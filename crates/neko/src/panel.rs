@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, Render,
-    SharedString, Window, actions, div, img, prelude::*, px, rgba,
+    SharedString, Window, actions, div, img, prelude::*, px,
 };
 use neko_client::NekoClient;
 use neko_protocol::{ClipboardContentKind, Request, ResultKind, Response, SearchItem};
@@ -327,7 +327,7 @@ impl Root {
             .py_2()
             .mb_1()
             .rounded(px(theme::ROW_RADIUS_PX))
-            .bg(rgba(0xe96e5014))
+            .bg(theme::BANNER_DANGER_BG)
             .child(
                 div()
                     .flex_1()
