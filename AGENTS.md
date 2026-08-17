@@ -19,9 +19,12 @@ restorable to the pasteboard with enter. See "Clipboard history" below. A
 third task built the frozen 14-screen first-run arc (design report §3): the
 real Accessibility permission ask, the clipboard-history ask, choosing/testing
 the summon hotkey, and graceful degradation when Accessibility is declined.
-See "Onboarding" below for the architecture. Still not built: the WASM
-extension system, agent capability. See "Seams for follow-up work" below for
-exactly where each plugs in.
+See "Onboarding" below for the architecture. A fourth task replaced the
+original hard-coded five-directory app scan with Spotlight as the primary
+discovery source, kept live without polling, and filtered to what a person
+would actually launch — see "Application discovery" below. Still not built:
+the WASM extension system, agent capability. See "Seams for follow-up work"
+below for exactly where each plugs in.
 
 ## Crate layout
 
@@ -244,6 +247,55 @@ small "Skip setup" text control in the footer, next to the "Setup · N of 4"
 label — deliberately not styled like `link_button` (used for the heavier,
 in-content "Use a different combination" link), since this should read as
 quiet and secondary, not a primary alternative to the step-by-step flow.
+
+## Application discovery
+
+`neko_core::apps` (`scan_applications`, `watch_applications`). Replaced the
+original hard-coded five-directory scan after the captain reported apps
+missing that Spotlight itself finds. Full reasoning, with the machine
+evidence behind each choice, is in the module's own doc comment — read that
+before touching this file again. Summary:
+
+- **Spotlight's metadata index (`mdfind`) is the primary source**, not a
+  directory list — it's what Spotlight's own UI queries, has no depth limit
+  (fixes the old `depth < 1` cap that missed nested installs like
+  `~/Applications/CrossOver/Steam/*.app`), and isn't tied to any hard-coded
+  root. No public LaunchServices call enumerates "every registered app"
+  (checked against the SDK header directly), which is why this shells out to
+  `mdfind` rather than linking `NSMetadataQuery`/`MDQuery`.
+- **Unioned with a plain scan of three sealed-system-volume directories**
+  (`/System/Applications` and its two siblings) — verified on the dev
+  machine that `mdfind` returns zero results there (`mdutil -s /` reports
+  indexing disabled for that whole volume) even though every app is really
+  there. That scan runs once, not live — the volume can't change without an
+  OS update, which restarts the daemon anyway.
+- **Live updates via `mdfind -live` as a change signal, not a data source**
+  — it only ever reports a match *count*, never the updated paths (confirmed
+  against its man page and by experiment), so an update triggers a fresh
+  one-shot query rather than being parsed directly. Requires
+  `NSUnbufferedIO=YES` in the child's environment or its stdout sits fully
+  buffered and invisible for a minute-plus even though Spotlight already has
+  the change (confirmed live). Debounced 300ms so a burst of filesystem
+  churn collapses into one rescan.
+- **Filtering rule: `LSBackgroundOnly`, never `LSUIElement`.** `LSUIElement`
+  only hides the Dock icon — Raycast, Rectangle, Tailscale, Docker, and
+  Amphetamine all set it and are all meant to be launchable (verified: none
+  of the five set `LSBackgroundOnly`). `LSBackgroundOnly` means no UI
+  surface at all exists to bring forward, which is what actually
+  distinguishes a helper (verified against `~/Applications/Claude Code URL
+  Handler.app`, a real example from the captain's machine). Also filtered:
+  bundles nested inside another `.app`/`.framework` (login items, XPC
+  services, framework-embedded helpers), Xcode/CI build products
+  (`DerivedData`, `ios/build`, ...), installer staging directories, and
+  Script Editor's template stubs (a separate rule from the nesting one —
+  they live loose in a shared `Templates` directory on this machine, not
+  inside `Script Editor.app` itself).
+- **Known limitation, stated rather than engineered around**: if Spotlight
+  indexing is disabled machine-wide, `mdfind` still runs successfully but
+  returns nothing, and a successful empty result is trusted rather than
+  triggering the directory-scan fallback (that fallback only fires if
+  `mdfind` can't be run at all) — per "the metadata index must be the
+  primary source." The sealed-system-volume apps still show either way.
 
 ## Search and ranking
 

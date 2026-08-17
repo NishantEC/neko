@@ -45,6 +45,23 @@ fn main() {
         });
     }
 
+    // Keeps the index live for the daemon's whole lifetime: installs,
+    // moves, and removals are reflected without a restart — see
+    // `neko_core::apps`'s module doc comment for the mechanism. Runs in
+    // its own background thread; `watch_applications` returns immediately.
+    {
+        let state = state.clone();
+        neko_core::apps::watch_applications(move |apps| {
+            *state.apps.write().unwrap() = apps.clone();
+            // Same reasoning as the startup pass above: a newly-appeared
+            // app should get a real icon without waiting for a restart,
+            // and this is a no-op for anything already cached.
+            for app in apps {
+                neko_core::icons::ensure_cached_icon(&app.id, &app.path);
+            }
+        });
+    }
+
     // The clipboard capture loop is resident for the daemon's whole
     // lifetime, independent of any client connection — see
     // `neko_core::clipboard`'s module doc comment for why this is safe to
