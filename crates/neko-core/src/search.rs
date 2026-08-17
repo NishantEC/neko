@@ -1,12 +1,11 @@
-//! Fuzzy matching and ranking. A small, dependency-free subsequence scorer
-//! (fzf-style) plus a recency boost from `launches`.
+//! Fuzzy matching (shared by every provider) and cross-provider ranking.
+//! Per-provider scoring (recency boosts, etc.) lives with each provider
+//! instead — see `apps::AppsProvider`, `clipboard::ClipboardProvider`,
+//! `files::FileProvider` — since "each provider owns its own matching and
+//! scoring" (the launch brief's own wording) is exactly the line this
+//! module doesn't cross.
 
-use std::collections::HashMap;
-
-use neko_protocol::{ResultKind, SearchItem};
-
-use crate::apps::AppEntry;
-use crate::clipboard::{self, ClipboardEntry};
+use neko_protocol::SearchItem;
 
 /// Score a query against a title as a case-insensitive subsequence match.
 /// Returns `None` if `query`'s characters don't all appear in `title`, in
@@ -66,101 +65,103 @@ pub fn fuzzy_score(query: &str, title: &str) -> Option<f32> {
     matched_any.then_some(score - length_penalty)
 }
 
-/// A launched-recently boost, tapering over roughly two weeks, plus a small
-/// per-launch frequency term. Recency dominates frequency: a thing you used
-/// once yesterday should usually beat a thing you used fifty times last
-/// year.
-fn recency_boost(last_launched_at_unix_ms: i64, launch_count: i64, now_unix_ms: i64) -> f32 {
-    let age_ms = (now_unix_ms - last_launched_at_unix_ms).max(0) as f32;
-    let age_days = age_ms / (1000.0 * 60.0 * 60.0 * 24.0);
-    let half_life_days = 5.0;
-    let recency = 8.0 * 0.5f32.powf(age_days / half_life_days);
-    let frequency = (launch_count as f32).ln_1p() * 0.5;
-    recency + frequency
+/// One provider's own scored result, before cross-provider allocation.
+/// Comparable across providers only because every built-in provider's score
+/// is ultimately built from [`fuzzy_score`] plus a same-shaped recency
+/// boost — see [`allocate`]'s doc comment for what that buys.
+pub struct Candidate {
+    pub score: f32,
+    pub item: SearchItem,
 }
 
-pub fn rank_apps(
-    query: &str,
-    apps: &[AppEntry],
-    recency: &HashMap<String, (i64, i64)>,
-    now_unix_ms: i64,
-    limit: usize,
-) -> Vec<SearchItem> {
-    let mut scored: Vec<(f32, &AppEntry)> = apps
-        .iter()
-        .filter_map(|app| {
-            let mut score = fuzzy_score(query, &app.name)?;
-            if let Some(&(last, count)) = recency.get(&app.id) {
-                score += recency_boost(last, count, now_unix_ms);
+/// Merges every provider's own candidate list into one response of at most
+/// `limit` items — the "today's concatenate-with-a-reservation is a
+/// stopgap" fix the launch brief asks for, generalized from a hard-coded
+/// two-provider special case (apps get whatever's left, clipboard's top
+/// match is reserved a slot) to however many providers are registered,
+/// with zero provider-specific code anywhere in this function.
+///
+/// `providers` must be given in section render order (`AppState::new`'s own
+/// registration order) — the output preserves that order, matching today's
+/// "Applications" section always rendering above "Clipboard". Every
+/// provider is treated symmetrically by the allocation itself (see the
+/// reservation pass below); render order is purely about where each
+/// section's header lands on screen, not about who gets first claim on the
+/// shared budget. `SearchItem`s stay grouped by provider in the output (each provider's
+/// own candidates stay contiguous, in that provider's own score order) so
+/// the panel's contiguous-run section-header detection keeps working
+/// unchanged.
+///
+/// Two passes:
+///
+/// 1. **Reservation.** Every provider with at least one candidate reserves
+///    one slot, subtracted from `limit` up front — this is what stops a
+///    long run of matches from one provider crowding a genuine match from
+///    *any other* provider out of the response entirely, the same
+///    guarantee `server.rs`'s own tests pin today (there, specifically for
+///    clipboard), now symmetric across every registered provider rather
+///    than hard-coded to one pair. This has to include the first
+///    (highest-priority) provider too, not just the ones after it: an
+///    earlier version of this function only reserved a floor for providers
+///    after the first, reasoning that the first one, "primary," would
+///    naturally win most of the greedy phase below anyway — live testing
+///    (`docs/evidence/`) proved that reasoning wrong the first time a
+///    provider whose matches score consistently higher (file search, on a
+///    clean prefix match) was registered: it won every contested slot, not
+///    just most of them, leaving the *app* section with zero rows even
+///    though real apps matched the query. "No provider crowds another out
+///    entirely" has to hold for every provider, including whichever one
+///    happens to be first.
+/// 2. **Greedy interleave.** Whatever's left of `limit` is spent one slot
+///    at a time on the single highest-scoring not-yet-taken candidate
+///    across *every* provider — this is the actual cross-provider ranking:
+///    a provider whose matches are more relevant to this particular query
+///    earns more of the shared budget than one that only barely cleared
+///    its reservation floor, rather than every provider being capped at
+///    exactly one row regardless of how well it matched. Ties (equal
+///    score) go to the earlier provider in `providers`' order, so behavior
+///    stays deterministic.
+pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize) -> Vec<SearchItem> {
+    for (_, candidates) in providers.iter_mut() {
+        candidates.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.item.title.cmp(&b.item.title)));
+    }
+
+    let n = providers.len();
+    let mut taken = vec![0usize; n];
+    let mut remaining = limit;
+
+    // Every provider with a match reserves one slot for its own top
+    // candidate, subtracted from the shared budget before anything else is
+    // allocated — see this function's doc comment for why this must not be
+    // skipped for the first provider.
+    for i in 0..n {
+        if remaining == 0 {
+            break;
+        }
+        if !providers[i].1.is_empty() {
+            taken[i] = 1;
+            remaining -= 1;
+        }
+    }
+
+    while remaining > 0 {
+        let mut best: Option<(usize, f32)> = None;
+        for (i, (_, candidates)) in providers.iter().enumerate() {
+            if let Some(candidate) = candidates.get(taken[i])
+                && best.is_none_or(|(_, best_score)| candidate.score > best_score)
+            {
+                best = Some((i, candidate.score));
             }
-            Some((score, app))
-        })
-        .collect();
+        }
+        let Some((i, _)) = best else { break };
+        taken[i] += 1;
+        remaining -= 1;
+    }
 
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
-
-    scored
+    providers
         .into_iter()
-        .take(limit)
-        .map(|(_, app)| SearchItem {
-            id: app.id.clone(),
-            kind: ResultKind::App,
-            title: app.name.clone(),
-            subtitle: None,
-            icon_path: crate::icons::cached_icon_path(&app.id)
-                .filter(|p| p.exists())
-                .map(|p| p.to_string_lossy().into_owned()),
-            content_kind: None,
-            accessory: None,
-        })
-        .collect()
-}
-
-/// A launched-recently boost for clipboard entries, tapering much faster
-/// than an app's (half-life of 3 hours, not 5 days) — a clipboard history is
-/// inherently a "recent things" list, so a query with no other signal
-/// (matches everything, or a tied fuzzy score) should surface the last few
-/// copies first, the way the launch brief's "ranking should favour recency"
-/// asks.
-fn clipboard_recency_boost(copied_at_unix_ms: i64, now_unix_ms: i64) -> f32 {
-    let age_ms = (now_unix_ms - copied_at_unix_ms).max(0) as f32;
-    let age_hours = age_ms / (1000.0 * 60.0 * 60.0);
-    let half_life_hours = 3.0;
-    8.0 * 0.5f32.powf(age_hours / half_life_hours)
-}
-
-pub fn rank_clipboard(
-    query: &str,
-    entries: &[ClipboardEntry],
-    now_unix_ms: i64,
-    limit: usize,
-) -> Vec<SearchItem> {
-    let mut scored: Vec<(f32, &ClipboardEntry)> = entries
-        .iter()
-        .filter_map(|entry| {
-            let mut score = fuzzy_score(query, &entry.content)?;
-            score += clipboard_recency_boost(entry.copied_at_unix_ms, now_unix_ms);
-            Some((score, entry))
-        })
-        .collect();
-
-    scored.sort_by(|a, b| {
-        b.0.total_cmp(&a.0)
-            .then_with(|| b.1.copied_at_unix_ms.cmp(&a.1.copied_at_unix_ms))
-    });
-
-    scored
-        .into_iter()
-        .take(limit)
-        .map(|(_, entry)| SearchItem {
-            id: entry.content.clone(),
-            kind: ResultKind::Clipboard,
-            title: clipboard::preview(&entry.content, entry.content_kind),
-            subtitle: entry.source_app.as_ref().map(|app| format!("Copied from {app}")),
-            icon_path: None,
-            content_kind: Some(entry.content_kind),
-            accessory: Some(clipboard::relative_time(now_unix_ms, entry.copied_at_unix_ms)),
-        })
+        .zip(taken)
+        .flat_map(|((_, candidates), take)| candidates.into_iter().take(take).map(|c| c.item))
         .collect()
 }
 
@@ -192,68 +193,107 @@ mod tests {
         assert_eq!(fuzzy_score("", "Anything"), Some(0.0));
     }
 
-    #[test]
-    fn ranking_prefers_recently_launched_apps_on_a_tied_fuzzy_score() {
-        let apps = vec![
-            AppEntry {
-                id: "a".into(),
-                name: "Finder".into(),
-                path: "/Applications/Finder.app".into(),
-            },
-            AppEntry {
-                id: "b".into(),
-                name: "Finder".into(),
-                path: "/Applications/OtherFinder.app".into(),
-            },
-        ];
-        let mut recency = HashMap::new();
-        recency.insert("b".to_string(), (1_000_000, 3));
-        let ranked = rank_apps("find", &apps, &recency, 1_000_000 + 1000, 10);
-        assert_eq!(ranked[0].id, "b");
-    }
-
-    fn entry(content: &str, kind: neko_protocol::ClipboardContentKind, copied_at: i64) -> ClipboardEntry {
-        ClipboardEntry {
-            content: content.to_string(),
-            content_kind: kind,
-            source_app: Some("Terminal".to_string()),
-            copied_at_unix_ms: copied_at,
+    fn item(kind: &str, id: &str, title: &str) -> SearchItem {
+        SearchItem {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            title: title.to_string(),
+            subtitle: None,
+            icon: neko_protocol::Icon::Placeholder,
+            section_label: kind.to_string(),
+            action_label: "Open  ↵".to_string(),
+            badge: None,
+            accessory: None,
         }
     }
 
-    #[test]
-    fn clipboard_ranking_filters_by_content() {
-        use neko_protocol::ClipboardContentKind::Text;
-        let entries = vec![entry("hello world", Text, 100), entry("goodbye", Text, 200)];
-        let ranked = rank_clipboard("hello", &entries, 1000, 10);
-        assert_eq!(ranked.len(), 1);
-        assert_eq!(ranked[0].id, "hello world");
+    fn candidates(kind: &str, scores: &[f32]) -> Vec<Candidate> {
+        scores
+            .iter()
+            .enumerate()
+            .map(|(i, &score)| Candidate {
+                score,
+                item: item(kind, &format!("{kind}-{i}"), &format!("{kind} {i}")),
+            })
+            .collect()
     }
 
     #[test]
-    fn clipboard_ranking_favors_recency_on_an_empty_query() {
-        use neko_protocol::ClipboardContentKind::Text;
-        let entries = vec![entry("older", Text, 100), entry("newer", Text, 900)];
-        let ranked = rank_clipboard("", &entries, 1000, 10);
-        assert_eq!(ranked[0].id, "newer");
+    fn a_pure_primary_query_still_returns_the_full_limit() {
+        let providers = vec![("app", candidates("app", &[10.0; 10])), ("clipboard", Vec::new())];
+        let items = allocate(providers, 8);
+        assert_eq!(items.len(), 8);
+        assert!(items.iter().all(|i| i.kind == "app"));
     }
 
     #[test]
-    fn clipboard_ranking_is_capped_at_the_requested_limit() {
-        use neko_protocol::ClipboardContentKind::Text;
-        let entries: Vec<_> = (0..5).map(|i| entry(&format!("item-{i}"), Text, i)).collect();
-        let ranked = rank_clipboard("", &entries, 1000, 2);
-        assert_eq!(ranked.len(), 2);
+    fn a_secondary_match_is_never_crowded_out_by_many_primary_matches() {
+        let providers = vec![("app", candidates("app", &[10.0; 10])), ("clipboard", candidates("clipboard", &[1.0]))];
+        let items = allocate(providers, 8);
+        assert_eq!(items.len(), 8);
+        assert!(items.iter().any(|i| i.kind == "clipboard"), "clipboard's one match must survive");
+        assert_eq!(items.iter().filter(|i| i.kind == "clipboard").count(), 1);
+        assert_eq!(items.iter().filter(|i| i.kind == "app").count(), 7);
     }
 
     #[test]
-    fn clipboard_result_items_carry_the_type_tag_and_source_subtitle() {
-        use neko_protocol::ClipboardContentKind::Link;
-        let entries = vec![entry("https://example.com", Link, 100)];
-        let ranked = rank_clipboard("example", &entries, 1000, 10);
-        assert_eq!(ranked[0].kind, ResultKind::Clipboard);
-        assert_eq!(ranked[0].content_kind, Some(Link));
-        assert_eq!(ranked[0].subtitle.as_deref(), Some("Copied from Terminal"));
-        assert!(ranked[0].accessory.is_some());
+    fn three_providers_each_keep_their_reservation() {
+        let providers = vec![
+            ("app", candidates("app", &[10.0; 10])),
+            ("file", candidates("file", &[9.0; 5])),
+            ("clipboard", candidates("clipboard", &[1.0])),
+        ];
+        let items = allocate(providers, 8);
+        assert_eq!(items.len(), 8);
+        assert!(items.iter().any(|i| i.kind == "file"), "file's reservation must survive");
+        assert!(items.iter().any(|i| i.kind == "clipboard"), "clipboard's reservation must survive");
+    }
+
+    #[test]
+    fn the_first_provider_cannot_be_crowded_out_by_a_consistently_higher_scoring_one_either() {
+        // The real bug this test pins, caught live (not in a unit test
+        // first): a secondary provider whose matches score consistently
+        // higher than the first (registered) provider's — file search on a
+        // clean prefix match easily outscores an app's scattered
+        // subsequence match — must not be able to win every single
+        // contested slot and reduce the first provider to zero rows. Every
+        // provider's own reservation (including the first) is what
+        // prevents this; the greedy phase alone does not.
+        let providers = vec![
+            ("app", candidates("app", &[3.0; 4])),
+            ("file", candidates("file", &[10.0; 7])),
+            ("clipboard", candidates("clipboard", &[8.0])),
+        ];
+        let items = allocate(providers, 8);
+        assert_eq!(items.len(), 8);
+        assert!(items.iter().any(|i| i.kind == "app"), "the first provider's reservation must survive too");
+        assert!(items.iter().any(|i| i.kind == "clipboard"));
+        assert!(items.iter().any(|i| i.kind == "file"));
+    }
+
+    #[test]
+    fn an_unused_reservation_rolls_over_to_the_highest_remaining_score() {
+        // Only 1 app match, so its own "budget" (limit minus reservations)
+        // goes unused unless it rolls over to whichever provider's next
+        // candidate scores highest — here that's clipboard's remaining
+        // three.
+        let providers = vec![("app", candidates("app", &[10.0])), ("clipboard", candidates("clipboard", &[5.0, 4.0, 3.0]))];
+        let items = allocate(providers, 8);
+        assert_eq!(items.iter().filter(|i| i.kind == "clipboard").count(), 3);
+        assert_eq!(items.iter().filter(|i| i.kind == "app").count(), 1);
+    }
+
+    #[test]
+    fn results_stay_grouped_by_provider_in_score_order() {
+        let providers = vec![("app", candidates("app", &[1.0, 5.0, 3.0]))];
+        let items = allocate(providers, 8);
+        let scores: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(scores, vec!["app-1", "app-2", "app-0"]);
+    }
+
+    #[test]
+    fn empty_providers_produce_no_results() {
+        assert_eq!(allocate(Vec::new(), 8), Vec::new());
+        assert_eq!(allocate(vec![("app", Vec::new())], 8), Vec::new());
     }
 }

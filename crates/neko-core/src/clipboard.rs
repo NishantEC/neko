@@ -17,9 +17,26 @@
 //! `img()` instead of the type-tag badge. Not started here — no half-built
 //! `Image` variant exists to avoid a dead code path with no reader.
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use neko_protocol::ClipboardContentKind;
+use neko_protocol::{Glyph, Icon, SearchItem};
+
+use crate::provider::{Provider, ProviderError};
+use crate::search::{Candidate, fuzzy_score};
+
+/// The clipboard content types this v1 distinguishes, used only internally
+/// by this module for classification/storage — the wire protocol no longer
+/// has a matching type (`neko_protocol::Glyph`/`badge` carry the
+/// client-facing equivalent instead, set in `ClipboardProvider::search`
+/// below). Images are an explicit non-goal for this slice — see this
+/// module's doc comment for the seam a future task plugs an `Image`
+/// variant into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipboardContentKind {
+    Text,
+    Link,
+}
 
 /// Poll interval for detecting pasteboard changes via `NSPasteboard`'s
 /// `changeCount`. Short enough that a copy shows up in history well within
@@ -158,6 +175,84 @@ pub fn entries(db: &crate::Db) -> rusqlite::Result<Vec<ClipboardEntry>> {
             copied_at_unix_ms,
         })
         .collect())
+}
+
+/// A launched-recently boost for clipboard entries, tapering much faster
+/// than an app's (half-life of 3 hours, not 5 days) — a clipboard history is
+/// inherently a "recent things" list, so a query with no other signal
+/// (matches everything, or a tied fuzzy score) should surface the last few
+/// copies first.
+fn clipboard_recency_boost(copied_at_unix_ms: i64, now_unix_ms: i64) -> f32 {
+    let age_ms = (now_unix_ms - copied_at_unix_ms).max(0) as f32;
+    let age_hours = age_ms / (1000.0 * 60.0 * 60.0);
+    let half_life_hours = 3.0;
+    8.0 * 0.5f32.powf(age_hours / half_life_hours)
+}
+
+/// The clipboard-history provider: matches by fuzzy-scoring each stored
+/// entry's own content, boosted by how recently it was copied. Rows never
+/// carry a per-entry icon (no favicon/thumbnail fetching in this slice —
+/// unchanged from before this task) — a painted content-type glyph fills
+/// the icon slot instead, chosen here rather than by the client, per this
+/// task's "every rendering decision comes from the provider" rule.
+pub struct ClipboardProvider {
+    db: Arc<Mutex<crate::Db>>,
+}
+
+impl ClipboardProvider {
+    pub fn new(db: Arc<Mutex<crate::Db>>) -> Self {
+        Self { db }
+    }
+}
+
+impl Provider for ClipboardProvider {
+    fn id(&self) -> &'static str {
+        "clipboard"
+    }
+
+    fn section_label(&self) -> &'static str {
+        "Clipboard"
+    }
+
+    fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate> {
+        let stored = {
+            let db = self.db.lock().unwrap();
+            entries(&db).unwrap_or_default()
+        };
+        stored
+            .iter()
+            .filter_map(|entry| {
+                let mut score = fuzzy_score(query, &entry.content)?;
+                score += clipboard_recency_boost(entry.copied_at_unix_ms, now_unix_ms);
+                let (badge, glyph) = match entry.content_kind {
+                    ClipboardContentKind::Text => ("TEXT", Glyph::Text),
+                    ClipboardContentKind::Link => ("LINK", Glyph::Link),
+                };
+                Some(Candidate {
+                    score,
+                    item: SearchItem {
+                        id: entry.content.clone(),
+                        kind: "clipboard".to_string(),
+                        title: preview(&entry.content, entry.content_kind),
+                        subtitle: entry.source_app.as_ref().map(|app| format!("Copied from {app}")),
+                        icon: Icon::Glyph(glyph),
+                        section_label: "Clipboard".to_string(),
+                        action_label: "Paste  ↵".to_string(),
+                        badge: Some(badge.to_string()),
+                        accessory: Some(relative_time(now_unix_ms, entry.copied_at_unix_ms)),
+                    },
+                })
+            })
+            .collect()
+    }
+
+    fn activate(&self, id: &str) -> Result<(), ProviderError> {
+        if write_to_pasteboard(id) {
+            Ok(())
+        } else {
+            Err(ProviderError("failed to write to the pasteboard".to_string()))
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -312,7 +407,7 @@ mod pasteboard {
     /// sense of "make this the system clipboard again," not a synthesized
     /// keystroke. Returns whether the write succeeded. Pooled for the same
     /// reason [`poll`] is, even though this is called far less often (once
-    /// per `Request::Paste`, not on a timer).
+    /// per `ClipboardProvider::activate`, not on a timer).
     pub fn write_string(content: &str) -> bool {
         objc2::rc::autoreleasepool(|_pool| {
             // SAFETY: same as `raw_read_current` — reading `NSPasteboardTypeString`.
@@ -351,13 +446,6 @@ mod pasteboard {
     }
 }
 
-fn now_unix_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 /// One capture attempt: if the pasteboard changed since `last_change_count`,
 /// classify and persist it (unless privacy-marked or empty of string
 /// content). Split out from [`run_capture_loop`] so the polling shape
@@ -375,7 +463,7 @@ fn poll_once(db: &crate::Db, last_change_count: &mut i64) {
         return;
     }
     let kind = classify(&content, has_url_type);
-    if let Err(e) = record_entry(db, &content, kind, tick.source_app.as_deref(), now_unix_ms()) {
+    if let Err(e) = record_entry(db, &content, kind, tick.source_app.as_deref(), crate::now_unix_ms()) {
         eprintln!("neko-daemon: failed to record clipboard entry: {e}");
     }
 }
@@ -477,5 +565,46 @@ mod tests {
         assert_eq!(entries[0].content_kind, ClipboardContentKind::Text);
         assert_eq!(entries[0].source_app.as_deref(), Some("Terminal"));
         assert_eq!(entries[0].copied_at_unix_ms, 100);
+    }
+
+    #[test]
+    fn provider_search_filters_by_content_and_carries_the_badge_and_verb() {
+        let db = crate::Db::open_in_memory().unwrap();
+        record_entry(&db, "hello world", ClipboardContentKind::Text, Some("Terminal"), 100).unwrap();
+        record_entry(&db, "goodbye", ClipboardContentKind::Text, None, 200).unwrap();
+        let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
+
+        let results = provider.search("hello", 1000);
+        assert_eq!(results.len(), 1);
+        let item = &results[0].item;
+        assert_eq!(item.id, "hello world");
+        assert_eq!(item.kind, "clipboard");
+        assert_eq!(item.section_label, "Clipboard");
+        assert_eq!(item.action_label, "Paste  ↵");
+        assert_eq!(item.badge.as_deref(), Some("TEXT"));
+        assert_eq!(item.subtitle.as_deref(), Some("Copied from Terminal"));
+        assert!(item.accessory.is_some());
+        assert_eq!(item.icon, Icon::Glyph(Glyph::Text));
+    }
+
+    #[test]
+    fn provider_search_favors_recency_on_an_empty_query() {
+        let db = crate::Db::open_in_memory().unwrap();
+        record_entry(&db, "older", ClipboardContentKind::Text, None, 100).unwrap();
+        record_entry(&db, "newer", ClipboardContentKind::Text, None, 900).unwrap();
+        let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
+        let results = provider.search("", 1000);
+        let best = results.iter().max_by(|a, b| a.score.total_cmp(&b.score)).unwrap();
+        assert_eq!(best.item.id, "newer");
+    }
+
+    #[test]
+    fn provider_search_tags_a_link_entry_with_the_link_glyph_and_badge() {
+        let db = crate::Db::open_in_memory().unwrap();
+        record_entry(&db, "https://example.com", ClipboardContentKind::Link, None, 100).unwrap();
+        let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
+        let results = provider.search("example", 1000);
+        assert_eq!(results[0].item.badge.as_deref(), Some("LINK"));
+        assert_eq!(results[0].item.icon, Icon::Glyph(Glyph::Link));
     }
 }

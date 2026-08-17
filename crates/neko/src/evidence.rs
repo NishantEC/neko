@@ -6,6 +6,18 @@
 //!
 //! - `NEKO_SHOW_ON_LAUNCH=1` shows the summon panel immediately, skipping
 //!   the hotkey/onboarding path — for a single screenshot.
+//! - `NEKO_SHOW_QUERY=<text>` (only read alongside `NEKO_SHOW_ON_LAUNCH`)
+//!   types `<text>` into the field before the screenshot — for capturing
+//!   real search results (the provider-abstraction task's own evidence:
+//!   apps, clipboard, and file results together in one list) without
+//!   synthetic OS keystrokes, which turned out unreliable here beyond just
+//!   the hotkey case `AGENTS.md`'s "Testing caveat" already documents (a
+//!   `System Events` `keystroke` sent right after `activate_window` landed
+//!   on the wrong frontmost process in practice). When set, `show_once`
+//!   prints `neko: ready for evidence setup` and waits 2s before typing the
+//!   query — room for an outside script to seed a real clipboard entry
+//!   first, so the query can demonstrate a genuine clipboard match too,
+//!   not just apps/files.
 //! - `NEKO_BENCH=<n>` re-measures warm summon latency `n` times without
 //!   synthetic OS keystrokes (unreliable — `AGENTS.md`, "Summon latency")
 //!   or repeated `cx.activate(true)` (steals focus each time); prints one
@@ -35,6 +47,7 @@ use crate::panel::Root;
 
 const BENCH_ENV_VAR: &str = "NEKO_BENCH";
 const SHOW_ON_LAUNCH_ENV_VAR: &str = "NEKO_SHOW_ON_LAUNCH";
+const SHOW_QUERY_ENV_VAR: &str = "NEKO_SHOW_QUERY";
 const BACKDROP_IMAGE_ENV_VAR: &str = "NEKO_BACKDROP_IMAGE";
 
 pub fn bench_iterations() -> Option<u32> {
@@ -43,6 +56,10 @@ pub fn bench_iterations() -> Option<u32> {
 
 pub fn show_on_launch_requested() -> bool {
     std::env::var_os(SHOW_ON_LAUNCH_ENV_VAR).is_some()
+}
+
+pub fn show_query() -> Option<String> {
+    std::env::var(SHOW_QUERY_ENV_VAR).ok()
 }
 
 pub fn backdrop_image_path() -> Option<PathBuf> {
@@ -90,10 +107,39 @@ impl Render for Backdrop {
 /// onboarding complete first so it can't cover the panel for this run.
 pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp) {
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
-    Timer::after(std::time::Duration::from_millis(300)).await;
+    let query = show_query();
+    if query.is_some() {
+        // A real daemon is now up and connected — printed so an outside
+        // script driving `NEKO_SHOW_QUERY` (e.g. to seed a clipboard entry
+        // before the query it wants to demonstrate actually fires) has a
+        // deterministic "go" signal instead of guessing a sleep against
+        // this process's own startup time.
+        eprintln!("neko: ready for evidence setup");
+        Timer::after(std::time::Duration::from_millis(2000)).await;
+    } else {
+        Timer::after(std::time::Duration::from_millis(300)).await;
+    }
+    let _ = cx.update(|cx| {
+        let _ = window.update(cx, |root, _window, cx| {
+            root.reset_for_summon(cx);
+            if let Some(query) = query.as_deref() {
+                root.set_query_for_evidence(query, cx);
+            }
+        });
+    });
+    if query.is_some() {
+        // `set_query_for_evidence` re-runs search the same way a real
+        // keystroke does — a real daemon round-trip, not instant. File
+        // results in particular can take up to `files::QUERY_TIMEOUT`
+        // (1.5s) on a broad query, plus real observed scheduling variance
+        // on a machine also running other `mdfind`-driven work; wait
+        // comfortably past that so the window-number line below (an
+        // outside script's "now capture" signal) isn't printed before the
+        // row this evidence run exists to show has actually rendered.
+        Timer::after(std::time::Duration::from_millis(3500)).await;
+    }
     let _ = cx.update(|cx| {
         let _ = window.update(cx, |root, window, cx| {
-            root.reset_for_summon(cx);
             window.activate_window();
             window.focus(&root.focus_handle(cx));
             if let Ok(number) = material::window_number(window) {

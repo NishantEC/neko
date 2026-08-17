@@ -22,7 +22,7 @@ use gpui::{
     SharedString, Window, actions, div, img, prelude::*, px,
 };
 use neko_client::NekoClient;
-use neko_protocol::{ClipboardContentKind, Request, ResultKind, Response, SearchItem};
+use neko_protocol::{Glyph, Icon, Request, Response, SearchItem};
 
 use crate::accessibility::AccessibilityChecker;
 use crate::text_field::{ContentChanged, TextField};
@@ -112,15 +112,23 @@ impl Root {
     /// query rather than clearing it (unlike `reset_for_summon`) — this can
     /// fire while the panel is open and mid-search, and the point is to let
     /// an icon that just became available actually show up in what's
-    /// already on screen, not to reset it. `run_search` re-derives
-    /// `icon_path` fresh from the daemon on every call (see
-    /// `neko_core::search::rank_apps`), so results already fitting the same
-    /// query naturally pick up any icon that finished since the last
-    /// response. No filesystem check happens here or anywhere on this
-    /// client-side path — the daemon is the one place that stats icon
-    /// files, once per search it already has to run.
+    /// already on screen, not to reset it. `run_search` re-derives each
+    /// item's `icon` fresh from the daemon on every call (see
+    /// `AppsProvider::search`), so results already fitting the same query
+    /// naturally pick up any icon that finished since the last response. No
+    /// filesystem check happens here or anywhere on this client-side path —
+    /// the daemon is the one place that stats icon files, once per search
+    /// it already has to run.
     pub fn refresh_icons(&mut self, cx: &mut Context<Self>) {
         self.run_search(cx);
+    }
+
+    /// Evidence/verification-only — see `TextField::set_content_for_evidence`'s
+    /// doc comment. Drives a real query into the field (which re-runs
+    /// search through the same `ContentChanged` path a keystroke would),
+    /// for `evidence.rs`'s `NEKO_SHOW_QUERY` hook.
+    pub fn set_query_for_evidence(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.text_field.update(cx, |field, cx| field.set_content_for_evidence(query, cx));
     }
 
     fn fetch_accessibility_banner_state(&mut self, cx: &mut Context<Self>) {
@@ -167,7 +175,7 @@ impl Root {
         let previous_selection = self
             .results
             .get(self.selected)
-            .map(|item| (item.kind, item.id.clone()));
+            .map(|item| (item.kind.clone(), item.id.clone()));
         let client = self.client.clone();
         cx.spawn(async move |this, cx| {
             let response = client
@@ -184,7 +192,7 @@ impl Root {
                     root.results = fit_within_budget(items, CONTENT_AREA_MIN_HEIGHT_PX);
                     let previous = previous_selection
                         .as_ref()
-                        .map(|(kind, id)| (*kind, id.as_str()));
+                        .map(|(kind, id)| (kind.as_str(), id.as_str()));
                     root.selected = resolve_selection(previous, &root.results);
                     cx.notify();
                 }
@@ -209,13 +217,11 @@ impl Root {
         let Some(item) = self.results.get(self.selected).cloned() else {
             return;
         };
-        // "Paste" here means "make this the system pasteboard's contents
-        // again" — not a synthesized ⌘V into whatever regains focus after
-        // neko hides. See `neko_protocol::Request::Paste`'s doc comment.
-        let request = match item.kind {
-            ResultKind::App => Request::Launch { id: item.id },
-            ResultKind::Clipboard => Request::Paste { id: item.id },
-        };
+        // A single generic action, routed by `kind` back to whichever
+        // provider produced this row — see `Request::Activate`'s doc
+        // comment. The panel never needs to know what "activating" an app
+        // vs. a clipboard entry vs. a file actually does.
+        let request = Request::Activate { kind: item.kind, id: item.id };
         let client = self.client.clone();
         cx.spawn(async move |_this, cx| {
             let _ = client.request(request).await;
@@ -310,16 +316,19 @@ impl Root {
             return container.child(render_empty_state(query_is_empty));
         }
 
-        // A header per contiguous run of the same `kind` — apps and
-        // clipboard entries each get their own section (design report
-        // screen 11: "one query, two result types, same list"). The daemon
-        // already emits apps before clipboard, so this walks the list once
-        // rather than sorting or grouping client-side.
-        let mut current_section: Option<ResultKind> = None;
+        // A header per contiguous run of the same `kind` — every provider's
+        // results get their own section (design report screen 11: "one
+        // query, two result types, same list", now generalized to however
+        // many providers are registered). The daemon already emits each
+        // provider's results contiguously (`search::allocate`), so this
+        // walks the list once rather than sorting or grouping client-side.
+        // The header text itself is `item.section_label`, provider data —
+        // this function has no per-kind knowledge at all.
+        let mut current_section: Option<&str> = None;
         for (idx, item) in self.results.iter().enumerate() {
-            if current_section != Some(item.kind) {
-                container = container.child(section_header(section_label(item.kind)));
-                current_section = Some(item.kind);
+            if current_section != Some(item.kind.as_str()) {
+                container = container.child(section_header(item.section_label.clone()));
+                current_section = Some(item.kind.as_str());
             }
             container = container.child(self.render_row(idx, item));
         }
@@ -385,26 +394,27 @@ impl Root {
             theme::TEXT_TERTIARY
         };
 
-        let icon: AnyElement = match (item.kind, item.icon_path.as_deref()) {
-            // Clipboard rows have no per-entry icon (no favicon fetching in
-            // this slice) — the content-type glyph fills the slot instead
-            // of an empty placeholder square, matching design screen 12's
-            // per-row type glyph.
-            (ResultKind::Clipboard, _) => {
-                content_kind_glyph(item.content_kind.unwrap_or(ClipboardContentKind::Text))
-            }
-            (_, Some(path)) => img(PathBuf::from(path))
+        // What fills the icon slot is entirely provider data now (`item.icon`)
+        // — this match is over the closed, rendering-only `Icon` enum, not
+        // over which provider produced the row. A new provider that just
+        // wants a cached raster or the placeholder square needs zero
+        // changes here; one that wants a genuinely new painted shape adds a
+        // `Glyph` variant and a case in `glyph_element` below, nothing else
+        // in this file.
+        let icon: AnyElement = match &item.icon {
+            Icon::Image(path) => img(PathBuf::from(path))
                 .w(px(theme::ROW_ICON_PX))
                 .h(px(theme::ROW_ICON_PX))
                 .rounded(px(theme::ROW_ICON_RADIUS_PX))
                 .bg(theme::ROW_ICON_SOCKET_BG)
                 .into_any_element(),
-            // An app whose icon the daemon hasn't finished extracting yet
-            // (a fresh install, or right after a daemon restart — see
+            Icon::Glyph(glyph) => glyph_element(*glyph),
+            // An icon the daemon hasn't finished extracting yet (a fresh
+            // install, or right after a daemon restart — see
             // `Event::IconsUpdated`'s doc comment) — a neutral glyph in the
             // socket rather than an empty hole, self-healing to the real
             // icon on the next `refresh_icons` without a layout change.
-            (_, None) => app_icon_placeholder_glyph(),
+            Icon::Placeholder => app_icon_placeholder_glyph(),
         };
 
         div()
@@ -441,7 +451,7 @@ impl Root {
                             .child(SharedString::from(subtitle))
                     })),
             )
-            .children(item.content_kind.map(|kind| {
+            .children(item.badge.clone().map(|badge| {
                 div()
                     .flex_shrink_0()
                     .px(px(6.))
@@ -450,7 +460,7 @@ impl Root {
                     .bg(theme::ROW_ICON_SOCKET_BG)
                     .text_size(px(10.))
                     .text_color(theme::TEXT_TERTIARY)
-                    .child(content_kind_tag(kind))
+                    .child(SharedString::from(badge))
             }))
             .children(item.accessory.clone().map(|accessory| {
                 div()
@@ -463,13 +473,14 @@ impl Root {
 
     fn render_footer(&self) -> impl IntoElement {
         let selected_item = self.results.get(self.selected);
-        // The primary action's verb matches what enter actually does — the
-        // design's dedicated clipboard screen (screen 12) uses "Paste" for
-        // exactly this reason.
-        let primary_action = match selected_item.map(|item| item.kind) {
-            Some(ResultKind::Clipboard) => "Paste  ↵",
-            _ => "Open  ↵",
-        };
+        // The primary action's verb matches what enter actually does — data
+        // straight from the selected row's own provider (`item.action_label`),
+        // not a client-side match on which provider produced it. Falls back
+        // to the app provider's own verb when nothing is selected, matching
+        // this footer's pre-existing behavior on an empty result list.
+        let primary_action: SharedString = selected_item
+            .map(|item| SharedString::from(item.action_label.clone()))
+            .unwrap_or_else(|| "Open  ↵".into());
         div()
             .flex()
             .items_center()
@@ -514,16 +525,17 @@ impl Root {
 /// normal case; this rule matters for the query-changes-but-the-top-match-
 /// is-still-there case, and for a keyboard adjustment made while the
 /// request for the *next* keystroke was still in flight.
-fn resolve_selection(previous: Option<(ResultKind, &str)>, results: &[SearchItem]) -> usize {
+fn resolve_selection(previous: Option<(&str, &str)>, results: &[SearchItem]) -> usize {
     previous
         .and_then(|(kind, id)| results.iter().position(|item| item.kind == kind && item.id == id))
         .unwrap_or(0)
 }
 
 /// Trims `results` to what renders within `budget_px` without ever showing
-/// a partial row or a section header with no row beneath it — and, when
-/// there's a matching clipboard entry, without ever letting a long run of
-/// app matches crowd it out of the panel entirely.
+/// a partial row or a section header with no row beneath it — and, when a
+/// secondary provider (anything after the first section) has a match,
+/// without ever letting a long run of primary-section matches crowd it out
+/// of the panel entirely.
 ///
 /// The panel is a fixed-size window (see this module's own doc comment) —
 /// there's no scroll machinery and dynamic resize is an explicit non-goal —
@@ -532,32 +544,59 @@ fn resolve_selection(previous: Option<(ResultKind, &str)>, results: &[SearchItem
 /// container, which would otherwise render the last row half-visible right
 /// against the footer.
 ///
-/// The reservation: if `results` contains any clipboard entry, the
-/// applications section is capped to whatever's left of `budget_px` after
-/// setting aside one section header plus one row (the top clipboard
-/// result) — a fixed reservation, not dynamic resizing, so apps and
-/// clipboard genuinely share the same list per the brief rather than apps
-/// silently winning every time enough of them match. If apps use less than
-/// their capped share, clipboard gets the difference too — the two
-/// `fit_section` calls below just spend whatever budget is actually left
-/// after the previous section, in order.
+/// The reservation, generalized from a hard-coded apps-vs-clipboard-only
+/// rule to however many contiguous provider sections `results` actually
+/// contains (a fourth provider needs no changes here at all): the first
+/// section is primary and gets whatever's left of `budget_px` after every
+/// *other* section has one header-plus-one-row set aside for it. If an
+/// earlier section uses less than its capped share, later sections split
+/// the difference too — `fit_section` below just spends whatever budget is
+/// actually left after the previous section, in order, same as before this
+/// task.
 fn fit_within_budget(results: Vec<SearchItem>, budget_px: f32) -> Vec<SearchItem> {
-    let (apps, clipboard): (Vec<SearchItem>, Vec<SearchItem>) =
-        results.into_iter().partition(|item| item.kind == ResultKind::App);
+    let sections = group_into_sections(results);
+    if sections.is_empty() {
+        return Vec::new();
+    }
 
-    let reserved_for_clipboard = if clipboard.is_empty() {
-        0.0
-    } else {
-        theme::SECTION_HEADER_HEIGHT_PX + theme::RESULT_ROW_HEIGHT_PX
-    };
+    let header_and_one_row = theme::SECTION_HEADER_HEIGHT_PX + theme::RESULT_ROW_HEIGHT_PX;
+    // Each section's own budget is the *original* `budget_px`, minus what
+    // every earlier section actually used (not its capped share — an
+    // earlier section using less than its cap must roll the difference
+    // forward), minus a floor reserved for every section still to come
+    // (not just the very next one) — that's what stops a middle section
+    // from crowding out the *last* section the same way a first section
+    // could crowd out a second.
+    let mut used_so_far = 0.0;
+    let mut kept_counts = Vec::with_capacity(sections.len());
+    for (i, section) in sections.iter().enumerate() {
+        let reserved_for_later_sections = (sections.len() - 1 - i) as f32 * header_and_one_row;
+        let available = budget_px - used_so_far - reserved_for_later_sections;
+        let (kept, used_px) = fit_section(section, available);
+        kept_counts.push(kept);
+        used_so_far += used_px;
+    }
 
-    let (apps_kept, apps_used_px) = fit_section(&apps, budget_px - reserved_for_clipboard);
-    let (clipboard_kept, _) = fit_section(&clipboard, budget_px - apps_used_px);
-
-    apps.into_iter()
-        .take(apps_kept)
-        .chain(clipboard.into_iter().take(clipboard_kept))
+    sections
+        .into_iter()
+        .zip(kept_counts)
+        .flat_map(|(section, kept)| section.into_iter().take(kept))
         .collect()
+}
+
+/// Splits `results` into contiguous same-`kind` runs, preserving order —
+/// the same grouping `render_content_area` uses to decide where a section
+/// header goes, pulled out so `fit_within_budget` can reason about "the
+/// first section" vs. "every other section" generically.
+fn group_into_sections(results: Vec<SearchItem>) -> Vec<Vec<SearchItem>> {
+    let mut sections: Vec<Vec<SearchItem>> = Vec::new();
+    for item in results {
+        match sections.last_mut() {
+            Some(section) if section.last().is_some_and(|last| last.kind == item.kind) => section.push(item),
+            _ => sections.push(vec![item]),
+        }
+    }
+    sections
 }
 
 /// How many leading items of one same-kind, contiguous section fit within
@@ -595,7 +634,7 @@ fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
         .child(message)
 }
 
-fn section_header(label: &'static str) -> impl IntoElement {
+fn section_header(label: impl Into<SharedString>) -> impl IntoElement {
     div()
         .flex_shrink_0()
         .h(px(theme::SECTION_HEADER_HEIGHT_PX))
@@ -604,32 +643,17 @@ fn section_header(label: &'static str) -> impl IntoElement {
         .px_3()
         .text_size(px(11.))
         .text_color(theme::TEXT_TERTIARY)
-        .child(label)
-}
-
-fn section_label(kind: ResultKind) -> &'static str {
-    match kind {
-        ResultKind::App => "Applications",
-        ResultKind::Clipboard => "Clipboard",
-    }
-}
-
-/// GPUI has no CSS `text-transform`, so the design's uppercase type-tag
-/// badge (`LINK`, `TEXT`) is upper-cased here rather than at the source.
-fn content_kind_tag(kind: ClipboardContentKind) -> &'static str {
-    match kind {
-        ClipboardContentKind::Text => "TEXT",
-        ClipboardContentKind::Link => "LINK",
-    }
+        .child(label.into())
 }
 
 /// The app row-icon slot before the daemon has finished extracting a real
 /// icon — a small centered rounded-square outline on the same
 /// `ROW_ICON_SOCKET_BG` plate every other row icon sits on, so a still-
 /// loading row reads as "generic app, not loaded yet" rather than a hole in
-/// the list. Deliberately a different shape from `content_kind_glyph`'s
-/// marks (bars for text, rings for a link) — this socket will very shortly
-/// hold a real per-app icon, unlike a clipboard row's, which never will.
+/// the list. Deliberately a different shape from `glyph_element`'s marks
+/// (bars for text, rings for a link, ...) — this socket will very shortly
+/// hold a real per-app icon, unlike a clipboard or file row's, which never
+/// will in this slice.
 fn app_icon_placeholder_glyph() -> AnyElement {
     div()
         .w(px(theme::ROW_ICON_PX))
@@ -651,18 +675,20 @@ fn app_icon_placeholder_glyph() -> AnyElement {
         .into_any_element()
 }
 
-/// A small hand-painted glyph for the clipboard row-icon slot, in the same
-/// spirit as `search_glyph` below (a painted shape composed from plain
-/// divs, not a font glyph or an SVG asset — this codebase has no bundled
-/// icon-asset pipeline, and a Unicode symbol is exactly what the design
-/// report's §6 finding on unreliable glyph rendering in GPUI already ruled
-/// out for the search icon).
-fn content_kind_glyph(kind: ClipboardContentKind) -> AnyElement {
+/// A small hand-painted glyph for the row-icon slot, in the same spirit as
+/// `search_glyph` below (a painted shape composed from plain divs, not a
+/// font glyph or an SVG asset — this codebase has no bundled icon-asset
+/// pipeline, and a Unicode symbol is exactly what the design report's §6
+/// finding on unreliable glyph rendering in GPUI already ruled out for the
+/// search icon). `Text`/`Link` predate this task (clipboard rows have no
+/// per-entry icon); `File`/`Folder` are this task's own addition for file
+/// search results that haven't gotten a real icon.
+fn glyph_element(glyph: Glyph) -> AnyElement {
     let slot = div().w(px(theme::ROW_ICON_PX)).h(px(theme::ROW_ICON_PX)).flex_shrink_0();
-    match kind {
+    match glyph {
         // Three stacked bars of decreasing width — a plain "lines of text"
         // mark.
-        ClipboardContentKind::Text => slot
+        Glyph::Text => slot
             .flex()
             .flex_col()
             .items_center()
@@ -674,7 +700,7 @@ fn content_kind_glyph(kind: ClipboardContentKind) -> AnyElement {
             .into_any_element(),
         // Two overlapping rounded-square rings on a diagonal — a chain-link
         // mark.
-        ClipboardContentKind::Link => slot
+        Glyph::Link => slot
             .relative()
             .child(
                 div()
@@ -699,6 +725,63 @@ fn content_kind_glyph(kind: ClipboardContentKind) -> AnyElement {
                     .border_color(theme::TEXT_TERTIARY),
             )
             .into_any_element(),
+        // A plain document outline (a portrait rounded-rect, border only —
+        // no fill, so it composes correctly whether the row is selected or
+        // the window is translucent, unlike a shape that would need to fake
+        // a cutout against the background color) with one short bar
+        // standing in for a line of text, same weight as `Glyph::Text`'s
+        // bars.
+        Glyph::File => slot
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(12.))
+                    .h(px(15.))
+                    .rounded(px(1.))
+                    .border_2()
+                    .border_color(theme::TEXT_TERTIARY)
+                    .child(div().w(px(6.)).h(px(1.5)).rounded(px(1.)).bg(theme::TEXT_TERTIARY)),
+            )
+            .into_any_element(),
+        // A folder shape: a wide rounded rectangle with a small tab along
+        // its top edge.
+        Glyph::Folder => slot
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .relative()
+                    .w(px(15.))
+                    .h(px(12.))
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left(px(1.))
+                            .w(px(6.))
+                            .h(px(2.))
+                            .rounded_t(px(1.))
+                            .bg(theme::TEXT_TERTIARY),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(2.))
+                            .left_0()
+                            .w(px(15.))
+                            .h(px(10.))
+                            .rounded(px(2.))
+                            .border_2()
+                            .border_color(theme::TEXT_TERTIARY),
+                    ),
+            )
+            .into_any_element(),
     }
 }
 
@@ -720,18 +803,20 @@ fn search_glyph() -> impl IntoElement {
 mod tests {
     use super::*;
 
-    fn item(kind: ResultKind) -> SearchItem {
+    fn item(kind: &str) -> SearchItem {
         item_with_id(kind, "x")
     }
 
-    fn item_with_id(kind: ResultKind, id: &str) -> SearchItem {
+    fn item_with_id(kind: &str, id: &str) -> SearchItem {
         SearchItem {
             id: id.into(),
-            kind,
+            kind: kind.into(),
             title: id.into(),
             subtitle: None,
-            icon_path: None,
-            content_kind: None,
+            icon: Icon::Placeholder,
+            section_label: kind.into(),
+            action_label: "Open  ↵".into(),
+            badge: None,
             accessory: None,
         }
     }
@@ -742,11 +827,11 @@ mod tests {
         // result set still contains it, just at a different index — the
         // highlight must follow it there, not snap back to the top.
         let new_results = vec![
-            item_with_id(ResultKind::App, "safari"),
-            item_with_id(ResultKind::App, "notes"),
-            item_with_id(ResultKind::App, "mail"),
+            item_with_id("app", "safari"),
+            item_with_id("app", "notes"),
+            item_with_id("app", "mail"),
         ];
-        let selected = resolve_selection(Some((ResultKind::App, "notes")), &new_results);
+        let selected = resolve_selection(Some(("app", "notes")), &new_results);
         assert_eq!(selected, 1);
     }
 
@@ -754,14 +839,14 @@ mod tests {
     fn resolve_selection_resets_to_top_when_the_previous_item_is_gone() {
         // The previously selected item didn't match this query at all —
         // the result set is genuinely new, so the highlight resets.
-        let new_results = vec![item_with_id(ResultKind::App, "safari")];
-        let selected = resolve_selection(Some((ResultKind::App, "notes")), &new_results);
+        let new_results = vec![item_with_id("app", "safari")];
+        let selected = resolve_selection(Some(("app", "notes")), &new_results);
         assert_eq!(selected, 0);
     }
 
     #[test]
     fn resolve_selection_with_no_previous_selection_defaults_to_top() {
-        let new_results = vec![item_with_id(ResultKind::App, "safari")];
+        let new_results = vec![item_with_id("app", "safari")];
         assert_eq!(resolve_selection(None, &new_results), 0);
     }
 
@@ -769,8 +854,8 @@ mod tests {
     fn resolve_selection_does_not_match_across_kinds() {
         // Same `id` string, different `kind` (an app path vs. a clipboard
         // entry's own content-as-id) must not be treated as the same item.
-        let new_results = vec![item_with_id(ResultKind::Clipboard, "notes")];
-        let selected = resolve_selection(Some((ResultKind::App, "notes")), &new_results);
+        let new_results = vec![item_with_id("clipboard", "notes")];
+        let selected = resolve_selection(Some(("app", "notes")), &new_results);
         assert_eq!(selected, 0);
     }
 
@@ -782,13 +867,13 @@ mod tests {
         // content budget. The clipboard reservation means the app section
         // gives up a row rather than the clipboard section losing its only
         // one.
-        let mut results: Vec<SearchItem> = (0..6).map(|_| item(ResultKind::App)).collect();
-        results.push(item(ResultKind::Clipboard));
+        let mut results: Vec<SearchItem> = (0..6).map(|_| item("app")).collect();
+        results.push(item("clipboard"));
 
         let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
 
-        let apps_kept = fitted.iter().filter(|i| i.kind == ResultKind::App).count();
-        let clipboard_kept = fitted.iter().filter(|i| i.kind == ResultKind::Clipboard).count();
+        let apps_kept = fitted.iter().filter(|i| i.kind == "app").count();
+        let clipboard_kept = fitted.iter().filter(|i| i.kind == "clipboard").count();
         assert_eq!(clipboard_kept, 1, "the top clipboard result must always be visible when one matched");
         assert_eq!(apps_kept, 5, "apps give up one row to make room, not zero clipboard rows");
         // Still no partial row and no dangling header: total height fits.
@@ -797,15 +882,15 @@ mod tests {
         assert!(total_height <= CONTENT_AREA_MIN_HEIGHT_PX);
         // Order is preserved: apps first, clipboard after — matches how
         // `render_content_area` detects section boundaries.
-        assert_eq!(fitted.last().unwrap().kind, ResultKind::Clipboard);
+        assert_eq!(fitted.last().unwrap().kind, "clipboard");
     }
 
     #[test]
     fn many_more_app_matches_still_cannot_crowd_clipboard_out_entirely() {
-        let mut results: Vec<SearchItem> = (0..20).map(|_| item(ResultKind::App)).collect();
-        results.push(item(ResultKind::Clipboard));
+        let mut results: Vec<SearchItem> = (0..20).map(|_| item("app")).collect();
+        results.push(item("clipboard"));
         let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
-        assert!(fitted.iter().any(|i| i.kind == ResultKind::Clipboard));
+        assert!(fitted.iter().any(|i| i.kind == "clipboard"));
     }
 
     #[test]
@@ -813,10 +898,10 @@ mod tests {
         // Only 1 app matched, so it can't use its whole reserved-against
         // share — the rest of the budget (not just the 1-row reservation)
         // should go to clipboard.
-        let mut results = vec![item(ResultKind::App)];
-        results.extend((0..3).map(|_| item(ResultKind::Clipboard)));
+        let mut results = vec![item("app")];
+        results.extend((0..3).map(|_| item("clipboard")));
         let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
-        let clipboard_kept = fitted.iter().filter(|i| i.kind == ResultKind::Clipboard).count();
+        let clipboard_kept = fitted.iter().filter(|i| i.kind == "clipboard").count();
         assert_eq!(clipboard_kept, 3);
     }
 
@@ -825,14 +910,14 @@ mod tests {
         // No clipboard entries at all -> no reservation taken -> same
         // count a pure app-only search produced before clipboard existed
         // (7 of 8 requested fit once the one header is charged).
-        let results: Vec<SearchItem> = (0..RESULT_LIMIT).map(|_| item(ResultKind::App)).collect();
+        let results: Vec<SearchItem> = (0..RESULT_LIMIT).map(|_| item("app")).collect();
         let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
         assert_eq!(fitted.len(), 7);
     }
 
     #[test]
     fn results_that_already_fit_are_returned_unchanged() {
-        let results = vec![item(ResultKind::App), item(ResultKind::Clipboard)];
+        let results = vec![item("app"), item("clipboard")];
         let fitted = fit_within_budget(results.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
         assert_eq!(fitted, results);
     }
@@ -840,5 +925,28 @@ mod tests {
     #[test]
     fn empty_results_stay_empty() {
         assert_eq!(fit_within_budget(Vec::new(), CONTENT_AREA_MIN_HEIGHT_PX), Vec::new());
+    }
+
+    #[test]
+    fn a_third_provider_gets_the_same_reservation_with_zero_special_casing() {
+        // Proves `fit_within_budget` generalized cleanly to N sections: a
+        // "file" section behaves exactly like "clipboard" did on its own —
+        // reserved a floor, never crowded out by a long run of app
+        // matches — without this function knowing "file" exists as a
+        // concept anywhere.
+        let mut results: Vec<SearchItem> = (0..6).map(|_| item("app")).collect();
+        results.push(item("file"));
+        results.push(item("clipboard"));
+
+        let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
+
+        assert!(fitted.iter().any(|i| i.kind == "file"), "file's reservation must survive");
+        assert!(fitted.iter().any(|i| i.kind == "clipboard"), "clipboard's reservation must survive");
+        // Section order preserved: app, then file, then clipboard.
+        let kinds: Vec<&str> = fitted.iter().map(|i| i.kind.as_str()).collect();
+        let first_file = kinds.iter().position(|&k| k == "file").unwrap();
+        let first_clipboard = kinds.iter().position(|&k| k == "clipboard").unwrap();
+        assert!(kinds[..first_file].iter().all(|&k| k == "app"));
+        assert!(first_file < first_clipboard);
     }
 }

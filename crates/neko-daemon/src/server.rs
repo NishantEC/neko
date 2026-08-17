@@ -1,33 +1,61 @@
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::{Mutex, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, RwLock};
 
+use neko_core::provider::Provider;
+use neko_core::search::Candidate;
 use neko_core::{AppEntry, Db};
 use neko_protocol::{Event, Frame, Request, Response, read_frame, write_frame};
 
 pub struct AppState {
-    pub db: Mutex<Db>,
-    pub apps: RwLock<Vec<AppEntry>>,
-    broadcast: Mutex<Vec<UnixStream>>,
+    pub db: Arc<Mutex<Db>>,
+    pub apps: Arc<RwLock<Vec<AppEntry>>>,
+    /// Every registered result-type provider, in section render order —
+    /// see `neko_core::search::allocate`'s doc comment for what that order
+    /// means for ranking. Registering a fourth provider is exactly one more
+    /// line here plus its own `impl Provider` — nothing else in this file,
+    /// the wire protocol, or the client needs to change. See `AGENTS.md`'s
+    /// "Provider abstraction" section for the full accounting.
+    providers: Vec<Box<dyn Provider>>,
+    /// One shared writer lock per connected client, keyed by nothing (just
+    /// a flat list) since a connection never needs to look itself up — see
+    /// `handle_connection`'s doc comment for why every write to a given
+    /// connection, whether a request's own response or a broadcast `Event`,
+    /// has to go through the *same* lock.
+    broadcast: Mutex<Vec<Arc<Mutex<UnixStream>>>>,
 }
 
 impl AppState {
     pub fn new(db: Db, apps: Vec<AppEntry>) -> Self {
+        Self::with_file_provider(db, apps, neko_core::files::FileProvider::new())
+    }
+
+    /// The real constructor, parameterized on the file provider so tests
+    /// can pass `FileProvider::empty()` — otherwise every `Request::Search`
+    /// test with a 2+ character query would shell out to a real `mdfind`
+    /// against whatever the test machine's own `$HOME` happens to contain,
+    /// which is both slow (up to `files::QUERY_TIMEOUT` per call) and not
+    /// hermetic.
+    fn with_file_provider(db: Db, apps: Vec<AppEntry>, file_provider: neko_core::files::FileProvider) -> Self {
+        let db = Arc::new(Mutex::new(db));
+        let apps = Arc::new(RwLock::new(apps));
+        let providers: Vec<Box<dyn Provider>> = vec![
+            Box::new(neko_core::apps::AppsProvider::new(apps.clone(), db.clone())),
+            Box::new(file_provider),
+            Box::new(neko_core::clipboard::ClipboardProvider::new(db.clone())),
+        ];
         Self {
-            db: Mutex::new(db),
-            apps: RwLock::new(apps),
+            db,
+            apps,
+            providers,
             broadcast: Mutex::new(Vec::new()),
         }
     }
 }
 
 pub fn now_unix_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    neko_core::now_unix_ms()
 }
 
 /// Binds the daemon's socket, taking over a stale one if the process that
@@ -66,24 +94,53 @@ fn ping(stream: &mut UnixStream) -> io::Result<()> {
     }
 }
 
-pub fn handle_connection(state: &AppState, stream: UnixStream) {
+/// Reads request frames off `stream` and spawns one thread per request to
+/// compute and send its response. **Per-request, not per-connection,
+/// concurrency is load-bearing, not an optimization**: `FileProvider`'s
+/// `mdfind` round-trip can take several hundred milliseconds on a real,
+/// repository-heavy home directory (see `neko_core::files`'s module doc
+/// comment for the measured numbers), and the client holds exactly one
+/// persistent connection to the daemon for every request it ever makes —
+/// hotkey changes, onboarding state, every search-as-you-type keystroke,
+/// all of it. A single-threaded read-handle-write loop (this function's
+/// shape before this task) would queue every one of those behind whichever
+/// `Search` a slow file query landed on, visibly degrading the whole app's
+/// responsiveness rather than just that one search. Spawning a thread per
+/// request means a slow `Search` blocks nothing else on the same
+/// connection; the next keystroke's request is read and dispatched
+/// immediately.
+///
+/// Responses can therefore complete out of order relative to requests —
+/// safe by construction: `neko-client`'s `Shared::pending` map matches a
+/// response back to its caller by the request's own `id`, never by arrival
+/// order (see `neko-client/src/lib.rs`'s `read_until_disconnected`).
+///
+/// **The shared `Arc<Mutex<UnixStream>>` writer is the other half of this
+/// change.** Two request threads on the same connection now genuinely can
+/// write concurrently, and a `UnixStream::try_clone()` shares the
+/// underlying socket fd — two unsynchronized `write_frame` calls (each two
+/// separate `write_all`s: a length prefix, then the payload) could
+/// interleave mid-frame and corrupt the stream. Every writer for a given
+/// connection — a request's own response, and any `Event` broadcast to it
+/// — goes through this one lock, so a full frame is always written
+/// atomically relative to every other writer on the same connection.
+pub fn handle_connection(state: Arc<AppState>, stream: UnixStream) {
     let writer = match stream.try_clone() {
-        Ok(w) => w,
+        Ok(w) => Arc::new(Mutex::new(w)),
         Err(_) => return,
     };
-    state.broadcast.lock().unwrap().push(writer);
+    state.broadcast.lock().unwrap().push(writer.clone());
 
     loop {
         match read_frame(&stream) {
             Ok(Some(Frame::Request { id, request })) => {
-                let response = handle_request(state, request);
-                let mut writer = match stream.try_clone() {
-                    Ok(w) => w,
-                    Err(_) => return,
-                };
-                if write_frame(&mut writer, &Frame::Response { id, response }).is_err() {
-                    return;
-                }
+                let state = state.clone();
+                let writer = writer.clone();
+                std::thread::spawn(move || {
+                    let response = handle_request(&state, request);
+                    let mut writer = writer.lock().unwrap();
+                    let _ = write_frame(&mut *writer, &Frame::Response { id, response });
+                });
             }
             Ok(Some(_)) => {} // Clients never send Response/Event frames.
             Ok(None) | Err(_) => return,
@@ -99,67 +156,41 @@ fn handle_request(state: &AppState, request: Request) -> Response {
             let limit = limit.clamp(1, 50);
             let now = now_unix_ms();
 
-            let apps = state.apps.read().unwrap();
-            let (recency, clipboard_entries) = {
-                let db = state.db.lock().unwrap();
-                (
-                    db.recency().unwrap_or_default(),
-                    neko_core::clipboard::entries(&db).unwrap_or_default(),
-                )
-            };
+            // Every provider searches concurrently, on its own thread —
+            // `FileProvider`'s `mdfind` round-trip dominates this request's
+            // latency otherwise, even though `AppsProvider` and
+            // `ClipboardProvider` finish in well under a millisecond each.
+            // `std::thread::scope` guarantees every spawned thread joins
+            // before this block returns, so `query`/`now` can be borrowed
+            // rather than cloned per provider.
+            let query = query.as_str();
+            let candidates: Vec<(&str, Vec<Candidate>)> = std::thread::scope(|scope| {
+                let handles: Vec<_> = state
+                    .providers
+                    .iter()
+                    .map(|provider| {
+                        let provider = provider.as_ref();
+                        scope.spawn(move || (provider.id(), provider.search(query, now)))
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            });
 
-            // Rank clipboard first so we know whether to reserve it a slot
-            // — apps are still the primary result type, but must never
-            // crowd clipboard out of the *response* entirely when there's
-            // a matching entry (the panel's own `fit_within_budget` makes
-            // the final call on how many of each actually render).
-            let clipboard_matches = neko_core::search::rank_clipboard(&query, &clipboard_entries, now, limit);
-            let app_limit = if clipboard_matches.is_empty() {
-                limit
-            } else {
-                limit.saturating_sub(1)
-            };
-            let mut items = neko_core::search::rank_apps(&query, &apps, &recency, now, app_limit);
-            let remaining = limit.saturating_sub(items.len());
-            items.extend(clipboard_matches.into_iter().take(remaining));
+            let items = neko_core::search::allocate(candidates, limit);
             Response::SearchResults { items }
         }
 
-        Request::Launch { id } => {
-            let app_path = {
-                let apps = state.apps.read().unwrap();
-                apps.iter().find(|a| a.id == id).map(|a| a.path.clone())
-            };
-            let Some(app_path) = app_path else {
-                return Response::Error {
-                    message: format!("no such app: {id}"),
-                };
-            };
-            match neko_core::launch::launch_app(&app_path) {
-                Ok(()) => {
-                    let _ = state.db.lock().unwrap().record_launch(&id, now_unix_ms());
-                    Response::Launched
-                }
+        Request::Activate { kind, id } => match state.providers.iter().find(|p| p.id() == kind) {
+            Some(provider) => match provider.activate(&id) {
+                Ok(()) => Response::Activated,
                 Err(e) => Response::Error {
                     message: e.to_string(),
                 },
-            }
-        }
-
-        Request::Paste { id } => {
-            // No explicit DB touch here: writing `id` back onto the
-            // pasteboard bumps the OS `changeCount`, which the capture loop
-            // (already polling in the background — see `main.rs`) picks up
-            // on its own next tick and re-records with a fresh timestamp,
-            // the same "move to top" dedup path an ordinary re-copy takes.
-            if neko_core::clipboard::write_to_pasteboard(&id) {
-                Response::Pasted
-            } else {
-                Response::Error {
-                    message: "failed to write to the pasteboard".to_string(),
-                }
-            }
-        }
+            },
+            None => Response::Error {
+                message: format!("no such provider: {kind}"),
+            },
+        },
 
         Request::GetHotkey => {
             let db = state.db.lock().unwrap();
@@ -248,7 +279,10 @@ fn error_response(e: impl std::fmt::Display) -> Response {
 
 fn broadcast(state: &AppState, event: &Event) {
     let mut writers = state.broadcast.lock().unwrap();
-    writers.retain_mut(|w| write_frame(w, &Frame::Event(event.clone())).is_ok());
+    writers.retain(|w| {
+        let mut w = w.lock().unwrap();
+        write_frame(&mut *w, &Frame::Event(event.clone())).is_ok()
+    });
 }
 
 /// Called by `main.rs`'s background icon-extraction passes (startup and
@@ -263,7 +297,7 @@ pub fn notify_icons_updated(state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neko_protocol::{ClipboardContentKind, ResultKind};
+    use neko_core::clipboard::ClipboardContentKind;
 
     fn app(name: &str) -> AppEntry {
         AppEntry {
@@ -271,6 +305,13 @@ mod tests {
             name: name.to_string(),
             path: std::path::PathBuf::from(format!("/Applications/{name}.app")),
         }
+    }
+
+    /// `AppState::new` with an empty-scope file provider — see
+    /// `AppState::with_file_provider`'s doc comment for why every test in
+    /// this module goes through this rather than the real constructor.
+    fn test_state(db: Db, apps: Vec<AppEntry>) -> AppState {
+        AppState::with_file_provider(db, apps, neko_core::files::FileProvider::empty())
     }
 
     #[test]
@@ -282,7 +323,7 @@ mod tests {
         // server's own `limit`, the exact shape that used to leave 0 room
         // for clipboard in the response itself (not just on screen).
         let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
-        let state = AppState::new(db, apps);
+        let state = test_state(db, apps);
 
         let response = handle_request(
             &state,
@@ -293,7 +334,7 @@ mod tests {
         };
 
         assert!(
-            items.iter().any(|i| i.kind == ResultKind::Clipboard),
+            items.iter().any(|i| i.kind == "clipboard"),
             "a clipboard match must survive in the response even when apps alone would fill `limit`"
         );
         assert!(items.len() <= 8);
@@ -303,7 +344,7 @@ mod tests {
     fn a_pure_app_query_still_returns_the_full_limit() {
         let db = Db::open_in_memory().unwrap();
         let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
-        let state = AppState::new(db, apps);
+        let state = test_state(db, apps);
 
         let response = handle_request(
             &state,
@@ -313,5 +354,31 @@ mod tests {
             panic!("expected SearchResults")
         };
         assert_eq!(items.len(), 8);
+    }
+
+    #[test]
+    fn activate_routes_to_the_provider_named_by_kind() {
+        let db = Db::open_in_memory().unwrap();
+        let state = test_state(db, vec![app("Console")]);
+
+        // "app" provider, id that doesn't exist — proves routing landed on
+        // the right provider (a real app-not-found error), not a generic
+        // "no such provider" failure.
+        let response = handle_request(&state, Request::Activate { kind: "app".into(), id: "does-not-exist".into() });
+        let Response::Error { message } = response else {
+            panic!("expected an Error response")
+        };
+        assert!(message.contains("no such app"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn activate_with_an_unknown_provider_kind_errors() {
+        let db = Db::open_in_memory().unwrap();
+        let state = test_state(db, Vec::new());
+        let response = handle_request(&state, Request::Activate { kind: "nonexistent".into(), id: "x".into() });
+        let Response::Error { message } = response else {
+            panic!("expected an Error response")
+        };
+        assert!(message.contains("no such provider"), "unexpected message: {message}");
     }
 }

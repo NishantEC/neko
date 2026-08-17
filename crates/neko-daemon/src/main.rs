@@ -102,6 +102,6 @@ fn main() {
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let state = state.clone();
-        std::thread::spawn(move || server::handle_connection(&state, stream));
+        std::thread::spawn(move || server::handle_connection(state, stream));
     }
 }

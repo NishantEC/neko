@@ -102,6 +102,17 @@ impl TextField {
         cx.emit(ContentChanged);
     }
 
+    /// Replaces the whole field with `text`, as a single real edit (emits
+    /// `ContentChanged`, same as typing it). Evidence/verification-only —
+    /// `evidence.rs`'s `NEKO_SHOW_QUERY` hook is the one caller, for driving
+    /// a specific query into a window-scoped screenshot without needing
+    /// synthetic OS keystrokes (unreliable in rapid succession — see
+    /// `AGENTS.md`'s "Testing caveat"). Nothing in the real typing path
+    /// calls this.
+    pub fn set_content_for_evidence(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.commit_edit(0..self.content.len(), text, cx);
+    }
+
     fn on_backspace(&mut self, _: &Backspace, _window: &mut Window, cx: &mut Context<Self>) {
         if self.cursor == 0 {
             return;
