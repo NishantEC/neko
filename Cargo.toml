@@ -1,0 +1,16 @@
+[package]
+name = "neko"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "neko"
+path = "src/main.rs"
+
+[dependencies]
+gpui = "0.2.2"
+global-hotkey = "0.8.0"
+
+[profile.dev]
+opt-level = 0
