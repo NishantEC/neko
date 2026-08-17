@@ -106,6 +106,19 @@ pub const FOOTER_HEIGHT_PX: f32 = 44.0;
 pub const PANEL_WIDTH_PX: f32 = 680.0;
 pub const PANEL_WIDTH_WITH_DETAIL_PX: f32 = 760.0;
 pub const ROW_ICON_PX: f32 = 22.0;
+pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
+/// The row-icon slot's own backing plate — `design.css`'s `.row-icon`
+/// background, `TEXT_PRIMARY`'s hex at 6% alpha (also reused for
+/// `.type-tag`'s background, the same token). Applied behind every app
+/// icon, not just the not-yet-cached placeholder: real macOS icon PNGs
+/// (`NSWorkspace.iconForFile`) commonly bake in their own transparent
+/// padding at wildly different ratios per app, so a raw icon floats at an
+/// inconsistent visual size with nothing to anchor it against the dark
+/// panel. A shared, low-alpha, *warm*-tinted socket (not a neutral white)
+/// gives every icon the same backing plate regardless of how much of its
+/// own padding shows through — the fix for icons reading as "bright stamps"
+/// mismatched in shape and brightness against the rest of the list.
+pub const ROW_ICON_SOCKET_BG: Rgba = rgba_const(0xf0e6da, 0.06);
 
 /// Onboarding window geometry (design report §3): the same panel width as
 /// the summoned popup, a static header standing in for the input row, a
