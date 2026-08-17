@@ -22,9 +22,12 @@ the summon hotkey, and graceful degradation when Accessibility is declined.
 See "Onboarding" below for the architecture. A fourth task replaced the
 original hard-coded five-directory app scan with Spotlight as the primary
 discovery source, kept live without polling, and filtered to what a person
-would actually launch — see "Application discovery" below. Still not built:
-the WASM extension system, agent capability. See "Seams for follow-up work"
-below for exactly where each plugs in.
+would actually launch — see "Application discovery" below. A fifth task
+replaced the `WindowBackgroundAppearance::Blurred` placeholder with real
+native window material — `NSGlassEffectView` ("Liquid Glass") where the OS
+ships it, an honest fallback chain beneath it — see "Window material"
+below. Still not built: the WASM extension system, agent capability. See
+"Seams for follow-up work" below for exactly where each plugs in.
 
 ## Crate layout
 
@@ -716,7 +719,10 @@ cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
   path, not a placeholder for a request flow still to build.
 - **Dynamic window resize**: see "v1 simplification" above.
 - **`AgentProvider` wiring**: see above.
-- **Native window material spike**: see "Window material" above.
+- **Native window material**: built — see "Window material" above. Still
+  open: a real screenshot proving live compositing/legibility against a
+  busy backdrop, blocked on this machine's standing capture-safety rule
+  (same section) rather than on any code gap.
 - **A real menu-bar `NSStatusItem`**: see "Onboarding" above — GPUI 0.2.2 has
   no usable status-item API; this is raw AppKit bridging, its own task.
 
