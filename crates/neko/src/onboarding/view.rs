@@ -62,6 +62,11 @@ pub struct OnboardingRoot {
     slot: SharedOnboardingSlot,
     focus_handle: FocusHandle,
     poll_generation: u64,
+    /// Armed by mouse-down on the custom header strip; the next mouse-move
+    /// with the button still held hands the drag to the compositor
+    /// (`Window::start_window_move`) — same pattern comet and waku use for
+    /// their own app-owned titlebar drag regions.
+    header_drag_armed: bool,
 }
 
 /// Opens the onboarding window and records its handle in `slot` — a slot
@@ -86,10 +91,15 @@ pub fn open_window(
         .open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                // Frameless-inset chrome, no system title text — the captain
+                // asked for comet/waku's approach in place of the standard
+                // grey title-bar strip. `render_header` below draws the real
+                // chrome; the traffic lights stay native macOS controls,
+                // repositioned into that strip via `traffic_light_position`.
                 titlebar: Some(TitlebarOptions {
-                    title: Some(SharedString::from("neko")),
-                    appears_transparent: false,
-                    traffic_light_position: None,
+                    title: None,
+                    appears_transparent: true,
+                    traffic_light_position: Some(point(px(14.), px(14.))),
                 }),
                 kind: WindowKind::Normal,
                 is_movable: true,
@@ -145,6 +155,7 @@ impl OnboardingRoot {
             slot,
             focus_handle: cx.focus_handle(),
             poll_generation: 0,
+            header_drag_armed: false,
         })
     }
 
@@ -361,6 +372,27 @@ impl OnboardingRoot {
 
     fn finish_and_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.flow.finish();
+        self.close_and_persist_completion(window, cx);
+    }
+
+    /// The persistent "Skip setup" footer control — jumps straight to the
+    /// working launcher from any step, for a captain re-testing the app who
+    /// doesn't want to walk the whole arc again. Reuses exactly the same
+    /// completion/close path `finish_and_close` uses, so the graceful
+    /// degradation is identical to declining accessibility from step 02:
+    /// nothing skip touches grants accessibility or enables clipboard on
+    /// its own, so `main.rs`'s summon loop simply never sees a live hotkey
+    /// id when it wasn't already granted, and `App::on_reopen`'s Dock-icon
+    /// path remains the way back in exactly as it already is for that case.
+    fn skip_onboarding(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.flow.hotkey_recording, RecordingState::Recording) {
+            return;
+        }
+        self.flow.skip_onboarding();
+        self.close_and_persist_completion(window, cx);
+    }
+
+    fn close_and_persist_completion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let client = self.client.clone();
         cx.spawn(async move |_this, _cx| {
             let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
@@ -393,7 +425,7 @@ fn canonicalize_key_name(raw: &str) -> String {
 }
 
 impl Render for OnboardingRoot {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .key_context("Onboarding")
             .track_focus(&self.focus_handle)
@@ -405,23 +437,59 @@ impl Render for OnboardingRoot {
             .size_full()
             .bg(theme::SURFACE_PANEL)
             .text_color(theme::TEXT_PRIMARY)
-            .child(self.render_header())
+            .child(self.render_header(window, cx))
             .child(self.render_content(cx))
             .child(self.render_footer(cx))
     }
 }
 
 impl OnboardingRoot {
-    fn render_header(&self) -> impl IntoElement {
+    /// The window's only chrome: no system title bar (see `open_window`'s
+    /// `TitlebarOptions`), so this strip both draws the neko identity and
+    /// drags the window. Reserves left clearance for the real macOS traffic
+    /// lights repositioned into it, unless fullscreen has hidden them.
+    fn render_header(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let left_padding = if !cfg!(target_os = "macos") {
+            theme::ONBOARDING_HEADER_BASE_PADDING_PX
+        } else if window.is_fullscreen() {
+            theme::ONBOARDING_TRAFFIC_LIGHT_CLEARANCE_FULLSCREEN_PX
+        } else {
+            theme::ONBOARDING_TRAFFIC_LIGHT_CLEARANCE_PX
+        };
+
         div()
+            .id("onboarding-header")
+            .window_control_area(gpui::WindowControlArea::Drag)
             .flex()
             .items_center()
             .flex_shrink_0()
             .h(px(theme::INPUT_ROW_HEIGHT_PX))
-            .px_5()
+            .pl(px(left_padding))
+            .pr(px(theme::ONBOARDING_HEADER_BASE_PADDING_PX))
             .gap_3()
             .border_b_1()
             .border_color(theme::BORDER_HAIRLINE)
+            .on_mouse_down_out(cx.listener(|this, _, _, _| this.header_drag_armed = false))
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, _, _| this.header_drag_armed = false),
+            )
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, _, _| this.header_drag_armed = true),
+            )
+            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, window, _| {
+                if this.header_drag_armed && event.pressed_button == Some(gpui::MouseButton::Left)
+                {
+                    this.header_drag_armed = false;
+                    window.start_window_move();
+                }
+            }))
+            .on_click(|event, window, _| {
+                if event.click_count() == 2 {
+                    window.titlebar_double_click();
+                }
+            })
             .child(crate::components::glyphs::neko_wordmark_glyph(px(18.), theme::TEXT_PRIMARY))
             .child(
                 div()
@@ -680,7 +748,6 @@ impl OnboardingRoot {
                 _ => ("Done — take me in".into(), true),
             },
         };
-        let _ = cx;
 
         div()
             .flex()
@@ -693,9 +760,33 @@ impl OnboardingRoot {
             .border_color(theme::BORDER_HAIRLINE)
             .child(
                 div()
-                    .text_size(px(11.))
-                    .text_color(theme::TEXT_TERTIARY)
-                    .child(format!("Setup · {phase} of 4")),
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme::TEXT_TERTIARY)
+                            .child(format!("Setup · {phase} of 4")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme::BORDER_HAIRLINE_STRONG)
+                            .child("·"),
+                    )
+                    .child(
+                        div()
+                            .id("onboarding-skip")
+                            .text_size(px(11.))
+                            .text_color(theme::TEXT_TERTIARY)
+                            .cursor(CursorStyle::PointingHand)
+                            .hover(|s| s.text_color(theme::TEXT_SECONDARY))
+                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                this.skip_onboarding(window, cx)
+                            }))
+                            .child("Skip setup"),
+                    ),
             )
             .child(
                 div()

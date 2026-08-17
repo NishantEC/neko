@@ -96,3 +96,40 @@ already-verified `status_pill`/link-button components used and screenshotted
 on steps 05/07/09, and `show_accessibility_banner()`'s gating logic
 (`accessibility_banner_dismissed == Some(false) && !accessibility.is_trusted()`)
 is straightforward to read directly in `panel.rs`.
+
+## Window chrome + "Skip setup" — verified on the release binary, from a fresh first-run state
+
+Same methodology as above, plus two additions specific to this pass:
+window IDs and screenshots this time via `screencapture -l<CGWindowID> -o`
+with the ID resolved through a small throwaway Swift snippet
+(`CGWindowListCopyWindowInfo`, filtered to this process's own `pid` — the
+JXA/`osascript -l JavaScript` equivalent segfaulted on this machine, so
+Swift was used instead); and a synthetic click/drag driven by `CGEvent`
+posted at `.cghidEventTap` (mouse-down → several mouse-dragged steps →
+mouse-up, screen coordinates only, targeting this window's own resolved
+bounds) to test dragging without any OS-level keystroke automation.
+
+- **No system title bar, correct traffic-light clearance**
+  (`onboarding-chrome-no-titlebar.png`, step 00/Welcome): captured after
+  fixing a real defect the captain caught live on the first pass — the neko
+  wordmark initially collided with the traffic lights (a guessed 78px
+  clearance was too small). Refixed to comet's own clearance convention
+  (88px windowed) instead of guessing; confirmed here with a clean gap
+  between the lights and the glyph.
+- **"Skip setup"** (same screenshot, footer): visible from the very first
+  step, next to "Setup · 1 of 4". Clicked via a synthetic `CGEvent` click at
+  its resolved screen position — the onboarding window closed immediately
+  (`CGWindowListCopyWindowInfo` returned zero windows for the process
+  afterward) and stayed closed on a subsequent relaunch *without*
+  `NEKO_RESET_ONBOARDING`, confirming `onboarding_completed` persisted the
+  same way the normal finish path already does.
+- **Dragging by the header does not work — confirmed, not assumed.** Same
+  synthetic-`CGEvent` technique, this time a full mouse-down → drag →
+  mouse-up sequence targeting empty header space (clear of the glyph, the
+  traffic lights, and "Skip setup"): the window's `CGWindowListCopyWindowInfo`
+  bounds were bit-for-bit identical before and after, including with a
+  Cmd-held drag (macOS's own background-window-move gesture) as a second
+  attempt. Root cause and the two real fixes are documented in
+  `AGENTS.md`/`CLAUDE.md`'s "Onboarding" section (window chrome
+  subsection) — this is a captain-acknowledged, deferred gap, not
+  something missed.

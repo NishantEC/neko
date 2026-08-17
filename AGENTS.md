@@ -178,6 +178,73 @@ functioning substitute. Relatedly, GPUI hardcodes
 no supported way to hide the Dock icon via GPUI's public API, so "no dock
 icon" (mockup step 13's copy) isn't achievable without patching GPUI itself.
 
+**Window chrome: no system title bar, live captain decision, supersedes the
+mockups.** The captain ran onboarding for the first time and rejected the
+standard macOS title bar (traffic lights + a "neko" title in a grey strip) —
+this overrides the design report's implication that onboarding gets
+*ordinary* system chrome; it is still a real, movable, closable `WindowKind::
+Normal` window that appears in the Dock, just without that strip.
+`onboarding::view::open_window`'s `WindowOptions` now sets `titlebar:
+Some(TitlebarOptions { title: None, appears_transparent: true,
+traffic_light_position: Some(point(px(14.), px(14.))) })` — frameless inset
+chrome, comet's own convention (`data/helm/refs/comet` in the firstmate
+home). `render_header` is the real chrome now, not content sitting under a
+system bar: it reserves `theme::ONBOARDING_TRAFFIC_LIGHT_CLEARANCE_PX` (88px)
+of left padding so the neko glyph/wordmark never collides with the real
+traffic-light cluster — a real, captain-reported defect on the first pass,
+fixed by matching comet's own `titlebar_cluster_start` clearance value
+exactly rather than guessing one. Collapses to
+`ONBOARDING_TRAFFIC_LIGHT_CLEARANCE_FULLSCREEN_PX` (12px) when
+`window.is_fullscreen()` — mac hides the lights there.
+
+**The header does not actually drag the window — a known, deliberate gap,
+not an oversight.** comet and waku both drag their custom chrome via
+`app_owns_titlebar_drag: true` plus GPUI's `WindowControlArea::Drag` hit-test
+wiring, but both depend on a **git fork** of Zed's gpui — this project is
+pinned to the published `gpui = "0.2.2"` crate specifically to avoid the
+GPL-3.0 taint on git-main (see "The GPUI dependency decision" below), and
+that published crate has neither of those: `WindowOptions` has no
+`app_owns_titlebar_drag` field at all, and `Window::start_window_move()` is
+gpui's own no-op default (`platform.rs`) — mac never overrides it, only
+Wayland/X11 do, per its own doc comment ("Tells the compositor to take
+control of window movement (Wayland and X11)"). `render_header` still sets
+`window_control_area(WindowControlArea::Drag)` and calls
+`window.start_window_move()` from its mouse-down/move handlers — the correct
+code for GPUI's public API, and forward-compatible with a future gpui bump
+that wires mac support for it — but confirmed live (synthetic `CGEvent`
+click-drag on the built release binary, window position unchanged
+before/after) to do nothing on mac today. **This is a real regression from
+the old system title bar**, which *was* natively draggable (a full-size
+content view swallows the click before AppKit's own title-bar drag ever
+sees it) — do not "fix" the regression by silently restoring
+`appears_transparent: false`; that brings back the grey strip the captain
+explicitly rejected. Two real fixes exist, both deferred by captain
+decision: bump gpui to a version with mac drag support (reopens the GPL
+question this project deliberately closed), or add a small, targeted native
+call (`raw-window-handle` + `NSWindow.performWindowDragWithEvent:` from the
+header's mouse-down handler, calling it from inside GPUI's own native
+mouseDown dispatch so `[NSApp currentEvent]` is still the right event) —
+scoped, low-risk, and the captain's own choice to make since it means a new
+dependency.
+
+**"Skip setup": a persistent, always-available way past the whole arc.**
+Added the same day, for a captain re-testing the app who doesn't want to
+walk all 14 screens every time — distinct from `NEKO_RESET_ONBOARDING`
+(that's for *getting back into* onboarding; this is for getting *out* of it
+quickly). `Flow::skip_onboarding` (`onboarding::state`) sets `finished` from
+any step, unlike `Flow::finish` (gated on reaching `LearnHotkey` first), and
+deliberately does not retroactively grant or enable anything — whatever
+`accessibility_granted`/`clipboard_enabled` already are at the moment it's
+clicked is exactly what persists. `OnboardingRoot::skip_onboarding` (view.rs)
+shares `close_and_persist_completion` with the normal finish path, so the
+graceful-degradation state is identical to declining accessibility from step
+02: no live hotkey if it was never granted, and `App::on_reopen`'s Dock-icon
+path remains the way back in, unchanged — never a dead end. Rendered as a
+small "Skip setup" text control in the footer, next to the "Setup · N of 4"
+label — deliberately not styled like `link_button` (used for the heavier,
+in-content "Use a different combination" link), since this should read as
+quiet and secondary, not a primary alternative to the step-by-step flow.
+
 ## Search and ranking
 
 `neko_core::search::fuzzy_score` is a small, dependency-free subsequence
