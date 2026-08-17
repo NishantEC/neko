@@ -38,12 +38,12 @@ fn main() {
     {
         let state = state.clone();
         std::thread::spawn(move || {
-            // One-time migration off the pre-versioning cache layout — see
-            // `purge_stale_unversioned_cache`'s own doc comment. Cheap (a
-            // single `read_dir` over at most one app index's worth of
-            // files), but still kept off the daemon's own startup path,
-            // same as the extraction loop below.
-            neko_core::icons::purge_stale_unversioned_cache();
+            // One-time migration off any previous cache generation — see
+            // `purge_stale_icon_cache`'s own doc comment. Cheap (a single
+            // `read_dir` over at most one app index's worth of files), but
+            // still kept off the daemon's own startup path, same as the
+            // extraction loop below.
+            neko_core::icons::purge_stale_icon_cache();
             // Verification-only, unset (0ms) in normal operation — the
             // real per-app extraction cost is small enough on real
             // hardware that a fresh index finishes in well under a second,

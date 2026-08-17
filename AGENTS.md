@@ -44,7 +44,13 @@ below for the trait, the cross-provider ranking algorithm, the now-generic
 wire protocol, and what a fourth provider actually has to touch. Still not
 built: the WASM extension system, agent capability (which is now exactly
 "implement `Provider`," per that section). See "Seams for follow-up work"
-below for exactly where each remaining piece plugs in.
+below for exactly where each remaining piece plugs in. A ninth task fixed
+the seventh task's own icon-cache *size* choice: 64px was picked as "big
+enough" rather than checked against what macOS actually ships, which made
+extraction itself lossy (a non-native target size) on top of the
+renderer's own necessary downscale — see "Icons" below,
+`docs/evidence/icon-cache-128px-report.md`, for the diagnosis and the fix
+(128px, a real representation size).
 
 ## Crate layout
 
@@ -388,35 +394,59 @@ dev-dependency only).
 `neko_core::icons` extracts each app's real icon via `NSWorkspace::iconForFile`
 (not a loose `.icns`-file parse, which silently fails on modern
 asset-catalog-only apps) and caches it as a PNG under
-`~/Library/Caches/neko/icons/v2-64px/`. Runs once per app on daemon startup, in a
+`~/Library/Caches/neko/icons/v3-128px/`. Runs once per app on daemon startup, in a
 background thread *after* the app index is already searchable, so it never
 delays the first search.
 
-**Cached at `ICON_CACHE_PX` (64px), not whatever size the source
-representation happened to be.** A first pass here trusted `NSImage.setSize`
-+ `TIFFRepresentation` to produce a small bitmap; it doesn't — a modern
-asset-catalog icon's source representation can be as large as 1024x1024,
-`setSize` only changes the image's reported *drawing* size, and
-`TIFFRepresentation` serializes the untouched source representation. Measured
-on a real 147-app index: 188MB across 142 files (`com.apple.calculator.png`
-alone 1.4MB) for icons displayed at 22px. `extract_icon_png` now draws into
-an explicitly `ICON_CACHE_PX`-sized `NSBitmapImageRep` via
-`NSGraphicsContext::graphicsContextWithBitmapImageRep` (the non-deprecated
-replacement for `NSImage.lockFocus`/`unlockFocus` — works from a background
-thread with no window or run loop, same as every other AppKit call site in
-this daemon) — same real index, same 146 apps, ~0.8MB total, ~5.7KB average,
-7.7KB max. `CACHE_GENERATION` (`"v2-64px"`) is a versioned subdirectory, not
-a flat rename: `ensure_cached_icon` only checks whether *a* file exists at
-its cache path, not what size it is, so bumping this constant is what makes
-a future pixel-size change regenerate rather than keep serving a stale file
-forever. `purge_stale_unversioned_cache` (called once from `neko-daemon`'s
-startup icon-extraction thread) is the one-time cleanup for caches written
-before this versioning existed — deletes only loose `*.png` files sitting
-directly in `icons/`, never a versioned subdirectory, so it's a no-op once
-run. No code reads old-generation files as a fallback; a captain who never
-runs the daemon again after upgrading keeps the old bytes on disk until this
-cleanup pass runs once, which happens automatically on the next `neko-daemon`
-start.
+**Cached at `ICON_CACHE_PX` (128px) — a real macOS icon-representation
+size, not a value picked to be "big enough."** The 1024px→64px pass (below)
+fixed a genuine disk-space problem but picked its replacement size as
+"roughly 3x the 22pt render slot," without checking what macOS actually
+ships representations at (16, 32, 128, 256, 512, 1024, each at 1x/2x pixel
+density). That made 64 a *non-native* target: `extract_icon_png`'s own
+`drawInRect` call resampled once to reach a non-native 64x64, and GPUI's
+renderer (a plain bilinear `min_filter: linear` sampler, no mipmap chain —
+`gpui-0.2.2/src/platform/mac/shaders.metal`) resampled a second time down
+to the display's physical pixels (44px at the captain's confirmed 2x
+backing scale on both his displays) — two compounding lossy steps for
+artwork whose whole problem was already "looks soft." Caching at 128
+instead — a real representation size — lets extraction's draw call copy
+instead of resample for most icons, leaving exactly one resample in the
+whole pipeline. Full diagnosis, before/after screenshots (including a raw
+cached-PNG nearest-neighbor blow-up that isolates extraction quality from
+rendering), and the display-move reasoning (nothing app-side has to
+special-case it — GPUI re-samples the same cached bitmap at the window's
+live `scale_factor()` every frame already):
+`docs/evidence/icon-cache-128px-report.md`. Storage, same real 146-app
+index: 1.10MB at 64px → 2.52MB at 128px — both trivially far from the
+original 188MB/1024px problem below.
+
+**Cached at `ICON_CACHE_PX`, not whatever size the source representation
+happened to be — the original, 1024px→64px fix.** A first pass here
+trusted `NSImage.setSize` + `TIFFRepresentation` to produce a small bitmap;
+it doesn't — a modern asset-catalog icon's source representation can be as
+large as 1024x1024, `setSize` only changes the image's reported *drawing*
+size, and `TIFFRepresentation` serializes the untouched source
+representation. Measured on a real 147-app index: 188MB across 142 files
+(`com.apple.calculator.png` alone 1.4MB) for icons displayed at 22px.
+`extract_icon_png` now draws into an explicitly `ICON_CACHE_PX`-sized
+`NSBitmapImageRep` via `NSGraphicsContext::graphicsContextWithBitmapImageRep`
+(the non-deprecated replacement for `NSImage.lockFocus`/`unlockFocus` —
+works from a background thread with no window or run loop, same as every
+other AppKit call site in this daemon) instead. `CACHE_GENERATION`
+(`"v3-128px"`) is a versioned subdirectory, not a flat rename:
+`ensure_cached_icon` only checks whether *a* file exists at its cache path,
+not what size it is, so bumping this constant is what makes a future
+pixel-size change regenerate rather than keep serving a stale file forever.
+`purge_stale_icon_cache` (called once from `neko-daemon`'s startup
+icon-extraction thread) is the cleanup for caches written under any
+previous generation — deletes loose `*.png` files sitting directly in
+`icons/` (the pre-versioning layout) *and* any versioned subdirectory other
+than the current `CACHE_GENERATION` (e.g. `v2-64px` after the 128px
+upgrade), so it's a no-op once it's caught up. No code reads old-generation
+files as a fallback; a captain who never runs the daemon again after
+upgrading keeps the old bytes on disk until this cleanup pass runs once,
+which happens automatically on the next `neko-daemon` start.
 
 **A client already showing search results does not, on its own, ever find
 out an icon it was missing has since been extracted — a real defect, not
@@ -453,7 +483,7 @@ draws from instead of a client-side `match` on result type.
 verification-only, unset-by-default hook (same pattern as `evidence.rs`'s
 `NEKO_BENCH`/`NEKO_FORCE_MATERIAL`) that stretches out the startup
 extraction pass — real hardware finishes 146 icons in well under a second
-at 64px, too fast to reliably land a screenshot mid-pass without it.
+even at 128px, too fast to reliably land a screenshot mid-pass without it.
 Before/after window-scoped screenshots of the same summon (no relaunch, cold
 → resolved): `docs/evidence/icon-cache-cold-before.png` /
 `icon-cache-warm-after.png`.
