@@ -1,0 +1,12 @@
+[package]
+name = "neko-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+neko-protocol.workspace = true
+futures-channel = "0.3"
+
+[dev-dependencies]
+futures = "0.3"

@@ -1,0 +1,15 @@
+[package]
+name = "neko"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "neko"
+path = "src/main.rs"
+
+[dependencies]
+neko-protocol.workspace = true
+neko-client.workspace = true
+gpui = "0.2.2"
+global-hotkey = "0.8.0"

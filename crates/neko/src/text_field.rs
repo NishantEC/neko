@@ -4,8 +4,11 @@ use gpui::{
     App, Bounds, Context, CursorStyle, ElementId, ElementInputHandler, Entity, EntityInputHandler,
     FocusHandle, Focusable, GlobalElementId, InspectorElementId, LayoutId, Pixels, Point, Render,
     ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window, actions, div, fill, point,
-    prelude::*, px, relative, rgb,
+    prelude::*, px, relative,
 };
+
+use crate::components::vendor::gpui_component::blink_cursor::CursorBlink;
+use crate::theme;
 
 actions!(text_field, [Backspace, Left, Right]);
 
@@ -22,18 +25,42 @@ pub struct TextField {
     cursor: usize,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
+    blink: Entity<CursorBlink>,
 }
 
 impl TextField {
     pub fn new(cx: &mut App) -> Entity<Self> {
-        cx.new(|cx| Self {
-            focus_handle: cx.focus_handle(),
-            content: String::new(),
-            placeholder: "Search…".into(),
-            cursor: 0,
-            last_layout: None,
-            last_bounds: None,
+        cx.new(|cx| {
+            let blink = cx.new(|_| CursorBlink::new());
+            blink.update(cx, |blink, cx| blink.start(cx));
+            cx.observe(&blink, |_, _, cx| cx.notify()).detach();
+            Self {
+                focus_handle: cx.focus_handle(),
+                content: String::new(),
+                placeholder: "Search…".into(),
+                cursor: 0,
+                last_layout: None,
+                last_bounds: None,
+                blink,
+            }
         })
+    }
+
+    pub fn content(&self) -> &str {
+        &self.content
+    }
+
+    /// Reset to empty with the cursor at the start — used when a launch
+    /// dismisses the panel, so the next summon starts from a clean field
+    /// rather than the previous query.
+    pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.content.clear();
+        self.cursor = 0;
+        cx.notify();
+    }
+
+    fn touch_cursor(&mut self, cx: &mut Context<Self>) {
+        self.blink.update(cx, |blink, cx| blink.pause(cx));
     }
 
     fn on_backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
@@ -48,11 +75,13 @@ impl TextField {
 
     fn on_left(&mut self, _: &Left, _window: &mut Window, cx: &mut Context<Self>) {
         self.cursor = self.previous_char_boundary(self.cursor);
+        self.touch_cursor(cx);
         cx.notify();
     }
 
     fn on_right(&mut self, _: &Right, _window: &mut Window, cx: &mut Context<Self>) {
         self.cursor = self.next_char_boundary(self.cursor);
+        self.touch_cursor(cx);
         cx.notify();
     }
 
@@ -154,6 +183,7 @@ impl EntityInputHandler for TextField {
             .unwrap_or(self.cursor..self.cursor);
         self.content.replace_range(range.clone(), new_text);
         self.cursor = range.start + new_text.len();
+        self.touch_cursor(cx);
         cx.notify();
     }
 
@@ -253,7 +283,7 @@ impl gpui::Element for TextFieldElement {
         let field = self.field.read(cx);
         let text_style = window.text_style();
         let (display_text, color) = if field.content.is_empty() {
-            (field.placeholder.clone(), gpui::hsla(0., 0., 1., 0.35))
+            (field.placeholder.clone(), theme::TEXT_TERTIARY.into())
         } else {
             (field.content.clone().into(), text_style.color)
         };
@@ -270,14 +300,16 @@ impl gpui::Element for TextFieldElement {
             .text_system()
             .shape_line(display_text, font_size, &[run], None);
 
-        let cursor = if field.focus_handle.is_focused(window) {
+        let show_cursor =
+            field.focus_handle.is_focused(window) && field.blink.read(cx).visible();
+        let cursor = if show_cursor {
             let x = bounds.left() + line.x_for_index(field.cursor);
             Some(fill(
                 Bounds::new(
                     point(x, bounds.top()),
                     gpui::size(px(2.), bounds.bottom() - bounds.top()),
                 ),
-                rgb(0xffffff),
+                theme::TEXT_PRIMARY,
             ))
         } else {
             None
