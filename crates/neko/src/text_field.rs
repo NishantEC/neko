@@ -37,7 +37,7 @@ impl TextField {
             Self {
                 focus_handle: cx.focus_handle(),
                 content: String::new(),
-                placeholder: "Search…".into(),
+                placeholder: "Search apps and clipboard…".into(),
                 cursor: 0,
                 last_layout: None,
                 last_bounds: None,

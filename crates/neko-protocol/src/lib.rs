@@ -71,18 +71,36 @@ pub struct HotkeyConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResultKind {
     App,
+    Clipboard,
+}
+
+/// The clipboard content types this v1 distinguishes. Images are an
+/// explicit non-goal for this slice — see `neko-core`'s `clipboard` module
+/// doc comment for the seam a future task plugs an `Image` variant into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClipboardContentKind {
+    Text,
+    Link,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchItem {
-    /// Stable identifier the daemon can resolve back to a launch target —
-    /// for `ResultKind::App` this is the bundle path.
+    /// Stable identifier the daemon can resolve back to an action target —
+    /// for `ResultKind::App` this is the bundle path; for
+    /// `ResultKind::Clipboard` this is the entry's own content (also the
+    /// SQLite primary key, so it doubles as the dedup key).
     pub id: String,
     pub kind: ResultKind,
     pub title: String,
     pub subtitle: Option<String>,
     /// Absolute path to a cached PNG icon, if one was extracted.
     pub icon_path: Option<String>,
+    /// `Some` only for `ResultKind::Clipboard` — the content-type tag the
+    /// design shows next to a clipboard row (`LINK`, `TEXT`).
+    pub content_kind: Option<ClipboardContentKind>,
+    /// `Some` only for `ResultKind::Clipboard` — a precomputed relative
+    /// timestamp ("12m", "3h") for the row's accessory text.
+    pub accessory: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +108,10 @@ pub enum Request {
     Ping,
     Search { query: String, limit: usize },
     Launch { id: String },
+    /// Writes a stored clipboard entry's content back onto the system
+    /// pasteboard — "paste" as in "make this the current clipboard
+    /// contents," not a synthesized ⌘V keystroke into the frontmost app.
+    Paste { id: String },
     GetHotkey,
     /// Fast, side-effect-free check against known OS/third-party reserved
     /// combinations (Spotlight, Mission Control, ...). Does not persist
@@ -107,6 +129,7 @@ pub enum Response {
     Pong,
     SearchResults { items: Vec<SearchItem> },
     Launched,
+    Pasted,
     Hotkey { config: HotkeyConfig },
     HotkeyConflict { reason: Option<String> },
     Error { message: String },

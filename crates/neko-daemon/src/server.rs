@@ -96,20 +96,33 @@ fn handle_request(state: &AppState, request: Request) -> Response {
         Request::Ping => Response::Pong,
 
         Request::Search { query, limit } => {
+            let limit = limit.clamp(1, 50);
+            let now = now_unix_ms();
+
             let apps = state.apps.read().unwrap();
-            let recency = state
-                .db
-                .lock()
-                .unwrap()
-                .recency()
-                .unwrap_or_default();
-            let items = neko_core::search::rank_apps(
-                &query,
-                &apps,
-                &recency,
-                now_unix_ms(),
-                limit.clamp(1, 50),
-            );
+            let (recency, clipboard_entries) = {
+                let db = state.db.lock().unwrap();
+                (
+                    db.recency().unwrap_or_default(),
+                    neko_core::clipboard::entries(&db).unwrap_or_default(),
+                )
+            };
+
+            let mut items = neko_core::search::rank_apps(&query, &apps, &recency, now, limit);
+            // Clipboard results fill whatever's left of `limit` after apps —
+            // apps stay the primary result type (unchanged from the
+            // app-only slice), clipboard is additive within the same
+            // server-capped list per `AGENTS.md`'s "just another result
+            // type in the same fast list."
+            let remaining = limit.saturating_sub(items.len());
+            if remaining > 0 {
+                items.extend(neko_core::search::rank_clipboard(
+                    &query,
+                    &clipboard_entries,
+                    now,
+                    remaining,
+                ));
+            }
             Response::SearchResults { items }
         }
 
@@ -131,6 +144,21 @@ fn handle_request(state: &AppState, request: Request) -> Response {
                 Err(e) => Response::Error {
                     message: e.to_string(),
                 },
+            }
+        }
+
+        Request::Paste { id } => {
+            // No explicit DB touch here: writing `id` back onto the
+            // pasteboard bumps the OS `changeCount`, which the capture loop
+            // (already polling in the background — see `main.rs`) picks up
+            // on its own next tick and re-records with a fresh timestamp,
+            // the same "move to top" dedup path an ordinary re-copy takes.
+            if neko_core::clipboard::write_to_pasteboard(&id) {
+                Response::Pasted
+            } else {
+                Response::Error {
+                    message: "failed to write to the pasteboard".to_string(),
+                }
             }
         }
 

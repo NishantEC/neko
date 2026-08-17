@@ -1,0 +1,411 @@
+//! Clipboard capture: polls the macOS general pasteboard on a background
+//! thread, persists distinct copies to SQLite, and can write a stored entry
+//! back onto the pasteboard. This all runs inside the daemon — no GPUI run
+//! loop needed. Unlike hotkey registration (`AGENTS.md`'s "why the hotkey is
+//! registered where it is"), `NSPasteboard` is a plain Objective-C call with
+//! no run-loop dependency, the same headless-background-thread shape
+//! `icons.rs`'s `NSWorkspace::iconForFile` already proves works — so capture
+//! keeps running whether or not a client window is open, which is the whole
+//! point of it living in the resident daemon rather than the client.
+//!
+//! **Images are an explicit non-goal for this slice.** Only
+//! `NSPasteboardTypeString` is read, so an image-only copy (a screenshot, a
+//! dragged photo) is silently not recorded. The seam for a future pass: a
+//! `ClipboardContentKind::Image` variant, a cached-PNG store keyed by a
+//! content hash under `~/Library/Caches/neko/clipboard/` (mirroring
+//! `icons.rs`'s own icon cache), and a row that renders the thumbnail via
+//! `img()` instead of the type-tag badge. Not started here — no half-built
+//! `Image` variant exists to avoid a dead code path with no reader.
+
+use std::time::Duration;
+
+use neko_protocol::ClipboardContentKind;
+
+/// Poll interval for detecting pasteboard changes via `NSPasteboard`'s
+/// `changeCount`. Short enough that a copy shows up in history well within
+/// a human's next keystroke; long enough not to spin a full core polling an
+/// integer.
+pub const POLL_INTERVAL: Duration = Duration::from_millis(400);
+
+/// Bounds the `clipboard_entries` table so it can't grow without limit.
+/// An entry-count cap rather than an age cap — it directly bounds storage
+/// regardless of how bursty copying is, and 200 is a "recent history" list
+/// a search field can page through, not an archive.
+pub const HISTORY_LIMIT: usize = 200;
+
+/// Pasteboard types that mean "do not record this" — the convention
+/// documented at nspasteboard.org and honored by password managers
+/// (1Password among them) to keep secrets out of clipboard-history tools.
+/// Honoring these is not optional (see the launch brief's privacy
+/// requirement).
+const PRIVACY_MARKER_TYPES: &[&str] = &[
+    "org.nspasteboard.ConcealedType",
+    "org.nspasteboard.TransientType",
+];
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClipboardEntry {
+    pub content: String,
+    pub content_kind: ClipboardContentKind,
+    pub source_app: Option<String>,
+    pub copied_at_unix_ms: i64,
+}
+
+/// `true` if the pasteboard's advertised types include one of
+/// [`PRIVACY_MARKER_TYPES`]. Pure and independent of any live pasteboard so
+/// it can be unit-tested without touching AppKit — the macOS-only glue that
+/// collects `NSPasteboard.types()` into a `Vec<String>` is the only
+/// untested-by-necessity part (same shape as `icons.rs`'s AppKit calls).
+pub fn is_privacy_marked(types: &[String]) -> bool {
+    types
+        .iter()
+        .any(|t| PRIVACY_MARKER_TYPES.contains(&t.as_str()))
+}
+
+/// A conservative heuristic for "this looks like a URL, not prose": no
+/// whitespace, and an explicit scheme. Used as a fallback when the
+/// pasteboard didn't also advertise `NSPasteboardTypeURL` (some apps only
+/// ever put plain text on the pasteboard for a copied link).
+fn looks_like_url(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() || s.contains(char::is_whitespace) {
+        return false;
+    }
+    const SCHEMES: &[&str] = &["http://", "https://", "ftp://", "mailto:", "file://"];
+    SCHEMES.iter().any(|scheme| s.starts_with(scheme))
+}
+
+/// Classifies captured content as `Link` or `Text`. `has_url_type` is
+/// authoritative when true (the source app told us directly, via
+/// `NSPasteboardTypeURL`); otherwise falls back to [`looks_like_url`].
+pub fn classify(content: &str, has_url_type: bool) -> ClipboardContentKind {
+    if has_url_type || looks_like_url(content) {
+        ClipboardContentKind::Link
+    } else {
+        ClipboardContentKind::Text
+    }
+}
+
+/// A single-line row title: newlines collapsed to spaces (multi-line copies
+/// are common — a paragraph, a code snippet — and `SearchItem::title` is
+/// rendered as one truncated line), plain-text entries wrapped in quotes to
+/// match the design's clipboard-row treatment (`"the difference is
+/// ownership…"`), links left bare.
+pub fn preview(content: &str, kind: ClipboardContentKind) -> String {
+    let collapsed: String = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    match kind {
+        ClipboardContentKind::Link => collapsed,
+        ClipboardContentKind::Text => format!("\"{collapsed}\""),
+    }
+}
+
+/// A short relative-time label ("now", "12m", "3h", "5d") for the row's
+/// accessory text, matching the design's `row-accessory` treatment.
+pub fn relative_time(now_unix_ms: i64, then_unix_ms: i64) -> String {
+    let diff_secs = (now_unix_ms - then_unix_ms).max(0) / 1000;
+    if diff_secs < 60 {
+        "now".to_string()
+    } else if diff_secs < 3600 {
+        format!("{}m", diff_secs / 60)
+    } else if diff_secs < 86_400 {
+        format!("{}h", diff_secs / 3600)
+    } else {
+        format!("{}d", diff_secs / 86_400)
+    }
+}
+
+fn content_kind_to_db(kind: ClipboardContentKind) -> &'static str {
+    match kind {
+        ClipboardContentKind::Text => "text",
+        ClipboardContentKind::Link => "link",
+    }
+}
+
+fn content_kind_from_db(s: &str) -> ClipboardContentKind {
+    match s {
+        "link" => ClipboardContentKind::Link,
+        _ => ClipboardContentKind::Text,
+    }
+}
+
+/// Persists one captured (or re-pasted) copy, deduplicating and pruning per
+/// [`HISTORY_LIMIT`] — see `Db::record_clipboard_entry`.
+pub fn record_entry(
+    db: &crate::Db,
+    content: &str,
+    content_kind: ClipboardContentKind,
+    source_app: Option<&str>,
+    copied_at_unix_ms: i64,
+) -> rusqlite::Result<()> {
+    db.record_clipboard_entry(
+        content,
+        content_kind_to_db(content_kind),
+        source_app,
+        copied_at_unix_ms,
+        HISTORY_LIMIT,
+    )
+}
+
+/// All stored entries, most recently copied first.
+pub fn entries(db: &crate::Db) -> rusqlite::Result<Vec<ClipboardEntry>> {
+    Ok(db
+        .clipboard_entries()?
+        .into_iter()
+        .map(|(content, kind, source_app, copied_at_unix_ms)| ClipboardEntry {
+            content,
+            content_kind: content_kind_from_db(&kind),
+            source_app,
+            copied_at_unix_ms,
+        })
+        .collect())
+}
+
+#[cfg(target_os = "macos")]
+mod pasteboard {
+    //! The only AppKit-touching code in this module. `NSPasteboard`, like
+    //! `NSWorkspace::iconForFile` in `icons.rs`, needs no active run loop —
+    //! plain Objective-C calls, safe to make from a headless background
+    //! thread.
+    //!
+    //! **On "detect and degrade honestly" for permissions**: unlike
+    //! Accessibility (`AXIsProcessTrusted()`), macOS exposes no distinct
+    //! "pasteboard access denied" signal separate from "no matching data" —
+    //! a read that's blocked and a read that's simply empty both come back
+    //! as `nil`/`None`. There is nothing more specific to detect, so
+    //! treating `None` as "nothing to capture this tick" (never panicking,
+    //! never blocking) *is* the honest degrade path here, not a shortcut
+    //! around one.
+
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString, NSPasteboardTypeURL, NSWorkspace};
+    use objc2_core_foundation::{CFRunLoop, kCFRunLoopDefaultMode};
+    use objc2_foundation::NSString;
+
+    /// The pasteboard's current `changeCount` — bumps on every distinct
+    /// change, the standard way to poll a `NSPasteboard` without missing or
+    /// double-processing a copy.
+    pub fn change_count() -> i64 {
+        NSPasteboard::generalPasteboard().changeCount() as i64
+    }
+
+    /// Reads the current pasteboard's plain-text string content, unless
+    /// it's marked private (see [`super::is_privacy_marked`]) or has no
+    /// string representation at all (e.g. an image-only copy — see this
+    /// module's file-level doc comment). Returns `(content, has_url_type)`.
+    pub fn read_current() -> Option<(String, bool)> {
+        // SAFETY: objc2-app-kit's generated `NSPasteboardTypeString`/
+        // `NSPasteboardTypeURL` are plain (non-`safe`) `extern "C"` statics,
+        // so reading them needs `unsafe` even under edition 2024's
+        // safe-extern-static rules (only items an `unsafe extern` block
+        // explicitly opts in via `safe` get that treatment). Reading them
+        // is just reading a linker-provided constant pointer — no actual
+        // invariant to uphold beyond "the framework is loaded," which it is
+        // by definition in an AppKit-linked binary.
+        unsafe {
+            let pb = NSPasteboard::generalPasteboard();
+            let types = pb.types();
+            let type_strings: Vec<String> = types
+                .as_ref()
+                .map(|types| types.iter().map(|t| t.to_string()).collect())
+                .unwrap_or_default();
+            if super::is_privacy_marked(&type_strings) {
+                return None;
+            }
+            let has_url_type = types
+                .as_ref()
+                .is_some_and(|types| types.containsObject(NSPasteboardTypeURL));
+            let string = pb.stringForType(NSPasteboardTypeString)?;
+            Some((string.to_string(), has_url_type))
+        }
+    }
+
+    /// The frontmost application's display name at the moment of capture —
+    /// an approximation of "who copied this," the same one every polling
+    /// clipboard manager uses, since macOS attaches no source-app metadata
+    /// to the general pasteboard itself. Because polling has up to
+    /// [`super::POLL_INTERVAL`] of latency, a very fast app-switch between
+    /// the copy and the next poll tick can attribute to the wrong app; not
+    /// solvable without a push notification macOS doesn't offer for this.
+    pub fn frontmost_app_name() -> Option<String> {
+        // `NSWorkspace`'s `frontmostApplication` is kept current by
+        // distributed notifications the process only dequeues while its
+        // run loop spins — a plain background thread (this one; the daemon
+        // has no `NSApplication`/`CFRunLoop` anywhere) never pumps one, so
+        // without this the value freezes at whatever was frontmost when the
+        // process — or this thread's first call — started, confirmed with
+        // a standalone repro: 16 reads over 8s, switching the real
+        // frontmost app four times, returned the *first* app's name for
+        // every single read. A brief run-loop pump before reading is the
+        // standard fix and reproducibly tracks live changes in the same
+        // repro.
+        //
+        // SAFETY: reading `kCFRunLoopDefaultMode`, a plain (non-`safe`)
+        // `extern "C"` static — see `read_current`'s SAFETY comment.
+        let mode = unsafe { kCFRunLoopDefaultMode };
+        CFRunLoop::run_in_mode(mode, 0.05, true);
+        let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+        app.localizedName().map(|s| s.to_string())
+    }
+
+    /// Writes `content` as the pasteboard's sole contents — "paste" in the
+    /// sense of "make this the system clipboard again," not a synthesized
+    /// keystroke. Returns whether the write succeeded.
+    pub fn write_string(content: &str) -> bool {
+        // SAFETY: same as `read_current` — reading `NSPasteboardTypeString`.
+        unsafe {
+            let pb = NSPasteboard::generalPasteboard();
+            pb.clearContents();
+            let ns = NSString::from_str(content);
+            pb.setString_forType(&ns, NSPasteboardTypeString)
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod pasteboard {
+    pub fn change_count() -> i64 {
+        0
+    }
+
+    pub fn read_current() -> Option<(String, bool)> {
+        None
+    }
+
+    pub fn frontmost_app_name() -> Option<String> {
+        None
+    }
+
+    pub fn write_string(_content: &str) -> bool {
+        false
+    }
+}
+
+fn now_unix_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// One capture attempt: if the pasteboard changed since `last_change_count`,
+/// classify and persist it (unless privacy-marked or empty of string
+/// content). Split out from [`run_capture_loop`] so the polling shape
+/// itself needs no macOS-only code — only `pasteboard::*` does.
+fn poll_once(db: &crate::Db, last_change_count: &mut i64) {
+    let current = pasteboard::change_count();
+    if current == *last_change_count {
+        return;
+    }
+    *last_change_count = current;
+
+    let Some((content, has_url_type)) = pasteboard::read_current() else {
+        return;
+    };
+    if content.trim().is_empty() {
+        return;
+    }
+    let kind = classify(&content, has_url_type);
+    let source_app = pasteboard::frontmost_app_name();
+    if let Err(e) = record_entry(db, &content, kind, source_app.as_deref(), now_unix_ms()) {
+        eprintln!("neko-daemon: failed to record clipboard entry: {e}");
+    }
+}
+
+/// Runs forever, polling the pasteboard on [`POLL_INTERVAL`]. Intended to be
+/// the body of its own background thread (see `neko-daemon`'s `main.rs`),
+/// the same shape as `icons.rs`'s icon-extraction thread — started once,
+/// outlives every individual client connection.
+pub fn run_capture_loop(db: &std::sync::Mutex<crate::Db>) {
+    let mut last_change_count = pasteboard::change_count();
+    loop {
+        std::thread::sleep(POLL_INTERVAL);
+        let db = db.lock().unwrap();
+        poll_once(&db, &mut last_change_count);
+    }
+}
+
+/// Writes a stored entry's content back onto the system pasteboard. `false`
+/// off macOS or if the write failed.
+pub fn write_to_pasteboard(content: &str) -> bool {
+    pasteboard::write_string(content)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bare_url_with_a_scheme_looks_like_a_url() {
+        assert!(looks_like_url("https://example.com/path"));
+        assert!(looks_like_url("mailto:hi@example.com"));
+    }
+
+    #[test]
+    fn prose_does_not_look_like_a_url() {
+        assert!(!looks_like_url("the difference is ownership, not a longer name"));
+        assert!(!looks_like_url("check out https://example.com for details"));
+    }
+
+    #[test]
+    fn classify_trusts_an_explicit_url_type_even_without_a_recognized_scheme() {
+        assert_eq!(classify("myapp://open", true), ClipboardContentKind::Link);
+    }
+
+    #[test]
+    fn classify_falls_back_to_the_heuristic_without_a_url_type() {
+        assert_eq!(classify("https://example.com", false), ClipboardContentKind::Link);
+        assert_eq!(classify("just some text", false), ClipboardContentKind::Text);
+    }
+
+    #[test]
+    fn concealed_and_transient_markers_are_privacy_marked() {
+        assert!(is_privacy_marked(&["org.nspasteboard.ConcealedType".to_string()]));
+        assert!(is_privacy_marked(&["org.nspasteboard.TransientType".to_string()]));
+        assert!(is_privacy_marked(&[
+            "public.utf8-plain-text".to_string(),
+            "org.nspasteboard.ConcealedType".to_string(),
+        ]));
+    }
+
+    #[test]
+    fn ordinary_text_types_are_not_privacy_marked() {
+        assert!(!is_privacy_marked(&["public.utf8-plain-text".to_string()]));
+        assert!(!is_privacy_marked(&[]));
+    }
+
+    #[test]
+    fn text_preview_collapses_whitespace_and_quotes() {
+        assert_eq!(
+            preview("line one\nline two", ClipboardContentKind::Text),
+            "\"line one line two\""
+        );
+    }
+
+    #[test]
+    fn link_preview_stays_bare() {
+        assert_eq!(
+            preview("https://example.com/path", ClipboardContentKind::Link),
+            "https://example.com/path"
+        );
+    }
+
+    #[test]
+    fn relative_time_buckets_by_magnitude() {
+        let now = 1_000_000_000;
+        assert_eq!(relative_time(now, now - 30_000), "now");
+        assert_eq!(relative_time(now, now - 5 * 60_000), "5m");
+        assert_eq!(relative_time(now, now - 3 * 3_600_000), "3h");
+        assert_eq!(relative_time(now, now - 2 * 86_400_000), "2d");
+    }
+
+    #[test]
+    fn record_entry_and_read_back_round_trips_through_db() {
+        let db = crate::Db::open_in_memory().unwrap();
+        record_entry(&db, "hello", ClipboardContentKind::Text, Some("Terminal"), 100).unwrap();
+        let entries = entries(&db).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content, "hello");
+        assert_eq!(entries[0].content_kind, ClipboardContentKind::Text);
+        assert_eq!(entries[0].source_app.as_deref(), Some("Terminal"));
+        assert_eq!(entries[0].copied_at_unix_ms, 100);
+    }
+}

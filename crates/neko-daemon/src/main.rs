@@ -45,6 +45,15 @@ fn main() {
         });
     }
 
+    // The clipboard capture loop is resident for the daemon's whole
+    // lifetime, independent of any client connection — see
+    // `neko_core::clipboard`'s module doc comment for why this is safe to
+    // run headlessly.
+    {
+        let state = state.clone();
+        std::thread::spawn(move || neko_core::clipboard::run_capture_loop(&state.db));
+    }
+
     eprintln!("neko-daemon: listening on {}", socket_path.display());
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };

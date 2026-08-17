@@ -5,15 +5,19 @@ in Rust on [GPUI](https://gpui.rs) (Zed's UI framework). See `README.md` for how
 to run it and `data/dim/plan.md` (in the firstmate home, not this repo) for the
 full product plan.
 
-## Current scope: the spine — protocol, daemon, client, search, the frozen panel
+## Current scope: the spine, plus clipboard history
 
-Slice 1 was a single-crate proof that GPUI works at all. This task restructured
-that proof into the plan's real five-crate workspace and built the first
-end-to-end feature: **summon with a hotkey, type, see your real applications
-ranked sensibly, press enter, the app launches** — on the frozen visual design,
-over real system window vibrancy. Still not built: onboarding UI, clipboard
-history, the WASM extension system, agent capability. See "Seams for follow-up
-work" below for exactly where each plugs in.
+Slice 1 was a single-crate proof that GPUI works at all. A follow-up task
+restructured that proof into the plan's real five-crate workspace and built
+the first end-to-end feature: **summon with a hotkey, type, see your real
+applications ranked sensibly, press enter, the app launches** — on the frozen
+visual design, over real system window vibrancy. The task after that added
+**clipboard history as a second result type in that same list**: the daemon polls the
+pasteboard, persists distinct copies, and they show up under their own
+`Clipboard` section header, filterable by the same search field, restorable
+to the pasteboard with enter. See "Clipboard history" below. Still not built:
+onboarding UI, the WASM extension system, agent capability. See "Seams for
+follow-up work" below for exactly where each plugs in.
 
 ## Crate layout
 
@@ -94,10 +98,19 @@ needing real OS calls in the test run.
 `neko_core::search::fuzzy_score` is a small, dependency-free subsequence
 scorer (fzf-shaped: contiguous-run and word-boundary bonuses, a length
 penalty) combined with a recency/frequency boost from the `launches` table
-(`neko_core::search::rank_apps`). The daemon caps results server-side
+(`neko_core::search::rank_apps`). `rank_clipboard` reuses the same
+`fuzzy_score` against each entry's content, with its own faster-tapering
+recency boost (3-hour half-life vs. apps' 5-day one — a clipboard history is
+inherently a "recent things" list). The daemon caps results server-side
 (`Request::Search { limit, .. }`, the client asks for 8) — the client never
 renders more than that, which is why the result list isn't virtualized (see
-"gpui-component" below).
+"gpui-component" below). `handle_request`'s `Search` arm gives `rank_apps`
+first crack at the full `limit` and fills whatever's left with
+`rank_clipboard` — apps stay the primary, unchanged-since-slice-1 result
+type; clipboard is additive. One consequence worth knowing: a query that
+alone matches `limit` or more apps crowds clipboard out of that response
+entirely (no clipboard section renders), same as it would for a third result
+type later — not a bug, just how a hard-capped shared budget behaves.
 
 ## Icons
 
@@ -109,6 +122,75 @@ background thread *after* the app index is already searchable, so it never
 delays the first search. `neko::panel` reads `SearchItem::icon_path` and
 falls back to a plain placeholder square when a PNG isn't cached yet — the
 list self-heals on the next search once the background pass catches up.
+
+## Clipboard history
+
+`neko_core::clipboard` — capture, storage, and restore all live in the
+daemon, nothing in the client (`neko`) crate touches AppKit for this at all;
+it's just another `Request`/`Response` pair, per the search section above.
+
+- **Capture is a background thread the daemon spawns unconditionally**
+  (`run_capture_loop`, started in `neko-daemon/src/main.rs` next to the
+  icon-extraction thread), polling `NSPasteboard.generalPasteboard`'s
+  `changeCount` every 400ms (`clipboard::POLL_INTERVAL`). Like
+  `icons.rs`'s `NSWorkspace::iconForFile`, `NSPasteboard` needs no run loop
+  for the read/write calls themselves — see the frontmost-app caveat below
+  for the one place in this module that *does* need one.
+- **Only `NSPasteboardTypeString` is read** — plain text and, heuristically
+  or via `NSPasteboardTypeURL`, links. Images are an explicit non-goal;
+  `clipboard.rs`'s module doc comment records the seam (an `Image`
+  `ClipboardContentKind`, a PNG cache under `~/Library/Caches/neko/clipboard/`
+  mirroring `icons.rs`, no half-built variant sitting unused in the meantime).
+- **Privacy**: pasteboard content flagged `org.nspasteboard.ConcealedType` or
+  `org.nspasteboard.TransientType` (the convention 1Password and other
+  password managers use) is never recorded — `clipboard::is_privacy_marked`,
+  pure and unit-tested, plus verified live against the real pasteboard with a
+  JXA script setting those exact marker types (no password manager was
+  installed on the verification machine to test against directly; say so
+  rather than claim more than was checked).
+- **Dedup and bound**: `content` is the SQLite primary key
+  (`clipboard_entries` table), so a repeat copy is an `ON CONFLICT DO UPDATE`
+  that moves it to the top rather than a new row. Bounded to
+  `clipboard::HISTORY_LIMIT` (200) by count, not age — pruned after every
+  insert. Both behaviors are covered in `db.rs`'s tests.
+- **"Paste" writes the pasteboard, it does not simulate ⌘V.**
+  `Request::Paste { id }` (`id` is the entry's own content) calls
+  `clipboard::write_to_pasteboard` and nothing else — the frontmost app after
+  neko hides still needs a real ⌘V from the user. Decided this way (not
+  answered by the plan or design report) because a synthetic keystroke would
+  need the same accessibility-permission machinery the brief explicitly
+  scoped out ("do not build onboarding or permission-request UI"), and
+  "puts it back on the pasteboard" is the brief's own literal wording.
+  Bonus: because writing back is a real pasteboard change, the capture loop
+  notices it on its own next tick and re-records it — a paste is
+  indistinguishable from an ordinary re-copy, including the recency bump.
+- **Source-app attribution is best-effort, not a guarantee**, in two
+  independent ways: (1) it's whatever `NSWorkspace.frontmostApplication`
+  says at capture time, which can be wrong if the real copying app and the
+  poll tick that notices it race (bounded by `POLL_INTERVAL`); (2) **a
+  process without a spinning run loop gets a stale, frozen answer from
+  `frontmostApplication`, not a live one** — confirmed with a standalone
+  repro (a plain background-thread binary, no `NSApplication`/`CFRunLoop`
+  anywhere, read `frontmostApplication` 16 times over 8 seconds while the
+  real frontmost app was switched four times via `osascript`; every read
+  returned the *first* app's name). The fix, in `clipboard::pasteboard::
+  frontmost_app_name`, is a `CFRunLoop::run_in_mode(kCFRunLoopDefaultMode,
+  0.05, true)` pump immediately before reading the property — confirmed live
+  in the daemon binary afterward (`docs/evidence/summon-panel-clipboard-
+  results.png`'s "Copied from Arc" row). **Any future code in this daemon
+  that reads live AppKit/Workspace state from a background thread should
+  expect the same staleness and pump a run loop first** — this is not
+  specific to clipboard, it's a property of any notification-backed
+  `NSWorkspace`/`NSRunningApplication` query made off a real run loop.
+- **No two-column detail pane.** The design's screen 12 (`12-first-clipboard-
+  use.html`) is a dedicated, wider (760px, `theme::PANEL_WIDTH_WITH_DETAIL_PX`)
+  clipboard-only mode with a preview pane. This task renders clipboard rows
+  inline in the one shared 680px list instead (screen 11's pattern: "one
+  query, two result types, same list" — apps and clipboard each under their
+  own section header, row-level type tag / source subtitle / relative-time
+  accessory matching screen 12's own row treatment). The two-column mode
+  stays a follow-up; `PANEL_WIDTH_WITH_DETAIL_PX` is still unused, still
+  reserved.
 
 ## The `AgentProvider` seam
 
@@ -227,8 +309,10 @@ one attributed Apache-2.0 file.
 a GPL-3.0-or-later crate (`ztracing`) through an unfixed dependency edge — see
 `data/dim-licence/report.md`. **Chosen route, unchanged from slice 1: depend on
 the published crate, `gpui = "0.2.2"` from crates.io — not git, no `[patch]`
-block.** Re-verified for the full five-crate workspace this task built
-(`docs/evidence/cargo-tree.txt`, `docs/evidence/cargo-license.txt`): still no
+block.** Re-verified again after clipboard history added `objc2-core-foundation`
+as a direct dependency (`Apache-2.0 OR MIT OR Zlib`, already transitively
+present via `gpui`/`objc2-app-kit`) — `docs/evidence/cargo-tree.txt` and
+`docs/evidence/cargo-license.txt` are current as of that change: still no
 GPL/AGPL anywhere in the tree, still only `self_cell`'s dual
 `Apache-2.0 OR GPL-2.0` line, used under the Apache-2.0 arm.
 
@@ -245,10 +329,16 @@ cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
   `HotkeyController::rebind` for step 09; nothing else in this codebase
   assumes it exists. The panel's own first-run/empty state
   (`panel::render_empty_state`) is deliberately generic, not onboarding.
-- **Clipboard history**: `neko_protocol::ResultKind` has one variant (`App`);
-  a `Clipboard` variant plus a daemon-side clipboard watcher is additive, not
-  a restructure. `theme::PANEL_WIDTH_WITH_DETAIL_PX` (760px) is already
-  reserved for the detail-pane width clipboard entries need.
+- **Clipboard history**: built — see "Clipboard history" above. Still open:
+  image capture (seam documented in `clipboard.rs`'s module doc comment) and
+  the two-column detail-pane mode (`PANEL_WIDTH_WITH_DETAIL_PX`, screen 12).
+  No macOS permission prompt was observed gating general pasteboard reads on
+  the verification machine (unlike Accessibility, there's no `AXIsProcessTrusted`-
+  equivalent "is trusted" API for the pasteboard) — `read_current`'s SAFETY
+  comment covers the "detect and degrade" reasoning for the day one shows up:
+  a blocked read and an empty one both come back as `None`/`nil`, so treating
+  `None` as "nothing to capture this tick" already is the honest degrade
+  path, not a placeholder for a request flow still to build.
 - **Dynamic window resize**: see "v1 simplification" above.
 - **`AgentProvider` wiring**: see above.
 - **Native window material spike**: see "Window material" above.
