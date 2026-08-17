@@ -1,4 +1,4 @@
-neko v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko)
+neko v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko)
 ├── global-hotkey v0.8.0
 │   ├── crossbeam-channel v0.5.16
 │   │   └── crossbeam-utils v0.8.22
@@ -1261,21 +1261,22 @@ neko v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko)
 │       └── unicode-ident v1.0.24
 │       [build-dependencies]
 │       └── cfg_aliases v0.2.2
-├── neko-client v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-client)
+├── neko-client v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-client)
 │   ├── futures-channel v0.3.34 (*)
-│   └── neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-protocol)
+│   └── neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-protocol)
 │       ├── serde v1.0.229 (*)
 │       └── serde_json v1.0.151 (*)
 │   [dev-dependencies]
 │   └── futures v0.3.34 (*)
-└── neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-protocol) (*)
+└── neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-protocol) (*)
 
-neko-client v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-client) (*)
+neko-client v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-client) (*)
 
-neko-core v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-core)
-├── neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-protocol) (*)
+neko-core v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-core)
+├── neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-protocol) (*)
 ├── objc2 v0.6.4 (*)
 ├── objc2-app-kit v0.3.2 (*)
+├── objc2-core-foundation v0.3.2 (*)
 ├── objc2-foundation v0.3.2 (*)
 ├── plist v1.10.0
 │   ├── base64 v0.22.1
@@ -1303,8 +1304,8 @@ neko-core v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-core)
 ├── serde v1.0.229 (*)
 └── serde_json v1.0.151 (*)
 
-neko-daemon v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-daemon)
-├── neko-core v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-core) (*)
-└── neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-protocol) (*)
+neko-daemon v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-daemon)
+├── neko-core v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-core) (*)
+└── neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-protocol) (*)
 
-neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/4/neko/crates/neko-protocol) (*)
+neko-protocol v0.1.0 (/Users/nish/.treehouse/neko-4fbaf0/1/neko/crates/neko-protocol) (*)

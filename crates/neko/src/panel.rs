@@ -21,7 +21,7 @@ use gpui::{
     actions, div, img, prelude::*, px, rgba,
 };
 use neko_client::NekoClient;
-use neko_protocol::{Request, Response, SearchItem};
+use neko_protocol::{ClipboardContentKind, Request, ResultKind, Response, SearchItem};
 
 use crate::text_field::TextField;
 use crate::theme;
@@ -114,9 +114,16 @@ impl Root {
         let Some(item) = self.results.get(self.selected).cloned() else {
             return;
         };
+        // "Paste" here means "make this the system pasteboard's contents
+        // again" — not a synthesized ⌘V into whatever regains focus after
+        // neko hides. See `neko_protocol::Request::Paste`'s doc comment.
+        let request = match item.kind {
+            ResultKind::App => Request::Launch { id: item.id },
+            ResultKind::Clipboard => Request::Paste { id: item.id },
+        };
         let client = self.client.clone();
         cx.spawn(async move |_this, cx| {
-            let _ = client.request(Request::Launch { id: item.id }).await;
+            let _ = client.request(request).await;
             let _ = cx.update(|cx| cx.hide());
         })
         .detach();
@@ -173,20 +180,26 @@ impl Root {
     }
 
     fn render_content_area(&self, query_is_empty: bool) -> impl IntoElement {
-        let container = div().flex().flex_col().flex_1().min_h(px(0.)).overflow_hidden();
+        let mut container = div().flex().flex_col().flex_1().min_h(px(0.)).overflow_hidden();
 
         if self.results.is_empty() {
             return container.child(render_empty_state(query_is_empty));
         }
 
+        // A header per contiguous run of the same `kind` — apps and
+        // clipboard entries each get their own section (design report
+        // screen 11: "one query, two result types, same list"). The daemon
+        // already emits apps before clipboard, so this walks the list once
+        // rather than sorting or grouping client-side.
+        let mut current_section: Option<ResultKind> = None;
+        for (idx, item) in self.results.iter().enumerate() {
+            if current_section != Some(item.kind) {
+                container = container.child(section_header(section_label(item.kind)));
+                current_section = Some(item.kind);
+            }
+            container = container.child(self.render_row(idx, item));
+        }
         container
-            .child(section_header("Applications"))
-            .children(
-                self.results
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, item)| self.render_row(idx, item)),
-            )
     }
 
     fn render_row(&self, idx: usize, item: &SearchItem) -> impl IntoElement {
@@ -246,10 +259,35 @@ impl Root {
                             .child(SharedString::from(subtitle))
                     })),
             )
+            .children(item.content_kind.map(|kind| {
+                div()
+                    .flex_shrink_0()
+                    .px(px(6.))
+                    .py(px(2.))
+                    .rounded(px(4.))
+                    .bg(rgba(0xffffff0f))
+                    .text_size(px(10.))
+                    .text_color(theme::TEXT_TERTIARY)
+                    .child(content_kind_tag(kind))
+            }))
+            .children(item.accessory.clone().map(|accessory| {
+                div()
+                    .flex_shrink_0()
+                    .text_size(px(11.))
+                    .text_color(subtitle_color)
+                    .child(SharedString::from(accessory))
+            }))
     }
 
     fn render_footer(&self) -> impl IntoElement {
         let selected_item = self.results.get(self.selected);
+        // The primary action's verb matches what enter actually does — the
+        // design's dedicated clipboard screen (screen 12) uses "Paste" for
+        // exactly this reason.
+        let primary_action = match selected_item.map(|item| item.kind) {
+            Some(ResultKind::Clipboard) => "Paste  ↵",
+            _ => "Open  ↵",
+        };
         div()
             .flex()
             .items_center()
@@ -275,7 +313,7 @@ impl Root {
                     .gap_3()
                     .text_size(px(12.))
                     .text_color(theme::TEXT_SECONDARY)
-                    .child("Open  ↵")
+                    .child(primary_action)
                     .child(div().w(px(1.)).h(px(14.)).bg(rgba(0xffffff1f)))
                     .child("Actions  ⌘K"),
             )
@@ -285,11 +323,13 @@ impl Root {
 fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
     // Step 10 of onboarding's own sequence: "a one-line tip stands in for a
     // blank list" — the same principle applies to steady-state empty
-    // results, not just first run.
+    // results, not just first run. Copy matches that screen's own tip, now
+    // that the empty state covers both result types: "Type an app name, or
+    // paste history from your clipboard."
     let message: SharedString = if query_is_empty {
-        "Type to search your applications…".into()
+        "Type an app name, or paste history from your clipboard.".into()
     } else {
-        "No matching applications".into()
+        "No matching results".into()
     };
     div()
         .flex()
@@ -311,6 +351,22 @@ fn section_header(label: &'static str) -> impl IntoElement {
         .text_size(px(11.))
         .text_color(theme::TEXT_TERTIARY)
         .child(label)
+}
+
+fn section_label(kind: ResultKind) -> &'static str {
+    match kind {
+        ResultKind::App => "Applications",
+        ResultKind::Clipboard => "Clipboard",
+    }
+}
+
+/// GPUI has no CSS `text-transform`, so the design's uppercase type-tag
+/// badge (`LINK`, `TEXT`) is upper-cased here rather than at the source.
+fn content_kind_tag(kind: ClipboardContentKind) -> &'static str {
+    match kind {
+        ClipboardContentKind::Text => "TEXT",
+        ClipboardContentKind::Link => "LINK",
+    }
 }
 
 fn search_glyph() -> impl IntoElement {

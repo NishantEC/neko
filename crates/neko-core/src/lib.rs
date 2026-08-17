@@ -7,6 +7,7 @@
 
 pub mod agent;
 pub mod apps;
+pub mod clipboard;
 pub mod db;
 pub mod hotkey;
 pub mod icons;

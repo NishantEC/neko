@@ -42,6 +42,14 @@ impl Db {
                 last_launched_at INTEGER NOT NULL,
                 launch_count     INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS clipboard_entries (
+                content           TEXT PRIMARY KEY,
+                content_kind      TEXT NOT NULL,
+                source_app        TEXT,
+                copied_at_unix_ms INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_clipboard_entries_copied_at
+                ON clipboard_entries (copied_at_unix_ms);
             ",
         )
     }
@@ -90,6 +98,57 @@ impl Db {
         })?;
         rows.collect()
     }
+
+    /// Insert or, on a repeat copy of the same content, move the existing
+    /// row to the top by bumping its timestamp (`content` is the primary
+    /// key, so a second copy of identical text is a dedup, not a new row —
+    /// see the launch brief's "copying the same thing twice should not
+    /// create two entries" requirement). Prunes down to `history_limit`
+    /// rows afterward, oldest-copied first, so the table is bounded
+    /// regardless of how bursty copying is.
+    pub fn record_clipboard_entry(
+        &self,
+        content: &str,
+        content_kind: &str,
+        source_app: Option<&str>,
+        copied_at_unix_ms: i64,
+        history_limit: usize,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO clipboard_entries (content, content_kind, source_app, copied_at_unix_ms)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(content) DO UPDATE SET
+                content_kind = excluded.content_kind,
+                source_app = excluded.source_app,
+                copied_at_unix_ms = excluded.copied_at_unix_ms",
+            (content, content_kind, source_app, copied_at_unix_ms),
+        )?;
+        self.conn.execute(
+            "DELETE FROM clipboard_entries
+             WHERE content NOT IN (
+                 SELECT content FROM clipboard_entries
+                 ORDER BY copied_at_unix_ms DESC
+                 LIMIT ?1
+             )",
+            (history_limit as i64,),
+        )?;
+        Ok(())
+    }
+
+    /// `(content, content_kind, source_app, copied_at_unix_ms)` per entry,
+    /// most recently copied first.
+    #[allow(clippy::type_complexity)]
+    pub fn clipboard_entries(&self) -> rusqlite::Result<Vec<(String, String, Option<String>, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT content, content_kind, source_app, copied_at_unix_ms
+             FROM clipboard_entries
+             ORDER BY copied_at_unix_ms DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+        rows.collect()
+    }
 }
 
 #[cfg(test)]
@@ -116,5 +175,33 @@ mod tests {
         db.record_launch("com.apple.Safari", 200).unwrap();
         let recency = db.recency().unwrap();
         assert_eq!(recency["com.apple.Safari"], (200, 2));
+    }
+
+    #[test]
+    fn copying_the_same_content_twice_moves_it_to_top_instead_of_duplicating() {
+        let db = Db::open_in_memory().unwrap();
+        db.record_clipboard_entry("hello", "text", Some("Terminal"), 100, 200)
+            .unwrap();
+        db.record_clipboard_entry("hello", "text", Some("Notes"), 200, 200)
+            .unwrap();
+        let entries = db.clipboard_entries().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0],
+            ("hello".to_string(), "text".to_string(), Some("Notes".to_string()), 200)
+        );
+    }
+
+    #[test]
+    fn history_is_pruned_to_the_configured_limit_oldest_first() {
+        let db = Db::open_in_memory().unwrap();
+        for i in 0..5 {
+            db.record_clipboard_entry(&format!("entry-{i}"), "text", None, i, 3)
+                .unwrap();
+        }
+        let entries = db.clipboard_entries().unwrap();
+        assert_eq!(entries.len(), 3);
+        let contents: Vec<&str> = entries.iter().map(|(c, ..)| c.as_str()).collect();
+        assert_eq!(contents, vec!["entry-4", "entry-3", "entry-2"]);
     }
 }
