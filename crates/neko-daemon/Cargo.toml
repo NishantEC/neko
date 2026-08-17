@@ -1,0 +1,13 @@
+[package]
+name = "neko-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "neko-daemon"
+path = "src/main.rs"
+
+[dependencies]
+neko-protocol.workspace = true
+neko-core.workspace = true
