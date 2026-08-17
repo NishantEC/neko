@@ -68,38 +68,80 @@ pub struct HotkeyConfig {
     pub updated_at_unix_ms: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ResultKind {
-    App,
-    Clipboard,
+/// A row's icon slot content. Closed by design, unlike `SearchItem::kind`
+/// below — this is a bounded set of things the client actually knows how to
+/// paint (a cached raster, or one of a handful of hand-drawn glyphs), not an
+/// extension point. A provider that wants a genuinely new visual (not just a
+/// new *result type*) adds a `Glyph` variant and one paint function in the
+/// client — still far cheaper than today's per-kind `match` sprinkled across
+/// the row, section header, and footer, and orthogonal to which provider
+/// produced the row. The real per-extension-drawable-vocabulary problem is
+/// explicitly out of scope for this task — see `AGENTS.md`'s "Provider
+/// abstraction" section.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Icon {
+    /// An absolute path to a cached PNG, rendered via `img()`.
+    Image(String),
+    /// No per-item raster (yet, or ever) — paint this built-in shape
+    /// instead of an empty socket.
+    Glyph(Glyph),
+    /// An empty placeholder square — the "no icon yet, self-heals later"
+    /// state apps use while their real icon is still warming in the
+    /// background icon-extraction pass.
+    Placeholder,
 }
 
-/// The clipboard content types this v1 distinguishes. Images are an
-/// explicit non-goal for this slice — see `neko-core`'s `clipboard` module
-/// doc comment for the seam a future task plugs an `Image` variant into.
+/// A small hand-painted shape for the row-icon slot, in the same spirit as
+/// `panel.rs`'s `search_glyph` — this codebase has no bundled SVG-asset
+/// pipeline, and a Unicode symbol isn't a reliable substitute (design
+/// report §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ClipboardContentKind {
+pub enum Glyph {
+    /// Three stacked bars — a clipboard entry with no URL type.
     Text,
+    /// Two overlapping rounded-square rings — a clipboard entry that looks
+    /// like a link.
     Link,
+    /// A plain document outline — a file search result.
+    File,
+    /// A folder shape — a directory search result.
+    Folder,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchItem {
     /// Stable identifier the daemon can resolve back to an action target —
-    /// for `ResultKind::App` this is the bundle path; for
-    /// `ResultKind::Clipboard` this is the entry's own content (also the
-    /// SQLite primary key, so it doubles as the dedup key).
+    /// for the app provider this is the bundle path; for the clipboard
+    /// provider this is the entry's own content (also the SQLite primary
+    /// key, so it doubles as the dedup key); for the file provider, the
+    /// file's absolute path.
     pub id: String,
-    pub kind: ResultKind,
+    /// The provider that produced this row (`Provider::id()`, e.g. `"app"`,
+    /// `"clipboard"`, `"file"`) — a plain string, not a closed enum, so a
+    /// future provider never needs to touch this crate to introduce a new
+    /// result type. Used only for two things: grouping a contiguous run of
+    /// results under one section header, and routing `Request::Activate`
+    /// back to the provider that owns `id`'s namespace. Every other
+    /// rendering decision (icon, section label, action verb) is carried as
+    /// plain data on this struct instead of being derived from `kind` by a
+    /// client-side `match` — see `AGENTS.md`'s "Provider abstraction"
+    /// section for why that distinction is the point of this refactor.
+    pub kind: String,
     pub title: String,
     pub subtitle: Option<String>,
-    /// Absolute path to a cached PNG icon, if one was extracted.
-    pub icon_path: Option<String>,
-    /// `Some` only for `ResultKind::Clipboard` — the content-type tag the
-    /// design shows next to a clipboard row (`LINK`, `TEXT`).
-    pub content_kind: Option<ClipboardContentKind>,
-    /// `Some` only for `ResultKind::Clipboard` — a precomputed relative
-    /// timestamp ("12m", "3h") for the row's accessory text.
+    pub icon: Icon,
+    /// The header text above this row's contiguous section, e.g.
+    /// "Applications", "Clipboard", "Files".
+    pub section_label: String,
+    /// The footer's primary-action label when this row is selected, e.g.
+    /// `"Open  ↵"`, `"Paste  ↵"` — matches whatever `Request::Activate`
+    /// actually does for this provider.
+    pub action_label: String,
+    /// A short uppercase type tag rendered next to the row (`"TEXT"`,
+    /// `"LINK"`) — `None` for providers that don't have one.
+    pub badge: Option<String>,
+    /// A short trailing accessory string (a relative timestamp, ...) —
+    /// `None` for providers that don't have one.
     pub accessory: Option<String>,
 }
 
@@ -107,11 +149,14 @@ pub struct SearchItem {
 pub enum Request {
     Ping,
     Search { query: String, limit: usize },
-    Launch { id: String },
-    /// Writes a stored clipboard entry's content back onto the system
-    /// pasteboard — "paste" as in "make this the current clipboard
-    /// contents," not a synthesized ⌘V keystroke into the frontmost app.
-    Paste { id: String },
+    /// Perform a `SearchItem`'s one action — launch an app, write the
+    /// pasteboard, open a file — routed by `kind` to whichever provider
+    /// produced `id`. One generic request for every provider, present and
+    /// future: a new provider never needs a new `Request` variant, just an
+    /// `activate` implementation of its own. Replaces what used to be two
+    /// separate per-kind requests (`Launch`, `Paste`) — see `AGENTS.md`'s
+    /// "Provider abstraction" section.
+    Activate { kind: String, id: String },
     GetHotkey,
     /// Fast, side-effect-free check against known OS/third-party reserved
     /// combinations (Spotlight, Mission Control, ...). Does not persist
@@ -145,8 +190,7 @@ pub enum Request {
 pub enum Response {
     Pong,
     SearchResults { items: Vec<SearchItem> },
-    Launched,
-    Pasted,
+    Activated,
     Hotkey { config: HotkeyConfig },
     HotkeyConflict { reason: Option<String> },
     OnboardingState { completed: bool, accessibility_banner_dismissed: bool },

@@ -5,7 +5,7 @@ in Rust on [GPUI](https://gpui.rs) (Zed's UI framework). See `README.md` for how
 to run it and `data/dim/plan.md` (in the firstmate home, not this repo) for the
 full product plan.
 
-## Current scope: the spine, clipboard history, and the first-run onboarding arc
+## Current scope: the spine, clipboard history, the first-run onboarding arc, and the provider abstraction
 
 Slice 1 was a single-crate proof that GPUI works at all. A follow-up task
 restructured that proof into the plan's real five-crate workspace and built
@@ -33,9 +33,18 @@ below. A seventh task fixed two real defects in the app-icon cache: icons
 that finished background extraction after a search response had already
 landed never appeared until the client was relaunched, and every cached icon
 was stored at up to 1024x1024 (188MB across a real 147-app index) for
-artwork displayed at 22px — see "Icons" below. Still not built: the WASM
-extension system, agent capability. See "Seams for follow-up work" below for
-exactly where each plugs in.
+artwork displayed at 22px — see "Icons" below. An eighth task replaced the
+two hard-coded result types (apps, clipboard) with a real `Provider` trait
+every result type implements, and proved the seam by adding **file and
+folder search** as the third provider through it — the captain's own "fix
+the indexing of stuff and also make it extensible," and the plan's own
+prescribed order: earn extensibility by using the seam for a real feature,
+not by designing the WASM extension host first. See "Provider abstraction"
+below for the trait, the cross-provider ranking algorithm, the now-generic
+wire protocol, and what a fourth provider actually has to touch. Still not
+built: the WASM extension system, agent capability (which is now exactly
+"implement `Provider`," per that section). See "Seams for follow-up work"
+below for exactly where each remaining piece plugs in.
 
 ## Crate layout
 
@@ -43,7 +52,7 @@ exactly where each plugs in.
 crates/
   neko-protocol/  pure wire types + length-prefixed JSON framing, no logic
   neko-core/      daemon-owned logic: SQLite, app index, search ranking,
-                  launching, hotkey-setting persistence, the AgentProvider seam
+                  launching, hotkey-setting persistence, the Provider seam
   neko-daemon/    thin binary hosting neko-core behind a Unix socket
   neko-client/    SDK: persistent auto-reconnecting connection to the daemon
   neko/           the GPUI app — window, panel, live OS hotkey capture, onboarding
@@ -323,30 +332,30 @@ before touching this file again. Summary:
 
 `neko_core::search::fuzzy_score` is a small, dependency-free subsequence
 scorer (fzf-shaped: contiguous-run and word-boundary bonuses, a length
-penalty) combined with a recency/frequency boost from the `launches` table
-(`neko_core::search::rank_apps`). `rank_clipboard` reuses the same
-`fuzzy_score` against each entry's content, with its own faster-tapering
-recency boost (3-hour half-life vs. apps' 5-day one — a clipboard history is
-inherently a "recent things" list). The daemon caps results server-side
+penalty), shared by every provider — see "Provider abstraction" below for
+where each provider's own matching/scoring lives now and how their scores
+are merged into one ranked response (`neko_core::search::allocate`,
+superseding the old `rank_apps`/`rank_clipboard`-plus-hard-coded-reservation
+shape this section used to describe). The daemon caps results server-side
 (`Request::Search { limit, .. }`, the client asks for 8) — the client never
 renders more than that, which is why the result list isn't virtualized (see
 "gpui-component" below).
 
-**Apps can never crowd clipboard out of a response entirely when there's a
-matching entry — a first pass at this got that wrong.** `handle_request`'s
-`Search` arm originally gave `rank_apps` the full `limit` and filled
-whatever was left with `rank_clipboard`, so a query matching `limit` or more
-apps returned zero clipboard results even with a real match — silent, not
-an error, easy to miss (see "v1 simplification" below: the client's own
-first fix hit the same shape and initially "fixed" it by dropping the
-whole clipboard section rather than reserving it room, which is exactly
-backwards from the brief's "same list" requirement). Corrected: `rank_clipboard`
-runs first; if it found anything, `rank_apps` is capped to `limit - 1`
-before it runs, guaranteeing at least the top clipboard match a slot in the
-response. Covered by `server.rs`'s own tests. The panel's
-`fit_within_budget` (below) does the equivalent reservation for pixels, not
-slots — both layers exist because a response with room for clipboard is
-necessary but not sufficient for a screen with room to render it.
+**No provider can crowd another out of a response entirely when there's a
+matching entry — a first pass at this (apps vs. clipboard, before the
+provider abstraction existed) got that wrong, twice.** The very first
+version gave apps the full `limit` and filled whatever was left with
+clipboard matches, so a query matching `limit` or more apps returned zero
+clipboard results even with a real match — silent, not an error, easy to
+miss (see "v1 simplification" below: the client's own first fix hit the
+same shape and initially "fixed" it by dropping the whole clipboard section
+rather than reserving it room, which is exactly backwards from the brief's
+"same list" requirement). That was fixed by reserving clipboard's top match
+a slot before apps ever ran. The provider-abstraction task then found a
+*third* variant of the same bug, live rather than in a unit test — see
+"Provider abstraction" below, `search::allocate`'s doc comment, for the
+full account of why a reservation has to apply to *every* provider,
+including whichever one is registered first.
 
 **`cx.observe` fires on *any* notification, not just the one you meant —
 this made keyboard navigation unusable.** `panel::Root` used to re-run
@@ -411,10 +420,11 @@ start.
 
 **A client already showing search results does not, on its own, ever find
 out an icon it was missing has since been extracted — a real defect, not
-hypothetical.** `SearchItem::icon_path` is `None` until `rank_apps` finds the
-file on disk (`icons::cached_icon_path(...).filter(|p| p.exists())`,
-re-checked fresh on every `Request::Search`), but a client's results are a
-one-time snapshot: nothing re-runs `run_search` on its own after that
+hypothetical.** `AppsProvider::search` (`apps.rs`) sets `SearchItem::icon`
+to `Icon::Placeholder` until it finds the file on disk
+(`icons::cached_icon_path(...).filter(|p| p.exists())`, re-checked fresh on
+every `Request::Search`, then `Icon::Image(path)`), but a client's results
+are a one-time snapshot: nothing re-runs `run_search` on its own after that
 snapshot lands, and background extraction (real AppKit work, run once after
 the daemon's own startup — see above) can easily still be in flight when a
 captain's very first summon after a fresh install or a daemon restart
@@ -432,10 +442,13 @@ already-visible rows pick up icons that just finished, live, in the same
 window, no relaunch and no per-frame filesystem check anywhere on the client
 side (the daemon is the only place that stats an icon file, once per search
 it already has to run). `panel::app_icon_placeholder_glyph` fills a
-not-yet-resolved app row's icon slot with a small hand-painted neutral mark
-(same painted-div convention as `content_kind_glyph` below — no bundled
-icon-asset pipeline in this codebase) instead of an empty hole, self-healing
-to the real icon in place once `refresh_icons` re-renders it.
+not-yet-resolved app row's `Icon::Placeholder` slot with a small
+hand-painted neutral mark (same painted-div convention as `glyph_element`
+below — no bundled icon-asset pipeline in this codebase) instead of an
+empty hole, self-healing to the real icon in place once `refresh_icons`
+re-renders it — see "Provider abstraction" below for `Icon`/`Glyph`, the
+wire-level rendering vocabulary this and every other provider's row now
+draws from instead of a client-side `match` on result type.
 `NEKO_ICON_EXTRACT_DELAY_MS` (`neko-daemon/src/main.rs`) is a
 verification-only, unset-by-default hook (same pattern as `evidence.rs`'s
 `NEKO_BENCH`/`NEKO_FORCE_MATERIAL`) that stretches out the startup
@@ -476,9 +489,12 @@ it's just another `Request`/`Response` pair, per the search section above.
   `clipboard::HISTORY_LIMIT` (200) by count, not age — pruned after every
   insert. Both behaviors are covered in `db.rs`'s tests.
 - **"Paste" writes the pasteboard, it does not simulate ⌘V.**
-  `Request::Paste { id }` (`id` is the entry's own content) calls
-  `clipboard::write_to_pasteboard` and nothing else — the frontmost app after
-  neko hides still needs a real ⌘V from the user. Decided this way (not
+  `ClipboardProvider::activate` (routed there from `Request::Activate {
+  kind: "clipboard", id }` — `id` is the entry's own content; see "Provider
+  abstraction" above for why this is a generic request rather than a
+  clipboard-specific one) calls `clipboard::write_to_pasteboard` and nothing
+  else — the frontmost app after neko hides still needs a real ⌘V from the
+  user. Decided this way (not
   answered by the plan or design report) because a synthetic keystroke would
   need the same accessibility-permission machinery the brief explicitly
   scoped out ("do not build onboarding or permission-request UI"), and
@@ -510,12 +526,15 @@ it's just another `Request`/`Response` pair, per the search section above.
   `render_row` already uses for an app with no cached icon yet — fine as a
   *transient* state for apps (self-heals once the icon-extraction pass
   catches up), wrong as a *permanent* one for clipboard, where nothing will
-  ever fill it in. `panel::content_kind_glyph` fills the slot instead: a
-  three-bar mark for `Text`, two overlapping rounded-square rings for
-  `Link` — hand-painted from plain `div`s, the same pattern
+  ever fill it in. `panel::glyph_element` fills the slot instead: a
+  three-bar mark for `Glyph::Text`, two overlapping rounded-square rings for
+  `Glyph::Link` — hand-painted from plain `div`s, the same pattern
   `search_glyph` already established (no bundled SVG-asset pipeline exists
   in this codebase, and per the design report's §6 finding, a Unicode
-  symbol isn't a reliable substitute either).
+  symbol isn't a reliable substitute either). See "Provider abstraction"
+  below for `Icon`/`Glyph`, the same rendering vocabulary every other
+  provider's rows draw from now, and `glyph_element`'s own `File`/`Folder`
+  cases the file-search provider added.
 - **No two-column detail pane.** The design's screen 12 (`12-first-clipboard-
   use.html`) is a dedicated, wider (760px, `theme::PANEL_WIDTH_WITH_DETAIL_PX`)
   clipboard-only mode with a preview pane. This task renders clipboard rows
@@ -557,14 +576,265 @@ not assumed. `crates/neko/src/material.rs` does call AppKit but runs in the
 every cycle, and is a different task's file — out of scope here, not
 touched.
 
-## The `AgentProvider` seam
+## Provider abstraction
 
-`neko_core::agent::AgentProvider` is exactly what the plan asked for: an
-object-safe trait with a `FakeProvider` proving it compiles, registered
-nowhere in the daemon's request handling. Wiring a real provider's results
-into `Request::Search`'s response as more `SearchItem`s (`ResultKind` would
-need a new variant) is the seam — "just another result type in the same fast
-list," per the plan.
+`neko_core::provider::Provider` is the seam every result type in the search
+list is built on — app search, clipboard history, and file search (this
+task's own proof) all `impl Provider`; agent capability, whenever it's
+built, is a fourth. Object-safe by construction (no generics, no `Self`
+return types), so the daemon holds a plain `Vec<Box<dyn Provider>>`:
+
+```rust
+pub trait Provider: Send + Sync {
+    fn id(&self) -> &'static str;
+    fn section_label(&self) -> &'static str;
+    fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate>;
+    fn activate(&self, id: &str) -> Result<(), ProviderError>;
+}
+```
+
+**This supersedes the old `neko_core::agent::AgentProvider` seam** (an
+earlier task's placeholder trait — `id`/`query` only, no score, no
+activation, registered nowhere) rather than living alongside it.
+`agent.rs` is deleted. The two overlapping provider-shaped traits would
+have left a future agent-capability task choosing between them, which
+defeats the point of having one seam — and once a second provider
+(clipboard) and a third (files) existed to design against, the shape that
+actually falls out needs a normalized `score` (for cross-provider ranking)
+and an `activate` method (to *perform* a result's action, not just produce
+it), neither of which the placeholder had. A future agent-capability
+provider is just another `impl Provider`, exactly like the three below.
+
+**Registering a fourth provider** is `Box::new(FourthProvider::new(...))`
+added to the `Vec` in `AppState::new` (`neko-daemon/src/server.rs`) plus
+the `impl Provider` itself — nothing else. Concretely, it does *not* need
+to touch: `neko-protocol` (no new `Request`/`Response`/enum variant —
+`Request::Activate { kind, id }` is generic, routed by `kind` at runtime,
+not matched per provider), `panel.rs` (no `match` on provider identity
+anywhere — see "the wire protocol is now provider-agnostic" below), or
+`search::allocate` (every provider is already treated symmetrically). It
+*does* need its own `impl Provider` (matching/scoring against whatever its
+own index is) and, if its rows want a genuinely new painted shape instead
+of a cached raster, one `Glyph` variant plus one case in `panel::
+glyph_element` — a data addition and a paint function, not a rendering
+`match` keyed on which provider produced the row.
+
+**The wire protocol is now provider-agnostic — `ResultKind` (a closed
+two-variant enum) is gone.** `SearchItem::kind` is a plain `String` (the
+producing provider's own `id()`), used for exactly two things: grouping a
+contiguous run of results under one section header, and routing
+`Request::Activate` back to the right provider. Every actual rendering
+decision that used to be a client-side `match` on `ResultKind` is now data
+the provider sets directly on the `SearchItem`: `section_label` (the header
+text), `action_label` (the footer verb, e.g. `"Open  ↵"`/`"Paste  ↵"`), and
+`icon: Icon` (`Image(path)` for a cached raster, `Glyph(Glyph)` for a
+painted built-in shape, or `Placeholder`). `Icon`/`Glyph` stay a closed enum
+on purpose — they're a bounded rendering vocabulary (what the client
+actually knows how to paint), not a provider-identity dispatch; the
+distinction that matters is "does the panel need to know *which provider*
+produced this row to render it" (no, not anymore) vs. "does the panel need
+a small closed set of paintable primitives" (yes, and always will, short of
+the WASM host's own declarative UI vocabulary, explicitly out of scope
+here). `panel.rs` itself has zero knowledge of "apps", "clipboard", or
+"files" as concepts — `render_row`, `render_footer`, and the section-header
+loop all just read data off `SearchItem`.
+
+**`Request::Launch`/`Request::Paste` are gone too, replaced by one generic
+`Request::Activate { kind: String, id: String }`.** The daemon routes it to
+`state.providers.iter().find(|p| p.id() == kind)` and calls that provider's
+`activate`. This is what actually makes "adding a provider" cheap in the
+sense the brief means: if activation still needed a new per-kind `Request`
+variant, a fourth provider would touch the protocol every time.
+
+### Cross-provider ranking (`neko_core::search::allocate`)
+
+Each provider's `search()` returns `Candidate { score, item }` — a
+provider owns its own matching and scoring entirely; the only
+cross-provider contract is "higher score is better, on roughly the scale
+`fuzzy_score` produces" (every built-in provider's score is ultimately
+built from it, so this held without extra normalization work — see "If you
+have to choose" in the launch brief: the smaller abstraction that genuinely
+works beats a general normalization scheme for imagined future providers).
+`allocate` merges every provider's candidates into one bounded response in
+two passes, replacing the old apps-vs-clipboard-only "give apps the full
+limit, cap it to `limit - 1` if clipboard matched" special case:
+
+1. **Reservation.** Every provider with at least one candidate reserves one
+   slot before anything else is allocated.
+2. **Greedy interleave.** Whatever's left of `limit` is spent one slot at a
+   time on the single highest-scoring not-yet-taken candidate across every
+   provider — a provider whose matches are more relevant to this query
+   earns more of the shared budget than one that only barely cleared its
+   floor.
+
+**The reservation pass has to include the first-registered provider too,
+not just the ones after it — caught live, not by a unit test.** The first
+version only reserved a floor for providers after the first ("apps get
+whatever's left, clipboard/files each get a floor"), reasoning that the
+first-registered provider would naturally win most of the greedy phase
+anyway. A window-scoped verification screenshot (`docs/evidence/
+provider-search-three-result-types.png`'s first draft, not the committed
+one) proved that reasoning wrong the moment a provider whose matches score
+*consistently* higher was registered: file search, on a clean prefix match,
+easily outscores an app's scattered subsequence match, and it won every
+single contested slot — the **Applications** section rendered with zero
+rows for a query that had real app matches. `search::allocate`'s reservation
+loop now runs over every provider, first included; `search.rs`'s
+`the_first_provider_cannot_be_crowded_out_by_a_consistently_higher_scoring_one_either`
+test pins the exact shape of this bug so it can't come back silently. The
+general lesson: a "primary provider always wins ties" assumption is itself
+a form of hard-coding one provider's identity into the ranking, exactly
+what this task was asked to remove — symmetry (every provider gets a floor)
+is what "no provider crowds another out" has to mean once there's more than
+two.
+
+`panel::fit_within_budget`/`fit_section` do the equivalent reservation for
+*pixels*, not slots, generalized the same way: `group_into_sections` splits
+`results` into contiguous same-`kind` runs (order-preserving), the first
+section gets whatever's left of the fixed content-area budget after every
+*other* section reserves one header-plus-one-row, and an earlier section
+using less than its share rolls the difference forward to later ones — the
+exact 2-provider math this function has always done, now provider-count-
+agnostic. Both layers (`allocate` for slots, `fit_within_budget` for pixels)
+exist because a response with room for a provider's match is necessary but
+not sufficient for a screen with room to render it.
+
+### File search (`neko_core::files::FileProvider`)
+
+The proof provider. Source of truth is the same one `apps.rs` established
+for application discovery: `mdfind`, not a hand-rolled directory walk —
+see `files.rs`'s own module doc comment for the full reasoning, which
+includes two real, measured findings this task turned up (not
+assumptions):
+
+- **Prefix matching (`kMDItemFSName == 'query*'cd`), not the app
+  provider's fuzzy subsequence matching.** A leading-wildcard query
+  (`'*query*'cd`, matching anywhere in the filename) was the natural first
+  attempt; a single-character version of it matched 55,191 files under a
+  real, repository-heavy `~/Documents` and took **~13 seconds** to
+  complete, because a leading wildcard forces Spotlight off its index onto
+  a slow per-item scan. The identical query as a prefix (no leading
+  wildcard) returned in well under a second — Spotlight can serve a prefix
+  query from its index directly. This means file search only matches names
+  that *start with* the query, not names that merely contain it (Spotlight's
+  own live-typing UI makes the same trade). Below `files::MIN_QUERY_LEN`
+  (2 characters), `FileProvider::search` returns without querying at all —
+  a 1-character prefix is both too broad to be useful and too slow even
+  with the bound below.
+- **`mdfind` needs `NSUnbufferedIO=YES` here too, not just in `apps.rs`'s
+  `-live` watcher.** Without it, a fast, large result set can sit fully
+  buffered on the read end well past this query's own deadline even though
+  `mdfind` itself would have finished quickly — confirmed the same way
+  `apps.rs` confirmed it originally: a query that completed in well under a
+  second at the shell produced zero results through this module's reader
+  before the fix.
+
+**Bounded regardless of query breadth.** `query_spotlight_paths` reads at
+most `files::MAX_RAW_RESULTS` (40) lines through a background reader
+thread (the same spawn-plus-channel shape `apps.rs`'s `run_live_watch`
+uses), and the caller gives that thread at most `files::QUERY_TIMEOUT`
+wall-clock time via `recv_timeout` either way, killing the `mdfind` child
+the instant either limit is hit. **`QUERY_TIMEOUT` is 1.5s, measured, not
+guessed**: even with the buffering fix above, *time to first streamed
+result* for a broad 2–4 character prefix against this machine's real
+`~/Documents`/`~/Desktop`/`~/Downloads` varied from well under 100ms to a
+little over 1.2s across repeated runs of the identical query — real
+variance in Spotlight's own query-planning time for a broad predicate that
+this module can't smooth out. A tighter 900ms bound (the first value tried)
+cut off real, useful results often enough in that range to be a regression,
+not a rare tail.
+
+**Scope: `~/Documents`, `~/Desktop`, `~/Downloads` only** (`files::
+default_scope_dirs`, each checked with `.is_dir()` so a missing one is
+silently skipped) — "the captain's own documents and common working
+locations," per the brief, not the whole disk. Not configurable in this
+task; the seam for a follow-up mirrors `clipboard_history_enabled`'s
+existing daemon-setting pattern (a new `Request::{Get,Set}FileSearchScope`
+pair, or a list-of-paths setting) rather than anything structural. Noise
+inside those directories — `node_modules`, `target`, `.git`, build output,
+anything hidden, and `.app` bundles (already covered by `AppsProvider`, so
+showing the same bundle twice would be confusing, not additive) — is
+filtered by `files::is_noisy` *after* the query, since `mdfind` has no
+directory-exclusion flag to push it into the query itself.
+
+**Icon: a painted `Glyph::File`/`Glyph::Folder`, not a real per-file
+icon, in this task.** `icons.rs`'s `ensure_cached_icon` is generic enough
+to work on any file path, not just app bundles, and reusing it was the
+obvious next step — but real icon extraction is genuinely expensive
+AppKit work (documented in `icons.rs`'s own module comment as "tens of ms
+each"), which is why `apps.rs` only ever does it in a background pass
+*after* the index is searchable, for a small, bounded (~150) app list. A
+file provider has no equivalent bounded set to pre-warm — the set of
+possibly-matched files is unbounded — so extracting synchronously on the
+search path would reintroduce exactly the latency problem the rest of this
+module works to avoid, and a background lazy-extraction pass is real,
+separate design work this task didn't do. It's also **exactly the surface
+a parallel task (`neko-icon-cache`) owns** (`icons.rs` and the panel's icon
+slot, fixing cold-cache icons and oversized files) — inventing a second,
+divergent file-icon-extraction path here risked conflicting with whatever
+that task lands. The painted glyph is the honest, zero-risk choice for
+this task, in the same spirit clipboard rows already use one (no per-entry
+icon, "no favicon fetching in this slice" predates this task). Wiring real
+file icons through `icons::ensure_cached_icon` in a background pass, once
+the icon-cache task's own fixes are in, is the seam.
+
+**Enter opens the item — same "Open  ↵" verb apps use, not a separate
+"reveal in Finder" action.** `/usr/bin/open` (already `neko_core::launch::
+launch_app`, reused as-is — `FileProvider::activate` is a one-line call
+into it) launches a file in its default app and opens a folder as a Finder
+window, matching what Enter does in Spotlight's own UI. A dedicated
+"reveal in Finder" would be a real secondary action (Raycast's own
+convention is ⌘-Enter for exactly this), but there is no secondary-action
+affordance anywhere in this panel yet — adding one speculatively, for one
+provider, ahead of any real need, is exactly the kind of imagined-future
+generality the brief's "prefer the smaller abstraction" guidance rules
+out.
+
+### Daemon concurrency (why `handle_connection` now spawns a thread per request)
+
+`FileProvider`'s `mdfind` round-trip (up to 1.5s on a broad query) exposed
+a real risk in the daemon's original request-handling shape: one
+persistent connection per client, one thread reading frames in a loop and
+handling each synchronously before reading the next. A slow `Search` would
+have queued every subsequent request on that connection — every future
+keystroke, a hotkey change, an onboarding check — behind it, visibly
+degrading the whole app's responsiveness rather than just that one search.
+`neko-daemon/src/server.rs`'s `handle_connection` now spawns one thread per
+*request*, not per connection; `handle_request` (`Search` specifically)
+also fans its providers out across `std::thread::scope` so the daemon
+round-trip is `max(provider times)`, not their sum. Responses can complete
+out of order relative to requests as a result — safe by construction,
+since `neko-client`'s `Shared::pending` map (`neko-client/src/lib.rs`)
+already matched a response to its caller by the request's own `id`, never
+by arrival order. The other necessary half: `AppState`'s per-connection
+writer moved from a bare `UnixStream` to a shared `Arc<Mutex<UnixStream>>`
+— two request-handling threads on the same connection can now genuinely
+write concurrently, and since a `UnixStream::try_clone()` shares the
+underlying socket fd, two unsynchronized `write_frame` calls (each two
+separate `write_all`s: a length prefix, then the payload) could interleave
+mid-frame and corrupt the stream without it. Every writer for a connection
+— a request's own response, and any `Event` broadcast to it — now goes
+through that one lock.
+
+### Evidence-capture hook: `NEKO_SHOW_QUERY`
+
+`crates/neko/src/evidence.rs` gained one more env-gated hook, same pattern
+as the existing `NEKO_SHOW_ON_LAUNCH`/`NEKO_BENCH`: `NEKO_SHOW_QUERY=<text>`
+types `<text>` into the search field before the screenshot (via
+`TextField::set_content_for_evidence`, a real edit through the same
+`ContentChanged` path a keystroke takes — not a rendering shortcut), for
+capturing real, non-empty search results without synthetic OS keystrokes.
+**Synthetic keystrokes turned out unreliable here beyond just the hotkey
+case `AGENTS.md`'s "Testing caveat" already documented** — a `System
+Events` `keystroke` sent to the frontmost process right after this
+window's own `activate_window()` call landed on the wrong process in
+practice (confirmed live: the query field stayed empty). When a query is
+set, `show_once` prints `neko: ready for evidence setup` and waits 2s
+before typing it — a deterministic "go" signal an outside script can watch
+for to seed a real clipboard entry first (the pasteboard is systemwide,
+not scoped to any per-run isolated `HOME`), so the captured query can
+demonstrate a genuine clipboard match alongside apps and files, not just
+two of the three.
 
 ## Third-party UI code: evaluated, then narrowly vendored
 
@@ -796,7 +1066,12 @@ at least its reservation plus any unused app budget. Still never a partial
 row, never a header with zero rows under it. Covered by `panel.rs`'s own
 tests, including the exact 6-apps-plus-1-clipboard-row shape that exposed
 both bugs in turn, and a 20-apps case proving the reservation holds well
-past the original repro's app count.
+past the original repro's app count. **Generalized from exactly two
+sections to however many providers a response actually contains** by the
+provider-abstraction task — see "Provider abstraction" above, "Cross-
+provider ranking" subsection, for the current N-section algorithm; the
+reservation-and-rollover behavior described above is still exactly what it
+does for the 2-section case.
 
 ## Summon latency
 
@@ -885,7 +1160,20 @@ cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
   `None` as "nothing to capture this tick" already is the honest degrade
   path, not a placeholder for a request flow still to build.
 - **Dynamic window resize**: see "v1 simplification" above.
-- **`AgentProvider` wiring**: see above.
+- **`Provider` abstraction**: built — see "Provider abstraction" above.
+  `agent.rs`'s old `AgentProvider` placeholder is deleted, superseded by
+  this. Agent capability, whenever it's built, is `impl Provider` plus one
+  line in `AppState::new` — no protocol or panel changes needed, per that
+  section's "registering a fourth provider" accounting.
+- **File search**: built as the provider abstraction's proof — see
+  "Provider abstraction" above, "File search" subsection. Still open:
+  configurable scope (currently fixed to `~/Documents`/`~/Desktop`/
+  `~/Downloads`, no settings UI — the seam mirrors `clipboard_history_enabled`'s
+  existing daemon-setting pattern) and real per-file icons (painted
+  `Glyph::File`/`Glyph::Folder` for now — deliberately not a second
+  icon-extraction path; wire through `icons::ensure_cached_icon` in a
+  background pass once the parallel `neko-icon-cache` task's own fixes are
+  in).
 - **Native window material**: built — see "Window material" above. Still
   open: a real screenshot proving live compositing/legibility against a
   busy backdrop, blocked on this machine's standing capture-safety rule

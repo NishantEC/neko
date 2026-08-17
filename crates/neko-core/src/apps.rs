@@ -55,7 +55,13 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
+
+use neko_protocol::{Icon, SearchItem};
+
+use crate::provider::{Provider, ProviderError};
+use crate::search::{Candidate, fuzzy_score};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppEntry {
@@ -65,6 +71,90 @@ pub struct AppEntry {
     pub id: String,
     pub name: String,
     pub path: PathBuf,
+}
+
+/// A launched-recently boost, tapering over roughly two weeks, plus a small
+/// per-launch frequency term. Recency dominates frequency: a thing you used
+/// once yesterday should usually beat a thing you used fifty times last
+/// year.
+fn recency_boost(last_launched_at_unix_ms: i64, launch_count: i64, now_unix_ms: i64) -> f32 {
+    let age_ms = (now_unix_ms - last_launched_at_unix_ms).max(0) as f32;
+    let age_days = age_ms / (1000.0 * 60.0 * 60.0 * 24.0);
+    let half_life_days = 5.0;
+    let recency = 8.0 * 0.5f32.powf(age_days / half_life_days);
+    let frequency = (launch_count as f32).ln_1p() * 0.5;
+    recency + frequency
+}
+
+/// The application-search provider: matches by fuzzy-scoring each indexed
+/// app's own name, boosted by how recently and how often it's been
+/// launched. Owns no storage of its own — `apps` is the live index
+/// `watch_applications` keeps current, `db` is where launches are recorded
+/// — both shared `Arc`s so this provider and the daemon's own background
+/// threads (icon extraction, the Spotlight watcher) see the same state.
+pub struct AppsProvider {
+    apps: Arc<RwLock<Vec<AppEntry>>>,
+    db: Arc<Mutex<crate::Db>>,
+}
+
+impl AppsProvider {
+    pub fn new(apps: Arc<RwLock<Vec<AppEntry>>>, db: Arc<Mutex<crate::Db>>) -> Self {
+        Self { apps, db }
+    }
+}
+
+impl Provider for AppsProvider {
+    fn id(&self) -> &'static str {
+        "app"
+    }
+
+    fn section_label(&self) -> &'static str {
+        "Applications"
+    }
+
+    fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate> {
+        let apps = self.apps.read().unwrap();
+        let recency = self.db.lock().unwrap().recency().unwrap_or_default();
+        apps.iter()
+            .filter_map(|app| {
+                let mut score = fuzzy_score(query, &app.name)?;
+                if let Some(&(last, count)) = recency.get(&app.id) {
+                    score += recency_boost(last, count, now_unix_ms);
+                }
+                let icon = crate::icons::cached_icon_path(&app.id)
+                    .filter(|p| p.exists())
+                    .map(|p| Icon::Image(p.to_string_lossy().into_owned()))
+                    .unwrap_or(Icon::Placeholder);
+                Some(Candidate {
+                    score,
+                    item: SearchItem {
+                        id: app.id.clone(),
+                        kind: "app".to_string(),
+                        title: app.name.clone(),
+                        subtitle: None,
+                        icon,
+                        section_label: "Applications".to_string(),
+                        action_label: "Open  ↵".to_string(),
+                        badge: None,
+                        accessory: None,
+                    },
+                })
+            })
+            .collect()
+    }
+
+    fn activate(&self, id: &str) -> Result<(), ProviderError> {
+        let app_path = {
+            let apps = self.apps.read().unwrap();
+            apps.iter().find(|a| a.id == id).map(|a| a.path.clone())
+        };
+        let Some(app_path) = app_path else {
+            return Err(ProviderError(format!("no such app: {id}")));
+        };
+        crate::launch::launch_app(&app_path).map_err(|e| ProviderError(e.to_string()))?;
+        let _ = self.db.lock().unwrap().record_launch(id, crate::now_unix_ms());
+        Ok(())
+    }
 }
 
 /// The three locations on the sealed, read-only system volume — see this
@@ -581,5 +671,48 @@ mod tests {
         assert!(is_nested_or_noisy(&PathBuf::from(
             "/Library/Application Support/Script Editor/Templates/Droplets/Recursive File Processing Droplet.app"
         )));
+    }
+
+    fn provider_with(apps: Vec<AppEntry>) -> AppsProvider {
+        AppsProvider::new(Arc::new(RwLock::new(apps)), Arc::new(Mutex::new(crate::Db::open_in_memory().unwrap())))
+    }
+
+    #[test]
+    fn provider_search_matches_by_fuzzy_name() {
+        let provider = provider_with(vec![app_entry("a", "Safari"), app_entry("b", "Notes")]);
+        let results = provider.search("saf", 1_000_000);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].item.id, "a");
+        assert_eq!(results[0].item.kind, "app");
+        assert_eq!(results[0].item.section_label, "Applications");
+        assert_eq!(results[0].item.action_label, "Open  ↵");
+    }
+
+    #[test]
+    fn provider_search_boosts_recently_launched_apps_on_a_tied_fuzzy_score() {
+        let db = crate::Db::open_in_memory().unwrap();
+        db.record_launch("b", 1_000_000).unwrap();
+        let provider =
+            AppsProvider::new(Arc::new(RwLock::new(vec![app_entry("a", "Finder"), app_entry("b", "Finder")])), Arc::new(Mutex::new(db)));
+        let results = provider.search("find", 1_000_000 + 1000);
+        let best = results.iter().max_by(|a, b| a.score.total_cmp(&b.score)).unwrap();
+        assert_eq!(best.item.id, "b");
+    }
+
+    #[test]
+    fn provider_activate_launches_and_records_a_launch() {
+        // No real `.app` bundle exists at this path, so `launch_app` (which
+        // shells to `/usr/bin/open`) fails — this test only exercises the
+        // "no such app" branch, not a real launch, to stay hermetic.
+        let provider = provider_with(vec![app_entry("a", "Nonexistent")]);
+        assert!(provider.activate("does-not-exist").is_err());
+    }
+
+    fn app_entry(id: &str, name: &str) -> AppEntry {
+        AppEntry {
+            id: id.to_string(),
+            name: name.to_string(),
+            path: PathBuf::from(format!("/Applications/{name}.app")),
+        }
     }
 }
