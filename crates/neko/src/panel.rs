@@ -107,6 +107,22 @@ impl Root {
         self.fetch_accessibility_banner_state(cx);
     }
 
+    /// Pushed by `Event::IconsUpdated` (`main.rs`'s daemon-event loop) once
+    /// a batch of background icon extraction finishes. Re-runs the current
+    /// query rather than clearing it (unlike `reset_for_summon`) — this can
+    /// fire while the panel is open and mid-search, and the point is to let
+    /// an icon that just became available actually show up in what's
+    /// already on screen, not to reset it. `run_search` re-derives
+    /// `icon_path` fresh from the daemon on every call (see
+    /// `neko_core::search::rank_apps`), so results already fitting the same
+    /// query naturally pick up any icon that finished since the last
+    /// response. No filesystem check happens here or anywhere on this
+    /// client-side path — the daemon is the one place that stats icon
+    /// files, once per search it already has to run.
+    pub fn refresh_icons(&mut self, cx: &mut Context<Self>) {
+        self.run_search(cx);
+    }
+
     fn fetch_accessibility_banner_state(&mut self, cx: &mut Context<Self>) {
         let client = self.client.clone();
         cx.spawn(async move |this, cx| {
@@ -383,12 +399,12 @@ impl Root {
                 .rounded(px(theme::ROW_ICON_RADIUS_PX))
                 .bg(theme::ROW_ICON_SOCKET_BG)
                 .into_any_element(),
-            (_, None) => div()
-                .w(px(theme::ROW_ICON_PX))
-                .h(px(theme::ROW_ICON_PX))
-                .rounded(px(theme::ROW_ICON_RADIUS_PX))
-                .bg(theme::ROW_ICON_SOCKET_BG)
-                .into_any_element(),
+            // An app whose icon the daemon hasn't finished extracting yet
+            // (a fresh install, or right after a daemon restart — see
+            // `Event::IconsUpdated`'s doc comment) — a neutral glyph in the
+            // socket rather than an empty hole, self-healing to the real
+            // icon on the next `refresh_icons` without a layout change.
+            (_, None) => app_icon_placeholder_glyph(),
         };
 
         div()
@@ -605,6 +621,34 @@ fn content_kind_tag(kind: ClipboardContentKind) -> &'static str {
         ClipboardContentKind::Text => "TEXT",
         ClipboardContentKind::Link => "LINK",
     }
+}
+
+/// The app row-icon slot before the daemon has finished extracting a real
+/// icon — a small centered rounded-square outline on the same
+/// `ROW_ICON_SOCKET_BG` plate every other row icon sits on, so a still-
+/// loading row reads as "generic app, not loaded yet" rather than a hole in
+/// the list. Deliberately a different shape from `content_kind_glyph`'s
+/// marks (bars for text, rings for a link) — this socket will very shortly
+/// hold a real per-app icon, unlike a clipboard row's, which never will.
+fn app_icon_placeholder_glyph() -> AnyElement {
+    div()
+        .w(px(theme::ROW_ICON_PX))
+        .h(px(theme::ROW_ICON_PX))
+        .flex_shrink_0()
+        .rounded(px(theme::ROW_ICON_RADIUS_PX))
+        .bg(theme::ROW_ICON_SOCKET_BG)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .w(px(10.))
+                .h(px(10.))
+                .rounded(px(3.))
+                .border_2()
+                .border_color(theme::TEXT_TERTIARY),
+        )
+        .into_any_element()
 }
 
 /// A small hand-painted glyph for the clipboard row-icon slot, in the same
