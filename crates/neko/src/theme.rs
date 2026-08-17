@@ -97,6 +97,16 @@ pub const ONBOARDING_CONTENT_HEIGHT_PX: f32 = 420.0;
 pub const ONBOARDING_HEIGHT_PX: f32 =
     INPUT_ROW_HEIGHT_PX + ONBOARDING_CONTENT_HEIGHT_PX + FOOTER_HEIGHT_PX;
 
+/// Left padding the onboarding header reserves so its own content (the neko
+/// glyph + wordmark) never sits under macOS's real traffic-light cluster,
+/// inset at `TitlebarOptions::traffic_light_position` (14px, 14px) — same
+/// clearance comet's own `titlebar_cluster_start` reserves for a windowed
+/// mac titlebar. Fullscreen hides the lights, so the reservation collapses
+/// to comet's fullscreen value there instead (see `view.rs`).
+pub const ONBOARDING_TRAFFIC_LIGHT_CLEARANCE_PX: f32 = 88.0;
+pub const ONBOARDING_TRAFFIC_LIGHT_CLEARANCE_FULLSCREEN_PX: f32 = 12.0;
+pub const ONBOARDING_HEADER_BASE_PADDING_PX: f32 = 20.0;
+
 /// Björn Ottosson's OKLab↔linear-sRGB matrices
 /// (<https://bottosson.github.io/posts/oklab/>), implemented independently
 /// from the published formulas — not ported from any reference app — to

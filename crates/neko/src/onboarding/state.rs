@@ -169,6 +169,17 @@ impl Flow {
             self.finished = true;
         }
     }
+
+    /// The persistent "Skip setup" control — ends onboarding immediately
+    /// from any step, unlike `finish` (gated on reaching `LearnHotkey`
+    /// first). Deliberately does not retroactively grant or enable
+    /// anything: whatever `accessibility_granted`/`clipboard_enabled`
+    /// already are is exactly what a caller sees after this — the same
+    /// honest, graceful-degradation state the accessibility/clipboard
+    /// decline paths already produce.
+    pub fn skip_onboarding(&mut self) {
+        self.finished = true;
+    }
 }
 
 /// Fast, local, side-effect-free validity check on a captured key chord —
@@ -268,6 +279,38 @@ mod tests {
         flow.step = Step::LearnHotkey;
         flow.finish();
         assert!(flow.finished);
+    }
+
+    #[test]
+    fn skip_onboarding_finishes_from_the_very_first_step() {
+        let mut flow = Flow::new(combo());
+        assert_eq!(flow.step, Step::Welcome);
+        flow.skip_onboarding();
+        assert!(flow.finished);
+        assert!(!flow.accessibility_granted);
+        assert!(!flow.clipboard_enabled);
+    }
+
+    #[test]
+    fn skip_onboarding_does_not_retroactively_grant_accessibility() {
+        let mut flow = Flow::new(combo());
+        flow.step = Step::AccessibilityAsk;
+        flow.skip_onboarding();
+        assert!(flow.finished);
+        assert!(!flow.accessibility_granted);
+    }
+
+    #[test]
+    fn skip_onboarding_preserves_whatever_was_already_granted() {
+        let mut flow = Flow::new(combo());
+        flow.advance_from_welcome();
+        flow.continue_to_accessibility_ask();
+        flow.request_accessibility();
+        flow.on_accessibility_granted();
+        assert!(flow.accessibility_granted);
+        flow.skip_onboarding();
+        assert!(flow.finished);
+        assert!(flow.accessibility_granted);
     }
 
     #[test]
