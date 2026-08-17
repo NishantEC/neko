@@ -182,6 +182,18 @@ it's just another `Request`/`Response` pair, per the search section above.
   expect the same staleness and pump a run loop first** — this is not
   specific to clipboard, it's a property of any notification-backed
   `NSWorkspace`/`NSRunningApplication` query made off a real run loop.
+- **Row icon is a painted content-type glyph, not a per-entry icon.**
+  Clipboard entries have no favicon/thumbnail fetching in this slice, so the
+  row-icon slot would otherwise render the same empty placeholder square
+  `render_row` already uses for an app with no cached icon yet — fine as a
+  *transient* state for apps (self-heals once the icon-extraction pass
+  catches up), wrong as a *permanent* one for clipboard, where nothing will
+  ever fill it in. `panel::content_kind_glyph` fills the slot instead: a
+  three-bar mark for `Text`, two overlapping rounded-square rings for
+  `Link` — hand-painted from plain `div`s, the same pattern
+  `search_glyph` already established (no bundled SVG-asset pipeline exists
+  in this codebase, and per the design report's §6 finding, a Unicode
+  symbol isn't a reliable substitute either).
 - **No two-column detail pane.** The design's screen 12 (`12-first-clipboard-
   use.html`) is a dedicated, wider (760px, `theme::PANEL_WIDTH_WITH_DETAIL_PX`)
   clipboard-only mode with a preview pane. This task renders clipboard rows
@@ -252,6 +264,25 @@ above the footer rather than the window growing or shrinking. Documented in
 `panel.rs`'s own module doc comment. Real dynamic resizing is a follow-up, not
 attempted here specifically because it was untested territory on the one path
 this task's acceptance criteria measures a hard number against.
+
+**A fixed content area with two possible section headers (apps, clipboard)
+means the row count that fits isn't always `RESULT_LIMIT` (8) — a header eats
+real space nothing budgeted for before clipboard existed.** Rendering
+whatever the daemon returned and relying on `overflow_hidden()` to clip the
+excess produced a real defect: the last row would render half-visible,
+jammed against the footer, instead of being fully shown or fully absent.
+`panel::fit_within_budget` (called on every search response, before results
+are stored in `Root`, so a truncated-but-out-of-sync `selected` index can
+never point at a row that isn't rendered) walks the results and drops
+anything — a whole row, or a whole section including its header — that
+would not fit in `CONTENT_AREA_MIN_HEIGHT_PX`. It never emits a partial row
+or a header with zero rows under it. One consequence: a query that alone
+fills the budget with apps (7, not 8, once one header's 28px is charged)
+shows no clipboard section even if the server-side response included one —
+a second, client-side layer of the same "apps are primary, clipboard is
+additive" crowd-out already described under "Search and ranking." Covered
+by `panel.rs`'s own tests, including the exact 6-apps-plus-1-clipboard-row
+shape that first exposed the bug.
 
 ## Summon latency
 

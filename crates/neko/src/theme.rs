@@ -58,6 +58,7 @@ pub const ROW_RADIUS_PX: f32 = 8.0;
 
 pub const INPUT_ROW_HEIGHT_PX: f32 = 56.0;
 pub const RESULT_ROW_HEIGHT_PX: f32 = 40.0;
+pub const SECTION_HEADER_HEIGHT_PX: f32 = 28.0;
 pub const FOOTER_HEIGHT_PX: f32 = 44.0;
 pub const PANEL_WIDTH_PX: f32 = 680.0;
 pub const PANEL_WIDTH_WITH_DETAIL_PX: f32 = 760.0;
