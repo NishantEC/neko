@@ -1,6 +1,7 @@
 mod accessibility;
 mod components;
 mod daemon_launcher;
+mod evidence;
 mod hotkey_client;
 mod material;
 mod onboarding;
@@ -82,6 +83,12 @@ fn main() {
         ]);
         cx.on_action(|_: &DismissWindow, cx| cx.hide());
 
+        // Verification-only, inert unless `NEKO_BACKDROP_IMAGE` is set —
+        // see `evidence.rs`'s own doc comment.
+        if let Some(path) = evidence::backdrop_image_path() {
+            evidence::open_backdrop_window(cx, path);
+        }
+
         let (client, event_rx) = NekoClient::connect(neko_protocol::socket_path());
         // Cheap to construct (no OS handshake, unlike `SystemRegistrar::new`)
         // so it's created once, up front, and shared by the summon panel
@@ -106,7 +113,39 @@ fn main() {
                 {
                     let client = client.clone();
                     let accessibility = accessibility.clone();
-                    move |_window, cx| Root::new(client.clone(), accessibility.clone(), cx)
+                    move |window, cx| {
+                        // Installed once here, right after the window opens
+                        // — this window is resident for the process
+                        // lifetime (only ever hidden, never closed), so one
+                        // install covers every future summon. On `Err`,
+                        // the window is already `Transparent`
+                        // (`material::window_background`), so it has to be
+                        // flipped back to `Opaque` explicitly or the panel
+                        // would render over whatever is genuinely behind it
+                        // on screen instead of a solid fill.
+                        let translucent = match material::install(window) {
+                            Ok(installed) => {
+                                eprintln!("neko: window material installed: {installed:?}");
+                                // Non-visual proof `install`'s claim is
+                                // real: reads the live view straight back
+                                // off the window rather than trusting the
+                                // setter calls took effect (see
+                                // `material::verify_installed`'s own doc
+                                // comment).
+                                match material::verify_installed(window, installed) {
+                                    Ok(readback) => eprintln!("neko: material verified: {readback}"),
+                                    Err(e) => eprintln!("neko: material readback verification FAILED: {e}"),
+                                }
+                                true
+                            }
+                            Err(e) => {
+                                eprintln!("neko: native window material install failed, falling back to opaque: {e}");
+                                window.set_background_appearance(gpui::WindowBackgroundAppearance::Opaque);
+                                false
+                            }
+                        };
+                        Root::new(client.clone(), accessibility.clone(), translucent, cx)
+                    }
                 },
             )
             .expect("failed to open the summon window");
@@ -123,6 +162,18 @@ fn main() {
             window,
             active_onboarding: active_onboarding.clone(),
         });
+
+        // Evidence/verification-only, both inert unless their env var is
+        // set — see `evidence.rs`'s own doc comment.
+        if let Some(iterations) = evidence::bench_iterations() {
+            let client = client.clone();
+            cx.spawn(async move |cx| evidence::run_bench(&client, window, cx, iterations).await)
+                .detach();
+        } else if evidence::show_on_launch_requested() {
+            let client = client.clone();
+            cx.spawn(async move |cx| evidence::show_once(&client, window, cx).await)
+                .detach();
+        }
 
         cx.spawn(async move |cx| {
             let config = fetch_initial_hotkey(&client).await;

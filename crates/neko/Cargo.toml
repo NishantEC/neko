@@ -17,3 +17,18 @@ global-hotkey = "0.8.0"
 [target.'cfg(target_os = "macos")'.dependencies]
 accessibility-sys = "0.1"
 core-foundation = "0.9"
+# Window material (see `src/material.rs`) — all four already transitive
+# dependencies of `gpui`/`neko-core` at these exact versions, so this adds
+# zero new crate versions to the tree (verified: `cargo tree` before/after,
+# `docs/evidence/cargo-tree.txt`).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = [
+    "NSView",
+    "NSWindow",
+    "NSResponder",
+    "NSGraphics",
+    "NSVisualEffectView",
+    "NSGlassEffectView",
+] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
+raw-window-handle = "0.6"

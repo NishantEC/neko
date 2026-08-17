@@ -43,6 +43,26 @@ const fn rgba_const(hex: u32, a: f32) -> Rgba {
 }
 
 pub const SURFACE_PANEL: Rgba = rgb_const(0x110c07);
+/// `SURFACE_PANEL`'s own RGB, at reduced alpha — the panel's fill when a
+/// native material (`material.rs`) is behind the window. This is what
+/// makes the material visible at all: GPUI renders this `div`'s fill on
+/// top of the native background view in window z-order, so a fully opaque
+/// fill (`SURFACE_PANEL`) would paint over it completely regardless of the
+/// native view's own z-position. **Reasoned, not screenshot-verified
+/// against a busy desktop** — this task's standing capture-safety rule
+/// (`AGENTS.md`, "Window material") rules out the only capture mechanism
+/// that could show it composited with a real/synthetic backdrop. Chosen
+/// high (82%) specifically so the final on-screen color stays dominated by
+/// this near-black tint rather than whatever the material blurs in behind
+/// it: `data/neko-native-material/report.md` §6 measured every material's
+/// own *worst case* (no panel tint on top at all) at 5.15:1 against a busy
+/// backdrop, comfortably above WCAG AA's 4.5:1 floor; at 82% opacity the
+/// backdrop's contribution to the final pixel is a fifth of that already-
+/// comfortable case, so contrast here should sit close to `SURFACE_PANEL`'s
+/// own fully-opaque, already-OKLCH-verified numbers (this file's own test,
+/// below). Re-verify with a real screenshot once a safe capture path exists
+/// for this machine, rather than trusting this reasoning indefinitely.
+pub const SURFACE_PANEL_TRANSLUCENT: Rgba = rgba_const(0x110c07, 0.82);
 pub const SURFACE_RAISED: Rgba = rgb_const(0x1b150e);
 pub const SURFACE_SELECTED: Rgba = rgb_const(0x473e33);
 pub const TEXT_PRIMARY: Rgba = rgb_const(0xf0e6da);
