@@ -2,15 +2,27 @@ use std::ops::Range;
 
 use gpui::{
     App, Bounds, Context, CursorStyle, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    FocusHandle, Focusable, GlobalElementId, InspectorElementId, LayoutId, Pixels, Point, Render,
-    ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window, actions, div, fill, point,
-    prelude::*, px, relative,
+    EventEmitter, FocusHandle, Focusable, GlobalElementId, InspectorElementId, LayoutId, Pixels,
+    Point, Render, ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window, actions, div,
+    fill, point, prelude::*, px, relative,
 };
 
 use crate::components::vendor::gpui_component::blink_cursor::CursorBlink;
 use crate::theme;
 
 actions!(text_field, [Backspace, Left, Right]);
+
+/// Emitted only when `content` actually changes (a real edit), never on
+/// cursor movement or a cursor-blink tick — both of those still call
+/// `cx.notify()` for their own rendering reasons, but that is a render
+/// signal, not a content-changed signal. `Root` subscribes to this event
+/// (via `cx.subscribe`) instead of observing raw notifications (via
+/// `cx.observe`) specifically so blink can never reach the search path —
+/// see this file's and `panel.rs`'s module docs for the bug this fixes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContentChanged;
+
+impl EventEmitter<ContentChanged> for TextField {}
 
 /// A minimal single-line text field.
 ///
@@ -33,6 +45,11 @@ impl TextField {
         cx.new(|cx| {
             let blink = cx.new(|_| CursorBlink::new());
             blink.update(cx, |blink, cx| blink.start(cx));
+            // Deliberately `cx.observe` + `cx.notify()`, not `cx.emit`: this
+            // re-renders the field so the cursor visibly blinks, but must
+            // never surface as `ContentChanged` — see that type's doc
+            // comment for why a blink tick and a real edit are different
+            // signals.
             cx.observe(&blink, |_, _, cx| cx.notify()).detach();
             Self {
                 focus_handle: cx.focus_handle(),
@@ -53,6 +70,11 @@ impl TextField {
     /// Reset to empty with the cursor at the start — used when a launch
     /// dismisses the panel, so the next summon starts from a clean field
     /// rather than the previous query.
+    ///
+    /// Deliberately does not emit `ContentChanged`: its one caller
+    /// (`Root::reset_for_summon`) already re-runs search explicitly right
+    /// after calling this, so emitting here too would fire the search
+    /// request twice for one summon.
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.content.clear();
         self.cursor = 0;
@@ -63,14 +85,30 @@ impl TextField {
         self.blink.update(cx, |blink, cx| blink.pause(cx));
     }
 
-    fn on_backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+    /// The one place `content` actually mutates. Emits `ContentChanged` in
+    /// addition to `cx.notify()`, which is what lets `Root` re-run search on
+    /// real edits without also reacting to blink's render-only notify (see
+    /// `ContentChanged`'s doc comment). Takes a byte range rather than
+    /// requiring a live `Window` (unlike `EntityInputHandler::
+    /// replace_text_in_range`, which the input system requires to be
+    /// `Window`-shaped even though it never reads it) so callers with no
+    /// window at hand — `on_backspace`, and this file's own tests — can
+    /// still drive a real edit.
+    fn commit_edit(&mut self, range: Range<usize>, new_text: &str, cx: &mut Context<Self>) {
+        self.content.replace_range(range.clone(), new_text);
+        self.cursor = range.start + new_text.len();
+        self.touch_cursor(cx);
+        cx.notify();
+        cx.emit(ContentChanged);
+    }
+
+    fn on_backspace(&mut self, _: &Backspace, _window: &mut Window, cx: &mut Context<Self>) {
         if self.cursor == 0 {
             return;
         }
         let prev = self.previous_char_boundary(self.cursor);
         let removed = prev..self.cursor;
-        self.cursor = prev;
-        self.replace_text_in_range(Some(self.range_to_utf16(&removed)), "", window, cx);
+        self.commit_edit(removed, "", cx);
     }
 
     fn on_left(&mut self, _: &Left, _window: &mut Window, cx: &mut Context<Self>) {
@@ -181,10 +219,7 @@ impl EntityInputHandler for TextField {
         let range = range_utf16
             .map(|r| self.range_from_utf16(&r))
             .unwrap_or(self.cursor..self.cursor);
-        self.content.replace_range(range.clone(), new_text);
-        self.cursor = range.start + new_text.len();
-        self.touch_cursor(cx);
-        cx.notify();
+        self.commit_edit(range, new_text, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -359,5 +394,85 @@ impl Render for TextField {
             .on_action(cx.listener(Self::on_right))
             .w_full()
             .child(TextFieldElement { field: cx.entity() })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use gpui::TestAppContext;
+
+    use super::*;
+
+    /// Reproduces the exact defect the captain hit: `TextField::new` wires
+    /// blink's tick to `cx.notify()` (needed so the cursor visibly blinks),
+    /// and this used to be the only signal `Root` had to know the query
+    /// changed — so search re-ran, and the selection reset, roughly twice a
+    /// second forever. This proves the fix at its source: a blink-shaped
+    /// notify on the field's own `blink` entity must never surface as
+    /// `ContentChanged`, the event `Root` now subscribes to instead.
+    #[gpui::test]
+    fn blink_notification_does_not_emit_content_changed(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        let content_changed_count = Rc::new(Cell::new(0));
+
+        let counted = content_changed_count.clone();
+        cx.update(|cx| {
+            cx.subscribe(&field, move |_field, _event: &ContentChanged, _cx| {
+                counted.set(counted.get() + 1);
+            })
+            .detach();
+        });
+
+        // Simulate a cursor-blink tick: exactly the signal
+        // `cx.observe(&blink, |_, _, cx| cx.notify())` reacts to.
+        field.update(cx, |field, cx| {
+            field.blink.update(cx, |_, cx| cx.notify());
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            content_changed_count.get(),
+            0,
+            "a blink-only notify must never trigger ContentChanged"
+        );
+
+        // A real edit still does — proves the subscription itself works and
+        // isn't just silently disconnected.
+        field.update(cx, |field, cx| field.commit_edit(0..0, "a", cx));
+        cx.run_until_parked();
+        assert_eq!(
+            content_changed_count.get(),
+            1,
+            "a real edit must still trigger ContentChanged"
+        );
+    }
+
+    /// Cursor movement (Left/Right) touches blink (to keep the cursor solid
+    /// while navigating) and re-renders, but is not a content edit — must
+    /// not trigger a search either.
+    #[gpui::test]
+    fn cursor_movement_does_not_emit_content_changed(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| field.commit_edit(0..0, "ab", cx));
+        cx.run_until_parked();
+
+        let content_changed_count = Rc::new(Cell::new(0));
+        let counted = content_changed_count.clone();
+        cx.update(|cx| {
+            cx.subscribe(&field, move |_field, _event: &ContentChanged, _cx| {
+                counted.set(counted.get() + 1);
+            })
+            .detach();
+        });
+
+        field.update(cx, |field, cx| {
+            field.cursor = field.previous_char_boundary(field.cursor);
+            field.touch_cursor(cx);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(content_changed_count.get(), 0);
     }
 }

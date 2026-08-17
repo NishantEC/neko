@@ -32,3 +32,8 @@ objc2-app-kit = { version = "0.3", features = [
 ] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
 raw-window-handle = "0.6"
+
+[dev-dependencies]
+# Same `gpui` dependency above, `test-support` feature only for `cargo
+# test` — adds zero new crate versions to the tree.
+gpui = { version = "0.2.2", features = ["test-support"] }
