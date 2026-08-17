@@ -299,6 +299,17 @@ before touching this file again. Summary:
   triggering the directory-scan fallback (that fallback only fires if
   `mdfind` can't be run at all) — per "the metadata index must be the
   primary source." The sealed-system-volume apps still show either way.
+- **A bundle name resolves to `None`, not an empty string, if every
+  candidate is blank.** `bundle_display_name` (`apps.rs`) chains
+  `CFBundleDisplayName` → `CFBundleName` → the `.app` filename's own stem,
+  but falls through past a candidate that's *present and blank* too, not
+  just a missing key — `plist::Value::as_string()` returns `Some("")` for an
+  empty `<string></string>`, which the original `.unwrap_or_else(...)` chain
+  treated as "found," producing a real row with a cached icon and a
+  completely empty title (hit at 147 real Spotlight-indexed apps). A bundle
+  where even the filename stem is blank is dropped from the index entirely
+  — never render an icon with no title, per the same rule `panel.rs`'s row
+  layout assumes throughout.
 
 ## Search and ranking
 
@@ -328,6 +339,32 @@ response. Covered by `server.rs`'s own tests. The panel's
 `fit_within_budget` (below) does the equivalent reservation for pixels, not
 slots — both layers exist because a response with room for clipboard is
 necessary but not sufficient for a screen with room to render it.
+
+**`cx.observe` fires on *any* notification, not just the one you meant —
+this made keyboard navigation unusable.** `panel::Root` used to re-run
+search via `cx.observe(&text_field, |root, _, cx| root.run_search(cx))`,
+and `TextField` notifies on every cursor blink tick (~2/sec, forever —
+that's how the cursor's own render updates) as well as on real edits.
+`cx.observe` can't tell those apart, so search re-ran and `selected` reset
+to `0` roughly twice a second, independent of typing — pressing Down looked
+like it "went back to the first selection" because it did, within half a
+second, every time. Fixed with GPUI's typed-event path instead of raw
+notify: `text_field::ContentChanged` is emitted only from `TextField::
+commit_edit` (the one real content-mutation chokepoint; blink's own
+`cx.notify()` is untouched, since the cursor still needs to visibly blink),
+and `Root` subscribes to that event type (`cx.subscribe`) rather than
+observing the entity generically. **This is the general lesson, not just
+this bug**: any entity that calls `cx.notify()` for a render-only reason
+(a blink timer, a hover-state pulse, anything cosmetic) can silently drive
+`cx.observe` listeners elsewhere in the app; if a re-render signal and a
+"something meaningful changed" signal need to be distinguished, that's
+what a typed event + `cx.subscribe` is for, not `cx.observe`. Selection
+across a genuine re-search is preserved by identity (`(kind, id)`, not
+index) via `panel::resolve_selection` when the previously-highlighted item
+is still present in the new results, and reset to the top only when it
+isn't — covered in `text_field.rs`'s and `panel.rs`'s own test suites
+(`#[gpui::test]` needs `gpui`'s `test-support` feature, added as a
+dev-dependency only).
 
 ## Icons
 
@@ -491,6 +528,19 @@ eye") is the one named constant the captain asked for — swapping it for
 direction B or C is a one-line change in that file. It's intentionally unused
 by any paint path right now: the report's colour-identity pick is still open,
 and v1 ships in the base neutral palette until the captain picks one.
+
+**Row/icon rendering drifted from `design.css` once real data (147 Spotlight
+apps, mixed-padding icon assets) exercised it** — `docs/evidence/panel-craft-pass.md`
+has the full before/after value table (icon corner radius and backing-plate
+token, row/section/input-row/footer padding, footer hairline tokens). The
+durable lesson: `theme::ROW_ICON_SOCKET_BG` (`design.css`'s `rgba(240,230,218,0.06)`,
+`TEXT_PRIMARY`'s hex, not a neutral white) is the row-icon slot's backing
+plate for *every* icon, cached or not — real macOS icon assets bake in
+wildly different amounts of transparent padding per app, and a consistent
+warm-tinted socket behind all of them is what makes a list of them read as
+one system instead of "mismatched brightness/shapes." Any future icon-slot
+work should keep painting this background rather than reverting to a bare
+`img()`.
 
 ## Window material
 
