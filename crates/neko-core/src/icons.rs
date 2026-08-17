@@ -3,27 +3,63 @@
 
 use std::path::PathBuf;
 
-/// Rendered/cached at roughly 3x the summon panel's 22pt row-icon slot
-/// (`theme::ROW_ICON_PX` in the `neko` crate — `neko-core` doesn't depend on
-/// that crate per the workspace's own boundary rule, so the value is
-/// restated here rather than imported): crisp on a 2x Retina display with
-/// headroom to spare, still sharp on 3x. Previously each icon was cached at
-/// whatever pixel size `NSWorkspace`'s source representation happened to
-/// carry — `NSImage.setSize` + `TIFFRepresentation` never resampled it (see
-/// `extract_icon_png`'s own comment) — up to 1024x1024 and ~1.4MB for a
-/// single icon, ~188MB across a real 147-app index, for artwork displayed
-/// at 22px.
-const ICON_CACHE_PX: isize = 64;
+/// Cached at a native macOS icon-representation size, not a value picked to
+/// be "roughly enough" bigger than the render slot. The row icon renders at
+/// `theme::ROW_ICON_PX` = 22 **logical points** (`neko-core` doesn't depend
+/// on the `neko` crate per the workspace's own boundary rule, so the value
+/// is restated here rather than imported) — on the captain's own two
+/// displays (built-in Liquid Retina XDR, external LG UltraFine 4K set to
+/// its native "looks like 1920x1080" mode) that's a confirmed
+/// `backingScaleFactor` of 2.0 on both (`system_profiler SPDisplaysDataType`:
+/// external reports "Resolution: 3840 x 2160" / "UI Looks like: 1920 x
+/// 1080", i.e. exactly 2x, not a fractional scaled-resolution mode — verify
+/// again with that command if this ever needs re-checking, don't assume),
+/// i.e. 44 physical px today, with headroom kept for a 3x display (66px)
+/// this repo has no way to test against.
+///
+/// The previous value here, 64, was chosen as "roughly 3x the render slot"
+/// without checking what macOS actually ships. That was two compounding
+/// mistakes, not one: (1) 64 down to 44 physical px is a non-integer 0.6875
+/// downscale — GPUI's own image sampler is a plain bilinear `min_filter:
+/// linear` with no mipmap chain (`gpui-0.2.2/src/platform/mac/shaders.metal`,
+/// `atlas_texture_sampler`), so any downscale ratio still aliases somewhat,
+/// but a *non-native* source resolution makes it worse for a second,
+/// independent reason: (2) `extract_icon_png`'s `drawInRect` call already
+/// resamples once, from whichever representation `NSWorkspace.iconForFile`'s
+/// composite `NSImage` picks as "best for a 64x64 draw," to 64x64 — and 64
+/// is not one of the fixed sizes modern asset-catalog icons ship
+/// representations at (16, 32, 128, 256, 512, 1024, each present at both
+/// 1x and 2x pixel densities). Caching at 128 instead means that draw call
+/// can hit an exact native representation for most modern icons, so
+/// extraction becomes a copy instead of a resample — leaving exactly one
+/// resample in the whole pipeline (GPUI's own downscale to the display's
+/// physical pixels at whatever the window's current scale factor is),
+/// instead of two compounding ones. `Img` decodes the full cached PNG and
+/// re-samples it every frame at the window's live `scale_factor()` — see
+/// that field's own doc comment in gpui's `elements/img.rs` — which is
+/// exactly why nothing here has to special-case a window moving between the
+/// two displays above: the source bitmap doesn't change, only the sampling
+/// target size does, on every frame, automatically.
+///
+/// Storage cost, measured on the same real 146-app index the 1024px and
+/// 64px generations were both measured against: 1.10MB total at 64px vs.
+/// 2.52MB at 128px (4x the pixel area, but PNG compresses the extra native
+/// detail better than it compressed the old generation's own resample
+/// artifacts, so the total isn't a full 4x) — see
+/// `docs/evidence/icon-cache-128px-report.md` for the full before/after
+/// table. Nowhere close to the original 188MB/1024px problem this whole
+/// cache-generation mechanism exists to keep from regressing.
+const ICON_CACHE_PX: isize = 128;
 
 /// Bumped whenever the cached pixel format/size changes, so upgrading never
 /// silently keeps serving an old, wrongly-sized file — `ensure_cached_icon`
 /// only checks whether *a* file exists at this path, not what size it is,
 /// so a stale cache from before this constant last changed would otherwise
-/// never regenerate on its own. See `purge_stale_unversioned_cache` for the
-/// one-time cleanup of caches written before this versioning existed.
-const CACHE_GENERATION: &str = "v2-64px";
+/// never regenerate on its own. See `purge_stale_icon_cache` for the
+/// one-time cleanup of caches written under a previous generation.
+const CACHE_GENERATION: &str = "v3-128px";
 
-/// `~/Library/Caches/neko/icons/v2-64px/<sanitized-id>.png`
+/// `~/Library/Caches/neko/icons/v3-128px/<sanitized-id>.png`
 pub fn cached_icon_path(app_id: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     let sanitized: String = app_id
@@ -38,23 +74,32 @@ pub fn cached_icon_path(app_id: &str) -> Option<PathBuf> {
     )
 }
 
-/// One-time cleanup of icons cached by a build that predates
-/// `CACHE_GENERATION`: those files sat loose directly under
-/// `icons/` (not in a versioned subdirectory) at up to ~1.4MB each, and
-/// `ensure_cached_icon`'s existence check would never have replaced them on
-/// its own — a real disk-space emergency traced to this cache would not
-/// self-heal just from upgrading the binary. Removes only loose `*.png`
-/// files sitting directly in `icons/`; never descends into or touches a
-/// versioned subdirectory (this generation's own, or a future one), so this
-/// is a no-op once the migration has already run once.
-pub fn purge_stale_unversioned_cache() {
+/// One-time cleanup of every icon-cache generation that isn't the current
+/// one: (1) loose `*.png` files sitting directly under `icons/` — the
+/// layout a build predating any `CACHE_GENERATION` versioning wrote — and
+/// (2) any versioned subdirectory (e.g. this task's own predecessor,
+/// `v2-64px`) other than `CACHE_GENERATION` itself. `ensure_cached_icon`'s
+/// existence check only ever looks at the *current* generation's path, so
+/// without this, a captain who has upgraded through several icon-cache
+/// changes would keep accumulating every previous generation's files on
+/// disk forever rather than having them replaced. Never descends into or
+/// touches the current generation's own subdirectory.
+pub fn purge_stale_icon_cache() {
     let Some(home) = std::env::var_os("HOME") else { return };
-    let dir = PathBuf::from(home).join("Library/Caches/neko/icons");
-    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    purge_stale_icon_cache_at(&PathBuf::from(home).join("Library/Caches/neko/icons"));
+}
+
+/// The actual sweep, taking the `icons/` directory directly so it's
+/// testable without touching the real `$HOME` cache — see
+/// `purge_stale_icon_cache`'s own doc comment for what this does and why.
+fn purge_stale_icon_cache_at(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("png") {
             let _ = std::fs::remove_file(path);
+        } else if path.is_dir() && entry.file_name() != CACHE_GENERATION {
+            let _ = std::fs::remove_dir_all(&path);
         }
     }
 }
@@ -176,6 +221,29 @@ mod tests {
         let path = cached_icon_path("com.apple.Safari").unwrap();
         assert!(path.ends_with("com.apple.Safari.png"));
         assert!(path.to_string_lossy().contains("Library/Caches/neko/icons"));
+    }
+
+    #[test]
+    fn purge_stale_icon_cache_removes_old_generations_and_loose_files_only() {
+        let dir = std::env::temp_dir().join(format!(
+            "neko-icons-purge-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(CACHE_GENERATION)).unwrap();
+        std::fs::write(dir.join(CACHE_GENERATION).join("com.apple.Safari.png"), b"current").unwrap();
+        std::fs::create_dir_all(dir.join("v2-64px")).unwrap();
+        std::fs::write(dir.join("v2-64px").join("com.apple.Safari.png"), b"stale").unwrap();
+        std::fs::write(dir.join("loose-unversioned.png"), b"pre-versioning").unwrap();
+
+        purge_stale_icon_cache_at(&dir);
+
+        assert!(dir.join(CACHE_GENERATION).join("com.apple.Safari.png").exists());
+        assert!(!dir.join("v2-64px").exists());
+        assert!(!dir.join("loose-unversioned.png").exists());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
