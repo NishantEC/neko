@@ -48,10 +48,22 @@ pub struct Root {
     /// persisted dismissal flag has been fetched, so the banner doesn't
     /// flash on for one frame before that first response lands.
     accessibility_banner_dismissed: Option<bool>,
+    /// Whether `material::install` put a native background view behind the
+    /// window. When `true`, the panel fills with `theme::SURFACE_PANEL_TRANSLUCENT`
+    /// so that material actually shows through; when `false` (the material
+    /// install errored — see `main.rs`), it fills fully opaque and grows a
+    /// hairline border instead, per the design report's own explicit
+    /// fallback (§1: "opaque-plus-shadow... as the fallback").
+    translucent: bool,
 }
 
 impl Root {
-    pub fn new(client: NekoClient, accessibility: Rc<dyn AccessibilityChecker>, cx: &mut App) -> Entity<Self> {
+    pub fn new(
+        client: NekoClient,
+        accessibility: Rc<dyn AccessibilityChecker>,
+        translucent: bool,
+        cx: &mut App,
+    ) -> Entity<Self> {
         cx.new(|cx| {
             let text_field = TextField::new(cx);
             cx.observe(&text_field, |root: &mut Root, _field, cx| {
@@ -66,6 +78,7 @@ impl Root {
                 selected: 0,
                 generation: 0,
                 accessibility_banner_dismissed: None,
+                translucent,
             };
             root.run_search(cx);
             root.fetch_accessibility_banner_state(cx);
@@ -198,7 +211,14 @@ impl Render for Root {
             .flex_col()
             .w(px(theme::PANEL_WIDTH_PX))
             .h(px(PANEL_HEIGHT_PX))
-            .bg(theme::SURFACE_PANEL)
+            .bg(if self.translucent {
+                theme::SURFACE_PANEL_TRANSLUCENT
+            } else {
+                theme::SURFACE_PANEL
+            })
+            .when(!self.translucent, |el| {
+                el.border_1().border_color(theme::BORDER_HAIRLINE_STRONG)
+            })
             .rounded(px(theme::PANEL_RADIUS_PX))
             .shadow_lg()
             .overflow_hidden()
