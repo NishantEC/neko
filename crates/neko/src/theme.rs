@@ -33,6 +33,15 @@ const fn rgb_const(hex: u32) -> Rgba {
     }
 }
 
+const fn rgba_const(hex: u32, a: f32) -> Rgba {
+    Rgba {
+        r: ((hex >> 16) & 0xff) as f32 / 255.0,
+        g: ((hex >> 8) & 0xff) as f32 / 255.0,
+        b: (hex & 0xff) as f32 / 255.0,
+        a,
+    }
+}
+
 pub const SURFACE_PANEL: Rgba = rgb_const(0x110c07);
 pub const SURFACE_RAISED: Rgba = rgb_const(0x1b150e);
 pub const SURFACE_SELECTED: Rgba = rgb_const(0x473e33);
@@ -53,8 +62,22 @@ pub const TEXT_TERTIARY_ON_SELECTED: Rgba = TEXT_SECONDARY;
 /// single seam to change if he picks a different one later.
 pub const ACCENT: Rgba = rgb_const(0xefa831);
 
+/// Decorative dividers only, per the report's own note on this token —
+/// never a load-bearing boundary. Onboarding's dialog chrome (header/footer
+/// hairlines, permission-row outlines, keycap borders) is the first paint
+/// path in this codebase to use these as named tokens rather than an inline
+/// `rgba(0xffffff__)` literal.
+pub const BORDER_HAIRLINE: Rgba = rgba_const(0xeee3d7, 0.08);
+pub const BORDER_HAIRLINE_STRONG: Rgba = rgba_const(0xeee3d7, 0.16);
+
+/// Text sitting on a `TEXT_PRIMARY` fill (the primary button's own label).
+pub const TEXT_ON_LIGHT: Rgba = rgb_const(0x14100a);
+
 pub const PANEL_RADIUS_PX: f32 = 16.0;
 pub const ROW_RADIUS_PX: f32 = 8.0;
+pub const DIALOG_RADIUS_PX: f32 = 14.0;
+pub const BTN_RADIUS_PX: f32 = 8.0;
+pub const CHIP_RADIUS_PX: f32 = 5.0;
 
 pub const INPUT_ROW_HEIGHT_PX: f32 = 56.0;
 pub const RESULT_ROW_HEIGHT_PX: f32 = 40.0;
@@ -63,6 +86,16 @@ pub const FOOTER_HEIGHT_PX: f32 = 44.0;
 pub const PANEL_WIDTH_PX: f32 = 680.0;
 pub const PANEL_WIDTH_WITH_DETAIL_PX: f32 = 760.0;
 pub const ROW_ICON_PX: f32 = 22.0;
+
+/// Onboarding window geometry (design report §3): the same panel width as
+/// the summoned popup, a static header standing in for the input row, a
+/// fixed content area sized for the tallest step (01's two permission
+/// rows), and the same footer height — matching `panel.rs`'s own "one
+/// fixed size, not dynamic per-content resize" v1 simplification rather
+/// than reopening that already-settled call for a second window.
+pub const ONBOARDING_CONTENT_HEIGHT_PX: f32 = 420.0;
+pub const ONBOARDING_HEIGHT_PX: f32 =
+    INPUT_ROW_HEIGHT_PX + ONBOARDING_CONTENT_HEIGHT_PX + FOOTER_HEIGHT_PX;
 
 /// Björn Ottosson's OKLab↔linear-sRGB matrices
 /// (<https://bottosson.github.io/posts/oklab/>), implemented independently

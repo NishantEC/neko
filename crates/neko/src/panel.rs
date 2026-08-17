@@ -15,14 +15,16 @@
 //! the summon-latency budget; real dynamic resizing is a follow-up.
 
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, Focusable, Render, SharedString, Window,
-    actions, div, img, prelude::*, px, rgba,
+    AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, Render,
+    SharedString, Window, actions, div, img, prelude::*, px, rgba,
 };
 use neko_client::NekoClient;
 use neko_protocol::{ClipboardContentKind, Request, ResultKind, Response, SearchItem};
 
+use crate::accessibility::AccessibilityChecker;
 use crate::text_field::TextField;
 use crate::theme;
 
@@ -36,13 +38,20 @@ pub const PANEL_HEIGHT_PX: f32 =
 pub struct Root {
     text_field: Entity<TextField>,
     client: NekoClient,
+    accessibility: Rc<dyn AccessibilityChecker>,
     results: Vec<SearchItem>,
     selected: usize,
     generation: u64,
+    /// Design report §3, step 08: shown whenever Accessibility isn't
+    /// granted and the captain hasn't dismissed the notice — never a dead
+    /// end, never nagging once dismissed. `None` until the daemon's
+    /// persisted dismissal flag has been fetched, so the banner doesn't
+    /// flash on for one frame before that first response lands.
+    accessibility_banner_dismissed: Option<bool>,
 }
 
 impl Root {
-    pub fn new(client: NekoClient, cx: &mut App) -> Entity<Self> {
+    pub fn new(client: NekoClient, accessibility: Rc<dyn AccessibilityChecker>, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
             let text_field = TextField::new(cx);
             cx.observe(&text_field, |root: &mut Root, _field, cx| {
@@ -52,11 +61,14 @@ impl Root {
             let mut root = Self {
                 text_field,
                 client,
+                accessibility,
                 results: Vec::new(),
                 selected: 0,
                 generation: 0,
+                accessibility_banner_dismissed: None,
             };
             root.run_search(cx);
+            root.fetch_accessibility_banner_state(cx);
             root
         })
     }
@@ -70,6 +82,44 @@ impl Root {
         self.results.clear();
         self.selected = 0;
         self.run_search(cx);
+        // Re-checked on every summon, not just once at process start:
+        // accessibility may have been granted from System Settings, or the
+        // banner dismissed from a previous summon, since this window was
+        // last shown.
+        self.fetch_accessibility_banner_state(cx);
+    }
+
+    fn fetch_accessibility_banner_state(&mut self, cx: &mut Context<Self>) {
+        let client = self.client.clone();
+        cx.spawn(async move |this, cx| {
+            let response = client.request(Request::GetOnboardingState).await;
+            let Ok(Response::OnboardingState { accessibility_banner_dismissed, .. }) = response else {
+                return;
+            };
+            let _ = this.update(cx, |root, cx| {
+                root.accessibility_banner_dismissed = Some(accessibility_banner_dismissed);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn show_accessibility_banner(&self) -> bool {
+        self.accessibility_banner_dismissed == Some(false) && !self.accessibility.is_trusted()
+    }
+
+    fn open_accessibility_settings(&mut self, _: &ClickEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        crate::accessibility::open_accessibility_settings();
+    }
+
+    fn dismiss_accessibility_banner(&mut self, _: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.accessibility_banner_dismissed = Some(true);
+        let client = self.client.clone();
+        cx.spawn(async move |_this, _cx| {
+            let _ = client.request(Request::DismissAccessibilityBanner).await;
+        })
+        .detach();
+        cx.notify();
     }
 
     fn run_search(&mut self, cx: &mut Context<Self>) {
@@ -153,7 +203,7 @@ impl Render for Root {
             .shadow_lg()
             .overflow_hidden()
             .child(self.render_input_row())
-            .child(self.render_content_area(query_is_empty))
+            .child(self.render_content_area(cx, query_is_empty))
             .child(self.render_footer())
     }
 }
@@ -179,8 +229,12 @@ impl Root {
             )
     }
 
-    fn render_content_area(&self, query_is_empty: bool) -> impl IntoElement {
+    fn render_content_area(&self, cx: &mut Context<Self>, query_is_empty: bool) -> impl IntoElement {
         let mut container = div().flex().flex_col().flex_1().min_h(px(0.)).overflow_hidden();
+
+        if self.show_accessibility_banner() {
+            container = container.child(self.render_accessibility_banner(cx));
+        }
 
         if self.results.is_empty() {
             return container.child(render_empty_state(query_is_empty));
@@ -200,6 +254,56 @@ impl Root {
             container = container.child(self.render_row(idx, item));
         }
         container
+    }
+
+    /// Design report §3, step 08 — content/copy matches the mockup, but not
+    /// its outer position/size: that mockup repositions and narrows the
+    /// whole panel to sit near a menu-bar icon, which this build doesn't
+    /// have (see `AGENTS.md`, "Menu bar icon: not built"). Rendered instead
+    /// as a strip inside the normal upper-third 680px panel, so the
+    /// already-shipped fixed-size/positioning decision (this file's own
+    /// module doc comment) doesn't get reopened for one banner.
+    fn render_accessibility_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .gap_3()
+            .px_3()
+            .py_2()
+            .mb_1()
+            .rounded(px(theme::ROW_RADIUS_PX))
+            .bg(rgba(0xe96e5014))
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(px(12.5))
+                    .line_height(px(18.))
+                    .text_color(theme::TEXT_SECONDARY)
+                    .child("⌥Space is off. Accessibility access was skipped, so the hotkey won't open neko. Reopen neko from the Dock to search anytime."),
+            )
+            .child(
+                div()
+                    .id("banner-open-settings")
+                    .flex_shrink_0()
+                    .text_size(px(12.))
+                    .text_color(theme::TEXT_SECONDARY)
+                    .cursor(CursorStyle::PointingHand)
+                    .hover(|s| s.text_color(theme::TEXT_PRIMARY))
+                    .on_click(cx.listener(Self::open_accessibility_settings))
+                    .child("Open System Settings"),
+            )
+            .child(
+                div()
+                    .id("banner-dismiss")
+                    .flex_shrink_0()
+                    .text_size(px(12.))
+                    .text_color(theme::TEXT_TERTIARY)
+                    .cursor(CursorStyle::PointingHand)
+                    .hover(|s| s.text_color(theme::TEXT_PRIMARY))
+                    .on_click(cx.listener(Self::dismiss_accessibility_banner))
+                    .child("Dismiss"),
+            )
     }
 
     fn render_row(&self, idx: usize, item: &SearchItem) -> impl IntoElement {

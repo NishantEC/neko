@@ -122,6 +122,23 @@ pub enum Request {
     /// successfully. The daemon trusts the caller on the OS-level part of
     /// the conflict check and only owns storage + fan-out.
     CommitHotkey { candidate: HotkeyCombo },
+    /// Whether the first-run onboarding arc has been completed, and whether
+    /// the accessibility-refused banner (design report §3, step 08) has
+    /// been dismissed.
+    GetOnboardingState,
+    /// Mark onboarding finished (or, for test/reset purposes, un-finished —
+    /// see `neko`'s `NEKO_RESET_ONBOARDING` env var).
+    SetOnboardingComplete { completed: bool },
+    /// Dismiss the "accessibility is off" banner shown in the summoned
+    /// panel after onboarding, once seen. Never re-shown once dismissed,
+    /// unless accessibility is later re-declined after being re-granted.
+    DismissAccessibilityBanner,
+    /// The clipboard-history *permission* toggle onboarding asks for
+    /// (design report §3, steps 06-07). Not TCC-gated on macOS — this is
+    /// neko's own setting, not an OS grant. The seam a parallel clipboard-
+    /// history watcher reads before it starts watching `NSPasteboard`.
+    GetClipboardHistoryEnabled,
+    SetClipboardHistoryEnabled { enabled: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +149,8 @@ pub enum Response {
     Pasted,
     Hotkey { config: HotkeyConfig },
     HotkeyConflict { reason: Option<String> },
+    OnboardingState { completed: bool, accessibility_banner_dismissed: bool },
+    ClipboardHistoryEnabled { enabled: bool },
     Error { message: String },
 }
 

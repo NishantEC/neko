@@ -12,6 +12,7 @@ pub mod db;
 pub mod hotkey;
 pub mod icons;
 pub mod launch;
+pub mod onboarding;
 pub mod search;
 
 pub use agent::{AgentProvider, FakeProvider};
