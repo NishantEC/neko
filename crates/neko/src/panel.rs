@@ -251,7 +251,7 @@ impl Root {
             .items_center()
             .flex_shrink_0()
             .h(px(theme::INPUT_ROW_HEIGHT_PX))
-            .px_4()
+            .px_5()
             .gap_3()
             .text_color(theme::TEXT_PRIMARY)
             .text_size(px(18.))
@@ -266,7 +266,25 @@ impl Root {
     }
 
     fn render_content_area(&self, cx: &mut Context<Self>, query_is_empty: bool) -> impl IntoElement {
-        let mut container = div().flex().flex_col().flex_1().min_h(px(0.)).overflow_hidden();
+        // Horizontal only, deliberately: `design.css`'s `.panel-list` also
+        // takes `padding-top`/`padding-bottom`, but this container's
+        // available height is a tuned, tested budget (`fit_within_budget`
+        // below) that assumes zero vertical inset — spending any of it here
+        // would need re-deriving that budget, a materially bigger change
+        // than what this pass is fixing. The horizontal 8px is still real:
+        // it's what makes the panel's 16px corner radius and the selected
+        // row's 8px pill radius concentric (16 = 8 + 8), and what pairs with
+        // each row's own 12px padding below to match the input row's 20px
+        // inset — before this, the container had no padding at all, so rows
+        // sat flush against the panel's rounded corner and noticeably
+        // closer to the edge than the search glyph above them.
+        let mut container = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_hidden()
+            .px_2();
 
         if self.show_accessibility_banner() {
             container = container.child(self.render_accessibility_banner(cx));
@@ -362,13 +380,14 @@ impl Root {
             (_, Some(path)) => img(PathBuf::from(path))
                 .w(px(theme::ROW_ICON_PX))
                 .h(px(theme::ROW_ICON_PX))
-                .rounded(px(4.))
+                .rounded(px(theme::ROW_ICON_RADIUS_PX))
+                .bg(theme::ROW_ICON_SOCKET_BG)
                 .into_any_element(),
             (_, None) => div()
                 .w(px(theme::ROW_ICON_PX))
                 .h(px(theme::ROW_ICON_PX))
-                .rounded(px(4.))
-                .bg(rgba(0xffffff14))
+                .rounded(px(theme::ROW_ICON_RADIUS_PX))
+                .bg(theme::ROW_ICON_SOCKET_BG)
                 .into_any_element(),
         };
 
@@ -378,7 +397,7 @@ impl Root {
             .items_center()
             .flex_shrink_0()
             .h(px(theme::RESULT_ROW_HEIGHT_PX))
-            .px_2()
+            .px_3()
             .gap_3()
             .when(selected, |row| {
                 row.bg(theme::SURFACE_SELECTED).rounded(px(theme::ROW_RADIUS_PX))
@@ -412,7 +431,7 @@ impl Root {
                     .px(px(6.))
                     .py(px(2.))
                     .rounded(px(4.))
-                    .bg(rgba(0xffffff0f))
+                    .bg(theme::ROW_ICON_SOCKET_BG)
                     .text_size(px(10.))
                     .text_color(theme::TEXT_TERTIARY)
                     .child(content_kind_tag(kind))
@@ -441,9 +460,9 @@ impl Root {
             .justify_between()
             .flex_shrink_0()
             .h(px(theme::FOOTER_HEIGHT_PX))
-            .px_4()
+            .px_5()
             .border_t_1()
-            .border_color(rgba(0xffffff0f))
+            .border_color(theme::BORDER_HAIRLINE)
             .child(
                 div()
                     .flex()
@@ -461,7 +480,7 @@ impl Root {
                     .text_size(px(12.))
                     .text_color(theme::TEXT_SECONDARY)
                     .child(primary_action)
-                    .child(div().w(px(1.)).h(px(14.)).bg(rgba(0xffffff1f)))
+                    .child(div().w(px(1.)).h(px(16.)).bg(theme::BORDER_HAIRLINE_STRONG))
                     .child("Actions  ⌘K"),
             )
     }
@@ -554,7 +573,7 @@ fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
         .flex()
         .items_center()
         .h(px(theme::RESULT_ROW_HEIGHT_PX))
-        .px_4()
+        .px_3()
         .text_size(px(13.))
         .text_color(theme::TEXT_TERTIARY)
         .child(message)
@@ -566,7 +585,7 @@ fn section_header(label: &'static str) -> impl IntoElement {
         .h(px(theme::SECTION_HEADER_HEIGHT_PX))
         .flex()
         .items_center()
-        .px_2()
+        .px_3()
         .text_size(px(11.))
         .text_color(theme::TEXT_TERTIARY)
         .child(label)
