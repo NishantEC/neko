@@ -89,7 +89,7 @@ impl Root {
             };
             let _ = this.update(cx, |root, cx| {
                 if root.generation == generation {
-                    root.results = items;
+                    root.results = fit_within_budget(items, CONTENT_AREA_MIN_HEIGHT_PX);
                     root.selected = 0;
                     cx.notify();
                 }
@@ -211,13 +211,20 @@ impl Root {
             theme::TEXT_TERTIARY
         };
 
-        let icon: AnyElement = match item.icon_path.as_deref() {
-            Some(path) => img(PathBuf::from(path))
+        let icon: AnyElement = match (item.kind, item.icon_path.as_deref()) {
+            // Clipboard rows have no per-entry icon (no favicon fetching in
+            // this slice) — the content-type glyph fills the slot instead
+            // of an empty placeholder square, matching design screen 12's
+            // per-row type glyph.
+            (ResultKind::Clipboard, _) => {
+                content_kind_glyph(item.content_kind.unwrap_or(ClipboardContentKind::Text))
+            }
+            (_, Some(path)) => img(PathBuf::from(path))
                 .w(px(theme::ROW_ICON_PX))
                 .h(px(theme::ROW_ICON_PX))
                 .rounded(px(4.))
                 .into_any_element(),
-            None => div()
+            (_, None) => div()
                 .w(px(theme::ROW_ICON_PX))
                 .h(px(theme::ROW_ICON_PX))
                 .rounded(px(4.))
@@ -320,6 +327,38 @@ impl Root {
     }
 }
 
+/// Trims `results` to the prefix that renders within `budget_px` without
+/// ever showing a partial row or a section header with no row beneath it.
+///
+/// The panel is a fixed-size window (see this module's own doc comment) —
+/// there's no scroll machinery and dynamic resize is an explicit non-goal —
+/// so unlike a scrollable list, anything that doesn't fit has to be dropped
+/// here rather than merely clipped by `overflow_hidden()` on the content
+/// container, which would otherwise render the last row half-visible right
+/// against the footer. `results` is assumed already grouped by `kind`
+/// (the daemon emits apps before clipboard) — a header's cost is only
+/// charged on the first row of each contiguous run.
+fn fit_within_budget(results: Vec<SearchItem>, budget_px: f32) -> Vec<SearchItem> {
+    let mut used_px = 0.0f32;
+    let mut kept = 0usize;
+    let mut current_kind = None;
+    for item in &results {
+        let header_cost = if current_kind != Some(item.kind) {
+            theme::SECTION_HEADER_HEIGHT_PX
+        } else {
+            0.0
+        };
+        let cost = header_cost + theme::RESULT_ROW_HEIGHT_PX;
+        if used_px + cost > budget_px {
+            break;
+        }
+        used_px += cost;
+        current_kind = Some(item.kind);
+        kept += 1;
+    }
+    results.into_iter().take(kept).collect()
+}
+
 fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
     // Step 10 of onboarding's own sequence: "a one-line tip stands in for a
     // blank list" — the same principle applies to steady-state empty
@@ -344,7 +383,7 @@ fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
 fn section_header(label: &'static str) -> impl IntoElement {
     div()
         .flex_shrink_0()
-        .h(px(28.))
+        .h(px(theme::SECTION_HEADER_HEIGHT_PX))
         .flex()
         .items_center()
         .px_2()
@@ -369,6 +408,57 @@ fn content_kind_tag(kind: ClipboardContentKind) -> &'static str {
     }
 }
 
+/// A small hand-painted glyph for the clipboard row-icon slot, in the same
+/// spirit as `search_glyph` below (a painted shape composed from plain
+/// divs, not a font glyph or an SVG asset — this codebase has no bundled
+/// icon-asset pipeline, and a Unicode symbol is exactly what the design
+/// report's §6 finding on unreliable glyph rendering in GPUI already ruled
+/// out for the search icon).
+fn content_kind_glyph(kind: ClipboardContentKind) -> AnyElement {
+    let slot = div().w(px(theme::ROW_ICON_PX)).h(px(theme::ROW_ICON_PX)).flex_shrink_0();
+    match kind {
+        // Three stacked bars of decreasing width — a plain "lines of text"
+        // mark.
+        ClipboardContentKind::Text => slot
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(2.))
+            .child(div().w(px(12.)).h(px(1.5)).rounded(px(1.)).bg(theme::TEXT_TERTIARY))
+            .child(div().w(px(9.)).h(px(1.5)).rounded(px(1.)).bg(theme::TEXT_TERTIARY))
+            .child(div().w(px(12.)).h(px(1.5)).rounded(px(1.)).bg(theme::TEXT_TERTIARY))
+            .into_any_element(),
+        // Two overlapping rounded-square rings on a diagonal — a chain-link
+        // mark.
+        ClipboardContentKind::Link => slot
+            .relative()
+            .child(
+                div()
+                    .absolute()
+                    .top(px(3.))
+                    .left(px(2.))
+                    .w(px(11.))
+                    .h(px(11.))
+                    .rounded(px(3.))
+                    .border_2()
+                    .border_color(theme::TEXT_TERTIARY),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .bottom(px(3.))
+                    .right(px(2.))
+                    .w(px(11.))
+                    .h(px(11.))
+                    .rounded(px(3.))
+                    .border_2()
+                    .border_color(theme::TEXT_TERTIARY),
+            )
+            .into_any_element(),
+    }
+}
+
 fn search_glyph() -> impl IntoElement {
     // A hand-drawn glyph rather than a font character: the design report's
     // §6 finding that the ⌥ modifier glyph has no reliable font rendering
@@ -381,4 +471,62 @@ fn search_glyph() -> impl IntoElement {
         .rounded_full()
         .border_2()
         .border_color(theme::TEXT_TERTIARY)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(kind: ResultKind) -> SearchItem {
+        SearchItem {
+            id: "x".into(),
+            kind,
+            title: "x".into(),
+            subtitle: None,
+            icon_path: None,
+            content_kind: None,
+            accessory: None,
+        }
+    }
+
+    #[test]
+    fn six_apps_and_a_clipboard_row_fit_within_budget_without_a_partial_row() {
+        // The exact shape that produced a half-clipped row: a query
+        // matching 6 apps plus 1 clipboard entry needs 2 headers + 7 rows
+        // (56 + 280 = 336px) against the fixed 320px content budget.
+        let mut results: Vec<SearchItem> = (0..6).map(|_| item(ResultKind::App)).collect();
+        results.push(item(ResultKind::Clipboard));
+
+        let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
+
+        // The clipboard section's header would push total height past the
+        // budget, so it — and its one row — are dropped entirely rather
+        // than rendering a header with no row, or a partially visible row.
+        assert_eq!(fitted.len(), 6);
+        assert!(fitted.iter().all(|i| i.kind == ResultKind::App));
+    }
+
+    #[test]
+    fn a_full_page_of_a_single_section_never_exceeds_the_budget() {
+        let results: Vec<SearchItem> = (0..RESULT_LIMIT).map(|_| item(ResultKind::App)).collect();
+        let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
+        let total_height = theme::SECTION_HEADER_HEIGHT_PX + fitted.len() as f32 * theme::RESULT_ROW_HEIGHT_PX;
+        assert!(
+            total_height <= CONTENT_AREA_MIN_HEIGHT_PX,
+            "{} rows + a header ({total_height}px) must fit in {CONTENT_AREA_MIN_HEIGHT_PX}px",
+            fitted.len()
+        );
+    }
+
+    #[test]
+    fn results_that_already_fit_are_returned_unchanged() {
+        let results = vec![item(ResultKind::App), item(ResultKind::Clipboard)];
+        let fitted = fit_within_budget(results.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
+        assert_eq!(fitted, results);
+    }
+
+    #[test]
+    fn empty_results_stay_empty() {
+        assert_eq!(fit_within_budget(Vec::new(), CONTENT_AREA_MIN_HEIGHT_PX), Vec::new());
+    }
 }
