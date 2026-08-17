@@ -828,13 +828,34 @@ capturing real, non-empty search results without synthetic OS keystrokes.
 case `AGENTS.md`'s "Testing caveat" already documented** — a `System
 Events` `keystroke` sent to the frontmost process right after this
 window's own `activate_window()` call landed on the wrong process in
-practice (confirmed live: the query field stayed empty). When a query is
-set, `show_once` prints `neko: ready for evidence setup` and waits 2s
-before typing it — a deterministic "go" signal an outside script can watch
-for to seed a real clipboard entry first (the pasteboard is systemwide,
-not scoped to any per-run isolated `HOME`), so the captured query can
-demonstrate a genuine clipboard match alongside apps and files, not just
-two of the three.
+practice (confirmed live: the query field stayed empty).
+
+Timing, precisely: when a query is set, `show_once` prints `neko: ready
+for evidence setup` immediately (a deterministic "go" signal an outside
+script can watch for — the pasteboard is systemwide, not scoped to any
+per-run isolated `HOME`, so this is the moment to seed a real clipboard
+entry), waits 2s, then applies the query; because that re-runs search the
+same way a keystroke does, a second 3.5s wait follows before the
+window-number line prints (the actual "now capture" signal), covering
+`files::QUERY_TIMEOUT`'s worst case plus real scheduling variance.
+
+**The recipe above is proven deterministic, not just plausible — a
+five-run repeat, each in a fresh isolated `HOME`, each copying a unique
+token to the clipboard the instant `ready for evidence setup` appears in
+the log, passed 5/5**, all three sections (Applications, Files, Clipboard)
+rendering correctly every time. The investigation that produced this
+proof is itself worth recording: an earlier round of ad-hoc verification
+runs saw the Clipboard section intermittently missing, and two rounds of
+debugging chased it as a possible timing race before the actual cause
+surfaced — the *verification token itself* (`"racetok1_...", "diagtok_...`)
+didn't contain the query's characters in order, so `fuzzy_score` correctly
+never matched it; a harness bug, not a product one. The lesson generalizes
+beyond this one hook: when a search-driven test fails intermittently,
+verify the query is capable of matching the fixture *before* suspecting
+the ranking or timing code — a `python3 -c` one-liner reimplementing
+`fuzzy_score`'s subsequence check against the exact fixture string is
+faster than another round of live capture, and would have caught this
+immediately.
 
 ## Third-party UI code: evaluated, then narrowly vendored
 
