@@ -44,6 +44,16 @@ handshake state required. `neko`'s `daemon_launcher` module spawns
 no-op — it pings the existing socket and exits quietly if something already
 answers, or takes over a stale socket file if nothing does.
 
+Note for concurrent dev testing: `socket_path()`/`database_path()` are fixed
+per-user paths (`~/Library/Application Support/neko/`), not per-worktree —
+correct for a real single install, but if another agent/worktree building
+this same repo is testing its own `neko`/`neko-daemon` at the same time on
+the same machine, you'll transparently be talking to *their* daemon (or vice
+versa) via the singleton check above, and a crash report for "neko" in
+Console/`~/Library/Logs/DiagnosticReports/` may not be yours. Check
+`pgrep -fl neko-daemon` and match the binary's actual path before assuming a
+daemon-related failure is this worktree's bug.
+
 **The live OS-level hotkey registration happens in the client, not the
 daemon**, even though the daemon owns and persists the *setting*
 (`neko_core::hotkey`, a `settings` KV table). This looked like it could go
