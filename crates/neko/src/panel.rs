@@ -431,36 +431,58 @@ impl Root {
     }
 }
 
-/// Trims `results` to the prefix that renders within `budget_px` without
-/// ever showing a partial row or a section header with no row beneath it.
+/// Trims `results` to what renders within `budget_px` without ever showing
+/// a partial row or a section header with no row beneath it — and, when
+/// there's a matching clipboard entry, without ever letting a long run of
+/// app matches crowd it out of the panel entirely.
 ///
 /// The panel is a fixed-size window (see this module's own doc comment) —
 /// there's no scroll machinery and dynamic resize is an explicit non-goal —
 /// so unlike a scrollable list, anything that doesn't fit has to be dropped
 /// here rather than merely clipped by `overflow_hidden()` on the content
 /// container, which would otherwise render the last row half-visible right
-/// against the footer. `results` is assumed already grouped by `kind`
-/// (the daemon emits apps before clipboard) — a header's cost is only
-/// charged on the first row of each contiguous run.
+/// against the footer.
+///
+/// The reservation: if `results` contains any clipboard entry, the
+/// applications section is capped to whatever's left of `budget_px` after
+/// setting aside one section header plus one row (the top clipboard
+/// result) — a fixed reservation, not dynamic resizing, so apps and
+/// clipboard genuinely share the same list per the brief rather than apps
+/// silently winning every time enough of them match. If apps use less than
+/// their capped share, clipboard gets the difference too — the two
+/// `fit_section` calls below just spend whatever budget is actually left
+/// after the previous section, in order.
 fn fit_within_budget(results: Vec<SearchItem>, budget_px: f32) -> Vec<SearchItem> {
-    let mut used_px = 0.0f32;
-    let mut kept = 0usize;
-    let mut current_kind = None;
-    for item in &results {
-        let header_cost = if current_kind != Some(item.kind) {
-            theme::SECTION_HEADER_HEIGHT_PX
-        } else {
-            0.0
-        };
-        let cost = header_cost + theme::RESULT_ROW_HEIGHT_PX;
-        if used_px + cost > budget_px {
-            break;
-        }
-        used_px += cost;
-        current_kind = Some(item.kind);
-        kept += 1;
+    let (apps, clipboard): (Vec<SearchItem>, Vec<SearchItem>) =
+        results.into_iter().partition(|item| item.kind == ResultKind::App);
+
+    let reserved_for_clipboard = if clipboard.is_empty() {
+        0.0
+    } else {
+        theme::SECTION_HEADER_HEIGHT_PX + theme::RESULT_ROW_HEIGHT_PX
+    };
+
+    let (apps_kept, apps_used_px) = fit_section(&apps, budget_px - reserved_for_clipboard);
+    let (clipboard_kept, _) = fit_section(&clipboard, budget_px - apps_used_px);
+
+    apps.into_iter()
+        .take(apps_kept)
+        .chain(clipboard.into_iter().take(clipboard_kept))
+        .collect()
+}
+
+/// How many leading items of one same-kind, contiguous section fit within
+/// `budget_px` (a header, charged once if anything is kept, plus one row
+/// per item), and the pixel height they use.
+fn fit_section(items: &[SearchItem], budget_px: f32) -> (usize, f32) {
+    let header_and_one_row = theme::SECTION_HEADER_HEIGHT_PX + theme::RESULT_ROW_HEIGHT_PX;
+    if items.is_empty() || budget_px < header_and_one_row {
+        return (0, 0.0);
     }
-    results.into_iter().take(kept).collect()
+    let rows_that_fit =
+        ((budget_px - theme::SECTION_HEADER_HEIGHT_PX) / theme::RESULT_ROW_HEIGHT_PX).floor() as usize;
+    let kept = rows_that_fit.min(items.len());
+    (kept, theme::SECTION_HEADER_HEIGHT_PX + kept as f32 * theme::RESULT_ROW_HEIGHT_PX)
 }
 
 fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
@@ -594,32 +616,59 @@ mod tests {
     }
 
     #[test]
-    fn six_apps_and_a_clipboard_row_fit_within_budget_without_a_partial_row() {
-        // The exact shape that produced a half-clipped row: a query
-        // matching 6 apps plus 1 clipboard entry needs 2 headers + 7 rows
-        // (56 + 280 = 336px) against the fixed 320px content budget.
+    fn six_apps_and_a_clipboard_row_still_show_the_clipboard_row() {
+        // The exact shape that first produced a half-clipped row, and then
+        // (after fixing that) produced a dropped-entirely clipboard
+        // section: 6 apps plus 1 clipboard entry, against the fixed 320px
+        // content budget. The clipboard reservation means the app section
+        // gives up a row rather than the clipboard section losing its only
+        // one.
         let mut results: Vec<SearchItem> = (0..6).map(|_| item(ResultKind::App)).collect();
         results.push(item(ResultKind::Clipboard));
 
         let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
 
-        // The clipboard section's header would push total height past the
-        // budget, so it — and its one row — are dropped entirely rather
-        // than rendering a header with no row, or a partially visible row.
-        assert_eq!(fitted.len(), 6);
-        assert!(fitted.iter().all(|i| i.kind == ResultKind::App));
+        let apps_kept = fitted.iter().filter(|i| i.kind == ResultKind::App).count();
+        let clipboard_kept = fitted.iter().filter(|i| i.kind == ResultKind::Clipboard).count();
+        assert_eq!(clipboard_kept, 1, "the top clipboard result must always be visible when one matched");
+        assert_eq!(apps_kept, 5, "apps give up one row to make room, not zero clipboard rows");
+        // Still no partial row and no dangling header: total height fits.
+        let total_height = theme::SECTION_HEADER_HEIGHT_PX * 2.0
+            + (apps_kept + clipboard_kept) as f32 * theme::RESULT_ROW_HEIGHT_PX;
+        assert!(total_height <= CONTENT_AREA_MIN_HEIGHT_PX);
+        // Order is preserved: apps first, clipboard after — matches how
+        // `render_content_area` detects section boundaries.
+        assert_eq!(fitted.last().unwrap().kind, ResultKind::Clipboard);
     }
 
     #[test]
-    fn a_full_page_of_a_single_section_never_exceeds_the_budget() {
+    fn many_more_app_matches_still_cannot_crowd_clipboard_out_entirely() {
+        let mut results: Vec<SearchItem> = (0..20).map(|_| item(ResultKind::App)).collect();
+        results.push(item(ResultKind::Clipboard));
+        let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
+        assert!(fitted.iter().any(|i| i.kind == ResultKind::Clipboard));
+    }
+
+    #[test]
+    fn clipboard_gets_the_app_sections_unused_budget_too() {
+        // Only 1 app matched, so it can't use its whole reserved-against
+        // share — the rest of the budget (not just the 1-row reservation)
+        // should go to clipboard.
+        let mut results = vec![item(ResultKind::App)];
+        results.extend((0..3).map(|_| item(ResultKind::Clipboard)));
+        let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
+        let clipboard_kept = fitted.iter().filter(|i| i.kind == ResultKind::Clipboard).count();
+        assert_eq!(clipboard_kept, 3);
+    }
+
+    #[test]
+    fn a_pure_app_query_is_unaffected_by_the_clipboard_reservation() {
+        // No clipboard entries at all -> no reservation taken -> same
+        // count a pure app-only search produced before clipboard existed
+        // (7 of 8 requested fit once the one header is charged).
         let results: Vec<SearchItem> = (0..RESULT_LIMIT).map(|_| item(ResultKind::App)).collect();
         let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
-        let total_height = theme::SECTION_HEADER_HEIGHT_PX + fitted.len() as f32 * theme::RESULT_ROW_HEIGHT_PX;
-        assert!(
-            total_height <= CONTENT_AREA_MIN_HEIGHT_PX,
-            "{} rows + a header ({total_height}px) must fit in {CONTENT_AREA_MIN_HEIGHT_PX}px",
-            fitted.len()
-        );
+        assert_eq!(fitted.len(), 7);
     }
 
     #[test]
