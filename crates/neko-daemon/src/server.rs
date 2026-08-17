@@ -108,21 +108,20 @@ fn handle_request(state: &AppState, request: Request) -> Response {
                 )
             };
 
-            let mut items = neko_core::search::rank_apps(&query, &apps, &recency, now, limit);
-            // Clipboard results fill whatever's left of `limit` after apps —
-            // apps stay the primary result type (unchanged from the
-            // app-only slice), clipboard is additive within the same
-            // server-capped list per `AGENTS.md`'s "just another result
-            // type in the same fast list."
+            // Rank clipboard first so we know whether to reserve it a slot
+            // — apps are still the primary result type, but must never
+            // crowd clipboard out of the *response* entirely when there's
+            // a matching entry (the panel's own `fit_within_budget` makes
+            // the final call on how many of each actually render).
+            let clipboard_matches = neko_core::search::rank_clipboard(&query, &clipboard_entries, now, limit);
+            let app_limit = if clipboard_matches.is_empty() {
+                limit
+            } else {
+                limit.saturating_sub(1)
+            };
+            let mut items = neko_core::search::rank_apps(&query, &apps, &recency, now, app_limit);
             let remaining = limit.saturating_sub(items.len());
-            if remaining > 0 {
-                items.extend(neko_core::search::rank_clipboard(
-                    &query,
-                    &clipboard_entries,
-                    now,
-                    remaining,
-                ));
-            }
+            items.extend(clipboard_matches.into_iter().take(remaining));
             Response::SearchResults { items }
         }
 
@@ -250,4 +249,60 @@ fn error_response(e: impl std::fmt::Display) -> Response {
 fn broadcast(state: &AppState, event: &Event) {
     let mut writers = state.broadcast.lock().unwrap();
     writers.retain_mut(|w| write_frame(w, &Frame::Event(event.clone())).is_ok());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use neko_protocol::{ClipboardContentKind, ResultKind};
+
+    fn app(name: &str) -> AppEntry {
+        AppEntry {
+            id: name.to_string(),
+            name: name.to_string(),
+            path: std::path::PathBuf::from(format!("/Applications/{name}.app")),
+        }
+    }
+
+    #[test]
+    fn a_clipboard_match_is_never_crowded_out_of_the_response_by_many_app_matches() {
+        let db = Db::open_in_memory().unwrap();
+        neko_core::clipboard::record_entry(&db, "co-worker-notes", ClipboardContentKind::Text, None, 1000).unwrap();
+
+        // 10 apps that all fuzzy-match "co" — comfortably more than the
+        // server's own `limit`, the exact shape that used to leave 0 room
+        // for clipboard in the response itself (not just on screen).
+        let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
+        let state = AppState::new(db, apps);
+
+        let response = handle_request(
+            &state,
+            Request::Search { query: "co".into(), limit: 8 },
+        );
+        let Response::SearchResults { items } = response else {
+            panic!("expected SearchResults")
+        };
+
+        assert!(
+            items.iter().any(|i| i.kind == ResultKind::Clipboard),
+            "a clipboard match must survive in the response even when apps alone would fill `limit`"
+        );
+        assert!(items.len() <= 8);
+    }
+
+    #[test]
+    fn a_pure_app_query_still_returns_the_full_limit() {
+        let db = Db::open_in_memory().unwrap();
+        let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
+        let state = AppState::new(db, apps);
+
+        let response = handle_request(
+            &state,
+            Request::Search { query: "co".into(), limit: 8 },
+        );
+        let Response::SearchResults { items } = response else {
+            panic!("expected SearchResults")
+        };
+        assert_eq!(items.len(), 8);
+    }
 }
