@@ -33,7 +33,7 @@ use gpui::{
     App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, IntoElement,
     KeyDownEvent, ParentElement, Render, SharedString, Styled, Timer, TitlebarOptions, Window,
     WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, actions,
-    div, point, prelude::*, px, rgba, size,
+    div, point, prelude::*, px, size,
 };
 use neko_client::NekoClient;
 use neko_protocol::{HotkeyCombo, Modifier as ProtoModifier, Request, Response};
@@ -869,7 +869,7 @@ fn permission_row(title: &'static str, description: &'static str) -> impl IntoEl
                 .h(px(30.))
                 .flex_shrink_0()
                 .rounded(px(6.))
-                .bg(rgba(0xf0e6da0f)),
+                .bg(theme::ROW_ICON_SOCKET_BG),
         )
         .child(
             div()
@@ -888,7 +888,7 @@ fn permission_row(title: &'static str, description: &'static str) -> impl IntoEl
 }
 
 fn icon_badge() -> impl IntoElement {
-    div().w(px(44.)).h(px(44.)).rounded(px(10.)).bg(rgba(0xf0e6da0f))
+    div().w(px(44.)).h(px(44.)).rounded(px(10.)).bg(theme::ROW_ICON_SOCKET_BG)
 }
 
 enum PillTone {
@@ -900,8 +900,8 @@ enum PillTone {
 fn status_pill(label: impl Into<SharedString>, tone: PillTone) -> impl IntoElement {
     let (dot_color, border_color) = match tone {
         PillTone::Pending => (theme::TEXT_TERTIARY, theme::BORDER_HAIRLINE_STRONG),
-        PillTone::Success => (theme::STATE_SUCCESS, rgba(0x61bd6759)),
-        PillTone::Danger => (theme::STATE_DANGER, rgba(0xe96e5059)),
+        PillTone::Success => (theme::STATE_SUCCESS, theme::STATE_SUCCESS_BORDER),
+        PillTone::Danger => (theme::STATE_DANGER, theme::STATE_DANGER_BORDER),
     };
     div()
         .flex()
@@ -927,7 +927,7 @@ fn keycap_shell() -> gpui::Div {
         .h(px(52.))
         .px_3p5()
         .rounded(px(12.))
-        .bg(rgba(0x2a221aff))
+        .bg(theme::KEYCAP_SHELL_BG)
         .border_1()
         .border_color(theme::BORDER_HAIRLINE_STRONG)
         .flex()

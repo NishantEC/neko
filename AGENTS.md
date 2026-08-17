@@ -26,6 +26,9 @@ would actually launch — see "Application discovery" below. A fifth task
 replaced the `WindowBackgroundAppearance::Blurred` placeholder with real
 native window material — `NSGlassEffectView` ("Liquid Glass") where the OS
 ships it, an honest fallback chain beneath it — see "Window material"
+below. A sixth task re-toned the palette from the original warm ramp to a
+cool monochrome-with-a-hint-of-blue one, on direct captain instruction —
+pure colour values, no geometry/layout/copy change — see "Design tokens"
 below. Still not built: the WASM extension system, agent capability. See
 "Seams for follow-up work" below for exactly where each plugs in.
 
@@ -519,28 +522,46 @@ change. Apache-2.0 attribution: `NOTICE`, `THIRD_PARTY_LICENSES/gpui-component-A
 
 ## Design tokens
 
-`crates/neko/src/theme.rs` is `data/neko-design/report.md` §1's token table as
-literal Rust constants (the report's own `sRGB` hex column, not re-derived),
-cross-checked in a test against an independently-implemented OKLCH→sRGB
-conversion — all 8 base-palette tokens matched exactly; nothing in the table
-looked wrong. The identity accent (`ACCENT`, `#efa831`, direction A "amber
-eye") is the one named constant the captain asked for — swapping it for
-direction B or C is a one-line change in that file. It's intentionally unused
-by any paint path right now: the report's colour-identity pick is still open,
-and v1 ships in the base neutral palette until the captain picks one.
+`crates/neko/src/theme.rs` is the token table as literal Rust constants,
+cross-checked in a test (`theme::tests::base_palette_matches_the_frozen_oklch_table`)
+against an independently-implemented OKLCH→sRGB conversion. **The palette is
+cool, not warm — re-toned from `data/neko-design/report.md` §1's original
+warm ramp** (hue 65°–75°) to a monochrome-with-a-hint-of-blue ramp (hue
+252°–257°) on direct captain instruction: offered three cat-derived identity
+directions (amber eye, jade eye, copper coat), he picked none of them —
+*"lets do monochrome with hint of blue."* That closed the report's own
+"Open: the colour-identity pick" question for good; there is **no accent
+token in this file any more** (`ACCENT` was removed — it was unused by any
+paint path, and its only reason to exist, an unmade identity-accent pick,
+no longer applies). `docs/evidence/palette-retone-report.md` has the full
+before/after OKLCH/sRGB/contrast table, same shape as the original report's
+§1 for direct comparison — read that before touching palette values again.
+Two things worth knowing without re-deriving them: `text_tertiary` carries
+more contrast margin than a pure hue swap would give it (5.23:1 vs. the
+warm ramp's barely-AA 4.53:1), specifically because `data/neko-native-material/
+report.md` §6 measured the Popover material fallback (`material.rs`)
+trimming placeholder-text contrast by ~6% — the old value would have failed
+AA on that path; and `surface_selected`'s L moved slightly (0.37→0.35) to
+close a real pre-existing contrast bug (`text_tertiary`-on-`surface_selected`'s
+promoted-to-`text_secondary` workaround measured 4.20:1 in the original warm
+ramp — under the 4.5:1 AA floor despite the original report calling it
+"passing" — now 4.81:1, a genuine pass).
 
 **Row/icon rendering drifted from `design.css` once real data (147 Spotlight
 apps, mixed-padding icon assets) exercised it** — `docs/evidence/panel-craft-pass.md`
 has the full before/after value table (icon corner radius and backing-plate
 token, row/section/input-row/footer padding, footer hairline tokens). The
-durable lesson: `theme::ROW_ICON_SOCKET_BG` (`design.css`'s `rgba(240,230,218,0.06)`,
-`TEXT_PRIMARY`'s hex, not a neutral white) is the row-icon slot's backing
-plate for *every* icon, cached or not — real macOS icon assets bake in
-wildly different amounts of transparent padding per app, and a consistent
-warm-tinted socket behind all of them is what makes a list of them read as
-one system instead of "mismatched brightness/shapes." Any future icon-slot
-work should keep painting this background rather than reverting to a bare
-`img()`.
+durable lesson: `theme::ROW_ICON_SOCKET_BG` (`TEXT_PRIMARY`'s hex at 6%
+alpha) is the row-icon slot's backing plate for *every* icon, cached or not
+— real macOS icon assets bake in wildly different amounts of transparent
+padding per app, and a consistent tinted socket behind all of them is what
+makes a list of them read as one system instead of "mismatched
+brightness/shapes." Any future icon-slot work should keep painting this
+background rather than reverting to a bare `img()`. `panel.rs` and
+`onboarding/view.rs` should have zero raw `rgba(0x......)` colour literals —
+if you find one, it's a fresh instance of the same drift the palette re-tone
+task cleaned up (`docs/evidence/palette-retone-report.md` §4); move it into
+`theme.rs` as a named token rather than leaving it inline.
 
 ## Window material
 

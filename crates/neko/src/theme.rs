@@ -1,23 +1,32 @@
 // This module is "the token table as a real Rust module" in full, not just
 // the subset this v1 slice happens to paint: `SURFACE_RAISED` is mouse-hover
 // only (rows are keyboard-first here), `STATE_SUCCESS`/`STATE_DANGER` are
-// onboarding's permission-granted/denied colours, `ACCENT` ships unused by
-// design (the report: the identity-accent pick is open and v1 "ships in the
-// base neutral palette above until a pick is made"), and
+// onboarding's permission-granted/denied colours, and
 // `PANEL_WIDTH_WITH_DETAIL_PX` is the clipboard-detail-pane width, a later
 // feature. Keeping the full table here — correct and ready — beats trimming
 // it to only what's painted today and redefining it piecemeal later.
 #![allow(dead_code)]
 
-//! The frozen design tokens from `data/neko-design/report.md` §1, expressed
-//! for GPUI. Every `Rgba` below is the table's own `sRGB` column, copied
-//! verbatim — not re-derived — so there is exactly one place a mismatch
-//! with the report could hide, and the test at the bottom of this file
-//! checks it against an independent OKLCH→sRGB implementation.
+//! The frozen design tokens from `data/neko-design/report.md` §1, re-toned
+//! per the captain's own instruction — offered three cat-derived identity
+//! directions (amber eye, jade eye, copper coat), he chose none of them:
+//! *"lets do monochrome with hint of blue."* That closed the open
+//! colour-identity question from the report's §1 "Open" note for good — no
+//! accent token exists in this file any more, and none should be
+//! reintroduced without a fresh captain decision. Geometry, layout, and
+//! every non-colour constant below are untouched; this is a re-tone, not a
+//! redesign.
 //!
-//! GPUI has no live `color-mix()`/OKLCH interpolation (see report §6), so
-//! every token here is a plain constant, the same shape `comet`'s `Theme`
-//! module uses (read for architecture only, not copied — see `AGENTS.md`).
+//! Every `Rgba` is generated from an OKLCH triple via Björn Ottosson's
+//! OKLab→linear-sRGB matrices, the same method and hand-computed precision
+//! the original report used, hue held in a tight band (252°–257°, a true
+//! blue — pure sRGB blue is ~264° in this space) across the whole neutral
+//! ramp so it reads as one cool, low-chroma system rather than a mix. GPUI
+//! has no live `color-mix()`/OKLCH interpolation (see report §6), so every
+//! token here is a plain constant, the same shape `comet`'s `Theme` module
+//! uses (read for architecture only, not copied — see `AGENTS.md`). The
+//! test at the bottom of this file checks every value against an
+//! independently-implemented OKLCH→sRGB conversion.
 
 use gpui::Rgba;
 
@@ -42,7 +51,7 @@ const fn rgba_const(hex: u32, a: f32) -> Rgba {
     }
 }
 
-pub const SURFACE_PANEL: Rgba = rgb_const(0x110c07);
+pub const SURFACE_PANEL: Rgba = rgb_const(0x090e13);
 /// `SURFACE_PANEL`'s own RGB, at reduced alpha — the panel's fill when a
 /// native material (`material.rs`) is behind the window. This is what
 /// makes the material visible at all: GPUI renders this `div`'s fill on
@@ -62,36 +71,71 @@ pub const SURFACE_PANEL: Rgba = rgb_const(0x110c07);
 /// own fully-opaque, already-OKLCH-verified numbers (this file's own test,
 /// below). Re-verify with a real screenshot once a safe capture path exists
 /// for this machine, rather than trusting this reasoning indefinitely.
-pub const SURFACE_PANEL_TRANSLUCENT: Rgba = rgba_const(0x110c07, 0.82);
-pub const SURFACE_RAISED: Rgba = rgb_const(0x1b150e);
-pub const SURFACE_SELECTED: Rgba = rgb_const(0x473e33);
-pub const TEXT_PRIMARY: Rgba = rgb_const(0xf0e6da);
-pub const TEXT_SECONDARY: Rgba = rgb_const(0xafa294);
-pub const TEXT_TERTIARY: Rgba = rgb_const(0x84786d);
+pub const SURFACE_PANEL_TRANSLUCENT: Rgba = rgba_const(0x090e13, 0.82);
+pub const SURFACE_RAISED: Rgba = rgb_const(0x11161d);
+pub const SURFACE_SELECTED: Rgba = rgb_const(0x333b46);
+pub const TEXT_PRIMARY: Rgba = rgb_const(0xe0e9f6);
+pub const TEXT_SECONDARY: Rgba = rgb_const(0x9faab9);
+/// Lifted from the warm ramp's `oklch(0.58 0.022 65)` to `oklch(0.615 0.024
+/// 252)` — L +0.035, one step beyond a hue swap. `data/neko-native-material
+/// /report.md` §6 measured this app's own worst-case material (the Popover
+/// fallback, `material.rs`) reducing placeholder-text contrast to ~94% of
+/// opaque (6.08:1 vs. 6.46:1 baseline in that report's own sampling). The
+/// original warm tertiary sat at exactly 4.53:1 against the panel — barely
+/// over WCAG AA's 4.5:1 floor already, so a ~6% translucency haircut would
+/// have put it under AA on the real (non-Glass) fallback path. This token
+/// now measures **5.23:1** opaque (this file's own test), which survives
+/// that same worst-case reduction with room to spare (~4.9:1) while still
+/// reading distinctly dimmer than `text_secondary`'s 8.23:1 — the
+/// hierarchy between the two tiers is preserved, tertiary just no longer
+/// lives right at the failure line.
+pub const TEXT_TERTIARY: Rgba = rgb_const(0x7b8693);
 pub const STATE_SUCCESS: Rgba = rgb_const(0x61bd67);
 pub const STATE_DANGER: Rgba = rgb_const(0xe96e50);
 
 /// A selected row promotes its accessory text from `text_tertiary` to
 /// `text_secondary` — the one scoped exception called out in the report
-/// (`text_tertiary` on `surface_selected` measures 2.44:1, failing AA; the
-/// promoted colour measures 4.2:1). Not a new token, a paint-path rule.
+/// (`text_tertiary` on `surface_selected` measures 3.06:1, failing AA). The
+/// promoted colour now measures **4.81:1**, a genuine AA pass — the warm
+/// ramp's equivalent pair measured 4.20:1, which the original report
+/// called "passing" but was in fact just under the 4.5:1 floor; re-toning
+/// gave `surface_selected` a slightly lower L (0.37 → 0.35) specifically to
+/// close that gap for real rather than carry the same near-miss forward.
+/// Not a new token, a paint-path rule.
 pub const TEXT_TERTIARY_ON_SELECTED: Rgba = TEXT_SECONDARY;
-
-/// The captain's chosen identity direction — §1 "Direction A — Amber eye".
-/// Two directions (jade, copper) were left open in the report; this is the
-/// single seam to change if he picks a different one later.
-pub const ACCENT: Rgba = rgb_const(0xefa831);
 
 /// Decorative dividers only, per the report's own note on this token —
 /// never a load-bearing boundary. Onboarding's dialog chrome (header/footer
 /// hairlines, permission-row outlines, keycap borders) is the first paint
 /// path in this codebase to use these as named tokens rather than an inline
 /// `rgba(0xffffff__)` literal.
-pub const BORDER_HAIRLINE: Rgba = rgba_const(0xeee3d7, 0.08);
-pub const BORDER_HAIRLINE_STRONG: Rgba = rgba_const(0xeee3d7, 0.16);
+pub const BORDER_HAIRLINE: Rgba = rgba_const(0xd7dfea, 0.08);
+pub const BORDER_HAIRLINE_STRONG: Rgba = rgba_const(0xd7dfea, 0.16);
 
 /// Text sitting on a `TEXT_PRIMARY` fill (the primary button's own label).
-pub const TEXT_ON_LIGHT: Rgba = rgb_const(0x14100a);
+pub const TEXT_ON_LIGHT: Rgba = rgb_const(0x0b1015);
+
+/// Onboarding's keycap chip background (`keycap_shell()` in `view.rs`) —
+/// previously an inline `rgba(0x2a221aff)` literal never routed through
+/// this module. Moved in during the blue re-tone: `oklch(0.255 0.020 255)`,
+/// sitting between `SURFACE_RAISED` and `SURFACE_SELECTED` in lightness,
+/// matching the same relationship the original literal had to the warm
+/// ramp's equivalent surfaces.
+pub const KEYCAP_SHELL_BG: Rgba = rgb_const(0x1c232c);
+
+/// The accessibility-declined banner's background (`render_accessibility_banner`
+/// in `panel.rs`) — previously an inline `rgba(0xe96e5014)` literal, moved
+/// in during the blue re-tone. Same `STATE_DANGER` hue at the same ~7.8%
+/// alpha the original literal used; `STATE_DANGER` itself is unchanged (see
+/// module doc comment: state colours are re-toned only if they clash with
+/// the cool base, and red-orange against a blue-grey base doesn't).
+pub const BANNER_DANGER_BG: Rgba = rgba_const(0xe96e50, 0.078_431_37);
+
+/// Status-pill borders (`status_pill` in `onboarding/view.rs`) — previously
+/// inline `rgba(0x61bd6759)`/`rgba(0xe96e5059)` literals, moved in during
+/// the blue re-tone at the same ~34.9% alpha the originals used.
+pub const STATE_SUCCESS_BORDER: Rgba = rgba_const(0x61bd67, 0.349_019_6);
+pub const STATE_DANGER_BORDER: Rgba = rgba_const(0xe96e50, 0.349_019_6);
 
 pub const PANEL_RADIUS_PX: f32 = 16.0;
 pub const ROW_RADIUS_PX: f32 = 8.0;
@@ -114,11 +158,11 @@ pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
 /// (`NSWorkspace.iconForFile`) commonly bake in their own transparent
 /// padding at wildly different ratios per app, so a raw icon floats at an
 /// inconsistent visual size with nothing to anchor it against the dark
-/// panel. A shared, low-alpha, *warm*-tinted socket (not a neutral white)
-/// gives every icon the same backing plate regardless of how much of its
-/// own padding shows through — the fix for icons reading as "bright stamps"
+/// panel. A shared, low-alpha, tinted socket (not a neutral white) gives
+/// every icon the same backing plate regardless of how much of its own
+/// padding shows through — the fix for icons reading as "bright stamps"
 /// mismatched in shape and brightness against the rest of the list.
-pub const ROW_ICON_SOCKET_BG: Rgba = rgba_const(0xf0e6da, 0.06);
+pub const ROW_ICON_SOCKET_BG: Rgba = rgba_const(0xe0e9f6, 0.06);
 
 /// Onboarding window geometry (design report §3): the same panel width as
 /// the summoned popup, a static header standing in for the input row, a
@@ -143,10 +187,10 @@ pub const ONBOARDING_HEADER_BASE_PADDING_PX: f32 = 20.0;
 /// Björn Ottosson's OKLab↔linear-sRGB matrices
 /// (<https://bottosson.github.io/posts/oklab/>), implemented independently
 /// from the published formulas — not ported from any reference app — to
-/// cross-check the constants above against the design report's own OKLCH
-/// column in a test, per the brief: "If any value in that table looks
-/// wrong to you, report it — do not silently correct it." (None did; see
-/// the test below.)
+/// cross-check the constants above against this module's own OKLCH
+/// derivation in a test, per the original report's own instruction: "If any
+/// value in that table looks wrong to you, report it — do not silently
+/// correct it." (None did; see the test below.)
 #[cfg(test)]
 // Kept at Ottosson's own published precision (more digits than f32 can
 // hold) so this stays visually cross-referenceable against the source
@@ -193,21 +237,24 @@ mod tests {
         )
     }
 
-    /// The design report's §1 base-palette table, OKLCH triple -> token,
-    /// transcribed exactly. If this test ever fails, the report's hex and
-    /// its own OKLCH triple disagree — that's the "report it" case, not a
-    /// silent-fix case.
+    /// The blue-re-tone base-palette table (this task's report has the same
+    /// shape for direct comparison against `data/neko-design/report.md`
+    /// §1's original warm table). If this test ever fails, this module's
+    /// hex and its own OKLCH triple disagree — that's the "report it" case,
+    /// not a silent-fix case.
     #[test]
     fn base_palette_matches_the_frozen_oklch_table() {
         let table: &[(&str, f32, f32, f32, Rgba)] = &[
-            ("surface_panel", 0.16, 0.014, 70.0, SURFACE_PANEL),
-            ("surface_raised", 0.20, 0.016, 70.0, SURFACE_RAISED),
-            ("surface_selected", 0.37, 0.022, 70.0, SURFACE_SELECTED),
-            ("text_primary", 0.93, 0.020, 75.0, TEXT_PRIMARY),
-            ("text_secondary", 0.72, 0.025, 70.0, TEXT_SECONDARY),
-            ("text_tertiary", 0.58, 0.022, 65.0, TEXT_TERTIARY),
+            ("surface_panel", 0.16, 0.014, 255.0, SURFACE_PANEL),
+            ("surface_raised", 0.20, 0.016, 255.0, SURFACE_RAISED),
+            ("surface_selected", 0.35, 0.022, 255.0, SURFACE_SELECTED),
+            ("text_primary", 0.93, 0.020, 257.0, TEXT_PRIMARY),
+            ("text_secondary", 0.735, 0.025, 255.0, TEXT_SECONDARY),
+            ("text_tertiary", 0.615, 0.024, 252.0, TEXT_TERTIARY),
             ("state_success", 0.72, 0.150, 145.0, STATE_SUCCESS),
             ("state_danger", 0.68, 0.160, 35.0, STATE_DANGER),
+            ("text_on_light", 0.17, 0.014, 255.0, TEXT_ON_LIGHT),
+            ("keycap_shell_bg", 0.255, 0.020, 255.0, KEYCAP_SHELL_BG),
         ];
         for (name, l, c, h, token) in table {
             let computed = oklch_to_srgb_u8(*l, *c, *h);
