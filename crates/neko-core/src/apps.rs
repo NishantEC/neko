@@ -173,6 +173,32 @@ pub fn scan_applications() -> Vec<AppEntry> {
     entries
 }
 
+/// The bundle's on-screen name: `CFBundleDisplayName`, then `CFBundleName`,
+/// then the `.app` filename's own stem — falling through past any
+/// candidate that's *present but blank*, not just past a missing key. The
+/// 147-app Spotlight-backed index surfaced a real bundle with
+/// `CFBundleDisplayName` present and set to an empty (or whitespace-only)
+/// string; the old `.and_then(|v| v.as_string()).unwrap_or_else(...)` chain
+/// treated that as "found" (`as_string` returns `Some("")`, so the
+/// `unwrap_or_else` fallback never ran), producing a row with a real icon
+/// and a completely empty title. `None` only when every candidate,
+/// including the filename stem, is blank — an entry with truly no usable
+/// name anywhere is excluded rather than shown with an empty title.
+fn bundle_display_name(dict: &plist::Dictionary, path: &Path) -> Option<String> {
+    let from_key = |key: &str| {
+        dict.get(key)
+            .and_then(|v| v.as_string())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    from_key("CFBundleDisplayName").or_else(|| from_key("CFBundleName")).or_else(|| {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().trim().to_owned())
+            .filter(|s| !s.is_empty())
+    })
+}
+
 /// Reads `path`'s `Info.plist` and returns `None` both for a bundle that
 /// fails to parse *and* for one that parses fine but isn't something a
 /// person would launch — see `is_nested_or_noisy` and the two Info.plist
@@ -217,16 +243,7 @@ fn read_app_bundle(path: &Path) -> Option<AppEntry> {
         return None;
     }
 
-    let name = dict
-        .get("CFBundleDisplayName")
-        .or_else(|| dict.get("CFBundleName"))
-        .and_then(|v| v.as_string())
-        .map(str::to_owned)
-        .unwrap_or_else(|| {
-            path.file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default()
-        });
+    let name = bundle_display_name(dict, path)?;
 
     let id = dict
         .get("CFBundleIdentifier")
@@ -417,6 +434,56 @@ mod tests {
         let app = read_app_bundle(&dir);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(app.unwrap().name, "Ordinary");
+    }
+
+    #[test]
+    fn a_blank_display_name_falls_back_to_bundle_name() {
+        // `CFBundleDisplayName` present but empty — the real shape of the
+        // captain's icon-with-no-title row. `as_string()` returns
+        // `Some("")` for this, which the old `.unwrap_or_else` chain
+        // treated as "found" and never fell through.
+        let dir = temp_bundle("BlankDisplayName.app");
+        write_bundle(
+            &dir,
+            r#"<key>CFBundleIdentifier</key><string>com.neko.blankdisplay</string>
+               <key>CFBundlePackageType</key><string>APPL</string>
+               <key>CFBundleDisplayName</key><string></string>
+               <key>CFBundleName</key><string>RealName</string>"#,
+        );
+        let app = read_app_bundle(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(app.unwrap().name, "RealName");
+    }
+
+    #[test]
+    fn a_whitespace_only_display_name_falls_back_to_the_filename_stem() {
+        let dir = temp_bundle("WhitespaceName.app");
+        write_bundle(
+            &dir,
+            r#"<key>CFBundleIdentifier</key><string>com.neko.whitespace</string>
+               <key>CFBundlePackageType</key><string>APPL</string>
+               <key>CFBundleDisplayName</key><string>   </string>"#,
+        );
+        let app = read_app_bundle(&dir);
+        let expected_stem = dir.file_stem().unwrap().to_string_lossy().into_owned();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(app.unwrap().name, expected_stem);
+    }
+
+    #[test]
+    fn no_usable_name_anywhere_returns_none_rather_than_a_blank_title() {
+        // Every candidate blank, including the filename stem itself — a
+        // row with an icon and no title is never acceptable, so a bundle
+        // this nameless is dropped rather than indexed with an empty name.
+        // Tested against the pure helper directly: a real path whose own
+        // `file_stem()` is blank isn't constructible through a temp
+        // directory (any real final path component is non-empty), but an
+        // empty `Path` reproduces the same "no candidate anywhere" case
+        // `bundle_display_name` has to handle.
+        let mut dict = plist::Dictionary::new();
+        dict.insert("CFBundleDisplayName".to_string(), plist::Value::String(String::new()));
+        dict.insert("CFBundleName".to_string(), plist::Value::String("   ".to_string()));
+        assert_eq!(bundle_display_name(&dict, Path::new("")), None);
     }
 
     #[test]

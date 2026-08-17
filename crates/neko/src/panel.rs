@@ -25,7 +25,7 @@ use neko_client::NekoClient;
 use neko_protocol::{ClipboardContentKind, Request, ResultKind, Response, SearchItem};
 
 use crate::accessibility::AccessibilityChecker;
-use crate::text_field::TextField;
+use crate::text_field::{ContentChanged, TextField};
 use crate::theme;
 
 actions!(panel, [SelectNext, SelectPrevious, Confirm]);
@@ -66,7 +66,12 @@ impl Root {
     ) -> Entity<Self> {
         cx.new(|cx| {
             let text_field = TextField::new(cx);
-            cx.observe(&text_field, |root: &mut Root, _field, cx| {
+            // Subscribed to `ContentChanged` specifically, not observed via
+            // `cx.observe` — `TextField` also notifies on every cursor
+            // blink (a render concern), and `cx.observe` cannot
+            // distinguish that from a real edit. Search must only re-run on
+            // an actual query change. See `ContentChanged`'s doc comment.
+            cx.subscribe(&text_field, |root: &mut Root, _field, _event: &ContentChanged, cx| {
                 root.run_search(cx);
             })
             .detach();
@@ -139,6 +144,14 @@ impl Root {
         self.generation += 1;
         let generation = self.generation;
         let query = self.text_field.read(cx).content().to_string();
+        // Snapshot *before* the request goes out, not when the response
+        // lands: this is "what was highlighted going into this search",
+        // which `resolve_selection` uses to decide whether to keep the
+        // highlight in place or the result set is genuinely new.
+        let previous_selection = self
+            .results
+            .get(self.selected)
+            .map(|item| (item.kind, item.id.clone()));
         let client = self.client.clone();
         cx.spawn(async move |this, cx| {
             let response = client
@@ -153,7 +166,10 @@ impl Root {
             let _ = this.update(cx, |root, cx| {
                 if root.generation == generation {
                     root.results = fit_within_budget(items, CONTENT_AREA_MIN_HEIGHT_PX);
-                    root.selected = 0;
+                    let previous = previous_selection
+                        .as_ref()
+                        .map(|(kind, id)| (*kind, id.as_str()));
+                    root.selected = resolve_selection(previous, &root.results);
                     cx.notify();
                 }
             });
@@ -451,6 +467,24 @@ impl Root {
     }
 }
 
+/// The selection-preservation rule for a fresh search response: if the item
+/// that was highlighted going into this search (identified by its stable
+/// `(kind, id)`, not by index — index shifts as sections grow/shrink) is
+/// still present in the new result set, the highlight follows it to its new
+/// position. Otherwise the result set is genuinely new for this query and
+/// the highlight resets to the top. This only ever runs when the query
+/// actually changed (`run_search` is now gated on `TextField`'s
+/// `ContentChanged` event, not blink's render-only notify — see
+/// `text_field::ContentChanged`), so a "genuinely new" result set is the
+/// normal case; this rule matters for the query-changes-but-the-top-match-
+/// is-still-there case, and for a keyboard adjustment made while the
+/// request for the *next* keystroke was still in flight.
+fn resolve_selection(previous: Option<(ResultKind, &str)>, results: &[SearchItem]) -> usize {
+    previous
+        .and_then(|(kind, id)| results.iter().position(|item| item.kind == kind && item.id == id))
+        .unwrap_or(0)
+}
+
 /// Trims `results` to what renders within `budget_px` without ever showing
 /// a partial row or a section header with no row beneath it — and, when
 /// there's a matching clipboard entry, without ever letting a long run of
@@ -624,15 +658,57 @@ mod tests {
     use super::*;
 
     fn item(kind: ResultKind) -> SearchItem {
+        item_with_id(kind, "x")
+    }
+
+    fn item_with_id(kind: ResultKind, id: &str) -> SearchItem {
         SearchItem {
-            id: "x".into(),
+            id: id.into(),
             kind,
-            title: "x".into(),
+            title: id.into(),
             subtitle: None,
             icon_path: None,
             content_kind: None,
             accessory: None,
         }
+    }
+
+    #[test]
+    fn resolve_selection_follows_the_previously_selected_item_to_its_new_index() {
+        // "notes" was selected (via Down) before this search; the new
+        // result set still contains it, just at a different index — the
+        // highlight must follow it there, not snap back to the top.
+        let new_results = vec![
+            item_with_id(ResultKind::App, "safari"),
+            item_with_id(ResultKind::App, "notes"),
+            item_with_id(ResultKind::App, "mail"),
+        ];
+        let selected = resolve_selection(Some((ResultKind::App, "notes")), &new_results);
+        assert_eq!(selected, 1);
+    }
+
+    #[test]
+    fn resolve_selection_resets_to_top_when_the_previous_item_is_gone() {
+        // The previously selected item didn't match this query at all —
+        // the result set is genuinely new, so the highlight resets.
+        let new_results = vec![item_with_id(ResultKind::App, "safari")];
+        let selected = resolve_selection(Some((ResultKind::App, "notes")), &new_results);
+        assert_eq!(selected, 0);
+    }
+
+    #[test]
+    fn resolve_selection_with_no_previous_selection_defaults_to_top() {
+        let new_results = vec![item_with_id(ResultKind::App, "safari")];
+        assert_eq!(resolve_selection(None, &new_results), 0);
+    }
+
+    #[test]
+    fn resolve_selection_does_not_match_across_kinds() {
+        // Same `id` string, different `kind` (an app path vs. a clipboard
+        // entry's own content-as-id) must not be treated as the same item.
+        let new_results = vec![item_with_id(ResultKind::Clipboard, "notes")];
+        let selected = resolve_selection(Some((ResultKind::App, "notes")), &new_results);
+        assert_eq!(selected, 0);
     }
 
     #[test]
