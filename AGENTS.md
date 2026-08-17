@@ -189,13 +189,23 @@ recency boost (3-hour half-life vs. apps' 5-day one — a clipboard history is
 inherently a "recent things" list). The daemon caps results server-side
 (`Request::Search { limit, .. }`, the client asks for 8) — the client never
 renders more than that, which is why the result list isn't virtualized (see
-"gpui-component" below). `handle_request`'s `Search` arm gives `rank_apps`
-first crack at the full `limit` and fills whatever's left with
-`rank_clipboard` — apps stay the primary, unchanged-since-slice-1 result
-type; clipboard is additive. One consequence worth knowing: a query that
-alone matches `limit` or more apps crowds clipboard out of that response
-entirely (no clipboard section renders), same as it would for a third result
-type later — not a bug, just how a hard-capped shared budget behaves.
+"gpui-component" below).
+
+**Apps can never crowd clipboard out of a response entirely when there's a
+matching entry — a first pass at this got that wrong.** `handle_request`'s
+`Search` arm originally gave `rank_apps` the full `limit` and filled
+whatever was left with `rank_clipboard`, so a query matching `limit` or more
+apps returned zero clipboard results even with a real match — silent, not
+an error, easy to miss (see "v1 simplification" below: the client's own
+first fix hit the same shape and initially "fixed" it by dropping the
+whole clipboard section rather than reserving it room, which is exactly
+backwards from the brief's "same list" requirement). Corrected: `rank_clipboard`
+runs first; if it found anything, `rank_apps` is capped to `limit - 1`
+before it runs, guaranteeing at least the top clipboard match a slot in the
+response. Covered by `server.rs`'s own tests. The panel's
+`fit_within_budget` (below) does the equivalent reservation for pixels, not
+slots — both layers exist because a response with room for clipboard is
+necessary but not sufficient for a screen with room to render it.
 
 ## Icons
 
@@ -358,16 +368,19 @@ excess produced a real defect: the last row would render half-visible,
 jammed against the footer, instead of being fully shown or fully absent.
 `panel::fit_within_budget` (called on every search response, before results
 are stored in `Root`, so a truncated-but-out-of-sync `selected` index can
-never point at a row that isn't rendered) walks the results and drops
-anything — a whole row, or a whole section including its header — that
-would not fit in `CONTENT_AREA_MIN_HEIGHT_PX`. It never emits a partial row
-or a header with zero rows under it. One consequence: a query that alone
-fills the budget with apps (7, not 8, once one header's 28px is charged)
-shows no clipboard section even if the server-side response included one —
-a second, client-side layer of the same "apps are primary, clipboard is
-additive" crowd-out already described under "Search and ranking." Covered
-by `panel.rs`'s own tests, including the exact 6-apps-plus-1-clipboard-row
-shape that first exposed the bug.
+never point at a row that isn't rendered) fixes that — but an earlier
+version fixed it by dropping the *entire* clipboard section whenever apps
+alone filled the budget, which just moved the "Search and ranking" crowd-out
+bug into the client instead of removing it (six or more app matches made
+clipboard invisible again, silently). The corrected version reserves one
+section header plus one row for clipboard *before* deciding how many apps
+fit — `fit_section` spends whatever budget is actually left, in order, so
+apps only give up rows they don't strictly need, and clipboard always gets
+at least its reservation plus any unused app budget. Still never a partial
+row, never a header with zero rows under it. Covered by `panel.rs`'s own
+tests, including the exact 6-apps-plus-1-clipboard-row shape that exposed
+both bugs in turn, and a 20-apps case proving the reservation holds well
+past the original repro's app count.
 
 ## Summon latency
 
