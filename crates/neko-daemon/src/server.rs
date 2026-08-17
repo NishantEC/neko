@@ -191,6 +191,59 @@ fn handle_request(state: &AppState, request: Request) -> Response {
                 },
             }
         }
+
+        Request::GetOnboardingState => {
+            let db = state.db.lock().unwrap();
+            match neko_core::onboarding::get_onboarding_state(&db) {
+                Ok(s) => onboarding_response(s),
+                Err(e) => error_response(e),
+            }
+        }
+
+        Request::SetOnboardingComplete { completed } => {
+            let db = state.db.lock().unwrap();
+            match neko_core::onboarding::set_onboarding_completed(&db, completed) {
+                Ok(s) => onboarding_response(s),
+                Err(e) => error_response(e),
+            }
+        }
+
+        Request::DismissAccessibilityBanner => {
+            let db = state.db.lock().unwrap();
+            match neko_core::onboarding::dismiss_accessibility_banner(&db) {
+                Ok(s) => onboarding_response(s),
+                Err(e) => error_response(e),
+            }
+        }
+
+        Request::GetClipboardHistoryEnabled => {
+            let db = state.db.lock().unwrap();
+            match neko_core::onboarding::get_clipboard_history_enabled(&db) {
+                Ok(enabled) => Response::ClipboardHistoryEnabled { enabled },
+                Err(e) => error_response(e),
+            }
+        }
+
+        Request::SetClipboardHistoryEnabled { enabled } => {
+            let db = state.db.lock().unwrap();
+            match neko_core::onboarding::set_clipboard_history_enabled(&db, enabled) {
+                Ok(enabled) => Response::ClipboardHistoryEnabled { enabled },
+                Err(e) => error_response(e),
+            }
+        }
+    }
+}
+
+fn onboarding_response(state: neko_core::onboarding::OnboardingState) -> Response {
+    Response::OnboardingState {
+        completed: state.completed,
+        accessibility_banner_dismissed: state.accessibility_banner_dismissed,
+    }
+}
+
+fn error_response(e: impl std::fmt::Display) -> Response {
+    Response::Error {
+        message: e.to_string(),
     }
 }
 

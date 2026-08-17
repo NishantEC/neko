@@ -5,19 +5,23 @@ in Rust on [GPUI](https://gpui.rs) (Zed's UI framework). See `README.md` for how
 to run it and `data/dim/plan.md` (in the firstmate home, not this repo) for the
 full product plan.
 
-## Current scope: the spine, plus clipboard history
+## Current scope: the spine, clipboard history, and the first-run onboarding arc
 
 Slice 1 was a single-crate proof that GPUI works at all. A follow-up task
 restructured that proof into the plan's real five-crate workspace and built
 the first end-to-end feature: **summon with a hotkey, type, see your real
 applications ranked sensibly, press enter, the app launches** — on the frozen
 visual design, over real system window vibrancy. The task after that added
-**clipboard history as a second result type in that same list**: the daemon polls the
-pasteboard, persists distinct copies, and they show up under their own
-`Clipboard` section header, filterable by the same search field, restorable
-to the pasteboard with enter. See "Clipboard history" below. Still not built:
-onboarding UI, the WASM extension system, agent capability. See "Seams for
-follow-up work" below for exactly where each plugs in.
+**clipboard history as a second result type in that same list**: the daemon
+polls the pasteboard, persists distinct copies, and they show up under their
+own `Clipboard` section header, filterable by the same search field,
+restorable to the pasteboard with enter. See "Clipboard history" below. A
+third task built the frozen 14-screen first-run arc (design report §3): the
+real Accessibility permission ask, the clipboard-history ask, choosing/testing
+the summon hotkey, and graceful degradation when Accessibility is declined.
+See "Onboarding" below for the architecture. Still not built: the WASM
+extension system, agent capability. See "Seams for follow-up work" below for
+exactly where each plugs in.
 
 ## Crate layout
 
@@ -28,7 +32,7 @@ crates/
                   launching, hotkey-setting persistence, the AgentProvider seam
   neko-daemon/    thin binary hosting neko-core behind a Unix socket
   neko-client/    SDK: persistent auto-reconnecting connection to the daemon
-  neko/           the GPUI app — window, panel, live OS hotkey capture
+  neko/           the GPUI app — window, panel, live OS hotkey capture, onboarding
 ```
 
 Boundary rule the crate split exists to enforce: `neko-protocol` depends on
@@ -85,13 +89,94 @@ is a fast, side-effect-free pre-check against well-known reserved combos
 not a guarantee; only a live registration attempt can catch a *third-party*
 app's custom binding.
 
-**Nothing in this codebase calls `rebind` yet** — there is no rebinding UI in
-this slice (that's onboarding's step 09, "Learn the hotkey," explicitly out of
-scope here). This is the seam: a future onboarding screen captures a candidate
-combination, calls `HotkeyController::rebind`, and on success sends
-`Request::CommitHotkey` — see `hotkey_client.rs`'s doc comments and its test
-suite (`FakeRegistrar`) for the exact state machine, already covered without
-needing real OS calls in the test run.
+`rebind` is now called from exactly one place: onboarding's step 09
+(`onboarding::view::OnboardingRoot::try_rebind`) — captures the next raw
+keydown while "Use a different combination" is active, validates it locally
+(`onboarding::state::validate_candidate`), checks
+`Request::CheckHotkeyConflict` for a human-readable reason to show if the live
+attempt fails, then calls `rebind` and on success `Request::CommitHotkey`. See
+`hotkey_client.rs`'s own doc comments and test suite (`FakeRegistrar`) for the
+state machine `rebind` itself guarantees.
+
+## Onboarding (design report §3)
+
+The 14-screen first-run arc, `crates/neko/src/onboarding/`. Split the same
+way `hotkey_client.rs` splits from `main.rs`: `state.rs` is a pure,
+side-effect-free step machine (`Flow`, unit-tested — the state-transition
+rules, not the GPUI rendering); `view.rs` is the GPUI window and all the real
+I/O (accessibility polling, daemon requests, live hotkey capture) that drives
+it. Step 03 (the real macOS system dialog) has no code of its own — it's what
+macOS draws natively the instant `AccessibilityChecker::request_prompt` is
+called; step 08 (the post-onboarding refusal banner) isn't part of `Flow`
+either, since it isn't a step in the wizard — it's a strip `panel.rs` renders
+inside the summoned panel's own content area, gated live on
+`AXIsProcessTrusted()` plus a persisted dismissed flag, not on anything
+onboarding remembers about how it ended.
+
+**Real permission, real gating.** `crates/neko/src/accessibility.rs` wraps
+`AXIsProcessTrusted`/`AXIsProcessTrustedWithOptions` (via `accessibility-sys`
++ `core-foundation`, both MIT/Apache — no objc2 needed in this crate for it).
+`main.rs` only calls `HotkeyController::apply_initial` if
+`AccessibilityChecker::is_trusted()` is already true at startup — a rejected
+registration is expected and silent, not a panic, whenever it isn't (that
+replaces slice 1's `.unwrap_or_else(|e| panic!(...))`, which predates any
+permission awareness in this codebase). If accessibility flips to granted
+*during* an onboarding run, `OnboardingRoot` registers the hotkey live at
+that moment too (`ensure_hotkey_registered`), so step 09's "press it to
+dismiss" works without a restart.
+
+**One `HotkeyController`, shared.** Onboarding's step 09 and `main.rs`'s
+summon loop both hold the *same* `Rc<RefCell<HotkeyController<SystemRegistrar>>>`
+(`onboarding::SharedHotkeyController`) — a rebind proven live during
+onboarding is the exact registration summon uses afterward, not a second one.
+
+**Persisted lifecycle state**, daemon-owned settings, same shape as the
+hotkey combo: `neko_core::onboarding` (`onboarding_completed`,
+`accessibility_banner_dismissed`, `clipboard_history_enabled`), served over
+`neko_protocol::Request::{GetOnboardingState, SetOnboardingComplete,
+DismissAccessibilityBanner, GetClipboardHistoryEnabled,
+SetClipboardHistoryEnabled}`. `clipboard_history_enabled` is the seam the
+clipboard-history capture task reads before it starts watching
+`NSPasteboard` — onboarding owns the ask (steps 06-07), not the watcher.
+Reset for testing: `NEKO_RESET_ONBOARDING=<anything>` (`README.md`) clears
+`onboarding_completed` before the client's first `GetOnboardingState` call.
+
+**The Dock-icon "way back."** `App::on_reopen` (registered on the
+`Application` builder, *before* `.run()`, since it needs to exist before any
+window does — reads a `ReopenTargets` `Global` set once the summon window and
+`onboarding::SharedOnboardingSlot` exist) routes a Dock-icon click to
+whichever is live: the onboarding window if `SharedOnboardingSlot` is
+`Some`, otherwise the summon panel. This is the real, load-bearing "never a
+dead end" path for a captain who declined Accessibility and has no live
+hotkey — not decorative.
+
+**Deviations from the mockups, documented where they happen in code** (also
+see `docs/evidence/onboarding-verification.md`): no embedded/registered
+fonts — matches `panel.rs`'s own pre-existing choice, GPUI's default system
+font throughout, sized to the mockup's values (report §6: fonts are real
+packaging work, orthogonal to onboarding); permission-row/status icons are
+tinted squares, not traced paths (only the ⌥ glyph is traced —
+`components::glyphs::opt_glyph`/`neko_wordmark_glyph`, the one the report
+specifically flags as unreliable as font text, both via GPUI's
+`PathBuilder`/`window.paint_path`, no SVG asset needed); step 08's banner
+renders as a strip inside the existing fixed 680px upper-third panel rather
+than the mockup's repositioned/narrowed 420px variant, because there's no
+menu-bar icon (see below) for it to sit next to and `panel.rs` already has a
+documented fixed-size/positioning decision this task didn't reopen; the
+hotkey-recording sub-state (after "Use a different combination") has no
+mockup at all — it reuses the existing dialog/keycap/status-pill components.
+
+**Menu bar icon: not built.** The mockups' simulated OS chrome shows one in
+steady state and step 08, but `gpui` 0.2.2's `platform/mac/status_item.rs`
+exists in the published crate's source and is never wired into a `mod`
+declaration — dead code, not a usable API. Building a real `NSStatusItem`
+would be raw AppKit bridging, its own scoped task (the exact kind of
+non-trivial native-bridging effort the design report itself flags for
+material work in §5). The Dock-icon `on_reopen` path above is the real,
+functioning substitute. Relatedly, GPUI hardcodes
+`NSApplicationActivationPolicyRegular` (`platform/mac/platform.rs`) — there is
+no supported way to hide the Dock icon via GPUI's public API, so "no dock
+icon" (mockup step 13's copy) isn't achievable without patching GPUI itself.
 
 ## Search and ranking
 
@@ -356,11 +441,11 @@ cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
 
 ## Seams for follow-up work
 
-- **Onboarding UI** (14-screen sequence, design report §3): drives
-  `HotkeyController::rebind` for step 09; nothing else in this codebase
-  assumes it exists. The panel's own first-run/empty state
-  (`panel::render_empty_state`) is deliberately generic, not onboarding.
-- **Clipboard history**: built — see "Clipboard history" above. Still open:
+- **Onboarding UI**: built — see "Onboarding" above.
+- **Clipboard history**: built — capture, storage, and restore all live in
+  the daemon; see "Clipboard history" above. Onboarding's steps 06-07 own the
+  *ask* (`clipboard_history_enabled` daemon setting) and reserved
+  `theme::PANEL_WIDTH_WITH_DETAIL_PX` (760px) for the detail pane. Still open:
   image capture (seam documented in `clipboard.rs`'s module doc comment) and
   the two-column detail-pane mode (`PANEL_WIDTH_WITH_DETAIL_PX`, screen 12).
   No macOS permission prompt was observed gating general pasteboard reads on
@@ -373,6 +458,8 @@ cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
 - **Dynamic window resize**: see "v1 simplification" above.
 - **`AgentProvider` wiring**: see above.
 - **Native window material spike**: see "Window material" above.
+- **A real menu-bar `NSStatusItem`**: see "Onboarding" above — GPUI 0.2.2 has
+  no usable status-item API; this is raw AppKit bridging, its own task.
 
 ## Maintaining this file
 
