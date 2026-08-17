@@ -175,15 +175,72 @@ mod pasteboard {
     //! treating `None` as "nothing to capture this tick" (never panicking,
     //! never blocking) *is* the honest degrade path here, not a shortcut
     //! around one.
+    //!
+    //! **Every AppKit call in this module runs inside an autorelease
+    //! pool.** This thread has no `NSApplication`/`CFRunLoop` of its own —
+    //! a normal Cocoa event loop drains an autorelease pool once per event
+    //! automatically, but a plain background thread never does, so any
+    //! `-autorelease`d object produced here (and `NSPasteboard`/
+    //! `NSWorkspace`/`CFRunLoop::run_in_mode` all produce plenty of
+    //! transient ones internally, not just the values this module returns)
+    //! leaks for the rest of the process's life. Confirmed live and fixed
+    //! in this pass — see `AGENTS.md`'s "Clipboard capture memory" section
+    //! for the measured before/after. [`poll`] and [`write_string`] are
+    //! the only two public entry points into AppKit this module has, and
+    //! both wrap their entire body in [`objc2::rc::autoreleasepool`] —
+    //! everything below them (`raw_*`) is a private implementation detail
+    //! that cannot be called unpooled from outside this module.
 
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString, NSPasteboardTypeURL, NSWorkspace};
     use objc2_core_foundation::{CFRunLoop, kCFRunLoopDefaultMode};
     use objc2_foundation::NSString;
 
+    /// One poll tick's result, converted to owned Rust data before
+    /// [`poll`] returns — nothing objc2-managed survives past the
+    /// autorelease pool that produced it.
+    pub struct Tick {
+        pub change_count: i64,
+        pub content: Option<(String, bool)>,
+        pub source_app: Option<String>,
+    }
+
+    /// The pasteboard's current `changeCount`, pooled on its own — used
+    /// only once, to seed [`super::run_capture_loop`]'s starting point
+    /// before the hot loop begins.
+    pub fn current_change_count() -> i64 {
+        objc2::rc::autoreleasepool(|_pool| raw_change_count())
+    }
+
+    /// One capture tick, entirely inside a single autorelease pool: the
+    /// `changeCount` check, and — only if it moved since
+    /// `last_change_count` — the pasteboard read and the frontmost-app
+    /// lookup (which pumps a run loop; see `raw_frontmost_app_name`).
+    /// Collapsing all three into one pooled call, rather than three public
+    /// functions each trusting its caller to wrap it, is deliberate: there
+    /// is no unpooled path left into this module's AppKit calls for a
+    /// future change to fall into by accident.
+    pub fn poll(last_change_count: i64) -> Tick {
+        objc2::rc::autoreleasepool(|_pool| {
+            let change_count = raw_change_count();
+            if change_count == last_change_count {
+                return Tick {
+                    change_count,
+                    content: None,
+                    source_app: None,
+                };
+            }
+            Tick {
+                change_count,
+                content: raw_read_current(),
+                source_app: raw_frontmost_app_name(),
+            }
+        })
+    }
+
     /// The pasteboard's current `changeCount` — bumps on every distinct
     /// change, the standard way to poll a `NSPasteboard` without missing or
     /// double-processing a copy.
-    pub fn change_count() -> i64 {
+    fn raw_change_count() -> i64 {
         NSPasteboard::generalPasteboard().changeCount() as i64
     }
 
@@ -191,7 +248,7 @@ mod pasteboard {
     /// it's marked private (see [`super::is_privacy_marked`]) or has no
     /// string representation at all (e.g. an image-only copy — see this
     /// module's file-level doc comment). Returns `(content, has_url_type)`.
-    pub fn read_current() -> Option<(String, bool)> {
+    fn raw_read_current() -> Option<(String, bool)> {
         // SAFETY: objc2-app-kit's generated `NSPasteboardTypeString`/
         // `NSPasteboardTypeURL` are plain (non-`safe`) `extern "C"` statics,
         // so reading them needs `unsafe` even under edition 2024's
@@ -225,7 +282,12 @@ mod pasteboard {
     /// [`super::POLL_INTERVAL`] of latency, a very fast app-switch between
     /// the copy and the next poll tick can attribute to the wrong app; not
     /// solvable without a push notification macOS doesn't offer for this.
-    pub fn frontmost_app_name() -> Option<String> {
+    ///
+    /// **This is the shipped clipboard-source-attribution feature — do not
+    /// remove the run-loop pump below to make the leak this module used to
+    /// have go away.** The autorelease pool in [`poll`] is the actual fix;
+    /// this function's behavior is unchanged.
+    fn raw_frontmost_app_name() -> Option<String> {
         // `NSWorkspace`'s `frontmostApplication` is kept current by
         // distributed notifications the process only dequeues while its
         // run loop spins — a plain background thread (this one; the daemon
@@ -239,7 +301,7 @@ mod pasteboard {
         // repro.
         //
         // SAFETY: reading `kCFRunLoopDefaultMode`, a plain (non-`safe`)
-        // `extern "C"` static — see `read_current`'s SAFETY comment.
+        // `extern "C"` static — see `raw_read_current`'s SAFETY comment.
         let mode = unsafe { kCFRunLoopDefaultMode };
         CFRunLoop::run_in_mode(mode, 0.05, true);
         let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
@@ -248,30 +310,40 @@ mod pasteboard {
 
     /// Writes `content` as the pasteboard's sole contents — "paste" in the
     /// sense of "make this the system clipboard again," not a synthesized
-    /// keystroke. Returns whether the write succeeded.
+    /// keystroke. Returns whether the write succeeded. Pooled for the same
+    /// reason [`poll`] is, even though this is called far less often (once
+    /// per `Request::Paste`, not on a timer).
     pub fn write_string(content: &str) -> bool {
-        // SAFETY: same as `read_current` — reading `NSPasteboardTypeString`.
-        unsafe {
-            let pb = NSPasteboard::generalPasteboard();
-            pb.clearContents();
-            let ns = NSString::from_str(content);
-            pb.setString_forType(&ns, NSPasteboardTypeString)
-        }
+        objc2::rc::autoreleasepool(|_pool| {
+            // SAFETY: same as `raw_read_current` — reading `NSPasteboardTypeString`.
+            unsafe {
+                let pb = NSPasteboard::generalPasteboard();
+                pb.clearContents();
+                let ns = NSString::from_str(content);
+                pb.setString_forType(&ns, NSPasteboardTypeString)
+            }
+        })
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 mod pasteboard {
-    pub fn change_count() -> i64 {
+    pub struct Tick {
+        pub change_count: i64,
+        pub content: Option<(String, bool)>,
+        pub source_app: Option<String>,
+    }
+
+    pub fn current_change_count() -> i64 {
         0
     }
 
-    pub fn read_current() -> Option<(String, bool)> {
-        None
-    }
-
-    pub fn frontmost_app_name() -> Option<String> {
-        None
+    pub fn poll(last_change_count: i64) -> Tick {
+        Tick {
+            change_count: last_change_count,
+            content: None,
+            source_app: None,
+        }
     }
 
     pub fn write_string(_content: &str) -> bool {
@@ -289,23 +361,21 @@ fn now_unix_ms() -> i64 {
 /// One capture attempt: if the pasteboard changed since `last_change_count`,
 /// classify and persist it (unless privacy-marked or empty of string
 /// content). Split out from [`run_capture_loop`] so the polling shape
-/// itself needs no macOS-only code — only `pasteboard::*` does.
+/// itself needs no macOS-only code — only `pasteboard::*` does. The
+/// autorelease-pool guarantee lives entirely inside `pasteboard::poll` (see
+/// its doc comment) — this function only ever sees owned Rust data.
 fn poll_once(db: &crate::Db, last_change_count: &mut i64) {
-    let current = pasteboard::change_count();
-    if current == *last_change_count {
-        return;
-    }
-    *last_change_count = current;
+    let tick = pasteboard::poll(*last_change_count);
+    *last_change_count = tick.change_count;
 
-    let Some((content, has_url_type)) = pasteboard::read_current() else {
+    let Some((content, has_url_type)) = tick.content else {
         return;
     };
     if content.trim().is_empty() {
         return;
     }
     let kind = classify(&content, has_url_type);
-    let source_app = pasteboard::frontmost_app_name();
-    if let Err(e) = record_entry(db, &content, kind, source_app.as_deref(), now_unix_ms()) {
+    if let Err(e) = record_entry(db, &content, kind, tick.source_app.as_deref(), now_unix_ms()) {
         eprintln!("neko-daemon: failed to record clipboard entry: {e}");
     }
 }
@@ -315,7 +385,7 @@ fn poll_once(db: &crate::Db, last_change_count: &mut i64) {
 /// the same shape as `icons.rs`'s icon-extraction thread — started once,
 /// outlives every individual client connection.
 pub fn run_capture_loop(db: &std::sync::Mutex<crate::Db>) {
-    let mut last_change_count = pasteboard::change_count();
+    let mut last_change_count = pasteboard::current_change_count();
     loop {
         std::thread::sleep(POLL_INTERVAL);
         let db = db.lock().unwrap();

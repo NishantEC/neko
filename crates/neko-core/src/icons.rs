@@ -44,26 +44,37 @@ fn extract_icon_png(app_path: &std::path::Path) -> Option<Vec<u8>> {
     use objc2_foundation::{NSDictionary, NSSize, NSString};
 
     let path_str = app_path.to_str()?;
-    // SAFETY: these are plain Cocoa calls (icon lookup + in-memory image
-    // format conversion) with no shared mutable state; every objc2 call
-    // below follows the exact method signatures generated from Apple's own
-    // headers, called from a single thread.
-    unsafe {
-        let workspace = NSWorkspace::sharedWorkspace();
-        let ns_path = NSString::from_str(path_str);
-        let image = workspace.iconForFile(&ns_path);
-        // A consistent target size: crisp at the design's 22px row icon
-        // even at a 2x/3x Retina backing scale.
-        image.setSize(NSSize {
-            width: 64.0,
-            height: 64.0,
-        });
-        let tiff = image.TIFFRepresentation()?;
-        let bitmap = NSBitmapImageRep::imageRepWithData(&tiff)?;
-        let properties = NSDictionary::new();
-        let png = bitmap.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)?;
-        Some(png.to_vec())
-    }
+    // Pooled for the same reason `clipboard.rs`'s `pasteboard` module is
+    // (see its doc comment): this runs on a plain background thread with
+    // no `NSApplication`/`CFRunLoop` draining autorelease pools the normal
+    // way, and `iconForFile`/`TIFFRepresentation`/`representationUsingType_
+    // properties` all produce transient autoreleased objects internally.
+    // Called once per app rather than on a timer, so the leak this would
+    // otherwise cause is bounded (one app index's worth, not unbounded
+    // over the daemon's lifetime) — pooled anyway for the same audited
+    // guarantee every AppKit call site in this daemon now has.
+    objc2::rc::autoreleasepool(|_pool| {
+        // SAFETY: these are plain Cocoa calls (icon lookup + in-memory image
+        // format conversion) with no shared mutable state; every objc2 call
+        // below follows the exact method signatures generated from Apple's own
+        // headers, called from a single thread.
+        unsafe {
+            let workspace = NSWorkspace::sharedWorkspace();
+            let ns_path = NSString::from_str(path_str);
+            let image = workspace.iconForFile(&ns_path);
+            // A consistent target size: crisp at the design's 22px row icon
+            // even at a 2x/3x Retina backing scale.
+            image.setSize(NSSize {
+                width: 64.0,
+                height: 64.0,
+            });
+            let tiff = image.TIFFRepresentation()?;
+            let bitmap = NSBitmapImageRep::imageRepWithData(&tiff)?;
+            let properties = NSDictionary::new();
+            let png = bitmap.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)?;
+            Some(png.to_vec())
+        }
+    })
 }
 
 #[cfg(test)]
