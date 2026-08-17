@@ -159,6 +159,19 @@ pub enum Response {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     HotkeyChanged { config: HotkeyConfig },
+    /// A batch of background icon extraction finished — at least one
+    /// `SearchItem::icon_path` a client already has may now resolve where
+    /// it previously didn't. Icon extraction runs on the daemon's own
+    /// background thread (real AppKit work, tens of ms per app), started
+    /// after the app index is already searchable, so a client's very first
+    /// search reply after a fresh install or a daemon restart is expected
+    /// to have empty `icon_path`s for apps not extracted yet. Without this
+    /// push, nothing ever prompts the client to ask again — search results
+    /// already delivered are a one-time snapshot, not a live view, so the
+    /// icon sockets would stay blank until the next thing that happens to
+    /// re-run a search (typing, or a fresh summon), which is not
+    /// guaranteed to happen soon, or at all, in the same process lifetime.
+    IconsUpdated,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -255,6 +255,13 @@ fn main() {
                                 eprintln!("neko: failed to apply hotkey change from daemon: {e:?}");
                             }
                         }
+                        Event::IconsUpdated => {
+                            let _ = cx.update(|cx| {
+                                let _ = window.update(cx, |root, _window, cx| {
+                                    root.refresh_icons(cx);
+                                });
+                            });
+                        }
                     }
                 }
 

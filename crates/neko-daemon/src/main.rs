@@ -38,10 +38,36 @@ fn main() {
     {
         let state = state.clone();
         std::thread::spawn(move || {
+            // One-time migration off the pre-versioning cache layout — see
+            // `purge_stale_unversioned_cache`'s own doc comment. Cheap (a
+            // single `read_dir` over at most one app index's worth of
+            // files), but still kept off the daemon's own startup path,
+            // same as the extraction loop below.
+            neko_core::icons::purge_stale_unversioned_cache();
+            // Verification-only, unset (0ms) in normal operation — the
+            // real per-app extraction cost is small enough on real
+            // hardware that a fresh index finishes in well under a second,
+            // making the cold-cache window this exists to demonstrate hard
+            // to land a screenshot inside without artificially stretching
+            // it out. Same inert-by-default pattern as `evidence.rs`'s
+            // `NEKO_BENCH`/`NEKO_FORCE_MATERIAL`.
+            let extract_delay_ms: u64 = std::env::var("NEKO_ICON_EXTRACT_DELAY_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
             let apps = state.apps.read().unwrap().clone();
             for app in apps {
+                if extract_delay_ms > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(extract_delay_ms));
+                }
                 neko_core::icons::ensure_cached_icon(&app.id, &app.path);
             }
+            // Pushed once after the whole startup batch, not per-icon: a
+            // client watching this event only needs to know "something is
+            // worth re-asking for," and one notification per batch is
+            // enough for `Root::refresh_icons` to pick up every icon that
+            // finished, cheaply, on its own next opportunity.
+            server::notify_icons_updated(&state);
         });
     }
 
@@ -59,6 +85,7 @@ fn main() {
             for app in apps {
                 neko_core::icons::ensure_cached_icon(&app.id, &app.path);
             }
+            server::notify_icons_updated(&state);
         });
     }
 

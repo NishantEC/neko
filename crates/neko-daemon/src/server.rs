@@ -251,6 +251,15 @@ fn broadcast(state: &AppState, event: &Event) {
     writers.retain_mut(|w| write_frame(w, &Frame::Event(event.clone())).is_ok());
 }
 
+/// Called by `main.rs`'s background icon-extraction passes (startup and
+/// each live `watch_applications` update) once a batch finishes, so a
+/// client that already has a search response with blank `icon_path`s finds
+/// out there's something new to ask for. See `Event::IconsUpdated`'s own
+/// doc comment for why this push exists at all.
+pub fn notify_icons_updated(state: &AppState) {
+    broadcast(state, &Event::IconsUpdated);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -29,8 +29,13 @@ ships it, an honest fallback chain beneath it — see "Window material"
 below. A sixth task re-toned the palette from the original warm ramp to a
 cool monochrome-with-a-hint-of-blue one, on direct captain instruction —
 pure colour values, no geometry/layout/copy change — see "Design tokens"
-below. Still not built: the WASM extension system, agent capability. See
-"Seams for follow-up work" below for exactly where each plugs in.
+below. A seventh task fixed two real defects in the app-icon cache: icons
+that finished background extraction after a search response had already
+landed never appeared until the client was relaunched, and every cached icon
+was stored at up to 1024x1024 (188MB across a real 147-app index) for
+artwork displayed at 22px — see "Icons" below. Still not built: the WASM
+extension system, agent capability. See "Seams for follow-up work" below for
+exactly where each plugs in.
 
 ## Crate layout
 
@@ -374,11 +379,71 @@ dev-dependency only).
 `neko_core::icons` extracts each app's real icon via `NSWorkspace::iconForFile`
 (not a loose `.icns`-file parse, which silently fails on modern
 asset-catalog-only apps) and caches it as a PNG under
-`~/Library/Caches/neko/icons/`. Runs once per app on daemon startup, in a
+`~/Library/Caches/neko/icons/v2-64px/`. Runs once per app on daemon startup, in a
 background thread *after* the app index is already searchable, so it never
-delays the first search. `neko::panel` reads `SearchItem::icon_path` and
-falls back to a plain placeholder square when a PNG isn't cached yet — the
-list self-heals on the next search once the background pass catches up.
+delays the first search.
+
+**Cached at `ICON_CACHE_PX` (64px), not whatever size the source
+representation happened to be.** A first pass here trusted `NSImage.setSize`
++ `TIFFRepresentation` to produce a small bitmap; it doesn't — a modern
+asset-catalog icon's source representation can be as large as 1024x1024,
+`setSize` only changes the image's reported *drawing* size, and
+`TIFFRepresentation` serializes the untouched source representation. Measured
+on a real 147-app index: 188MB across 142 files (`com.apple.calculator.png`
+alone 1.4MB) for icons displayed at 22px. `extract_icon_png` now draws into
+an explicitly `ICON_CACHE_PX`-sized `NSBitmapImageRep` via
+`NSGraphicsContext::graphicsContextWithBitmapImageRep` (the non-deprecated
+replacement for `NSImage.lockFocus`/`unlockFocus` — works from a background
+thread with no window or run loop, same as every other AppKit call site in
+this daemon) — same real index, same 146 apps, ~0.8MB total, ~5.7KB average,
+7.7KB max. `CACHE_GENERATION` (`"v2-64px"`) is a versioned subdirectory, not
+a flat rename: `ensure_cached_icon` only checks whether *a* file exists at
+its cache path, not what size it is, so bumping this constant is what makes
+a future pixel-size change regenerate rather than keep serving a stale file
+forever. `purge_stale_unversioned_cache` (called once from `neko-daemon`'s
+startup icon-extraction thread) is the one-time cleanup for caches written
+before this versioning existed — deletes only loose `*.png` files sitting
+directly in `icons/`, never a versioned subdirectory, so it's a no-op once
+run. No code reads old-generation files as a fallback; a captain who never
+runs the daemon again after upgrading keeps the old bytes on disk until this
+cleanup pass runs once, which happens automatically on the next `neko-daemon`
+start.
+
+**A client already showing search results does not, on its own, ever find
+out an icon it was missing has since been extracted — a real defect, not
+hypothetical.** `SearchItem::icon_path` is `None` until `rank_apps` finds the
+file on disk (`icons::cached_icon_path(...).filter(|p| p.exists())`,
+re-checked fresh on every `Request::Search`), but a client's results are a
+one-time snapshot: nothing re-runs `run_search` on its own after that
+snapshot lands, and background extraction (real AppKit work, run once after
+the daemon's own startup — see above) can easily still be in flight when a
+captain's very first summon after a fresh install or a daemon restart
+renders. Confirmed live: summon immediately after clearing the cache and
+restarting the daemon left every icon socket blank even once extraction had
+finished in the background, until the client process itself was relaunched.
+Fixed with a push, not a poll: `Event::IconsUpdated` (`neko_protocol`)
+broadcasts once after each background extraction pass finishes (the startup
+pass and each `watch_applications`-triggered incremental pass —
+`server::notify_icons_updated`, `neko-daemon/src/main.rs`); `neko`'s
+daemon-event loop (`main.rs`) routes it to `panel::Root::refresh_icons`,
+which re-runs the *current* query (not `reset_for_summon` — this can fire
+mid-search, and clearing what the captain already typed would be wrong) so
+already-visible rows pick up icons that just finished, live, in the same
+window, no relaunch and no per-frame filesystem check anywhere on the client
+side (the daemon is the only place that stats an icon file, once per search
+it already has to run). `panel::app_icon_placeholder_glyph` fills a
+not-yet-resolved app row's icon slot with a small hand-painted neutral mark
+(same painted-div convention as `content_kind_glyph` below — no bundled
+icon-asset pipeline in this codebase) instead of an empty hole, self-healing
+to the real icon in place once `refresh_icons` re-renders it.
+`NEKO_ICON_EXTRACT_DELAY_MS` (`neko-daemon/src/main.rs`) is a
+verification-only, unset-by-default hook (same pattern as `evidence.rs`'s
+`NEKO_BENCH`/`NEKO_FORCE_MATERIAL`) that stretches out the startup
+extraction pass — real hardware finishes 146 icons in well under a second
+at 64px, too fast to reliably land a screenshot mid-pass without it.
+Before/after window-scoped screenshots of the same summon (no relaunch, cold
+→ resolved): `docs/evidence/icon-cache-cold-before.png` /
+`icon-cache-warm-after.png`.
 
 ## Clipboard history
 
