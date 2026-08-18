@@ -3367,6 +3367,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-quartz-core",
  "raw-window-handle",
+ "unicode-segmentation",
 ]
 
 [[package]]

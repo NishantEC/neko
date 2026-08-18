@@ -157,14 +157,26 @@ impl Provider for AppsProvider {
     }
 }
 
-/// The three locations on the sealed, read-only system volume — see this
-/// module's doc comment for why they need a plain scan rather than a
-/// Spotlight query, and why that scan doesn't need to be live.
+/// The locations on the sealed, read-only system volume — see this module's
+/// doc comment for why they need a plain scan rather than a Spotlight query,
+/// and why that scan doesn't need to be live. `/System/Library/CoreServices`
+/// itself (not just its `Applications` subdirectory) has to be included:
+/// `Finder.app`, `Installer.app`, `Siri.app`, `Game Center.app`, and
+/// `Screen Time.app` all live loose directly in that top-level directory,
+/// one level up from `.../CoreServices/Applications`, which is a different,
+/// smaller directory of minor utilities (About This Mac, Archive Utility,
+/// Keychain Access, …). The ~100 background agents that also live loose in
+/// `CoreServices` (`Dock.app`, `ControlCenter.app`, `SystemUIServer.app`, …)
+/// are already correctly dropped by `read_app_bundle`'s `LSBackgroundOnly`
+/// check — verified live: a full scan of this directory keeps Finder,
+/// Installer, Siri, Game Center, and Screen Time, and drops every
+/// background-agent bundle checked by hand.
 fn sealed_system_directories() -> Vec<PathBuf> {
     vec![
         PathBuf::from("/System/Applications"),
         PathBuf::from("/System/Applications/Utilities"),
         PathBuf::from("/System/Library/CoreServices/Applications"),
+        PathBuf::from("/System/Library/CoreServices"),
     ]
 }
 
@@ -306,9 +318,15 @@ fn read_app_bundle(path: &Path) -> Option<AppEntry> {
     // payloads, plugins, and other bundle kinds that happen to carry a
     // `.app` extension are not. Many legitimate small apps omit the key
     // entirely, so absence is not itself a signal — only a *wrong* value
-    // is.
+    // is. `"FNDR"` is also accepted: `/System/Library/CoreServices/
+    // Finder.app`'s own `Info.plist` carries that legacy four-char OSType
+    // value (predating the `"APPL"` convention) instead of `"APPL"` — a
+    // real, verified fact about Finder specifically (every other loose app
+    // in that same directory — Installer, Siri, Game Center, Screen Time —
+    // uses `"APPL"`), not a guess or a broadened filter.
     if let Some(pkg_type) = dict.get("CFBundlePackageType").and_then(|v| v.as_string())
         && pkg_type != "APPL"
+        && pkg_type != "FNDR"
     {
         return None;
     }
@@ -482,11 +500,12 @@ mod tests {
     }
 
     #[test]
-    fn sealed_system_directories_are_the_three_verified_unindexed_paths() {
+    fn sealed_system_directories_are_the_four_verified_unindexed_paths() {
         let dirs = sealed_system_directories();
         assert!(dirs.contains(&PathBuf::from("/System/Applications")));
         assert!(dirs.contains(&PathBuf::from("/System/Applications/Utilities")));
         assert!(dirs.contains(&PathBuf::from("/System/Library/CoreServices/Applications")));
+        assert!(dirs.contains(&PathBuf::from("/System/Library/CoreServices")));
     }
 
     #[test]
@@ -496,18 +515,22 @@ mod tests {
     }
 
     #[test]
-    fn scanning_the_real_machine_finds_at_least_finder_or_safari() {
+    fn scanning_the_real_machine_finds_finder() {
         // A real, non-mocked scan against this machine's actual sealed
         // system directories (the part of `scan_applications` that never
         // depends on `mdfind` being available in a test environment).
+        // Asserts Finder specifically, not an OR against "System Settings" —
+        // the OR version passed the entire time Finder itself was absent
+        // from the scan (it lives in `/System/Library/CoreServices`, not
+        // `.../CoreServices/Applications`), a false-negative-blind test.
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for dir in sealed_system_directories() {
             scan_dir(&dir, 0, &mut seen, &mut out);
         }
         assert!(
-            out.iter().any(|a| a.name.contains("Finder") || a.name.contains("System Settings")),
-            "expected to find at least one well-known system app, found: {:?}",
+            out.iter().any(|a| a.name == "Finder"),
+            "expected to find Finder, found: {:?}",
             out.iter().map(|a| &a.name).collect::<Vec<_>>()
         );
     }

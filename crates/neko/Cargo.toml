@@ -13,6 +13,11 @@ neko-protocol.workspace = true
 neko-client.workspace = true
 gpui = "0.2.2"
 global-hotkey = "0.8.0"
+# Unicode-aware word-boundary segmentation for `text_field.rs`'s ⌥←/⌥→/
+# ⌥⌫/⌥⌦ word navigation — already a transitive dependency (via
+# `global-hotkey` -> `keyboard-types`) at this exact version, so this adds
+# zero new crate versions to the tree. MIT OR Apache-2.0.
+unicode-segmentation = "1.13"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 accessibility-sys = "0.1"
