@@ -34,7 +34,15 @@ objc2-app-kit = { version = "0.3", features = [
     "NSGraphics",
     "NSVisualEffectView",
     "NSGlassEffectView",
+    "NSScreen",
+    "NSEvent",
 ] }
+# Window-under-cursor multi-display placement (`src/display_placement.rs`)
+# needs `NSPoint`/`NSRect` directly to build the `setFrameTopLeftPoint:`
+# argument — already a transitive dependency of `objc2-app-kit` at this
+# exact version (verified via `Cargo.lock`), so this adds zero new crate
+# versions to the tree, same reasoning as the rest of this block.
+objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSArray", "objc2-core-foundation"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
 raw-window-handle = "0.6"
 

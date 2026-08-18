@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -42,6 +42,15 @@ struct Shared {
     pending: Mutex<HashMap<u64, futures_channel::oneshot::Sender<Response>>>,
     write_stream: Mutex<Option<UnixStream>>,
     event_tx: std_mpsc::Sender<Event>,
+    /// Mirrors whether `run_supervisor` currently holds a live socket —
+    /// the one client-visible connection-state signal callers need to stop
+    /// a dead daemon from being a silent no-op (see `AGENTS.md`,
+    /// "Reliability / error states"). `NekoClient::is_connected` is a
+    /// plain poll, not a push channel: the caller (`neko`'s summon loop)
+    /// already polls something else (`Event`) on a short, fixed interval,
+    /// so a second thing to poll from the same loop is the smaller
+    /// addition — no new channel, no new wire concept.
+    connected: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -63,6 +72,7 @@ impl NekoClient {
             pending: Mutex::new(HashMap::new()),
             write_stream: Mutex::new(None),
             event_tx,
+            connected: AtomicBool::new(false),
         });
 
         let supervisor_shared = shared.clone();
@@ -104,6 +114,17 @@ impl NekoClient {
             rx.await.map_err(|_| ClientError::Disconnected)
         }
     }
+
+    /// Whether the reconnect supervisor currently has a live socket open to
+    /// `neko-daemon`. `false` both before the very first connection and
+    /// for as long as the daemon stays unreachable after one drops — a
+    /// caller that wants to distinguish "never connected yet" from "was
+    /// connected, then lost it" needs its own first-response bookkeeping
+    /// (`request`'s own `Ok`/`Err` already gives it that), since this is
+    /// deliberately just the one plain, poll-anytime signal.
+    pub fn is_connected(&self) -> bool {
+        self.shared.connected.load(Ordering::Relaxed)
+    }
 }
 
 fn run_supervisor(socket_path: PathBuf, shared: Arc<Shared>) {
@@ -122,12 +143,14 @@ fn run_supervisor(socket_path: PathBuf, shared: Arc<Shared>) {
                     }
                 };
                 *shared.write_stream.lock().unwrap() = Some(stream);
+                shared.connected.store(true, Ordering::Relaxed);
 
                 // Blocks until the connection drops (EOF or an error) —
                 // that's the resume point for the outer reconnect loop.
                 read_until_disconnected(reader_stream, &shared);
 
                 *shared.write_stream.lock().unwrap() = None;
+                shared.connected.store(false, Ordering::Relaxed);
                 // Any request that was mid-flight when the connection died
                 // resolves now: dropping these senders turns their
                 // `rx.await` into `Err(Canceled)`, i.e. `ClientError::Disconnected`.
@@ -209,5 +232,31 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         let result = futures::executor::block_on(client.request(Request::Ping));
         assert!(matches!(result, Ok(Response::Pong)));
+    }
+
+    #[test]
+    fn is_connected_reflects_the_daemon_dying_without_any_request_being_made() {
+        // The exact defect this exists to fix (`AGENTS.md`, "Reliability /
+        // error states"): a caller must be able to learn the daemon died
+        // even if nothing ever sends another request afterward — no
+        // keystroke, no poll-triggered search, nothing.
+        let path = temp_socket_path();
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+
+        let (client, _events) = NekoClient::connect(path.clone());
+        assert!(!client.is_connected(), "not connected before the daemon-like listener ever accepts");
+
+        let (stream, _) = listener.accept().unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(client.is_connected(), "connected once the supervisor's dial-in succeeds");
+
+        // Simulates the daemon dying: close the accepted end, which
+        // delivers EOF to the client's reader thread with no request in
+        // flight and no further keystroke to provoke a failure.
+        drop(stream);
+        drop(listener);
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!client.is_connected(), "disconnected the moment the socket closes, proactively");
     }
 }
