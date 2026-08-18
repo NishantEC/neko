@@ -50,7 +50,14 @@ enough" rather than checked against what macOS actually ships, which made
 extraction itself lossy (a non-native target size) on top of the
 renderer's own necessary downscale — see "Icons" below,
 `docs/evidence/icon-cache-128px-report.md`, for the diagnosis and the fix
-(128px, a real representation size).
+(128px, a real representation size). A tenth task fixed search ranking so
+applications win queries obviously about them — the captain's own daily
+complaint that searching for an app returned source files instead — with a
+deliberate, gated per-provider category weight for `AppsProvider` and a
+demotion (never exclusion) of compiled/source-code file extensions in
+`FileProvider`; both constants were re-tuned after live queries against the
+captain's own file corpus caught real regressions a unit fixture wouldn't
+have. See "Search and ranking" below, `docs/evidence/ranking-before-after.md`.
 
 ## Crate layout
 
@@ -388,6 +395,30 @@ is still present in the new results, and reset to the top only when it
 isn't — covered in `text_field.rs`'s and `panel.rs`'s own test suites
 (`#[gpui::test]` needs `gpui`'s `test-support` feature, added as a
 dev-dependency only).
+
+**An exact app-name match only barely outscored a same-prefixed file — a
+razor-thin length-penalty spread, not a reservation bug — so "terminal"
+surfaced junk files, and a vendor-prefixed app ("Google Chrome") lost to a
+plain file entirely.** Fixed with two scoped, deliberate additions — neither
+touches `fuzzy_score` itself (still the same 12 original tests, unmodified):
+`search::app_category_score` gives the `"app"` provider's own candidates a
+per-word rescore (so "chrome" matches "Chrome" inside "Google Chrome" at
+full strength, not just the whole string) plus a flat `APP_CATEGORY_BONUS`,
+**gated on a real prefix match** (whole title or a significant word must
+*start with* the query) — an unconditional version of this bonus was tried
+first and caught live promoting scattered, coincidental app matches
+("Xcode" for query "code") above genuinely relevant files, which is exactly
+backwards. `files::is_source_artifact` demotes (never excludes) compiled/
+source-code extensions' `fuzzy_score` by `SOURCE_ARTIFACT_DEMOTION`; the
+first value tried (`0.5`) was too aggressive and, combined with the app
+bonus above, let unboosted scattered app matches outrank real, relevant
+source files — `0.85` was the value that survived live verification against
+the captain's own file corpus. Full before/after numbers, the two live
+regressions the first-tried constants caused and why, and the resolution of
+a previously-unresolved "duplicate `finders.py`" report (two genuinely
+different files vendored inside a Python virtualenv's `site-packages` — now
+filtered as noise, the same category `node_modules`/`vendor` already are):
+`docs/evidence/ranking-before-after.md`.
 
 ## Icons
 
