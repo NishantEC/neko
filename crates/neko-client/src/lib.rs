@@ -248,15 +248,39 @@ mod tests {
         assert!(!client.is_connected(), "not connected before the daemon-like listener ever accepts");
 
         let (stream, _) = listener.accept().unwrap();
-        std::thread::sleep(Duration::from_millis(100));
-        assert!(client.is_connected(), "connected once the supervisor's dial-in succeeds");
+        assert!(
+            wait_until(|| client.is_connected(), Duration::from_secs(2)),
+            "connected once the supervisor's dial-in succeeds"
+        );
 
         // Simulates the daemon dying: close the accepted end, which
         // delivers EOF to the client's reader thread with no request in
         // flight and no further keystroke to provoke a failure.
         drop(stream);
         drop(listener);
-        std::thread::sleep(Duration::from_millis(100));
-        assert!(!client.is_connected(), "disconnected the moment the socket closes, proactively");
+        assert!(
+            wait_until(|| !client.is_connected(), Duration::from_secs(2)),
+            "disconnected the moment the socket closes, proactively"
+        );
+    }
+
+    /// Polls `condition` with a short interval instead of a single fixed
+    /// sleep — this test asserts on the reconnect supervisor's own
+    /// background-thread timing, and a fixed sleep tight enough to be fast
+    /// is also tight enough to flake under real system load (seen once in
+    /// a full `cargo test --workspace` run on a busy multi-agent machine, a
+    /// generous fixed sleep still isn't a guarantee). A 2s budget is far
+    /// past the supervisor's own 50ms initial backoff either way.
+    fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if condition() {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 }
