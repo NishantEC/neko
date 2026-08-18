@@ -6,11 +6,27 @@ use gpui::{
     Point, Render, ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window, actions, div,
     fill, point, prelude::*, px, relative,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::components::vendor::gpui_component::blink_cursor::CursorBlink;
 use crate::theme;
 
-actions!(text_field, [Backspace, Left, Right]);
+actions!(
+    text_field,
+    [
+        Backspace,
+        Left,
+        Right,
+        DeleteLineStart,
+        DeleteLineEnd,
+        DeleteWordBackward,
+        DeleteWordForward,
+        LineStart,
+        LineEnd,
+        WordBackward,
+        WordForward,
+    ]
+);
 
 /// Emitted only when `content` actually changes (a real edit), never on
 /// cursor movement or a cursor-blink tick — both of those still call
@@ -134,6 +150,75 @@ impl TextField {
         cx.notify();
     }
 
+    // ⌘⌫/⌘⌦/⌥⌫/⌥⌦/⌘←/⌘→/⌥←/⌥→ — standard macOS single-line editing
+    // shortcuts. Deliberately not a selection-range feature: there is still
+    // only ever one `cursor: usize` here, same as before this task — these
+    // are all either a cursor jump or a delete of `[start, cursor)`/
+    // `[cursor, end)`, never a highlighted range a person could then act on
+    // (copy, extend, retype-over). Real selection (⇧-arrows, ⌘A) and paste
+    // (⌘V/⌘C/⌘X) need that range concept added to `TextField` first — a
+    // bigger, separate piece of work the audit this task fixes from
+    // deliberately split out; this file's doc comment above still names it
+    // as not-yet-supported for exactly that reason.
+
+    fn on_delete_line_start(&mut self, _: &DeleteLineStart, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor == 0 {
+            return;
+        }
+        let removed = 0..self.cursor;
+        self.commit_edit(removed, "", cx);
+    }
+
+    fn on_delete_line_end(&mut self, _: &DeleteLineEnd, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor == self.content.len() {
+            return;
+        }
+        let removed = self.cursor..self.content.len();
+        self.commit_edit(removed, "", cx);
+    }
+
+    fn on_delete_word_backward(&mut self, _: &DeleteWordBackward, _window: &mut Window, cx: &mut Context<Self>) {
+        let start = self.word_start_before(self.cursor);
+        if start == self.cursor {
+            return;
+        }
+        let removed = start..self.cursor;
+        self.commit_edit(removed, "", cx);
+    }
+
+    fn on_delete_word_forward(&mut self, _: &DeleteWordForward, _window: &mut Window, cx: &mut Context<Self>) {
+        let end = self.word_end_after(self.cursor);
+        if end == self.cursor {
+            return;
+        }
+        let removed = self.cursor..end;
+        self.commit_edit(removed, "", cx);
+    }
+
+    fn on_line_start(&mut self, _: &LineStart, _window: &mut Window, cx: &mut Context<Self>) {
+        self.cursor = 0;
+        self.touch_cursor(cx);
+        cx.notify();
+    }
+
+    fn on_line_end(&mut self, _: &LineEnd, _window: &mut Window, cx: &mut Context<Self>) {
+        self.cursor = self.content.len();
+        self.touch_cursor(cx);
+        cx.notify();
+    }
+
+    fn on_word_backward(&mut self, _: &WordBackward, _window: &mut Window, cx: &mut Context<Self>) {
+        self.cursor = self.word_start_before(self.cursor);
+        self.touch_cursor(cx);
+        cx.notify();
+    }
+
+    fn on_word_forward(&mut self, _: &WordForward, _window: &mut Window, cx: &mut Context<Self>) {
+        self.cursor = self.word_end_after(self.cursor);
+        self.touch_cursor(cx);
+        cx.notify();
+    }
+
     fn previous_char_boundary(&self, byte_offset: usize) -> usize {
         self.content[..byte_offset]
             .char_indices()
@@ -147,6 +232,31 @@ impl TextField {
             .char_indices()
             .nth(1)
             .map(|(idx, _)| byte_offset + idx)
+            .unwrap_or(self.content.len())
+    }
+
+    /// The start of the word `byte_offset` is inside or just after —
+    /// Unicode-aware (`unicode_word_indices`, UAX#29 word boundaries, not
+    /// `char::is_whitespace` on bytes), matching macOS's own ⌥← convention:
+    /// from mid-word, jumps to that word's start; from trailing punctuation
+    /// or whitespace, skips back over it to the previous word's start.
+    fn word_start_before(&self, byte_offset: usize) -> usize {
+        self.content[..byte_offset]
+            .unicode_word_indices()
+            .next_back()
+            .map(|(idx, _)| idx)
+            .unwrap_or(0)
+    }
+
+    /// The end of the next word at or after `byte_offset` — the ⌥→
+    /// counterpart to [`Self::word_start_before`]: from mid-word, jumps to
+    /// that word's end; from leading whitespace/punctuation, skips forward
+    /// over it to the next word's end.
+    fn word_end_after(&self, byte_offset: usize) -> usize {
+        self.content[byte_offset..]
+            .unicode_word_indices()
+            .next()
+            .map(|(idx, word)| byte_offset + idx + word.len())
             .unwrap_or(self.content.len())
     }
 
@@ -403,6 +513,14 @@ impl Render for TextField {
             .on_action(cx.listener(Self::on_backspace))
             .on_action(cx.listener(Self::on_left))
             .on_action(cx.listener(Self::on_right))
+            .on_action(cx.listener(Self::on_delete_line_start))
+            .on_action(cx.listener(Self::on_delete_line_end))
+            .on_action(cx.listener(Self::on_delete_word_backward))
+            .on_action(cx.listener(Self::on_delete_word_forward))
+            .on_action(cx.listener(Self::on_line_start))
+            .on_action(cx.listener(Self::on_line_end))
+            .on_action(cx.listener(Self::on_word_backward))
+            .on_action(cx.listener(Self::on_word_forward))
             .w_full()
             .child(TextFieldElement { field: cx.entity() })
     }
@@ -485,5 +603,148 @@ mod tests {
         });
         cx.run_until_parked();
         assert_eq!(content_changed_count.get(), 0);
+    }
+
+    // The eight standard macOS shortcuts below are tested against the
+    // editing model directly (`word_start_before`/`word_end_after`/
+    // `commit_edit`/`cursor` — the same methods each `on_*` action handler
+    // calls), the same way the existing tests above exercise
+    // `previous_char_boundary` without going through GPUI's action-dispatch
+    // layer, which needs a live `Window` these entity-only tests don't open.
+
+    #[gpui::test]
+    fn cmd_backspace_deletes_to_line_start(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = 8; // inside "world"
+            let removed = 0..field.cursor;
+            field.commit_edit(removed, "", cx);
+            assert_eq!(field.content, "rld");
+            assert_eq!(field.cursor, 0);
+        });
+    }
+
+    #[gpui::test]
+    fn cmd_delete_deletes_to_line_end(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = 5; // right after "hello"
+            let removed = field.cursor..field.content.len();
+            field.commit_edit(removed, "", cx);
+            assert_eq!(field.content, "hello");
+            assert_eq!(field.cursor, 5);
+        });
+    }
+
+    #[gpui::test]
+    fn alt_backspace_deletes_previous_word(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = field.content.len();
+            let start = field.word_start_before(field.cursor);
+            field.commit_edit(start..field.cursor, "", cx);
+            assert_eq!(field.content, "hello ");
+            assert_eq!(field.cursor, 6);
+        });
+    }
+
+    #[gpui::test]
+    fn alt_delete_deletes_next_word(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = 0;
+            let end = field.word_end_after(field.cursor);
+            field.commit_edit(field.cursor..end, "", cx);
+            assert_eq!(field.content, " world");
+            assert_eq!(field.cursor, 0);
+        });
+    }
+
+    #[gpui::test]
+    fn cmd_left_moves_to_line_start(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = 0;
+            field.touch_cursor(cx);
+            assert_eq!(field.cursor, 0);
+        });
+    }
+
+    #[gpui::test]
+    fn cmd_right_moves_to_line_end(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = field.content.len();
+            field.touch_cursor(cx);
+            assert_eq!(field.cursor, "hello world".len());
+        });
+    }
+
+    #[gpui::test]
+    fn alt_left_moves_to_previous_word_start(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello   world", cx);
+            field.cursor = field.content.len();
+            field.cursor = field.word_start_before(field.cursor);
+            field.touch_cursor(cx);
+            // Skips the run of trailing spaces to land on "world"'s own
+            // start, not just one character back.
+            assert_eq!(field.cursor, 8);
+        });
+    }
+
+    #[gpui::test]
+    fn alt_right_moves_to_next_word_end(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello   world", cx);
+            field.cursor = 0;
+            field.cursor = field.word_end_after(field.cursor);
+            field.touch_cursor(cx);
+            assert_eq!(field.cursor, 5);
+        });
+    }
+
+    /// Word boundaries must be Unicode-aware, not `char::is_whitespace` on
+    /// byte offsets — a naive byte-indexed scan would panic or split a
+    /// multi-byte character mid-codepoint on non-ASCII input. "café" is a
+    /// single word under UAX#29 (the accented "é" is alphabetic, contiguous
+    /// with the rest, unlike a byte-wise scan that could stop mid-codepoint
+    /// on "é"'s two UTF-8 bytes). The CJK run has no ASCII whitespace inside
+    /// it at all, yet each ideograph is still its own UAX#29 word boundary
+    /// (real, correct Unicode behavior, not a language-aware dictionary
+    /// segmentation) — walking it one step at a time proves every stop
+    /// lands on a real char boundary rather than panicking or drifting.
+    #[gpui::test]
+    fn word_boundaries_are_unicode_aware(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "café 東京 test", cx);
+            assert_eq!(field.word_end_after(0), "café".len(), "café is one word, accents included");
+            let after_cafe = "café ".len();
+            let after_first_ideograph = field.word_end_after(after_cafe);
+            assert_eq!(
+                after_first_ideograph,
+                "café 東".len(),
+                "each CJK ideograph is its own UAX#29 word boundary"
+            );
+            assert_eq!(
+                field.word_end_after(after_first_ideograph),
+                "café 東京".len(),
+                "the second ideograph is the next stop, still a valid char boundary"
+            );
+            assert_eq!(
+                field.word_start_before(field.content.len()),
+                "café 東京 ".len(),
+                "walking back from the end lands on \"test\"'s own start"
+            );
+        });
     }
 }

@@ -9,7 +9,7 @@ mod panel;
 mod text_field;
 mod theme;
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -74,6 +74,17 @@ fn main() {
             KeyBinding::new("backspace", text_field::Backspace, Some("TextField")),
             KeyBinding::new("left", text_field::Left, Some("TextField")),
             KeyBinding::new("right", text_field::Right, Some("TextField")),
+            // Standard macOS single-line editing shortcuts — see
+            // `text_field.rs`'s own doc comment on the handlers for exactly
+            // what each does and why selection/paste aren't part of this.
+            KeyBinding::new("cmd-backspace", text_field::DeleteLineStart, Some("TextField")),
+            KeyBinding::new("cmd-delete", text_field::DeleteLineEnd, Some("TextField")),
+            KeyBinding::new("alt-backspace", text_field::DeleteWordBackward, Some("TextField")),
+            KeyBinding::new("alt-delete", text_field::DeleteWordForward, Some("TextField")),
+            KeyBinding::new("cmd-left", text_field::LineStart, Some("TextField")),
+            KeyBinding::new("cmd-right", text_field::LineEnd, Some("TextField")),
+            KeyBinding::new("alt-left", text_field::WordBackward, Some("TextField")),
+            KeyBinding::new("alt-right", text_field::WordForward, Some("TextField")),
             KeyBinding::new("down", panel::SelectNext, Some("Panel")),
             KeyBinding::new("up", panel::SelectPrevious, Some("Panel")),
             KeyBinding::new("enter", panel::Confirm, Some("Panel")),
@@ -150,7 +161,24 @@ fn main() {
             )
             .expect("failed to open the summon window");
 
-        let visible = Rc::new(Cell::new(false));
+        // Frozen spec (`data/neko-design/report.md` §2): "dismisses on
+        // `Esc` or on losing focus." Escape is the `DismissWindow` binding
+        // above; this is the focus-loss half — registered once, on the one
+        // resident summon window, never on the separate onboarding window,
+        // so declining/stepping through onboarding is never affected by it.
+        // `cx.hide()` here is exactly `confirm()`'s own hide
+        // (`panel.rs::confirm`) — both just tell the OS the window is no
+        // longer active, so there's nothing to reconcile between the two
+        // paths.
+        let _ = window.update(cx, |_root, window, cx| {
+            cx.observe_window_activation(window, |_root, window, cx| {
+                if !window.is_window_active() {
+                    eprintln!("neko: summon window lost activation, hiding");
+                    cx.hide();
+                }
+            })
+            .detach();
+        });
 
         // Populated once onboarding decides it needs to run (see the async
         // block below); checked by both the hotkey-press loop and
@@ -225,11 +253,20 @@ fn main() {
                         });
                     } else {
                         let pressed_at = Instant::now();
-                        let opening = !visible.get();
-                        visible.set(opening);
+                        // The window's own live activation state is the
+                        // toggle's ground truth, not a separately tracked
+                        // flag — a flag desyncs the moment the window is
+                        // hidden by anything other than this branch (a
+                        // result activation via `confirm()`, or clicking
+                        // outside via the focus-loss observer registered
+                        // above), which would otherwise make the *next*
+                        // hotkey press silently no-op instead of
+                        // re-summoning.
                         let _ = cx.update(|cx| {
-                            if opening {
-                                let _ = window.update(cx, |root, window, cx| {
+                            let _ = window.update(cx, |root, window, cx| {
+                                if window.is_window_active() {
+                                    cx.hide();
+                                } else {
                                     root.reset_for_summon(cx);
                                     window.activate_window();
                                     window.focus(&root.focus_handle(cx));
@@ -239,11 +276,9 @@ fn main() {
                                     window.on_next_frame(move |_, _| {
                                         eprintln!("neko: summon latency {:?}", pressed_at.elapsed());
                                     });
-                                });
-                                cx.activate(true);
-                            } else {
-                                cx.hide();
-                            }
+                                    cx.activate(true);
+                                }
+                            });
                         });
                     }
                 }

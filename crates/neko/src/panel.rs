@@ -48,6 +48,15 @@ pub struct Root {
     /// persisted dismissal flag has been fetched, so the banner doesn't
     /// flash on for one frame before that first response lands.
     accessibility_banner_dismissed: Option<bool>,
+    /// Set when `Request::Activate` comes back as `Response::Error` (or the
+    /// request fails to reach the daemon at all) — the underlying app/file
+    /// moved or was deleted since it was indexed, or the daemon is
+    /// unreachable. Rendered in place of the footer's normal title/verb
+    /// (`render_footer`) rather than a new toast surface: same fixed
+    /// geometry, no layout change, just different content for one strip
+    /// that's already always on screen. Cleared by the next query change or
+    /// summon so it can never outlive the state that produced it.
+    activation_error: Option<String>,
     /// Whether `material::install` put a native background view behind the
     /// window. When `true`, the panel fills with `theme::SURFACE_PANEL_TRANSLUCENT`
     /// so that material actually shows through; when `false` (the material
@@ -83,6 +92,7 @@ impl Root {
                 selected: 0,
                 generation: 0,
                 accessibility_banner_dismissed: None,
+                activation_error: None,
                 translucent,
             };
             root.run_search(cx);
@@ -165,6 +175,9 @@ impl Root {
     }
 
     fn run_search(&mut self, cx: &mut Context<Self>) {
+        // A stale activation-failure message from a previous result no
+        // longer applies once the query changes underneath it.
+        self.activation_error = None;
         self.generation += 1;
         let generation = self.generation;
         let query = self.text_field.read(cx).content().to_string();
@@ -223,9 +236,31 @@ impl Root {
         // vs. a clipboard entry vs. a file actually does.
         let request = Request::Activate { kind: item.kind, id: item.id };
         let client = self.client.clone();
-        cx.spawn(async move |_this, cx| {
-            let _ = client.request(request).await;
-            let _ = cx.update(|cx| cx.hide());
+        cx.spawn(async move |this, cx| {
+            // `Request::Activate` really can come back `Response::Error`
+            // (the underlying app/file moved or was deleted since it was
+            // indexed — `server.rs`'s own unit tests cover both "no such
+            // app" and "no such provider") — discarding it here used to
+            // hide the panel exactly as if the activation had worked, with
+            // no indication anything failed. A transport-level `Err` (the
+            // daemon unreachable) is folded into the same inline-error path
+            // rather than a second, silent no-op, since from the captain's
+            // seat "nothing happened" and "it errored" both need the same
+            // visible result: the panel stays open and says why.
+            let outcome = client.request(request).await;
+            let error_message = match outcome {
+                Ok(Response::Error { message }) => Some(message),
+                Ok(_) => None,
+                Err(_) => Some("couldn't reach neko".to_string()),
+            };
+            let failed = error_message.is_some();
+            let _ = this.update(cx, |root, cx| {
+                root.activation_error = error_message;
+                cx.notify();
+            });
+            if !failed {
+                let _ = cx.update(|cx| cx.hide());
+            }
         })
         .detach();
     }
@@ -472,6 +507,34 @@ impl Root {
     }
 
     fn render_footer(&self) -> impl IntoElement {
+        let base = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .flex_shrink_0()
+            .h(px(theme::FOOTER_HEIGHT_PX))
+            .px_5()
+            .border_t_1()
+            .border_color(theme::BORDER_HAIRLINE);
+
+        // An activation failure takes over the footer's own fixed strip
+        // instead of opening a new toast surface — same geometry, same
+        // always-on-screen location, just different content until the next
+        // query or summon clears it (`run_search`). Reuses the danger
+        // tokens the accessibility banner already established
+        // (`render_accessibility_banner`) rather than inventing a new color.
+        if let Some(message) = &self.activation_error {
+            return base.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_size(px(12.))
+                    .text_color(theme::STATE_DANGER)
+                    .child(format!("Couldn't open — {message}")),
+            );
+        }
+
         let selected_item = self.results.get(self.selected);
         // The primary action's verb matches what enter actually does — data
         // straight from the selected row's own provider (`item.action_label`),
@@ -481,16 +544,7 @@ impl Root {
         let primary_action: SharedString = selected_item
             .map(|item| SharedString::from(item.action_label.clone()))
             .unwrap_or_else(|| "Open  ↵".into());
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .flex_shrink_0()
-            .h(px(theme::FOOTER_HEIGHT_PX))
-            .px_5()
-            .border_t_1()
-            .border_color(theme::BORDER_HAIRLINE)
-            .child(
+        base.child(
                 div()
                     .flex()
                     .items_center()
