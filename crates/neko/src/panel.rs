@@ -64,6 +64,17 @@ pub struct Root {
     /// hairline border instead, per the design report's own explicit
     /// fallback (§1: "opaque-plus-shadow... as the fallback").
     translucent: bool,
+    /// Mirrors `NekoClient::is_connected()` — pushed by `main.rs`'s summon
+    /// loop, which already polls something else on a fixed short interval
+    /// (see that method's own doc comment). Defaults optimistic (`true`):
+    /// the supervisor's very first dial-in race (tens to a couple hundred
+    /// ms, per `neko-client`'s own test) only ever happens while this
+    /// window is still hidden pre-first-summon, so there's nothing for a
+    /// captain to see either way — biasing toward *not* flashing a false
+    /// "can't reach neko-daemon" banner on a normal, fast launch matches
+    /// this codebase's existing "fail toward not showing a false state"
+    /// calls (see `main.rs`'s `fetch_onboarding_state`).
+    connected: bool,
 }
 
 impl Root {
@@ -94,6 +105,7 @@ impl Root {
                 accessibility_banner_dismissed: None,
                 activation_error: None,
                 translucent,
+                connected: true,
             };
             root.run_search(cx);
             root.fetch_accessibility_banner_state(cx);
@@ -149,6 +161,20 @@ impl Root {
     /// `set_query_for_evidence`'s own doc comment.
     pub fn confirm_for_evidence(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.confirm(&Confirm, window, cx);
+    }
+
+    /// Pushed by `main.rs`'s summon loop whenever `NekoClient::is_connected()`
+    /// changes — see that method's doc comment for why this is a poll, not
+    /// an event subscription. This is the fix for `data/neko-audit/report.md`
+    /// Part 4 item 8: a dead daemon used to be a completely silent no-op
+    /// (`run_search`'s response handling discarded every error, including a
+    /// dropped connection); now the panel has a real, live-updating signal
+    /// for it, independent of whether anything is being typed.
+    pub fn set_connected(&mut self, connected: bool, cx: &mut Context<Self>) {
+        if self.connected != connected {
+            self.connected = connected;
+            cx.notify();
+        }
     }
 
     fn fetch_accessibility_banner_state(&mut self, cx: &mut Context<Self>) {
@@ -207,6 +233,15 @@ impl Root {
                     limit: RESULT_LIMIT,
                 })
                 .await;
+            // A request error (including a dead connection) is deliberately
+            // *not* surfaced here — `results`/`selected` just stay exactly
+            // as they were, per the design intent below. The live
+            // "can't reach neko-daemon" signal itself is
+            // `main.rs`'s poll of `NekoClient::is_connected()`
+            // (`Root::set_connected`), which doesn't depend on a search
+            // having been attempted at all — see that method's doc comment
+            // for why a request failing here is the wrong place to decide
+            // connection state.
             let Ok(Response::SearchResults { items }) = response else {
                 return;
             };
@@ -353,6 +388,10 @@ impl Root {
             .overflow_hidden()
             .px_2();
 
+        if !self.connected {
+            container = container.child(self.render_connection_banner());
+        }
+
         if self.show_accessibility_banner() {
             container = container.child(self.render_accessibility_banner(cx));
         }
@@ -427,6 +466,33 @@ impl Root {
                     .hover(|s| s.text_color(theme::TEXT_PRIMARY))
                     .on_click(cx.listener(Self::dismiss_accessibility_banner))
                     .child("Dismiss"),
+            )
+    }
+
+    /// The fix for `data/neko-audit/report.md` Part 4 item 8 — same strip
+    /// treatment as `render_accessibility_banner` just above (frozen design,
+    /// no new chrome), but with no dismiss control: unlike the accessibility
+    /// banner (a persisted setting the captain explicitly closes), this one
+    /// tracks a live signal and clears itself the moment `set_connected`
+    /// reports the daemon is reachable again — there's nothing to dismiss.
+    fn render_connection_banner(&self) -> impl IntoElement {
+        div()
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .gap_3()
+            .px_3()
+            .py_2()
+            .mb_1()
+            .rounded(px(theme::ROW_RADIUS_PX))
+            .bg(theme::BANNER_DANGER_BG)
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(px(12.5))
+                    .line_height(px(18.))
+                    .text_color(theme::TEXT_SECONDARY)
+                    .child("Can't reach neko-daemon. Results may be out of date."),
             )
     }
 

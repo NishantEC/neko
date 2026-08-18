@@ -1,11 +1,13 @@
 mod accessibility;
 mod components;
 mod daemon_launcher;
+mod display_placement;
 mod evidence;
 mod hotkey_client;
 mod material;
 mod onboarding;
 mod panel;
+mod spaces;
 mod text_field;
 mod theme;
 
@@ -63,6 +65,7 @@ fn main() {
         // Accessibility never leaves neko unreachable.
         let _ = window.update(cx, |root, window, cx| {
             root.reset_for_summon(cx);
+            reposition_to_cursor_display(window);
             window.activate_window();
             window.focus(&root.focus_handle(cx));
         });
@@ -155,6 +158,16 @@ fn main() {
                                 false
                             }
                         };
+                        // Permanent runtime sanity check, same reasoning as
+                        // the material readback just above: proves the
+                        // Spaces/full-screen reachability the audit could
+                        // only grep for (`data/neko-audit/report.md` Part 4
+                        // item 10) against the real live window, not just
+                        // gpui's source.
+                        match spaces::verify(window) {
+                            Ok(readback) => eprintln!("neko: Spaces/full-screen reachability verified: {readback}"),
+                            Err(e) => eprintln!("neko: Spaces/full-screen reachability readback FAILED: {e}"),
+                        }
                         Root::new(client.clone(), accessibility.clone(), translucent, cx)
                     }
                 },
@@ -226,6 +239,16 @@ fn main() {
                 );
             }
 
+            // `NekoClient::is_connected()` is a plain poll, not a push
+            // channel (see that method's own doc comment) — this loop
+            // already polls hotkey events and `event_rx` on a fixed 20ms
+            // interval below, so checking one more thing here is the
+            // smaller addition. Seeded `true` to match `Root::connected`'s
+            // own optimistic default, so a launch where the daemon is
+            // already connected by the first tick (the common case) never
+            // pushes a spurious no-op transition.
+            let mut last_connected = true;
+
             if !onboarding_state.completed {
                 let _ = cx.update(|cx| {
                     onboarding::open_window(
@@ -268,6 +291,7 @@ fn main() {
                                     cx.hide();
                                 } else {
                                     root.reset_for_summon(cx);
+                                    reposition_to_cursor_display(window);
                                     window.activate_window();
                                     window.focus(&root.focus_handle(cx));
                                     // The next frame is the first one painted after
@@ -298,6 +322,16 @@ fn main() {
                             });
                         }
                     }
+                }
+
+                let is_connected = client.is_connected();
+                if is_connected != last_connected {
+                    last_connected = is_connected;
+                    let _ = cx.update(|cx| {
+                        let _ = window.update(cx, |root, _window, cx| {
+                            root.set_connected(is_connected, cx);
+                        });
+                    });
                 }
 
                 Timer::after(Duration::from_millis(20)).await;
@@ -363,11 +397,24 @@ fn upper_third(display_id: Option<gpui::DisplayId>, panel_size: gpui::Size<gpui:
     };
 
     let display_bounds = display.bounds();
-    let x = display_bounds.origin.x + (display_bounds.size.width - panel_size.width) / 2.0;
-    let y = display_bounds.origin.y + display_bounds.size.height / 3.0 - panel_size.height / 4.0;
+    let offset = display_placement::upper_third_offset(display_bounds.size, panel_size);
     Bounds {
-        origin: point(x, y),
+        origin: point(display_bounds.origin.x + offset.x, display_bounds.origin.y + offset.y),
         size: panel_size,
+    }
+}
+
+/// Moves the resident summon window onto the display under the cursor,
+/// right before it's activated — `upper_third` above only ever runs once,
+/// at the initial `open_window` call, so without this every later summon
+/// keeps reopening on whichever display was primary at process launch
+/// (`data/neko-audit/report.md` Part 4 item 9). Best-effort: on any error
+/// (no `NSScreen` available, off the main thread, ...) the window simply
+/// stays wherever it already was rather than failing the summon.
+fn reposition_to_cursor_display(window: &gpui::Window) {
+    let panel_size = size(px(theme::PANEL_WIDTH_PX), px(panel::PANEL_HEIGHT_PX));
+    if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
+        eprintln!("neko: could not reposition the summon window to the display under the cursor: {e}");
     }
 }
 
