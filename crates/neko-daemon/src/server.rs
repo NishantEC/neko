@@ -13,11 +13,12 @@ pub struct AppState {
     pub apps: Arc<RwLock<Vec<AppEntry>>>,
     /// Every registered result-type provider, in section render order —
     /// see `neko_core::search::allocate`'s doc comment for what that order
-    /// means for ranking. Registering a new provider (four are registered
-    /// today: app, file, clipboard, settings) is exactly one more line here
-    /// plus its own `impl Provider` — nothing else in this file, the wire
-    /// protocol, or the client needs to change. See `AGENTS.md`'s "Provider
-    /// abstraction" section for the full accounting.
+    /// means for ranking. Registering a new provider (five are registered
+    /// today: app, file, clipboard, settings, command) is exactly one more
+    /// line here plus its own `impl Provider` — nothing else in this file,
+    /// the wire protocol, or the client needs to change. See `AGENTS.md`'s
+    /// "Provider abstraction" and "Commands and modes" sections for the
+    /// full accounting.
     providers: Vec<Box<dyn Provider>>,
     /// One shared writer lock per connected client, keyed by nothing (just
     /// a flat list) since a connection never needs to look itself up — see
@@ -54,6 +55,11 @@ impl AppState {
             Box::new(file_provider),
             Box::new(neko_core::clipboard::ClipboardProvider::new(db.clone())),
             Box::new(settings_provider),
+            // No test-provided variant needed, unlike file/settings above:
+            // `CommandsProvider` does zero I/O (a fixed, compiled-in table
+            // — see `commands.rs`'s own doc comment), so it's exactly as
+            // hermetic and fast in a test as in the real daemon.
+            Box::new(neko_core::commands::CommandsProvider::new()),
         ];
         Self {
             db,
@@ -162,7 +168,24 @@ fn handle_request(state: &AppState, request: Request) -> Response {
     match request {
         Request::Ping => Response::Pong,
 
-        Request::Search { query, limit } => {
+        Request::Search { query, limit, provider: Some(provider_id) } => {
+            // The mode seam: scoped to exactly one provider, no cross-
+            // provider `allocate()` — see `Request::Search`'s own doc
+            // comment. A mode's own list wants "this provider's best
+            // matches, ranked," not a shared, budget-reserving merge with
+            // every other result type.
+            let limit = limit.clamp(1, 50);
+            let now = now_unix_ms();
+            let Some(provider) = state.providers.iter().find(|p| p.id() == provider_id) else {
+                return Response::Error { message: format!("no such provider: {provider_id}") };
+            };
+            let mut candidates = provider.search(&query, now);
+            candidates.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.item.title.cmp(&b.item.title)));
+            candidates.truncate(limit);
+            Response::SearchResults { items: candidates.into_iter().map(|c| c.item).collect() }
+        }
+
+        Request::Search { query, limit, provider: None } => {
             let limit = limit.clamp(1, 50);
             let now = now_unix_ms();
 
@@ -190,13 +213,19 @@ fn handle_request(state: &AppState, request: Request) -> Response {
             Response::SearchResults { items }
         }
 
-        Request::Activate { kind, id } => match state.providers.iter().find(|p| p.id() == kind) {
-            Some(provider) => match provider.activate(&id) {
-                Ok(()) => Response::Activated,
-                Err(e) => Response::Error {
-                    message: e.to_string(),
-                },
-            },
+        Request::Activate { kind, id, action } => match state.providers.iter().find(|p| p.id() == kind) {
+            Some(provider) => {
+                let result = match action {
+                    None => provider.activate(&id),
+                    Some(action_id) => provider.perform_action(&id, &action_id),
+                };
+                match result {
+                    Ok(()) => Response::Activated,
+                    Err(e) => Response::Error {
+                        message: e.to_string(),
+                    },
+                }
+            }
             None => Response::Error {
                 message: format!("no such provider: {kind}"),
             },
@@ -335,15 +364,21 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         neko_core::clipboard::record_entry(&db, "co-worker-notes", ClipboardContentKind::Text, None, 1000).unwrap();
 
-        // 10 apps that all fuzzy-match "co" — comfortably more than the
+        // 10 apps that all fuzzy-match "cons" — comfortably more than the
         // server's own `limit`, the exact shape that used to leave 0 room
-        // for clipboard in the response itself (not just on screen).
+        // for clipboard in the response itself (not just on screen). "cons"
+        // rather than "co": the always-registered `CommandsProvider` (a
+        // fixed table, unlike the empty-scope file/settings providers this
+        // test fixture uses) would otherwise also match "co" against its
+        // "Clipboard"/"Clipboard History"/"Clipboard Manager" aliases,
+        // muddying what this test is isolating — "cons" matches none of
+        // those (no 'n' in "Clipboard"/"History", no 's' in "Manager").
         let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
         let state = test_state(db, apps);
 
         let response = handle_request(
             &state,
-            Request::Search { query: "co".into(), limit: 8 },
+            Request::Search { query: "cons".into(), limit: 8, provider: None },
         );
         let Response::SearchResults { items } = response else {
             panic!("expected SearchResults")
@@ -364,12 +399,72 @@ mod tests {
 
         let response = handle_request(
             &state,
-            Request::Search { query: "co".into(), limit: 8 },
+            Request::Search { query: "cons".into(), limit: 8, provider: None },
         );
         let Response::SearchResults { items } = response else {
             panic!("expected SearchResults")
         };
         assert_eq!(items.len(), 8);
+    }
+
+    #[test]
+    fn a_provider_scoped_search_returns_only_that_providers_own_matches() {
+        // The mode seam: `provider: Some(id)` bypasses `allocate()`
+        // entirely — a query that would otherwise also match apps (10 of
+        // them, all containing "co") must come back as *only* clipboard
+        // matches when scoped to "clipboard".
+        let db = Db::open_in_memory().unwrap();
+        neko_core::clipboard::record_entry(&db, "co-worker-notes", ClipboardContentKind::Text, None, 1000).unwrap();
+        neko_core::clipboard::record_entry(&db, "unrelated", ClipboardContentKind::Text, None, 2000).unwrap();
+        let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
+        let state = test_state(db, apps);
+
+        let response = handle_request(
+            &state,
+            Request::Search { query: "co".into(), limit: 50, provider: Some("clipboard".to_string()) },
+        );
+        let Response::SearchResults { items } = response else {
+            panic!("expected SearchResults")
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, "clipboard");
+        assert_eq!(items[0].id, "co-worker-notes");
+    }
+
+    #[test]
+    fn a_provider_scoped_search_with_an_unknown_provider_id_errors() {
+        let db = Db::open_in_memory().unwrap();
+        let state = test_state(db, Vec::new());
+        let response = handle_request(
+            &state,
+            Request::Search { query: "x".into(), limit: 8, provider: Some("nonexistent".to_string()) },
+        );
+        let Response::Error { message } = response else {
+            panic!("expected an Error response")
+        };
+        assert!(message.contains("no such provider"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn a_provider_scoped_search_with_an_empty_query_returns_the_providers_full_list() {
+        // The mode's own "just entered, show everything" case: an empty
+        // filter query still scores every clipboard entry (`fuzzy_score`
+        // returns `Some(0.0)` for an empty query) and returns them all,
+        // most-recent-first via the recency boost — not the merged root
+        // list's "empty query = every provider returns nothing" behavior.
+        let db = Db::open_in_memory().unwrap();
+        neko_core::clipboard::record_entry(&db, "older", ClipboardContentKind::Text, None, 100).unwrap();
+        neko_core::clipboard::record_entry(&db, "newer", ClipboardContentKind::Text, None, 900).unwrap();
+        let state = test_state(db, Vec::new());
+        let response = handle_request(
+            &state,
+            Request::Search { query: "".into(), limit: 50, provider: Some("clipboard".to_string()) },
+        );
+        let Response::SearchResults { items } = response else {
+            panic!("expected SearchResults")
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, "newer", "more recently copied entries sort first");
     }
 
     #[test]
@@ -380,7 +475,8 @@ mod tests {
         // "app" provider, id that doesn't exist — proves routing landed on
         // the right provider (a real app-not-found error), not a generic
         // "no such provider" failure.
-        let response = handle_request(&state, Request::Activate { kind: "app".into(), id: "does-not-exist".into() });
+        let response =
+            handle_request(&state, Request::Activate { kind: "app".into(), id: "does-not-exist".into(), action: None });
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
@@ -391,10 +487,37 @@ mod tests {
     fn activate_with_an_unknown_provider_kind_errors() {
         let db = Db::open_in_memory().unwrap();
         let state = test_state(db, Vec::new());
-        let response = handle_request(&state, Request::Activate { kind: "nonexistent".into(), id: "x".into() });
+        let response =
+            handle_request(&state, Request::Activate { kind: "nonexistent".into(), id: "x".into(), action: None });
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
         assert!(message.contains("no such provider"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn activate_with_a_named_action_routes_to_perform_action() {
+        let db = Db::open_in_memory().unwrap();
+        neko_core::clipboard::record_entry(&db, "delete me", ClipboardContentKind::Text, None, 100).unwrap();
+        let state = test_state(db, Vec::new());
+        let response = handle_request(
+            &state,
+            Request::Activate { kind: "clipboard".into(), id: "delete me".into(), action: Some("delete".into()) },
+        );
+        assert!(matches!(response, Response::Activated), "expected Activated, got {response:?}");
+    }
+
+    #[test]
+    fn activate_with_an_unknown_action_on_a_known_provider_errors() {
+        let db = Db::open_in_memory().unwrap();
+        let state = test_state(db, vec![app("Console")]);
+        let response = handle_request(
+            &state,
+            Request::Activate { kind: "app".into(), id: "Console".into(), action: Some("teleport".into()) },
+        );
+        let Response::Error { message } = response else {
+            panic!("expected an Error response")
+        };
+        assert!(message.contains("no action"), "unexpected message: {message}");
     }
 }

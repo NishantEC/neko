@@ -19,18 +19,25 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, Render,
-    SharedString, Window, actions, div, img, prelude::*, px,
+    SharedString, Window, actions, div, img, prelude::*, px, size,
 };
 use neko_client::NekoClient;
-use neko_protocol::{Glyph, Icon, Request, Response, SearchItem};
+use neko_protocol::{Glyph, Icon, ItemAction, Request, Response, SearchItem};
 
 use crate::accessibility::AccessibilityChecker;
-use crate::text_field::{ContentChanged, TextField};
+use crate::modes::{self, ModeChrome};
+use crate::text_field::{ContentChanged, DEFAULT_PLACEHOLDER, TextField};
 use crate::theme;
 
-actions!(panel, [SelectNext, SelectPrevious, Confirm]);
+actions!(panel, [SelectNext, SelectPrevious, Confirm, OpenActionsMenu]);
 
 const RESULT_LIMIT: usize = 8;
+/// A mode's own list wants "as many of this one provider's matches as it
+/// can consider," not the shared, multi-provider root-list budget — a
+/// generous cap since the daemon does the real trimming to what actually
+/// fits on screen (`fit_mode_list`, this file), same as `RESULT_LIMIT`
+/// does for the root list's own `fit_within_budget`.
+const MODE_RESULT_LIMIT: usize = 50;
 pub const CONTENT_AREA_MIN_HEIGHT_PX: f32 = theme::RESULT_ROW_HEIGHT_PX * RESULT_LIMIT as f32;
 pub const PANEL_HEIGHT_PX: f32 =
     theme::INPUT_ROW_HEIGHT_PX + CONTENT_AREA_MIN_HEIGHT_PX + theme::FOOTER_HEIGHT_PX;
@@ -83,6 +90,38 @@ pub struct Root {
     /// (GPUI's sprite atlas never reclaims a tile without it) and why it's
     /// a bounded LRU rather than a full clear on every summon.
     row_icon_cache: Entity<crate::row_icon_cache::RowIconCache>,
+    /// `Some` while a command's mode is active (`SearchItem::enters_mode`) —
+    /// see `crate::modes`'s module doc comment for the full concept. `None`
+    /// is the ordinary root list.
+    active_mode: Option<ActiveMode>,
+    /// `Some` while the `⌘K` actions menu is open for the currently
+    /// selected row.
+    actions_menu: Option<ActionsMenuState>,
+}
+
+/// The one piece of state a mode transition actually carries, beyond the
+/// static `ModeChrome` — the query the root list had before entering, so
+/// exiting can restore it exactly. `chrome` is `&'static` (looked up once
+/// from `crate::modes::MODES` on entry), so this whole struct is `Copy`
+/// apart from the owned `String`.
+#[derive(Clone)]
+struct ActiveMode {
+    chrome: &'static ModeChrome,
+    saved_query: String,
+}
+
+/// The `⌘K` actions menu's own state — which row it's for (so a stray
+/// keystroke race can't apply an action to whatever's newly selected
+/// instead), which action is highlighted, and whether a destructive action
+/// is "armed" (one Enter selects it, a second confirms — see
+/// `confirm_menu_action`'s doc comment for why this exists).
+#[derive(Clone)]
+struct ActionsMenuState {
+    kind: String,
+    id: String,
+    actions: Vec<ItemAction>,
+    selected: usize,
+    confirm_armed: bool,
 }
 
 impl Root {
@@ -92,35 +131,48 @@ impl Root {
         translucent: bool,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| {
-            let text_field = TextField::new(cx);
-            let row_icon_cache = crate::row_icon_cache::RowIconCache::new(cx);
-            // Subscribed to `ContentChanged` specifically, not observed via
-            // `cx.observe` — `TextField` also notifies on every cursor
-            // blink (a render concern), and `cx.observe` cannot
-            // distinguish that from a real edit. Search must only re-run on
-            // an actual query change. See `ContentChanged`'s doc comment.
-            cx.subscribe(&text_field, |root: &mut Root, _field, _event: &ContentChanged, cx| {
-                root.run_search(cx);
-            })
-            .detach();
-            let mut root = Self {
-                text_field,
-                client,
-                accessibility,
-                results: Vec::new(),
-                selected: 0,
-                generation: 0,
-                accessibility_banner_dismissed: None,
-                activation_error: None,
-                translucent,
-                connected: true,
-                row_icon_cache,
-            };
+        cx.new(|cx| Self::build(client, accessibility, translucent, cx))
+    }
+
+    /// The real construction logic, factored out of [`new`](Self::new) so a
+    /// test can build a `Root` directly inside `TestAppContext::add_window`'s
+    /// own closure (which needs a plain `V`, not an `Entity<V>` — `new`
+    /// itself wraps this in `cx.new(...)`) without duplicating any of it.
+    fn build(
+        client: NekoClient,
+        accessibility: Rc<dyn AccessibilityChecker>,
+        translucent: bool,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let text_field = TextField::new(cx);
+        let row_icon_cache = crate::row_icon_cache::RowIconCache::new(cx);
+        // Subscribed to `ContentChanged` specifically, not observed via
+        // `cx.observe` — `TextField` also notifies on every cursor
+        // blink (a render concern), and `cx.observe` cannot
+        // distinguish that from a real edit. Search must only re-run on
+        // an actual query change. See `ContentChanged`'s doc comment.
+        cx.subscribe(&text_field, |root: &mut Root, _field, _event: &ContentChanged, cx| {
             root.run_search(cx);
-            root.fetch_accessibility_banner_state(cx);
-            root
         })
+        .detach();
+        let mut root = Self {
+            text_field,
+            client,
+            accessibility,
+            results: Vec::new(),
+            selected: 0,
+            generation: 0,
+            accessibility_banner_dismissed: None,
+            activation_error: None,
+            translucent,
+            connected: true,
+            row_icon_cache,
+            active_mode: None,
+            actions_menu: None,
+        };
+        root.run_search(cx);
+        root.fetch_accessibility_banner_state(cx);
+        root
     }
 
     /// Called right before the window is activated on a summon, so every
@@ -140,7 +192,25 @@ impl Root {
     /// at capacity, which a fresh summon's new query naturally can (and
     /// does) trigger without any extra call here. See that module's doc
     /// comment for the full reasoning.
-    pub fn reset_for_summon(&mut self, cx: &mut Context<Self>) {
+    ///
+    /// **Also force-exits any active mode.** A mode is treated as
+    /// per-summon-session state, not something that survives the panel
+    /// being hidden and re-shown — matching "every summon starts from a
+    /// clean query" above: if a captain hid the panel while inside
+    /// clipboard-history mode (Escape, or clicking outside), the *next*
+    /// hotkey press should re-summon the ordinary root list, not silently
+    /// resume the mode they were in. This is also what keeps the window's
+    /// own width correct before it's shown again — narrowing back to
+    /// `PANEL_WIDTH_PX` happens here, synchronously, before `main.rs`
+    /// activates the window, so there's no visible wide-then-narrow flash.
+    pub fn reset_for_summon(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(mode) = self.active_mode.take() {
+            self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
+            self.actions_menu = None;
+            if mode.chrome.has_detail {
+                self.resize_panel(window, theme::PANEL_WIDTH_PX);
+            }
+        }
         self.text_field.update(cx, |field, cx| field.clear(cx));
         self.results.clear();
         self.selected = 0;
@@ -150,6 +220,24 @@ impl Root {
         // banner dismissed from a previous summon, since this window was
         // last shown.
         self.fetch_accessibility_banner_state(cx);
+    }
+
+    /// The one call site that actually touches the real `NSWindow` — see
+    /// `display_placement::resize_and_recenter`'s own doc comment for why
+    /// this is a synchronous raw AppKit call rather than `gpui::Window::
+    /// resize` plus a separate reposition. Best-effort: an error (no raw
+    /// window handle — the same conditions `main.rs`'s own
+    /// `reposition_to_cursor_display` already tolerates, e.g. under a
+    /// headless test window) is logged and otherwise ignored, never a panic
+    /// and never a blocked mode transition — the panel's own `div` width
+    /// (`Render::render`, below) still changes either way, so the *content*
+    /// is always internally consistent even on the rare path where the real
+    /// window fails to follow it.
+    fn resize_panel(&self, window: &mut Window, new_width: f32) {
+        let target = size(px(new_width), px(PANEL_HEIGHT_PX));
+        if let Err(e) = crate::display_placement::resize_and_recenter(window, target) {
+            eprintln!("neko: could not resize/recenter the panel for a mode transition: {e}");
+        }
     }
 
     /// Pushed by `Event::IconsUpdated` (`main.rs`'s daemon-event loop) once
@@ -257,13 +345,16 @@ impl Root {
             .get(self.selected)
             .map(|item| (item.kind.clone(), item.id.clone()));
         let client = self.client.clone();
+        // The mode seam: while a mode is active, every keystroke scopes to
+        // its own provider (`Request::Search`'s `provider` field) with a
+        // generous limit — the merged root-list budget/reservation logic
+        // (`fit_within_budget`) doesn't apply at all here, `fit_mode_list`
+        // does instead (see that function's own doc comment for why it's a
+        // different, simpler shape).
+        let mode_provider = self.active_mode.as_ref().map(|m| m.chrome.provider_id.to_string());
+        let limit = if mode_provider.is_some() { MODE_RESULT_LIMIT } else { RESULT_LIMIT };
         cx.spawn(async move |this, cx| {
-            let response = client
-                .request(Request::Search {
-                    query,
-                    limit: RESULT_LIMIT,
-                })
-                .await;
+            let response = client.request(Request::Search { query, limit, provider: mode_provider }).await;
             // A request error (including a dead connection) is deliberately
             // *not* surfaced here — `results`/`selected` just stay exactly
             // as they were, per the design intent below. The live
@@ -278,7 +369,11 @@ impl Root {
             };
             let _ = this.update(cx, |root, cx| {
                 if root.generation == generation {
-                    root.results = fit_within_budget(items, CONTENT_AREA_MIN_HEIGHT_PX);
+                    root.results = if root.active_mode.is_some() {
+                        fit_mode_list(items, CONTENT_AREA_MIN_HEIGHT_PX)
+                    } else {
+                        fit_within_budget(items, CONTENT_AREA_MIN_HEIGHT_PX)
+                    };
                     let previous = previous_selection
                         .as_ref()
                         .map(|(kind, id)| (kind.as_str(), id.as_str()));
@@ -291,6 +386,14 @@ impl Root {
     }
 
     fn select_next(&mut self, _: &SelectNext, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(menu) = &mut self.actions_menu {
+            if !menu.actions.is_empty() {
+                menu.selected = (menu.selected + 1).min(menu.actions.len() - 1);
+                menu.confirm_armed = false;
+                cx.notify();
+            }
+            return;
+        }
         if !self.results.is_empty() {
             self.selected = (self.selected + 1).min(self.results.len() - 1);
             cx.notify();
@@ -298,19 +401,55 @@ impl Root {
     }
 
     fn select_previous(&mut self, _: &SelectPrevious, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(menu) = &mut self.actions_menu {
+            menu.selected = menu.selected.saturating_sub(1);
+            menu.confirm_armed = false;
+            cx.notify();
+            return;
+        }
         self.selected = self.selected.saturating_sub(1);
         cx.notify();
     }
 
-    fn confirm(&mut self, _: &Confirm, _window: &mut Window, cx: &mut Context<Self>) {
+    fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        if self.actions_menu.is_some() {
+            self.confirm_menu_action(cx);
+            return;
+        }
         let Some(item) = self.results.get(self.selected).cloned() else {
             return;
         };
+        // A command row never reaches `Request::Activate` at all —
+        // confirming it is a client-side UI transition, not a daemon
+        // action (see `crate::modes`'s module doc comment).
+        if let Some(mode_id) = item.enters_mode {
+            self.enter_mode(&mode_id, window, cx);
+            return;
+        }
         // A single generic action, routed by `kind` back to whichever
         // provider produced this row — see `Request::Activate`'s doc
         // comment. The panel never needs to know what "activating" an app
-        // vs. a clipboard entry vs. a file actually does.
-        let request = Request::Activate { kind: item.kind, id: item.id };
+        // vs. a clipboard entry vs. a file actually does. Matches every
+        // pre-existing Enter behavior exactly (hides the panel on success)
+        // whether or not a mode happens to be active — Enter on a
+        // clipboard-history row still pastes-and-dismisses, the same as
+        // Enter on one in the root list always has.
+        let request = Request::Activate { kind: item.kind, id: item.id, action: None };
+        self.perform_activation(request, true, cx);
+    }
+
+    /// Confirming a row's primary action (`confirm`, above) and confirming
+    /// a `⌘K` menu selection (`confirm_menu_action`, below) both end in the
+    /// same "send `Request::Activate`, surface any error inline" shape —
+    /// pulled out once rather than duplicated. `hide_on_success` is the one
+    /// real difference: a primary Enter finishes the interaction (matching
+    /// every pre-existing Activate call site), while a menu action is a
+    /// management operation on the current list (copy, delete, ...) the
+    /// captain very plausibly wants to keep working from — the actions menu
+    /// has no mockup at all (the launch brief's own note), so "the menu
+    /// never closes the panel, Enter on a row always can" is this task's
+    /// own deliberate, stated design choice, not a frozen spec's.
+    fn perform_activation(&mut self, request: Request, hide_on_success: bool, cx: &mut Context<Self>) {
         let client = self.client.clone();
         cx.spawn(async move |this, cx| {
             // `Request::Activate` really can come back `Response::Error`
@@ -332,13 +471,151 @@ impl Root {
             let failed = error_message.is_some();
             let _ = this.update(cx, |root, cx| {
                 root.activation_error = error_message;
+                // A menu action that changed the underlying data (delete,
+                // ...) and isn't about to hide the panel needs the current
+                // list re-fetched to reflect it — a deleted row must not
+                // keep rendering until the next keystroke happens to
+                // re-search.
+                if !failed && !hide_on_success {
+                    root.run_search(cx);
+                }
                 cx.notify();
             });
-            if !failed {
+            if !failed && hide_on_success {
                 let _ = cx.update(|cx| cx.hide());
             }
         })
         .detach();
+    }
+
+    /// Enters `mode_id`'s mode: saves the current query so `exit_mode` can
+    /// restore it, clears the field to start the mode's own list fresh,
+    /// swaps the placeholder, and — if the mode wants a detail pane —
+    /// widens the real window. A no-op if `mode_id` doesn't name a
+    /// registered mode (a stale/corrupted value) or a mode is already
+    /// active (confirming a command row is only ever possible from the
+    /// root list, since commands never appear inside a mode's own scoped
+    /// search — but this guards the invariant rather than assuming it).
+    fn enter_mode(&mut self, mode_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_mode.is_some() {
+            return;
+        }
+        let Some(chrome) = modes::chrome_for(mode_id) else {
+            return;
+        };
+        let saved_query = self.text_field.read(cx).content().to_string();
+        self.active_mode = Some(ActiveMode { chrome, saved_query });
+        self.selected = 0;
+        self.actions_menu = None;
+        if chrome.has_detail {
+            self.resize_panel(window, theme::PANEL_WIDTH_WITH_DETAIL_PX);
+        }
+        self.text_field.update(cx, |field, cx| {
+            field.set_placeholder(chrome.placeholder, cx);
+            // A real edit (emits `ContentChanged`), which is what actually
+            // runs the mode-scoped search above — `active_mode` is already
+            // `Some` by the time this synchronously fires, so `run_search`
+            // takes the mode branch immediately, not the root-list one.
+            field.set_content("", cx);
+        });
+        cx.notify();
+    }
+
+    /// Leaves the active mode, if any: restores the pre-entry query
+    /// (triggering a real root-list search, same reasoning as
+    /// `enter_mode`'s own `set_content` call), restores the default
+    /// placeholder, closes any open actions menu, and narrows the window
+    /// back if it had widened.
+    fn exit_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(mode) = self.active_mode.take() else {
+            return;
+        };
+        self.actions_menu = None;
+        self.selected = 0;
+        if mode.chrome.has_detail {
+            self.resize_panel(window, theme::PANEL_WIDTH_PX);
+        }
+        self.text_field.update(cx, |field, cx| {
+            field.set_placeholder(DEFAULT_PLACEHOLDER, cx);
+            field.set_content(&mode.saved_query, cx);
+        });
+        cx.notify();
+    }
+
+    /// `⌘K` — opens the actions menu for the currently selected row, if it
+    /// has any (`SearchItem::actions`); a no-op for a row with none (apps,
+    /// files, settings, commands today), which is why the footer's
+    /// "Actions ⌘K" label is always shown rather than conditionally hidden
+    /// — matching Raycast's own convention of a menu that's simply empty
+    /// (here: inert) rather than a control that disappears depending on
+    /// selection.
+    fn open_actions_menu(&mut self, _: &OpenActionsMenu, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item) = self.results.get(self.selected) else {
+            return;
+        };
+        if item.actions.is_empty() {
+            return;
+        }
+        self.actions_menu = Some(ActionsMenuState {
+            kind: item.kind.clone(),
+            id: item.id.clone(),
+            actions: item.actions.clone(),
+            selected: 0,
+            confirm_armed: false,
+        });
+        cx.notify();
+    }
+
+    /// Enter, while the actions menu is open. A destructive action
+    /// (`ItemAction::destructive`) needs a *second* Enter to actually run —
+    /// the first just arms it (re-rendered with a "press again to confirm"
+    /// label, `render_actions_menu`) — so a single mis-keyed Enter on
+    /// "Delete" can never silently destroy an entry; moving the menu
+    /// selection at all (`select_next`/`select_previous`) disarms it again,
+    /// so the confirmation can't survive being scrolled past and back.
+    fn confirm_menu_action(&mut self, cx: &mut Context<Self>) {
+        let Some(menu) = &mut self.actions_menu else { return };
+        let Some(action) = menu.actions.get(menu.selected).cloned() else {
+            self.actions_menu = None;
+            cx.notify();
+            return;
+        };
+        if action.destructive && !menu.confirm_armed {
+            menu.confirm_armed = true;
+            cx.notify();
+            return;
+        }
+        let kind = menu.kind.clone();
+        let id = menu.id.clone();
+        self.actions_menu = None;
+        cx.notify();
+        let request = Request::Activate { kind, id, action: Some(action.id) };
+        self.perform_activation(request, false, cx);
+    }
+
+    /// `Escape` — closes the actions menu if it's open, else exits the
+    /// active mode if one is, else hides the whole panel (the ordinary,
+    /// pre-existing behavior). Registered as a window-level `on_action`
+    /// listener on `Root`'s own div (`Render::render`, below), which — per
+    /// GPUI's own action-dispatch order (window listeners run in the bubble
+    /// phase *before* global ones, and a handled action stops propagating
+    /// there by default) — intercepts `DismissWindow` before `main.rs`'s
+    /// global `cx.on_action(|_, cx| cx.hide())` fallback ever sees it. Only
+    /// the "hide the whole panel" branch reaches that fallback's own
+    /// behavior, and it does so explicitly (`cx.hide()`), not by
+    /// re-propagating — the two are equivalent for that one case, and
+    /// keeping this one call site self-contained is clearer than routing
+    /// back through the global handler.
+    fn handle_dismiss(&mut self, _: &crate::DismissWindow, window: &mut Window, cx: &mut Context<Self>) {
+        if self.actions_menu.take().is_some() {
+            cx.notify();
+            return;
+        }
+        if self.active_mode.is_some() {
+            self.exit_mode(window, cx);
+            return;
+        }
+        cx.hide();
     }
 }
 
@@ -351,14 +628,21 @@ impl Focusable for Root {
 impl Render for Root {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let query_is_empty = self.text_field.read(cx).content().is_empty();
-        div()
+        let panel_width = match &self.active_mode {
+            Some(mode) if mode.chrome.has_detail => theme::PANEL_WIDTH_WITH_DETAIL_PX,
+            _ => theme::PANEL_WIDTH_PX,
+        };
+        let mut root = div()
             .key_context("Panel")
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::confirm))
+            .on_action(cx.listener(Self::open_actions_menu))
+            .on_action(cx.listener(Self::handle_dismiss))
+            .relative()
             .flex()
             .flex_col()
-            .w(px(theme::PANEL_WIDTH_PX))
+            .w(px(panel_width))
             .h(px(PANEL_HEIGHT_PX))
             .bg(if self.translucent {
                 theme::SURFACE_PANEL_TRANSLUCENT
@@ -371,14 +655,21 @@ impl Render for Root {
             .rounded(px(theme::PANEL_RADIUS_PX))
             .shadow_lg()
             .overflow_hidden()
-            .child(self.render_input_row())
-            .child(self.render_content_area(cx, query_is_empty))
-            .child(self.render_footer())
+            .child(self.render_input_row(cx))
+            .child(match &self.active_mode {
+                Some(mode) => self.render_mode_content(mode).into_any_element(),
+                None => self.render_content_area(cx, query_is_empty).into_any_element(),
+            })
+            .child(self.render_footer());
+        if let Some(menu) = self.actions_menu.clone() {
+            root = root.child(self.render_actions_menu(&menu));
+        }
+        root
     }
 }
 
 impl Root {
-    fn render_input_row(&self) -> impl IntoElement {
+    fn render_input_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .items_center()
@@ -388,7 +679,19 @@ impl Root {
             .gap_3()
             .text_color(theme::TEXT_PRIMARY)
             .text_size(px(18.))
-            .child(search_glyph())
+            .child(match &self.active_mode {
+                // The back affordance the launch brief asks for: "a back
+                // arrow in place of the search glyph." Clickable — exits
+                // the mode the same way Escape does, sharing `exit_mode`
+                // rather than duplicating its logic.
+                Some(_) => div()
+                    .id("mode-back")
+                    .cursor(CursorStyle::PointingHand)
+                    .on_click(cx.listener(|root, _: &ClickEvent, window, cx| root.exit_mode(window, cx)))
+                    .child(back_glyph())
+                    .into_any_element(),
+                None => search_glyph().into_any_element(),
+            })
             .child(div().flex_1().child(self.text_field.clone()))
             .child(
                 div()
@@ -655,6 +958,15 @@ impl Root {
         let primary_action: SharedString = selected_item
             .map(|item| SharedString::from(item.action_label.clone()))
             .unwrap_or_else(|| "Open  ↵".into());
+        // The footer's left side is the mode's own name while a mode is
+        // active (`data/neko-design/mockups/12-first-clipboard-use.html`'s
+        // `footer-source`: "Clipboard History", constant regardless of
+        // selection) rather than the selected row's title — the mode *is*
+        // the context now, not whatever happens to be highlighted.
+        let left_label: Option<SharedString> = match &self.active_mode {
+            Some(mode) => Some(mode.chrome.title.into()),
+            None => selected_item.map(|item| SharedString::from(item.title.clone())),
+        };
         base.child(
                 div()
                     .flex()
@@ -662,7 +974,7 @@ impl Root {
                     .gap_2()
                     .text_size(px(12.))
                     .text_color(theme::TEXT_TERTIARY)
-                    .children(selected_item.map(|item| SharedString::from(item.title.clone()))),
+                    .children(left_label),
             )
             .child(
                 div()
@@ -675,6 +987,161 @@ impl Root {
                     .child(div().w(px(1.)).h(px(16.)).bg(theme::BORDER_HAIRLINE_STRONG))
                     .child("Actions  ⌘K"),
             )
+    }
+
+    /// The two-column mode view (`data/neko-design/mockups/
+    /// 12-first-clipboard-use.html`): a fixed-width filtered list on the
+    /// left, a preview + info pane on the right when
+    /// `ModeChrome::has_detail` — otherwise just the list, full width. Sits
+    /// where `render_content_area` sits for the root list; same content-area
+    /// height budget (`CONTENT_AREA_MIN_HEIGHT_PX`), only ever a width
+    /// change between the two.
+    fn render_mode_content(&self, mode: &ActiveMode) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_hidden()
+            .child(self.render_mode_list())
+            .when(mode.chrome.has_detail, |el| el.child(self.render_mode_detail()))
+    }
+
+    /// The mode's own filtered, time-grouped list — reuses `render_row`
+    /// verbatim (it already renders purely from `SearchItem` data, with no
+    /// per-provider knowledge), grouping by `SearchItem::group_label`
+    /// instead of `kind`/`section_label` the way the root list's
+    /// `render_content_area` does. Same image cache as the root list, so a
+    /// clipboard-mode session doesn't get its own separate, redundant icon
+    /// cache (moot today — clipboard rows are always painted glyphs, never
+    /// `img()` — but correct if a future mode's provider ever has real
+    /// per-row icons).
+    fn render_mode_list(&self) -> impl IntoElement {
+        let mut container = div()
+            .flex()
+            .flex_col()
+            .flex_shrink_0()
+            .w(px(theme::MODE_LIST_COLUMN_WIDTH_PX))
+            .h_full()
+            .overflow_hidden()
+            .px_2()
+            .border_r_1()
+            .border_color(theme::BORDER_HAIRLINE)
+            .image_cache(self.row_icon_cache.clone());
+
+        if self.results.is_empty() {
+            return container.child(render_empty_state_message("No matching entries."));
+        }
+
+        let mut current_group: Option<&Option<String>> = None;
+        for (idx, item) in self.results.iter().enumerate() {
+            if current_group != Some(&item.group_label) {
+                if let Some(label) = &item.group_label {
+                    container = container.child(section_header(label.clone()));
+                }
+                current_group = Some(&item.group_label);
+            }
+            container = container.child(self.render_row(idx, item));
+        }
+        container
+    }
+
+    /// The mode's own preview + info pane — deliberately *not* a generic
+    /// "detail pane renderer": what fields are honest to show is entirely
+    /// mode-specific (see `crate::modes`'s module doc comment, "what a
+    /// second command has to implement" — this function is exactly the
+    /// cost a second command with its own detail view pays). Three fields,
+    /// matching `data/neko-design/mockups/12-first-clipboard-use.html`
+    /// exactly: Application (`SearchItem::source`), Content Type
+    /// (`SearchItem::badge`, title-cased), Copied (`SearchItem::accessory`
+    /// — this app's existing relative-time label, not an absolute
+    /// local-clock timestamp like the mockup's literal "Today, 9:50 AM":
+    /// no date/time-formatting dependency exists anywhere in this codebase,
+    /// and adding one for one label wasn't judged worth it — a disclosed,
+    /// deliberate deviation, not an oversight). The preview box itself
+    /// shows the entry's raw stored content (`SearchItem::id`, clipboard's
+    /// own dedup key) rather than the list row's own truncated/quoted
+    /// `title` — the whole point of a detail pane is showing what the list
+    /// row had to compress.
+    fn render_mode_detail(&self) -> impl IntoElement {
+        let col = div().flex().flex_col().flex_1().min_w(px(0.)).min_h(px(0.)).gap_4().px_5().py_5();
+        let Some(item) = self.results.get(self.selected) else {
+            return col.child(
+                div()
+                    .text_size(px(12.5))
+                    .text_color(theme::TEXT_TERTIARY)
+                    .child("Select an entry to preview it."),
+            );
+        };
+
+        let preview = div()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_hidden()
+            .p_3()
+            .rounded(px(theme::ROW_RADIUS_PX))
+            .bg(theme::SURFACE_INPUT)
+            .border_1()
+            .border_color(theme::BORDER_HAIRLINE)
+            .text_size(px(13.))
+            .text_color(theme::TEXT_PRIMARY)
+            .child(SharedString::from(item.id.clone()));
+
+        let mut info = div().flex().flex_col().gap_2();
+        if let Some(source) = &item.source {
+            info = info.child(detail_info_row("Application", source.clone()));
+        }
+        if let Some(badge) = &item.badge {
+            info = info.child(detail_info_row("Content Type", title_case_badge(badge)));
+        }
+        if let Some(accessory) = &item.accessory {
+            info = info.child(detail_info_row("Copied", accessory.clone()));
+        }
+
+        col.child(preview).child(info)
+    }
+
+    /// `⌘K`'s own popup — no mockup exists for this (the launch brief's own
+    /// note), so this reuses the existing visual language (raised surface,
+    /// hairline border, the same selected-row fill and danger color every
+    /// other surface in this panel already uses) rather than inventing new
+    /// tokens. Anchored above the footer's own "Actions ⌘K" label, the
+    /// control that opens it.
+    fn render_actions_menu(&self, menu: &ActionsMenuState) -> impl IntoElement {
+        div()
+            .absolute()
+            .bottom(px(theme::FOOTER_HEIGHT_PX + 8.))
+            .right(px(theme::PANEL_RADIUS_PX))
+            .w(px(200.))
+            .flex()
+            .flex_col()
+            .p_1()
+            .gap(px(1.))
+            .rounded(px(theme::ROW_RADIUS_PX))
+            .bg(theme::SURFACE_RAISED)
+            .border_1()
+            .border_color(theme::BORDER_HAIRLINE_STRONG)
+            .shadow_lg()
+            .children(menu.actions.iter().enumerate().map(|(idx, action)| {
+                let selected = idx == menu.selected;
+                let armed = selected && menu.confirm_armed && action.destructive;
+                let label: SharedString = if armed {
+                    format!("Confirm {} — ↵ again", action.label).into()
+                } else {
+                    action.label.clone().into()
+                };
+                let color = if action.destructive { theme::STATE_DANGER } else { theme::TEXT_PRIMARY };
+                div()
+                    .id(("actions-menu-row", idx))
+                    .flex()
+                    .items_center()
+                    .h(px(30.))
+                    .px_2()
+                    .rounded(px(theme::ROW_RADIUS_PX))
+                    .when(selected, |el| el.bg(theme::SURFACE_SELECTED))
+                    .text_size(px(12.5))
+                    .text_color(color)
+                    .child(label)
+            }))
     }
 }
 
@@ -778,6 +1245,47 @@ fn fit_section(items: &[SearchItem], budget_px: f32) -> (usize, f32) {
     (kept, theme::SECTION_HEADER_HEIGHT_PX + kept as f32 * theme::RESULT_ROW_HEIGHT_PX)
 }
 
+/// The mode list's own budget-fitting pass — same "never a partial row,
+/// never a dangling header" invariant `fit_within_budget` enforces for the
+/// root list, but a simpler shape: a mode's list is always exactly one
+/// provider's results (no cross-provider crowd-out to guard against), just
+/// grouped by `SearchItem::group_label` (time buckets) instead of `kind`
+/// (provider identity). Groups are spent front-to-back — the most recent
+/// group can't be crowded out because there's nothing recency-ranked ahead
+/// of it to crowd it, matching "most recent copies first" being exactly
+/// what a captain wants visible when the budget is tight.
+fn fit_mode_list(results: Vec<SearchItem>, budget_px: f32) -> Vec<SearchItem> {
+    let groups = group_by_group_label(results);
+    let mut used_so_far = 0.0;
+    let mut out = Vec::new();
+    for group in groups {
+        let (kept, used_px) = fit_section(&group, budget_px - used_so_far);
+        used_so_far += used_px;
+        let group_len = group.len();
+        out.extend(group.into_iter().take(kept));
+        if kept < group_len {
+            break;
+        }
+    }
+    out
+}
+
+/// Splits `results` into contiguous same-`group_label` runs, preserving
+/// order — `fit_mode_list`'s own grouping, and `Root::render_mode_list`'s
+/// (which renders one `section_header` per group boundary, mirroring
+/// `group_into_sections`/`render_content_area`'s identical shape for
+/// `kind` above).
+fn group_by_group_label(results: Vec<SearchItem>) -> Vec<Vec<SearchItem>> {
+    let mut groups: Vec<Vec<SearchItem>> = Vec::new();
+    for item in results {
+        match groups.last_mut() {
+            Some(group) if group.last().is_some_and(|last| last.group_label == item.group_label) => group.push(item),
+            _ => groups.push(vec![item]),
+        }
+    }
+    groups
+}
+
 fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
     // Step 10 of onboarding's own sequence: "a one-line tip stands in for a
     // blank list" — the same principle applies to steady-state empty
@@ -789,6 +1297,14 @@ fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
     } else {
         "No matching results".into()
     };
+    render_empty_state_message(message)
+}
+
+/// The plain one-line-tip shape `render_empty_state` uses, parameterized on
+/// the message — shared with the mode list's own empty state
+/// (`Root::render_mode_list`), which has different copy but the identical
+/// layout.
+fn render_empty_state_message(message: impl Into<SharedString>) -> impl IntoElement {
     div()
         .flex()
         .items_center()
@@ -796,7 +1312,7 @@ fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
         .px_3()
         .text_size(px(13.))
         .text_color(theme::TEXT_TERTIARY)
-        .child(message)
+        .child(message.into())
 }
 
 fn section_header(label: impl Into<SharedString>) -> impl IntoElement {
@@ -947,6 +1463,44 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
                     ),
             )
             .into_any_element(),
+        // A clipboard board with a small clip tab along the top edge —
+        // traces `data/neko-design/mockups/12-first-clipboard-use.html`'s
+        // own clipboard-mode input-row glyph (`<rect x="5" y="4" width="10"
+        // height="14" rx="2"/><rect x="7.5" y="2.5" width="5" height="3"
+        // rx="1" fill/>`, from a 20×20 viewBox), reused here for the
+        // root-list "Clipboard History" command row's own icon.
+        Glyph::Clipboard => slot
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .relative()
+                    .w(px(14.))
+                    .h(px(16.))
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left(px(3.5))
+                            .w(px(7.))
+                            .h(px(3.))
+                            .rounded(px(1.))
+                            .bg(theme::TEXT_TERTIARY),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(1.5))
+                            .left_0()
+                            .w(px(14.))
+                            .h(px(14.5))
+                            .rounded(px(2.))
+                            .border_2()
+                            .border_color(theme::TEXT_TERTIARY),
+                    ),
+            )
+            .into_any_element(),
     }
 }
 
@@ -962,6 +1516,64 @@ fn search_glyph() -> impl IntoElement {
         .rounded_full()
         .border_2()
         .border_color(theme::TEXT_TERTIARY)
+}
+
+/// The mode input row's back affordance — "a back arrow in place of the
+/// search glyph," per the launch brief. Traced with `gpui::PathBuilder`,
+/// the same mechanism `components::glyphs::opt_glyph`/`neko_wordmark_glyph`
+/// already use for a shape a plain axis-aligned `div()` border can't draw
+/// (a diagonal chevron) — GPUI's `div()` styling API has no rotation
+/// primitive, and per the design report's §6 finding, a Unicode `←`
+/// character isn't a reliable substitute either.
+fn back_glyph() -> impl IntoElement {
+    gpui::canvas(
+        move |_bounds, _window, _cx| (),
+        move |bounds, (), window, _cx| {
+            let scale = f32::from(bounds.size.width) / 20.0;
+            let ox = f32::from(bounds.origin.x);
+            let oy = f32::from(bounds.origin.y);
+            let pt = |x: f32, y: f32| gpui::point(px(ox + x * scale), px(oy + y * scale));
+
+            let mut builder = gpui::PathBuilder::stroke(px((1.6f32 * scale).max(1.0)));
+            builder.move_to(pt(12.0, 4.0));
+            builder.line_to(pt(6.0, 10.0));
+            builder.line_to(pt(12.0, 16.0));
+            if let Ok(path) = builder.build() {
+                window.paint_path(path, theme::TEXT_TERTIARY);
+            }
+        },
+    )
+    .w(px(14.))
+    .h(px(14.))
+}
+
+/// The detail pane's one repeated row shape: a label on the left, the
+/// value on the right — matches `data/neko-design/mockups/
+/// 12-first-clipboard-use.html`'s plain `display:flex; justify-content:
+/// space-between` info rows exactly (no card/border chrome of its own).
+fn detail_info_row(label: &str, value: String) -> impl IntoElement {
+    div()
+        .flex()
+        .justify_between()
+        .gap_3()
+        .text_size(px(12.))
+        .child(div().flex_shrink_0().text_color(theme::TEXT_TERTIARY).child(SharedString::from(label.to_string())))
+        .child(div().overflow_hidden().truncate().text_color(theme::TEXT_SECONDARY).child(SharedString::from(value)))
+}
+
+/// Translates a row badge's already-uppercase wire value (`"TEXT"`,
+/// `"LINK"` — see `SearchItem::badge`'s own doc comment on why the wire
+/// value is pre-uppercased rather than CSS-transformed) into the
+/// title-cased form the detail pane's "Content Type" field shows in the
+/// frozen mockup (`"Text"`, `"Link"`) — a plain, closed two-value
+/// translation of data the *same* clipboard row already carries, not a
+/// match on which provider produced the row.
+fn title_case_badge(badge: &str) -> String {
+    match badge {
+        "TEXT" => "Text".to_string(),
+        "LINK" => "Link".to_string(),
+        other => other.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -983,6 +1595,10 @@ mod tests {
             action_label: "Open  ↵".into(),
             badge: None,
             accessory: None,
+            enters_mode: None,
+            group_label: None,
+            actions: Vec::new(),
+            source: None,
         }
     }
 
@@ -1113,5 +1729,303 @@ mod tests {
         let first_clipboard = kinds.iter().position(|&k| k == "clipboard").unwrap();
         assert!(kinds[..first_file].iter().all(|&k| k == "app"));
         assert!(first_file < first_clipboard);
+    }
+
+    // --- Commands and modes: fit_mode_list / group_by_group_label ---
+
+    fn mode_item(group: Option<&str>, id: &str) -> SearchItem {
+        SearchItem { group_label: group.map(str::to_string), ..item_with_id("clipboard", id) }
+    }
+
+    #[test]
+    fn group_by_group_label_splits_contiguous_runs_by_group() {
+        let items = vec![
+            mode_item(Some("Today"), "a"),
+            mode_item(Some("Today"), "b"),
+            mode_item(Some("Yesterday"), "c"),
+        ];
+        let groups = group_by_group_label(items);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].len(), 2);
+        assert_eq!(groups[1].len(), 1);
+    }
+
+    #[test]
+    fn fit_mode_list_never_shows_a_dangling_header_or_a_partial_row() {
+        // 3 "Today" entries + 3 "Yesterday" entries against a budget that
+        // only fits one full group plus a partial second one.
+        let budget = theme::SECTION_HEADER_HEIGHT_PX * 2.0 + theme::RESULT_ROW_HEIGHT_PX * 4.0;
+        let mut items: Vec<SearchItem> = (0..3).map(|i| mode_item(Some("Today"), &format!("t{i}"))).collect();
+        items.extend((0..3).map(|i| mode_item(Some("Yesterday"), &format!("y{i}"))));
+
+        let fitted = fit_mode_list(items, budget);
+
+        let today_kept = fitted.iter().filter(|i| i.group_label.as_deref() == Some("Today")).count();
+        let yesterday_kept = fitted.iter().filter(|i| i.group_label.as_deref() == Some("Yesterday")).count();
+        assert_eq!(today_kept, 3, "the first (most recent) group must fit in full before any budget goes elsewhere");
+        assert_eq!(yesterday_kept, 1, "leftover budget after the full first group is exactly one more row");
+        // No provider-crowd-out reservation exists for mode lists (unlike
+        // `fit_within_budget`) — a later group can be starved entirely by
+        // an earlier, larger one, which is the correct, simpler behavior
+        // for "most recent first" (see `fit_mode_list`'s own doc comment).
+    }
+
+    #[test]
+    fn fit_mode_list_keeps_everything_that_already_fits() {
+        let items = vec![mode_item(Some("Today"), "a"), mode_item(Some("Yesterday"), "b")];
+        let fitted = fit_mode_list(items.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
+        assert_eq!(fitted, items);
+    }
+
+    #[test]
+    fn fit_mode_list_on_an_empty_list_stays_empty() {
+        assert_eq!(fit_mode_list(Vec::new(), CONTENT_AREA_MIN_HEIGHT_PX), Vec::new());
+    }
+
+    #[test]
+    fn title_case_badge_translates_the_two_known_wire_values_and_passes_through_anything_else() {
+        assert_eq!(title_case_badge("TEXT"), "Text");
+        assert_eq!(title_case_badge("LINK"), "Link");
+        assert_eq!(title_case_badge("COMMAND"), "COMMAND");
+    }
+
+    // --- Commands and modes: Root-level state transitions, headless via
+    // TestAppContext (no OS window, no screen pixels — see this module's
+    // own report on what this can and can't prove without real rendering).
+
+    use gpui::TestAppContext;
+
+    use crate::accessibility::FakeAccessibilityChecker;
+
+    fn test_root(cx: &mut TestAppContext) -> gpui::WindowHandle<Root> {
+        let (client, _events) = NekoClient::connect(std::path::PathBuf::from(format!(
+            "/tmp/neko-panel-test-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        )));
+        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        cx.add_window(|_window, cx| Root::build(client, accessibility, true, cx))
+    }
+
+    /// A command row's `id`, `kind: "command"` — everything else is
+    /// deliberately minimal, since only `enters_mode` and `action_label`
+    /// matter to `confirm`'s own routing.
+    fn command_item(mode: &str) -> SearchItem {
+        SearchItem { enters_mode: Some(mode.to_string()), ..item_with_id("command", "clipboard-history") }
+    }
+
+    #[gpui::test]
+    fn confirming_a_command_row_enters_its_mode_and_saves_the_prior_query(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.text_field.update(cx, |field, cx| field.set_content("safari", cx));
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![command_item("clipboard")];
+                root.selected = 0;
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                let mode = root.active_mode.as_ref().expect("confirming a command row must enter a mode");
+                assert_eq!(mode.chrome.id, "clipboard");
+                assert_eq!(mode.saved_query, "safari", "the query typed before entering the mode must be saved");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn exiting_a_mode_restores_the_saved_query_and_clears_active_mode(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.text_field.update(cx, |field, cx| field.set_content("safari", cx));
+                root.results = vec![command_item("clipboard")];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |root, _window, _cx| assert!(root.active_mode.is_some(), "must be in the mode before exiting it"))
+            .unwrap();
+
+        window
+            .update(cx, |root, window, cx| root.exit_mode(window, cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                assert!(root.active_mode.is_none());
+                assert_eq!(root.text_field.read(cx).content(), "safari", "exiting must restore the pre-entry query");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn escape_exits_the_mode_instead_of_hiding_when_one_is_active(cx: &mut TestAppContext) {
+        // `handle_dismiss` (bound to the same `escape` key `DismissWindow`
+        // already uses globally) must intercept and exit the mode rather
+        // than falling through to `cx.hide()` — this is the "back
+        // affordance" half of the brief's "Escape and back leave it"
+        // requirement; `exiting_a_mode_...` above already covers the other
+        // half (the actual UI back-arrow, which calls the same
+        // `exit_mode`).
+        let window = test_root(cx);
+        cx.run_until_parked();
+        window
+            .update(cx, |root, _window, cx| {
+                root.results = vec![command_item("clipboard")];
+                root.selected = 0;
+                let _ = cx;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, window, cx| root.handle_dismiss(&crate::DismissWindow, window, cx))
+            .unwrap();
+
+        window.update(cx, |root, _window, _cx| assert!(root.active_mode.is_none())).unwrap();
+    }
+
+    #[gpui::test]
+    fn opening_the_actions_menu_on_a_row_with_no_actions_does_nothing(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        cx.run_until_parked();
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![item_with_id("app", "safari")]; // apps carry no actions
+                root.selected = 0;
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .unwrap();
+
+        window.update(cx, |root, _window, _cx| assert!(root.actions_menu.is_none())).unwrap();
+    }
+
+    #[gpui::test]
+    fn opening_the_actions_menu_on_a_row_with_actions_populates_it(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        cx.run_until_parked();
+        let mut clipboard_row = item_with_id("clipboard", "hello");
+        clipboard_row.actions = vec![
+            ItemAction { id: "paste".into(), label: "Paste".into(), destructive: false },
+            ItemAction { id: "delete".into(), label: "Delete".into(), destructive: true },
+        ];
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![clipboard_row];
+                root.selected = 0;
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .unwrap();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                let menu = root.actions_menu.as_ref().expect("a row with actions must open the menu");
+                assert_eq!(menu.actions.len(), 2);
+                assert_eq!(menu.id, "hello");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_destructive_menu_action_requires_a_second_confirm_before_it_ever_sends_a_request(cx: &mut TestAppContext) {
+        // The mis-keyed-delete guard: the very first Enter on "Delete" must
+        // only arm it, never perform it — proven here by checking the menu
+        // is still open (and therefore no request was dispatched to close
+        // it) after exactly one `confirm`.
+        let window = test_root(cx);
+        cx.run_until_parked();
+        let mut clipboard_row = item_with_id("clipboard", "hello");
+        clipboard_row.actions = vec![ItemAction { id: "delete".into(), label: "Delete".into(), destructive: true }];
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![clipboard_row];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .unwrap();
+
+        window.update(cx, |root, window, cx| root.confirm(&Confirm, window, cx)).unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                let menu = root.actions_menu.as_ref().expect("one Enter on a destructive action must only arm it");
+                assert!(menu.confirm_armed);
+            })
+            .unwrap();
+
+        // A second Enter actually performs it, which closes the menu (the
+        // request itself fails against the disconnected test client, but
+        // `perform_activation` closes the menu synchronously before it
+        // even sends the request — see that method's own body).
+        window.update(cx, |root, window, cx| root.confirm(&Confirm, window, cx)).unwrap();
+        window.update(cx, |root, _window, _cx| assert!(root.actions_menu.is_none())).unwrap();
+    }
+
+    #[gpui::test]
+    fn moving_the_menu_selection_disarms_a_pending_destructive_confirmation(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        cx.run_until_parked();
+        let mut clipboard_row = item_with_id("clipboard", "hello");
+        clipboard_row.actions = vec![
+            ItemAction { id: "delete".into(), label: "Delete".into(), destructive: true },
+            ItemAction { id: "paste".into(), label: "Paste".into(), destructive: false },
+        ];
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![clipboard_row];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .unwrap();
+        window.update(cx, |root, window, cx| root.confirm(&Confirm, window, cx)).unwrap();
+        window
+            .update(cx, |root, _window, _cx| assert!(root.actions_menu.as_ref().unwrap().confirm_armed))
+            .unwrap();
+
+        window
+            .update(cx, |root, window, cx| root.select_next(&SelectNext, window, cx))
+            .unwrap();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(!root.actions_menu.as_ref().unwrap().confirm_armed, "moving off the armed action must disarm it");
+            })
+            .unwrap();
     }
 }

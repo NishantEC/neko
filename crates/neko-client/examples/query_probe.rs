@@ -26,7 +26,7 @@ fn main() {
     let queries = ["sound", "storage", "appearance", "wallpaper", "accessibility", "displays", "bluetooth"];
 
     for q in queries {
-        let request = Request::Search { query: q.to_string(), limit: 10 };
+        let request = Request::Search { query: q.to_string(), limit: 10, provider: None };
         let response = futures::executor::block_on(client.request(request));
         match response {
             Ok(Response::SearchResults { items }) => {

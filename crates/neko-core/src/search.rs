@@ -406,6 +406,10 @@ mod tests {
             action_label: "Open  ↵".to_string(),
             badge: None,
             accessory: None,
+            enters_mode: None,
+            group_label: None,
+            actions: Vec::new(),
+            source: None,
         }
     }
 

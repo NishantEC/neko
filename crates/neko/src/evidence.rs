@@ -134,8 +134,8 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         Timer::after(std::time::Duration::from_millis(300)).await;
     }
     let _ = cx.update(|cx| {
-        let _ = window.update(cx, |root, _window, cx| {
-            root.reset_for_summon(cx);
+        let _ = window.update(cx, |root, window, cx| {
+            root.reset_for_summon(window, cx);
             if let Some(query) = query.as_deref() {
                 root.set_query_for_evidence(query, cx);
             }
@@ -201,7 +201,7 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         let started = Instant::now();
         let _ = cx.update(|cx| {
             let _ = window.update(cx, |root, window, cx| {
-                root.reset_for_summon(cx);
+                root.reset_for_summon(window, cx);
                 let _ = material::order_front_regardless(window);
                 window.on_next_frame(move |_, _| {
                     eprintln!("neko: bench summon {i} latency {:?}", started.elapsed());
