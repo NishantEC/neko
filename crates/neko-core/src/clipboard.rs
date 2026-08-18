@@ -189,6 +189,36 @@ fn clipboard_recency_boost(copied_at_unix_ms: i64, now_unix_ms: i64) -> f32 {
     8.0 * 0.5f32.powf(age_hours / half_life_hours)
 }
 
+/// A clipboard entry at or under this length scores on the same footing
+/// `fuzzy_score` already gives every other provider's title-length
+/// candidates — a URL, a short snippet, a single line, is genuinely
+/// title-like. [`clipboard_length_normalization`] leaves it untouched.
+const CLIPBOARD_TITLE_LIKE_CHARS: usize = 60;
+
+/// A clipboard entry is a pasted paragraph, not a title — `fuzzy_score`'s
+/// own length penalty (a flat 2%-per-character deduction, sized for
+/// title-length strings like app/pane names) barely dents a match found
+/// once inside a multi-hundred-character block of text, so a long entry
+/// that merely *contains* the query routinely outscored a short, exact
+/// title match elsewhere (a real captain-reported defect: "wallpaper"
+/// returned nine clipboard rows out of ten, crowding out the System
+/// Settings pane actually named "Wallpaper" — see
+/// `docs/evidence/settings-and-clipboard-ranking.md`). This scales a
+/// candidate's raw match score down proportionally once its content passes
+/// [`CLIPBOARD_TITLE_LIKE_CHARS`], so a 600-character paragraph's match
+/// component is worth a tenth of a title-length one instead of ~98% of
+/// it — applied only to the `fuzzy_score` component in
+/// [`ClipboardProvider::search`], not to the recency boost added after it,
+/// since how long ago something was copied is a genuine signal independent
+/// of how long the copied text happens to be.
+fn clipboard_length_normalization(content_chars: usize) -> f32 {
+    if content_chars <= CLIPBOARD_TITLE_LIKE_CHARS {
+        1.0
+    } else {
+        CLIPBOARD_TITLE_LIKE_CHARS as f32 / content_chars as f32
+    }
+}
+
 /// The clipboard-history provider: matches by fuzzy-scoring each stored
 /// entry's own content, boosted by how recently it was copied. Rows never
 /// carry a per-entry icon (no favicon/thumbnail fetching in this slice —
@@ -222,7 +252,8 @@ impl Provider for ClipboardProvider {
         stored
             .iter()
             .filter_map(|entry| {
-                let mut score = fuzzy_score(query, &entry.content)?;
+                let raw_score = fuzzy_score(query, &entry.content)?;
+                let mut score = raw_score * clipboard_length_normalization(entry.content.chars().count());
                 score += clipboard_recency_boost(entry.copied_at_unix_ms, now_unix_ms);
                 let (badge, glyph) = match entry.content_kind {
                     ClipboardContentKind::Text => ("TEXT", Glyph::Text),
@@ -606,5 +637,39 @@ mod tests {
         let results = provider.search("example", 1000);
         assert_eq!(results[0].item.badge.as_deref(), Some("LINK"));
         assert_eq!(results[0].item.icon, Icon::Glyph(Glyph::Link));
+    }
+
+    // --- Defect 2: a long, paragraph-shaped clipboard entry that merely
+    // contains the query must not systematically outscore a short,
+    // title-shaped candidate the way it did before length normalization. ---
+
+    #[test]
+    fn short_entries_are_left_exactly_as_fuzzy_score_scored_them() {
+        assert_eq!(clipboard_length_normalization(10), 1.0);
+        assert_eq!(clipboard_length_normalization(CLIPBOARD_TITLE_LIKE_CHARS), 1.0);
+    }
+
+    #[test]
+    fn long_entries_are_scaled_down_proportionally_to_their_length() {
+        let factor = clipboard_length_normalization(CLIPBOARD_TITLE_LIKE_CHARS * 10);
+        assert!((factor - 0.1).abs() < 0.001, "a 10x-over-threshold entry should score at ~10% of its raw match");
+    }
+
+    #[test]
+    fn a_short_exact_match_outscores_a_long_paragraph_that_merely_contains_the_query_at_the_same_age() {
+        let db = crate::Db::open_in_memory().unwrap();
+        let paragraph = format!(
+            "{}wallpaper{}",
+            "filler text ".repeat(20),
+            " more unrelated filler content padding this out well past the title-like length threshold".repeat(2)
+        );
+        assert!(paragraph.chars().count() > CLIPBOARD_TITLE_LIKE_CHARS * 3, "fixture paragraph must be clearly long");
+        record_entry(&db, &paragraph, ClipboardContentKind::Text, None, 1000).unwrap();
+        record_entry(&db, "wallpaper", ClipboardContentKind::Text, None, 1000).unwrap();
+        let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
+        let results = provider.search("wallpaper", 1000);
+        let short = results.iter().find(|c| c.item.id == "wallpaper").unwrap();
+        let long = results.iter().find(|c| c.item.id == paragraph).unwrap();
+        assert!(short.score > long.score, "short exact match ({}) should beat the long paragraph ({})", short.score, long.score);
     }
 }

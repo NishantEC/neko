@@ -270,12 +270,25 @@ impl Provider for SettingsProvider {
         if query.chars().count() < MIN_QUERY_LEN {
             return Vec::new();
         }
-        // Deliberately no per-provider category bonus here (contrast
-        // `search::app_category_score`, gated to the "app" provider only) —
-        // the launch brief's own requirement is that this pane must not
-        // crowd out genuine application matches for app-shaped queries,
-        // which plain, unboosted `fuzzy_score` (the same scale every other
-        // provider except "app" scores on) already satisfies.
+        // This provider's own candidates return plain, unboosted
+        // `fuzzy_score` here — the category bonus that makes an
+        // exact/near-exact pane match beat an incidental file/clipboard hit
+        // (`search::settings_category_score`) is applied by `allocate`,
+        // gated to the "settings" provider, exactly where
+        // `search::app_category_score` already sits for "app". Kept
+        // deliberately smaller than the app bonus and gated on the same
+        // real-prefix-match condition, so a genuine application match for
+        // an app-shaped query ("Bluetooth File Exchange" for "bluetooth")
+        // still outranks the pane — see `search.rs`'s doc comment on
+        // `settings_category_score` for the full reasoning and
+        // `docs/evidence/settings-and-clipboard-ranking.md` for the real
+        // numbers this was tuned against. An earlier version of this
+        // provider left this fully unboosted, reasoning that plain
+        // `fuzzy_score` already satisfied "must not crowd out application
+        // matches" — true, but it also meant the pane lost to *everything
+        // else*, not just apps (a captain-reported live defect: "sound"
+        // ranked the Sound pane tenth, behind unrelated files and clipboard
+        // entries).
         let icon = crate::icons::cached_icon_path(SETTINGS_APP_ICON_ID)
             .filter(|p| p.exists())
             .map(|p| Icon::Image(p.to_string_lossy().into_owned()))
