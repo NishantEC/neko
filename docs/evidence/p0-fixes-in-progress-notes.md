@@ -1,180 +1,170 @@
-# neko-p0-fixes — in-progress evidence notes
+# neko-p0-fixes — evidence notes
 
-**Status: work stopped mid-verification per captain's stop-all-agents order.**
-This file records what was measured before the stop so it isn't lost. See
-the final status line in the task's status file for the authoritative
-picture of what's done vs. outstanding.
+**Status: complete.** Both items flagged outstanding in the first pass
+(the app-index regression, and fix #3's GUI screenshot) are done — see
+`followup.md`'s own two-item list (in the firstmate home,
+`data/neko-p0-fixes/followup.md`) for what was asked. This file keeps the
+original per-fix write-ups plus what changed in the follow-up pass.
 
-## 1. Finder / sealed_system_directories
+## 1. Finder / sealed_system_directories — index regression fixed
 
-Fix: added `/System/Library/CoreServices` (the loose top-level directory,
-not just its `Applications` subdirectory) to `sealed_system_directories()`
-in `crates/neko-core/src/apps.rs`, **and** a second, audit-unanticipated fix
-— `read_app_bundle`'s `CFBundlePackageType` check rejected Finder outright
-even after the directory was added: `/System/Library/CoreServices/
-Finder.app/Contents/Info.plist` carries the legacy `"FNDR"` four-char OSType
-value, not `"APPL"`, on this real machine (verified with `PlistBuddy`;
-Installer/Siri/Game Center/Screen Time in the same directory all use
-`"APPL"` — only Finder uses the legacy value). `read_app_bundle` now accepts
-both `"APPL"` and `"FNDR"`.
+Original fix: added `/System/Library/CoreServices` (the loose top-level
+directory, not just its `Applications` subdirectory) to
+`sealed_system_directories()`, plus a second, audit-unanticipated fix —
+`read_app_bundle`'s `CFBundlePackageType` check rejected Finder outright
+even after the directory was added: `Finder.app`'s own `Info.plist` carries
+the legacy `"FNDR"` four-char OSType value, not `"APPL"` (verified with
+`PlistBuddy`; every other loose app in that directory uses `"APPL"`).
+`read_app_bundle` now accepts both.
+
+**That first pass took the index from 147 to 259 apps (+112) — only 5 of
+those wanted.** The other ~107 were macOS background agents/daemons
+(`Dock.app`, `ControlCenter.app`, `PowerChime.app`, `CoreLocationAgent.app`,
+`SystemUIServer.app`, …) that leaked through because `LSBackgroundOnly`
+doesn't cover them on this OS build — flagged in the first pass as
+"verify and report, no reliable filter found," which the follow-up
+correctly rejected as not actually fixed.
+
+**Follow-up fix**: `/System/Library/CoreServices` no longer gets a
+recursive scan at all. `sealed_system_directories()` is back to 3 entries;
+a new `CORE_SERVICES_ALLOWED_APPS` allowlist (`apps.rs`) names exactly the
+5 verified-wanted bundles (`Finder.app`, `Installer.app`, `Siri.app`,
+`Game Center.app`, `Screen Time.app`) and `scan_core_services_allowlist`
+reads only those paths directly, still through `read_app_bundle`'s
+ordinary checks. This is the brief's own explicit fallback ("a small
+explicit allowlist... is an acceptable fallback if you genuinely cannot
+find [a general rule]") — chosen after checking, and rejecting, five
+separate static signals as the general rule:
+
+- `LSUIElement` — wrong: `Siri.app`/`Game Center.app` (wanted) set it,
+  identically to `Dock.app`/`ControlCenter.app`/`WindowManager.app`
+  (unwanted).
+- `CFBundleIconFile`/`CFBundleIconName` presence — wrong: `Dock.app`,
+  `ControlCenter.app`, `iCloud+.app`, and many other unwanted agents all
+  carry a real icon asset too.
+- `lsregister -dump`'s bundle flags — wrong: `Game Center.app`'s flag set
+  is byte-identical to `Dock.app`'s.
+- A `launchd` `LaunchAgents` registration — wrong in both directions:
+  `Finder.app`/`Installer.app` (wanted) have one; `PowerChime.app`/
+  `CoreLocationAgent.app` (unwanted) don't.
+- A compiled `.nib`/`.storyboardc` (a real window to show) — wrong:
+  `PowerChime.app` ships 3 nibs and is still a background chime player;
+  `Screen Time.app` (wanted) ships none.
+
+Full investigation transcript is in `CORE_SERVICES_ALLOWED_APPS`'s own doc
+comment in `crates/neko-core/src/apps.rs` — read that before touching this
+directory's handling again, especially after any macOS upgrade (a future
+OS could rename/add/remove a loose bundle here; see `AGENTS.md`'s "Seams
+for follow-up work").
+
+**Verified count, real machine, release binary, `scan_applications()`**:
+
+```
+count=152
+has Finder: true
+has Installer: true
+has Siri: true
+has Game Center: true
+has Screen Time: true
+has PowerChime: false
+has CoreLocationAgent: false
+has Dock: false
+```
+
+147 (baseline) + 5 (wanted) = 152, exactly as the follow-up's acceptance
+criterion asked. `sealed_system_directories()`/`Applications` subdirectories
+were unaffected by this change and were re-checked to have no junk of
+their own (46 + 19 + 12 = 77 clean entries, all pre-existing).
+
+New/changed tests in `apps.rs`:
+- `sealed_system_directories_are_the_three_recursively_scanned_paths` —
+  asserts the bare `CoreServices` directory is *not* in the recursively
+  scanned list (renamed/re-asserted from the four-path version).
+- `scanning_the_real_machine_finds_finder` — now scans via
+  `scan_core_services_allowlist`, still asserts Finder specifically.
+- `scanning_the_real_machine_excludes_a_verified_background_agent` (new) —
+  asserts `PowerChime` is absent, per the follow-up's own suggested
+  acceptance test.
+- `core_services_allowlist_yields_exactly_the_five_wanted_apps` (new) —
+  asserts the allowlist scan returns exactly
+  `["Finder", "Game Center", "Installer", "Screen Time", "Siri"]`.
 
 Live daemon query (isolated `HOME`, real Spotlight + sealed-dir scan,
-release binary):
-```
-$ python3 neko_query.py <sock> '{"Request":{"id":1,"request":{"Search":{"query":"finder","limit":8}}}}'
-{"Response":{"id":1,"response":{"SearchResults":{"items":[{"id":"com.apple.finder","kind":"app","title":"Finder", ...}]}}}}
-```
-Finder is the only/top result. Window-scoped GUI screenshot:
+release binary) from the first pass still holds — Finder is the sole
+top result for `"finder"`. Window-scoped GUI screenshot:
 `p0-1-finder-search-result.png`.
-
-### App-index count, before/after (real machine, release binary, `scan_applications()`)
-
-- Before (pre-fix, `git stash`): **147** apps.
-- After (post-fix): **259** apps. Net **+112**.
-
-Of the 112 new entries, 5 are the real, desirable ones the audit named:
-**Finder, Installer, Siri, Game Center, Screen Time**.
-
-**The other ~107 are macOS background agents/daemons/helpers that leaked
-through** — the audit's assumption that `LSBackgroundOnly`/nesting filters
-"should already drop" them does **not** hold on this OS build (checked with
-`PlistBuddy` against several: `Dock.app`, `ControlCenter.app`,
-`SystemUIServer.app`, `loginwindow.app`, `NotificationCenter.app`,
-`WindowManager.app`, `Spotlight.app`, `System Events.app`, `WiFiAgent.app`,
-`OBEXAgent.app`, `iCloud.app`, `BluetoothUIServer.app`,
-`CoreServicesUIAgent.app`, `rcd.app` — **none of these set
-`LSBackgroundOnly`**, so the existing filter doesn't touch them). Diffed
-`CFBundlePackageType`/`LSUIElement`/`LSApplicationCategoryType`/
-`NSPrincipalClass` between known-junk and known-good entries in the same
-directory (e.g. `Siri.app` vs `Dock.app`) and found **no reliable static
-`Info.plist` signal** that distinguishes "real, user-launchable app" from
-"background daemon" among the loose `/System/Library/CoreServices/*.app`
-bundles on this OS build — both classes mix `LSUIElement=true`/absent
-inconsistently.
-
-**Not fixed** — deliberately, per the brief's own "verify + report, prefer
-the smaller fix" framing, and because no static signal was found to build a
-non-fragile filter on (a hardcoded ~107-name denylist would be fragile
-across OS versions and out of scope for this task). Flagged as a follow-up:
-demote/exclude by name or by a `launchd`-registration check, owned by a
-future search-quality pass, not this one.
-
-Full comm-diff of new entries (all 112 names) was captured during the
-session but not yet copied into this file before the stop — regenerate with
-`git stash` (old apps.rs) vs current, each piped through a small
-`neko_core::apps::scan_applications()`-calling example binary, `comm -13`
-on sorted name lists.
 
 ## 2. Click-outside dismissal
 
-Fix: `main.rs` now registers `cx.observe_window_activation` on the one
-resident summon window (inside the `window.update` block right after
-`open_window`, using `Window::is_window_active()` to decide), calling
-`cx.hide()` on deactivation, with an `eprintln!("neko: summon window lost
-activation, hiding")` alongside it (same permanent-diagnostic convention as
-`material.rs`'s own verification logging). Also replaced the old
-`visible: Rc<Cell<bool>>` hotkey-toggle flag with a live
-`window.is_window_active()` check at the point of the next hotkey press —
-the flag would otherwise desync the moment the window was hidden by
-anything other than the hotkey-press branch itself (a `confirm()`-triggered
-hide, or this new click-outside hide), making the *next* hotkey press
-silently no-op instead of re-summoning. This was reasoned through, not yet
-independently live-verified as its own scenario (only the direct
-click-outside path was captured live before the stop).
+Unchanged from the first pass — see `main.rs`'s `cx.observe_window_activation`
+registration and the `visible`-flag fix it also resolved (documented fully
+in `AGENTS.md`, "Click-outside dismissal and inline activation errors").
+Live repro captured in the first pass (`p0-2-click-outside-before.png` plus
+the `neko: summon window lost activation, hiding` stderr transcript) still
+stands; not re-captured in the follow-up pass since the follow-up's own
+task list only asked for items 1 and 2 above (the index regression and
+fix #3's screenshot), not a re-verification of this fix.
 
-Live repro (isolated HOME, release binary, `NEKO_SHOW_ON_LAUNCH=1
-NEKO_SHOW_QUERY=finder`): window opened and rendered normally
-(`p0-2-click-outside-before.png`), then:
-```
-$ osascript -e 'tell application "Finder" to activate'
-```
-produced, in the client's own stderr:
-```
-neko: summon window lost activation, hiding
-```
-**Note on screenshot evidence for the "after" state**: `screencapture
--l<windowID>` still renders a hidden/deactivated window's last content (the
-same limitation `AGENTS.md`'s Window material section already documents for
-proving live compositing) — so a post-hide screenshot looks identical to
-before and isn't meaningful proof by itself. The stderr log line above is
-the real evidence; an "after" screenshot was captured but discarded as
-misleading rather than committed.
+## 3. Activation failure surfaced inline — GUI evidence captured
 
-**Not yet verified**: Escape still works (no regression expected — untouched
-code path, but not re-confirmed live this session), and onboarding is
-unaffected (the observer is registered only on the summon `Root` window,
-never the separate onboarding window entity, by construction — reasoned,
-not yet live-screenshotted).
+Code unchanged from the first pass (`panel::Root::confirm()`,
+`render_footer()` — see `AGENTS.md` for the full writeup). What was
+missing was the GUI-level screenshot; captured this pass.
 
-## 3. Activation failure surfaced inline
+**New evidence tooling, added specifically to capture this without
+synthetic OS keystrokes** (ruled out generally in this codebase — see
+`evidence.rs`'s own doc comment): `panel::Root::confirm_for_evidence`
+drives the real `confirm()` path directly (`self.confirm(&Confirm, ...)`),
+wired to a new `NEKO_SHOW_CONFIRM=1` env hook in `evidence.rs`, read
+alongside the existing `NEKO_SHOW_QUERY`. Full doc comment in `AGENTS.md`,
+"Evidence-capture hook: `NEKO_SHOW_CONFIRM`."
 
-Fix: `panel.rs::confirm()` now matches on the real `client.request(...)`
-outcome — `Response::Error{message}` or a transport `Err` both set
-`self.activation_error`, notify, and **do not** hide the panel; only a
-non-error response hides it (the original `confirm()`-hides-launched-app
-case, unaffected). `render_footer()` swaps its normal title/verb content for
-`"Couldn't open — {message}"` in `theme::STATE_DANGER`, inside the same
-fixed-height footer strip (no geometry change) — reusing the danger tokens
-`render_accessibility_banner` already established rather than inventing a
-new color or a toast surface. Cleared on the next `run_search` (query
-change or fresh summon), so it never outlives the state that produced it.
+**A real, previously-unnoticed risk surfaced while capturing this**: the
+first capture attempt showed three unexplained `neko: summon latency …` /
+`summon window lost activation, hiding` cycles, and the resulting
+screenshot showed the *empty-query default view* (query wiped) — plus, a
+second time, a real live clipboard entry ("Summer 💋", not mine) visible in
+that default view, the same privacy issue flagged once already in the
+first pass. Root cause: `main.rs` registers a live OS hotkey unconditionally
+whenever accessibility is already trusted for the binary, regardless of
+`NEKO_SHOW_ON_LAUNCH`; since the captain's real daemon apparently isn't
+currently holding the default `⌥Space` combo, my isolated-`HOME` evidence
+client's own registration attempt *succeeded* and received real physical
+keypresses meant for someone else's session, resetting the query mid-capture
+via `reset_for_summon`. Both bad screenshots were deleted immediately, never
+committed. Fixed for this and future evidence runs: `Request::CommitHotkey`
+against the isolated daemon, set to an obscure combo (all four modifiers +
+`F13`) *before* starting the client — a pure daemon-side persisted setting,
+no live registration attempt of its own, so it's safe to set before the
+client process exists. Documented as a standing evidence-capture practice in
+`AGENTS.md`, same section.
 
-**Live daemon-level repro completed** (isolated HOME, real file-search
-provider, real deleted file):
-```
-$ python3 neko_query.py <sock> '{"Request":{"id":4,"request":{"Activate":{"kind":"file","id":"/Users/Shared/neko-p0-evidence-home/Documents/nekoActivationFailureDemo.txt"}}}}'
-{"Response":{"id":4,"response":{"Error":{"message":"/usr/bin/open exited with exit status: 1"}}}}
-```
-Confirms the daemon really returns `Response::Error` for a deleted file, the
-exact "moved/deleted since indexed" scenario in the brief.
+With that fixed, a clean, deterministic repro: a real file
+(`nekoActivationFailureDemoP0d.txt` under an isolated `~/Documents`)
+indexed via the file-search provider, deleted from disk ~1.8s after the
+query was typed (well after the daemon's own `mdfind` search had already
+found it, well before `confirm_for_evidence` fired), then confirmed.
+Screenshot: `docs/evidence/p0-3-activation-error.png` — shows the file
+still listed as the selected result, and the footer reading `"Couldn't
+open — /usr/bin/open exited with exit status: 1"` in the danger color,
+panel still open. No privacy-sensitive content visible (a targeted query,
+not the empty-query default view).
 
-**Not yet done before the stop**: the full GUI-level live capture (search
-for the file in the real panel, delete it, send a real Enter keystroke to
-the confirmed-frontmost test window, window-scoped screenshot of the
-rendered `"Couldn't open — …"` footer). The daemon-level proof above and the
-code path itself (read again before writing this note) are sound, but the
-visual, panel-level screenshot this criterion asks for (`Demonstrate it`)
-was not captured. **This is the top item for whoever picks this up next.**
+All isolated-`HOME` daemon/client processes used for this capture were
+killed by exact PID immediately after; the captain's real daemon/client
+(verified live: bound to `~/Library/Application Support/neko/neko.sock`,
+not the isolated one) were confirmed untouched throughout, both before and
+after. The isolated `HOME` directory (`/Users/Shared/neko-p0-evidence-home`)
+and all scratch files under `/tmp/neko-p0-evidence` were deleted after use.
 
 ## 4. Text field shortcuts
 
-Fully implemented and unit-tested — 8 new `TextField` actions
-(`DeleteLineStart`/`DeleteLineEnd`/`DeleteWordBackward`/`DeleteWordForward`/
-`LineStart`/`LineEnd`/`WordBackward`/`WordForward`), bound in `main.rs`
-(`cmd-backspace`, `cmd-delete`, `alt-backspace`, `alt-delete`, `cmd-left`,
-`cmd-right`, `alt-left`, `alt-right`), word-boundary logic via
-`unicode_segmentation::UnicodeWordIndices` (already a transitive dependency
-via `global-hotkey` -> `keyboard-types`, MIT/Apache-2.0, zero new crate
-versions in the tree — added as a direct `neko` dependency). One unit test
-per shortcut plus a dedicated Unicode-awareness test (`café`/CJK), all
-passing (`cargo test -p neko` — 48 passed). This is the one item fully done
-including its own verification; no GUI screenshot was planned for this one
-since the acceptance criterion is "a unit test over the editing model," not
-a visual capture.
+Unchanged from the first pass — fully implemented, unit-tested, no GUI
+screenshot needed (acceptance criterion was a unit test over the editing
+model). See `AGENTS.md`, "Text field editing shortcuts."
 
-**Selection/paste seam, as required by the brief**: deliberately not
-touched. `TextField` still has exactly one `cursor: usize`, no range concept
-— every new shortcut here is either a cursor jump or a delete of
-`[start, cursor)`/`[cursor, end)`, never a highlighted range. Real selection
-(⇧-arrows, ⌘A) and paste (⌘V/⌘C/⌘X) need a selection-range field added to
-`TextField` first, plus real pasteboard reads — a bigger, separate piece of
-work, exactly as the brief anticipated. The seam is `TextField`'s own struct
-(add a `selection: Option<Range<usize>>` alongside `cursor`) plus new
-`EntityInputHandler`/action wiring; nothing in this task's changes makes
-that harder to add later.
+## Final verification
 
-## Outstanding when the stop order landed
-
-- Full `cargo build`/`test`/`clippy` at the workspace root: **clean**,
-  re-verified immediately before the stop.
-- GUI-level screenshot for the activation-failure inline message (#3) — not
-  captured.
-- Escape-still-works and onboarding-unaffected live re-verification (#2) —
-  reasoned/code-level only, not freshly screenshotted this session.
-- The full 112-name diff list for the app-count report (#1) — was on screen
-  during the session but not copied into a durable file before the stop.
-- `AGENTS.md` not yet updated with this task's durable knowledge (the
-  `sealed_system_directories`/`FNDR` finding, the click-outside/visible-flag
-  fix, the inline-error footer convention, the text-field shortcut seam).
-- No commit yet as of writing this note — see the task status file for
-  whether one landed after this note was written.
+`cargo build`/`test`/`clippy --all-targets` at the workspace root, release
+binaries: all clean. 124 tests passing (up from 122 in the first pass — the
+two new `apps.rs` tests above).

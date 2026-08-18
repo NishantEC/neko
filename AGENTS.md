@@ -58,6 +58,15 @@ demotion (never exclusion) of compiled/source-code file extensions in
 `FileProvider`; both constants were re-tuned after live queries against the
 captain's own file corpus caught real regressions a unit fixture wouldn't
 have. See "Search and ranking" below, `docs/evidence/ranking-before-after.md`.
+An eleventh task (`neko-p0-fixes`) fixed four more captain-reported
+defects in one pass: Finder (and Installer/Siri/Game Center/Screen Time)
+missing from the app index, the summoned panel not dismissing on an
+outside click, activation failures closing the panel silently instead of
+saying why, and the search field ignoring standard macOS line/word editing
+shortcuts (⌘⌫/⌥⌫/⌘←/⌥← and their forward counterparts) — see "Application
+discovery" below for the index fix, "Click-outside dismissal and inline
+activation errors" below for the other two panel-level fixes, and "Text
+field editing shortcuts" below for the fourth.
 
 ## Crate layout
 
@@ -302,6 +311,29 @@ before touching this file again. Summary:
   indexing disabled for that whole volume) even though every app is really
   there. That scan runs once, not live — the volume can't change without an
   OS update, which restarts the daemon anyway.
+- **A fourth sealed-volume location, `/System/Library/CoreServices` itself
+  (not just its `Applications` subdirectory), gets a named allowlist of 5
+  bundle names instead of a fourth recursive scan — `neko-p0-fixes`,
+  correcting this section's own prior claim.** Finder/Installer/Siri/Game
+  Center/Screen Time all live loose in that top-level directory, which is
+  why the captain's own "Finder is missing" report traced here — but so do
+  ~112 macOS background agents (`Dock.app`, `PowerChime.app`,
+  `CoreLocationAgent.app`, `SystemUIServer.app`, …), and a first version of
+  this fix scanned the whole directory on the assumption that
+  `LSBackgroundOnly` (below) would drop them, landing 259 apps instead of
+  ~152. It doesn't: verified against a wide sample that **none of the
+  leaked agents set `LSBackgroundOnly`**, and no other static
+  `Info.plist`/`lsregister`-flag/launchd-registration/nib-presence signal
+  checked separates the 5 wanted bundles from the ~112 agents either (both
+  classes mix every candidate property inconsistently) — the full
+  investigation, each signal tried and why it failed, is in
+  `apps.rs`'s `CORE_SERVICES_ALLOWED_APPS` doc comment. `Finder.app`'s own
+  `Info.plist` also needed a second, narrower fix either way:
+  `CFBundlePackageType` is the legacy `"FNDR"` value there, not `"APPL"` —
+  `read_app_bundle` accepts both now, the one general rule change this task
+  made. Regression test:
+  `apps::tests::scanning_the_real_machine_excludes_a_verified_background_agent`
+  (asserts `PowerChime` absent, `Finder` present).
 - **Live updates via `mdfind -live` as a change signal, not a data source**
   — it only ever reports a match *count*, never the updated paths (confirmed
   against its man page and by experiment), so an update triggers a fresh
@@ -340,6 +372,68 @@ before touching this file again. Summary:
   where even the filename stem is blank is dropped from the index entirely
   — never render an icon with no title, per the same rule `panel.rs`'s row
   layout assumes throughout.
+
+## Click-outside dismissal and inline activation errors
+
+Two more `neko-p0-fixes` defects, both in `main.rs`/`panel.rs`.
+
+**Click-outside dismissal.** `main.rs` registers
+`cx.observe_window_activation` once, on the one resident summon window,
+right after `open_window` — `window.is_window_active()` false calls
+`cx.hide()`, exactly the same hide `confirm()` already used for the
+launched-a-result case. Registered only on that window, never on the
+separate onboarding window entity, so onboarding is unaffected by
+construction. **Fixing this also fixed a latent bug it would otherwise have
+made worse**: the hotkey-press handler used to toggle an `Rc<Cell<bool>>`
+`visible` flag rather than checking real window state, which desynced the
+moment the window was hidden by anything other than that exact branch (a
+`confirm()` hide, or this new click-outside hide) — the *next* hotkey press
+would then silently no-op instead of re-summoning. `main.rs` now checks
+`window.is_window_active()` live at the point of each hotkey press instead
+of trusting a cached flag.
+
+**Inline activation errors.** `panel::Root::confirm()` used to discard
+`client.request(Request::Activate{..})`'s result and unconditionally
+`cx.hide()` — an app moved/deleted since it was indexed, or the daemon
+unreachable, closed the panel exactly as if the launch had worked, with no
+indication anything failed. `confirm()` now matches the real outcome:
+`Response::Error{message}` or a transport `Err` both set a new
+`Root::activation_error: Option<String>` field and **do not** hide the
+panel; only a real non-error response hides it. `render_footer()` swaps its
+normal title/verb content for `"Couldn't open — {message}"` in
+`theme::STATE_DANGER` (the same danger token `render_accessibility_banner`
+already established — no new toast surface, no geometry change), and
+`run_search()` clears `activation_error` as its first line so it never
+outlives the query that produced it. Window-scoped GUI evidence (a real
+file, indexed, then deleted before Enter, captured via the
+`NEKO_SHOW_CONFIRM` evidence hook below):
+`docs/evidence/p0-3-activation-error.png`.
+
+## Text field editing shortcuts
+
+`neko-p0-fixes`'s fourth fix. `TextField` (`crates/neko/src/text_field.rs`)
+had only `Backspace`/`Left`/`Right` before this task; it now also binds (in
+`main.rs`'s `cx.bind_keys`) the standard macOS line/word editing set:
+`cmd-backspace`/`cmd-delete` (delete to line start/end), `alt-backspace`/
+`alt-delete` (delete previous/next word), `cmd-left`/`cmd-right` (jump to
+line start/end), `alt-left`/`alt-right` (jump to previous/next word start).
+Word boundaries go through `unicode_segmentation::UnicodeWordIndices`
+(`TextField::word_start_before`/`word_end_after`), not a byte-level
+`char::is_whitespace` scan — verified against `"café 東京 test"`: each CJK
+ideograph is its own word-boundary stop (UAX#29 has no dictionary-based
+segmentation), accented Latin stays within one word. Already a transitive
+dependency via `global-hotkey -> keyboard-types`, so this added zero new
+crate versions to the tree. One unit test per shortcut plus a dedicated
+Unicode-awareness test, all against the editing model directly (no `Window`
+needed, consistent with this file's existing test convention).
+
+**Deliberately excludes selection and paste — the seam, not a gap.**
+`TextField` still has exactly one `cursor: usize`, no range concept; every
+shortcut here is a cursor jump or a delete of `[start, cursor)`/
+`[cursor, end)`, never a highlighted range. Real selection (⇧-arrows, ⌘A)
+and paste (⌘V/⌘C/⌘X) need a `selection: Option<Range<usize>>` field on
+`TextField` plus real pasteboard reads first — out of scope for this task
+by its own brief, and nothing added here makes that harder later.
 
 ## Search and ranking
 
@@ -918,6 +1012,40 @@ the ranking or timing code — a `python3 -c` one-liner reimplementing
 faster than another round of live capture, and would have caught this
 immediately.
 
+### Evidence-capture hook: `NEKO_SHOW_CONFIRM`, and a live-hotkey collision it exposed
+
+`neko-p0-fixes`'s own evidence hook, for capturing the inline activation-
+error footer (see "Click-outside dismissal and inline activation errors"
+above) without synthetic OS keystrokes — same reasoning as `NEKO_SHOW_QUERY`
+above. Read alongside it: once the query's results render,
+`panel::Root::confirm_for_evidence` drives the exact same `confirm()` path a
+real Enter keystroke takes (`self.confirm(&Confirm, window, cx)` —
+`Confirm` is a plain constructible unit struct, GPUI's `actions!` macro
+output), then `show_once` waits for the real `Request::Activate` round-trip
+before printing the window-number "now capture" line.
+
+**Real finding while using this hook, worth recording for any future
+evidence run on this machine, not just this one hook**: `main.rs` registers
+a live OS hotkey unconditionally at startup whenever `AXIsProcessTrusted()`
+is already true for the binary being run — `NEKO_SHOW_ON_LAUNCH` bypasses
+the onboarding *screen* but not this registration. If the captain's real
+daemon/client doesn't currently hold the default `⌥Space` combo (e.g. he's
+rebound it), an isolated-`HOME` evidence client's registration attempt can
+*succeed* — and then genuinely receive real physical `⌥Space` presses meant
+for whatever the captain was actually doing, visibly resetting the evidence
+run's own query field via `reset_for_summon` mid-capture (confirmed live:
+three unexplained `neko: summon latency …` / `lost activation` cycles during
+one capture attempt turned out to be three real hotkey presses landing on
+the evidence process instead of the captain's). **Mitigation, now routine
+for any evidence run that leaves `NEKO_SHOW_ON_LAUNCH`'s hotkey path live**:
+before starting the client, send the isolated daemon a `Request::CommitHotkey`
+for an obscure combo (e.g. all four modifiers plus `F13`) so nothing anyone
+is realistically pressing can land on it. This is a persisted daemon-side
+setting (`neko_core::hotkey::set_hotkey`, no live registration attempt of
+its own — see "The hotkey is a runtime-configurable setting" above), so it
+can be set with one request against the isolated socket before the client
+process even starts.
+
 ## Third-party UI code: evaluated, then narrowly vendored
 
 `longbridge/gpui-component` (Apache-2.0, crates.io) was evaluated as a
@@ -1262,6 +1390,19 @@ cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
   (same section) rather than on any code gap.
 - **A real menu-bar `NSStatusItem`**: see "Onboarding" above — GPUI 0.2.2 has
   no usable status-item API; this is raw AppKit bridging, its own task.
+- **Text field selection and paste**: see "Text field editing shortcuts"
+  above — needs a `selection: Option<Range<usize>>` field on `TextField`
+  plus real pasteboard reads for ⌘V/⌘C/⌘X, deliberately out of scope for
+  `neko-p0-fixes`.
+- **`CORE_SERVICES_ALLOWED_APPS`'s 5-name allowlist** (`apps.rs`, see
+  "Application discovery" above) is pinned to this machine's OS build. A
+  future macOS release could rename, remove, or add a loose bundle in
+  `/System/Library/CoreServices` that a person would want launchable; no
+  static signal was found this task could build a version-proof general
+  rule on instead (the investigation, and why each candidate signal failed,
+  is in that constant's own doc comment) — re-verify the list by hand after
+  any major OS upgrade, the same way `docs/evidence/cargo-license.txt`/
+  `cargo-tree.txt` get re-verified after a dependency bump.
 
 ## Maintaining this file
 

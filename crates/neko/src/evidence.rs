@@ -18,6 +18,15 @@
 //!   query — room for an outside script to seed a real clipboard entry
 //!   first, so the query can demonstrate a genuine clipboard match too,
 //!   not just apps/files.
+//! - `NEKO_SHOW_CONFIRM=1` (only read alongside `NEKO_SHOW_QUERY`) drives
+//!   the field's top result through the exact same `Root::confirm` path a
+//!   real Enter keystroke takes — `panel::Root::confirm_for_evidence` — for
+//!   capturing the inline `"Couldn't open — …"` activation-failure footer
+//!   (the neko-p0-fixes task's own evidence) without synthetic OS input,
+//!   same reasoning as `NEKO_SHOW_QUERY` above. `show_once` waits for the
+//!   query's own results to render, calls it, then waits once more for the
+//!   real daemon round-trip `Request::Activate` makes before printing the
+//!   window-number "now capture" line.
 //! - `NEKO_BENCH=<n>` re-measures warm summon latency `n` times without
 //!   synthetic OS keystrokes (unreliable — `AGENTS.md`, "Summon latency")
 //!   or repeated `cx.activate(true)` (steals focus each time); prints one
@@ -48,6 +57,7 @@ use crate::panel::Root;
 const BENCH_ENV_VAR: &str = "NEKO_BENCH";
 const SHOW_ON_LAUNCH_ENV_VAR: &str = "NEKO_SHOW_ON_LAUNCH";
 const SHOW_QUERY_ENV_VAR: &str = "NEKO_SHOW_QUERY";
+const SHOW_CONFIRM_ENV_VAR: &str = "NEKO_SHOW_CONFIRM";
 const BACKDROP_IMAGE_ENV_VAR: &str = "NEKO_BACKDROP_IMAGE";
 
 pub fn bench_iterations() -> Option<u32> {
@@ -60,6 +70,10 @@ pub fn show_on_launch_requested() -> bool {
 
 pub fn show_query() -> Option<String> {
     std::env::var(SHOW_QUERY_ENV_VAR).ok()
+}
+
+pub fn show_confirm_requested() -> bool {
+    std::env::var_os(SHOW_CONFIRM_ENV_VAR).is_some()
 }
 
 pub fn backdrop_image_path() -> Option<PathBuf> {
@@ -137,6 +151,19 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // outside script's "now capture" signal) isn't printed before the
         // row this evidence run exists to show has actually rendered.
         Timer::after(std::time::Duration::from_millis(3500)).await;
+    }
+    if show_confirm_requested() {
+        let _ = cx.update(|cx| {
+            let _ = window.update(cx, |root, window, cx| {
+                root.confirm_for_evidence(window, cx);
+            });
+        });
+        // `confirm()` makes its own real `Request::Activate` daemon
+        // round-trip before it sets `activation_error` and notifies — wait
+        // for it to land before the window-number "now capture" line below
+        // prints, or the screenshot below would race the still-in-flight
+        // request and show the pre-confirm footer instead.
+        Timer::after(std::time::Duration::from_millis(800)).await;
     }
     let _ = cx.update(|cx| {
         let _ = window.update(cx, |root, window, cx| {

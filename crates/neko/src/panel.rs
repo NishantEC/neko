@@ -141,6 +141,16 @@ impl Root {
         self.text_field.update(cx, |field, cx| field.set_content_for_evidence(query, cx));
     }
 
+    /// Evidence/verification-only — drives the exact same `confirm()` path
+    /// a real Enter keystroke takes (activate the selected result, surface
+    /// `Response::Error` inline on failure) without a synthetic OS
+    /// keystroke, for `evidence.rs`'s `NEKO_SHOW_CONFIRM` hook. Real
+    /// keystroke synthesis was already ruled out for this panel — see
+    /// `set_query_for_evidence`'s own doc comment.
+    pub fn confirm_for_evidence(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm(&Confirm, window, cx);
+    }
+
     fn fetch_accessibility_banner_state(&mut self, cx: &mut Context<Self>) {
         let client = self.client.clone();
         cx.spawn(async move |this, cx| {
