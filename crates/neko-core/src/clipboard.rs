@@ -219,6 +219,47 @@ fn clipboard_length_normalization(content_chars: usize) -> f32 {
     }
 }
 
+/// A day-relative group label for clipboard history mode's own time-grouped
+/// list (`data/neko-design/report.md` mockup 12: "Today" / "Yesterday"
+/// section headers) — `SearchItem::group_label`, read only by the client's
+/// mode rendering, never by the ordinary root-list view.
+///
+/// **UTC calendar-day arithmetic, not local-timezone-aware — a known,
+/// disclosed approximation, not a hidden bug.** No date/time-formatting
+/// dependency exists anywhere in this codebase yet (`clipboard::relative_time`,
+/// the only other time-label this module produces, is pure duration
+/// arithmetic, not a calendar), and adding one (`chrono` or equivalent) for
+/// two section-header labels wasn't judged worth a new dependency. A copy
+/// made shortly before or after local midnight can land in the "wrong" UTC
+/// day bucket relative to the captain's own wall clock — say so rather than
+/// claim more.
+fn day_bucket_label(now_unix_ms: i64, copied_at_unix_ms: i64) -> String {
+    const DAY_MS: i64 = 86_400_000;
+    let now_day = now_unix_ms.div_euclid(DAY_MS);
+    let entry_day = copied_at_unix_ms.div_euclid(DAY_MS);
+    match now_day - entry_day {
+        n if n <= 0 => "Today".to_string(),
+        1 => "Yesterday".to_string(),
+        n => format!("{n} days ago"),
+    }
+}
+
+/// The clipboard actions menu's three secondary actions, offered on every
+/// clipboard row — see `AGENTS.md`'s "Commands and modes" section. "Paste"
+/// duplicates the row's own primary `Request::Activate` action (matching
+/// Raycast's own action-panel convention of listing the default action
+/// first); neko's "paste" and "copy" are the identical operation today
+/// (write to the system pasteboard — see `AGENTS.md`'s "Clipboard history"
+/// section on why neko never simulates a keystroke), offered as two labels
+/// because a captain reaching for "Copy" shouldn't have to know that.
+fn clipboard_item_actions() -> Vec<neko_protocol::ItemAction> {
+    vec![
+        neko_protocol::ItemAction { id: "paste".to_string(), label: "Paste".to_string(), destructive: false },
+        neko_protocol::ItemAction { id: "copy".to_string(), label: "Copy".to_string(), destructive: false },
+        neko_protocol::ItemAction { id: "delete".to_string(), label: "Delete".to_string(), destructive: true },
+    ]
+}
+
 /// The clipboard-history provider: matches by fuzzy-scoring each stored
 /// entry's own content, boosted by how recently it was copied. Rows never
 /// carry a per-entry icon (no favicon/thumbnail fetching in this slice —
@@ -271,6 +312,10 @@ impl Provider for ClipboardProvider {
                         action_label: "Paste  ↵".to_string(),
                         badge: Some(badge.to_string()),
                         accessory: Some(relative_time(now_unix_ms, entry.copied_at_unix_ms)),
+                        enters_mode: None,
+                        group_label: Some(day_bucket_label(now_unix_ms, entry.copied_at_unix_ms)),
+                        actions: clipboard_item_actions(),
+                        source: entry.source_app.clone(),
                     },
                 })
             })
@@ -282,6 +327,24 @@ impl Provider for ClipboardProvider {
             Ok(())
         } else {
             Err(ProviderError("failed to write to the pasteboard".to_string()))
+        }
+    }
+
+    /// "paste"/"copy" are the identical operation for neko today (see
+    /// [`clipboard_item_actions`]'s doc comment) — both just re-run
+    /// [`activate`](Self::activate). "delete" permanently removes the entry
+    /// from history; deleting something already gone (a double-delete, or a
+    /// stale action-menu reference to an entry that pruned out in the
+    /// meantime) is treated as success, not an error — the end state the
+    /// caller wanted ("this content is not in history") already holds.
+    fn perform_action(&self, id: &str, action_id: &str) -> Result<(), ProviderError> {
+        match action_id {
+            "paste" | "copy" => self.activate(id),
+            "delete" => {
+                let db = self.db.lock().unwrap();
+                db.delete_clipboard_entry(id).map_err(|e| ProviderError(e.to_string()))
+            }
+            other => Err(ProviderError(format!("clipboard has no action '{other}'"))),
         }
     }
 }
@@ -671,5 +734,82 @@ mod tests {
         let short = results.iter().find(|c| c.item.id == "wallpaper").unwrap();
         let long = results.iter().find(|c| c.item.id == paragraph).unwrap();
         assert!(short.score > long.score, "short exact match ({}) should beat the long paragraph ({})", short.score, long.score);
+    }
+
+    // --- Commands and modes: group_label, actions, perform_action, source ---
+
+    #[test]
+    fn day_bucket_labels_today_yesterday_and_older_by_utc_calendar_day() {
+        const DAY_MS: i64 = 86_400_000;
+        let now = 10 * DAY_MS + 12345; // any time on "day 10"
+        assert_eq!(day_bucket_label(now, now), "Today");
+        assert_eq!(day_bucket_label(now, now - DAY_MS), "Yesterday");
+        assert_eq!(day_bucket_label(now, now - 3 * DAY_MS), "3 days ago");
+    }
+
+    #[test]
+    fn day_bucket_treats_a_future_timestamp_as_today_rather_than_panicking_or_going_negative() {
+        // Clock skew guard: a copy timestamped fractionally after `now`
+        // (client/daemon clock drift) must not read as some nonsensical
+        // "-1 days ago".
+        let now = 5_000_000_000;
+        assert_eq!(day_bucket_label(now, now + 60_000), "Today");
+    }
+
+    #[test]
+    fn search_results_carry_a_group_label_and_the_standard_action_set() {
+        let db = crate::Db::open_in_memory().unwrap();
+        record_entry(&db, "hello", ClipboardContentKind::Text, Some("Terminal"), 1000).unwrap();
+        let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
+        let results = provider.search("hello", 1000);
+        let item = &results[0].item;
+        assert_eq!(item.group_label.as_deref(), Some("Today"));
+        assert_eq!(item.source.as_deref(), Some("Terminal"));
+        let action_ids: Vec<&str> = item.actions.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(action_ids, vec!["paste", "copy", "delete"]);
+        assert!(item.actions.iter().find(|a| a.id == "delete").unwrap().destructive);
+        assert!(!item.actions.iter().find(|a| a.id == "paste").unwrap().destructive);
+        assert!(item.enters_mode.is_none());
+    }
+
+    #[test]
+    fn perform_action_delete_removes_the_entry_from_history() {
+        let db = Arc::new(Mutex::new(crate::Db::open_in_memory().unwrap()));
+        record_entry(&db.lock().unwrap(), "gone soon", ClipboardContentKind::Text, None, 100).unwrap();
+        let provider = ClipboardProvider::new(db.clone());
+        assert!(provider.perform_action("gone soon", "delete").is_ok());
+        assert!(entries(&db.lock().unwrap()).unwrap().is_empty());
+    }
+
+    // Deliberately no test calls `perform_action` with `"copy"`/`"paste"`
+    // (or `activate` directly) against a real `ClipboardProvider`: both
+    // route to the real `pasteboard::write_string` on macOS, which is a
+    // live, unconditional write to *the system pasteboard* — running that
+    // in a unit test on the captain's own machine would overwrite whatever
+    // he actually has copied with test fixture text, exactly the kind of
+    // real-data interference this task's own brief warns against (just in
+    // the opposite direction — this codebase writing *to* his pasteboard,
+    // not reading *from* his clipboard history). The routing itself
+    // ("copy" and "paste" both call `self.activate`) is a one-line, visibly
+    // correct fact in `perform_action`'s own body above, not something that
+    // needs a live-AppKit test to confirm — consistent with the rest of
+    // this module, which has never had a test that calls `activate()` on a
+    // real `ClipboardProvider` either.
+
+    #[test]
+    fn perform_action_with_an_unknown_action_id_errors() {
+        let db = crate::Db::open_in_memory().unwrap();
+        record_entry(&db, "x", ClipboardContentKind::Text, None, 100).unwrap();
+        let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
+        let result = provider.perform_action("x", "reverse-it");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().0.contains("no action"));
+    }
+
+    #[test]
+    fn deleting_an_entry_that_is_already_gone_is_not_an_error() {
+        let db = crate::Db::open_in_memory().unwrap();
+        let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
+        assert!(provider.perform_action("never existed", "delete").is_ok());
     }
 }

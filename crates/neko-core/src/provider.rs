@@ -59,8 +59,19 @@ pub trait Provider: Send + Sync {
     /// instead.
     fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate>;
 
-    /// Perform this provider's one action for a `SearchItem::id` it
+    /// Perform this provider's one primary action for a `SearchItem::id` it
     /// previously returned — launch an app, write the pasteboard, open a
-    /// file. Called from `Request::Activate`.
+    /// file. Called from `Request::Activate` when `action` is `None`.
     fn activate(&self, id: &str) -> Result<(), ProviderError>;
+
+    /// Perform a named *secondary* action from a row's own
+    /// `SearchItem::actions` (e.g. clipboard's "copy"/"delete" alongside its
+    /// default "paste") — called from `Request::Activate` when `action` is
+    /// `Some(action_id)`. Defaulted so the three providers with nothing
+    /// beyond their one primary action (apps, files, settings) don't need
+    /// to implement this at all; only a provider that actually populates
+    /// `SearchItem::actions` (clipboard) overrides it.
+    fn perform_action(&self, _id: &str, action_id: &str) -> Result<(), ProviderError> {
+        Err(ProviderError(format!("provider '{}' has no action '{action_id}'", self.id())))
+    }
 }

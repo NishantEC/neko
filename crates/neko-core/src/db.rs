@@ -135,6 +135,17 @@ impl Db {
         Ok(())
     }
 
+    /// Permanently removes one stored entry by its own content (the primary
+    /// key) — the clipboard actions menu's "Delete" action
+    /// (`ClipboardProvider::perform_action`). A content string that isn't
+    /// actually stored (already deleted, e.g. a mis-keyed double-delete) is
+    /// not an error: the end state ("this content is not in history") is
+    /// already what the caller wanted.
+    pub fn delete_clipboard_entry(&self, content: &str) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM clipboard_entries WHERE content = ?1", [content])?;
+        Ok(())
+    }
+
     /// `(content, content_kind, source_app, copied_at_unix_ms)` per entry,
     /// most recently copied first.
     #[allow(clippy::type_complexity)]
@@ -190,6 +201,23 @@ mod tests {
             entries[0],
             ("hello".to_string(), "text".to_string(), Some("Notes".to_string()), 200)
         );
+    }
+
+    #[test]
+    fn deleting_a_clipboard_entry_removes_only_that_one() {
+        let db = Db::open_in_memory().unwrap();
+        db.record_clipboard_entry("keep", "text", None, 100, 200).unwrap();
+        db.record_clipboard_entry("drop", "text", None, 200, 200).unwrap();
+        db.delete_clipboard_entry("drop").unwrap();
+        let entries = db.clipboard_entries().unwrap();
+        let contents: Vec<&str> = entries.iter().map(|(c, ..)| c.as_str()).collect();
+        assert_eq!(contents, vec!["keep"]);
+    }
+
+    #[test]
+    fn deleting_a_content_that_was_never_stored_is_not_an_error() {
+        let db = Db::open_in_memory().unwrap();
+        assert!(db.delete_clipboard_entry("never-stored").is_ok());
     }
 
     #[test]

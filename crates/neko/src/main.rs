@@ -5,6 +5,7 @@ mod display_placement;
 mod evidence;
 mod hotkey_client;
 mod material;
+mod modes;
 mod onboarding;
 mod panel;
 mod row_icon_cache;
@@ -65,7 +66,7 @@ fn main() {
         // Works whether or not the global hotkey is live, so declining
         // Accessibility never leaves neko unreachable.
         let _ = window.update(cx, |root, window, cx| {
-            root.reset_for_summon(cx);
+            root.reset_for_summon(window, cx);
             reposition_to_cursor_display(window);
             window.activate_window();
             window.focus(&root.focus_handle(cx));
@@ -92,6 +93,7 @@ fn main() {
             KeyBinding::new("down", panel::SelectNext, Some("Panel")),
             KeyBinding::new("up", panel::SelectPrevious, Some("Panel")),
             KeyBinding::new("enter", panel::Confirm, Some("Panel")),
+            KeyBinding::new("cmd-k", panel::OpenActionsMenu, Some("Panel")),
             KeyBinding::new("escape", DismissWindow, Some("Panel")),
             KeyBinding::new("enter", onboarding::view::Primary, Some("Onboarding")),
             KeyBinding::new("escape", onboarding::view::Secondary, Some("Onboarding")),
@@ -291,7 +293,7 @@ fn main() {
                                 if window.is_window_active() {
                                     cx.hide();
                                 } else {
-                                    root.reset_for_summon(cx);
+                                    root.reset_for_summon(window, cx);
                                     reposition_to_cursor_display(window);
                                     window.activate_window();
                                     window.focus(&root.focus_handle(cx));

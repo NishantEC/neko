@@ -56,6 +56,10 @@ pub struct TextField {
     blink: Entity<CursorBlink>,
 }
 
+/// The root list's own placeholder — named so `panel::Root`'s mode-exit path
+/// can restore it exactly, rather than duplicating the literal.
+pub const DEFAULT_PLACEHOLDER: &str = "Search apps and clipboard…";
+
 impl TextField {
     pub fn new(cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
@@ -70,7 +74,7 @@ impl TextField {
             Self {
                 focus_handle: cx.focus_handle(),
                 content: String::new(),
-                placeholder: "Search apps and clipboard…".into(),
+                placeholder: DEFAULT_PLACEHOLDER.into(),
                 cursor: 0,
                 last_layout: None,
                 last_bounds: None,
@@ -127,6 +131,27 @@ impl TextField {
     /// calls this.
     pub fn set_content_for_evidence(&mut self, text: &str, cx: &mut Context<Self>) {
         self.commit_edit(0..self.content.len(), text, cx);
+    }
+
+    /// Replaces the whole field with `text`, as a single real edit (emits
+    /// `ContentChanged`, same as typing it) — the real, non-evidence
+    /// counterpart to [`set_content_for_evidence`](Self::set_content_for_evidence)
+    /// above. Used for a mode transition's own query swap: entering a mode
+    /// clears the field to start its filtered list fresh, and exiting
+    /// restores whatever the root list's query was before entry — both are
+    /// genuine content changes the mode's own search has to react to, not
+    /// evidence-capture plumbing.
+    pub fn set_content(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.commit_edit(0..self.content.len(), text, cx);
+    }
+
+    /// Swaps the field's placeholder text — a mode has its own ("Type to
+    /// filter entries…"), distinct from the root list's default. Purely
+    /// cosmetic (no content change, no `ContentChanged`), so this alone
+    /// never re-runs a search.
+    pub fn set_placeholder(&mut self, placeholder: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.placeholder = placeholder.into();
+        cx.notify();
     }
 
     fn on_backspace(&mut self, _: &Backspace, _window: &mut Window, cx: &mut Context<Self>) {
@@ -746,5 +771,39 @@ mod tests {
                 "walking back from the end lands on \"test\"'s own start"
             );
         });
+    }
+
+    /// `set_content` (a mode's own query swap on enter/exit) is a real edit,
+    /// unlike `set_placeholder` — a mode's UI copy changes without touching
+    /// what's actually been typed.
+    #[gpui::test]
+    fn set_content_emits_content_changed_but_set_placeholder_does_not(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        let content_changed_count = Rc::new(Cell::new(0));
+        let counted = content_changed_count.clone();
+        cx.update(|cx| {
+            cx.subscribe(&field, move |_field, _event: &ContentChanged, _cx| {
+                counted.set(counted.get() + 1);
+            })
+            .detach();
+        });
+
+        field.update(cx, |field, cx| field.set_placeholder("Type to filter entries…", cx));
+        cx.run_until_parked();
+        assert_eq!(content_changed_count.get(), 0, "a placeholder swap is cosmetic, not a content edit");
+        field.read_with(cx, |field, _| assert_eq!(field.placeholder.as_ref(), "Type to filter entries…"));
+
+        field.update(cx, |field, cx| field.set_content("clipboard", cx));
+        cx.run_until_parked();
+        assert_eq!(content_changed_count.get(), 1, "set_content is a real edit and must trigger a re-search");
+        field.read_with(cx, |field, _| assert_eq!(field.content(), "clipboard"));
+    }
+
+    #[gpui::test]
+    fn set_content_replaces_whatever_was_there_before(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| field.commit_edit(0..0, "old query", cx));
+        field.update(cx, |field, cx| field.set_content("new", cx));
+        field.read_with(cx, |field, _| assert_eq!(field.content(), "new"));
     }
 }

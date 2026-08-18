@@ -106,6 +106,33 @@ pub enum Glyph {
     File,
     /// A folder shape — a directory search result.
     Folder,
+    /// A clipboard board with a clip tab — a command that enters clipboard
+    /// history mode (`SearchItem::enters_mode`). The same shape
+    /// `data/neko-design/report.md`'s mockup 12 uses for the mode's own
+    /// input-row glyph, reused here for the root-list row that leads to it.
+    Clipboard,
+}
+
+/// One named secondary action a row's `⌘K` actions menu can offer, beyond
+/// the primary action `action_label`/`Request::Activate` already cover —
+/// e.g. clipboard's "Copy" and "Delete" alongside its default "Paste".
+/// Carried as plain data on `SearchItem`, the same "provider describes it,
+/// client just renders it" shape `action_label`/`badge`/`icon` already
+/// established — see `AGENTS.md`'s "Commands and modes" section. Empty for
+/// every provider that has nothing beyond its one primary action (apps,
+/// files, settings, commands) — the client menu simply has nothing to show
+/// for those rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemAction {
+    /// Routed back through `Request::Activate`'s own `action` field to
+    /// `Provider::perform_action`.
+    pub id: String,
+    /// The menu row's own label, e.g. `"Paste"`, `"Copy"`, `"Delete"`.
+    pub label: String,
+    /// Whether this action is destructive and permanent (deletes data) —
+    /// the client requires a second, explicit confirmation before actually
+    /// performing it, and renders it in the danger color.
+    pub destructive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -143,20 +170,62 @@ pub struct SearchItem {
     /// A short trailing accessory string (a relative timestamp, ...) —
     /// `None` for providers that don't have one.
     pub accessory: Option<String>,
+    /// When set, confirming this row enters a client-side "mode" instead of
+    /// calling `Request::Activate` — the value is the mode id (today,
+    /// always the scoped provider's own `id()`, `"clipboard"`), which
+    /// `neko`'s `modes` module resolves to that mode's chrome (placeholder,
+    /// footer title) and to `Request::Search`'s `provider` field for the
+    /// mode's own filtered list. `None` for every ordinary result. See
+    /// `AGENTS.md`'s "Commands and modes" section.
+    pub enters_mode: Option<String>,
+    /// An additional, orthogonal grouping label a mode's own list can use
+    /// instead of `section_label` (e.g. `"Today"`, `"Yesterday"` for
+    /// clipboard history) — `render_content_area`'s ordinary root-list
+    /// rendering never reads this field at all; only a mode's own list
+    /// rendering does. Kept separate from `section_label` because the same
+    /// item needs a *different* header depending on whether it's shown in
+    /// the merged root list (grouped by provider) or inside its own mode
+    /// (grouped by this). `None` for providers that don't group this way.
+    pub group_label: Option<String>,
+    /// Secondary actions this row's `⌘K` menu offers — see [`ItemAction`].
+    /// Empty for providers with nothing beyond their one primary action.
+    pub actions: Vec<ItemAction>,
+    /// A short "where this came from" label, distinct from `subtitle`
+    /// (which providers already compose into a full sentence, e.g.
+    /// "Copied from Terminal") — this is just the bare value, for a detail
+    /// pane's own labeled field ("Application: Terminal"), where a full
+    /// sentence would be redundant against a label already saying what the
+    /// field means. `None` for providers with nothing to say here.
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Request {
     Ping,
-    Search { query: String, limit: usize },
-    /// Perform a `SearchItem`'s one action — launch an app, write the
-    /// pasteboard, open a file — routed by `kind` to whichever provider
-    /// produced `id`. One generic request for every provider, present and
-    /// future: a new provider never needs a new `Request` variant, just an
-    /// `activate` implementation of its own. Replaces what used to be two
-    /// separate per-kind requests (`Launch`, `Paste`) — see `AGENTS.md`'s
-    /// "Provider abstraction" section.
-    Activate { kind: String, id: String },
+    /// `provider`, when set, scopes this search to exactly one provider's
+    /// own `search()` — no cross-provider `allocate()`, no section
+    /// reservation, just that provider's own candidates sorted by score.
+    /// This is the mode seam: entering a mode (`SearchItem::enters_mode`)
+    /// means every subsequent keystroke searches only the mode's own
+    /// provider, scoped to as many matches as its own list wants to
+    /// consider, not the shared root-list budget. `None` (every call site
+    /// before this field existed) is the ordinary merged root-list search,
+    /// completely unchanged.
+    Search { query: String, limit: usize, provider: Option<String> },
+    /// Perform a `SearchItem`'s action — launch an app, write the
+    /// pasteboard, open a file, or (when `action` is set) one of a
+    /// provider's own secondary actions (`Provider::perform_action`) —
+    /// routed by `kind` to whichever provider produced `id`. `action: None`
+    /// is the provider's one primary action (`Provider::activate`,
+    /// unchanged from before this field existed); `action: Some(id)` is a
+    /// named secondary action from that row's own `SearchItem::actions`
+    /// (e.g. clipboard's "copy"/"delete" alongside its default "paste").
+    /// One generic request for every provider, present and future: a new
+    /// provider never needs a new `Request` variant, just an `activate`
+    /// (and, optionally, `perform_action`) implementation of its own.
+    /// Replaces what used to be two separate per-kind requests (`Launch`,
+    /// `Paste`) — see `AGENTS.md`'s "Provider abstraction" section.
+    Activate { kind: String, id: String, action: Option<String> },
     GetHotkey,
     /// Fast, side-effect-free check against known OS/third-party reserved
     /// combinations (Spotlight, Mission Control, ...). Does not persist
@@ -283,16 +352,18 @@ mod tests {
             request: Request::Search {
                 query: "fin".into(),
                 limit: 8,
+                provider: None,
             },
         };
         let mut buf = Vec::new();
         write_frame(&mut buf, &frame).unwrap();
         let decoded = read_frame(&buf[..]).unwrap().unwrap();
         match decoded {
-            Frame::Request { id, request: Request::Search { query, limit } } => {
+            Frame::Request { id, request: Request::Search { query, limit, provider } } => {
                 assert_eq!(id, 7);
                 assert_eq!(query, "fin");
                 assert_eq!(limit, 8);
+                assert_eq!(provider, None);
             }
             other => panic!("unexpected frame: {other:?}"),
         }

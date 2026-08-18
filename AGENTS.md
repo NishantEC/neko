@@ -94,7 +94,19 @@ fixes are `search::settings_category_score` (the same per-provider bonus
 on clipboard's own share of the greedy phase); the same evidence file also
 records a structural finding worth knowing before touching ranking again:
 `allocate`'s output order is fixed by provider *registration* order, never
-resorted by score.
+resorted by score. A fifteenth task (`neko-detail-pane`) built commands and
+modes — the audit's top-priority finding, that the captain expects to
+search for a *thing to do* and enter it, not just get a row — proved with
+clipboard history as the one real command/mode pair: a fifth provider
+(`neko_core::commands::CommandsProvider`) whose rows enter a client-side
+mode instead of performing a daemon action, and the mode concept itself
+(`crate::modes`, `panel::Root`) that transition drives — the reserved
+two-column `PANEL_WIDTH_WITH_DETAIL_PX` layout, the `⌘K` actions menu
+(previously a dead label), and a real one-time window resize on mode
+entry/exit. See "Commands and modes" below for the concept, the wire
+protocol's three small additive touches, and — since the captain was using
+this machine during this task — exactly what could be verified headlessly
+(`#[gpui::test]`, no client launch) versus what still needs a live window.
 
 ## Crate layout
 
@@ -1257,6 +1269,193 @@ its own — see "The hotkey is a runtime-configurable setting" above), so it
 can be set with one request against the isolated socket before the client
 process even starts.
 
+## Commands and modes
+
+The audit's top-priority finding: the captain expects to search for a
+*thing to do*, not just a row — "search for Clipboard History and enter
+it," the way Raycast's own root list mixes commands in with applications.
+Built as two small, orthogonal pieces on top of the existing seams rather
+than a new abstraction layer: **a command** is a fifth `Provider`
+(`neko_core::commands::CommandsProvider`) whose rows carry a new
+`SearchItem::enters_mode` field instead of doing a daemon-side action;
+**a mode** is `neko`'s own client-side UI state (`crate::modes`, `panel::
+Root`) that a confirmed command transitions the panel into. Full concept
+writeup, including the exact "what does a second command have to
+implement" accounting the launch brief asked for (the same shape
+`settings.rs`'s own doc comment gives for a fourth provider), lives in
+`crates/neko/src/modes.rs`'s module doc comment — read that before adding a
+second command or touching this area again.
+
+**The wire protocol touches, and why each one is additive, not a
+workaround.** Three changes, all backward-compatible field additions, no
+new `Request`/`Response` variant beyond what's noted:
+- `SearchItem` gained four fields: `enters_mode: Option<String>` (the mode
+  id a confirmed row enters, checked by `panel::Root::confirm` *before*
+  ever building a `Request::Activate` — a command's own `activate` is never
+  actually called, and errors if it somehow is), `group_label: Option<String>`
+  (a mode's own "Today"/"Yesterday" time-grouping, orthogonal to
+  `section_label`'s provider grouping — the root list never reads it),
+  `actions: Vec<ItemAction>` (the `⌘K` menu's own secondary actions, empty
+  for the three providers that have nothing beyond their one primary
+  action), and `source: Option<String>` (a bare "where this came from"
+  value for a detail pane's own labeled field, distinct from `subtitle`'s
+  already-composed sentence). All four are exactly the same "provider
+  describes it, client just renders it" pattern `action_label`/`badge`/
+  `icon` already established — no new per-kind `match` anywhere.
+- `Request::Search` gained `provider: Option<String>` — `Some(id)` scopes
+  the search to exactly that one provider's own `search()`, sorted by
+  score, no cross-provider `allocate()` at all. This is the actual mode
+  mechanism: entering a mode means every keystroke searches with this field
+  set to the mode's own provider id instead of `None`. The daemon-side
+  branch is a straight `if let`/`else` in `handle_request`
+  (`neko-daemon/src/server.rs`) before the existing multi-provider path,
+  which is completely untouched.
+- `Request::Activate` gained `action: Option<String>` — `None` is the
+  existing single primary action (`Provider::activate`, unchanged);
+  `Some(action_id)` routes to a new, defaulted `Provider::perform_action`
+  trait method (`provider.rs`) instead. The default errors "no such
+  action," so the three providers with nothing beyond their primary action
+  (apps, files, settings, commands) need zero code changes at all;
+  `ClipboardProvider` is the one override, for its three menu actions
+  below.
+
+**Commands (`neko_core::commands`).** One built-in command today,
+`CommandsProvider::search` (id `"command"`, section label "Commands"),
+returning `"Clipboard History"` with `badge: Some("COMMAND")` (pre-
+uppercased on the wire, same convention `ClipboardProvider`'s `"TEXT"`/
+`"LINK"` badges already use — this client never CSS-transforms text) and
+`enters_mode: Some("clipboard")`. **The multi-word matching limit
+documented in `docs/evidence/settings-provider-report.md`** ("keyboard
+shortcuts" never matches a pane titled "Keyboard" — `fuzzy_score` needs
+every query character, including the space, to appear as an in-order
+subsequence of *one* title) would otherwise block "clipboard manager" (no
+`m`/`a`/`n`/`g`/`e`/`r` exist anywhere in "Clipboard History" after
+"Clipboard "). Fixed inside this provider, per the launch brief's own
+instruction not to touch the shared `fuzzy_score` (owned by a parallel
+task's `search.rs`): each command carries a short list of alias phrases
+(`"Clipboard History"`, `"Clipboard Manager"`, `"Clipboard"`), each scored
+independently, best score wins. "clipboard" and "clipboard history" already
+match the literal title as a plain subsequence with no alias needed —
+verified in `commands.rs`'s own test that pins exactly this distinction.
+
+**Modes (`crate::modes`, `neko`).** Split the same way `onboarding/state.rs`
+splits from `onboarding/view.rs`: `modes.rs` is pure, GPUI-free chrome data
+(`ModeChrome`: id, scoped provider id, footer title, placeholder text,
+whether it has a detail pane) plus a lookup function, unit-tested with
+plain `#[test]`s; `panel::Root` is the view layer. Confirming a command row
+(`Root::confirm`) calls `enter_mode`, which saves the current query, clears
+the field to start the mode's list fresh (a real edit through
+`TextField::set_content`, which re-runs search — by then `active_mode` is
+already `Some`, so `run_search` takes the provider-scoped branch
+immediately), swaps the placeholder, and — if `ModeChrome::has_detail` —
+widens the real window. `Escape` (a new `Root::handle_dismiss`, registered
+as a window-level `on_action` listener on `Root`'s own div so it intercepts
+`DismissWindow` before `main.rs`'s global `cx.hide()` fallback ever sees it
+— GPUI's own action dispatch runs window listeners in the bubble phase
+before global ones, and a handled action stops propagating there by
+default) or the input row's own back-arrow glyph both call `exit_mode`,
+which restores the saved query verbatim and narrows the window back.
+`reset_for_summon` also force-exits any active mode — a mode is
+per-summon-session state, not something that survives the panel being
+hidden and re-shown.
+
+**The real window resize (`display_placement::resize_and_recenter`,
+macOS-only) is one raw, synchronous `NSWindow` call sequence, not `gpui::
+Window::resize` plus a separate reposition.** `gpui`'s own `Window::resize`
+dispatches `setContentSize:` onto the window's executor *asynchronously*;
+resizing and then immediately repositioning based on the "new" size would
+race against AppKit actually applying it. `resize_and_recenter` instead
+walks to the real `NSWindow` (the same `raw-window-handle` technique
+`display_placement.rs`'s existing `reposition_to_cursor_display` and
+`material.rs` already use), calls `setContentSize:` and `setFrameTopLeftPoint:`
+back to back against the *same* `Retained<NSWindow>`, and re-derives the
+target screen from the window's own current frame center — not the cursor,
+unlike `reposition_to_cursor_display`'s "summon where the captain is
+looking" reasoning, which is right for a fresh summon but wrong for a mode
+transition that fires from a keypress, by which point the cursor may not
+be over the panel at all. Best-effort, like every other native call in this
+module: an error (no raw window handle) is logged and the transition
+proceeds anyway — the panel's own `div` width still changes via `Render::
+render`, so content stays internally consistent even on the rare path where
+the real window fails to follow it.
+
+**The two-column clipboard-history view**
+(`data/neko-design/mockups/12-first-clipboard-use.html`, the frozen mockup
+— not just the launch brief's prose description of the captain's Raycast
+screenshots, which mentions Dimensions/Image size fields this app has no
+data for and this mockup deliberately doesn't include) — left column fixed
+at `theme::MODE_LIST_COLUMN_WIDTH_PX` (264px, a new geometry token, the
+mockup's own `.panel-list.with-detail` width — not a change to any
+*existing* frozen token), right column the preview (the entry's raw stored
+content, `SearchItem::id`, not the list row's own truncated/quoted `title`)
+plus three info fields: Application (`source`), Content Type (`badge`,
+title-cased for display), Copied. **One disclosed deviation from the
+mockup's literal copy**: "Copied" shows this app's existing relative-time
+label ("12m", "3h" — `clipboard::relative_time`, already used for the row's
+own accessory) rather than an absolute local timestamp like the mockup's
+"Today, 9:50 AM" — no date/time-formatting dependency exists anywhere in
+this codebase, and adding one (`chrono` or equivalent) for one label wasn't
+judged worth it. The "Today"/"Yesterday" list-section grouping
+(`clipboard::day_bucket_label`) is real but **UTC-calendar-day
+arithmetic, not local-timezone-aware**, for the identical reason — a copy
+made shortly before/after local midnight can land in the "wrong" UTC-day
+bucket; disclosed in that function's own doc comment rather than silently
+assumed correct. **One new color token**, `theme::SURFACE_INPUT` (the
+preview box's recessed background) — derived by the exact same
+warm-to-cool hue-swap rule every existing base-neutral token in `theme.rs`
+already used for the palette re-tone (same L/C, hue swapped from ~70° to
+255°), not a fresh color pick, so it doesn't reopen the closed
+colour-identity question. **Not built**: the mockup's "All Types" filter
+control on the right of the mode's input row — there is no real type-filter
+logic behind it (clipboard has exactly two content kinds today, already
+visible per-row via the badge), and a control with nothing real to do would
+be a fake affordance; the back-arrow half of that row is real and built.
+
+**The `⌘K` actions menu** (no mockup exists for this — the launch brief's
+own note) is `panel::Root`'s own `ActionsMenuState`, populated from the
+selected row's `SearchItem::actions` (no daemon round-trip to open it — the
+data already arrived with the last search response, the same "provider
+describes it" pattern the rest of this file uses). `ClipboardProvider`
+offers three: "Paste" and "Copy" both call the identical `activate`
+(writing to the pasteboard — see "Clipboard history" above on why neko
+never simulates a keystroke, which makes these two genuinely the same
+operation today, not just similarly labeled), "Delete"
+(`Db::delete_clipboard_entry`) is `destructive: true`. **A destructive
+action needs a second, explicit Enter to actually run** — the first only
+"arms" it (`ActionsMenuState::confirm_armed`, rendered as "Confirm Delete —
+↵ again"); moving the menu selection at all disarms it again, so a
+confirmation can't survive being scrolled past and back. This satisfies the
+brief's "a mis-keyed action cannot silently destroy an entry" requirement
+without a separate modal dialog. A primary-row Enter still hides the panel
+on success (matching every pre-existing `Activate` call site, mode or not);
+the menu deliberately never does, on either action — reviewing/managing
+entries is exactly what opening the menu is for.
+
+**Verification: headless only, by explicit instruction — the captain was
+using this machine.** No client launch, no real window, no screenshots this
+pass. Covered instead: `commands.rs`/`clipboard.rs`/`db.rs`/`provider.rs`
+plain `#[test]`s (command matching and aliasing, `perform_action` routing,
+day-bucket labeling, delete), `server.rs` integration tests against
+`handle_request` directly (provider-scoped search, the new `action` field
+routing), and — the load-bearing ones for the client side —
+`panel.rs`'s own `#[gpui::test]`s using `TestAppContext`/`FakeAccessibilityChecker`/a
+real `NekoClient::connect` against a socket nobody's listening on (the same
+headless-GPUI, no-OS-window mechanism `row_icon_cache.rs`'s own tests
+already established for this crate): confirming a command row really does
+enter the mode and save the prior query, `Escape` exiting it and restoring
+that query, opening the actions menu populated vs. inert, and the
+destructive-delete double-confirm/disarm-on-navigate behavior — all
+directly on `Root`'s real methods, not reimplemented test doubles. **What
+this could not verify**: the real `NSWindow` resize/recenter call
+(`display_placement::resize_and_recenter`'s macOS body has no test, the
+same as `reposition_to_cursor_display`'s own pre-existing macOS body —
+raw AppKit calls in this module have never been unit-tested, only the pure
+geometry helpers they call into), the two-column layout's actual on-screen
+appearance against the frozen mockup, warm summon latency, and daemon idle
+memory under this change — all four need a live client/window/daemon this
+task was explicitly told not to launch. Re-verify on the release binaries,
+with real window-scoped screenshots, before calling this visually done.
+
 ## Third-party UI code: evaluated, then narrowly vendored
 
 `longbridge/gpui-component` (Apache-2.0, crates.io) was evaluated as a
@@ -1650,18 +1849,35 @@ cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
 - **Onboarding UI**: built — see "Onboarding" above.
 - **Clipboard history**: built — capture, storage, and restore all live in
   the daemon; see "Clipboard history" above. Onboarding's steps 06-07 own the
-  *ask* (`clipboard_history_enabled` daemon setting) and reserved
-  `theme::PANEL_WIDTH_WITH_DETAIL_PX` (760px) for the detail pane. Still open:
-  image capture (seam documented in `clipboard.rs`'s module doc comment) and
-  the two-column detail-pane mode (`PANEL_WIDTH_WITH_DETAIL_PX`, screen 12).
-  No macOS permission prompt was observed gating general pasteboard reads on
-  the verification machine (unlike Accessibility, there's no `AXIsProcessTrusted`-
-  equivalent "is trusted" API for the pasteboard) — `read_current`'s SAFETY
-  comment covers the "detect and degrade" reasoning for the day one shows up:
-  a blocked read and an empty one both come back as `None`/`nil`, so treating
-  `None` as "nothing to capture this tick" already is the honest degrade
-  path, not a placeholder for a request flow still to build.
-- **Dynamic window resize**: see "v1 simplification" above.
+  *ask* (`clipboard_history_enabled` daemon setting). The two-column
+  detail-pane mode (`PANEL_WIDTH_WITH_DETAIL_PX`, screen 12) is now also
+  built — see "Commands and modes" below. Still open: image capture (seam
+  documented in `clipboard.rs`'s module doc comment, and in "Commands and
+  modes"'s own note on what an `Image` `SearchItem`/detail-pane variant
+  would cost). No macOS permission prompt was observed gating general
+  pasteboard reads on the verification machine (unlike Accessibility,
+  there's no `AXIsProcessTrusted`-equivalent "is trusted" API for the
+  pasteboard) — `read_current`'s SAFETY comment covers the "detect and
+  degrade" reasoning for the day one shows up: a blocked read and an empty
+  one both come back as `None`/`nil`, so treating `None` as "nothing to
+  capture this tick" already is the honest degrade path, not a placeholder
+  for a request flow still to build.
+- **Commands and modes**: built — see "Commands and modes" above. One
+  command exists (Clipboard History); a second command's own accounting
+  (what it has to implement vs. what it gets for free) is in
+  `crates/neko/src/modes.rs`'s module doc comment. Still open: the mockup's
+  "All Types" filter control (no real filtering logic exists to back it —
+  see "Commands and modes"), real window-scoped visual evidence and warm
+  summon latency / daemon idle memory re-measurement (this task's client
+  could not be launched — the captain was using this machine), and image
+  entries in the clipboard-history detail pane (a real scope increase: blob
+  storage, thumbnails, size bounds, a new `SearchItem`/`Icon` shape — a
+  separate captain decision per the launch brief, not attempted here).
+- **Dynamic window resize**: partially built — see "v1 simplification"
+  below for the still-true per-keystroke case, and "Commands and modes"
+  above for the one real, working exception (a mode transition's one-time
+  width change, via a synchronous raw `NSWindow` call rather than `gpui::
+  Window::resize`'s async one).
 - **`Provider` abstraction**: built — see "Provider abstraction" above.
   `agent.rs`'s old `AgentProvider` placeholder is deleted, superseded by
   this. Agent capability, whenever it's built, is `impl Provider` plus one

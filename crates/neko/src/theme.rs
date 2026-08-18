@@ -73,6 +73,18 @@ pub const SURFACE_PANEL: Rgba = rgb_const(0x090e13);
 /// for this machine, rather than trusting this reasoning indefinitely.
 pub const SURFACE_PANEL_TRANSLUCENT: Rgba = rgba_const(0x090e13, 0.82);
 pub const SURFACE_RAISED: Rgba = rgb_const(0x11161d);
+/// The clipboard-history detail pane's own recessed preview box
+/// (`data/neko-design/mockups/12-first-clipboard-use.html`'s
+/// `--surface-input`, `oklch(0.13 0.012 70)` in the original warm ramp —
+/// never added to this file before now because nothing painted it until
+/// this token's one consumer, the mode detail pane). Derived by the exact
+/// same rule every other base-neutral token in this file already used for
+/// the blue re-tone: same L/C, hue swapped from the warm ramp's ~70° into
+/// this ramp's 252°–257° band (255° here, matching `SURFACE_PANEL`/
+/// `SURFACE_RAISED`/`SURFACE_SELECTED`'s own swap) — not a fresh colour
+/// pick, so it doesn't reopen the closed colour-identity question (see this
+/// module's own doc comment).
+pub const SURFACE_INPUT: Rgba = rgb_const(0x05080c);
 pub const SURFACE_SELECTED: Rgba = rgb_const(0x333b46);
 pub const TEXT_PRIMARY: Rgba = rgb_const(0xe0e9f6);
 pub const TEXT_SECONDARY: Rgba = rgb_const(0x9faab9);
@@ -149,6 +161,11 @@ pub const SECTION_HEADER_HEIGHT_PX: f32 = 28.0;
 pub const FOOTER_HEIGHT_PX: f32 = 44.0;
 pub const PANEL_WIDTH_PX: f32 = 680.0;
 pub const PANEL_WIDTH_WITH_DETAIL_PX: f32 = 760.0;
+/// The two-column mode view's fixed left (list) column width —
+/// `data/neko-design/mockups/12-first-clipboard-use.html`'s
+/// `.panel-list.with-detail { flex: 0 0 264px }`. The detail pane takes
+/// whatever's left of `PANEL_WIDTH_WITH_DETAIL_PX`.
+pub const MODE_LIST_COLUMN_WIDTH_PX: f32 = 264.0;
 pub const ROW_ICON_PX: f32 = 22.0;
 pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
 /// The row-icon slot's own backing plate — `design.css`'s `.row-icon`
@@ -247,6 +264,7 @@ mod tests {
         let table: &[(&str, f32, f32, f32, Rgba)] = &[
             ("surface_panel", 0.16, 0.014, 255.0, SURFACE_PANEL),
             ("surface_raised", 0.20, 0.016, 255.0, SURFACE_RAISED),
+            ("surface_input", 0.13, 0.012, 255.0, SURFACE_INPUT),
             ("surface_selected", 0.35, 0.022, 255.0, SURFACE_SELECTED),
             ("text_primary", 0.93, 0.020, 257.0, TEXT_PRIMARY),
             ("text_secondary", 0.735, 0.025, 255.0, TEXT_SECONDARY),
