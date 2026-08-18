@@ -702,6 +702,73 @@ Before/after window-scoped screenshots of the same summon (no relaunch, cold
 → resolved): `docs/evidence/icon-cache-cold-before.png` /
 `icon-cache-warm-after.png`.
 
+**The above is the daemon-side, on-disk PNG cache. Client-side, GPUI's own
+image cache is separately bounded — `crates/neko/src/row_icon_cache.rs`.**
+A static, source-only investigation
+(`data/neko-leak-audit/report.md` in the firstmate home, §2 alternative #2 /
+§4 item 3) found that `gpui`'s sprite atlas (`MetalAtlas::remove`,
+`gpui-0.2.2/src/platform/mac/metal_atlas.rs`) only returns a whole texture
+to the free list once every tile inside it has been individually removed,
+and that this crate never called the one caller-facing entry point that
+removes a tile at all (`Window::drop_image`/`image_cache(...)`) — every row
+icon (`panel::render_row`'s `Icon::Image` case) went through GPUI's default,
+never-evicted per-`App` asset cache instead, an unbounded hole for as long
+as the process ran. **The report explicitly does not believe this was the
+primary driver of a captain-reported 20 GB resident-memory growth** — it
+ranks a GPUI window-activation code path (`windowDidBecomeKey:`'s forced
+synchronous redraw, gated on key-window transitions) above it, and that
+cause remains unconfirmed; this fix closes a real, documented gap this
+crate owns outright, not the 20 GB investigation itself.
+
+`row_icon_cache::RowIconCache` is a bounded-LRU `ImageCache`
+(`ROW_ICON_CACHE_CAPACITY`, 256 — comfortably above the real, closed
+row-icon identity space of ~150 apps plus one shared System Settings icon;
+file-search and clipboard rows use painted `Glyph`s, never `img()`, so they
+never touch this cache at all), installed once on the results-list
+container (`panel::Root::render_content_area`, `.image_cache(...)`) rather
+than per row. Adapted from `gpui`'s own shipped
+`examples/image_gallery.rs::SimpleLruCache` (Apache-2.0, the same license
+`gpui` is already vendored under — not one of this project's GPL-licensed
+reference apps), with the recency/eviction bookkeeping split into its own
+`Window`-free `RecencyOrder` type specifically so the bound could be unit
+tested without a live GPUI window.
+
+**Deliberately not cleared at `reset_for_summon`/`refresh_icons`, even
+though those are the two natural "the result set changed" boundaries.** A
+full clear on every fresh summon would drop icons about to be shown again
+immediately, forcing a redundant disk reload and a visible blank-then-appear
+flash on almost every summon — the same "evicted too eagerly" regression
+class this section's cold-cache and placeholder fixes above already closed
+once each. The bounded LRU evicts continuously instead, only when a
+genuinely new icon identity is requested while already at capacity, which a
+fresh summon's query (or a `Placeholder`→`Image` promotion) naturally
+triggers on its own — see `row_icon_cache.rs`'s and `panel.rs`'s own doc
+comments on `reset_for_summon`/`refresh_icons` for the full reasoning.
+
+**No new filesystem work on the summon path.** The actual `fs::read` of a
+cached icon PNG already happened asynchronously, off the GPUI-frame path,
+before this task — through GPUI's own `ImageAssetLoader` via the default
+per-`App` asset cache. This task changes *which* cache holds the decoded
+result (and adds real eviction), not when or how the file is read; summon
+latency (`AGENTS.md`'s own "Summon latency" section) was not remeasured as
+part of this task since nothing on that path changed.
+
+**What this did not verify, and why.** The task brief that produced this
+section explicitly ruled out launching the real client, opening a window, or
+capturing a screenshot (the captain was using this machine at the time), so
+this was verified with `cargo test`'s headless `#[gpui::test]` machinery
+only (`TestAppContext`/`TestWindow` — the same mechanism already used by
+`text_field.rs`'s pre-existing tests; no OS window, no screen pixels) plus
+plain `#[test]`s for the eviction-order bookkeeping itself. **Not verified**:
+that this bound has any measurable effect on the captain's real, reported
+20 GB growth (the report's own position, restated above); that a real
+summon's visible icons actually come from a warm cache hit in practice
+rather than incidentally re-loading (both are correct either way, but only
+one is "free"); and end-to-end confirmation via `vmmap`/real memory sampling
+that `drop_image` calls here actually shrink resident atlas memory — the
+report's own §6 names the exact `vmmap` methodology that would settle that,
+not attempted here per the brief's "no rendering" constraint.
+
 ## Clipboard history
 
 `neko_core::clipboard` — capture, storage, and restore all live in the
