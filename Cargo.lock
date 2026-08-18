@@ -3359,6 +3359,7 @@ version = "0.1.0"
 dependencies = [
  "accessibility-sys",
  "core-foundation 0.9.4",
+ "futures",
  "global-hotkey",
  "gpui",
  "neko-client",

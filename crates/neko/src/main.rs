@@ -7,6 +7,7 @@ mod hotkey_client;
 mod material;
 mod onboarding;
 mod panel;
+mod row_icon_cache;
 mod spaces;
 mod text_field;
 mod theme;

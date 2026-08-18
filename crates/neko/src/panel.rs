@@ -75,6 +75,14 @@ pub struct Root {
     /// this codebase's existing "fail toward not showing a false state"
     /// calls (see `main.rs`'s `fetch_onboarding_state`).
     connected: bool,
+    /// The bounded `ImageCache` every row's `img(path)` element loads
+    /// through — installed once on the content-area container
+    /// (`render_content_area`, `.image_cache(...)`), not per-row, so every
+    /// `Icon::Image` in the results list shares one cache instance. See
+    /// `row_icon_cache.rs`'s own module doc comment for why this exists
+    /// (GPUI's sprite atlas never reclaims a tile without it) and why it's
+    /// a bounded LRU rather than a full clear on every summon.
+    row_icon_cache: Entity<crate::row_icon_cache::RowIconCache>,
 }
 
 impl Root {
@@ -86,6 +94,7 @@ impl Root {
     ) -> Entity<Self> {
         cx.new(|cx| {
             let text_field = TextField::new(cx);
+            let row_icon_cache = crate::row_icon_cache::RowIconCache::new(cx);
             // Subscribed to `ContentChanged` specifically, not observed via
             // `cx.observe` — `TextField` also notifies on every cursor
             // blink (a render concern), and `cx.observe` cannot
@@ -106,6 +115,7 @@ impl Root {
                 activation_error: None,
                 translucent,
                 connected: true,
+                row_icon_cache,
             };
             root.run_search(cx);
             root.fetch_accessibility_banner_state(cx);
@@ -117,6 +127,19 @@ impl Root {
     /// summon starts from a clean query rather than whatever was last
     /// typed (matches Raycast's own behavior, confirmed live per the
     /// design report's evidence log).
+    ///
+    /// **Deliberately does not clear `row_icon_cache` here.** This is one
+    /// of the two boundaries named for cache eviction — a full clear on
+    /// every fresh summon would drop icons that are about to be shown
+    /// again immediately (the same apps a captain summons repeatedly),
+    /// forcing a redundant disk reload and a visible blank-then-appear
+    /// flash on almost every summon — the exact "evicted too eagerly"
+    /// regression the icon-cache task's own brief warns against. The
+    /// bounded LRU in `row_icon_cache.rs` evicts continuously instead,
+    /// only when a genuinely new icon identity is requested while already
+    /// at capacity, which a fresh summon's new query naturally can (and
+    /// does) trigger without any extra call here. See that module's doc
+    /// comment for the full reasoning.
     pub fn reset_for_summon(&mut self, cx: &mut Context<Self>) {
         self.text_field.update(cx, |field, cx| field.clear(cx));
         self.results.clear();
@@ -141,6 +164,14 @@ impl Root {
     /// filesystem check happens here or anywhere on this client-side path —
     /// the daemon is the one place that stats icon files, once per search
     /// it already has to run.
+    ///
+    /// **Also deliberately does not clear `row_icon_cache` here**, for the
+    /// same reason `reset_for_summon` doesn't — see that method's doc
+    /// comment. An icon that just finished extracting is, by construction,
+    /// a resource identity the cache has never loaded before (it was
+    /// `Icon::Placeholder`, a painted glyph, not an `img()` at all, until
+    /// this event fired), so it's always a normal cache miss here, never a
+    /// stale hit that needs invalidating first.
     pub fn refresh_icons(&mut self, cx: &mut Context<Self>) {
         self.run_search(cx);
     }
@@ -386,7 +417,11 @@ impl Root {
             .flex_1()
             .min_h(px(0.))
             .overflow_hidden()
-            .px_2();
+            .px_2()
+            // Every `img(path)` row icon under this container loads through
+            // one bounded cache instance, not GPUI's default never-evicted
+            // per-`App` asset cache — see `row_icon_cache.rs`.
+            .image_cache(self.row_icon_cache.clone());
 
         if !self.connected {
             container = container.child(self.render_connection_banner());
