@@ -157,27 +157,96 @@ impl Provider for AppsProvider {
     }
 }
 
-/// The locations on the sealed, read-only system volume — see this module's
-/// doc comment for why they need a plain scan rather than a Spotlight query,
-/// and why that scan doesn't need to be live. `/System/Library/CoreServices`
-/// itself (not just its `Applications` subdirectory) has to be included:
-/// `Finder.app`, `Installer.app`, `Siri.app`, `Game Center.app`, and
-/// `Screen Time.app` all live loose directly in that top-level directory,
-/// one level up from `.../CoreServices/Applications`, which is a different,
-/// smaller directory of minor utilities (About This Mac, Archive Utility,
-/// Keychain Access, …). The ~100 background agents that also live loose in
-/// `CoreServices` (`Dock.app`, `ControlCenter.app`, `SystemUIServer.app`, …)
-/// are already correctly dropped by `read_app_bundle`'s `LSBackgroundOnly`
-/// check — verified live: a full scan of this directory keeps Finder,
-/// Installer, Siri, Game Center, and Screen Time, and drops every
-/// background-agent bundle checked by hand.
+/// The locations on the sealed, read-only system volume that get a plain
+/// *recursive* scan — see this module's doc comment for why they need a
+/// plain scan rather than a Spotlight query, and why that scan doesn't need
+/// to be live. **Deliberately excludes `/System/Library/CoreServices`
+/// itself** (only its `Applications` subdirectory) — see
+/// [`CORE_SERVICES_ALLOWED_APPS`] for why that directory gets a named
+/// allowlist instead of a recursive scan.
 fn sealed_system_directories() -> Vec<PathBuf> {
     vec![
         PathBuf::from("/System/Applications"),
         PathBuf::from("/System/Applications/Utilities"),
         PathBuf::from("/System/Library/CoreServices/Applications"),
-        PathBuf::from("/System/Library/CoreServices"),
     ]
+}
+
+/// `Finder.app`, `Installer.app`, `Siri.app`, `Game Center.app`, and
+/// `Screen Time.app` all live loose directly in
+/// `/System/Library/CoreServices` — one level up from
+/// `.../CoreServices/Applications`, a different, smaller directory of minor
+/// utilities (About This Mac, Archive Utility, Keychain Access, …) that
+/// [`sealed_system_directories`] already scans recursively and safely.
+///
+/// The same top-level directory also holds ~112 macOS background
+/// agents/daemons (`Dock.app`, `ControlCenter.app`, `PowerChime.app`,
+/// `CoreLocationAgent.app`, `SystemUIServer.app`, …), and a first version of
+/// this fix scanned the whole directory on the assumption that
+/// `read_app_bundle`'s existing `LSBackgroundOnly` check would drop them —
+/// it doesn't: checked with `PlistBuddy` against a wide sample
+/// (`Dock.app`, `ControlCenter.app`, `SystemUIServer.app`, `loginwindow.app`,
+/// `NotificationCenter.app`, `WindowManager.app`, `Spotlight.app`,
+/// `System Events.app`, `WiFiAgent.app`, `OBEXAgent.app`, `iCloud.app`,
+/// `BluetoothUIServer.app`, `CoreServicesUIAgent.app`, `rcd.app`,
+/// `PowerChime.app`, `CoreLocationAgent.app`), **none of them set
+/// `LSBackgroundOnly`**, so a full scan of this directory landed 259 apps
+/// instead of the expected ~152 — 107 unwanted background agents, not 5.
+///
+/// No single static `Info.plist`/Launch-Services signal was found that
+/// cleanly separates the 5 wanted bundles from the ~112 agents on this OS
+/// build — every candidate checked draws the line in the wrong place:
+/// - `LSUIElement` (Dock-icon visibility): **wrong**. `Siri.app` and
+///   `Game Center.app` — both wanted — set `LSUIElement=true`, identically
+///   to `Dock.app`/`ControlCenter.app`/`WindowManager.app` and most of the
+///   other agents.
+/// - `CFBundleIconFile`/`CFBundleIconName` presence: **wrong**. `Dock.app`,
+///   `ControlCenter.app`, `Automator Installer.app`, `iCloud+.app`, and
+///   many other agents all carry a real icon asset just like the wanted
+///   five do.
+/// - `lsregister -dump`'s bundle flags (`has-display-name`, `ui-element`,
+///   `is-containerized`, …): **wrong**. `Game Center.app`'s flag set
+///   (`has-display-name ui-element`) is byte-identical to
+///   `Dock.app`/`ControlCenter.app`/`WindowManager.app`'s.
+/// - A `launchd` registration under `/System/Library/LaunchAgents` (agents
+///   are launchd-managed services, real apps aren't): **wrong in both
+///   directions**. `Finder.app` and `Installer.app` (wanted) *do* have a
+///   `LaunchAgents` entry; `PowerChime.app`/`CoreLocationAgent.app`
+///   (unwanted) do *not*.
+/// - Presence of a compiled `.nib`/`.storyboardc` (a real window to show):
+///   **wrong**. `PowerChime.app` ships 3 nibs and is still a background
+///   chime player with no launchable window; `Screen Time.app` (wanted)
+///   ships none.
+/// - `LSApplicationCategoryType` (App Store category): only 2 of the 5
+///   wanted bundles set it at all (`Finder`, `Screen Time`) — too sparse to
+///   build a rule on.
+///
+/// Per the brief's own fallback: a small, explicit, named allowlist of
+/// exactly the 5 verified-wanted bundles, checked directly by path rather
+/// than discovered by a recursive scan. This is not a denylist of the 112
+/// unwanted names (which would be fragile across OS versions) — it's the 5
+/// names the captain actually asked for, still filtered through
+/// `read_app_bundle`'s ordinary checks (nesting, `CFBundlePackageType`,
+/// `LSBackgroundOnly`) like every other entry in the index.
+const CORE_SERVICES_ALLOWED_APPS: &[&str] =
+    &["Finder.app", "Installer.app", "Siri.app", "Game Center.app", "Screen Time.app"];
+
+fn core_services_root() -> PathBuf {
+    PathBuf::from("/System/Library/CoreServices")
+}
+
+/// Reads exactly the [`CORE_SERVICES_ALLOWED_APPS`] bundles, never a
+/// recursive walk of their parent directory — see that constant's doc
+/// comment for why.
+fn scan_core_services_allowlist(seen_ids: &mut HashSet<String>, out: &mut Vec<AppEntry>) {
+    let root = core_services_root();
+    for name in CORE_SERVICES_ALLOWED_APPS {
+        if let Some(app) = read_app_bundle(&root.join(name))
+            && seen_ids.insert(app.id.clone())
+        {
+            out.push(app);
+        }
+    }
 }
 
 /// The classic third-party locations, scanned only when `mdfind` itself is
@@ -265,6 +334,7 @@ pub fn scan_applications() -> Vec<AppEntry> {
     for dir in scan_dirs {
         scan_dir(&dir, 0, &mut seen_ids, &mut entries);
     }
+    scan_core_services_allowlist(&mut seen_ids, &mut entries);
     for path in spotlight_paths.unwrap_or_default() {
         if let Some(app) = read_app_bundle(&path)
             && seen_ids.insert(app.id.clone())
@@ -500,12 +570,15 @@ mod tests {
     }
 
     #[test]
-    fn sealed_system_directories_are_the_four_verified_unindexed_paths() {
+    fn sealed_system_directories_are_the_three_recursively_scanned_paths() {
+        // `/System/Library/CoreServices` itself is deliberately NOT here —
+        // see `CORE_SERVICES_ALLOWED_APPS`'s doc comment for why that one
+        // directory gets a named allowlist instead of a recursive scan.
         let dirs = sealed_system_directories();
         assert!(dirs.contains(&PathBuf::from("/System/Applications")));
         assert!(dirs.contains(&PathBuf::from("/System/Applications/Utilities")));
         assert!(dirs.contains(&PathBuf::from("/System/Library/CoreServices/Applications")));
-        assert!(dirs.contains(&PathBuf::from("/System/Library/CoreServices")));
+        assert!(!dirs.contains(&PathBuf::from("/System/Library/CoreServices")));
     }
 
     #[test]
@@ -516,22 +589,51 @@ mod tests {
 
     #[test]
     fn scanning_the_real_machine_finds_finder() {
-        // A real, non-mocked scan against this machine's actual sealed
-        // system directories (the part of `scan_applications` that never
-        // depends on `mdfind` being available in a test environment).
-        // Asserts Finder specifically, not an OR against "System Settings" —
-        // the OR version passed the entire time Finder itself was absent
-        // from the scan (it lives in `/System/Library/CoreServices`, not
-        // `.../CoreServices/Applications`), a false-negative-blind test.
+        // A real, non-mocked scan against this machine's actual
+        // CoreServices allowlist (the part of `scan_applications` that
+        // never depends on `mdfind` being available in a test
+        // environment). Asserts Finder specifically, not an OR against
+        // "System Settings" — the OR version passed the entire time Finder
+        // itself was absent from the scan, a false-negative-blind test.
         let mut seen = HashSet::new();
         let mut out = Vec::new();
-        for dir in sealed_system_directories() {
-            scan_dir(&dir, 0, &mut seen, &mut out);
-        }
+        scan_core_services_allowlist(&mut seen, &mut out);
         assert!(
             out.iter().any(|a| a.name == "Finder"),
             "expected to find Finder, found: {:?}",
             out.iter().map(|a| &a.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn scanning_the_real_machine_excludes_a_verified_background_agent() {
+        // `PowerChime.app`: confirmed by hand (`PlistBuddy`) to set
+        // neither `LSBackgroundOnly` nor a distinguishing static signal
+        // this module could filter on generally — see
+        // `CORE_SERVICES_ALLOWED_APPS`'s doc comment for the full
+        // investigation. The allowlist keeps it out simply by never
+        // naming it, not by any property check.
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        scan_core_services_allowlist(&mut seen, &mut out);
+        assert!(
+            !out.iter().any(|a| a.name == "PowerChime"),
+            "PowerChime must not appear in the CoreServices allowlist scan, found: {:?}",
+            out.iter().map(|a| &a.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn core_services_allowlist_yields_exactly_the_five_wanted_apps() {
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        scan_core_services_allowlist(&mut seen, &mut out);
+        let mut names: Vec<&str> = out.iter().map(|a| a.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            vec!["Finder", "Game Center", "Installer", "Screen Time", "Siri"],
+            "expected exactly the five verified-wanted CoreServices apps"
         );
     }
 
