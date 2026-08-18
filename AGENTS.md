@@ -1844,6 +1844,35 @@ cargo license 2>/dev/null | grep -iE '\bgpl\b|agpl'   # expect only the self_cel
 cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
 ```
 
+## A known, upstream-fixed-but-unreleased deadlock in the real summon path
+
+`neko-leak-confirm` set out to confirm a hypothesized ~4GB-per-summon memory
+leak in gpui-0.2.2's `windowDidBecomeKey:` forced-draw path (see the
+now-superseded framing in `data/neko-leak-audit/report.md`, firstmate home)
+and instead found a **different, real bug in the identical code path**: five
+live runs under an isolated `HOME`, driving the real `activate_window()` +
+`cx.activate(true)` / `cx.hide()` cycle, showed **zero IOSurface/GPU-backed
+growth** (the original leak hypothesis is not confirmed), but every run
+reproducibly **self-deadlocked** the main thread after one or two real
+activations — a live `sample` stack trace shows `window_did_change_key_status`
+(`gpui-0.2.2/src/platform/mac/window.rs:1976`) re-entering itself via a
+synchronous `resignKeyWindow` call made while still holding `window_state`'s
+lock, blocking forever on the same non-reentrant mutex. This is not a novel
+finding — it's an exact match (same call chain, same locking primitive) for
+`zed-industries/zed#50151`, already root-caused and fixed by merged PR
+`#51035`, but **that fix isn't in any published `gpui` crate** (crates.io's
+newest is still 0.2.2, from six months before the fix merged) — consuming it
+today would mean depending on git `zed-industries/zed`, reopening "The GPUI
+dependency decision" above. No neko-side workaround was found (one
+call-ordering hypothesis was tested live and disproven). Full account,
+proven-vs-inferred table, and the captain's real options:
+`docs/evidence/neko-leak-audit-confirmation.md`. The permanent artifact this
+task left behind: `NEKO_BENCH_REAL` (`crates/neko/src/evidence.rs`), a bench
+mode that drives the real summon/dismiss path (unlike `NEKO_BENCH`, which
+uses `order_front_regardless`/`order_out` and — proven in this task, not
+just asserted — structurally cannot reach `windowDidBecomeKey:` at all) —
+use it to re-verify once a fixed `gpui` becomes consumable.
+
 ## Seams for follow-up work
 
 - **Onboarding UI**: built — see "Onboarding" above.
@@ -1923,6 +1952,16 @@ cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
   real evidence on an actual two-display setup (this task's sandbox only had
   one physical display — the math and the live single-display execution
   path are both proven; the cross-display *visual* isn't).
+- **The `windowDidBecomeKey:` deadlock and the original memory-growth
+  question**: see "A known, upstream-fixed-but-unreleased deadlock in the
+  real summon path" above. Still open: whether the originally-hypothesized
+  memory growth is real under sustained, realistic load (this task's
+  synthetic bench never got past two rapid cycles before the deadlock);
+  whether the deadlock explains the captain's original 19.96GB report (not
+  provable from available evidence); and the dependency decision itself
+  (wait for a new `gpui` release, depend on git and reopen the GPL
+  question, vendor a local patch, or accept the risk) — a captain call, not
+  an engineering one.
 
 ## Maintaining this file
 
