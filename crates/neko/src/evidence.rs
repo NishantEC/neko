@@ -52,7 +52,8 @@ use neko_client::NekoClient;
 use neko_protocol::Request;
 
 use crate::material;
-use crate::panel::Root;
+use crate::panel::{PANEL_HEIGHT_PX, Root};
+use crate::{display_placement, theme};
 
 const BENCH_ENV_VAR: &str = "NEKO_BENCH";
 const SHOW_ON_LAUNCH_ENV_VAR: &str = "NEKO_SHOW_ON_LAUNCH";
@@ -193,15 +194,29 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
 /// through `Window::activate_window`/`cx.hide()`, so a long bench run
 /// doesn't repeatedly steal focus from whatever else is on screen. Exits
 /// the process when done.
+///
+/// **Also runs the real `display_placement::reposition_to_cursor_display`
+/// call every cycle**, exactly as the two real summon entry points in
+/// `main.rs` do — an earlier version of this bench measured
+/// `order_front_regardless` alone, which silently excluded the
+/// repositioning step from both the latency number and, more importantly,
+/// from a long-running bench's own RSS growth (see `AGENTS.md`, "Client
+/// AppKit pooling" — this is the harness that reproduces the leak the
+/// unpooled reposition calls caused).
 pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp, iterations: u32) {
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
     Timer::after(std::time::Duration::from_millis(300)).await;
+
+    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_PX), gpui::px(PANEL_HEIGHT_PX));
 
     for i in 0..iterations {
         let started = Instant::now();
         let _ = cx.update(|cx| {
             let _ = window.update(cx, |root, window, cx| {
                 root.reset_for_summon(window, cx);
+                if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
+                    eprintln!("neko: bench reposition failed: {e}");
+                }
                 let _ = material::order_front_regardless(window);
                 window.on_next_frame(move |_, _| {
                     eprintln!("neko: bench summon {i} latency {:?}", started.elapsed());
