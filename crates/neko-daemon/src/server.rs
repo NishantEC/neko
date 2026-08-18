@@ -13,10 +13,11 @@ pub struct AppState {
     pub apps: Arc<RwLock<Vec<AppEntry>>>,
     /// Every registered result-type provider, in section render order —
     /// see `neko_core::search::allocate`'s doc comment for what that order
-    /// means for ranking. Registering a fourth provider is exactly one more
-    /// line here plus its own `impl Provider` — nothing else in this file,
-    /// the wire protocol, or the client needs to change. See `AGENTS.md`'s
-    /// "Provider abstraction" section for the full accounting.
+    /// means for ranking. Registering a new provider (four are registered
+    /// today: app, file, clipboard, settings) is exactly one more line here
+    /// plus its own `impl Provider` — nothing else in this file, the wire
+    /// protocol, or the client needs to change. See `AGENTS.md`'s "Provider
+    /// abstraction" section for the full accounting.
     providers: Vec<Box<dyn Provider>>,
     /// One shared writer lock per connected client, keyed by nothing (just
     /// a flat list) since a connection never needs to look itself up — see
@@ -28,22 +29,31 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(db: Db, apps: Vec<AppEntry>) -> Self {
-        Self::with_file_provider(db, apps, neko_core::files::FileProvider::new())
+        Self::with_test_providers(db, apps, neko_core::files::FileProvider::new(), neko_core::settings::SettingsProvider::new())
     }
 
-    /// The real constructor, parameterized on the file provider so tests
-    /// can pass `FileProvider::empty()` — otherwise every `Request::Search`
-    /// test with a 2+ character query would shell out to a real `mdfind`
-    /// against whatever the test machine's own `$HOME` happens to contain,
-    /// which is both slow (up to `files::QUERY_TIMEOUT` per call) and not
-    /// hermetic.
-    fn with_file_provider(db: Db, apps: Vec<AppEntry>, file_provider: neko_core::files::FileProvider) -> Self {
+    /// The real constructor, parameterized on the file and settings
+    /// providers so tests can pass `FileProvider::empty()` /
+    /// `SettingsProvider::with_panes(Vec::new())` — otherwise every
+    /// `Request::Search` test with a 2+ character query would shell out to
+    /// a real `mdfind` against whatever the test machine's own `$HOME`
+    /// happens to contain (slow, not hermetic), and every such test would
+    /// also pick up whatever System Settings panes happen to exist on the
+    /// machine running the test suite, which is both non-hermetic and
+    /// varies by OS version.
+    fn with_test_providers(
+        db: Db,
+        apps: Vec<AppEntry>,
+        file_provider: neko_core::files::FileProvider,
+        settings_provider: neko_core::settings::SettingsProvider,
+    ) -> Self {
         let db = Arc::new(Mutex::new(db));
         let apps = Arc::new(RwLock::new(apps));
         let providers: Vec<Box<dyn Provider>> = vec![
             Box::new(neko_core::apps::AppsProvider::new(apps.clone(), db.clone())),
             Box::new(file_provider),
             Box::new(neko_core::clipboard::ClipboardProvider::new(db.clone())),
+            Box::new(settings_provider),
         ];
         Self {
             db,
@@ -307,11 +317,17 @@ mod tests {
         }
     }
 
-    /// `AppState::new` with an empty-scope file provider — see
-    /// `AppState::with_file_provider`'s doc comment for why every test in
+    /// `AppState::new` with an empty-scope file provider and an
+    /// empty-pane-list settings provider — see
+    /// `AppState::with_test_providers`'s doc comment for why every test in
     /// this module goes through this rather than the real constructor.
     fn test_state(db: Db, apps: Vec<AppEntry>) -> AppState {
-        AppState::with_file_provider(db, apps, neko_core::files::FileProvider::empty())
+        AppState::with_test_providers(
+            db,
+            apps,
+            neko_core::files::FileProvider::empty(),
+            neko_core::settings::SettingsProvider::with_panes(Vec::new()),
+        )
     }
 
     #[test]

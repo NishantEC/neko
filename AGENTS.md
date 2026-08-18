@@ -66,7 +66,12 @@ saying why, and the search field ignoring standard macOS line/word editing
 shortcuts (⌘⌫/⌥⌫/⌘←/⌥← and their forward counterparts) — see "Application
 discovery" below for the index fix, "Click-outside dismissal and inline
 activation errors" below for the other two panel-level fixes, and "Text
-field editing shortcuts" below for the fourth.
+field editing shortcuts" below for the fourth. A twelfth task added System
+Settings pane search — `neko_core::settings::SettingsProvider`, the fourth
+`Provider` and the second proof (after file search) that the seam is cheap
+to extend — so that "displays", "bluetooth", "sound" etc. find the
+individual System Settings pane rather than nothing. See "System Settings
+pane search" below.
 
 ## Crate layout
 
@@ -945,6 +950,61 @@ provider, ahead of any real need, is exactly the kind of imagined-future
 generality the brief's "prefer the smaller abstraction" guidance rules
 out.
 
+### System Settings pane search (`neko_core::settings::SettingsProvider`)
+
+The fourth provider, and the second proof (after file search) that the
+seam holds for a genuinely new capability rather than being designed in
+the abstract. Full reasoning, with the machine evidence behind every
+choice, is in the module's own doc comment — read that before touching
+this file again, and `docs/evidence/settings-provider-report.md` for the
+discovery narrative, the real-pane-opened proof, and the before/after
+latency/memory numbers. Summary:
+
+- **Enumeration source: `/System/Library/ExtensionKit/Extensions/*.appex`,
+  not the old `.prefPane` layout**, which is a dead stub on this OS (no
+  `Info.plist` at all in e.g. `Displays.prefPane`). A pane is real when its
+  `Info.plist` declares `EXAppExtensionAttributes.
+  EXExtensionPointIdentifier == "com.apple.Settings.extension.ui"` and
+  `SettingsExtensionAttributes.allowsXAppleSystemPreferencesURLScheme ==
+  true` (50 of 241 total `.appex` bundles on this machine).
+- **The URL target is the extension's own `CFBundleIdentifier`, never
+  `legacyBundleIdentifier`** — the legacy field is missing on a third of
+  panes and, where present, is sometimes shared by two different panes
+  (Siri and Spotlight declare the identical legacy list), so it can't be
+  the primary key. The modern bundle identifier is unique and was verified
+  live to resolve every pane tested, alone.
+- **One-time scan at daemon construction, no live watcher** — the same
+  "sealed system volume, an OS update restarts the daemon anyway" argument
+  `apps.rs` already established for `/System/Applications`, since
+  `/System/Library/ExtensionKit/Extensions` sits on the same sealed
+  volume. Enumeration never runs on a client's search path.
+- **Display names come from each bundle's localized `InfoPlist.loctable`
+  (`"en"` key), not the raw, often-internal-target-named `Info.plist`** —
+  falls back to the raw plist, then a two-entry override table for the
+  two panes (Battery, Headphones) that have no localized name anywhere in
+  their bundle.
+- **Icon: the System Settings app's own icon, shared by every pane row**
+  — a per-pane icon would need Apple's private iconography stack (each
+  pane names an `ISGraphicIconConfiguration.ISTypeIdentifier`, not
+  resolvable through the public `NSWorkspace.iconForFile` this daemon's
+  icon cache already uses everywhere else). Extracted once, in the same
+  background pass `main.rs` already runs for every app icon, through the
+  same `icons::ensure_cached_icon` — no second icon pipeline.
+- **No settings-specific ranking bonus.** Unlike `AppsProvider`'s gated
+  `app_category_score`, this provider's candidates are plain
+  `fuzzy_score` — the launch brief's own requirement ("must not crowd out
+  genuine application matches for app-shaped queries") is already
+  satisfied without one, verified against `fe4e4e9`'s own ranking test
+  queries ("code", "terminal", "chrome") producing identical top results.
+- **The seam held.** Touched: one new file (`settings.rs`), one new
+  function in `launch.rs` (`open_url`, `launch_app`'s identical shape
+  typed on `&str` for a URL rather than a `Path`), one `pub mod` line,
+  and one provider-registration line in `server.rs`. Untouched:
+  `neko-protocol` (no new `Request`/`Response` variant), `panel.rs` (no
+  `match` on provider identity — section label, icon, and action verb are
+  already data on `SearchItem`), and `search::allocate` (already
+  provider-count-agnostic).
+
 ### Daemon concurrency (why `handle_connection` now spawns a thread per request)
 
 `FileProvider`'s `mdfind` round-trip (up to 1.5s on a broad query) exposed
@@ -1384,6 +1444,13 @@ cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
   icon-extraction path; wire through `icons::ensure_cached_icon` in a
   background pass once the parallel `neko-icon-cache` task's own fixes are
   in).
+- **System Settings pane search**: built — see "Provider abstraction"
+  above, "System Settings pane search" subsection. Still open: real
+  per-pane icons (shares the System Settings app icon for now, same
+  deliberate scope cut as file search's painted glyphs — Apple's private
+  iconography stack, not `NSWorkspace.iconForFile`, is what would be
+  needed) and multi-word queries ("keyboard shortcuts") — a `fuzzy_score`
+  limitation shared by every provider, not specific to this one.
 - **Native window material**: built — see "Window material" above. Still
   open: a real screenshot proving live compositing/legibility against a
   busy backdrop, blocked on this machine's standing capture-safety rule

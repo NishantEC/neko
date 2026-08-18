@@ -44,6 +44,14 @@ fn main() {
             // still kept off the daemon's own startup path, same as the
             // extraction loop below.
             neko_core::icons::purge_stale_icon_cache();
+            // The one icon every `settings::SettingsProvider` row shares
+            // (see that module's doc comment, "Icon" section) — extracted
+            // first, before the per-app loop below, so it's warm well
+            // before a captain's first settings-pane search even on a cold
+            // cache; a single `NSWorkspace.iconForFile` call is a few tens
+            // of ms, not the "tens of ms *times 146 apps*" cost the rest of
+            // this pass exists to keep off the daemon's own startup path.
+            neko_core::icons::ensure_cached_icon(neko_core::settings::SETTINGS_APP_ICON_ID, std::path::Path::new(neko_core::settings::SETTINGS_APP_PATH));
             // Verification-only, unset (0ms) in normal operation — the
             // real per-app extraction cost is small enough on real
             // hardware that a fresh index finishes in well under a second,

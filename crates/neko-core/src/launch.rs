@@ -31,3 +31,24 @@ pub fn launch_app(app_path: &Path) -> Result<(), LaunchError> {
         )))
     }
 }
+
+/// Same mechanism as [`launch_app`], for a URL rather than a file path —
+/// `settings::SettingsProvider::activate` uses this to hand
+/// `x-apple.systempreferences:<bundle-id>` to `open`, which is how System
+/// Settings itself resolves a deep link to one specific pane rather than
+/// just bringing the app to the front. `open` treats a URL-scheme argument
+/// and a filesystem path identically, so this is the same call, just typed
+/// on `&str` since a `systempreferences:` URL is never a valid `Path`.
+pub fn open_url(url: &str) -> Result<(), LaunchError> {
+    let status = Command::new("/usr/bin/open")
+        .arg(url)
+        .status()
+        .map_err(|e| LaunchError(format!("failed to run /usr/bin/open: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(LaunchError(format!(
+            "/usr/bin/open exited with {status}"
+        )))
+    }
+}
