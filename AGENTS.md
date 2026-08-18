@@ -81,7 +81,20 @@ Spaces/full-screen collection behavior had never been checked at all (only
 grepped for and found absent). See "Window placement, disconnection, and
 Spaces" below — one of the three (Spaces) turned out to already be correct,
 fixed by nothing this task did except adding the live readback that proves
-it.
+it. A fourteenth task (`neko-ranking-2`) fixed two more captain-reported
+ranking defects, live on the System Settings pane provider `b39eb25` had
+just shipped: an exact pane match (e.g. "Sound") scored below unrelated
+files and clipboard entries because `settings.rs` deliberately left it
+unboosted, and a long clipboard paste's near-unbounded match score could
+flood the result list (nine of ten rows for one real query) once it was the
+only provider left with supply for the shared budget. See "Search and
+ranking" below, `docs/evidence/settings-and-clipboard-ranking.md` — the
+fixes are `search::settings_category_score` (the same per-provider bonus
+`app_category_score` established) and `search::clipboard_max_slots` (a cap
+on clipboard's own share of the greedy phase); the same evidence file also
+records a structural finding worth knowing before touching ranking again:
+`allocate`'s output order is fixed by provider *registration* order, never
+resorted by score.
 
 ## Crate layout
 
@@ -528,6 +541,67 @@ a previously-unresolved "duplicate `finders.py`" report (two genuinely
 different files vendored inside a Python virtualenv's `site-packages` — now
 filtered as noise, the same category `node_modules`/`vendor` already are):
 `docs/evidence/ranking-before-after.md`.
+
+**`allocate`'s output order is fixed by provider *registration* order —
+score only ever decides how many rows a provider gets, never where its
+section sits.** Traced and confirmed while diagnosing the two defects
+below, not assumed from `allocate`'s own doc comment: the final
+`flat_map` iterates `providers` in exactly the order `AppState::new`
+registered them (`app`, `file`, `clipboard`, `settings`), always — a
+provider's score, however boosted, cannot move its section earlier or
+later in the list. Any future per-provider category bonus should be
+designed around this: it changes *which* candidates win the shared greedy
+budget, and can matter a great deal when a provider has more than one real
+candidate contesting a slot, but it is not a lever for visual position.
+`docs/evidence/settings-and-clipboard-ranking.md` has the full trace.
+
+**System Settings pane matches scored too low, and clipboard could flood
+the list — two more captain-reported defects, `neko-ranking-2`.**
+`settings.rs`'s original choice to leave pane candidates completely
+unboosted (reasoning: plain `fuzzy_score` already keeps a pane from
+crowding out a genuine app match) overcorrected — an exact pane title also
+lost to *everything else*, files and clipboard included. `search::
+settings_category_score` extends `app_category_score`'s exact shape (a
+shared `category_score` helper factors out the prefix-gate/per-word-rescore
+logic both now use) to a fourth provider, `"settings"`, with a smaller,
+deliberately-sized bonus (`SETTINGS_CATEGORY_BONUS = 1.5`, half of
+`APP_CATEGORY_BONUS`) so a genuine app match for an app-shaped query
+("Bluetooth File Exchange" for "bluetooth") still wins by a full 1.5-point
+margin. Separately, `ClipboardProvider::search` scored a whole pasted
+paragraph with the same unmodified `fuzzy_score` plus up to `+8.0` of
+recency boost — `fuzzy_score`'s own length penalty is sized for
+title-length strings and barely dents a match found once inside hundreds of
+characters of text, so a long, largely-irrelevant paste routinely
+outscored everything else and (correctly, by the greedy phase's own design)
+won every contested slot once it was the last provider with remaining
+supply: nine of ten rows for one real "wallpaper" query, and a privacy
+concern given the captain's real clipboard holds invoices and client
+correspondence. Fixed with two independent layers: `clipboard::
+clipboard_length_normalization` scales a candidate's raw match score down
+proportionally once its content passes a title-like length threshold
+(`CLIPBOARD_TITLE_LIKE_CHARS = 60`), applied before the recency boost;
+`search::clipboard_max_slots` caps clipboard's own greedy-phase intake at
+half of `limit` (rounded up) whenever at least one other provider also has
+a candidate — scoped to `"clipboard"` specifically, the same per-provider
+gating the category bonuses use, since a provider whose *individual*
+candidates are all genuinely relevant winning most of the shared budget is
+the greedy phase working as intended, not a bug. The pre-existing "clipboard
+always gets at least one slot" guarantee (from `allocate`'s unconditional
+reservation pass) is untouched — the cap only bounds what the *greedy*
+phase can additionally hand it. Full before/after numbers (a clean
+`git checkout <prior-commit> -- <files>` A/B on identical fixture data, not
+two separate runs), the real `fuzzy_score` values both bonuses were tuned
+against, daemon idle/loaded RSS measurements, and an investigated-but-not-
+reproduced finding (the original report's "displays"/"bluetooth" pane
+*totally* absent, not just last — mathematically impossible from
+`allocate`'s reservation pass alone if the provider returned any real
+candidate, so likely a `SettingsProvider` data/environment difference on
+the captain's own machine, not a ranking bug): `docs/evidence/
+settings-and-clipboard-ranking.md`. That task's own hard constraint — no
+client launch, no window, no `NEKO_BENCH`, no screenshot, because the
+captain was actively using this machine — means warm summon latency was
+not re-measured; the evidence file states that gap plainly rather than
+assuming the last documented figure still holds.
 
 ## Icons
 
