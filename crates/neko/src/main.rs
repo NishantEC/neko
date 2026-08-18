@@ -213,6 +213,10 @@ fn main() {
             let client = client.clone();
             cx.spawn(async move |cx| evidence::run_bench(&client, window, cx, iterations).await)
                 .detach();
+        } else if let Some(iterations) = evidence::bench_real_iterations() {
+            let client = client.clone();
+            cx.spawn(async move |cx| evidence::run_bench_real(&client, window, cx, iterations).await)
+                .detach();
         } else if evidence::show_on_launch_requested() {
             let client = client.clone();
             cx.spawn(async move |cx| evidence::show_once(&client, window, cx).await)

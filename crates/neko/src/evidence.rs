@@ -31,6 +31,17 @@
 //!   synthetic OS keystrokes (unreliable — `AGENTS.md`, "Summon latency")
 //!   or repeated `cx.activate(true)` (steals focus each time); prints one
 //!   `neko: bench summon N latency …` line per summon, then exits.
+//! - `NEKO_BENCH_REAL=<n>` — added for the client memory-leak investigation
+//!   (`docs/evidence/neko-leak-audit-confirmation.md`) — drives the *real*
+//!   summon/dismiss path `n` times: `window.activate_window()` +
+//!   `cx.activate(true)` to show, `cx.hide()` to dismiss, exactly what
+//!   `main.rs`'s hotkey handler calls, unlike `NEKO_BENCH` above (which
+//!   deliberately avoids `activate_window`/`cx.hide()` so a long run
+//!   doesn't steal focus — see its own doc comment). This one does steal
+//!   focus and takes over the screen for real on every cycle, which is why
+//!   it's meant for a small, deliberate iteration count, not a long bench.
+//!   See `run_bench_real`'s own doc comment for the exact stderr markers an
+//!   outside script samples `vmmap`/`footprint` against.
 //! - `NEKO_BACKDROP_IMAGE=<path>` opens a second, full-display window
 //!   showing the given image at `NSNormalWindowLevel` — strictly *below*
 //!   the summon panel's own `NSPopUpWindowLevel` (`gpui-0.2.2`'s own
@@ -56,6 +67,7 @@ use crate::panel::{PANEL_HEIGHT_PX, Root};
 use crate::{display_placement, theme};
 
 const BENCH_ENV_VAR: &str = "NEKO_BENCH";
+const BENCH_REAL_ENV_VAR: &str = "NEKO_BENCH_REAL";
 const SHOW_ON_LAUNCH_ENV_VAR: &str = "NEKO_SHOW_ON_LAUNCH";
 const SHOW_QUERY_ENV_VAR: &str = "NEKO_SHOW_QUERY";
 const SHOW_CONFIRM_ENV_VAR: &str = "NEKO_SHOW_CONFIRM";
@@ -63,6 +75,10 @@ const BACKDROP_IMAGE_ENV_VAR: &str = "NEKO_BACKDROP_IMAGE";
 
 pub fn bench_iterations() -> Option<u32> {
     std::env::var(BENCH_ENV_VAR).ok()?.parse().ok()
+}
+
+pub fn bench_real_iterations() -> Option<u32> {
+    std::env::var(BENCH_REAL_ENV_VAR).ok()?.parse().ok()
 }
 
 pub fn show_on_launch_requested() -> bool {
@@ -199,10 +215,16 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
 /// call every cycle**, exactly as the two real summon entry points in
 /// `main.rs` do — an earlier version of this bench measured
 /// `order_front_regardless` alone, which silently excluded the
-/// repositioning step from both the latency number and, more importantly,
-/// from a long-running bench's own RSS growth (see `AGENTS.md`, "Client
-/// AppKit pooling" — this is the harness that reproduces the leak the
-/// unpooled reposition calls caused).
+/// repositioning step from both the latency number and any RSS growth it
+/// might cause. **Result, not hypothesis**: 60 cycles of this bench under
+/// an isolated `HOME` measured flat RSS (~65MB, no growth) and 4-7ms
+/// latency — this *rules out* `reposition_to_cursor_display` and the
+/// `order_front_regardless`/`order_out` ordering path as leak sources,
+/// it does not reproduce a leak. See `docs/evidence/` for the client
+/// memory-leak investigation this bench mode was extended to support —
+/// the real path (`window.activate_window()` + `cx.activate(true)` /
+/// `cx.hide()`, which this mode still does not exercise) is the next
+/// divergence point, covered by `run_bench_real` below.
 pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp, iterations: u32) {
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
     Timer::after(std::time::Duration::from_millis(300)).await;
@@ -233,5 +255,76 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
     }
 
     eprintln!("neko: bench complete ({iterations} summons)");
+    std::process::exit(0);
+}
+
+/// Drives the *real* summon/dismiss path `iterations` times —
+/// `NEKO_BENCH_REAL`. See this module's own doc comment for why this is a
+/// separate mode from `run_bench` above: that one's `order_front_regardless`/
+/// `order_out` never make the window key and so structurally cannot reach
+/// gpui's `windowDidBecomeKey:` handler
+/// (`gpui-0.2.2/src/platform/mac/window.rs:1976-2027`) — the code path
+/// `docs/evidence/neko-leak-audit-confirmation.md` traces as the real
+/// summon path's one structural divergence from the proven-flat bench. This
+/// mode calls exactly what `main.rs`'s hotkey handler calls: `reset_for_summon`,
+/// the real `display_placement::reposition_to_cursor_display`, `window.focus`,
+/// `window.activate_window()`, `cx.activate(true)` to show; `cx.hide()` to
+/// dismiss.
+///
+/// Prints `neko: real-bench pid {pid}` once at the very start, then one
+/// `neko: real-bench cycle {i} {phase}` line per phase
+/// (`activating`/`activated`/`hiding`/`hidden`) per cycle — an outside
+/// script samples `vmmap`/`footprint` against that exact pid right after
+/// each `activated`/`hidden` line, during the deliberate settle delay that
+/// follows it, rather than on a guessed sleep. The delay after `activated`
+/// is long enough to cover both the forced synchronous draw
+/// `windowDidBecomeKey:` triggers on every activation after the first
+/// (`activated_least_once`) and any async Metal command-buffer completion
+/// handler it schedules, not just the frame callback itself.
+///
+/// Iteration counts here are expected to be small — the memory-leak
+/// investigation that added this mode used 5, matching the captain's own
+/// real repro — since each cycle takes over the screen for real and, if the
+/// investigation's hypothesis is right, costs multiple gigabytes.
+pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp, iterations: u32) {
+    let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
+    eprintln!("neko: real-bench pid {}", std::process::id());
+    Timer::after(std::time::Duration::from_millis(300)).await;
+
+    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_PX), gpui::px(PANEL_HEIGHT_PX));
+
+    for i in 0..iterations {
+        eprintln!("neko: real-bench cycle {i} activating");
+        let started = Instant::now();
+        let _ = cx.update(|cx| {
+            let _ = window.update(cx, |root, window, cx| {
+                root.reset_for_summon(window, cx);
+                if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
+                    eprintln!("neko: real-bench reposition failed: {e}");
+                }
+                window.activate_window();
+                window.focus(&root.focus_handle(cx));
+                window.on_next_frame(move |_, _| {
+                    eprintln!("neko: real-bench cycle {i} frame latency {:?}", started.elapsed());
+                });
+            });
+            cx.activate(true);
+        });
+        // Settle past the frame callback and gpui's own forced-draw /
+        // completion-handler window (this function's own doc comment)
+        // before printing `activated` — the moment an outside script should
+        // sample.
+        Timer::after(std::time::Duration::from_millis(400)).await;
+        eprintln!("neko: real-bench cycle {i} activated");
+        Timer::after(std::time::Duration::from_millis(900)).await;
+
+        eprintln!("neko: real-bench cycle {i} hiding");
+        let _ = cx.update(|cx| cx.hide());
+        Timer::after(std::time::Duration::from_millis(400)).await;
+        eprintln!("neko: real-bench cycle {i} hidden");
+        Timer::after(std::time::Duration::from_millis(900)).await;
+    }
+
+    eprintln!("neko: real-bench complete ({iterations} cycles)");
     std::process::exit(0);
 }
