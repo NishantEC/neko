@@ -159,6 +159,16 @@ const APP_CATEGORY_BONUS: f32 = 3.0;
 /// "Code" as a whole word, so it's a genuine prefix match too and keeps
 /// its boost.
 fn app_category_score(query: &str, title: &str, original_score: f32) -> f32 {
+    category_score(query, title, original_score, APP_CATEGORY_BONUS)
+}
+
+/// The same prefix-gated rescore [`app_category_score`] uses, generalized
+/// over the flat bonus applied so [`settings_category_score`] below can
+/// share it exactly rather than re-implementing the same word-rescore/gate
+/// logic with a different constant — the gating condition (a real prefix
+/// match, whole title or a significant word) and the per-word rescore are
+/// category-agnostic; only the bonus size is provider-specific.
+fn category_score(query: &str, title: &str, original_score: f32, bonus: f32) -> f32 {
     let query_lower = query.to_lowercase();
     let is_prefix_match = title.to_lowercase().starts_with(&query_lower)
         || title.split_whitespace().any(|word| word.to_lowercase().starts_with(&query_lower));
@@ -169,7 +179,80 @@ fn app_category_score(query: &str, title: &str, original_score: f32) -> f32 {
         .split_whitespace()
         .filter_map(|word| fuzzy_score(query, word))
         .fold(f32::MIN, f32::max);
-    original_score.max(best_word_score) + APP_CATEGORY_BONUS
+    original_score.max(best_word_score) + bonus
+}
+
+/// The System Settings pane equivalent of [`APP_CATEGORY_BONUS`] — see
+/// [`settings_category_score`]'s doc comment for why `settings.rs`'s
+/// original "no bonus at all" choice overcorrected, and
+/// `docs/evidence/settings-and-clipboard-ranking.md` for the real
+/// before/after numbers this was tuned against. Deliberately smaller than
+/// `APP_CATEGORY_BONUS` (3.0), not just qualitatively but by a measured
+/// margin: for a single-word title that both an app and a pane match
+/// equally well (`"bluetooth"` against both "Bluetooth" the pane and
+/// "Bluetooth File Exchange" the app), `category_score`'s own per-word
+/// rescore gives both candidates the *identical* base score before either
+/// bonus is added — so the gap between the two final scores is exactly
+/// `APP_CATEGORY_BONUS - SETTINGS_CATEGORY_BONUS`. `1.5` keeps that gap a
+/// full 1.5 points, comfortably decisive (matching the ≥1.0-point margin
+/// `app_category_score`'s own "terminal" test already treats as
+/// "decisive"), while still clearing an unrelated file's raw `fuzzy_score`
+/// by a wide margin for a real pane query ("sound" vs. "Sound" beats
+/// "background_sound.log" by 4.8 points even with only this smaller bonus).
+const SETTINGS_CATEGORY_BONUS: f32 = 1.5;
+
+/// Rescoring applied only to the "settings" provider's own candidates,
+/// inside [`allocate`] — the same category-weight idea
+/// [`app_category_score`] already established for "app", now extended to
+/// the fourth provider. `settings.rs::search`'s own doc comment originally
+/// argued no bonus was needed there because plain `fuzzy_score` already
+/// satisfied "must not crowd out genuine application matches" — true, but
+/// incomplete: unboosted, a short exact pane title ("Sound") also loses to
+/// *everything else*, not just to apps. A file that merely contains the
+/// query as a substring, or a clipboard entry whose recency boost stacks on
+/// top of an incidental hit, both routinely outscored an exact pane match
+/// (`docs/evidence/settings-and-clipboard-ranking.md` has the real
+/// `fuzzy_score` numbers: "sound" → "Sound" scores only 17.4, well below
+/// what an unrelated file or a recent clipboard paste containing "sound"
+/// can reach). [`SETTINGS_CATEGORY_BONUS`] restores "an exact/near-exact
+/// pane match beats an incidental file/clipboard hit" without touching the
+/// one thing `settings.rs` got right the first time — this bonus, like
+/// `app_category_score`'s, is gated on a real prefix match, so a scattered
+/// non-prefix hit gets no advantage, and it's sized smaller than
+/// `APP_CATEGORY_BONUS` so a genuine application match for the same query
+/// ("Bluetooth File Exchange" for "bluetooth") still wins outright.
+fn settings_category_score(query: &str, title: &str, original_score: f32) -> f32 {
+    category_score(query, title, original_score, SETTINGS_CATEGORY_BONUS)
+}
+
+/// Clipboard's own guardrail, on top of the ordinary reservation-then-greedy
+/// allocation every provider gets: at most half of `limit` (rounded up),
+/// applied only once at least one *other* provider also has a candidate for
+/// this query — the same "when others have candidates" condition the launch
+/// brief itself specifies. A free-form pasted paragraph can score highly for
+/// containing the query once, almost anywhere in a lot of unrelated text
+/// (`clipboard::clipboard_length_normalization` narrows that gap but can't
+/// close it to zero for every possible entry, and a very recent copy's
+/// recency boost stacks on top regardless of length) — without a hard cap,
+/// once clipboard is the only provider with remaining supply, it wins every
+/// single contested slot: a real captain-reported query ("wallpaper")
+/// returned nine private clipboard rows out of ten for one exact pane match,
+/// which is both a relevance problem and — the captain's own clipboard
+/// history holds real invoices and client correspondence — a privacy one.
+/// Scoped to "clipboard" specifically (mirrors [`app_category_score`]'s
+/// "app"-only gating) rather than a blanket cap on every provider: a
+/// provider whose *individual* candidates are all genuinely relevant (many
+/// real file matches, say) winning most of the shared budget is the
+/// intended behavior of the greedy phase, not a bug — clipboard's problem is
+/// that a high score there doesn't reliably mean high relevance the way it
+/// does for a curated, title-shaped candidate pool. When the cap leaves
+/// slots unclaimed because no other provider has more supply either, those
+/// slots simply go unused (a shorter result list) rather than being forced
+/// back onto clipboard — same "an earlier section using less than its share
+/// doesn't automatically go to a section that doesn't need it" principle
+/// [`allocate`]'s own doc comment already establishes for reservations.
+fn clipboard_max_slots(limit: usize) -> usize {
+    limit.div_ceil(2).max(1)
 }
 
 /// Merges every provider's own candidate list into one response of at most
@@ -225,6 +308,10 @@ pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize, query:
             for candidate in candidates.iter_mut() {
                 candidate.score = app_category_score(query, &candidate.item.title, candidate.score);
             }
+        } else if *id == "settings" {
+            for candidate in candidates.iter_mut() {
+                candidate.score = settings_category_score(query, &candidate.item.title, candidate.score);
+            }
         }
         candidates.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.item.title.cmp(&b.item.title)));
     }
@@ -247,9 +334,21 @@ pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize, query:
         }
     }
 
+    // See [`clipboard_max_slots`]'s doc comment for why clipboard alone
+    // gets a hard ceiling on top of the ordinary greedy interleave, and why
+    // it's scoped to "clipboard" rather than applied to every provider.
+    let clipboard_cap = providers
+        .iter()
+        .position(|(id, _)| *id == "clipboard")
+        .filter(|_| providers.iter().any(|(id, candidates)| *id != "clipboard" && !candidates.is_empty()))
+        .map(|clipboard_index| (clipboard_index, clipboard_max_slots(limit)));
+
     while remaining > 0 {
         let mut best: Option<(usize, f32)> = None;
         for (i, (_, candidates)) in providers.iter().enumerate() {
+            if clipboard_cap.is_some_and(|(clipboard_index, cap)| i == clipboard_index && taken[i] >= cap) {
+                continue;
+            }
             if let Some(candidate) = candidates.get(taken[i])
                 && best.is_none_or(|(_, best_score)| candidate.score > best_score)
             {
@@ -515,6 +614,125 @@ mod tests {
         assert_eq!(items[0].id, "app-code", "the real app must still be the top result");
         assert!(!items.iter().any(|i| i.id == "app-xcode"), "a scattered non-prefix match must lose every contested slot to real file matches");
         assert_eq!(items.iter().filter(|i| i.kind == "file").count(), 3, "all three genuinely relevant files must fit instead");
+    }
+
+    // --- Defect 1: an exact settings-pane match must outscore an
+    // unrelated file/clipboard hit that merely contains the query, without
+    // beating a genuine application match for the same query. ---
+
+    #[test]
+    fn settings_category_score_beats_an_unrelated_file_that_merely_contains_the_query() {
+        // Real measured fuzzy_score numbers (see SETTINGS_CATEGORY_BONUS's
+        // doc comment and docs/evidence/settings-and-clipboard-ranking.md):
+        // unboosted, the exact pane title "Sound" (17.4) barely clears a
+        // file that merely contains "sound" at a word boundary
+        // ("background_sound.log", 14.1) — not the decisive win a real,
+        // curated pane match deserves.
+        let settings_score = settings_category_score("sound", "Sound", fuzzy_score("sound", "Sound").unwrap());
+        let file_score = fuzzy_score("sound", "background_sound.log").unwrap();
+        assert!(settings_score > file_score + 1.0, "{settings_score} should decisively beat {file_score}");
+    }
+
+    #[test]
+    fn settings_category_score_does_not_let_a_pane_beat_a_genuine_app_match() {
+        // The launch brief's own explicit requirement: "bluetooth" must
+        // keep "Bluetooth File Exchange" (the real app) above the
+        // "Bluetooth" pane. Both get the identical per-word rescore for
+        // this query, so this pins the bonus gap directly.
+        let settings_score = settings_category_score("bluetooth", "Bluetooth", fuzzy_score("bluetooth", "Bluetooth").unwrap());
+        let app_score = app_category_score("bluetooth", "Bluetooth File Exchange", fuzzy_score("bluetooth", "Bluetooth File Exchange").unwrap());
+        assert!(app_score > settings_score, "the real app ({app_score}) must still beat the pane ({settings_score})");
+    }
+
+    #[test]
+    fn settings_category_score_does_not_boost_a_non_prefix_scattered_match() {
+        // Mirrors app_category_score's identical guard: a scattered,
+        // non-prefix hit inside a pane title gets no category advantage.
+        let raw = fuzzy_score("play", "Displays").unwrap();
+        let scored = settings_category_score("play", "Displays", raw);
+        assert_eq!(scored, raw, "a scattered non-prefix match must be left exactly as fuzzy_score scored it");
+    }
+
+    #[test]
+    fn allocate_lets_the_settings_bonus_win_a_contested_slot_end_to_end() {
+        // Presence alone (the reservation) doesn't exercise the bonus —
+        // every provider's first candidate is guaranteed a slot regardless
+        // of score. This pins the case that actually needs the bonus: a
+        // *second* real pane match competing with a file for one shared
+        // slot beyond both reservations, illustrative round numbers chosen
+        // so the outcome flips with the bonus applied (12.5 vs. 12.0, where
+        // unboosted it would have been 11.0 vs. 12.0) — the real
+        // `fuzzy_score` numbers this was tuned against are in the two
+        // dedicated scoring tests above.
+        let providers = vec![
+            (
+                "file",
+                vec![
+                    Candidate { score: 15.0, item: item_titled("file", "file-a", "soundboard.app") },
+                    Candidate { score: 12.0, item: item_titled("file", "file-b", "sound_test.wav") },
+                ],
+            ),
+            (
+                "settings",
+                vec![
+                    Candidate { score: 12.0, item: item_titled("settings", "com.apple.preference.sound", "Sound") },
+                    Candidate { score: 11.0, item: item_titled("settings", "com.apple.preference.sound-effects", "Sound Effects") },
+                ],
+            ),
+        ];
+        let items = allocate(providers, 3, "sound");
+        assert_eq!(items.iter().filter(|i| i.kind == "settings").count(), 2, "the bonus must let the pane's second match win the contested slot");
+        assert_eq!(items.iter().filter(|i| i.kind == "file").count(), 1);
+    }
+
+    // --- Defect 2: clipboard alone must not be able to claim (nearly) the
+    // whole shared budget once another provider also has a candidate. ---
+
+    #[test]
+    fn clipboard_max_slots_is_half_the_limit_rounded_up() {
+        assert_eq!(clipboard_max_slots(10), 5);
+        assert_eq!(clipboard_max_slots(8), 4);
+        assert_eq!(clipboard_max_slots(1), 1);
+    }
+
+    #[test]
+    fn a_single_provider_cannot_take_the_whole_list_while_others_have_candidates() {
+        // The real captain-reported shape: nine clipboard entries (each
+        // individually outscoring the one real settings match, the same way
+        // a long pasted paragraph containing the query can) must not be
+        // allowed to fill nearly the entire ten-row budget when a genuine
+        // settings match exists too.
+        let providers = vec![
+            ("clipboard", candidates("clipboard", &[20.0; 9])),
+            ("settings", candidates("settings", &[5.0])),
+        ];
+        let items = allocate(providers, 10, "");
+        let clipboard_count = items.iter().filter(|i| i.kind == "clipboard").count();
+        assert!(clipboard_count <= 5, "clipboard took {clipboard_count} of 10 rows even though another provider had a match");
+        assert_eq!(items.iter().filter(|i| i.kind == "settings").count(), 1, "the other provider's reservation must still survive");
+    }
+
+    #[test]
+    fn clipboard_is_not_capped_when_it_is_the_only_provider_with_candidates() {
+        // If nothing else matched this query, there's no reason to shorten
+        // the list — the cap only exists to make room for other real
+        // matches, not as a blanket ceiling on clipboard.
+        let providers = vec![("clipboard", candidates("clipboard", &[20.0; 9])), ("settings", Vec::new())];
+        let items = allocate(providers, 10, "");
+        assert_eq!(items.iter().filter(|i| i.kind == "clipboard").count(), 9);
+    }
+
+    #[test]
+    fn clipboard_cap_still_leaves_room_for_a_secondary_match_with_few_candidates() {
+        // The pre-existing "secondary match never crowded out" guarantee
+        // (see `a_secondary_match_is_never_crowded_out_by_many_primary_matches`
+        // above) must keep holding for clipboard specifically, in whichever
+        // role — here as the *primary*, capped provider, not the crowded
+        // secondary.
+        let providers = vec![("clipboard", candidates("clipboard", &[10.0; 10])), ("app", candidates("app", &[1.0]))];
+        let items = allocate(providers, 8, "");
+        assert_eq!(items.iter().filter(|i| i.kind == "app").count(), 1, "app's one real match must still survive");
+        assert!(items.iter().filter(|i| i.kind == "clipboard").count() <= clipboard_max_slots(8));
     }
 }
 
