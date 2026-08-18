@@ -51,6 +51,38 @@
 //! after the query, in [`is_noisy`] — `mdfind` has no directory-exclusion
 //! flag, so this can't be pushed into the query itself, only applied to
 //! what comes back.
+//!
+//! **Source/build artifacts are demoted, not excluded.** A `.rs`/`.h`/`.py`/
+//! `.svg` sitting in an ordinary, non-hidden project folder used to be a
+//! fully eligible result for any short generic query, competing on equal
+//! footing with a genuinely-wanted document. [`SOURCE_ARTIFACT_DEMOTION`]
+//! scales such a match's score down instead of dropping it — a developer
+//! does sometimes want to find a source file by name, so it still shows
+//! up, just no longer crowds out a document/PDF/image match for the same
+//! query. See [`is_source_artifact`] for exactly what counts.
+//!
+//! **The apparent-duplicate investigation (launch brief: "settle it,
+//! either way, with evidence").** A prior audit saw what looked like two
+//! identical `finders.py` rows and couldn't resolve, from a `/tmp` test
+//! fixture, whether that was a real duplicate-emission bug or two
+//! legitimately different files. Settled here against the real machine:
+//! `mdfind -onlyin ~/Documents -onlyin ~/Desktop -onlyin ~/Downloads
+//! "kMDItemFSName == 'finders.py*'cd"` returns exactly two lines,
+//! `.../django/contrib/staticfiles/finders.py` and
+//! `.../djangobower/finders.py` — two different real files at two
+//! different real paths, each a distinct Django-ecosystem package shipping
+//! its own module of that name inside the same vendored virtualenv. Not a
+//! duplicate-emission bug: [`query_spotlight_paths`] has no dedup logic
+//! because it never receives the same path twice from `mdfind` in the
+//! first place. The row *was* already distinguishable — [`home_relative_parent`]
+//! puts each file's own parent directory in the subtitle, so the two rows
+//! read `finders.py — ~/.../staticfiles` and `finders.py — ~/.../djangobower`,
+//! not two blank-subtitle duplicates — but both were also exactly the kind
+//! of vendored-dependency noise `node_modules`/`vendor` are already
+//! filtered for, which is the more useful fix: `/site-packages/` is now in
+//! `NOISY_PATH_SUBSTRINGS`, so neither shows up for a query this generic
+//! any more. Raw `mdfind` output preserved in
+//! `docs/evidence/ranking-before-after.md`.
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -107,6 +139,21 @@ const NOISY_PATH_SUBSTRINGS: &[&str] = &[
     "/venv/",
     "/vendor/",
     "/.Trash/",
+    // Python's `node_modules` equivalent — vendored third-party package
+    // code a `pip`/virtualenv install unpacks, regardless of what the venv
+    // root directory itself happens to be named (".venv", "venv", "env",
+    // or anything else a project picked, unlike the fixed substrings
+    // above). Confirmed live against a real query on this machine's actual
+    // `~/Documents`: querying "finders.py" returned two hits with the same
+    // filename — `django/contrib/staticfiles/finders.py` and
+    // `djangobower/finders.py` — both under a virtualenv literally named
+    // `env` (not matched by "/venv/" or "/.venv/" above), both genuinely
+    // different files, not a duplicate-emission bug (see this module's
+    // "the apparent-duplicate investigation" doc section below) — but both
+    // exactly the kind of vendored dependency noise `node_modules`/`vendor`
+    // are already filtered for. See `docs/evidence/ranking-before-after.md`
+    // for the raw `mdfind` output this was verified against.
+    "/site-packages/",
 ];
 
 /// True for a path that's noise for a "find something I saved" search: a
@@ -127,6 +174,65 @@ fn is_noisy(path: &Path) -> bool {
     }
     path.components()
         .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
+}
+
+/// Extensions of compiled/source-code artefacts — incidental to a codebase
+/// rather than something a person searches for by name the way they'd
+/// search for a document, image, or PDF. Deliberately **not** excluded
+/// outright (the launch brief: "a developer does sometimes want them") —
+/// see [`SOURCE_ARTIFACT_DEMOTION`], applied in [`FileProvider::search`]
+/// instead of a hard filter here. Scoped to source/compiled-code and
+/// project-metadata files specifically; document formats (`.pdf`, `.docx`,
+/// `.pages`, `.key`, `.numbers`, `.txt`, `.md`), images (`.png`, `.jpg`,
+/// `.heic`, ...) and plain folders are never in this list and are never
+/// demoted.
+const SOURCE_ARTIFACT_EXTENSIONS: &[&str] = &[
+    // Compiled/bytecode output — never what "find this by name" means.
+    "pyc", "pyo", "o", "obj", "class", "so", "dylib", "a", "rlib",
+    // Source code, across the languages this codebase's own machines and
+    // the captain's repos are most likely to contain.
+    "rs", "c", "h", "hpp", "cc", "cpp", "cxx", "m", "mm", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "go", "rb",
+    "java", "kt", "swift", "scala", "php", "cs", "sh", "bash", "zsh",
+    // Markup/data formats that are almost always project source, not a
+    // document a person saved for its own sake — an SVG in a repo is an
+    // icon asset, not artwork someone's looking for by filename.
+    "svg", "css", "scss",
+];
+
+/// Multiplies a source-artifact candidate's [`fuzzy_score`] down instead of
+/// dropping it — large enough to reliably lose to a same-scoring
+/// non-artifact match (a document, image, or folder), small enough that an
+/// exact, high-confidence source-file match still competes normally
+/// against everything else, per this task's launch brief: "do not exclude
+/// source files outright."
+///
+/// **`0.85`, not the more aggressive `0.5` first tried — caught live, not
+/// assumed.** A real query against the captain's own machine ("code",
+/// alongside `AppsProvider`'s own real, unboosted `fuzzy_score` matches
+/// for "Xcode" ≈ 8.9, "Cloudflare WARP"/"Cloudless Voice" ≈ 10.7 — none of
+/// these get [`crate::search`]'s app-category bonus, since none of them
+/// are a genuine prefix match on "code") showed the interaction a smaller
+/// demotion factor misses: at `0.5`, three clearly-relevant source files
+/// ("CodexAdapter.ts", "CodexDriver.ts", "CodexProvider.ts", each
+/// `fuzzy_score` ≈ 13.7, a real prefix match on "Code") demoted to ≈ 6.85
+/// — *below* those three unrelated, merely-coincidental app matches — so
+/// the file section lost real, wanted results to app-search noise that
+/// the demotion feature was never meant to promote. `0.85` keeps every
+/// one of those three real files comfortably above all three of those
+/// real scattered-app scores (≈ 11.6 vs. ≤ 10.7) while still cutting a
+/// source file's competitive weight by 15% against a same-scoring
+/// document — enough to consistently lose a contested slot to one
+/// (`docs/evidence/ranking-before-after.md` has the full before/after
+/// numbers for both factors).
+const SOURCE_ARTIFACT_DEMOTION: f32 = 0.85;
+
+/// See [`SOURCE_ARTIFACT_EXTENSIONS`]. Extension comparison is
+/// case-insensitive (`README.MD`-style all-caps extensions are common
+/// enough on real filesystems to be worth not missing).
+fn is_source_artifact(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| SOURCE_ARTIFACT_EXTENSIONS.iter().any(|candidate| candidate.eq_ignore_ascii_case(ext)))
 }
 
 fn default_scope_dirs() -> Vec<PathBuf> {
@@ -309,6 +415,7 @@ impl Provider for FileProvider {
             .filter_map(|path| {
                 let name = path.file_name()?.to_string_lossy().into_owned();
                 let score = fuzzy_score(query, &name)?;
+                let score = if is_source_artifact(&path) { score * SOURCE_ARTIFACT_DEMOTION } else { score };
                 Some(build_candidate(score, path, name))
             })
             .take(MAX_CANDIDATES)
@@ -337,6 +444,39 @@ mod tests {
     fn an_ordinary_document_is_not_noisy() {
         assert!(!is_noisy(Path::new("/Users/x/Documents/report.pdf")));
         assert!(!is_noisy(Path::new("/Users/x/Documents/project/README.md")));
+    }
+
+    #[test]
+    fn a_vendored_python_dependency_is_noisy() {
+        assert!(is_noisy(Path::new(
+            "/Users/x/Documents/proj/env/lib/python3.8/site-packages/django/contrib/staticfiles/finders.py"
+        )));
+        assert!(is_noisy(Path::new("/Users/x/Documents/proj/env/lib/python3.8/site-packages/djangobower/finders.py")));
+    }
+
+    #[test]
+    fn source_and_build_artifact_extensions_are_recognized() {
+        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/terminal.rs")));
+        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/terminal.h")));
+        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/terminal.svg")));
+        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/module.pyc")));
+        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/Main.CLASS")), "extension match must be case-insensitive");
+    }
+
+    #[test]
+    fn documents_images_and_folders_are_never_source_artifacts() {
+        assert!(!is_source_artifact(Path::new("/Users/x/Documents/report.pdf")));
+        assert!(!is_source_artifact(Path::new("/Users/x/Documents/photo.heic")));
+        assert!(!is_source_artifact(Path::new("/Users/x/Documents/notes.txt")));
+        assert!(!is_source_artifact(Path::new("/Users/x/Documents/project"))); // no extension
+    }
+
+    #[test]
+    fn a_source_artifact_is_demoted_but_not_dropped() {
+        let raw = fuzzy_score("terminal", "terminal.rs").unwrap();
+        let score = if is_source_artifact(Path::new("terminal.rs")) { raw * SOURCE_ARTIFACT_DEMOTION } else { raw };
+        assert!(score > 0.0, "a source-artifact match must still be a real, positive-scoring candidate");
+        assert!(score < raw, "it must score lower than an equivalent non-artifact match would");
     }
 
     #[test]

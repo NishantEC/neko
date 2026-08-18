@@ -176,7 +176,7 @@ fn handle_request(state: &AppState, request: Request) -> Response {
                 handles.into_iter().map(|h| h.join().unwrap()).collect()
             });
 
-            let items = neko_core::search::allocate(candidates, limit);
+            let items = neko_core::search::allocate(candidates, limit, query);
             Response::SearchResults { items }
         }
 
