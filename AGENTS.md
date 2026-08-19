@@ -94,7 +94,9 @@ fixes are `search::settings_category_score` (the same per-provider bonus
 on clipboard's own share of the greedy phase); the same evidence file also
 records a structural finding worth knowing before touching ranking again:
 `allocate`'s output order is fixed by provider *registration* order, never
-resorted by score. A fifteenth task (`neko-detail-pane`) built commands and
+resorted by score — true at the time this task ran; a seventeenth task
+(`neko-section-order`, below) later made section order follow content
+strength instead. A fifteenth task (`neko-detail-pane`) built commands and
 modes — the audit's top-priority finding, that the captain expects to
 search for a *thing to do* and enter it, not just get a row — proved with
 clipboard history as the one real command/mode pair: a fifth provider
@@ -118,6 +120,18 @@ truncated title. The same task also reversed the captain's own prior
 "monochrome with a hint of blue" palette decision to true neutral (chroma
 0 on every chrome token, lightness unchanged) on his direct instruction.
 See "Mode-view row anatomy and the neutral re-tone" below.
+A seventeenth task (`neko-section-order`) fixed the structural gap
+`neko-ranking-2` had already found and deliberately deferred: `allocate`'s
+section order was fixed by provider registration order, so a query naming
+one thing exactly — "clipboard history" — still rendered the **Commands**
+section beneath the always-reserved **Clipboard** one, and "displays"
+rendered **Settings** beneath unrelated **Files**, regardless of how
+decisively the right section actually matched. Sections now order by their
+own top candidate's score (the same score already used for row-level
+ranking), with a documented, narrowly-scoped correction so a clipboard
+entry's recency boost — legitimate for ordering *rows* within Clipboard —
+can't be mistaken for query relevance when deciding which *section* leads.
+See "Search and ranking" below, `docs/evidence/section-order-report.md`.
 
 ## Crate layout
 
@@ -565,18 +579,45 @@ different files vendored inside a Python virtualenv's `site-packages` — now
 filtered as noise, the same category `node_modules`/`vendor` already are):
 `docs/evidence/ranking-before-after.md`.
 
-**`allocate`'s output order is fixed by provider *registration* order —
-score only ever decides how many rows a provider gets, never where its
-section sits.** Traced and confirmed while diagnosing the two defects
-below, not assumed from `allocate`'s own doc comment: the final
-`flat_map` iterates `providers` in exactly the order `AppState::new`
-registered them (`app`, `file`, `clipboard`, `settings`), always — a
-provider's score, however boosted, cannot move its section earlier or
-later in the list. Any future per-provider category bonus should be
-designed around this: it changes *which* candidates win the shared greedy
-budget, and can matter a great deal when a provider has more than one real
-candidate contesting a slot, but it is not a lever for visual position.
-`docs/evidence/settings-and-clipboard-ranking.md` has the full trace.
+**`allocate`'s section order is decided by content strength, not provider
+registration order — this was true through `neko-ranking-2` (below) and was
+deliberately left for a later task; `neko-section-order` is that task.**
+Through `neko-ranking-2`, the final `flat_map` iterated `providers` in
+exactly the order `AppState::new` registered them (`app`, `file`,
+`clipboard`, `settings`, `command`), always — a provider's score, however
+boosted, could change *how many* rows it got but never move its section
+earlier or later. That was a real, captain-reported defect on its own:
+typing "clipboard history" — a phrase the `command` provider's own alias
+table matches almost perfectly — still rendered **Commands** beneath the
+always-reserved **Clipboard** section, purely because `command` registers
+last. `search::allocate` now adds a third pass after reservation and greedy
+interleave: sections are stable-sorted by their own top surviving
+candidate's score, descending, reusing the exact score already established
+as "comparable enough" for the row-level greedy interleave rather than
+inventing a second cross-provider scale — ties resolve to registration
+order for free, since a stable sort with no secondary key leaves
+equal-scoring providers exactly where `providers`' input order already put
+them. `panel::fit_within_budget` needed no code change for this — it
+already just spends the pixel budget on whatever order `results` arrives
+in, so "the first section gets the most generous budget" was already
+correct once "first" means "most relevant" instead of "app" specifically.
+**One second-order defect this surfaced, live, not assumed**: reusing the
+row-level score as-is let a clipboard entry copied at the same instant as
+the query out-rank a decisive command match purely on its recency boost
+(up to `clipboard::CLIPBOARD_RECENCY_BOOST_CEILING`, 8.0) — freshness is a
+legitimate *row*-ordering signal within Clipboard, not a *section*-strength
+signal against other providers. `allocate`'s section-ordering pass
+discounts a clipboard section's top score by that same constant (shared
+with `clipboard.rs`, not re-declared, so the two can't drift apart) only
+for this one comparison — `candidate.score` itself, and therefore every
+row-level ranking, is untouched. Any future per-provider category bonus
+still changes *which* candidates win the shared greedy budget as before;
+it now also feeds section placement, both deliberately. Full before/after
+query traces (all four captain-reported shapes, plus the recency-discount
+finding) and the verification methodology (why the real daemon was never
+launched for this): `docs/evidence/section-order-report.md`.
+`docs/evidence/settings-and-clipboard-ranking.md` still has the full trace
+for the registration-order-only era described above.
 
 **System Settings pane matches scored too low, and clipboard could flood
 the list — two more captain-reported defects, `neko-ranking-2`.**

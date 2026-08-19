@@ -182,12 +182,27 @@ pub fn entries(db: &crate::Db) -> rusqlite::Result<Vec<ClipboardEntry>> {
 /// inherently a "recent things" list, so a query with no other signal
 /// (matches everything, or a tied fuzzy score) should surface the last few
 /// copies first.
+///
+/// `pub(crate)`, not private: `search::allocate`'s section-ordering pass
+/// needs this exact ceiling (see [`CLIPBOARD_RECENCY_BOOST_CEILING`]'s own
+/// doc comment) to discount how much of a clipboard candidate's score is
+/// "just copied" freshness rather than query relevance, when deciding which
+/// *section* leads — sharing the one constant both places use keeps that
+/// discount from silently drifting out of sync with this function's actual
+/// maximum if the half-life or ceiling ever changes here.
 fn clipboard_recency_boost(copied_at_unix_ms: i64, now_unix_ms: i64) -> f32 {
     let age_ms = (now_unix_ms - copied_at_unix_ms).max(0) as f32;
     let age_hours = age_ms / (1000.0 * 60.0 * 60.0);
     let half_life_hours = 3.0;
-    8.0 * 0.5f32.powf(age_hours / half_life_hours)
+    CLIPBOARD_RECENCY_BOOST_CEILING * 0.5f32.powf(age_hours / half_life_hours)
 }
+
+/// The maximum value [`clipboard_recency_boost`] can return (at age zero) —
+/// factored out to a named, shared constant specifically so `search::
+/// allocate`'s section-ordering pass can reference the same number rather
+/// than hard-coding a second `8.0` that could quietly stop matching this
+/// function's own ceiling.
+pub(crate) const CLIPBOARD_RECENCY_BOOST_CEILING: f32 = 8.0;
 
 /// A clipboard entry at or under this length scores on the same footing
 /// `fuzzy_score` already gives every other provider's title-length
