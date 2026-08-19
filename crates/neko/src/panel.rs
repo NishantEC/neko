@@ -752,7 +752,7 @@ impl Root {
                 container = container.child(section_header(item.section_label.clone()));
                 current_section = Some(item.kind.as_str());
             }
-            container = container.child(self.render_row(idx, item));
+            container = container.child(self.render_row(idx, item, false));
         }
         container
     }
@@ -834,7 +834,22 @@ impl Root {
             )
     }
 
-    fn render_row(&self, idx: usize, item: &SearchItem) -> impl IntoElement {
+    /// `compact` drops `subtitle`/`accessory` from the row — the mode list's
+    /// own anatomy (`data/neko-design/mockups/12-first-clipboard-use.html`'s
+    /// `.row`: icon, title, type-tag, nothing else). The root list still
+    /// wants both (`11-first-search.html`'s rows carry a subtitle and a
+    /// trailing accessory) — that's the wider 680px row, with room for them.
+    /// Left in at `MODE_LIST_COLUMN_WIDTH_PX` (264px), `item.subtitle` (e.g.
+    /// clipboard's own `"Copied from {app}"`) and `item.accessory` (the
+    /// relative-time stamp) had nowhere near enough room next to the title,
+    /// badge, and icon — a real, captain-reported defect
+    /// (`"remove con  Co   TEXT   now"`, title truncated mid-word,
+    /// overlapping the subtitle's own truncated remainder before the badge
+    /// and timestamp), not a taste call: the mockup's mode-list row simply
+    /// never carries them, since `Application`/`Copied` already have a
+    /// dedicated, unhurried home in the detail pane
+    /// (`render_mode_detail`).
+    fn render_row(&self, idx: usize, item: &SearchItem, compact: bool) -> impl IntoElement {
         let selected = idx == self.selected;
         let title_color = theme::TEXT_PRIMARY;
         let subtitle_color = if selected {
@@ -892,7 +907,7 @@ impl Root {
                             .truncate()
                             .child(SharedString::from(item.title.clone())),
                     )
-                    .children(item.subtitle.clone().map(|subtitle| {
+                    .children(item.subtitle.clone().filter(|_| !compact).map(|subtitle| {
                         div()
                             .text_size(px(12.))
                             .text_color(subtitle_color)
@@ -911,7 +926,7 @@ impl Root {
                     .text_color(theme::TEXT_TERTIARY)
                     .child(SharedString::from(badge))
             }))
-            .children(item.accessory.clone().map(|accessory| {
+            .children(item.accessory.clone().filter(|_| !compact).map(|accessory| {
                 div()
                     .flex_shrink_0()
                     .text_size(px(11.))
@@ -1040,7 +1055,7 @@ impl Root {
                 }
                 current_group = Some(&item.group_label);
             }
-            container = container.child(self.render_row(idx, item));
+            container = container.child(self.render_row(idx, item, true));
         }
         container
     }

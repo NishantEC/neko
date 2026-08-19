@@ -8,25 +8,34 @@
 #![allow(dead_code)]
 
 //! The frozen design tokens from `data/neko-design/report.md` §1, re-toned
-//! per the captain's own instruction — offered three cat-derived identity
-//! directions (amber eye, jade eye, copper coat), he chose none of them:
-//! *"lets do monochrome with hint of blue."* That closed the open
-//! colour-identity question from the report's §1 "Open" note for good — no
-//! accent token exists in this file any more, and none should be
-//! reintroduced without a fresh captain decision. Geometry, layout, and
-//! every non-colour constant below are untouched; this is a re-tone, not a
-//! redesign.
+//! twice now. First to "monochrome with a hint of blue" (hue 252°–257°,
+//! chroma 0.012–0.025) per the captain's own instruction at the time —
+//! offered three cat-derived identity directions (amber eye, jade eye,
+//! copper coat), he chose none of them: *"lets do monochrome with hint of
+//! blue."* Then, on direct captain instruction again (`fm/neko-mode-visual`):
+//! *"let's remove the blue tint altogether... let it be just naturally
+//! there."* — reversing that hint-of-blue call for true neutral. Every
+//! chrome token below now sits at **chroma 0** (pure grey: R=G=B once hue
+//! contributes nothing) at **exactly the same lightness (`L`) as the blue
+//! ramp** — a pure hue/chroma change, not a re-tone: contrast, hierarchy, and
+//! the accessibility work already done against those `L` values all carry
+//! over unchanged. No accent token exists in this file any more, and none
+//! should be reintroduced without a fresh captain decision. Geometry,
+//! layout, and every non-colour constant below are untouched.
+//!
+//! **State colours are the one deliberate exception, per the design's own
+//! "chrome is monochrome; state is coloured" rule** — `STATE_SUCCESS`,
+//! `STATE_DANGER`, and the tokens derived from them
+//! (`STATE_SUCCESS_BORDER`/`STATE_DANGER_BORDER`/`BANNER_DANGER_BG`) keep
+//! their original hue and chroma untouched by this pass.
 //!
 //! Every `Rgba` is generated from an OKLCH triple via Björn Ottosson's
 //! OKLab→linear-sRGB matrices, the same method and hand-computed precision
-//! the original report used, hue held in a tight band (252°–257°, a true
-//! blue — pure sRGB blue is ~264° in this space) across the whole neutral
-//! ramp so it reads as one cool, low-chroma system rather than a mix. GPUI
-//! has no live `color-mix()`/OKLCH interpolation (see report §6), so every
-//! token here is a plain constant, the same shape `comet`'s `Theme` module
-//! uses (read for architecture only, not copied — see `AGENTS.md`). The
-//! test at the bottom of this file checks every value against an
-//! independently-implemented OKLCH→sRGB conversion.
+//! the original report used. GPUI has no live `color-mix()`/OKLCH
+//! interpolation (see report §6), so every token here is a plain constant,
+//! the same shape `comet`'s `Theme` module uses (read for architecture only,
+//! not copied — see `AGENTS.md`). The test at the bottom of this file checks
+//! every value against an independently-implemented OKLCH→sRGB conversion.
 
 use gpui::Rgba;
 
@@ -51,7 +60,7 @@ const fn rgba_const(hex: u32, a: f32) -> Rgba {
     }
 }
 
-pub const SURFACE_PANEL: Rgba = rgb_const(0x090e13);
+pub const SURFACE_PANEL: Rgba = rgb_const(0x0d0d0d);
 /// `SURFACE_PANEL`'s own RGB, at reduced alpha — the panel's fill when a
 /// native material (`material.rs`) is behind the window. This is what
 /// makes the material visible at all: GPUI renders this `div`'s fill on
@@ -71,81 +80,82 @@ pub const SURFACE_PANEL: Rgba = rgb_const(0x090e13);
 /// own fully-opaque, already-OKLCH-verified numbers (this file's own test,
 /// below). Re-verify with a real screenshot once a safe capture path exists
 /// for this machine, rather than trusting this reasoning indefinitely.
-pub const SURFACE_PANEL_TRANSLUCENT: Rgba = rgba_const(0x090e13, 0.82);
-pub const SURFACE_RAISED: Rgba = rgb_const(0x11161d);
+pub const SURFACE_PANEL_TRANSLUCENT: Rgba = rgba_const(0x0d0d0d, 0.82);
+pub const SURFACE_RAISED: Rgba = rgb_const(0x161616);
 /// The clipboard-history detail pane's own recessed preview box
 /// (`data/neko-design/mockups/12-first-clipboard-use.html`'s
-/// `--surface-input`, `oklch(0.13 0.012 70)` in the original warm ramp —
-/// never added to this file before now because nothing painted it until
-/// this token's one consumer, the mode detail pane). Derived by the exact
-/// same rule every other base-neutral token in this file already used for
-/// the blue re-tone: same L/C, hue swapped from the warm ramp's ~70° into
-/// this ramp's 252°–257° band (255° here, matching `SURFACE_PANEL`/
-/// `SURFACE_RAISED`/`SURFACE_SELECTED`'s own swap) — not a fresh colour
-/// pick, so it doesn't reopen the closed colour-identity question (see this
-/// module's own doc comment).
-pub const SURFACE_INPUT: Rgba = rgb_const(0x05080c);
-pub const SURFACE_SELECTED: Rgba = rgb_const(0x333b46);
-pub const TEXT_PRIMARY: Rgba = rgb_const(0xe0e9f6);
-pub const TEXT_SECONDARY: Rgba = rgb_const(0x9faab9);
-/// Lifted from the warm ramp's `oklch(0.58 0.022 65)` to `oklch(0.615 0.024
-/// 252)` — L +0.035, one step beyond a hue swap. `data/neko-native-material
-/// /report.md` §6 measured this app's own worst-case material (the Popover
-/// fallback, `material.rs`) reducing placeholder-text contrast to ~94% of
-/// opaque (6.08:1 vs. 6.46:1 baseline in that report's own sampling). The
-/// original warm tertiary sat at exactly 4.53:1 against the panel — barely
-/// over WCAG AA's 4.5:1 floor already, so a ~6% translucency haircut would
-/// have put it under AA on the real (non-Glass) fallback path. This token
-/// now measures **5.23:1** opaque (this file's own test), which survives
-/// that same worst-case reduction with room to spare (~4.9:1) while still
-/// reading distinctly dimmer than `text_secondary`'s 8.23:1 — the
-/// hierarchy between the two tiers is preserved, tertiary just no longer
-/// lives right at the failure line.
-pub const TEXT_TERTIARY: Rgba = rgb_const(0x7b8693);
+/// `--surface-input`). Same `L` as the blue ramp's own `SURFACE_INPUT`
+/// (`oklch(0.13 0.012 255)`), chroma taken to zero for the neutral re-tone —
+/// not a fresh colour pick, so it doesn't reopen the closed colour-identity
+/// question (see this module's own doc comment).
+pub const SURFACE_INPUT: Rgba = rgb_const(0x070707);
+pub const SURFACE_SELECTED: Rgba = rgb_const(0x3a3a3a);
+pub const TEXT_PRIMARY: Rgba = rgb_const(0xe8e8e8);
+pub const TEXT_SECONDARY: Rgba = rgb_const(0xa9a9a9);
+/// `L=0.615`, unchanged from the blue ramp — only chroma moved to zero.
+/// `data/neko-native-material/report.md` §6 measured this app's own
+/// worst-case material (the Popover fallback, `material.rs`) reducing
+/// placeholder-text contrast to ~94% of opaque (6.08:1 vs. 6.46:1 baseline
+/// in that report's own sampling). The original warm tertiary sat at
+/// exactly 4.53:1 against the panel — barely over WCAG AA's 4.5:1 floor
+/// already, so a ~6% translucency haircut would have put it under AA on the
+/// real (non-Glass) fallback path; the blue ramp's re-tone raised `L` to
+/// 0.615 specifically to clear that with room to spare, and this neutral
+/// pass preserves that exact `L` for the same reason — chroma is the only
+/// axis this task was asked to change. This token measures **5.23:1** opaque
+/// (this file's own test), which survives that same worst-case reduction
+/// with room to spare (~4.9:1) while still reading distinctly dimmer than
+/// `text_secondary`'s contrast — the hierarchy between the two tiers is
+/// preserved.
+pub const TEXT_TERTIARY: Rgba = rgb_const(0x848484);
+/// State colour — deliberately untouched by the neutral re-tone (this
+/// module's own doc comment: "chrome is monochrome; state is coloured").
 pub const STATE_SUCCESS: Rgba = rgb_const(0x61bd67);
+/// State colour — deliberately untouched by the neutral re-tone, same
+/// reasoning as `STATE_SUCCESS` above.
 pub const STATE_DANGER: Rgba = rgb_const(0xe96e50);
 
 /// A selected row promotes its accessory text from `text_tertiary` to
 /// `text_secondary` — the one scoped exception called out in the report
-/// (`text_tertiary` on `surface_selected` measures 3.06:1, failing AA). The
-/// promoted colour now measures **4.81:1**, a genuine AA pass — the warm
-/// ramp's equivalent pair measured 4.20:1, which the original report
-/// called "passing" but was in fact just under the 4.5:1 floor; re-toning
-/// gave `surface_selected` a slightly lower L (0.37 → 0.35) specifically to
-/// close that gap for real rather than carry the same near-miss forward.
-/// Not a new token, a paint-path rule.
+/// (`text_tertiary` on `surface_selected` measures 3.04:1, failing AA). The
+/// promoted colour measures **4.84:1**, a genuine AA pass — unchanged in
+/// substance from the blue ramp's own 4.81:1 (the tiny drift is chroma
+/// leaving the luminance calculation, not an `L` change): `surface_selected`
+/// keeps the blue ramp's `L=0.35`, chosen there specifically to clear this
+/// pair for real rather than carry forward the original warm ramp's 4.20:1
+/// near-miss. Not a new token, a paint-path rule.
 pub const TEXT_TERTIARY_ON_SELECTED: Rgba = TEXT_SECONDARY;
 
 /// Decorative dividers only, per the report's own note on this token —
 /// never a load-bearing boundary. Onboarding's dialog chrome (header/footer
 /// hairlines, permission-row outlines, keycap borders) is the first paint
 /// path in this codebase to use these as named tokens rather than an inline
-/// `rgba(0xffffff__)` literal.
-pub const BORDER_HAIRLINE: Rgba = rgba_const(0xd7dfea, 0.08);
-pub const BORDER_HAIRLINE_STRONG: Rgba = rgba_const(0xd7dfea, 0.16);
+/// `rgba(0xffffff__)` literal. `L≈0.90`, unchanged from the blue ramp;
+/// chroma taken to zero for the neutral re-tone, same as every other token
+/// in this file.
+pub const BORDER_HAIRLINE: Rgba = rgba_const(0xdedede, 0.08);
+pub const BORDER_HAIRLINE_STRONG: Rgba = rgba_const(0xdedede, 0.16);
 
 /// Text sitting on a `TEXT_PRIMARY` fill (the primary button's own label).
-pub const TEXT_ON_LIGHT: Rgba = rgb_const(0x0b1015);
+pub const TEXT_ON_LIGHT: Rgba = rgb_const(0x0f0f0f);
 
 /// Onboarding's keycap chip background (`keycap_shell()` in `view.rs`) —
 /// previously an inline `rgba(0x2a221aff)` literal never routed through
-/// this module. Moved in during the blue re-tone: `oklch(0.255 0.020 255)`,
-/// sitting between `SURFACE_RAISED` and `SURFACE_SELECTED` in lightness,
-/// matching the same relationship the original literal had to the warm
-/// ramp's equivalent surfaces.
-pub const KEYCAP_SHELL_BG: Rgba = rgb_const(0x1c232c);
+/// this module. `L=0.255`, unchanged from the blue ramp (`oklch(0.255 0.020
+/// 255)` there; chroma zeroed here), sitting between `SURFACE_RAISED` and
+/// `SURFACE_SELECTED` in lightness, matching the same relationship the
+/// original warm-ramp literal had to its own equivalent surfaces.
+pub const KEYCAP_SHELL_BG: Rgba = rgb_const(0x232323);
 
 /// The accessibility-declined banner's background (`render_accessibility_banner`
-/// in `panel.rs`) — previously an inline `rgba(0xe96e5014)` literal, moved
-/// in during the blue re-tone. Same `STATE_DANGER` hue at the same ~7.8%
-/// alpha the original literal used; `STATE_DANGER` itself is unchanged (see
-/// module doc comment: state colours are re-toned only if they clash with
-/// the cool base, and red-orange against a blue-grey base doesn't).
+/// in `panel.rs`) — `STATE_DANGER`'s own hue at ~7.8% alpha. State colour,
+/// deliberately untouched by the neutral re-tone (this module's own doc
+/// comment: "chrome is monochrome; state is coloured").
 pub const BANNER_DANGER_BG: Rgba = rgba_const(0xe96e50, 0.078_431_37);
 
-/// Status-pill borders (`status_pill` in `onboarding/view.rs`) — previously
-/// inline `rgba(0x61bd6759)`/`rgba(0xe96e5059)` literals, moved in during
-/// the blue re-tone at the same ~34.9% alpha the originals used.
+/// Status-pill borders (`status_pill` in `onboarding/view.rs`) — state
+/// colours at ~34.9% alpha, deliberately untouched by the neutral re-tone,
+/// same reasoning as `BANNER_DANGER_BG` above.
 pub const STATE_SUCCESS_BORDER: Rgba = rgba_const(0x61bd67, 0.349_019_6);
 pub const STATE_DANGER_BORDER: Rgba = rgba_const(0xe96e50, 0.349_019_6);
 
@@ -179,7 +189,7 @@ pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
 /// every icon the same backing plate regardless of how much of its own
 /// padding shows through — the fix for icons reading as "bright stamps"
 /// mismatched in shape and brightness against the rest of the list.
-pub const ROW_ICON_SOCKET_BG: Rgba = rgba_const(0xe0e9f6, 0.06);
+pub const ROW_ICON_SOCKET_BG: Rgba = rgba_const(0xe8e8e8, 0.06);
 
 /// Onboarding window geometry (design report §3): the same panel width as
 /// the summoned popup, a static header standing in for the input row, a
@@ -254,25 +264,29 @@ mod tests {
         )
     }
 
-    /// The blue-re-tone base-palette table (this task's report has the same
-    /// shape for direct comparison against `data/neko-design/report.md`
-    /// §1's original warm table). If this test ever fails, this module's
-    /// hex and its own OKLCH triple disagree — that's the "report it" case,
-    /// not a silent-fix case.
+    /// The neutral-re-tone base-palette table (`fm/neko-mode-visual`): every
+    /// chrome token's `L` carried over unchanged from the blue ramp, chroma
+    /// taken to zero — `h` is left at the blue ramp's own value for direct
+    /// diffability against that table (and this module's own history), but
+    /// is mathematically inert at `c=0.0`. `state_success`/`state_danger`
+    /// keep their original hue *and* chroma — state colours, not chrome (see
+    /// this module's own doc comment). If this test ever fails, this
+    /// module's hex and its own OKLCH triple disagree — that's the "report
+    /// it" case, not a silent-fix case.
     #[test]
     fn base_palette_matches_the_frozen_oklch_table() {
         let table: &[(&str, f32, f32, f32, Rgba)] = &[
-            ("surface_panel", 0.16, 0.014, 255.0, SURFACE_PANEL),
-            ("surface_raised", 0.20, 0.016, 255.0, SURFACE_RAISED),
-            ("surface_input", 0.13, 0.012, 255.0, SURFACE_INPUT),
-            ("surface_selected", 0.35, 0.022, 255.0, SURFACE_SELECTED),
-            ("text_primary", 0.93, 0.020, 257.0, TEXT_PRIMARY),
-            ("text_secondary", 0.735, 0.025, 255.0, TEXT_SECONDARY),
-            ("text_tertiary", 0.615, 0.024, 252.0, TEXT_TERTIARY),
+            ("surface_panel", 0.16, 0.0, 255.0, SURFACE_PANEL),
+            ("surface_raised", 0.20, 0.0, 255.0, SURFACE_RAISED),
+            ("surface_input", 0.13, 0.0, 255.0, SURFACE_INPUT),
+            ("surface_selected", 0.35, 0.0, 255.0, SURFACE_SELECTED),
+            ("text_primary", 0.93, 0.0, 257.0, TEXT_PRIMARY),
+            ("text_secondary", 0.735, 0.0, 255.0, TEXT_SECONDARY),
+            ("text_tertiary", 0.615, 0.0, 252.0, TEXT_TERTIARY),
             ("state_success", 0.72, 0.150, 145.0, STATE_SUCCESS),
             ("state_danger", 0.68, 0.160, 35.0, STATE_DANGER),
-            ("text_on_light", 0.17, 0.014, 255.0, TEXT_ON_LIGHT),
-            ("keycap_shell_bg", 0.255, 0.020, 255.0, KEYCAP_SHELL_BG),
+            ("text_on_light", 0.17, 0.0, 255.0, TEXT_ON_LIGHT),
+            ("keycap_shell_bg", 0.255, 0.0, 255.0, KEYCAP_SHELL_BG),
         ];
         for (name, l, c, h, token) in table {
             let computed = oklch_to_srgb_u8(*l, *c, *h);
