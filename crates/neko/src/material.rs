@@ -102,6 +102,32 @@ pub fn verify_installed(_window: &Window, _installed: Installed) -> Result<Strin
     Err("native window material is only implemented on macOS".to_string())
 }
 
+/// Repositions and resizes the installed background material view directly
+/// — see `AGENTS.md`, "Mode view resize seam", for why a mode transition
+/// drives *this* instead of a native `NSWindow` resize. `x_px`/`width_px`
+/// let the panel's own visible rect sit anywhere within the window's fixed
+/// content bounds (`panel::Root::render`'s own centering math is the only
+/// caller and the only place that decides those numbers); `height_px` is
+/// taken explicitly too, even though it never actually changes between
+/// modes, rather than re-deriving it here from a constant this module has
+/// no reason to otherwise depend on.
+///
+/// Best-effort, the same shape every other native call in this module and
+/// `display_placement.rs` already uses: an `Err` (no raw window handle, no
+/// background view installed) is logged by the caller and otherwise
+/// ignored — the GPUI panel `div` this frame is meant to back still moves
+/// to the correct place on its own, so the only real failure mode is a
+/// visible seam on whatever machine hit the error, not a wrong layout.
+#[cfg(target_os = "macos")]
+pub fn set_background_frame(window: &Window, x_px: f32, width_px: f32, height_px: f32) -> Result<(), String> {
+    macos::set_background_frame(window, x_px, width_px, height_px)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_background_frame(_window: &Window, _x_px: f32, _width_px: f32, _height_px: f32) -> Result<(), String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     use objc2::MainThreadMarker;
@@ -112,6 +138,7 @@ mod macos {
         NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
         NSVisualEffectView, NSWindowOrderingMode,
     };
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
     use objc2_quartz_core::kCACornerCurveContinuous;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -373,6 +400,37 @@ mod macos {
                 ))
             }
         }
+    }
+
+    /// See `super::set_background_frame`'s doc comment. `y` is always `0` —
+    /// the background view's own height always matches `contentView`'s
+    /// full height (`height_px` is the same in every mode this app has),
+    /// so `0..height_px` covers the identical vertical extent regardless of
+    /// whether `contentView` uses a flipped (top-down) or unflipped
+    /// (bottom-up) coordinate system; only `x`/`width` ever need to differ
+    /// between a call for the root list and one for a mode's own wider
+    /// detail view.
+    pub fn set_background_frame(window: &Window, x_px: f32, width_px: f32, height_px: f32) -> Result<(), String> {
+        // Same gate `install` uses: a headless `#[gpui::test]` window's own
+        // `HasWindowHandle::window_handle` implementation panics rather
+        // than erroring (`gpui-0.2.2/src/platform/test/window.rs`), so this
+        // has to fail gracefully *before* reaching it, not inside its own
+        // `Err` path — `MainThreadMarker::new()` already reliably returns
+        // `None` in that context (confirmed live: this is the same reason
+        // `enter_mode`/`exit_mode`'s own test coverage never hit this
+        // panic before this function existed).
+        let _mtm = MainThreadMarker::new()
+            .ok_or_else(|| "background frame update attempted off the main thread".to_string())?;
+        let content_view = root_content_view(window)?;
+        let subviews = content_view.subviews().to_vec();
+        let background = subviews
+            .first()
+            .ok_or_else(|| "contentView has no subviews — material not installed yet".to_string())?;
+        background.setFrame(NSRect {
+            origin: NSPoint { x: x_px as f64, y: 0.0 },
+            size: NSSize { width: width_px as f64, height: height_px as f64 },
+        });
+        Ok(())
     }
 
     #[cfg(test)]
