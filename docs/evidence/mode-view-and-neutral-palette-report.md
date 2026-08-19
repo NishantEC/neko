@@ -12,8 +12,8 @@ client, so no real keypress could land on it.
 
 ## 1. Does the mode view's window actually resize to 760px?
 
-**Yes — verified live, twice, through the exact code path a real Enter
-keystroke takes.** `panel::Root::confirm_for_evidence` calls
+**Yes — the window itself, verified live, twice, through the exact code path
+a real Enter keystroke takes.** `panel::Root::confirm_for_evidence` calls
 `self.confirm(&Confirm, window, cx)`, the identical method a real keypress
 invokes; this is not a shortcut around the resize logic.
 
@@ -26,24 +26,69 @@ invokes; this is not a shortcut around the resize logic.
   correctly widened back to `760px`. This diagnostic path was removed after
   the check — it never shipped.
 
-Both runs' screenshots (`mode-view-before.png`, and the cycle capture, not
-committed separately since it was pixel-identical to the after shot) show the
-full 760px-wide panel: preview readable, all three Information rows
-populated, footer showing both `Paste ↵` and `Actions ⌘K` complete. **The
-specific "window stuck at 680" symptom the captain described — clipped
-preview, bare labels with no values, `"Paste ↵ | A…"` — could not be
-reproduced** despite matching his exact scenario (query "clipboard history",
-confirm the command row, real `resize_and_recenter` call, real screenshot).
+### Follow-up: a pixel measurement of the captain's screenshot narrowed this further
 
-No code change was made to `display_placement::resize_and_recenter` or
-`panel::Root::enter_mode`/`exit_mode` — nothing wrong was found in them.
-Possible explanations for what the captain saw, none confirmed: a
-single-frame race between AppKit's `setContentSize:` and GPUI's own
-`windowDidResize:`-driven bounds refresh that this task's ~800ms settle
-window didn't happen to catch; a different display/Space configuration; or a
-stale binary. If this recurs, the next useful evidence would be a screenshot
-timestamped against the exact moment of the Enter keypress (not a later,
-settled state) to check for a one-frame flash specifically.
+A second pass measured the captain's own screenshot directly: panel width
+~757pt (matching the 760 finding above), but the *drawn* content — the
+detail preview's right edge, the footer text — stopped at ~680pt, an exact
+80pt gap with his desktop visible straight through it. The leading
+hypothesis: `material.rs`'s native background view (`NSGlassEffectView` or
+its `NSVisualEffectView` fallback), inserted at window-creation size, not
+tracking the window's later resize — leaving an unbacked strip that the
+panel's own `SURFACE_PANEL_TRANSLUCENT` fill (82% opacity) shows straight
+through.
+
+**Tested directly, not just assumed — this was not reproduced either.**
+`install_glass`/`install_popover` (`material.rs`) already call
+`setAutoresizingMask(ViewWidthSizable | ViewHeightSizable)` on the
+background view at install time. A temporary diagnostic (`material::
+debug_background_frame`, reverted — never shipped) read back the real
+`CGRect` of `contentView.subviews()[0]` — the actual background view, not
+GPUI's own rendering view — immediately after a real mode-entry resize:
+
+- Glass path (default): `background[0].frame = CGSize { width: 760.0,
+  height: 420.0 }` — exactly matching `content_view.frame`, no drift.
+- Popover path (`NEKO_FORCE_MATERIAL=popover`, the fallback branch): same
+  result, `760.0 x 420.0`, exact match.
+
+A pixel-level scan of `mode-view-after.png` confirms this independently:
+fully opaque (alpha 255) content extends symmetrically to within the
+window's own drop-shadow margin on *both* left and right edges (112px
+either side of a 1744px-wide capture at a clean 2x backing scale) — no
+asymmetric transparent strip anywhere in the reproduction.
+
+**This investigation ran on the same physical machine and macOS build the
+captain's own session was on** (`sw_vers`: macOS 26.5.1, confirmed — the
+same OS `NSGlassEffectView`'s availability itself depends on), which rules
+out an OS-version or hardware explanation for the divergence. A third
+diagnostic — modeling a captain who summons/dismisses the real panel several
+times (real `activate_window`/`cx.activate`/`cx.hide` cycles, not just
+mode-only enter/exit) before ever entering a mode — was attempted and
+abandoned: the automated harness's own repeated programmatic reactivation
+stalled after two cycles (almost certainly a harness artifact — synthetic,
+non-user-driven `cx.activate(true)` calls repeated in a tight loop are not
+representative of real usage — not a reproduction of the captain's bug
+manifesting a different way), so this scenario was not actually exercised
+end-to-end. If real repeated summon/dismiss cycling turns out to matter, it
+remains untested.
+
+**No code change was made to `display_placement::resize_and_recenter`,
+`panel::Root::enter_mode`/`exit_mode`, or `material.rs`** — three
+independent, direct measurements (window bounds, AppKit `CGRect` readback of
+the background view across both fallback branches, and screenshot pixel
+analysis) found the resize-and-material mechanism correct every time it was
+exercised. Per the specific instruction this follow-up investigation was
+given, an unconfirmed fix was deliberately not forced onto a mechanism this
+testing could not show broken. Possible explanations for what the captain
+saw, none confirmed: a single-frame race this task's settle windows (~800ms
+after confirm, plus one animation frame) didn't happen to catch; state that
+only accumulates over many real, spontaneous summon/dismiss/mode cycles
+(the one scenario this task could not actually exercise, above); a different
+display/Space configuration at the moment of his screenshot; or a stale
+binary. If this recurs on a confirmed-current build, the most useful next
+evidence would be either a screenshot timestamped at the exact instant of
+the real keypress (to catch a single-frame race) or a repro after a long
+real session with many real summon/dismiss cycles first.
 
 ## 2. The row collision — real, reproduced, fixed
 
@@ -108,12 +153,16 @@ fixed OKLCH `L` is negligible at these lightness levels. Every AA pass/fail
 boundary this file's own comments already documented (the promoted-accessory
 4.5:1 floor, the tertiary-on-translucent-material margin) still holds.
 
-**`data/neko-design/report.md`** (firstmate home, not this repo) does not
-record hue/chroma values for any token — its own §1 table is the *original
-warm* ramp, and the blue re-tone was already a documented deviation from it
-tracked only in `theme.rs`'s own comments and `docs/evidence/palette-retone-
-report.md`, not by editing the report's frozen table. Nothing in the report
-needed updating for this pass, for the same reason.
+**`data/neko-design/report.md`** (firstmate home, not this repo) does
+record hue/chroma values, but for the *original warm* ramp (§1) — the frozen
+mockup HTML/CSS files this table describes are themselves still warm and
+were not edited by either re-tone. Rewriting the table's own numbers to
+"neutral" would have made it lie about what those mockup files actually
+contain. Instead, an explanatory note was added right after the table,
+recording both re-tones (warm→blue, blue→neutral) and pointing at this
+repo's `theme.rs`/evidence files as the current source of truth for the
+shipped app's actual colours — the record now stays accurate without
+touching the frozen table's own values.
 
 **Screenshots**: `palette-neutral-root-before.png` /
 `palette-neutral-root-after.png` (root list, real app + clipboard results,
@@ -127,6 +176,14 @@ blue cast in the panel fill or the selected-row highlight.
   including the updated palette test and every `panel::tests::` case), and
   `cargo clippy --workspace --all-targets` — all clean on the real release
   binaries.
+- The window-resize/material-tracking mechanism was tested three independent
+  ways (window bounds, direct AppKit background-view `CGRect` readback across
+  both material fallback branches, and screenshot pixel analysis) and found
+  correct every time — see "Follow-up" above. **Not verified**: the specific
+  scenario of many real, spontaneous summon/dismiss cycles before a mode
+  entry (the harness itself stalled attempting this — see above), and the
+  captain's exact original symptom, which this task could not reproduce on a
+  build confirmed current and on the same machine/OS his session ran on.
 - Warm summon latency and daemon idle memory were **not** re-measured this
   pass — nothing on the summon path or the daemon's own memory behavior
   changed (a client-side row-rendering conditional and a palette constant
