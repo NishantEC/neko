@@ -107,6 +107,17 @@ entry/exit. See "Commands and modes" below for the concept, the wire
 protocol's three small additive touches, and — since the captain was using
 this machine during this task — exactly what could be verified headlessly
 (`#[gpui::test]`, no client launch) versus what still needs a live window.
+A sixteenth task (`neko-mode-visual`) closed exactly that gap, live, on the
+release binaries under an isolated `HOME`: `resize_and_recenter` was
+confirmed correct (verified twice — a fresh mode entry and an exit/re-entry
+cycle both land at the real 760px), and a real, reproduced defect was found
+and fixed instead — the mode list's rows reused the root list's row
+renderer unmodified, which rendered `subtitle`/`accessory` text that has no
+room in the mode list's narrower 264px column and visibly collided with the
+truncated title. The same task also reversed the captain's own prior
+"monochrome with a hint of blue" palette decision to true neutral (chroma
+0 on every chrome token, lightness unchanged) on his direct instruction.
+See "Mode-view row anatomy and the neutral re-tone" below.
 
 ## Crate layout
 
@@ -1446,15 +1457,76 @@ enter the mode and save the prior query, `Escape` exiting it and restoring
 that query, opening the actions menu populated vs. inert, and the
 destructive-delete double-confirm/disarm-on-navigate behavior — all
 directly on `Root`'s real methods, not reimplemented test doubles. **What
-this could not verify**: the real `NSWindow` resize/recenter call
-(`display_placement::resize_and_recenter`'s macOS body has no test, the
-same as `reposition_to_cursor_display`'s own pre-existing macOS body —
-raw AppKit calls in this module have never been unit-tested, only the pure
-geometry helpers they call into), the two-column layout's actual on-screen
-appearance against the frozen mockup, warm summon latency, and daemon idle
-memory under this change — all four need a live client/window/daemon this
-task was explicitly told not to launch. Re-verify on the release binaries,
-with real window-scoped screenshots, before calling this visually done.
+this could not verify at the time**: the real `NSWindow` resize/recenter
+call, the two-column layout's actual on-screen appearance, warm summon
+latency, and daemon idle memory — all needed a live client/window/daemon
+this task was explicitly told not to launch. **Since closed by
+`neko-mode-visual`** (see "Mode-view row anatomy and the neutral re-tone"
+below): `resize_and_recenter` was verified live, twice (a fresh mode entry
+and an exit/re-enter cycle), through the real `Root::confirm` path — it
+correctly resizes to 760px both times. Warm summon latency and daemon idle
+memory were still not re-measured by that task either, since neither the
+resize path nor the daemon changed — only a client-side row-rendering
+conditional and a palette constant table did.
+
+## Mode-view row anatomy and the neutral re-tone
+
+`neko-mode-visual`, prompted by a captain screenshot of the clipboard mode
+view looking broken. Full account, live evidence, and the WCAG contrast
+recomputation: `docs/evidence/mode-view-and-neutral-palette-report.md`.
+
+**The window resize is correct — verified live, not just read.** The
+captain's report described the mode view as if the window never actually
+widened to `theme::PANEL_WIDTH_WITH_DETAIL_PX` (clipped preview, Information
+rows with labels but no values, a truncated footer). This task drove
+`panel::Root::confirm_for_evidence` — the identical method a real Enter
+keystroke calls — through a fresh mode entry and, separately, an exit/
+re-entry cycle (to check whether a *second* transition in the same window
+session misbehaves, since the captain's long-running daemon/client would
+have cycled the mode many times). Both landed at the real 760px, with a
+fully populated detail pane and complete footer, confirmed by
+`screencapture -l<windowID>` window-scoped screenshots. **No fix was made
+to `display_placement::resize_and_recenter` or `panel::enter_mode`/
+`exit_mode` — nothing wrong was found in them.** If the captain's original
+symptom recurs, treat it as a fresh, unreproduced report rather than
+assuming this task's code is the cause; the next useful evidence would be a
+screenshot timestamped at the exact instant of the real keypress, to check
+for a single-frame race this task's ~800ms settle window wouldn't catch.
+
+**The real, reproduced defect: `panel::render_row` was one function shared,
+unmodified, between two rows of very different width.** The root list
+(680px, plenty of room) and the mode list's own column
+(`theme::MODE_LIST_COLUMN_WIDTH_PX`, 264px) both rendered `item.subtitle`
+and `item.accessory` — for a clipboard entry, `"Copied from {app}"` plus a
+relative-time stamp — cramped in beside an already-truncating title, badge,
+and icon. Reproduced live with real fixtures: `"remove con  Co   TEXT
+now"`, the title cut off mid-word colliding with the start of its own
+subtitle. `data/neko-design/mockups/12-first-clipboard-use.html`'s own row
+anatomy settles this as a real bug, not a taste call — the mode list's rows
+never carry a subtitle or accessory at all; `Application`/`Copied` already
+have a dedicated, unhurried home in the detail pane. Fixed with a `compact:
+bool` parameter on `render_row` (root list passes `false`, unchanged; the
+mode list passes `true`, dropping `subtitle`/`accessory`) — no geometry,
+spacing, or type change, only which optional fields a narrow row is allowed
+to draw. **The general lesson**: a row renderer shared across two
+differently-sized containers needs to know which container it's in if the
+design's own row anatomy differs between them — sharing the function is
+right (no per-provider knowledge either way), sharing every field it draws
+isn't automatically right too.
+
+**The neutral re-tone: chroma to zero, `L` untouched, on every chrome
+token.** Reverses the captain's own earlier "monochrome with a hint of
+blue" call (`37b9800`) per a second direct instruction — see "Design
+tokens" above for the full before/after and the recomputed WCAG contrast
+table (every figure holds within rounding; chroma's effect on relative
+luminance at fixed OKLCH `L` is negligible at these lightness levels).
+`STATE_SUCCESS`/`STATE_DANGER` and their derived tokens are untouched —
+state colours, not chrome. `data/neko-design/report.md` §1's own OKLCH
+table (the firstmate home, not this repo) was left as-is — it describes the
+frozen mockup HTML/CSS files verbatim, which are still warm and were not
+edited either re-tone — with an added note pointing at this repo's own
+evidence files as the current source of truth for the shipped app's actual
+colours.
 
 ## Third-party UI code: evaluated, then narrowly vendored
 
@@ -1479,28 +1551,30 @@ change. Apache-2.0 attribution: `NOTICE`, `THIRD_PARTY_LICENSES/gpui-component-A
 
 `crates/neko/src/theme.rs` is the token table as literal Rust constants,
 cross-checked in a test (`theme::tests::base_palette_matches_the_frozen_oklch_table`)
-against an independently-implemented OKLCH→sRGB conversion. **The palette is
-cool, not warm — re-toned from `data/neko-design/report.md` §1's original
-warm ramp** (hue 65°–75°) to a monochrome-with-a-hint-of-blue ramp (hue
-252°–257°) on direct captain instruction: offered three cat-derived identity
-directions (amber eye, jade eye, copper coat), he picked none of them —
-*"lets do monochrome with hint of blue."* That closed the report's own
-"Open: the colour-identity pick" question for good; there is **no accent
-token in this file any more** (`ACCENT` was removed — it was unused by any
-paint path, and its only reason to exist, an unmade identity-accent pick,
-no longer applies). `docs/evidence/palette-retone-report.md` has the full
-before/after OKLCH/sRGB/contrast table, same shape as the original report's
-§1 for direct comparison — read that before touching palette values again.
-Two things worth knowing without re-deriving them: `text_tertiary` carries
-more contrast margin than a pure hue swap would give it (5.23:1 vs. the
-warm ramp's barely-AA 4.53:1), specifically because `data/neko-native-material/
-report.md` §6 measured the Popover material fallback (`material.rs`)
-trimming placeholder-text contrast by ~6% — the old value would have failed
-AA on that path; and `surface_selected`'s L moved slightly (0.37→0.35) to
-close a real pre-existing contrast bug (`text_tertiary`-on-`surface_selected`'s
-promoted-to-`text_secondary` workaround measured 4.20:1 in the original warm
-ramp — under the 4.5:1 AA floor despite the original report calling it
-"passing" — now 4.81:1, a genuine pass).
+against an independently-implemented OKLCH→sRGB conversion. **The palette
+has been re-toned twice now, both on direct captain instruction, and is
+currently true neutral — chroma 0 on every chrome token.** First from
+`data/neko-design/report.md` §1's original warm ramp (hue 65°–75°) to a
+monochrome-with-a-hint-of-blue ramp (hue 252°–257°, chroma 0.012–0.025):
+offered three cat-derived identity directions (amber eye, jade eye, copper
+coat), the captain picked none of them — *"lets do monochrome with hint of
+blue."* Then, on a second instruction (`fm/neko-mode-visual`) reversing that
+one — *"let's remove the blue tint altogether... let it be just naturally
+there"* — every chrome token's chroma was taken to exactly `0.0`, with `L`
+held bit-for-bit unchanged from the blue ramp (a pure hue/chroma change, not
+a re-tone: contrast and hierarchy carry over, recomputed and confirmed in
+`docs/evidence/mode-view-and-neutral-palette-report.md`). **`STATE_SUCCESS`/
+`STATE_DANGER` and everything derived from them
+(`STATE_SUCCESS_BORDER`/`STATE_DANGER_BORDER`/`BANNER_DANGER_BG`) are
+untouched by either re-tone** — state colours, not chrome, per this file's
+own "chrome is monochrome; state is coloured" rule. There is **no accent
+token in this file any more** (`ACCENT` was removed during the first
+re-tone — it was unused by any paint path, and its only reason to exist, an
+unmade identity-accent pick, no longer applies).
+`docs/evidence/palette-retone-report.md` (warm→blue) and
+`docs/evidence/mode-view-and-neutral-palette-report.md` (blue→neutral) have
+the full before/after OKLCH/sRGB/contrast tables — read the latter before
+touching palette values again, since it's the current state.
 
 **Row/icon rendering drifted from `design.css` once real data (147 Spotlight
 apps, mixed-padding icon assets) exercised it** — `docs/evidence/panel-craft-pass.md`
