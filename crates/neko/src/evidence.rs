@@ -51,6 +51,27 @@
 //!   instead of screenshotting whatever is genuinely behind the window on
 //!   this machine (which may be another live session's real work — see
 //!   `AGENTS.md`).
+//! - `NEKO_REAL_CYCLES_BEFORE_SHOW=<n>` (only read alongside
+//!   `NEKO_SHOW_ON_LAUNCH`) drives `n` real order-front/order-out paint
+//!   cycles (`material::order_front_regardless`/`order_out`, the same
+//!   mechanism `NEKO_BENCH` uses — see `run_real_cycles_before_show`'s own
+//!   doc comment for why *not* the real `activate_window`/`cx.activate`
+//!   path here) — *before* `show_once`'s own flow runs. Added for the
+//!   mode-view resize seam investigation (`AGENTS.md`, "Mode view resize
+//!   seam"): the captain's real sequence is launch, summon and paint at
+//!   `PANEL_WIDTH_PX` (possibly several times), *then* enter a mode — never
+//!   a mode entered moments after process launch, which is the one
+//!   sequence the prior investigation's `confirm_for_evidence`-only repro
+//!   exercised. This flag reproduces the missing first half so
+//!   `NEKO_SHOW_QUERY`/`NEKO_SHOW_CONFIRM`'s mode entry below happens
+//!   against a window that has genuinely been shown, painted, and hidden
+//!   first.
+//! - `NEKO_CYCLE_MODE_ONCE=1` (only read alongside `NEKO_SHOW_CONFIRM`)
+//!   exits the mode `NEKO_SHOW_CONFIRM` just entered (the same
+//!   `Root::dismiss_for_evidence` path `Escape` takes) and re-enters it
+//!   once more before the window-number "now capture" line prints — for
+//!   verifying a mode transition survives being cycled more than once in a
+//!   row, not just entered fresh.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -72,6 +93,8 @@ const SHOW_ON_LAUNCH_ENV_VAR: &str = "NEKO_SHOW_ON_LAUNCH";
 const SHOW_QUERY_ENV_VAR: &str = "NEKO_SHOW_QUERY";
 const SHOW_CONFIRM_ENV_VAR: &str = "NEKO_SHOW_CONFIRM";
 const BACKDROP_IMAGE_ENV_VAR: &str = "NEKO_BACKDROP_IMAGE";
+const REAL_CYCLES_BEFORE_SHOW_ENV_VAR: &str = "NEKO_REAL_CYCLES_BEFORE_SHOW";
+const CYCLE_MODE_ONCE_ENV_VAR: &str = "NEKO_CYCLE_MODE_ONCE";
 
 pub fn bench_iterations() -> Option<u32> {
     std::env::var(BENCH_ENV_VAR).ok()?.parse().ok()
@@ -93,8 +116,16 @@ pub fn show_confirm_requested() -> bool {
     std::env::var_os(SHOW_CONFIRM_ENV_VAR).is_some()
 }
 
+pub fn cycle_mode_once_requested() -> bool {
+    std::env::var_os(CYCLE_MODE_ONCE_ENV_VAR).is_some()
+}
+
 pub fn backdrop_image_path() -> Option<PathBuf> {
     std::env::var_os(BACKDROP_IMAGE_ENV_VAR).map(PathBuf::from)
+}
+
+pub fn real_cycles_before_show() -> Option<u32> {
+    std::env::var(REAL_CYCLES_BEFORE_SHOW_ENV_VAR).ok()?.parse().ok()
 }
 
 /// Opens the full-display backdrop window described in this module's own
@@ -134,10 +165,84 @@ impl Render for Backdrop {
     }
 }
 
+/// `NEKO_REAL_CYCLES_BEFORE_SHOW` — drives `cycles` genuine order-front/
+/// order-out paint cycles at `PANEL_WIDTH_PX` (`material::
+/// order_front_regardless`/`order_out`, the same real `NSWindow` ordering
+/// `NEKO_BENCH` uses) before `show_once`'s own flow (which may go on to
+/// enter a mode) runs.
+///
+/// **Deliberately not `window.activate_window()` + `cx.activate(true)` /
+/// `cx.hide()`** (the mechanism `run_bench_real` uses) even though that's
+/// closer to a real hotkey-driven summon: two of those in a row inside one
+/// process reliably hit the pre-existing, already-documented
+/// `windowDidBecomeKey:` self-deadlock (`AGENTS.md`, "A known,
+/// upstream-fixed-but-unreleased deadlock in the real summon path") —
+/// confirmed hitting it live while building this repro, the exact same
+/// stall the prior mode-view investigation's own repeated-`cx.activate`
+/// attempt already hit and correctly declined to chase further. That bug
+/// is orthogonal to this task (a gpui-0.2.2 issue with a merged-but-
+/// unreleased upstream fix, no neko-side workaround) and would derail this
+/// repro rather than serve it. `order_front_regardless`/`order_out`
+/// structurally cannot reach `windowDidBecomeKey:` at all (same reasoning
+/// `NEKO_BENCH`'s own doc comment gives), so any number of these cycles is
+/// safe, while still being a genuine native window order-front — real
+/// occlusion-state change, real frame paint at `PANEL_WIDTH_PX` — not a
+/// no-op.
+async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncApp, cycles: u32) {
+    // The real window is always `PANEL_WIDTH_WITH_DETAIL_PX` now (`AGENTS.md`,
+    // "Mode view resize seam") — this is only ever used to compute the
+    // window's own on-screen *position*, never a resize.
+    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX), gpui::px(PANEL_HEIGHT_PX));
+    for i in 0..cycles {
+        eprintln!("neko: real-cycles-before-show cycle {i} activating");
+        let _ = cx.update(|cx| {
+            let _ = window.update(cx, |root, window, cx| {
+                root.reset_for_summon(window, cx);
+                if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
+                    eprintln!("neko: real-cycles-before-show reposition failed: {e}");
+                }
+                let _ = material::order_front_regardless(window);
+            });
+        });
+        // Long enough for a real frame to actually paint at `PANEL_WIDTH_PX`
+        // before the next step.
+        Timer::after(std::time::Duration::from_millis(300)).await;
+        eprintln!("neko: real-cycles-before-show cycle {i} activated");
+        let _ = cx.update(|cx| {
+            let _ = window.update(cx, |_root, window, _cx| {
+                let _ = material::order_out(window);
+            });
+        });
+        Timer::after(std::time::Duration::from_millis(200)).await;
+        eprintln!("neko: real-cycles-before-show cycle {i} hidden");
+    }
+}
+
 /// Shows the summon panel once, immediately — `NEKO_SHOW_ON_LAUNCH`. Marks
 /// onboarding complete first so it can't cover the panel for this run.
+///
+/// **The real, final summon activates the window first, then drives
+/// query/confirm while it stays visible/key** — not the other way around.
+/// An earlier version of this function deferred `window.activate_window()`/
+/// `cx.activate(true)` to the very end, after `reset_for_summon`/query/
+/// confirm had already run. That matched every *other* evidence hook here
+/// (each is the window's first-ever appearance in the process, so there's
+/// no "already shown" state to get wrong), but combined with
+/// `NEKO_REAL_CYCLES_BEFORE_SHOW` it silently misrepresented the captain's
+/// real sequence: those cycles end with the window *hidden*
+/// (`order_out`), so mode entry (the resize) was happening while the
+/// window sat off-screen the whole time, only made visible again well
+/// after — not "he summons it, types, and presses Enter while looking at
+/// it," which is what the mode-view resize investigation
+/// (`AGENTS.md`, "Mode view resize seam") actually needs reproduced.
+/// Activating first and keeping the window key through query/confirm
+/// matches the real sequence and was the one change that made the seam
+/// reproducible at all.
 pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp) {
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
+    if let Some(cycles) = real_cycles_before_show() {
+        run_real_cycles_before_show(window, cx, cycles).await;
+    }
     let query = show_query();
     if query.is_some() {
         // A real daemon is now up and connected — printed so an outside
@@ -153,10 +258,13 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
     let _ = cx.update(|cx| {
         let _ = window.update(cx, |root, window, cx| {
             root.reset_for_summon(window, cx);
+            window.activate_window();
+            window.focus(&root.focus_handle(cx));
             if let Some(query) = query.as_deref() {
                 root.set_query_for_evidence(query, cx);
             }
         });
+        cx.activate(true);
     });
     if query.is_some() {
         // `set_query_for_evidence` re-runs search the same way a real
@@ -181,11 +289,30 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // prints, or the screenshot below would race the still-in-flight
         // request and show the pre-confirm footer instead.
         Timer::after(std::time::Duration::from_millis(800)).await;
+        if cycle_mode_once_requested() {
+            let _ = cx.update(|cx| {
+                let _ = window.update(cx, |root, window, cx| {
+                    root.dismiss_for_evidence(window, cx);
+                });
+            });
+            Timer::after(std::time::Duration::from_millis(400)).await;
+            let requery = query.clone().unwrap_or_default();
+            let _ = cx.update(|cx| {
+                let _ = window.update(cx, |root, _window, cx| {
+                    root.set_query_for_evidence(&requery, cx);
+                });
+            });
+            Timer::after(std::time::Duration::from_millis(1500)).await;
+            let _ = cx.update(|cx| {
+                let _ = window.update(cx, |root, window, cx| {
+                    root.confirm_for_evidence(window, cx);
+                });
+            });
+            Timer::after(std::time::Duration::from_millis(800)).await;
+        }
     }
     let _ = cx.update(|cx| {
-        let _ = window.update(cx, |root, window, cx| {
-            window.activate_window();
-            window.focus(&root.focus_handle(cx));
+        let _ = window.update(cx, |_root, window, _cx| {
             if let Ok(number) = material::window_number(window) {
                 eprintln!("neko: window number {number}");
             }
@@ -200,7 +327,6 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                 b.origin.x, b.origin.y, b.size.width, b.size.height
             );
         });
-        cx.activate(true);
     });
 }
 
@@ -229,7 +355,10 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
     Timer::after(std::time::Duration::from_millis(300)).await;
 
-    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_PX), gpui::px(PANEL_HEIGHT_PX));
+    // The real window is always `PANEL_WIDTH_WITH_DETAIL_PX` now
+    // (`AGENTS.md`, "Mode view resize seam") — only ever used here to
+    // compute the window's own on-screen position, never a resize.
+    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX), gpui::px(PANEL_HEIGHT_PX));
 
     for i in 0..iterations {
         let started = Instant::now();
@@ -291,7 +420,10 @@ pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx:
     eprintln!("neko: real-bench pid {}", std::process::id());
     Timer::after(std::time::Duration::from_millis(300)).await;
 
-    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_PX), gpui::px(PANEL_HEIGHT_PX));
+    // The real window is always `PANEL_WIDTH_WITH_DETAIL_PX` now
+    // (`AGENTS.md`, "Mode view resize seam") — only ever used here to
+    // compute the window's own on-screen position, never a resize.
+    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX), gpui::px(PANEL_HEIGHT_PX));
 
     for i in 0..iterations {
         eprintln!("neko: real-bench cycle {i} activating");

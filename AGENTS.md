@@ -132,6 +132,21 @@ ranking), with a documented, narrowly-scoped correction so a clipboard
 entry's recency boost — legitimate for ordering *rows* within Clipboard —
 can't be mistaken for query relevance when deciding which *section* leads.
 See "Search and ranking" below, `docs/evidence/section-order-report.md`.
+An eighteenth task (`neko-mode-resize`), running in parallel with the
+seventeenth, finally reproduced and fixed the mode-view seam the
+sixteenth task's own `resize_and_recenter` verification had — correctly,
+by every measurement taken at the time — found no evidence of: entering a
+mode from a window that had already been summoned and dismissed a few
+times first (not the fresh-window case the sixteenth task tested)
+reproduced it reliably, and it traced to a real `gpui-0.2.2` internal
+staleness (`Window::viewport_size` not resyncing after a real resize, with
+no public API able to force it) rather than anything wrong in this repo's
+own geometry code. The fix removes runtime window resizing for a mode
+transition entirely — the real `NSWindow` is now fixed at
+`PANEL_WIDTH_WITH_DETAIL_PX` for the process's whole lifetime, with the
+narrower root-list panel centered inside it — rather than working around
+the staleness. See "Mode view resize seam" below,
+`docs/evidence/mode-resize-seam-fix-report.md`.
 
 ## Crate layout
 
@@ -1400,36 +1415,33 @@ the field to start the mode's list fresh (a real edit through
 `TextField::set_content`, which re-runs search — by then `active_mode` is
 already `Some`, so `run_search` takes the provider-scoped branch
 immediately), swaps the placeholder, and — if `ModeChrome::has_detail` —
-widens the real window. `Escape` (a new `Root::handle_dismiss`, registered
+widens the *visible* panel. `Escape` (a new `Root::handle_dismiss`, registered
 as a window-level `on_action` listener on `Root`'s own div so it intercepts
 `DismissWindow` before `main.rs`'s global `cx.hide()` fallback ever sees it
 — GPUI's own action dispatch runs window listeners in the bubble phase
 before global ones, and a handled action stops propagating there by
 default) or the input row's own back-arrow glyph both call `exit_mode`,
-which restores the saved query verbatim and narrows the window back.
+which restores the saved query verbatim and narrows the panel back.
 `reset_for_summon` also force-exits any active mode — a mode is
 per-summon-session state, not something that survives the panel being
 hidden and re-shown.
 
-**The real window resize (`display_placement::resize_and_recenter`,
-macOS-only) is one raw, synchronous `NSWindow` call sequence, not `gpui::
-Window::resize` plus a separate reposition.** `gpui`'s own `Window::resize`
-dispatches `setContentSize:` onto the window's executor *asynchronously*;
-resizing and then immediately repositioning based on the "new" size would
-race against AppKit actually applying it. `resize_and_recenter` instead
-walks to the real `NSWindow` (the same `raw-window-handle` technique
-`display_placement.rs`'s existing `reposition_to_cursor_display` and
-`material.rs` already use), calls `setContentSize:` and `setFrameTopLeftPoint:`
-back to back against the *same* `Retained<NSWindow>`, and re-derives the
-target screen from the window's own current frame center — not the cursor,
-unlike `reposition_to_cursor_display`'s "summon where the captain is
-looking" reasoning, which is right for a fresh summon but wrong for a mode
-transition that fires from a keypress, by which point the cursor may not
-be over the panel at all. Best-effort, like every other native call in this
-module: an error (no raw window handle) is logged and the transition
-proceeds anyway — the panel's own `div` width still changes via `Render::
-render`, so content stays internally consistent even on the rare path where
-the real window fails to follow it.
+**The real window resize this originally described (`display_placement::
+resize_and_recenter`, a raw, synchronous `NSWindow` `setContentSize:`/
+`setFrameTopLeftPoint:` call pair) was removed by `neko-mode-resize` and
+does not exist any more — see "Mode view resize seam" below.** It resized
+correctly by every measurement taken at the time; the real window, its
+rendering surface, and its backing drawable all tracked the new size. What
+didn't reliably track it, discovered only once a session that had summoned
+and dismissed the panel a few times first was reproduced, was `gpui::
+Window`'s own private `viewport_size` — the size its root element is
+actually laid out and painted against every frame. A mode transition now
+resizes nothing: the real `NSWindow` is a fixed `PANEL_WIDTH_WITH_DETAIL_PX`
+for the process's entire lifetime, and `enter_mode`/`exit_mode` instead call
+`panel::Root::update_background_bounds` (a direct native-view frame set,
+`material::set_background_frame`) to move/resize the material backdrop
+*within* that fixed window, in lockstep with `Render::render`'s own
+`justify_center()` centering of the panel `div`.
 
 **The two-column clipboard-history view**
 (`data/neko-design/mockups/12-first-clipboard-use.html`, the frozen mockup
@@ -1586,6 +1598,76 @@ frozen mockup HTML/CSS files verbatim, which are still warm and were not
 edited either re-tone — with an added note pointing at this repo's own
 evidence files as the current source of truth for the shipped app's actual
 colours.
+
+## Mode view resize seam
+
+`neko-mode-resize`, fixing a real defect two prior tasks
+(`docs/evidence/mode-view-and-neutral-palette-report.md`) tried and failed
+to reproduce: the clipboard mode's window widened to 760pt but only 680pt
+was actually drawn into, leaving a transparent strip (the desktop visibly
+showing through) and clipped text on the right. Full diagnosis, the four
+workarounds tried and ruled out, and the before/after measurements:
+`docs/evidence/mode-resize-seam-fix-report.md`. Summary:
+
+**The reproduction the prior tasks were missing**: entering a mode
+*immediately* after the window's first-ever appearance (their own repro
+shape) always worked. The captain's real sequence — summon and dismiss the
+panel some number of times first, *then*, from a later summon, enter a
+mode — reliably reproduced the seam on the very first attempt.
+`evidence.rs` gained `NEKO_REAL_CYCLES_BEFORE_SHOW=<n>` to drive that real
+sequence (see its own doc comment for why it uses
+`order_front_regardless`/`order_out`, not the real `activate_window`/
+`cx.activate` path, to avoid colliding with the unrelated, already-
+documented `windowDidBecomeKey:` deadlock below) — a permanent addition to
+this repo's evidence tooling, not a one-off script.
+
+**Root cause, confirmed by direct native readback, not inferred**: the old
+`display_placement::resize_and_recenter`'s raw `NSWindow` resize genuinely
+worked — `contentView`, GPUI's own rendering `NSView`, its `CAMetalLayer`,
+and the Metal drawable itself all correctly tracked the new size, every
+time, confirmed live. What silently didn't track it was `gpui::Window`'s
+own private `viewport_size` — the size `draw_roots` (`gpui-0.2.2/src/
+window.rs`) actually paints and clips the frame against — which only
+resyncs via native `on_resize`/`on_moved`/`on_active_status_change`
+callbacks that, per direct testing, stop firing reliably on this window
+once it's been shown/hidden a few times. **Four different public-API
+workarounds were tried and all failed** to force that resync (`window.
+refresh()`, `window.resize()`, a real `-setFrameSize:` value-change nudge,
+and forcing AppKit's own deferred layout via `-layoutSubtreeIfNeeded`/
+`-displayIfNeeded`) — `viewport_size` stayed stale through all of them,
+confirmed by reading the public `window.viewport_size()` accessor well
+after each attempt, not just synchronously. This is a real `gpui-0.2.2`
+staleness this codebase cannot reach around from outside the crate (the
+field and the resync method are both private), not a bug in this repo's
+own resize/positioning math — which the prior tasks' own readbacks had
+already shown correct.
+
+**The fix removes the operation that triggered the staleness, rather than
+working around it**: the real `NSWindow` is now created once at
+`theme::PANEL_WIDTH_WITH_DETAIL_PX` (760) and never resized again for the
+rest of the process — `resize_and_recenter` is deleted, not just unused.
+`panel::Root::render`'s own stage element is always `w(PANEL_WIDTH_WITH_DETAIL_PX)
+.flex().justify_center()`; the narrower root-list panel centers inside it
+via ordinary GPUI flexbox, provably unaffected by `viewport_size`'s own
+tracking since the window's real size genuinely never changes any more.
+`material::set_background_frame` (new) moves/resizes the installed native
+backdrop directly — one synchronous `-[NSView setFrame:]` call, the same
+centering formula `justify_center()` produces, no window resize and no
+dependency on the broken callback chain. `panel::Root::update_background_bounds`
+(replacing `resize_panel`) is the one call site, from `enter_mode`/
+`exit_mode`/`reset_for_summon`.
+
+**Disclosed cost, verified rather than assumed**: the real window's own
+footprint is 760pt at rest now, not 680pt — an internal fact only.
+`theme::PANEL_ROOT_INSET_PX` (40pt, half the width gap) centers the 680pt
+root-list panel inside that wider window, landing its own visible left
+edge at exactly the same on-screen position the old 680pt-wide window's
+left edge sat at — proven algebraically and confirmed live
+(`docs/evidence/mode-resize-seam-fix-report.md`'s own pixel measurements).
+The 40pt margin outside the visible panel carries no material and no
+shadow of its own (macOS's native shadow follows the actual painted pixels
+for a transparent-backed window, confirmed in the same screenshots) — the
+root list's resting state is visually unchanged.
 
 ## Third-party UI code: evaluated, then narrowly vendored
 
@@ -1878,7 +1960,12 @@ bottom via a flex-grow content area, so short result lists leave quiet space
 above the footer rather than the window growing or shrinking. Documented in
 `panel.rs`'s own module doc comment. Real dynamic resizing is a follow-up, not
 attempted here specifically because it was untested territory on the one path
-this task's acceptance criteria measures a hard number against.
+this task's acceptance criteria measures a hard number against. The
+*height* (448) is still exactly this: fixed, never resized at runtime. The
+*width* no longer varies at the real `NSWindow` level at all either, since
+"Mode view resize seam" below — the window is a fixed
+`PANEL_WIDTH_WITH_DETAIL_PX`, and only the panel `div`'s own centering
+changes for a mode transition.
 
 **A fixed content area with two possible section headers (apps, clipboard)
 means the row count that fits isn't always `RESULT_LIMIT` (8) — a header eats
@@ -2036,10 +2123,11 @@ use it to re-verify once a fixed `gpui` becomes consumable.
   storage, thumbnails, size bounds, a new `SearchItem`/`Icon` shape — a
   separate captain decision per the launch brief, not attempted here).
 - **Dynamic window resize**: partially built — see "v1 simplification"
-  below for the still-true per-keystroke case, and "Commands and modes"
-  above for the one real, working exception (a mode transition's one-time
-  width change, via a synchronous raw `NSWindow` call rather than `gpui::
-  Window::resize`'s async one).
+  below for the still-true per-keystroke case. A mode transition's own
+  width change is real but, since "Mode view resize seam" above, is no
+  longer a window resize at all — the real `NSWindow` is fixed at
+  `PANEL_WIDTH_WITH_DETAIL_PX` for the process's whole lifetime; only the
+  panel `div`'s own centering and the native backdrop's frame change.
 - **`Provider` abstraction**: built — see "Provider abstraction" above.
   `agent.rs`'s old `AgentProvider` placeholder is deleted, superseded by
   this. Agent capability, whenever it's built, is `impl Provider` plus one

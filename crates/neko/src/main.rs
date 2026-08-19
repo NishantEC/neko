@@ -112,7 +112,13 @@ fn main() {
         // (the step 08 banner) and onboarding alike.
         let accessibility: onboarding::SharedAccessibility = Rc::new(SystemAccessibilityChecker);
 
-        let bounds = upper_third(None, size(px(theme::PANEL_WIDTH_PX), px(panel::PANEL_HEIGHT_PX)), cx);
+        // Always `PANEL_WIDTH_WITH_DETAIL_PX` — the real `NSWindow` never
+        // resizes for a mode transition any more (see `AGENTS.md`, "Mode
+        // view resize seam"); the narrower root-list panel is centered
+        // *within* this fixed window instead (`panel::Root::render`'s own
+        // stage element, `material::set_background_frame`'s matching
+        // native backdrop).
+        let bounds = upper_third(None, size(px(theme::PANEL_WIDTH_WITH_DETAIL_PX), px(panel::PANEL_HEIGHT_PX)), cx);
         let window = cx
             .open_window(
                 WindowOptions {
@@ -170,6 +176,22 @@ fn main() {
                         match spaces::verify(window) {
                             Ok(readback) => eprintln!("neko: Spaces/full-screen reachability verified: {readback}"),
                             Err(e) => eprintln!("neko: Spaces/full-screen reachability readback FAILED: {e}"),
+                        }
+                        // The window itself just opened at the fixed
+                        // `PANEL_WIDTH_WITH_DETAIL_PX`, but the root list is
+                        // the narrower `PANEL_WIDTH_PX` state — narrow the
+                        // native backdrop to match before the first summon
+                        // ever shows it, the same centering
+                        // `panel::Root::render`'s own stage element and
+                        // every later mode transition use (`AGENTS.md`,
+                        // "Mode view resize seam").
+                        if let Err(e) = material::set_background_frame(
+                            window,
+                            theme::PANEL_ROOT_INSET_PX,
+                            theme::PANEL_WIDTH_PX,
+                            panel::PANEL_HEIGHT_PX,
+                        ) {
+                            eprintln!("neko: could not narrow the initial native background frame: {e}");
                         }
                         Root::new(client.clone(), accessibility.clone(), translucent, cx)
                     }
@@ -419,7 +441,11 @@ fn upper_third(display_id: Option<gpui::DisplayId>, panel_size: gpui::Size<gpui:
 /// (no `NSScreen` available, off the main thread, ...) the window simply
 /// stays wherever it already was rather than failing the summon.
 fn reposition_to_cursor_display(window: &gpui::Window) {
-    let panel_size = size(px(theme::PANEL_WIDTH_PX), px(panel::PANEL_HEIGHT_PX));
+    // `PANEL_WIDTH_WITH_DETAIL_PX` — the real window's own fixed size
+    // (`AGENTS.md`, "Mode view resize seam"), not whichever mode the panel
+    // happens to be in; `upper_third_offset` positions the window itself,
+    // and the window never changes size.
+    let panel_size = size(px(theme::PANEL_WIDTH_WITH_DETAIL_PX), px(panel::PANEL_HEIGHT_PX));
     if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
         eprintln!("neko: could not reposition the summon window to the display under the cursor: {e}");
     }

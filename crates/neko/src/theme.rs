@@ -171,6 +171,16 @@ pub const SECTION_HEADER_HEIGHT_PX: f32 = 28.0;
 pub const FOOTER_HEIGHT_PX: f32 = 44.0;
 pub const PANEL_WIDTH_PX: f32 = 680.0;
 pub const PANEL_WIDTH_WITH_DETAIL_PX: f32 = 760.0;
+/// Half the gap between the two panel widths above — the horizontal inset
+/// the root list's own 680px content sits at within the real `NSWindow`,
+/// which is now always `PANEL_WIDTH_WITH_DETAIL_PX` wide (see `AGENTS.md`,
+/// "Mode view resize seam"). Centering the narrower panel inside the fixed
+/// window this way, rather than resizing the window itself for a mode
+/// transition, is what keeps the root list landing in the exact same
+/// on-screen position `upper_third_offset`'s own 680px-based formula placed
+/// it at before that fix — `(680 - 760) / 2` cancels back out once this
+/// inset is added on top of the window's own 760px-based centering.
+pub const PANEL_ROOT_INSET_PX: f32 = (PANEL_WIDTH_WITH_DETAIL_PX - PANEL_WIDTH_PX) / 2.0;
 /// The two-column mode view's fixed left (list) column width —
 /// `data/neko-design/mockups/12-first-clipboard-use.html`'s
 /// `.panel-list.with-detail { flex: 0 0 264px }`. The detail pane takes

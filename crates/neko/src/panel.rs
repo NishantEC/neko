@@ -8,18 +8,30 @@
 //! exists in GPUI, but its resize-anchor behavior on a borderless
 //! always-on-top popup window was untested territory this task had no safe
 //! way to verify visually before committing to it on the hotkey-latency
-//! critical path. Instead the window is one fixed size (680×448) and the
-//! footer is pinned to its true bottom with a flex-grow content area, so
-//! short result lists just leave quiet space above the footer rather than
-//! the window itself growing/shrinking. Correct, on-brief, and zero risk to
-//! the summon-latency budget; real dynamic resizing is a follow-up.
+//! critical path. Instead the window height is one fixed size (448px) and
+//! the footer is pinned to its true bottom with a flex-grow content area,
+//! so short result lists just leave quiet space above the footer rather
+//! than the window itself growing/shrinking. Correct, on-brief, and zero
+//! risk to the summon-latency budget; real dynamic resizing is a
+//! follow-up.
+//!
+//! The real `NSWindow`'s own *width* is fixed too, at
+//! `theme::PANEL_WIDTH_WITH_DETAIL_PX` (760px), for the whole process
+//! lifetime — not a v1 scope cut like the height above, but the fix for a
+//! real defect (`AGENTS.md`, "Mode view resize seam"): resizing the real
+//! window for a mode transition left `gpui`'s own paint viewport silently
+//! out of sync with it once the window had been shown/hidden a few times.
+//! `render`'s own stage element centers the narrower root-list panel
+//! inside that fixed window instead; `Root::update_background_bounds`
+//! keeps the native material backdrop in lockstep via a direct `NSView`
+//! frame set, never a window resize.
 
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, Render,
-    SharedString, Window, actions, div, img, prelude::*, px, size,
+    SharedString, Window, actions, div, img, prelude::*, px,
 };
 use neko_client::NekoClient;
 use neko_protocol::{Glyph, Icon, ItemAction, Request, Response, SearchItem};
@@ -199,16 +211,16 @@ impl Root {
     /// clean query" above: if a captain hid the panel while inside
     /// clipboard-history mode (Escape, or clicking outside), the *next*
     /// hotkey press should re-summon the ordinary root list, not silently
-    /// resume the mode they were in. This is also what keeps the window's
-    /// own width correct before it's shown again — narrowing back to
-    /// `PANEL_WIDTH_PX` happens here, synchronously, before `main.rs`
-    /// activates the window, so there's no visible wide-then-narrow flash.
+    /// resume the mode they were in. This is also what keeps the native
+    /// background material correctly narrowed before the panel is shown
+    /// again — see `update_background_bounds`'s own doc comment for why
+    /// this no longer resizes the real `NSWindow` at all.
     pub fn reset_for_summon(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(mode) = self.active_mode.take() {
             self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
             self.actions_menu = None;
             if mode.chrome.has_detail {
-                self.resize_panel(window, theme::PANEL_WIDTH_PX);
+                self.update_background_bounds(window, theme::PANEL_WIDTH_PX);
             }
         }
         self.text_field.update(cx, |field, cx| field.clear(cx));
@@ -222,21 +234,27 @@ impl Root {
         self.fetch_accessibility_banner_state(cx);
     }
 
-    /// The one call site that actually touches the real `NSWindow` — see
-    /// `display_placement::resize_and_recenter`'s own doc comment for why
-    /// this is a synchronous raw AppKit call rather than `gpui::Window::
-    /// resize` plus a separate reposition. Best-effort: an error (no raw
-    /// window handle — the same conditions `main.rs`'s own
-    /// `reposition_to_cursor_display` already tolerates, e.g. under a
-    /// headless test window) is logged and otherwise ignored, never a panic
-    /// and never a blocked mode transition — the panel's own `div` width
-    /// (`Render::render`, below) still changes either way, so the *content*
-    /// is always internally consistent even on the rare path where the real
-    /// window fails to follow it.
-    fn resize_panel(&self, window: &mut Window, new_width: f32) {
-        let target = size(px(new_width), px(PANEL_HEIGHT_PX));
-        if let Err(e) = crate::display_placement::resize_and_recenter(window, target) {
-            eprintln!("neko: could not resize/recenter the panel for a mode transition: {e}");
+    /// Updates the native background material view to match a mode
+    /// transition — see `AGENTS.md`, "Mode view resize seam", for why this
+    /// is a direct `NSView` frame set (`material::set_background_frame`)
+    /// rather than a native `NSWindow` resize: the real window is now
+    /// always `theme::PANEL_WIDTH_WITH_DETAIL_PX` wide (`main.rs`'s own
+    /// window creation), so this only ever moves/resizes the background
+    /// view *within* that fixed window, centering it at `new_width` — the
+    /// same centering `Render::render`'s own `justify_center()` stage
+    /// element produces for the panel `div` itself (flexbox centering a
+    /// `new_width`-wide child inside a `PANEL_WIDTH_WITH_DETAIL_PX`-wide
+    /// row lands on this exact same `x`), so the two always agree without
+    /// either one hard-coding the other's formula. Best-effort: an
+    /// error (no raw window handle, material not installed) is logged and
+    /// otherwise ignored, never a panic and never a blocked mode transition
+    /// — the panel's own `div` width/centering still changes either way, so
+    /// the *content* is always internally consistent even on the rare path
+    /// where the native backdrop fails to follow it.
+    fn update_background_bounds(&self, window: &Window, new_width: f32) {
+        let x = (theme::PANEL_WIDTH_WITH_DETAIL_PX - new_width) / 2.0;
+        if let Err(e) = crate::material::set_background_frame(window, x, new_width, PANEL_HEIGHT_PX) {
+            eprintln!("neko: could not update the native background frame for a mode transition: {e}");
         }
     }
 
@@ -280,6 +298,15 @@ impl Root {
     /// `set_query_for_evidence`'s own doc comment.
     pub fn confirm_for_evidence(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.confirm(&Confirm, window, cx);
+    }
+
+    /// Evidence/verification-only — drives the same `Escape`/back-arrow
+    /// path a real dismiss takes (`handle_dismiss`, exiting the active mode
+    /// if one is open), for verification hooks that need to cycle a mode
+    /// exit/re-entry without synthetic OS input — same reasoning as
+    /// `confirm_for_evidence` above.
+    pub fn dismiss_for_evidence(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.handle_dismiss(&crate::DismissWindow, window, cx);
     }
 
     /// Pushed by `main.rs`'s summon loop whenever `NekoClient::is_connected()`
@@ -491,7 +518,10 @@ impl Root {
     /// Enters `mode_id`'s mode: saves the current query so `exit_mode` can
     /// restore it, clears the field to start the mode's own list fresh,
     /// swaps the placeholder, and — if the mode wants a detail pane —
-    /// widens the real window. A no-op if `mode_id` doesn't name a
+    /// widens the *visible* panel (`Render::render`'s own centering, driven
+    /// by `active_mode`, plus `update_background_bounds`'s matching native
+    /// backdrop — the real `NSWindow` itself never resizes, see that
+    /// method's doc comment). A no-op if `mode_id` doesn't name a
     /// registered mode (a stale/corrupted value) or a mode is already
     /// active (confirming a command row is only ever possible from the
     /// root list, since commands never appear inside a mode's own scoped
@@ -508,7 +538,7 @@ impl Root {
         self.selected = 0;
         self.actions_menu = None;
         if chrome.has_detail {
-            self.resize_panel(window, theme::PANEL_WIDTH_WITH_DETAIL_PX);
+            self.update_background_bounds(window, theme::PANEL_WIDTH_WITH_DETAIL_PX);
         }
         self.text_field.update(cx, |field, cx| {
             field.set_placeholder(chrome.placeholder, cx);
@@ -524,8 +554,8 @@ impl Root {
     /// Leaves the active mode, if any: restores the pre-entry query
     /// (triggering a real root-list search, same reasoning as
     /// `enter_mode`'s own `set_content` call), restores the default
-    /// placeholder, closes any open actions menu, and narrows the window
-    /// back if it had widened.
+    /// placeholder, closes any open actions menu, and narrows the visible
+    /// panel back if it had widened.
     fn exit_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(mode) = self.active_mode.take() else {
             return;
@@ -533,7 +563,7 @@ impl Root {
         self.actions_menu = None;
         self.selected = 0;
         if mode.chrome.has_detail {
-            self.resize_panel(window, theme::PANEL_WIDTH_PX);
+            self.update_background_bounds(window, theme::PANEL_WIDTH_PX);
         }
         self.text_field.update(cx, |field, cx| {
             field.set_placeholder(DEFAULT_PLACEHOLDER, cx);
@@ -664,7 +694,22 @@ impl Render for Root {
         if let Some(menu) = self.actions_menu.clone() {
             root = root.child(self.render_actions_menu(&menu));
         }
-        root
+        // The real `NSWindow` is always `PANEL_WIDTH_WITH_DETAIL_PX` wide
+        // now, never resized at runtime for a mode transition — see
+        // `AGENTS.md`, "Mode view resize seam", and
+        // `update_background_bounds`'s own doc comment. This stage element
+        // is what gpui actually lays out against the window's own (now
+        // fixed, always-correct) viewport; centering the narrower
+        // root-list `root` div inside it, rather than ever asking gpui to
+        // resize the window itself, is what the fix trades on — matched
+        // pixel-for-pixel by `update_background_bounds`'s identical
+        // centering of the native backdrop, so the two always agree.
+        div()
+            .w(px(theme::PANEL_WIDTH_WITH_DETAIL_PX))
+            .h(px(PANEL_HEIGHT_PX))
+            .flex()
+            .justify_center()
+            .child(root)
     }
 }
 

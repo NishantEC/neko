@@ -89,47 +89,12 @@ pub fn reposition_to_cursor_display(_window: &Window, _panel_size: Size<Pixels>)
     Err("multi-display repositioning is only implemented on macOS".to_string())
 }
 
-/// Resizes the real `NSWindow`'s content to `panel_size` and re-centers it
-/// (the same `upper_third_offset` formula every other placement in this
-/// module uses) on whichever screen the window is *currently* on — a mode
-/// transition (`panel::Root::enter_mode`/`exit_mode`) fires from a
-/// keypress, not a cursor move, so the cursor may no longer be over the
-/// panel at all by then; re-deriving the target screen from the window's
-/// own current frame center is correct regardless of where the cursor
-/// happens to be, unlike `reposition_to_cursor_display`'s own "summon
-/// where the captain is looking" reasoning (which is right for *that*
-/// call, a fresh summon, but wrong for this one).
-///
-/// **Deliberately one raw `NSWindow` call sequence, not
-/// `Window::resize` + `reposition_to_cursor_display`.** `gpui`'s own
-/// `Window::resize` (`gpui-0.2.2/src/platform/mac/window.rs`) dispatches
-/// `setContentSize:` onto the window's executor *asynchronously* — calling
-/// it and then immediately repositioning based on the "new" size would race
-/// against AppKit actually applying that size, and could momentarily
-/// recenter for the wrong width. Resizing and repositioning together here,
-/// synchronously, against the one real `NSWindow`, has no such race.
-///
-/// On any error (no raw window handle — the same conditions
-/// `reposition_to_cursor_display` already tolerates) the window is left
-/// exactly as it was rather than failing the mode transition; the caller
-/// logs and continues, same as every other best-effort native call in this
-/// module.
-#[cfg(target_os = "macos")]
-pub fn resize_and_recenter(window: &Window, panel_size: Size<Pixels>) -> Result<String, String> {
-    macos::resize_and_recenter(window, panel_size)
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn resize_and_recenter(_window: &Window, _panel_size: Size<Pixels>) -> Result<String, String> {
-    Err("window resize/recenter is only implemented on macOS".to_string())
-}
-
 #[cfg(target_os = "macos")]
 mod macos {
     use objc2::MainThreadMarker;
     use objc2::rc::Retained;
     use objc2_app_kit::{NSEvent, NSScreen, NSView, NSWindow};
-    use objc2_foundation::{NSPoint, NSSize};
+    use objc2_foundation::NSPoint;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     use super::{Pixels, ScreenFrame, Size, Window, pick_screen_for_point, upper_third_offset};
@@ -202,73 +167,6 @@ mod macos {
             "screen frame origin=({}, {}) size=({}, {}), top-left set to ({}, {})",
             frame.origin.x, frame.origin.y, frame.size.width, frame.size.height, top_left.x, top_left.y
         ))
-    }
-
-    /// The screen containing `point`, falling back the same way
-    /// [`screen_under_cursor`] does (main screen, then the first screen) —
-    /// shared logic, parameterized on the point to test containment
-    /// against rather than always reading the live cursor.
-    fn screen_containing(mtm: MainThreadMarker, point_x: f64, point_y: f64) -> Option<Retained<NSScreen>> {
-        let screens: Vec<Retained<NSScreen>> = NSScreen::screens(mtm).to_vec();
-        let frames: Vec<ScreenFrame> = screens.iter().map(|s| screen_frame(s)).collect();
-        if let Some(idx) = pick_screen_for_point(&frames, point_x, point_y) {
-            return screens.get(idx).cloned();
-        }
-        NSScreen::mainScreen(mtm).or_else(|| screens.first().cloned())
-    }
-
-    /// **Pooled.** A parallel task on this same file
-    /// (`fm/neko-client-leak`) is fixing a real, measured multi-gigabyte
-    /// client leak traced to exactly this class of defect — client-side
-    /// AppKit calls (`NSScreen::screens`, `NSEvent::mouseLocation`, ...)
-    /// with no `objc2::rc::autoreleasepool` anywhere in this file, the same
-    /// shape `6fdc80c` already fixed daemon-side. This function is new code
-    /// added after that leak existed, so it wraps its own AppKit calls
-    /// rather than adding a fourth unpooled call site while that fix is
-    /// in flight — `reposition`/`screen_under_cursor` above are
-    /// pre-existing and intentionally left for that task to fix, not
-    /// touched here to keep this diff from conflicting with theirs.
-    pub fn resize_and_recenter(window: &Window, panel_size: Size<Pixels>) -> Result<String, String> {
-        objc2::rc::autoreleasepool(|_pool| {
-            let mtm = MainThreadMarker::new()
-                .ok_or_else(|| "resize/recenter attempted off the main thread".to_string())?;
-            let native = native_window(window)?;
-            let current = native.frame();
-            let center_x = current.origin.x + current.size.width / 2.0;
-            let center_y = current.origin.y + current.size.height / 2.0;
-            let screen = screen_containing(mtm, center_x, center_y)
-                .ok_or_else(|| "no NSScreen is available".to_string())?;
-            let frame = screen.frame();
-            let offset = upper_third_offset(
-                gpui::size(gpui::px(frame.size.width as f32), gpui::px(frame.size.height as f32)),
-                panel_size,
-            );
-            // Resize first: `setFrameTopLeftPoint` only moves the origin,
-            // it doesn't touch size, so the size has to already be correct
-            // before computing/applying the new top-left, or the *next*
-            // frame's center-point calculation (a second resize back)
-            // would be based on a stale size.
-            native.setContentSize(NSSize {
-                width: panel_size.width.to_f64(),
-                height: panel_size.height.to_f64(),
-            });
-            let top_left = NSPoint {
-                x: frame.origin.x + offset.x.to_f64(),
-                y: frame.origin.y + frame.size.height - offset.y.to_f64(),
-            };
-            native.setFrameTopLeftPoint(top_left);
-            Ok(format!(
-                "resized to ({}, {}), screen frame origin=({}, {}) size=({}, {}), top-left set to ({}, {})",
-                panel_size.width.to_f64(),
-                panel_size.height.to_f64(),
-                frame.origin.x,
-                frame.origin.y,
-                frame.size.width,
-                frame.size.height,
-                top_left.x,
-                top_left.y
-            ))
-        })
     }
 }
 
