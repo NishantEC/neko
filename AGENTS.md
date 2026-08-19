@@ -1669,6 +1669,60 @@ shadow of its own (macOS's native shadow follows the actual painted pixels
 for a transparent-backed window, confirmed in the same screenshots) — the
 root list's resting state is visually unchanged.
 
+**That 40pt margin is still real, clickable `NSWindow` frame, though — a
+second real defect this task's own fix introduced, caught in review before
+landing, not by the original acceptance criteria.** The window is always
+`PANEL_WIDTH_WITH_DETAIL_PX` now, in *every* mode, not just detail mode; a
+click landing in the margin (present on all four sides whenever the panel
+is narrower than the window — i.e. the common root-list case, not just
+detail mode) used to hit nothing (`justify_center()`'s implicit gap has no
+gpui element covering it at all). Checked directly against `gpui-0.2.2`'s
+own source (no `ignoresMouseEvents`, no custom `-hitTest:` override
+anywhere in the crate) rather than assumed: standard AppKit hit-testing
+means that click is captured by neko's own window (already key/frontmost,
+`NSPopUpWindowLevel`) regardless — it neither reaches whatever's behind
+the window on the desktop (no real click-through without
+`ignoresMouseEvents`, which is a whole-window property and would also make
+the *visible* panel unclickable) nor dismisses the panel (`main.rs`'s
+click-outside-dismiss, `cx.observe_window_activation`, only fires on an
+actual activation *change* — a click that stays inside neko's own window,
+margin included, is never that). Two real, silent regressions from one fix:
+a click there did nothing at all, where before this task there was no such
+region for a click to land in.
+
+Fixed by giving the margin its own real gpui presence:
+`panel::Root::render_dismiss_margin` renders two explicit divs (left/right,
+each `(PANEL_WIDTH_WITH_DETAIL_PX − panel_width) / 2`, `0`-width and so
+harmless whenever the panel already fills the window) in place of
+`justify_center()`'s implicit gap, each with an `on_mouse_down` that calls
+`cx.hide()` — restoring the click-outside *behavior* the captain already
+relies on, for a region that can no longer be true click-through short of
+a second overlay window or patching `gpui`'s own hit-testing (neither
+undertaken here — see the launch brief's own "whichever is cleaner"
+framing between the two, and `ignoresMouseEvents`' whole-window scope
+above for why it wasn't the one picked). **Live click confirmation
+(pixel-position mouse-down/up, either via `System Events` or a
+`CGEventPostToPid`-scoped synthetic event) was attempted and abandoned partway**:
+a `System Events "click at"` probe against unverified absolute screen
+coordinates landed on a real, unrelated app on this shared machine before
+its risk was fully appreciated (harmless as far as could be confirmed —
+an accessibility-hierarchy read, not a destructive action — but a real
+lesson: never post a synthetic click at raw screen coordinates without
+first confirming exactly what occupies them); switching to
+`CGEventPostToPid` (confirmed safe — scoped to one process's own windows
+by the OS, cannot address a different app regardless of coordinates) hit a
+*separate*, real rendering staleness in this same long test session — data
+proven correct via direct daemon queries and in-process debug reads, but
+the on-screen frame never updated to reflect it, reproducible even on
+completely unmodified, non-margin-related search-result rendering — that
+made on-screen confirmation unreliable within the session and wasn't
+chased further (a session/environment issue, not this fix's own
+correctness, but not run to ground either). The fix itself rests on the
+`gpui`-source-level hit-testing analysis above, not a live click; the next
+person to touch this area should get a real, interactive click on the
+margin from a clean session before trusting this description of the
+mechanism as the final word.
+
 ## Third-party UI code: evaluated, then narrowly vendored
 
 `longbridge/gpui-component` (Apache-2.0, crates.io) was evaluated as a

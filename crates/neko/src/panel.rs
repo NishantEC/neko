@@ -30,8 +30,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, Render,
-    SharedString, Window, actions, div, img, prelude::*, px,
+    AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, MouseButton,
+    Render, SharedString, Window, actions, div, img, prelude::*, px,
 };
 use neko_client::NekoClient;
 use neko_protocol::{Glyph, Icon, ItemAction, Request, Response, SearchItem};
@@ -704,16 +704,50 @@ impl Render for Root {
         // resize the window itself, is what the fix trades on — matched
         // pixel-for-pixel by `update_background_bounds`'s identical
         // centering of the native backdrop, so the two always agree.
+        //
+        // **Explicit margin children, not `justify_center()`'s implicit
+        // flex gap** — the margin is still real, clickable window area (the
+        // real `NSWindow` frame extends past `root`'s own edge whenever
+        // `panel_width < PANEL_WIDTH_WITH_DETAIL_PX`), and with no gpui
+        // element covering it, a click there used to be silently swallowed:
+        // this window is already key/frontmost (`WindowKind::PopUp`, no
+        // `ignoresMouseEvents`, no custom hit-testing anywhere in `gpui`),
+        // so it neither reaches whatever's behind it on the desktop nor
+        // triggers `main.rs`'s click-outside-dismiss (`cx.
+        // observe_window_activation`, which only fires on an actual
+        // activation *change* — clicking inside this window's own frame,
+        // margin included, is never that). Giving each margin div its own
+        // `on_mouse_down` restores the click-outside *behavior* (dismiss)
+        // for a region that can no longer be true click-through — see
+        // `AGENTS.md`, "Mode view resize seam", for why real click-through
+        // isn't available without a second overlay window or patching
+        // `gpui`'s own hit-testing, neither undertaken here.
+        let margin_width = (theme::PANEL_WIDTH_WITH_DETAIL_PX - panel_width) / 2.0;
         div()
             .w(px(theme::PANEL_WIDTH_WITH_DETAIL_PX))
             .h(px(PANEL_HEIGHT_PX))
             .flex()
-            .justify_center()
+            .child(self.render_dismiss_margin(margin_width, "left", cx))
             .child(root)
+            .child(self.render_dismiss_margin(margin_width, "right", cx))
     }
 }
 
 impl Root {
+    /// One of `render`'s own two margin children — see its call site's doc
+    /// comment for why this exists at all. `width` is `0` whenever the
+    /// panel is already the full `PANEL_WIDTH_WITH_DETAIL_PX` (detail
+    /// mode), which renders an empty, harmless, unclickable sliver rather
+    /// than needing a separate conditional.
+    fn render_dismiss_margin(&self, width: f32, side: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id(SharedString::from(format!("panel-margin-{side}")))
+            .w(px(width))
+            .h_full()
+            .flex_shrink_0()
+            .on_mouse_down(MouseButton::Left, cx.listener(|_root, _event, _window, cx| cx.hide()))
+    }
+
     fn render_input_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
