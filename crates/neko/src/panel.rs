@@ -1194,12 +1194,25 @@ fn resolve_selection(previous: Option<(&str, &str)>, results: &[SearchItem]) -> 
 /// The reservation, generalized from a hard-coded apps-vs-clipboard-only
 /// rule to however many contiguous provider sections `results` actually
 /// contains (a fourth provider needs no changes here at all): the first
-/// section is primary and gets whatever's left of `budget_px` after every
-/// *other* section has one header-plus-one-row set aside for it. If an
-/// earlier section uses less than its capped share, later sections split
-/// the difference too — `fit_section` below just spends whatever budget is
-/// actually left after the previous section, in order, same as before this
-/// task.
+/// section gets whatever's left of `budget_px` after every *other* section
+/// has one header-plus-one-row set aside for it. If an earlier section uses
+/// less than its capped share, later sections split the difference too —
+/// `fit_section` below just spends whatever budget is actually left after
+/// the previous section, in order, same as before this task.
+///
+/// **This intentionally reuses the daemon's own section order rather than
+/// deciding one independently.** `results` arrives from the wire already
+/// ordered by `neko_core::search::allocate`'s own final pass — sections by
+/// content strength (their best candidate's score), registration order only
+/// as the tiebreak (see that function's doc comment) — not by provider
+/// registration order the way it used to be. `group_into_sections` merely
+/// splits that order into contiguous runs; it never re-sorts. Giving "the
+/// first section" the most generous pixel budget therefore now means "the
+/// section the daemon judged most relevant to this query gets the most
+/// rows," which is the same intent as the daemon's own reservation-then-
+/// greedy budget — the screen and the wire have to agree on what "primary"
+/// means, and this is how they stay in sync without duplicating the
+/// ordering logic client-side.
 fn fit_within_budget(results: Vec<SearchItem>, budget_px: f32) -> Vec<SearchItem> {
     let sections = group_into_sections(results);
     if sections.is_empty() {
@@ -1744,6 +1757,28 @@ mod tests {
         let first_clipboard = kinds.iter().position(|&k| k == "clipboard").unwrap();
         assert!(kinds[..first_file].iter().all(|&k| k == "app"));
         assert!(first_file < first_clipboard);
+    }
+
+    #[test]
+    fn the_reservation_holds_regardless_of_which_kind_the_daemon_put_first() {
+        // `neko_core::search::allocate` now orders sections by content
+        // strength, not provider registration order (see that function's
+        // own doc comment) — "command" or "settings" can legitimately lead
+        // a response now, not just "app". `fit_within_budget` never re-sorts
+        // (`group_into_sections` only groups contiguous runs, preserving
+        // whatever order `results` already arrived in), so this only proves
+        // what matters here: the reservation-then-crowd-out guarantee holds
+        // for *whichever* section happens to be first, not just "app".
+        let mut results = vec![item("command")];
+        results.extend((0..6).map(|_| item("clipboard")));
+        results.push(item("settings"));
+
+        let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
+
+        assert!(fitted.iter().any(|i| i.kind == "command"), "the leading section's own reservation must survive");
+        assert!(fitted.iter().any(|i| i.kind == "settings"), "the trailing section must never be crowded out either");
+        let kinds: Vec<&str> = fitted.iter().map(|i| i.kind.as_str()).collect();
+        assert_eq!(kinds[0], "command", "the daemon's own section order must be preserved verbatim, not re-sorted here");
     }
 
     // --- Commands and modes: fit_mode_list / group_by_group_label ---

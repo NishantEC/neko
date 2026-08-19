@@ -3,8 +3,13 @@
 //! instead — see `apps::AppsProvider`, `clipboard::ClipboardProvider`,
 //! `files::FileProvider` — since "each provider owns its own matching and
 //! scoring" (the launch brief's own wording) is exactly the line this
-//! module doesn't cross.
+//! module doesn't cross, with one narrow, documented exception:
+//! `allocate`'s section-ordering pass reads (never writes)
+//! `clipboard::CLIPBOARD_RECENCY_BOOST_CEILING` to keep a clipboard
+//! candidate's freshness bonus from being mistaken for query relevance when
+//! choosing which *section* leads — see that pass's own doc comment.
 
+use crate::clipboard;
 use neko_protocol::SearchItem;
 
 /// Score a query against a title as a case-insensitive subsequence match.
@@ -262,18 +267,29 @@ fn clipboard_max_slots(limit: usize) -> usize {
 /// match is reserved a slot) to however many providers are registered,
 /// with zero provider-specific code anywhere in this function.
 ///
-/// `providers` must be given in section render order (`AppState::new`'s own
-/// registration order) — the output preserves that order, matching today's
-/// "Applications" section always rendering above "Clipboard". Every
-/// provider is treated symmetrically by the allocation itself (see the
-/// reservation pass below); render order is purely about where each
-/// section's header lands on screen, not about who gets first claim on the
-/// shared budget. `SearchItem`s stay grouped by provider in the output (each provider's
-/// own candidates stay contiguous, in that provider's own score order) so
-/// the panel's contiguous-run section-header detection keeps working
-/// unchanged.
+/// `providers` is given in registration order (`AppState::new`'s own `Vec`
+/// order) — that order decides *only* how ties are broken (see the section-
+/// ordering pass below), never where a section's header actually lands on
+/// screen. **Section order is decided by content strength, not by
+/// registration order** — a structural fix, not a scoring one: a previous
+/// task (`fe4e4e9`, `neko-ranking-2`) established that score alone can only
+/// move rows *within* a section, never move a section itself, since the
+/// output used to be `flat_map`'d over `providers` in its given order,
+/// always. That meant a query like `"clipboard history"` — which the
+/// `command` provider matches almost perfectly (`docs/evidence/
+/// settings-and-clipboard-ranking.md`'s "Commands and modes" companion
+/// evidence) — still rendered the **Commands** section dead last, beneath
+/// **Clipboard**'s own always-reserved rows, purely because `command` is
+/// registered after `clipboard` in `AppState::with_test_providers`. Every
+/// provider is still treated symmetrically by the *allocation* itself (see
+/// the reservation pass below, unchanged); only the final section order is
+/// new. `SearchItem`s stay grouped by provider in the output (each
+/// provider's own candidates stay contiguous, in that provider's own score
+/// order) so the panel's contiguous-run section-header detection
+/// (`panel::group_into_sections`) keeps working unchanged — this changes
+/// *which* contiguous run comes first, not whether runs exist.
 ///
-/// Two passes:
+/// Three passes:
 ///
 /// 1. **Reservation.** Every provider with at least one candidate reserves
 ///    one slot, subtracted from `limit` up front — this is what stops a
@@ -282,7 +298,7 @@ fn clipboard_max_slots(limit: usize) -> usize {
 ///    guarantee `server.rs`'s own tests pin today (there, specifically for
 ///    clipboard), now symmetric across every registered provider rather
 ///    than hard-coded to one pair. This has to include the first
-///    (highest-priority) provider too, not just the ones after it: an
+///    (registration-order) provider too, not just the ones after it: an
 ///    earlier version of this function only reserved a floor for providers
 ///    after the first, reasoning that the first one, "primary," would
 ///    naturally win most of the greedy phase below anyway — live testing
@@ -291,17 +307,38 @@ fn clipboard_max_slots(limit: usize) -> usize {
 ///    clean prefix match) was registered: it won every contested slot, not
 ///    just most of them, leaving the *app* section with zero rows even
 ///    though real apps matched the query. "No provider crowds another out
-///    entirely" has to hold for every provider, including whichever one
-///    happens to be first.
+///    entirely" has to hold for every provider, independent of section
+///    order.
 /// 2. **Greedy interleave.** Whatever's left of `limit` is spent one slot
 ///    at a time on the single highest-scoring not-yet-taken candidate
-///    across *every* provider — this is the actual cross-provider ranking:
-///    a provider whose matches are more relevant to this particular query
-///    earns more of the shared budget than one that only barely cleared
-///    its reservation floor, rather than every provider being capped at
-///    exactly one row regardless of how well it matched. Ties (equal
-///    score) go to the earlier provider in `providers`' order, so behavior
-///    stays deterministic.
+///    across *every* provider — this is the actual cross-provider row-level
+///    ranking: a provider whose matches are more relevant to this
+///    particular query earns more of the shared budget than one that only
+///    barely cleared its reservation floor, rather than every provider
+///    being capped at exactly one row regardless of how well it matched.
+///    This pass never changes section order, only how many rows a section
+///    gets.
+/// 3. **Section ordering.** Once every provider knows how many rows it's
+///    keeping, the sections themselves are sorted by the score of their own
+///    top (best) surviving candidate — descending, so a section holding an
+///    exact-name match (an alias-matched command, a prefix-matched app or
+///    settings pane, all of which already carry a category bonus baked into
+///    that same score) rises above a section whose best match is an
+///    incidental substring hit. This is deliberately the *same* score
+///    already used for the row-level greedy interleave above, not a fresh
+///    cross-provider normalization: those scores are already established as
+///    "roughly comparable enough to rank against each other one row at a
+///    time" by passes 1–2, and by every category-bonus doc comment in this
+///    file, so reusing them for one more comparison (section vs. section
+///    instead of row vs. row) needed no new machinery. **Ties are broken by
+///    original registration order** — `sort_by` is a stable sort, and
+///    comparing by score alone (no secondary key) leaves equal-scoring
+///    providers exactly where they already were in `providers`' input
+///    order, which satisfies "ties break deterministically" without a
+///    second comparison key to keep in sync. A provider with zero surviving
+///    candidates sorts last (its top-candidate score is defined as
+///    `f32::NEG_INFINITY`) but contributes zero rows either way, so its
+///    exact position is unobservable.
 pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize, query: &str) -> Vec<SearchItem> {
     for (id, candidates) in providers.iter_mut() {
         if *id == "app" {
@@ -360,10 +397,46 @@ pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize, query:
         remaining -= 1;
     }
 
-    providers
+    let mut sections: Vec<(&str, Vec<Candidate>, usize)> = providers
         .into_iter()
         .zip(taken)
-        .flat_map(|((_, candidates), take)| candidates.into_iter().take(take).map(|c| c.item))
+        .map(|((id, candidates), take)| (id, candidates, take))
+        .collect();
+
+    // See this function's own doc comment, pass 3: order the *sections* by
+    // their own top candidate's score, stable-sorted so equal scores keep
+    // `sections`' current (registration) order as the deterministic tiebreak.
+    let mut order: Vec<usize> = (0..sections.len()).collect();
+    order.sort_by(|&a, &b| {
+        let section_rank_score = |i: usize| {
+            let (id, candidates, _) = &sections[i];
+            let Some(top) = candidates.first().map(|c| c.score) else { return f32::NEG_INFINITY };
+            // Clipboard's own top score already carries up to
+            // `CLIPBOARD_RECENCY_BOOST_CEILING` of "just copied" freshness
+            // (`ClipboardProvider::search`) on top of however well it
+            // actually matches the query — legitimate for ranking *rows*
+            // (a recent copy surfacing first within Clipboard is the whole
+            // point), but not for deciding which *section* leads: a query
+            // like "clipboard history" can otherwise put an ordinary, merely
+            // fresh clipboard entry ahead of the `Clipboard History`
+            // command's own decisive alias match purely because it was
+            // copied a moment ago, not because it's more relevant — caught
+            // live during this task with a synthetic same-instant repro, not
+            // assumed. Subtracting the ceiling here (never touching
+            // `candidate.score` itself, so row-level ranking is untouched)
+            // means clipboard only leads a section it would have led on
+            // match strength alone.
+            if *id == "clipboard" { top - clipboard::CLIPBOARD_RECENCY_BOOST_CEILING } else { top }
+        };
+        section_rank_score(b).total_cmp(&section_rank_score(a))
+    });
+
+    order
+        .into_iter()
+        .flat_map(|i| {
+            let (_, candidates, take) = std::mem::take(&mut sections[i]);
+            candidates.into_iter().take(take).map(|c| c.item)
+        })
         .collect()
 }
 
@@ -737,6 +810,139 @@ mod tests {
         let items = allocate(providers, 8, "");
         assert_eq!(items.iter().filter(|i| i.kind == "app").count(), 1, "app's one real match must still survive");
         assert!(items.iter().filter(|i| i.kind == "clipboard").count() <= clipboard_max_slots(8));
+    }
+
+    // --- Section order: the captain-reported defect this task fixes.
+    // `allocate` used to `flat_map` providers in their given (registration)
+    // order unconditionally — score decided *how many* rows a section got,
+    // never *where* the section itself sat. ---
+
+    #[test]
+    fn section_order_follows_content_strength_not_registration_order() {
+        // The real captain-reported shape for "clipboard history": `command`
+        // is registered *after* `clipboard` in `AppState::with_test_providers`
+        // (app, file, clipboard, settings, command), so the old code always
+        // rendered clipboard's section above command's regardless of score —
+        // even though the command provider's alias match for "clipboard
+        // history" scores far higher than any of a handful of ordinary
+        // clipboard entries. Registration order here deliberately puts the
+        // weaker section (clipboard) first and the stronger one (command)
+        // last, so this only passes if section order is actually driven by
+        // score.
+        let providers = vec![
+            ("clipboard", candidates("clipboard", &[3.0, 2.5, 2.0, 1.5])),
+            ("command", vec![Candidate { score: 20.0, item: item_titled("command", "clipboard-history", "Clipboard History") }]),
+        ];
+        let items = allocate(providers, 8, "clipboard history");
+        let first_kind = items.first().map(|i| i.kind.as_str());
+        assert_eq!(first_kind, Some("command"), "the stronger section (command) must render first, not the weaker one that merely registered earlier");
+        // Every clipboard row must still come after every command row —
+        // section order is a hard grouping change, not just "the top row."
+        let command_end = items.iter().rposition(|i| i.kind == "command").unwrap();
+        let clipboard_start = items.iter().position(|i| i.kind == "clipboard").unwrap();
+        assert!(command_end < clipboard_start, "no clipboard row may render above the command section");
+    }
+
+    #[test]
+    fn section_order_is_not_fooled_by_a_freshly_copied_clipboard_entry_outscoring_a_decisive_command_match() {
+        // Caught live during this task, not assumed: a synthetic
+        // "clipboard history"-shaped repro (isolated daemon, seeded
+        // fixtures) showed a clipboard entry copied moments ago, which
+        // merely *starts with* the query text, out-scoring the `Clipboard
+        // History` command's own perfect alias match by close to
+        // `clipboard::CLIPBOARD_RECENCY_BOOST_CEILING` — purely because it
+        // was fresh, not because it was more relevant. These illustrative
+        // numbers reproduce that shape: without the discount, clipboard
+        // (28.0) would beat command (22.0) into first section; with it,
+        // clipboard's own section-ranking score (28.0 - 8.0 = 20.0) loses,
+        // as it should — command really is the more decisive match.
+        let providers = vec![
+            (
+                "clipboard",
+                vec![Candidate {
+                    score: 20.0 + clipboard::CLIPBOARD_RECENCY_BOOST_CEILING,
+                    item: item_titled("clipboard", "clip-fresh", "clipboard history feature test note"),
+                }],
+            ),
+            ("command", vec![Candidate { score: 22.0, item: item_titled("command", "clipboard-history", "Clipboard History") }]),
+        ];
+        let items = allocate(providers, 8, "clipboard history");
+        assert_eq!(items.first().map(|i| i.kind.as_str()), Some("command"), "a merely-fresh clipboard entry must not out-rank a more decisive command match for section order");
+    }
+
+    #[test]
+    fn section_order_still_lets_clipboard_lead_when_it_wins_on_match_strength_alone() {
+        // The discount must not become a blanket "clipboard never leads" —
+        // if clipboard's match is decisively stronger even after removing
+        // its entire possible freshness bonus, it still leads.
+        let providers = vec![
+            (
+                "clipboard",
+                vec![Candidate {
+                    score: 50.0 + clipboard::CLIPBOARD_RECENCY_BOOST_CEILING,
+                    item: item_titled("clipboard", "clip-strong", "clipboard history feature test note"),
+                }],
+            ),
+            ("command", vec![Candidate { score: 22.0, item: item_titled("command", "clipboard-history", "Clipboard History") }]),
+        ];
+        let items = allocate(providers, 8, "clipboard history");
+        assert_eq!(items.first().map(|i| i.kind.as_str()), Some("clipboard"), "a genuinely stronger clipboard match must still be allowed to lead");
+    }
+
+    #[test]
+    fn section_order_follows_content_strength_for_a_pane_query_too() {
+        // The other real captain-reported shape: "displays" must put the
+        // Displays pane at or near the top, not beneath unrelated files.
+        let providers = vec![
+            ("file", candidates("file", &[4.0, 3.5, 3.0, 2.5])),
+            (
+                "settings",
+                vec![Candidate {
+                    score: settings_category_score("displays", "Displays", fuzzy_score("displays", "Displays").unwrap()),
+                    item: item_titled("settings", "com.apple.preference.displays", "Displays"),
+                }],
+            ),
+        ];
+        let items = allocate(providers, 8, "displays");
+        assert_eq!(items.first().map(|i| i.kind.as_str()), Some("settings"), "the pane's own section must lead, not the file section");
+    }
+
+    #[test]
+    fn section_order_ties_break_by_registration_order() {
+        // Equal top-candidate scores must resolve to a fixed, repeatable
+        // order rather than depending on incidental sort implementation
+        // details — `providers`' own given order is the documented tiebreak.
+        // Deliberately avoids the "app"/"settings"/"clipboard" ids:
+        // `allocate` rescores the first two (the category-bonus pass above)
+        // and discounts the third's freshness bonus (the section-ordering
+        // pass's own clipboard-specific adjustment) before this comparison
+        // ever runs, either of which would turn an intended tie into a real
+        // score difference and defeat the point of this test.
+        let providers = vec![
+            ("file", vec![Candidate { score: 5.0, item: item_titled("file", "file-a", "match") }]),
+            ("command", vec![Candidate { score: 5.0, item: item_titled("command", "command-a", "match") }]),
+            ("widget", vec![Candidate { score: 5.0, item: item_titled("widget", "widget-a", "match") }]),
+        ];
+        let items = allocate(providers, 8, "");
+        let kinds: Vec<&str> = items.iter().map(|i| i.kind.as_str()).collect();
+        assert_eq!(kinds, vec!["file", "command", "widget"], "a three-way tie must resolve to registration order every time");
+    }
+
+    #[test]
+    fn section_order_ties_break_by_registration_order_is_stable_across_repeated_runs() {
+        // Non-jitter guard: the exact same input, run twice, must produce
+        // the exact same section order — no reliance on hash-map iteration
+        // or anything else that could vary run to run.
+        let build = || {
+            vec![
+                ("command", vec![Candidate { score: 5.0, item: item_titled("command", "command-a", "match") }]),
+                ("file", vec![Candidate { score: 5.0, item: item_titled("file", "file-a", "match") }]),
+            ]
+        };
+        let first: Vec<String> = allocate(build(), 8, "").iter().map(|i| i.kind.clone()).collect();
+        let second: Vec<String> = allocate(build(), 8, "").iter().map(|i| i.kind.clone()).collect();
+        assert_eq!(first, second);
+        assert_eq!(first, vec!["command", "file"], "registration order (command before file here) must be the stable tiebreak");
     }
 }
 
