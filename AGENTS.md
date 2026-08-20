@@ -218,7 +218,17 @@ other, and the one still standing on the binary the captain was looking
 at. Confirmed with a single-variable test (alpha-channel measurement of a
 window-scoped capture, not eyeballing) before removing it outright. See
 "The panel shadow tent — the second overlapping shadow source" below,
-`docs/evidence/panel-shadow-tent-fix-report.md`.
+`docs/evidence/panel-shadow-tent-fix-report.md`. A twenty-fifth task
+(`neko-fork-summon-latency`) root-caused and fixed the warm-summon-latency
+regression the fork migration task had found but not root-caused: a
+fork-only addition to `crates/gpui/src/window.rs`'s `on_request_frame`
+handler throttles any window that isn't key to ~30fps, with no exemption
+for a pending `on_next_frame` callback — absent entirely from the published
+`gpui = "0.2.2"` crate, confirmed by direct diff. Fixed with a small local
+patch on top of the pinned rev (`patches/`, applied by
+`scripts/setup-gpui-patch.sh`), not a neko-side change, since no public
+gpui API exists to opt a window or request out of that throttle. See
+"Summon latency" below, `docs/evidence/gpui-inactive-window-throttle-fix-report.md`.
 
 ## Crate layout
 
@@ -2524,23 +2534,71 @@ Real hardware keypresses weren't re-tested with the same instrumentation this
 pass either — don't be surprised if automated re-tests need retries.
 
 **Regressed on the `wingleeio/zed` fork (`fm/neko-gpui-fork-migration`,
-2026-08-20) — a real, measured finding, not yet root-caused.** Warm summon
-on the fork's own release binary sits at **~26–40ms across 15 samples with
-no warm-up trend**, versus the published crate's documented ~2.9–6.4ms —
-confirmed not to be shared-machine noise by rebuilding the published crate
-from a disposable worktree and bench'ing it interleaved, on the same
-machine, against the same isolated daemon, in the same few minutes (full
-numbers, both interleaved runs side by side:
-`docs/evidence/gpui-fork-migration-report.md` §8). The real
-`activate_window`/`cx.activate` path shows the same elevated pattern in its
-own frame-latency numbers. Still comfortably under 100ms and not
-human-perceptible as sluggish, but a real ~6–8x regression against the
-budget this section documents, deliberately not root-caused by the
-migration task itself (candidates worth checking first: the
-`runtime_shaders` feature compiling Metal shaders at runtime rather than at
-build time and never fully amortizing; a heavier per-frame cost somewhere
-in this rev's renderer/layout engine; something specific to `font-kit`) —
-scoped follow-up work for whoever picks this up next.
+2026-08-20) to ~26–40ms warm — root-caused and fixed
+(`fm/neko-fork-summon-latency`).** Full diagnosis, the live instrumented
+trace that proves it, and the fix's own trade-offs:
+`docs/evidence/gpui-inactive-window-throttle-fix-report.md`. Summary:
+
+**Cause**: `crates/gpui/src/window.rs`'s `on_request_frame` handler caps
+frame delivery to ~30fps (a `Duration::from_micros(33333)` minimum
+interval) whenever a window isn't key (`!active.get()`) — with no
+exemption for a pending `on_next_frame`/`request_animation_frame`
+callback, i.e. something a caller is *explicitly* waiting on, not an idle
+background redraw. **This throttle does not exist at all in the published
+`gpui = "0.2.2"` crate** — confirmed by direct diff, not inferred; its
+equivalent handler runs `next_frame_callbacks` unconditionally on every
+request. `NEKO_BENCH` shows the window via a non-activating
+`orderFrontRegardless` by design (so a long bench run doesn't repeatedly
+steal focus), so it is always "inactive" from this check's point of view —
+every summon's frame request fell into the 30fps cap, and because a
+throttled request never advances the handler's own `last_frame_time`,
+every following request landed in the same stale window and got throttled
+again, locking summon into a ~25–40ms cadence with no way out on its own.
+The real `activate_window`/`cx.activate` path races the same check against
+the async `windowDidBecomeKey:` notification and shows the identical
+pattern, decreasing across repeated activations
+(`gpui-fork-migration-report.md`'s own `NEKO_BENCH_REAL` numbers: 61.7ms,
+32.0ms, 11.1ms for 3 cycles) — not contradicting this diagnosis, consistent
+with it.
+
+**Fix**: a small local patch on top of the pinned fork rev —
+`patches/gpui-0001-exempt-pending-frame-callbacks-from-inactive-window-throttle.patch`,
+applied by `scripts/setup-gpui-patch.sh` (run once, or again after the
+pinned rev changes; populates `~/Library/Caches/neko-dev/gpui-fork-patched`,
+which the workspace `Cargo.toml`'s new
+`[patch."https://github.com/wingleeio/zed"]` section points `gpui`/
+`gpui_platform` at) — exempts a frame request carrying a pending callback
+from the inactive-window cap specifically, leaving thermal throttling
+untouched. No public gpui API exists to opt out of this per-window or
+per-request (every native macOS call site that invokes the frame callback
+passes `RequestFrameOptions::default()`, always), which is why this needed
+a dependency patch rather than a neko-side fix — see the evidence report's
+§4 for the trade-off this patch accepts (a future *repeating* animation in
+an inactive window would also stop being power-throttled; neko's own
+`motion.rs` catalog is exclusively one-shot today, so this doesn't regress
+anything currently in the app).
+
+**Verified**: `cargo build`/`cargo test` (242 tests)/`cargo clippy
+--all-targets` all clean against the patched dependency; the deadlock fix,
+native window-drag support, and the `paint_backdrop_blur`/`EdgeFade`
+primitives the fork migration was taken for are all untouched (the patch's
+only functional change is inside `on_request_frame`'s throttle branch).
+**Not completed live in this task**: a release-binary `NEKO_BENCH`
+before/after sample set — the shared machine's screen genuinely locked
+partway through verification (confirmed via
+`CGSessionCopyCurrentDictionary()`'s `CGSSessionScreenIsLocked` key, not
+just display-idle-sleep, which `caffeinate` cannot clear) and stayed locked
+for the rest of this task's available time. The root-cause diagnosis itself
+rests on a real, saved instrumented trace from a debug build captured
+*before* the lock (the evidence report's §3), plus the unconditional
+source-diff proof in §1 — both complete and not blocked by the lock; only
+the final release-binary confirmation number is outstanding. Whoever picks
+this up next: `caffeinate -u` per the standing rule already documented
+below the "Comet craft pass" section, confirm the screen is actually
+unlocked (not just display-awake) via the `CGSessionCopyCurrentDictionary`
+check in the evidence report before trusting a `NEKO_BENCH` run's absence
+of output, then re-run `NEKO_BENCH=15` on the release binary and record the
+numbers here.
 
 ## Hotkey scoping (must never leak into other apps)
 
