@@ -122,6 +122,103 @@ pub fn verify_installed(_window: &Window, _installed: Installed) -> Result<Strin
     Err("native window material is only implemented on macOS".to_string())
 }
 
+/// `NSWindowStyleMask` bit 0, `NSTitledWindowMask`.
+///
+/// The summon panel has no titlebar and never wanted one — `main.rs` passes
+/// `titlebar: None` — but gpui's mac backend reads that as "no
+/// `TitlebarOptions`" and falls into a branch that sets
+/// `NSTitledWindowMask | NSFullSizeContentViewWindowMask` anyway
+/// (`gpui_macos/src/window.rs`, `MacWindow::open`); `titlebar: Some(..)`
+/// takes the *other* branch, which also sets `NSTitledWindowMask`. There is
+/// no `WindowOptions` value that produces an untitled window, which is why
+/// this is cleared natively after the fact rather than at creation.
+///
+/// AppKit draws its own ~1pt top-edge highlight on a **titled** window,
+/// above everything the app itself paints — the captain's thrice-reported
+/// "line across the top of the panel". See `AGENTS.md`, "The top line"
+/// (and the two earlier, wrong attributions it corrects).
+const TITLED_STYLE_MASK_BIT: u64 = 1 << 0;
+
+/// `NSWindowStyleMaskNonactivatingPanel` (bit 7) — set by gpui for a
+/// `WindowKind::PopUp` window and load-bearing for both the summon path and
+/// every `evidence.rs` hook (`AGENTS.md`, "an evidence window must never
+/// become the key window"). `verify_titled_cleared` asserts it survives.
+const NONACTIVATING_PANEL_STYLE_MASK_BIT: u64 = 1 << 7;
+
+/// `NSWindowStyleMaskFullSizeContentView` (bit 15) — what lets the app's own
+/// content occupy the window's entire frame. Also asserted to survive.
+const FULL_SIZE_CONTENT_VIEW_STYLE_MASK_BIT: u64 = 1 << 15;
+
+/// Pure bit arithmetic, factored out so "what should the mask become" is
+/// unit-testable without a real `NSWindow` — the same split
+/// `spaces::joins_all_spaces_and_fullscreen_auxiliary` already uses.
+/// Clears **only** bit 0; every other bit is preserved exactly.
+pub(crate) fn style_mask_without_titled(bits: u64) -> u64 {
+    bits & !TITLED_STYLE_MASK_BIT
+}
+
+/// Whether `bits` is a mask this app is happy with: `Titled` clear, and
+/// both the non-activating-panel and full-size-content-view bits still set.
+pub(crate) fn style_mask_is_untitled_panel(bits: u64) -> bool {
+    bits & TITLED_STYLE_MASK_BIT == 0
+        && bits & NONACTIVATING_PANEL_STYLE_MASK_BIT != 0
+        && bits & FULL_SIZE_CONTENT_VIEW_STYLE_MASK_BIT != 0
+}
+
+/// The live `NSWindow.styleMask`, as raw bits — the "before" half of the
+/// readback `main.rs` logs on every launch.
+#[cfg(target_os = "macos")]
+pub fn style_mask_bits(window: &Window) -> Result<u64, String> {
+    macos::style_mask_bits(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn style_mask_bits(_window: &Window) -> Result<u64, String> {
+    Err("style-mask readback is only implemented on macOS".to_string())
+}
+
+/// Clears `NSTitledWindowMask` on the real `NSWindow`, leaving every other
+/// bit alone — see `TITLED_STYLE_MASK_BIT` for why this is needed and why it
+/// cannot be done through `WindowOptions`.
+///
+/// Called once, at window creation, *before* `install` — a `setStyleMask:`
+/// call makes AppKit rebuild the window's frame view, so doing it first
+/// means every native view this module installs afterwards is installed
+/// into the final one, and `disable_native_shadow`'s own readback happens
+/// after the mask is already settled.
+///
+/// Nothing else about the window is touched: rounding is drawn by GPUI and
+/// by the material view's own `cornerRadius` (never by AppKit's titled
+/// frame), the collection behavior that carries Spaces/full-screen
+/// reachability is a separate property, and `canBecomeKeyWindow` is
+/// overridden to `YES` by gpui's own window subclass regardless of style
+/// mask. All three are read back live anyway rather than assumed —
+/// `spaces::verify`, `verify_shadow_disabled`, and `verify_titled_cleared`.
+#[cfg(target_os = "macos")]
+pub fn clear_titled_style_mask(window: &Window) -> Result<(), String> {
+    macos::clear_titled_style_mask(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn clear_titled_style_mask(_window: &Window) -> Result<(), String> {
+    Err("style-mask clearing is only implemented on macOS".to_string())
+}
+
+/// A non-visual proof `clear_titled_style_mask`'s claim is real, and that
+/// it cost nothing else — same "verified, not trusted" pattern
+/// `verify_installed`/`verify_shadow_disabled`/`spaces::verify` establish.
+/// Returns the live mask bits on success so the caller can log the "after"
+/// half of the readback.
+#[cfg(target_os = "macos")]
+pub fn verify_titled_cleared(window: &Window) -> Result<u64, String> {
+    macos::verify_titled_cleared(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn verify_titled_cleared(_window: &Window) -> Result<u64, String> {
+    Err("style-mask verification is only implemented on macOS".to_string())
+}
+
 // `set_background_frame` (a direct `NSView` frame set repositioning the
 // whole-window background material for a mode transition) was deleted here
 // — see `AGENTS.md`, "One constant panel width": the panel `div` is now
@@ -302,13 +399,15 @@ mod macos {
     use objc2_app_kit::{
         NSAutoresizingMaskOptions, NSGlassEffectView, NSGlassEffectViewStyle, NSView, NSWindow,
         NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
-        NSVisualEffectView, NSWindowOrderingMode,
+        NSVisualEffectView, NSWindowOrderingMode, NSWindowStyleMask,
     };
     use objc2_foundation::{NSPoint, NSRect, NSSize};
     use objc2_quartz_core::kCACornerCurveContinuous;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-    use super::{Installed, Window};
+    use super::{
+        Installed, Window, style_mask_is_untitled_panel, style_mask_without_titled,
+    };
 
     /// Matches the design token (`theme::PANEL_RADIUS_PX`) — the
     /// background view's own rounding has to agree with GPUI's
@@ -727,6 +826,39 @@ mod macos {
         Ok(())
     }
 
+    /// See `super::style_mask_bits`'s doc comment.
+    pub fn style_mask_bits(window: &Window) -> Result<u64, String> {
+        Ok(native_window(window)?.styleMask().bits() as u64)
+    }
+
+    /// See `super::clear_titled_style_mask`'s doc comment.
+    pub fn clear_titled_style_mask(window: &Window) -> Result<(), String> {
+        let native = native_window(window)?;
+        let current = native.styleMask().bits() as u64;
+        let wanted = style_mask_without_titled(current);
+        if wanted == current {
+            // Already untitled — nothing to do, and no `setStyleMask:` call
+            // (which would rebuild the frame view) made for no reason.
+            return Ok(());
+        }
+        native.setStyleMask(NSWindowStyleMask::from_bits_retain(
+            wanted as usize as _,
+        ));
+        Ok(())
+    }
+
+    /// See `super::verify_titled_cleared`'s doc comment.
+    pub fn verify_titled_cleared(window: &Window) -> Result<u64, String> {
+        let bits = native_window(window)?.styleMask().bits() as u64;
+        if !style_mask_is_untitled_panel(bits) {
+            return Err(format!(
+                "expected NSTitledWindowMask clear with NSNonactivatingPanelMask and \
+                 NSFullSizeContentViewWindowMask still set, readback bits={bits:#x}"
+            ));
+        }
+        Ok(bits)
+    }
+
     /// See `super::verify_shadow_disabled`'s doc comment.
     pub fn verify_shadow_disabled(window: &Window) -> Result<(), String> {
         let has_shadow = native_window(window)?.hasShadow();
@@ -758,5 +890,49 @@ mod macos {
             assert_eq!(parse_forced_fallback(Some("glass")), None);
             assert_eq!(parse_forced_fallback(Some("")), None);
         }
+    }
+}
+
+#[cfg(test)]
+mod style_mask_tests {
+    use super::*;
+
+    /// The exact mask gpui produces for this window, read back live off the
+    /// captain's own running client (`data/neko-truth-pass/report.md` §2.4):
+    /// `NSTitledWindowMask | NSNonactivatingPanelMask |
+    /// NSFullSizeContentViewWindowMask`.
+    const OBSERVED_MASK: u64 = 0x8081;
+
+    #[test]
+    fn clearing_titled_leaves_every_other_bit_alone() {
+        let cleared = style_mask_without_titled(OBSERVED_MASK);
+        assert_eq!(cleared, 0x8080);
+        assert_eq!(cleared & TITLED_STYLE_MASK_BIT, 0);
+        assert_ne!(cleared & NONACTIVATING_PANEL_STYLE_MASK_BIT, 0);
+        assert_ne!(cleared & FULL_SIZE_CONTENT_VIEW_STYLE_MASK_BIT, 0);
+    }
+
+    #[test]
+    fn clearing_an_already_untitled_mask_is_a_no_op() {
+        assert_eq!(style_mask_without_titled(0x8080), 0x8080);
+    }
+
+    #[test]
+    fn the_observed_mask_is_rejected_before_the_fix_and_accepted_after() {
+        assert!(!style_mask_is_untitled_panel(OBSERVED_MASK));
+        assert!(style_mask_is_untitled_panel(style_mask_without_titled(OBSERVED_MASK)));
+    }
+
+    #[test]
+    fn losing_the_non_activating_panel_bit_fails_verification() {
+        // The bit every `evidence.rs` hook and the summon path depend on —
+        // a `setStyleMask:` that dropped it would be a worse regression
+        // than the line this change removes.
+        assert!(!style_mask_is_untitled_panel(0x8000));
+    }
+
+    #[test]
+    fn losing_the_full_size_content_view_bit_fails_verification() {
+        assert!(!style_mask_is_untitled_panel(0x0080));
     }
 }
