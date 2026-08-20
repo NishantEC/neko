@@ -84,6 +84,16 @@
 //!   actually selected at that point — a clipboard-mode row inside the
 //!   two-column detail view if `NEKO_SHOW_CONFIRM` entered that mode, or
 //!   the plain query's own top result otherwise.
+//! - `NEKO_SCROLL_MODE_LIST_TO_BOTTOM=1` (only read alongside
+//!   `NEKO_SHOW_CONFIRM`, added for the results-list edge fade —
+//!   `edge_fade.rs`) scrolls the mode list just entered to its own bottom
+//!   (`Root::scroll_mode_list_to_bottom_for_evidence`, `ScrollHandle::
+//!   scroll_to_bottom` — gpui's own public API, not a synthetic scroll
+//!   event) before the window-number "now capture" line prints — for
+//!   capturing the top-edge fade (only reachable once something is
+//!   actually scrolled down) without synthetic OS input, same reasoning as
+//!   every other hook in this file. Unset, a mode with more entries than
+//!   fit shows only the bottom fade, at rest.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -108,6 +118,7 @@ const BACKDROP_IMAGE_ENV_VAR: &str = "NEKO_BACKDROP_IMAGE";
 const REAL_CYCLES_BEFORE_SHOW_ENV_VAR: &str = "NEKO_REAL_CYCLES_BEFORE_SHOW";
 const CYCLE_MODE_ONCE_ENV_VAR: &str = "NEKO_CYCLE_MODE_ONCE";
 const SHOW_ACTIONS_MENU_ENV_VAR: &str = "NEKO_SHOW_ACTIONS_MENU";
+const SCROLL_MODE_LIST_TO_BOTTOM_ENV_VAR: &str = "NEKO_SCROLL_MODE_LIST_TO_BOTTOM";
 
 pub fn bench_iterations() -> Option<u32> {
     std::env::var(BENCH_ENV_VAR).ok()?.parse().ok()
@@ -135,6 +146,10 @@ pub fn cycle_mode_once_requested() -> bool {
 
 pub fn show_actions_menu_requested() -> bool {
     std::env::var_os(SHOW_ACTIONS_MENU_ENV_VAR).is_some()
+}
+
+pub fn scroll_mode_list_to_bottom_requested() -> bool {
+    std::env::var_os(SCROLL_MODE_LIST_TO_BOTTOM_ENV_VAR).is_some()
 }
 
 pub fn backdrop_image_path() -> Option<PathBuf> {
@@ -333,6 +348,19 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                 });
             });
             cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
+        }
+        if scroll_mode_list_to_bottom_requested() {
+            let _ = cx.update(|cx| {
+                let _ = window.update(cx, |root, _window, cx| {
+                    root.scroll_mode_list_to_bottom_for_evidence(cx);
+                });
+            });
+            // A local, synchronous `ScrollHandle` mutation — no daemon
+            // round-trip to wait for, but one settle frame so the next
+            // paint (which is what actually reads the corrected offset —
+            // see `edge_fade.rs`'s own doc comment on paint-time gating)
+            // has genuinely happened before the window-number line below.
+            Timer::after(std::time::Duration::from_millis(150)).await;
         }
     }
     if show_actions_menu_requested() {

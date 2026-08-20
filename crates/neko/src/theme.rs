@@ -201,6 +201,12 @@ pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
 /// mismatched in shape and brightness against the rest of the list.
 pub const ROW_ICON_SOCKET_BG: Rgba = rgba_const(0xe8e8e8, 0.06);
 
+/// The results list's own scroll edge-fade band height
+/// (`edge_fade.rs`) — tall enough to read as a gradual dissolve rather
+/// than a hard cutoff at `RESULT_ROW_HEIGHT_PX` (40), short enough that it
+/// never covers more than about half of one row.
+pub const EDGE_FADE_BAND_PX: f32 = 18.0;
+
 /// Onboarding window geometry (design report §3): the same panel width as
 /// the summoned popup, a static header standing in for the input row, a
 /// fixed content area sized for the tallest step (01's two permission
