@@ -30,7 +30,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable,
+    Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable,
     MouseButton, MouseDownEvent, Render, SharedString, Window, actions, anchored, deferred, div, img,
     prelude::*, px,
 };
@@ -1447,15 +1447,17 @@ impl Root {
     /// `data/neko-comet-design/report.md` recommendation 1 (comet's
     /// `crates/ui/src/popover.rs:395-416`, `anchored_menu` — read for the
     /// pattern, reimplemented here against neko's own geometry and, unlike
-    /// comet's fork, without `frost.rs`'s backdrop blur, which needs a
-    /// `gpui` primitive (`paint_backdrop_blur`) that doesn't exist in the
-    /// published crate neko compiles against):
+    /// comet's fork, without `frost.rs`'s backdrop blur — `window.
+    /// paint_backdrop_blur` is available as of the `wingleeio/zed` fork
+    /// migration (`AGENTS.md`, "The GPUI dependency decision"), but using it
+    /// is deliberately out of scope for that migration and left to a
+    /// follow-up, not attempted here):
     ///
     /// - **`deferred(...)`** gives the card its own floating paint layer,
     ///   painted after (so visually above) everything else already painted
     ///   this frame — it can't be occluded by content painted later, the way
     ///   a plain `.child()` sitting earlier in paint order could be.
-    /// - **`anchored().anchor(Corner::BottomRight)
+    /// - **`anchored().anchor(Anchor::BottomRight)
     ///   .snap_to_window_with_margin(px(8.0))`** positions the card relative
     ///   to the trigger's own on-screen point (the zero-size pin div in
     ///   `render_actions_trigger`, at the trigger's top-right corner —
@@ -1531,7 +1533,7 @@ impl Root {
             .child(
                 deferred(
                     anchored()
-                        .anchor(Corner::BottomRight)
+                        .anchor(Anchor::BottomRight)
                         .snap_to_window_with_margin(px(8.0))
                         .child(card),
                 )
