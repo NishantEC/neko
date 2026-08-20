@@ -208,8 +208,8 @@ intermediate state is capturable at all:
 The client's own log for that run records which phase each capture shows:
 
 ```
-neko: search-latency gen=3 phase=partial  query="notes" rows=2 elapsed_ms=35.15
-neko: search-latency gen=3 phase=complete query="notes" rows=5 elapsed_ms=6089.78
+neko: search-latency gen=3 phase=partial  query="notes" rows=2 elapsed_ms=0.67
+neko: search-latency gen=3 phase=complete query="notes" rows=5 elapsed_ms=6064.51
 ```
 
 `NEKO_FILE_SEARCH_DELAY_MS` is verification-only and unset by default — the
@@ -217,6 +217,21 @@ same pattern as `NEKO_ICON_EXTRACT_DELAY_MS`. Real hardware answers this
 query in tens of milliseconds, which is genuinely too fast to land a
 screenshot between the two frames even though that state is precisely what
 the change exists to produce.
+
+## Re-verified after rebasing onto `main` at `6b51c72`
+
+`main` advanced during this task (notably `fm/neko-textinput`, and a new
+standing rule that an evidence window must never become the system key
+window unless `NEKO_EVIDENCE_ACTIVATE` opts in). The branch was rebased and
+everything above re-checked on freshly built release binaries against a
+freshly regenerated corpus: `cargo build` / `cargo test --workspace` (296
+tests) / `cargo clippy --all-targets` all clean, keystroke-to-first-render
+samples 0.23–0.71 ms across the same 7-keystroke run, and both screenshots
+retaken (the committed pair is from the rebased build, under the new
+non-activating capture path). The before/after table itself was not re-run
+against the new `main`: nothing between `f8cbe4c` and `6b51c72` touches the
+search path, and the after-column samples on the rebased build sit inside
+the range already reported.
 
 ## Not verified
 
