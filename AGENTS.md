@@ -1498,7 +1498,14 @@ is realistically pressing can land on it. This is a persisted daemon-side
 setting (`neko_core::hotkey::set_hotkey`, no live registration attempt of
 its own — see "The hotkey is a runtime-configurable setting" above), so it
 can be set with one request against the isolated socket before the client
-process even starts.
+process even starts. **Superseded structurally as of
+`fm/neko-evidence-no-activate`**: `main.rs` now skips hotkey registration
+entirely for any evidence run (`evidence::evidence_run_active`), so this
+mitigation is belt-and-braces rather than the thing standing between an
+evidence client and the captain's real keypresses. See "Standing safety
+rule: an evidence window must never become the key window" above — that
+section's own incident is what proved a remember-to-do-it mitigation
+insufficient.
 
 ## Commands and modes
 
