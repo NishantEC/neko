@@ -221,6 +221,13 @@ fn main() {
                                 Err(e) => eprintln!("neko: native window shadow disable verification FAILED: {e}"),
                             }
                         }
+                        // Read-only: the mask gpui itself created this
+                        // window with. Never modified — see
+                        // `material::read_style_mask`'s doc comment.
+                        match material::read_style_mask(window) {
+                            Ok(mask) => eprintln!("neko: window style mask 0x{mask:x}"),
+                            Err(e) => eprintln!("neko: could not read the window style mask: {e}"),
+                        }
                         // The `⌘K` actions menu's own smaller frost surface
                         // — only meaningful when the whole-window material
                         // itself installed (`translucent`); with the opaque
