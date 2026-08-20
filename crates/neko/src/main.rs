@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 
 use global_hotkey::{GlobalHotKeyEvent, HotKeyState};
 use gpui::{
-    App, Application, Bounds, Focusable, KeyBinding, Timer, WindowBounds, WindowKind,
-    WindowOptions, point, px, size,
+    App, AsyncApp, Bounds, Focusable, KeyBinding, WindowBounds, WindowKind, WindowOptions, point,
+    px, size,
 };
 use neko_client::NekoClient;
 use neko_protocol::{Event, HotkeyCombo, HotkeyConfig, Request, Response};
@@ -50,7 +50,12 @@ impl gpui::Global for ReopenTargets {}
 fn main() {
     daemon_launcher::ensure_daemon_running();
 
-    let app = Application::new();
+    // `gpui::Application::new()` no longer exists on the `wingleeio/zed`
+    // fork this crate depends on (`AGENTS.md`, "The GPUI dependency
+    // decision") — every real bootstrap on that fork goes through
+    // `gpui_platform::application()`, which selects the mac platform
+    // backend (`gpui_macos::MacPlatform`) internally.
+    let app = gpui_platform::application();
     app.on_reopen(|cx| {
         let Some((window, active_onboarding)) = cx
             .try_global::<ReopenTargets>()
@@ -70,7 +75,7 @@ fn main() {
             root.reset_for_summon(window, cx);
             reposition_to_cursor_display(window);
             window.activate_window();
-            window.focus(&root.focus_handle(cx));
+            window.focus(&root.focus_handle(cx), cx);
         });
         cx.activate(true);
     });
@@ -264,8 +269,8 @@ fn main() {
         }
 
         cx.spawn(async move |cx| {
-            let config = fetch_initial_hotkey(&client).await;
-            let onboarding_state = fetch_onboarding_state(&client).await;
+            let config = fetch_initial_hotkey(&client, cx).await;
+            let onboarding_state = fetch_onboarding_state(&client, cx).await;
 
             let registrar = SystemRegistrar::new()
                 .expect("failed to talk to the OS hotkey service");
@@ -340,7 +345,7 @@ fn main() {
                                     root.reset_for_summon(window, cx);
                                     reposition_to_cursor_display(window);
                                     window.activate_window();
-                                    window.focus(&root.focus_handle(cx));
+                                    window.focus(&root.focus_handle(cx), cx);
                                     // The next frame is the first one painted after
                                     // activation — the closest proxy GPUI exposes for
                                     // "visible and accepting input" on screen.
@@ -381,14 +386,14 @@ fn main() {
                     });
                 }
 
-                Timer::after(Duration::from_millis(20)).await;
+                cx.background_executor().timer(Duration::from_millis(20)).await;
             }
         })
         .detach();
     });
 }
 
-async fn fetch_initial_hotkey(client: &NekoClient) -> HotkeyConfig {
+async fn fetch_initial_hotkey(client: &NekoClient, cx: &AsyncApp) -> HotkeyConfig {
     // The client and daemon start concurrently (`daemon_launcher` just
     // spawns the daemon and returns) — the daemon's socket may not be
     // listening yet on the very first launch, so retry briefly rather than
@@ -398,7 +403,7 @@ async fn fetch_initial_hotkey(client: &NekoClient) -> HotkeyConfig {
         if let Ok(Response::Hotkey { config }) = client.request(Request::GetHotkey).await {
             return config;
         }
-        Timer::after(Duration::from_millis(40)).await;
+        cx.background_executor().timer(Duration::from_millis(40)).await;
     }
     eprintln!("neko: could not reach neko-daemon for the configured hotkey in time, using the default");
     HotkeyConfig {
@@ -411,7 +416,7 @@ struct OnboardingStateSnapshot {
     completed: bool,
 }
 
-async fn fetch_onboarding_state(client: &NekoClient) -> OnboardingStateSnapshot {
+async fn fetch_onboarding_state(client: &NekoClient, cx: &AsyncApp) -> OnboardingStateSnapshot {
     if std::env::var_os(RESET_ONBOARDING_ENV_VAR).is_some() {
         let _ = client.request(Request::SetOnboardingComplete { completed: false }).await;
     }
@@ -419,7 +424,7 @@ async fn fetch_onboarding_state(client: &NekoClient) -> OnboardingStateSnapshot 
         if let Ok(Response::OnboardingState { completed, .. }) = client.request(Request::GetOnboardingState).await {
             return OnboardingStateSnapshot { completed };
         }
-        Timer::after(Duration::from_millis(40)).await;
+        cx.background_executor().timer(Duration::from_millis(40)).await;
     }
     // Fail toward *not* re-showing onboarding: a daemon that's merely slow
     // to answer shouldn't force a captain who already finished onboarding

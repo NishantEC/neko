@@ -89,8 +89,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use gpui::{
-    App, AsyncApp, Context, Focusable, IntoElement, ObjectFit, Render, Timer, Window,
-    WindowBounds, WindowHandle, WindowKind, WindowOptions, img, prelude::*,
+    App, AsyncApp, Context, Focusable, IntoElement, ObjectFit, Render, Window, WindowBounds,
+    WindowHandle, WindowKind, WindowOptions, img, prelude::*,
 };
 use neko_client::NekoClient;
 use neko_protocol::Request;
@@ -223,14 +223,14 @@ async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncA
         });
         // Long enough for a real frame to actually paint at `PANEL_WIDTH_PX`
         // before the next step.
-        Timer::after(std::time::Duration::from_millis(300)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
         eprintln!("neko: real-cycles-before-show cycle {i} activated");
         let _ = cx.update(|cx| {
             let _ = window.update(cx, |_root, window, _cx| {
                 let _ = material::order_out(window);
             });
         });
-        Timer::after(std::time::Duration::from_millis(200)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(200)).await;
         eprintln!("neko: real-cycles-before-show cycle {i} hidden");
     }
 }
@@ -268,15 +268,15 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // deterministic "go" signal instead of guessing a sleep against
         // this process's own startup time.
         eprintln!("neko: ready for evidence setup");
-        Timer::after(std::time::Duration::from_millis(2000)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(2000)).await;
     } else {
-        Timer::after(std::time::Duration::from_millis(300)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
     }
     let _ = cx.update(|cx| {
         let _ = window.update(cx, |root, window, cx| {
             root.reset_for_summon(window, cx);
             window.activate_window();
-            window.focus(&root.focus_handle(cx));
+            window.focus(&root.focus_handle(cx), cx);
             if let Some(query) = query.as_deref() {
                 root.set_query_for_evidence(query, cx);
             }
@@ -292,7 +292,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // comfortably past that so the window-number line below (an
         // outside script's "now capture" signal) isn't printed before the
         // row this evidence run exists to show has actually rendered.
-        Timer::after(std::time::Duration::from_millis(3500)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(3500)).await;
     }
     if show_confirm_requested() {
         let _ = cx.update(|cx| {
@@ -312,27 +312,27 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // mode-entry search specifically under real concurrent load from
         // other agents' own processes (a genuinely local SQLite query, but
         // not exempt from real scheduling contention).
-        Timer::after(std::time::Duration::from_millis(1500)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
         if cycle_mode_once_requested() {
             let _ = cx.update(|cx| {
                 let _ = window.update(cx, |root, window, cx| {
                     root.dismiss_for_evidence(window, cx);
                 });
             });
-            Timer::after(std::time::Duration::from_millis(400)).await;
+            cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
             let requery = query.clone().unwrap_or_default();
             let _ = cx.update(|cx| {
                 let _ = window.update(cx, |root, _window, cx| {
                     root.set_query_for_evidence(&requery, cx);
                 });
             });
-            Timer::after(std::time::Duration::from_millis(1500)).await;
+            cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
             let _ = cx.update(|cx| {
                 let _ = window.update(cx, |root, window, cx| {
                     root.confirm_for_evidence(window, cx);
                 });
             });
-            Timer::after(std::time::Duration::from_millis(800)).await;
+            cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
         }
     }
     if show_actions_menu_requested() {
@@ -344,7 +344,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // A synchronous state transition (no daemon round-trip), but give
         // the next frame a beat to actually paint the open fade-in before
         // the window-number "now capture" line below prints.
-        Timer::after(std::time::Duration::from_millis(300)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
     }
     // A real, if rare, failure mode confirmed live on a shared machine
     // while capturing this task's own evidence: this window's activation
@@ -368,7 +368,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             let _ = material::order_front_regardless(window);
         });
     });
-    Timer::after(std::time::Duration::from_millis(200)).await;
+    cx.background_executor().timer(std::time::Duration::from_millis(200)).await;
     let _ = cx.update(|cx| {
         let _ = window.update(cx, |_root, window, _cx| {
             if let Ok(number) = material::window_number(window) {
@@ -411,7 +411,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
 /// divergence point, covered by `run_bench_real` below.
 pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp, iterations: u32) {
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
-    Timer::after(std::time::Duration::from_millis(300)).await;
+    cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
 
     // The real window is always `PANEL_WIDTH_WITH_DETAIL_PX` now
     // (`AGENTS.md`, "Mode view resize seam") — only ever used here to
@@ -432,13 +432,13 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                 });
             });
         });
-        Timer::after(std::time::Duration::from_millis(150)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
         let _ = cx.update(|cx| {
             let _ = window.update(cx, |_root, window, _cx| {
                 let _ = material::order_out(window);
             });
         });
-        Timer::after(std::time::Duration::from_millis(80)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(80)).await;
     }
 
     eprintln!("neko: bench complete ({iterations} summons)");
@@ -476,7 +476,7 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
 pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp, iterations: u32) {
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
     eprintln!("neko: real-bench pid {}", std::process::id());
-    Timer::after(std::time::Duration::from_millis(300)).await;
+    cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
 
     // The real window is always `PANEL_WIDTH_WITH_DETAIL_PX` now
     // (`AGENTS.md`, "Mode view resize seam") — only ever used here to
@@ -493,7 +493,7 @@ pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx:
                     eprintln!("neko: real-bench reposition failed: {e}");
                 }
                 window.activate_window();
-                window.focus(&root.focus_handle(cx));
+                window.focus(&root.focus_handle(cx), cx);
                 window.on_next_frame(move |_, _| {
                     eprintln!("neko: real-bench cycle {i} frame latency {:?}", started.elapsed());
                 });
@@ -504,15 +504,15 @@ pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx:
         // completion-handler window (this function's own doc comment)
         // before printing `activated` — the moment an outside script should
         // sample.
-        Timer::after(std::time::Duration::from_millis(400)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
         eprintln!("neko: real-bench cycle {i} activated");
-        Timer::after(std::time::Duration::from_millis(900)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(900)).await;
 
         eprintln!("neko: real-bench cycle {i} hiding");
         let _ = cx.update(|cx| cx.hide());
-        Timer::after(std::time::Duration::from_millis(400)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
         eprintln!("neko: real-bench cycle {i} hidden");
-        Timer::after(std::time::Duration::from_millis(900)).await;
+        cx.background_executor().timer(std::time::Duration::from_millis(900)).await;
     }
 
     eprintln!("neko: real-bench complete ({iterations} cycles)");
