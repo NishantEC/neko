@@ -15,6 +15,7 @@
 //! Provider`, exactly like `apps::AppsProvider`, `clipboard::
 //! ClipboardProvider`, and `files::FileProvider` below.
 
+use crate::cancel::Cancel;
 use crate::search::Candidate;
 
 #[derive(Debug)]
@@ -58,6 +59,49 @@ pub trait Provider: Send + Sync {
     /// provider scoring on a wildly different scale would need to do
     /// instead.
     fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate>;
+
+    /// Whether this provider's answer for `query` is expected to be slow
+    /// enough that the daemon should **not** make every other provider's
+    /// results wait behind it — see `neko-daemon`'s `handle_request` and
+    /// `AGENTS.md`'s "Two-phase search" section. A provider that returns
+    /// `true` here has its candidates delivered in a *second*
+    /// `Response::SearchResults` frame (`complete: true`) after the fast
+    /// providers' own results have already gone out (`complete: false`).
+    ///
+    /// Defaulted `false`, which is the honest answer for every provider
+    /// that answers from memory or SQLite — apps, clipboard, settings,
+    /// commands all finish in microseconds, and splitting them across two
+    /// frames would cost a wire round-trip and a second client render for
+    /// no gain. `files::FileProvider` is the one override today: it shells
+    /// out to `mdfind`, whose *measured* time-to-first-result on a real,
+    /// repository-heavy home directory ranges from under 100ms to over
+    /// 1.2s (see that module's own doc comment).
+    ///
+    /// Takes the query because "slow" is query-dependent, not a fixed
+    /// property of the provider: `FileProvider` returns nothing at all,
+    /// instantly, below its own minimum query length, and answering that
+    /// case in two frames would be strictly worse than one.
+    fn defers_for(&self, _query: &str) -> bool {
+        false
+    }
+
+    /// [`Provider::search`], but abandonable: `cancel` is set the moment
+    /// the daemon learns this client no longer wants this query's answer
+    /// (the next keystroke arrived). A provider doing real, interruptible
+    /// I/O should poll it and return early — killing whatever child
+    /// process or connection it started, not merely discarding the result
+    /// — see `crate::cancel`'s module doc comment for why abandoning
+    /// matters rather than just ignoring.
+    ///
+    /// **The daemon always calls this, never `search` directly.** Defaulted
+    /// to ignore the token and delegate, so a provider with nothing
+    /// interruptible to abandon (everything except `files::FileProvider`
+    /// today) implements exactly one method, exactly as before this
+    /// existed — the "registering a new provider is one `impl` plus one
+    /// line" accounting in `AGENTS.md` is unchanged.
+    fn search_cancellable(&self, query: &str, now_unix_ms: i64, _cancel: &Cancel) -> Vec<Candidate> {
+        self.search(query, now_unix_ms)
+    }
 
     /// Perform this provider's one primary action for a `SearchItem::id` it
     /// previously returned — launch an app, write the pasteboard, open a
