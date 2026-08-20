@@ -229,6 +229,15 @@ patch on top of the pinned rev (`patches/`, applied by
 `scripts/setup-gpui-patch.sh`), not a neko-side change, since no public
 gpui API exists to opt a window or request out of that throttle. See
 "Summon latency" below, `docs/evidence/gpui-inactive-window-throttle-fix-report.md`.
+A twenty-sixth task (`fm/neko-footer-hairline`) shipped two more small,
+captain-requested chrome changes together: removed the panel's one
+horizontal hairline (above the footer — the vertical divider inside the
+footer stays), and unified the panel to one constant width (760px, root
+list and clipboard mode alike, overriding the frozen design's original
+two-width rule), which also let a real chunk of now-dead centering/margin/
+native-backdrop-repositioning machinery come out. See "Footer hairline
+removal, and one constant panel width" below,
+`docs/evidence/footer-hairline-and-panel-width-report.md`.
 
 ## Crate layout
 
@@ -1951,6 +1960,51 @@ window's presence. The evidence report above has the full account, including
 what was tried; the code-level argument above (a provably `0`-width margin
 in that mode) stands in for the missing screenshot. `evidence.rs` itself
 was not changed by this task.
+
+## Footer hairline removal, and one constant panel width
+
+`fm/neko-footer-hairline`, two captain-requested changes landed together
+since both touch the same area of `panel.rs`. Full before/after screenshots
+(root list and clipboard mode, both changes): `docs/evidence/
+footer-hairline-and-panel-width-report.md`.
+
+**The horizontal hairline above the footer is gone.** `render_footer`
+carried the only horizontal rule anywhere in the panel
+(`.border_t_1().border_color(theme::BORDER_HAIRLINE)`) — removed outright,
+on the captain's own "there is a line above the footer, maybe we can
+remove that?" The vertical divider *inside* the footer (between
+`Open ↵`/`Paste ↵` and `Actions ⌘K`) is untouched — that one is named
+explicitly in the frozen design (`data/neko-design/report.md` §2's own
+footer anatomy) and stays. Judged live: the footer still reads as its own
+band without the line, on the existing `FOOTER_HEIGHT_PX` strip and
+whitespace alone — no new chrome, no palette/geometry/spacing/type change.
+
+**The panel is now one constant width, 760px, root list and clipboard mode
+alike** — a captain override of the frozen design's original two-width
+rule (680px list-only / 760px only with a detail pane;
+`data/neko-design/report.md` §2, updated in place to record the override).
+It has to be 760, not 680: the real `NSWindow` was already permanently
+fixed at 760px for the process's whole lifetime for the unrelated reason
+"Mode view resize seam" above documents (gpui's own paint viewport goes
+stale after a show/hide cycle, with no public API to resync it), so one
+constant width has to match the window, not the other way around.
+`panel::Root::render` no longer varies width by `active_mode`.
+
+**What this let the implementation delete, since it was now genuinely
+dead**: `render`'s centering stage element and its two margin `div`s
+(`render_dismiss_margin`, including their click-to-dismiss handlers — no
+margin once the panel always fills the window, so no dead zone to
+compensate for); `theme::PANEL_ROOT_INSET_PX`; `Root::
+update_background_bounds` and its three call sites
+(`reset_for_summon`/`enter_mode`/`exit_mode`) — the native backdrop
+`material::install` already puts in place at the window's own full
+`contentView` bounds, once, at startup, which now matches the panel in
+every mode with nothing left to reposition; `main.rs`'s startup call
+narrowing that backdrop to 680px before the first summon; and
+`material::set_background_frame` itself (the public wrapper and its macOS
+impl), whose only two callers were the two removed just above. **What
+stayed, and why**: `theme::PANEL_WIDTH_PX` (680) — `onboarding/view.rs`
+still uses it for the onboarding window's own, unrelated size.
 
 ## Comet craft pass: floating-layer discipline, a throttled motion catalog, `paint_layer`
 

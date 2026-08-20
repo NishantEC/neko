@@ -122,10 +122,9 @@ fn main() {
 
         // Always `PANEL_WIDTH_WITH_DETAIL_PX` — the real `NSWindow` never
         // resizes for a mode transition any more (see `AGENTS.md`, "Mode
-        // view resize seam"); the narrower root-list panel is centered
-        // *within* this fixed window instead (`panel::Root::render`'s own
-        // stage element, `material::set_background_frame`'s matching
-        // native backdrop).
+        // view resize seam"), and since "One constant panel width" the panel
+        // `div` itself is always exactly this wide too, root list and
+        // clipboard mode alike, so window and panel never diverge.
         let bounds = upper_third(None, size(px(theme::PANEL_WIDTH_WITH_DETAIL_PX), px(panel::PANEL_HEIGHT_PX)), cx);
         let window = cx
             .open_window(
@@ -185,22 +184,12 @@ fn main() {
                             Ok(readback) => eprintln!("neko: Spaces/full-screen reachability verified: {readback}"),
                             Err(e) => eprintln!("neko: Spaces/full-screen reachability readback FAILED: {e}"),
                         }
-                        // The window itself just opened at the fixed
-                        // `PANEL_WIDTH_WITH_DETAIL_PX`, but the root list is
-                        // the narrower `PANEL_WIDTH_PX` state — narrow the
-                        // native backdrop to match before the first summon
-                        // ever shows it, the same centering
-                        // `panel::Root::render`'s own stage element and
-                        // every later mode transition use (`AGENTS.md`,
-                        // "Mode view resize seam").
-                        if let Err(e) = material::set_background_frame(
-                            window,
-                            theme::PANEL_ROOT_INSET_PX,
-                            theme::PANEL_WIDTH_PX,
-                            panel::PANEL_HEIGHT_PX,
-                        ) {
-                            eprintln!("neko: could not narrow the initial native background frame: {e}");
-                        }
+                        // No native-backdrop narrowing call here any more —
+                        // the panel is now always `PANEL_WIDTH_WITH_DETAIL_PX`
+                        // wide too (`AGENTS.md`, "One constant panel width"),
+                        // so `install`'s own full-`contentView`-bounds
+                        // material install already matches it exactly, at
+                        // rest and through every mode transition.
                         // The fixed-width window itself is always
                         // `PANEL_WIDTH_WITH_DETAIL_PX` now, but AppKit's own
                         // automatic window shadow doesn't know the visible
