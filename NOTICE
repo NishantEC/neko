@@ -1,5 +1,5 @@
-neko is MIT-licensed (see LICENSE). It vendors one small, adapted file from a
-third-party Apache-2.0 project:
+neko's own source is MIT-licensed (see LICENSE). It vendors one small,
+adapted file from a third-party Apache-2.0 project:
 
   crates/neko/src/components/vendor/gpui_component/blink_cursor.rs
     Adapted from gpui-component 0.5.1 (https://github.com/longbridge/gpui-component)
@@ -9,3 +9,13 @@ third-party Apache-2.0 project:
 
 See crates/neko/src/components/vendor/MANIFEST.md for what was vendored, what was
 deliberately not vendored, and why.
+
+IMPORTANT — this no longer describes a distributable binary. As of
+2026-08-20, `crates/neko` depends on the `wingleeio/zed` fork of gpui,
+which unconditionally links GPL-3.0-or-later code (`gpui -> sum_tree ->
+ztracing`, no feature gate that avoids it). A built `neko` binary is not
+MIT-shippable — see `AGENTS.md`'s "The GPUI dependency decision" for the
+full record, including why this obligation is dormant (triggers on
+distribution, not on local build/use) as long as neko stays a local-only
+tool built and run on one machine. Do not publish a release binary of
+this repo without resolving that first.

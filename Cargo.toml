@@ -11,6 +11,13 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+# This field describes every line written in this repo, which remains MIT —
+# see `AGENTS.md`'s "Licence rule". It does NOT describe a distributed
+# binary: `crates/neko` links the `wingleeio/zed` gpui fork, which pulls in
+# GPL-3.0-or-later code unconditionally (`gpui -> sum_tree -> ztracing`, no
+# feature gate) — see `AGENTS.md`'s "The GPUI dependency decision" for the
+# full record, why a bare SPDX string can't express a linked-GPL obligation,
+# and why the practical exposure is nil while neko stays local-only.
 license = "MIT"
 
 [workspace.dependencies]
