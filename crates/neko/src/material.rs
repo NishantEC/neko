@@ -82,6 +82,26 @@ pub fn window_number(window: &Window) -> Result<isize, String> {
     macos::window_number(window)
 }
 
+/// Reads back, from the real `NSWindow`, whether this window is currently
+/// the system's **key** window — i.e. whether real keystrokes typed on this
+/// machine right now would land in it.
+///
+/// This is the load-bearing readback behind `AGENTS.md`'s "an evidence
+/// window must never become the key window" rule: `evidence.rs` prints it
+/// next to the window number on every capture, so a capture is
+/// self-evidencing about focus rather than merely asserting it. Same
+/// "verified, not trusted" pattern as `verify_installed`/
+/// `verify_shadow_disabled` — a native readback, not a cached flag.
+#[cfg(target_os = "macos")]
+pub fn is_key_window(window: &Window) -> Result<bool, String> {
+    macos::is_key_window(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn is_key_window(_window: &Window) -> Result<bool, String> {
+    Err("key-window readback is only implemented on macOS".to_string())
+}
+
 /// A non-visual proof that `install`'s `Ok(Installed::_)` claim is real:
 /// re-derives `window.contentView()` fresh, reads back the actual live
 /// class, its material-specific properties, and its position in the
@@ -413,6 +433,15 @@ mod macos {
     /// outside the process — see `evidence.rs`.
     pub fn window_number(window: &Window) -> Result<isize, String> {
         Ok(native_window(window)?.windowNumber())
+    }
+
+    /// See the public `is_key_window` wrapper's own doc comment. Reads
+    /// `-[NSWindow isKeyWindow]` off the live window, plus
+    /// `-[NSApplication isActive]` is deliberately *not* consulted: key
+    /// status is what decides where a keystroke is delivered, and a
+    /// window can be in an active app without being key.
+    pub fn is_key_window(window: &Window) -> Result<bool, String> {
+        Ok(native_window(window)?.isKeyWindow())
     }
 
     /// The corner radius the `⌘K` actions menu's own overlay material

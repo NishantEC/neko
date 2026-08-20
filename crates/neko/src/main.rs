@@ -313,7 +313,18 @@ fn main() {
             // it hasn't been granted yet — the summon loop below simply
             // never sees a matching hotkey id, and `on_reopen`/onboarding
             // remain the way in.
-            if accessibility.is_trusted()
+            // Never register a live OS hotkey for an evidence/bench run
+            // (`evidence::evidence_run_active`). An isolated evidence client
+            // whose registration *succeeds* genuinely consumes the captain's
+            // own real keypresses — confirmed live once already
+            // (`AGENTS.md`, "Evidence-capture hook: `NEKO_SHOW_CONFIRM`").
+            // The prior mitigation was "remember to commit an obscure combo
+            // to the isolated daemon first," and a remember-to-do-it
+            // mitigation is precisely what failed in the key-window incident
+            // this guard's sibling in `evidence.rs` was added for.
+            if evidence::evidence_run_active() {
+                eprintln!("neko: evidence run — skipping live hotkey registration");
+            } else if accessibility.is_trusted()
                 && let Err(e) = controller.borrow_mut().apply_initial(&config)
             {
                 eprintln!(

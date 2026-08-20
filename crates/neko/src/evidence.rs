@@ -4,8 +4,65 @@
 //! env var, unset by default. Kept separate from `main.rs` so the real
 //! app's startup path stays readable.
 //!
+//! # Standing safety rule: an evidence window must never become key
+//!
+//! **Every hook in this file is non-activating by default.** An evidence
+//! window that becomes the system's *key* window receives the real
+//! keystrokes of whoever is using this machine — the captain's typing lands
+//! in a throwaway panel's search field instead of wherever he meant it to
+//! go. That is not hypothetical: a design-review run captured a screenshot
+//! with the words `fix it` already in the query field on a run that set no
+//! query hook at all. The capture was deleted and nothing was persisted,
+//! but the mechanism is a live keystroke-harvesting hazard on a shared
+//! machine, and `AGENTS.md`'s pre-existing "commit an obscure hotkey"
+//! mitigation does not help — that addresses *hotkey collision*, a
+//! different hazard from *key-window focus*.
+//!
+//! The window is made visible for a capture with
+//! `material::order_front_regardless`, which "structurally cannot reach
+//! `windowDidBecomeKey:` at all" (`run_bench`'s own doc comment): it paints
+//! normally, is fully `screencapture -l<windowID>`-able, and never takes
+//! keyboard focus from anything real.
+//!
+//! Activation is opt-in, never incidental: `NEKO_EVIDENCE_ACTIVATE=1`
+//! (`activation_opt_in`). Only two hooks consult it —
+//! `NEKO_SHOW_ON_LAUNCH` and `NEKO_BENCH_REAL` — and `NEKO_BENCH_REAL`
+//! **refuses to run at all without it**, because measuring the real
+//! summon path is definitionally an activation. Every hook prints a
+//! `neko: key window <bool>` line read back off the live `NSWindow`
+//! (`material::is_key_window`) at each point it matters, so a run is
+//! self-evidencing about focus rather than merely asserting it.
+//!
+//! Per-hook focus accounting (kept current — add a row when you add a
+//! hook):
+//!
+//! | hook | can it take key focus | why |
+//! |---|---|---|
+//! | `NEKO_SHOW_ON_LAUNCH` | only with `NEKO_EVIDENCE_ACTIVATE=1` | was the incident's source; now `order_front_regardless` by default |
+//! | `NEKO_SHOW_QUERY` | no | a modifier on `NEKO_SHOW_ON_LAUNCH`; drives `set_query_for_evidence` directly, never focus |
+//! | `NEKO_SHOW_CONFIRM` | no | same — drives `confirm_for_evidence` in-process |
+//! | `NEKO_CYCLE_MODE_ONCE` | no | same — `dismiss_for_evidence`/`confirm_for_evidence` |
+//! | `NEKO_SHOW_ACTIONS_MENU` | no | same — `open_actions_menu_for_evidence` |
+//! | `NEKO_SCROLL_MODE_LIST_TO_BOTTOM` | no | same — a `ScrollHandle` mutation |
+//! | `NEKO_SHOW_SELECTION` | no | same — `select_query_for_evidence` |
+//! | `NEKO_REAL_CYCLES_BEFORE_SHOW` | no | already `order_front_regardless`/`order_out` only, by its own deliberate design |
+//! | `NEKO_BENCH` | no | `order_front_regardless`/`order_out` only, by its own deliberate design |
+//! | `NEKO_BENCH_REAL` | **yes, and must** | it exists to measure the real `activate_window` path; gated behind `NEKO_EVIDENCE_ACTIVATE=1` and refuses to start without it |
+//! | `NEKO_BACKDROP_IMAGE` | no | opened with `focus: false`, below the panel's window level |
+//!
+//! Note the hotkey hazard is separate and still real: `main.rs` registers
+//! a live OS hotkey whenever Accessibility is already granted for the
+//! binary being run. That is now suppressed for any evidence run — see
+//! `evidence_run_active`.
+//!
 //! - `NEKO_SHOW_ON_LAUNCH=1` shows the summon panel immediately, skipping
-//!   the hotkey/onboarding path — for a single screenshot.
+//!   the hotkey/onboarding path — for a single screenshot. Non-activating
+//!   by default (see the safety rule above); pass
+//!   `NEKO_EVIDENCE_ACTIVATE=1` alongside it only when the thing being
+//!   captured genuinely depends on a real activation.
+//! - `NEKO_EVIDENCE_ACTIVATE=1` is the single, explicit opt-in that lets an
+//!   evidence window become the system key window. Nothing else in this
+//!   file activates. See `activation_opt_in`.
 //! - `NEKO_SHOW_QUERY=<text>` (only read alongside `NEKO_SHOW_ON_LAUNCH`)
 //!   types `<text>` into the field before the screenshot — for capturing
 //!   real search results (the provider-abstraction task's own evidence:
@@ -40,6 +97,9 @@
 //!   doesn't steal focus — see its own doc comment). This one does steal
 //!   focus and takes over the screen for real on every cycle, which is why
 //!   it's meant for a small, deliberate iteration count, not a long bench.
+//!   **Requires `NEKO_EVIDENCE_ACTIVATE=1`** and refuses to run without it
+//!   — an activation must never be reachable by typing one env var that
+//!   does not obviously say so.
 //!   See `run_bench_real`'s own doc comment for the exact stderr markers an
 //!   outside script samples `vmmap`/`footprint` against.
 //! - `NEKO_BACKDROP_IMAGE=<path>` opens a second, full-display window
@@ -132,6 +192,11 @@ const CYCLE_MODE_ONCE_ENV_VAR: &str = "NEKO_CYCLE_MODE_ONCE";
 const SHOW_ACTIONS_MENU_ENV_VAR: &str = "NEKO_SHOW_ACTIONS_MENU";
 const SCROLL_MODE_LIST_TO_BOTTOM_ENV_VAR: &str = "NEKO_SCROLL_MODE_LIST_TO_BOTTOM";
 const SHOW_SELECTION_ENV_VAR: &str = "NEKO_SHOW_SELECTION";
+/// The one explicit opt-in that permits an evidence window to become the
+/// system key window. See this module's own "an evidence window must never
+/// become key" safety rule for why activation is opt-in rather than the
+/// default it used to be.
+const ACTIVATE_ENV_VAR: &str = "NEKO_EVIDENCE_ACTIVATE";
 
 pub fn bench_iterations() -> Option<u32> {
     std::env::var(BENCH_ENV_VAR).ok()?.parse().ok()
@@ -167,6 +232,51 @@ pub fn scroll_mode_list_to_bottom_requested() -> bool {
 
 pub fn show_selection_requested() -> bool {
     std::env::var_os(SHOW_SELECTION_ENV_VAR).is_some()
+}
+
+/// `NEKO_EVIDENCE_ACTIVATE` — whether this run is explicitly permitted to
+/// take real keyboard focus. **Default is `false`, deliberately**: an agent
+/// who forgets a flag is exactly the failure mode the incident in this
+/// module's own doc comment came from, so forgetting must fail *safe*, not
+/// fail *loud-and-focus-stealing*.
+pub fn activation_opt_in() -> bool {
+    std::env::var_os(ACTIVATE_ENV_VAR).is_some()
+}
+
+/// True when any hook in this file is driving this process — i.e. this is a
+/// throwaway evidence client, not the captain's real one.
+///
+/// `main.rs` uses this to suppress the live OS hotkey registration it would
+/// otherwise perform whenever Accessibility is already granted for the
+/// binary being run. That registration is the *other* half of the same
+/// "an evidence process must not intercept real input" hazard this module's
+/// safety rule covers: `AGENTS.md` previously mitigated it by asking each
+/// agent to remember to commit an obscure combo to the isolated daemon
+/// first, which is exactly the kind of remember-to-do-it mitigation that
+/// failed here. Suppressing it structurally cannot be forgotten.
+pub fn evidence_run_active() -> bool {
+    show_on_launch_requested() || bench_iterations().is_some() || bench_real_iterations().is_some()
+}
+
+/// Reads back off the live `NSWindow` whether this evidence window is
+/// currently the system key window, and prints it — `neko: key window
+/// <bool>`. Printed at every point that matters so a capture is
+/// self-evidencing about focus (this module's own safety rule), and shouts
+/// if a run that never opted into activation somehow ended up key anyway.
+fn report_key_window(window: &Window, at: &str) {
+    match material::is_key_window(window) {
+        Ok(is_key) => {
+            eprintln!("neko: key window {is_key} ({at})");
+            if is_key && !activation_opt_in() {
+                eprintln!(
+                    "neko: SAFETY WARNING — this evidence window is the system key window at {at} \
+                     without NEKO_EVIDENCE_ACTIVATE set. Real keystrokes may be landing in it. \
+                     See evidence.rs's own safety rule."
+                );
+            }
+        }
+        Err(e) => eprintln!("neko: key window readback failed ({at}): {e}"),
+    }
 }
 
 pub fn backdrop_image_path() -> Option<PathBuf> {
@@ -270,8 +380,17 @@ async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncA
 /// Shows the summon panel once, immediately — `NEKO_SHOW_ON_LAUNCH`. Marks
 /// onboarding complete first so it can't cover the panel for this run.
 ///
-/// **The real, final summon activates the window first, then drives
-/// query/confirm while it stays visible/key** — not the other way around.
+/// **Non-activating by default** — see this module's own "an evidence
+/// window must never become key" safety rule. `NEKO_EVIDENCE_ACTIVATE=1`
+/// restores the real `activate_window()` + `cx.activate(true)` path for the
+/// rare capture that genuinely needs a real activation to reproduce (the
+/// mode-view resize seam below is the one known case). The rest of the
+/// sequence is identical either way: every state transition this hook
+/// drives is an in-process view update, and GPUI keeps processing those for
+/// a non-key — or even hidden — window.
+///
+/// **The real, final summon shows the window first, then drives
+/// query/confirm while it stays visible** — not the other way around.
 /// An earlier version of this function deferred `window.activate_window()`/
 /// `cx.activate(true)` to the very end, after `reset_for_summon`/query/
 /// confirm had already run. That matched every *other* evidence hook here
@@ -284,9 +403,11 @@ async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncA
 /// after — not "he summons it, types, and presses Enter while looking at
 /// it," which is what the mode-view resize investigation
 /// (`AGENTS.md`, "Mode view resize seam") actually needs reproduced.
-/// Activating first and keeping the window key through query/confirm
+/// Showing first and keeping the window on screen through query/confirm
 /// matches the real sequence and was the one change that made the seam
-/// reproducible at all.
+/// reproducible at all. (That investigation used the activating path; it is
+/// reachable today with `NEKO_EVIDENCE_ACTIVATE=1`, which is exactly the
+/// kind of deliberate, stated intent the safety rule asks for.)
 pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp) {
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
     if let Some(cycles) = real_cycles_before_show() {
@@ -304,16 +425,38 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
     } else {
         cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
     }
+    let activate = activation_opt_in();
+    if activate {
+        eprintln!(
+            "neko: NEKO_EVIDENCE_ACTIVATE set — this window WILL become the system key window \
+             and will receive real keystrokes typed on this machine."
+        );
+    }
     cx.update(|cx| {
         let _ = window.update(cx, |root, window, cx| {
             root.reset_for_summon(window, cx);
-            window.activate_window();
+            if activate {
+                window.activate_window();
+            } else {
+                // The safe default (this module's own safety rule): a real
+                // native order-front that paints and is fully capturable,
+                // but structurally cannot make this window key.
+                let _ = material::order_front_regardless(window);
+            }
+            // GPUI-internal focus only — it renders the caret and routes
+            // this process's own actions. It cannot pull real OS keystrokes
+            // into a window that isn't key, so it is safe on both paths.
             window.focus(&root.focus_handle(cx), cx);
             if let Some(query) = query.as_deref() {
                 root.set_query_for_evidence(query, cx);
             }
         });
-        cx.activate(true);
+        if activate {
+            cx.activate(true);
+        }
+    });
+    cx.update(|cx| {
+        let _ = window.update(cx, |_root, window, _cx| report_key_window(window, "after show"));
     });
     if query.is_some() {
         // `set_query_for_evidence` re-runs search the same way a real
@@ -429,6 +572,11 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             if let Ok(number) = material::window_number(window) {
                 eprintln!("neko: window number {number}");
             }
+            // Printed immediately before the capture signal below, so the
+            // evidence for "this window was visible and painted but was not
+            // key" is a live native readback taken at capture time, not an
+            // assertion made somewhere else in this function.
+            report_key_window(window, "at capture");
             // Points, top-left origin, `-R<x,y,w,h>`-ready — lets an
             // outside script capture *exactly* this window's own on-screen
             // rect (`screencapture -R`) rather than the whole display, the
@@ -449,6 +597,14 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
 /// through `Window::activate_window`/`cx.hide()`, so a long bench run
 /// doesn't repeatedly steal focus from whatever else is on screen. Exits
 /// the process when done.
+///
+/// **This mode never makes the window key**, and that is a load-bearing
+/// property, not an incidental one — see this module's own safety rule.
+/// `order_front_regardless` structurally cannot reach
+/// `windowDidBecomeKey:`. It prints a `neko: key window false` readback on
+/// the first cycle so the bench proves it rather than claiming it. The
+/// real-activation counterpart is `run_bench_real`, which is separately
+/// gated.
 ///
 /// **Also runs the real `display_placement::reposition_to_cursor_display`
 /// call every cycle**, exactly as the two real summon entry points in
@@ -482,6 +638,9 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                     eprintln!("neko: bench reposition failed: {e}");
                 }
                 let _ = material::order_front_regardless(window);
+                if i == 0 {
+                    report_key_window(window, "bench summon 0");
+                }
                 window.on_next_frame(move |_, _| {
                     eprintln!("neko: bench summon {i} latency {:?}", started.elapsed());
                 });
@@ -528,9 +687,32 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
 /// investigation that added this mode used 5, matching the captain's own
 /// real repro — since each cycle takes over the screen for real and, if the
 /// investigation's hypothesis is right, costs multiple gigabytes.
+///
+/// **This is the one hook in this file that must take real keyboard focus**
+/// — measuring the real summon path *is* measuring `activate_window()` +
+/// `cx.activate(true)`, and a non-activating stand-in measures a
+/// structurally different path (that stand-in already exists and is
+/// `run_bench`). It is therefore the one hook allowed to violate this
+/// module's "never become key" rule, and to keep that from being reachable
+/// by accident it **refuses to run without `NEKO_EVIDENCE_ACTIVATE=1`**:
+/// setting `NEKO_BENCH_REAL` alone prints why and exits without ever
+/// activating. Do not run it on a machine someone is using.
 pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp, iterations: u32) {
+    if !activation_opt_in() {
+        eprintln!(
+            "neko: NEKO_BENCH_REAL measures the real activate_window() summon path, which makes \
+             this window the system key window and captures real keystrokes typed on this \
+             machine. Refusing to run without an explicit NEKO_EVIDENCE_ACTIVATE=1. \
+             Use NEKO_BENCH for a non-activating latency bench."
+        );
+        std::process::exit(2);
+    }
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
     eprintln!("neko: real-bench pid {}", std::process::id());
+    eprintln!(
+        "neko: real-bench WILL take real keyboard focus for {iterations} cycles \
+         (NEKO_EVIDENCE_ACTIVATE is set)."
+    );
     cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
 
     // The real window is always `PANEL_WIDTH_WITH_DETAIL_PX` now
@@ -560,6 +742,11 @@ pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx:
         // before printing `activated` — the moment an outside script should
         // sample.
         cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+        cx.update(|cx| {
+            let _ = window.update(cx, |_root, window, _cx| {
+                report_key_window(window, "real-bench activated")
+            });
+        });
         eprintln!("neko: real-bench cycle {i} activated");
         cx.background_executor().timer(std::time::Duration::from_millis(900)).await;
 
