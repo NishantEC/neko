@@ -312,6 +312,39 @@ fn query_spotlight_paths(query: &str, dirs: &[PathBuf], cancel: &Cancel) -> Vec<
     run_bounded_child(command, cancel).0
 }
 
+/// `NEKO_FILE_SEARCH_DELAY_MS` — verification-only, unset by default, never
+/// read in normal operation. Same pattern (and same reasoning) as
+/// `neko-daemon`'s own `NEKO_ICON_EXTRACT_DELAY_MS`: real hardware answers
+/// a prefix query against a real corpus in tens of milliseconds, which is
+/// genuinely too fast to land a screenshot *between* the fast providers'
+/// results and this one's, even though that intermediate state is exactly
+/// what the two-phase search exists to produce and therefore exactly what
+/// has to be shown to be believed.
+///
+/// Stretching this provider out is the only way to capture that window
+/// without synthetic input or a doctored screenshot. It also makes the
+/// cancellation path live-verifiable rather than only unit-tested: with a
+/// multi-second delay set, a superseded keystroke visibly abandons its
+/// query instead of holding a thread.
+fn verification_delay() -> Option<Duration> {
+    std::env::var("NEKO_FILE_SEARCH_DELAY_MS").ok()?.parse::<u64>().ok().map(Duration::from_millis)
+}
+
+/// Sleeps for `delay` in [`CANCEL_POLL_INTERVAL`] slices, returning `false`
+/// if `cancel` fired before it elapsed. `None` returns `true` immediately —
+/// the normal, un-delayed path.
+fn sleep_unless_cancelled(delay: Option<Duration>, cancel: &Cancel) -> bool {
+    let Some(delay) = delay else { return true };
+    let deadline = std::time::Instant::now() + delay;
+    while std::time::Instant::now() < deadline {
+        if cancel.is_cancelled() {
+            return false;
+        }
+        std::thread::sleep(CANCEL_POLL_INTERVAL);
+    }
+    !cancel.is_cancelled()
+}
+
 /// How often [`run_bounded_child`] wakes to re-check `cancel` while waiting
 /// on the reader thread. Small enough that a superseded query's child dies
 /// within a keystroke's own interval rather than lingering, large enough
@@ -484,6 +517,9 @@ impl Provider for FileProvider {
         if query.chars().count() < MIN_QUERY_LEN {
             return Vec::new();
         }
+        if !sleep_unless_cancelled(verification_delay(), cancel) {
+            return Vec::new();
+        }
         query_spotlight_paths(query, &self.scope_dirs, cancel)
             .into_iter()
             .filter(|path| !is_noisy(path))
@@ -591,6 +627,27 @@ mod tests {
         assert!(!provider.defers_for("a"), "a single character is below MIN_QUERY_LEN");
         assert!(!provider.defers_for("  a  "), "whitespace does not count toward the minimum");
         assert!(provider.defers_for("do"), "two characters is the point mdfind actually runs");
+    }
+
+    #[test]
+    fn a_verification_delay_is_abandoned_the_moment_the_query_is_superseded() {
+        let cancel = Cancel::new();
+        let canceller = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            canceller.cancel();
+        });
+        let started = std::time::Instant::now();
+        let completed = sleep_unless_cancelled(Some(Duration::from_secs(30)), &cancel);
+        assert!(!completed, "a cancelled delay reports that it did not elapse");
+        assert!(started.elapsed() < Duration::from_secs(1), "and returns without waiting the rest of it out");
+    }
+
+    #[test]
+    fn no_verification_delay_configured_means_no_wait_at_all() {
+        let started = std::time::Instant::now();
+        assert!(sleep_unless_cancelled(None, &Cancel::never()));
+        assert!(started.elapsed() < Duration::from_millis(50));
     }
 
     #[test]
