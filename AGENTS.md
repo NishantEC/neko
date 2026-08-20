@@ -244,7 +244,15 @@ panel's own top-edge highlight bleeding past its rounded corner into the
 Liquid Glass–specific specular rim (ruled out live: the same top-edge
 brightening persists on the `NSVisualEffectView(.popover)` fallback too).
 See "One constant panel width, and the real top line" below,
-`docs/evidence/footer-hairline-and-panel-width-report.md`.
+`docs/evidence/footer-hairline-and-panel-width-report.md`. A twenty-seventh
+task (`fm/neko-textinput`) closed the one seam "Text field editing
+shortcuts" below had explicitly deferred: real keyboard-driven text
+selection (⇧←/⇧→, ⇧⌥←/⇧⌥→, ⇧⌘←/⇧⌘→, ⌘A) and real clipboard (⌘C/⌘X/⌘V against
+the actual `NSPasteboard`) in the search field, closing the one place a
+peer launcher study (`data/neko-loungy-study/report.md` in the firstmate
+home) had found neko clearly behind. See "Text field editing shortcuts"
+below for the implementation, the rendered-highlight token reuse, and a
+real pasteboard-test race this task found and fixed along the way.
 
 ## Crate layout
 
@@ -605,13 +613,71 @@ crate versions to the tree. One unit test per shortcut plus a dedicated
 Unicode-awareness test, all against the editing model directly (no `Window`
 needed, consistent with this file's existing test convention).
 
-**Deliberately excludes selection and paste — the seam, not a gap.**
-`TextField` still has exactly one `cursor: usize`, no range concept; every
-shortcut here is a cursor jump or a delete of `[start, cursor)`/
-`[cursor, end)`, never a highlighted range. Real selection (⇧-arrows, ⌘A)
-and paste (⌘V/⌘C/⌘X) need a `selection: Option<Range<usize>>` field on
-`TextField` plus real pasteboard reads first — out of scope for this task
-by its own brief, and nothing added here makes that harder later.
+**Selection and clipboard, closing the seam this section used to describe —
+`fm/neko-textinput`.** `TextField` now carries `selection_anchor:
+Option<usize>`; `cursor` is always the moving end, `selection_anchor` the
+fixed one. `selection_range()` normalizes the two into a `start..end` byte
+range, `None` whenever there's no anchor or the two coincide (an empty
+selection is the same as no selection). Bound in `main.rs`'s `cx.bind_keys`:
+`shift-left`/`shift-right` (`SelectLeft`/`SelectRight`, one char at a time),
+`shift-alt-left`/`shift-alt-right` (by word, reusing `word_start_before`/
+`word_end_after`), `shift-cmd-left`/`shift-cmd-right` (to line start/end),
+`cmd-a` (`SelectAll`, always re-anchors at the true start rather than
+extending from wherever the cursor sits), `cmd-c`/`cmd-x`/`cmd-v`
+(`crates/neko/src/pasteboard.rs`, the real `NSPasteboard`, every AppKit call
+autoreleasepool-wrapped — same discipline as `neko_core::clipboard::
+pasteboard` and `material.rs`, since an unpooled pasteboard call site is
+exactly the defect class that took the daemon's own capture loop to 14+ GB
+resident, see "Clipboard capture memory" above). A non-shift movement key
+clears the selection (`selection_anchor = None`); any real edit clears it
+too, inside `commit_edit`, the one chokepoint every content mutation goes
+through. Typing a character or invoking any delete shortcut with a
+selection active replaces/deletes exactly the selection first
+(`edit_target_range()`), never falling through to its own direction-specific
+range. The rendered highlight (`TextFieldElement::prepaint`/`paint`) reuses
+`theme::SURFACE_SELECTED` — the same token `panel.rs`'s row-selection
+highlight already uses — painted behind the shaped text so selected
+characters stay legible, deliberately no new palette token. `⌘K` is bound
+only at the `"Panel"` key context (`main.rs`), never `"TextField"`, so it
+was never at risk of being shadowed by anything this task added.
+
+**Every AppKit pasteboard test hits the same real, systemwide
+`NSPasteboard`, with no per-test isolation — this raced under `cargo test`'s
+default multithreading and had to be fixed with a lock, not skipped.**
+`text_field::tests::pasteboard_test_lock()` is a single `static
+Mutex<()>` every copy/cut/paste test holds for its whole body, so two such
+tests can never interleave their real pasteboard writes/reads — confirmed
+live: without it, 5 of the file's pasteboard tests failed intermittently
+(wrong fixture string read back) whenever `cargo test --workspace` happened
+to schedule more than one of them concurrently; with it, dozens of repeat
+runs were clean. **The general lesson**: any test suite that touches a
+real, unpartitioned OS-level shared resource (the systemwide pasteboard
+here; a fixed socket path is `neko-client`'s own equivalent, per that
+crate's own `temp_socket_path()`) needs its own explicit serialization if
+more than one test in the suite touches it — `cargo test`'s default
+parallelism doesn't know or care that two tests share state outside the
+process.
+
+Verified on the release binaries, window-scoped, without synthetic input —
+same isolated-`HOME`/`verify_harness` discipline "Daemon concurrency" above
+established (a real `neko-daemon` binary was never spawned: the isolated
+`neko` client ran from a directory with no `neko-daemon` sibling and an
+empty `PATH`, so `daemon_launcher::ensure_daemon_running`'s spawn attempt
+failed cleanly rather than transiently starting the real capture loop).
+`evidence.rs` gained `NEKO_SHOW_SELECTION=1` (only read alongside
+`NEKO_SHOW_QUERY`) — drives `Root::select_query_for_evidence` →
+`TextField::select_all_for_evidence`, the exact logic ⌘A's real handler
+uses, factored out so it doesn't need a live `Window` — for a rendered
+selection highlight without a synthetic keystroke, this repo's standing
+rule. `docs/evidence/text-field-selection-highlight.png`: a real, isolated
+summon window with `SURFACE_SELECTED` visibly highlighting the whole query
+text, driven by this hook alone. Copy/cut/paste were verified the same way
+the rest of this section already was — real `NSPasteboard` round-trips
+through `pasteboard.rs`'s actual read/write functions in `text_field.rs`'s
+own test suite, own fixture strings only, never the captain's real
+clipboard — not by a live ⌘V keystroke, since synthesizing one is exactly
+the kind of synthetic OS input this repo's standing rule (`AGENTS.md`
+throughout, and this task's own launch brief) rules out.
 
 ## Search and ranking
 
@@ -2937,10 +3003,11 @@ short (3 cycles) and didn't re-attempt that measurement.
   native bridging.
 - **A real menu-bar `NSStatusItem`**: see "Onboarding" above — GPUI 0.2.2 has
   no usable status-item API; this is raw AppKit bridging, its own task.
-- **Text field selection and paste**: see "Text field editing shortcuts"
-  above — needs a `selection: Option<Range<usize>>` field on `TextField`
-  plus real pasteboard reads for ⌘V/⌘C/⌘X, deliberately out of scope for
-  `neko-p0-fixes`.
+- **Text field selection and paste**: built — see "Text field editing
+  shortcuts" above. Still open: mouse selection (click-drag) and IME
+  composition (marked text) — both real, separate pieces of work this
+  task's own launch brief scoped out (single-line, standard-shortcut-set
+  only, no general text editor).
 - **`CORE_SERVICES_ALLOWED_APPS`'s 5-name allowlist** (`apps.rs`, see
   "Application discovery" above) is pinned to this machine's OS build. A
   future macOS release could rename, remove, or add a loose bundle in
