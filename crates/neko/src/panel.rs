@@ -971,7 +971,29 @@ impl Render for Root {
                 el.border_1().border_color(theme::BORDER_HAIRLINE_STRONG)
             })
             .rounded(px(theme::PANEL_RADIUS_PX))
-            .shadow_lg()
+            // **Deliberately no drawn shadow here — this used to be
+            // `.shadow_lg()`.** That was the real, second cause of the
+            // "black tent" halo the captain kept reporting even after the
+            // native window shadow was disabled ("The double-panel shadow
+            // defect" in `AGENTS.md`): `shadow_lg`'s blur/spread paints a
+            // few px of soft, low-alpha black *outside* this div's own
+            // bounds, and since `235bf88` there's `theme::PANEL_ROOT_INSET_PX`
+            // of real, otherwise-empty transparent window on each side of
+            // the root-list panel for it to bleed into
+            // (`render_dismiss_margin`'s own margin `div`s, next to this
+            // one, paint nothing at all). Confirmed with a single-variable
+            // test, not assumed: alpha-channel analysis of a window-scoped
+            // capture showed a soft 0→~17/255 gradient in the margin with
+            // this line present, and a hard, exact 0 with it removed. Every
+            // other paint source in that margin was already deliberately
+            // eliminated for the same reason (the native auto-shadow fix
+            // above; the native backdrop material is intentionally
+            // narrowed to the panel's own width, not the window's) — this
+            // was the one holdout. The translucent Glass material
+            // (`self.translucent`) already reads as an elevated surface on
+            // its own via real vibrancy; the opaque fallback keeps its
+            // `.border_1()` above for edge definition, which never had any
+            // spill risk. See `docs/evidence/panel-shadow-tent-fix-report.md`.
             .overflow_hidden()
             .child(self.render_input_row(cx))
             .child(match &self.active_mode {
