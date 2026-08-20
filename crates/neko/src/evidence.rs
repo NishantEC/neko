@@ -149,6 +149,10 @@
 //!   edit path, one keystroke-to-first-render sample per character — see
 //!   `run_search_bench`. `panel::Root` prints the numbers.
 //!
+//! - `NEKO_LOG_SEARCH_LATENCY=1` prints one `neko: search-latency` line per
+//!   applied search frame (implied by `NEKO_BENCH_SEARCH`) — the record of
+//!   which phase a captured frame actually shows.
+//!
 //! - `NEKO_SCROLL_MODE_LIST_TO_BOTTOM=1` (only read alongside
 //!   `NEKO_SHOW_CONFIRM`, added for the results-list edge fade —
 //!   `edge_fade.rs`) scrolls the mode list just entered to its own bottom
@@ -203,6 +207,7 @@ const SHOW_SELECTION_ENV_VAR: &str = "NEKO_SHOW_SELECTION";
 /// default it used to be.
 const ACTIVATE_ENV_VAR: &str = "NEKO_EVIDENCE_ACTIVATE";
 const BENCH_SEARCH_ENV_VAR: &str = "NEKO_BENCH_SEARCH";
+const LOG_SEARCH_LATENCY_ENV_VAR: &str = "NEKO_LOG_SEARCH_LATENCY";
 
 pub fn bench_iterations() -> Option<u32> {
     std::env::var(BENCH_ENV_VAR).ok()?.parse().ok()
@@ -236,6 +241,16 @@ pub fn show_actions_menu_requested() -> bool {
 /// See [`run_search_bench`].
 pub fn bench_search_query() -> Option<String> {
     std::env::var(BENCH_SEARCH_ENV_VAR).ok().filter(|q| !q.is_empty())
+}
+
+/// Whether `panel::Root` should print a `neko: search-latency` line for
+/// every search frame it applies. Implied by [`bench_search_query`] (which
+/// exists to produce exactly those lines), and separately settable with
+/// `NEKO_LOG_SEARCH_LATENCY=1` for a run that drives its query some other
+/// way — a screenshot run under `NEKO_SHOW_QUERY`, say, where the log is
+/// what tells you which phase the captured frame actually shows.
+pub fn log_search_latency() -> bool {
+    bench_search_query().is_some() || std::env::var_os(LOG_SEARCH_LATENCY_ENV_VAR).is_some()
 }
 
 pub fn scroll_mode_list_to_bottom_requested() -> bool {
