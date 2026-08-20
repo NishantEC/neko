@@ -179,7 +179,24 @@ read as broken rather than fast. See "Comet craft pass" below,
 `frost.rs` backdrop blur and `EdgeFade` (both need `gpui` fork-only
 primitives absent from the published crate) and comet's automatic
 `App::reduce_motion()` snap (same reason) — see that section for what was
-built instead of each.
+built instead of each. A twenty-second task (`neko-gpui-fork-migration`)
+reversed the standing decision that same section's own "Explicitly not
+attempted" line depended on: on direct captain instruction, `crates/neko`
+now depends on the `wingleeio/zed` fork of `gpui` (pinned by rev, same
+commit `data/helm/refs/comet` pins), accepting a real GPL-3.0-or-later
+dependency-chain exposure the captain was shown and explicitly chose to
+accept — "its okay lets do it, i dont care about licence." This makes
+`paint_backdrop_blur`/`BackdropBlur` and `EdgeFade`/`with_edge_fade`
+genuinely available for the first time (confirmed by citation, not used by
+this task — left to `fm/neko-frost`'s own follow-up), and empirically
+confirms (not just reads in source) that this fork also fixes the
+long-standing `windowDidBecomeKey:` self-deadlock. See "The GPUI dependency
+decision" below for the full reversal record and its licence consequence,
+and `docs/evidence/gpui-fork-migration-report.md` for the migration itself
+— the API-drift compile fixes it forced, the four-primitive availability
+citations, build-cost numbers, and a real, measured warm-summon-latency
+regression this task found and did not root-cause (see "Summon latency"
+below).
 
 ## Crate layout
 
@@ -2091,10 +2108,13 @@ against an arbitrary desktop, per the design report's own explicit fallback.
 `objc2-quartz-core`, `raw-window-handle` added as direct dependencies of the
 `neko` crate (macOS-only target block) — all four already transitive
 dependencies of `gpui`/`neko-core` at these exact versions, so this added
-**zero new crate versions** to the tree (verified before/after via `cargo
-tree`; `docs/evidence/cargo-tree.txt`/`cargo-license.txt` are current). Every
-one is MIT/Apache/Zlib; the tree stays GPL-free (only the pre-existing
-`self_cell` Apache-2.0/GPL-2.0 dual line, used under its Apache arm).
+**zero new crate versions** to the tree at the time this task ran. Every one
+of *these four* is MIT/Apache/Zlib. **"The tree stays GPL-free" is no
+longer true as of the 2026-08-20 fork migration** ("The GPUI dependency
+decision" below) — unrelated to this task's own four crates, but
+`docs/evidence/cargo-tree.txt`/`cargo-license.txt` now reflect the current,
+post-migration tree (GPL-3.0-or-later present via `gpui`'s own dependency
+chain), not the GPL-free state this paragraph describes.
 
 **Forcing a specific fallback branch for verification** (never set in
 normal operation): `NEKO_FORCE_MATERIAL=popover` skips the
@@ -2322,6 +2342,25 @@ delivery), even though every event that *did* arrive was handled correctly.
 Real hardware keypresses weren't re-tested with the same instrumentation this
 pass either — don't be surprised if automated re-tests need retries.
 
+**Regressed on the `wingleeio/zed` fork (`fm/neko-gpui-fork-migration`,
+2026-08-20) — a real, measured finding, not yet root-caused.** Warm summon
+on the fork's own release binary sits at **~26–40ms across 15 samples with
+no warm-up trend**, versus the published crate's documented ~2.9–6.4ms —
+confirmed not to be shared-machine noise by rebuilding the published crate
+from a disposable worktree and bench'ing it interleaved, on the same
+machine, against the same isolated daemon, in the same few minutes (full
+numbers, both interleaved runs side by side:
+`docs/evidence/gpui-fork-migration-report.md` §8). The real
+`activate_window`/`cx.activate` path shows the same elevated pattern in its
+own frame-latency numbers. Still comfortably under 100ms and not
+human-perceptible as sluggish, but a real ~6–8x regression against the
+budget this section documents, deliberately not root-caused by the
+migration task itself (candidates worth checking first: the
+`runtime_shaders` feature compiling Metal shaders at runtime rather than at
+build time and never fully amortizing; a heavier per-frame cost somewhere
+in this rev's renderer/layout engine; something specific to `font-kit`) —
+scoped follow-up work for whoever picks this up next.
+
 ## Hotkey scoping (must never leak into other apps)
 
 `global-hotkey`'s macOS backend registers through Carbon's
@@ -2344,9 +2383,98 @@ Apache-2.0, attributed). `data/helm/refs/` (in the firstmate home) holds four
 reference GPUI apps — `comet` (MIT), `waku` (GPL-3.0), `codux` (GPL-3.0),
 `t3code` (MIT) — plus GPUI's own bundled `examples/` (Apache-2.0). All read for
 architecture and API shape, never copied. The aim is MIT end to end, plus the
-one attributed Apache-2.0 file.
+one attributed Apache-2.0 file — true of every line of *this repo's own
+source*, still. **It does not describe a built, distributed binary as of
+2026-08-20** — see "The GPUI dependency decision" immediately below for why
+a linked dependency can attach obligations this rule doesn't cover.
 
 ## The GPUI dependency decision
+
+**Reversed 2026-08-20, by explicit captain decision — this section
+previously chose the opposite route specifically to avoid the cost this
+reversal accepts. Read this whole section, not just the summary below, if
+you're touching this dependency again.**
+
+**Current state**: `crates/neko` depends on the `wingleeio/zed` fork of
+`gpui` (plus its own `gpui_platform`), pinned by git rev
+`e2ddcc6805f8c5088e62a60dfe517abcccd61a9a` — the same rev
+`data/helm/refs/comet` pins, chosen specifically so the primitives this
+migration was taken for are known to exist at that exact commit. Pinned by
+rev, never by branch. Full migration record, build-cost numbers, and the
+four-primitive availability confirmation:
+`docs/evidence/gpui-fork-migration-report.md`.
+
+**What was decided, in the captain's own words**: shown verified evidence
+that this fork's `gpui` unconditionally links three GPL-3.0-or-later crates
+(`gpui → sum_tree → ztracing`, plus `ztracing`'s own `zlog`/`ztracing_macro`
+dependencies) with no Cargo feature that avoids it, and that this is not
+fork-specific — vanilla Zed's own `gpui` carries the identical chain,
+tracked upstream as `zed-industries/zed#55470`, still open, unfixed — the
+captain's response was *"its okay lets do it, i dont care about licence."*
+Full evidence and decision record (outside this repo, firstmate home):
+`data/neko-gpui-fork-licence/report.md`,
+`data/neko-gpui-fork-licence/decision-adopt-fork.md`.
+
+**Why the original decision (below) chose the opposite route**: the
+published `gpui = "0.2.2"` crate on crates.io is genuinely Apache-2.0 with
+no GPL edge — `sum_tree`/`ztracing` aren't part of what crates.io publishes
+under that version, only present via a git dependency on the fork/mainline.
+Depending on the published crate was the whole point: get gpui without the
+GPL chain. This reversal gives that up on purpose, for capabilities the
+published crate doesn't have and won't get without waiting on an unknown
+future release.
+
+**What it buys, concretely** (see `docs/evidence/gpui-fork-migration-report.md`
+§4 for citations): `window.paint_backdrop_blur`/`BackdropBlur` (a real
+Metal backdrop-blur scene primitive — `fm/neko-frost`'s own follow-up to
+build a native frosted backdrop with, not attempted by the migration task
+itself); `gpui::EdgeFade`/`window.with_edge_fade` (a scoped edge-fade
+primitive, likewise left to `fm/neko-frost`); `Window::start_window_move()`
+gaining a real mac implementation (`NSWindow.performWindowDragWithEvent:`)
+instead of gpui's cross-platform no-op default — closes the "Window chrome"
+section's own documented header-drag gap, though nothing wires it up yet;
+and, empirically confirmed by driving the real summon/dismiss path 3 times
+without a hang (not just read in source), a fix for the
+`windowDidBecomeKey:` self-deadlock documented below in "A known,
+upstream-fixed-but-unreleased deadlock in the real summon path" —
+`window_did_change_key_status` (`gpui_macos/src/window.rs`) now drops its
+state lock before calling back into AppKit's `resignKeyWindow`.
+
+**The licence consequence, stated plainly**: a **built, distributed**
+`neko` binary is no longer shippable under a clean MIT grant — GPL-3.0
+obligations (including source disclosure) attach to the combined work once
+it's distributed. This repo's own source remains MIT (see "Licence rule"
+below — nothing here was relicensed), and the workspace `Cargo.toml`'s
+`license = "MIT"` field and `NOTICE` both now carry an explicit caveat
+saying so, rather than silently describing something no longer true of a
+release binary.
+
+**The obligation is real but currently dormant — GPL-3.0 triggers on
+distribution, not on use.** neko ships **local-only**: no remote, no
+releases, built and run on the captain's own machine, for himself. While
+that stays true there is nothing to disclose and no obligation to
+discharge — today's practical exposure is essentially zero. It becomes live
+the moment a `neko` binary is ever distributed to anyone else. **Before
+that day, revisit this with counsel** — the open questions (whether linking
+functionally-inert GPL code creates a derivative work at all; an
+unreferenced Apache licence file sitting in `ztracing`'s own directory
+next to its GPL manifest declaration; `-or-later` semantics) are legal
+judgment calls, not settled facts, and weren't resolved by the decision
+above — only accepted as a known, live risk. **`data/helm/refs/comet`
+shipping MIT-declared binaries is not precedent for this** — an MIT grant
+on comet's own code doesn't discharge an obligation attaching to a
+distributed *combined* binary, and comet's own maintainer also owns the
+`wingleeio/zed` fork, so comet's licensing choice isn't an independent
+validation of the arrangement being clean.
+
+**Practical rule going forward**: fine to build, run, and develop against
+locally. Do not distribute a `neko` release binary to anyone — including a
+GitHub release, a download link, or handing a built binary to another
+person — without first resolving the open legal questions above, with
+counsel. This is a standing constraint on this repo now, not a one-time
+warning.
+
+### The original decision (2026, superseded above)
 
 `gpui` is Apache-2.0 as published on crates.io, but git-`main` currently links
 a GPL-3.0-or-later crate (`ztracing`) through an unfixed dependency edge — see
@@ -2359,11 +2487,17 @@ present via `gpui`/`objc2-app-kit`) — `docs/evidence/cargo-tree.txt` and
 GPL/AGPL anywhere in the tree, still only `self_cell`'s dual
 `Apache-2.0 OR GPL-2.0` line, used under the Apache-2.0 arm.
 
-To re-verify after any dependency bump:
+**This verification is stale as of the 2026-08-20 reversal above** — it
+described the dependency tree before the fork switch and no longer
+reflects what `cargo tree`/`cargo license` actually report. Kept here as
+the historical record the original decision was based on, not as current
+fact.
+
+To re-verify (now expected to show the GPL-3.0 chain, not flag one):
 
 ```sh
-cargo license 2>/dev/null | grep -iE '\bgpl\b|agpl'   # expect only the self_cell dual-license line
-cargo tree | grep -i 'ztracing\|zlog'                  # expect no output
+cargo license 2>/dev/null | grep -iE '\bgpl\b|agpl'   # now expected to show ztracing/zlog/ztracing_macro (GPL-3.0-or-later)
+cargo tree | grep -i 'ztracing\|zlog'                  # now expected to show the gpui -> sum_tree -> ztracing chain
 ```
 
 ## A known, upstream-fixed-but-unreleased deadlock in the real summon path
@@ -2394,6 +2528,17 @@ mode that drives the real summon/dismiss path (unlike `NEKO_BENCH`, which
 uses `order_front_regardless`/`order_out` and — proven in this task, not
 just asserted — structurally cannot reach `windowDidBecomeKey:` at all) —
 use it to re-verify once a fixed `gpui` becomes consumable.
+
+**Resolved 2026-08-20** — a fixed `gpui` did become consumable, via the
+reversal in "The GPUI dependency decision" above, and `NEKO_BENCH_REAL` is
+exactly what re-verified it: 3 real `activate_window()`/`cx.activate(true)`/
+`cx.hide()` cycles on the `wingleeio/zed` fork's release binary completed
+without a hang (`docs/evidence/gpui-fork-migration-report.md` §4) — the
+fix's own source (`gpui_macos/src/window.rs`'s `window_did_change_key_status`
+now drops its lock before calling `resignKeyWindow`) matches this section's
+own account of what was missing. The originally-hypothesized ~4GB memory
+growth remains unconfirmed either way — this task's own bench runs were
+short (3 cycles) and didn't re-attempt that measurement.
 
 ## Seams for follow-up work
 
@@ -2475,16 +2620,19 @@ use it to re-verify once a fixed `gpui` becomes consumable.
   real evidence on an actual two-display setup (this task's sandbox only had
   one physical display — the math and the live single-display execution
   path are both proven; the cross-display *visual* isn't).
-- **The `windowDidBecomeKey:` deadlock and the original memory-growth
-  question**: see "A known, upstream-fixed-but-unreleased deadlock in the
-  real summon path" above. Still open: whether the originally-hypothesized
-  memory growth is real under sustained, realistic load (this task's
-  synthetic bench never got past two rapid cycles before the deadlock);
-  whether the deadlock explains the captain's original 19.96GB report (not
-  provable from available evidence); and the dependency decision itself
-  (wait for a new `gpui` release, depend on git and reopen the GPL
-  question, vendor a local patch, or accept the risk) — a captain call, not
-  an engineering one.
+- **The `windowDidBecomeKey:` deadlock**: fixed and empirically re-verified
+  — see "A known, upstream-fixed-but-unreleased deadlock in the real summon
+  path" above, "Resolved 2026-08-20". **The dependency decision itself is
+  made** (`fm/neko-gpui-fork-migration`, "The GPUI dependency decision") —
+  the fork, accepting the GPL-3.0 exposure. Still open: whether the
+  originally-hypothesized ~4GB-per-summon memory growth is real under
+  sustained, realistic load (re-verification so far was 3 short cycles, not
+  a sustained-load test) and whether it explains the captain's original
+  19.96GB report (still not provable from available evidence either way).
+  **A new, real cost surfaced instead**: warm summon latency regressed
+  roughly 6–8x on the fork (`AGENTS.md`'s own "Summon latency" section,
+  `docs/evidence/gpui-fork-migration-report.md` §8) — not root-caused, a
+  real follow-up.
 
 ## Maintaining this file
 
