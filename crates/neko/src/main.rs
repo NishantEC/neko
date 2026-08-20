@@ -11,6 +11,7 @@ mod modes;
 mod motion;
 mod onboarding;
 mod panel;
+mod pasteboard;
 mod row_icon_cache;
 mod spaces;
 mod text_field;
@@ -98,6 +99,19 @@ fn main() {
             KeyBinding::new("cmd-right", text_field::LineEnd, Some("TextField")),
             KeyBinding::new("alt-left", text_field::WordBackward, Some("TextField")),
             KeyBinding::new("alt-right", text_field::WordForward, Some("TextField")),
+            // Selection and clipboard — see `text_field.rs`'s own module
+            // doc comment. Deliberately no `cmd-k` binding here — that's
+            // the panel-level actions menu, a parallel task's own seam.
+            KeyBinding::new("shift-left", text_field::SelectLeft, Some("TextField")),
+            KeyBinding::new("shift-right", text_field::SelectRight, Some("TextField")),
+            KeyBinding::new("shift-alt-left", text_field::SelectWordLeft, Some("TextField")),
+            KeyBinding::new("shift-alt-right", text_field::SelectWordRight, Some("TextField")),
+            KeyBinding::new("shift-cmd-left", text_field::SelectLineStart, Some("TextField")),
+            KeyBinding::new("shift-cmd-right", text_field::SelectLineEnd, Some("TextField")),
+            KeyBinding::new("cmd-a", text_field::SelectAll, Some("TextField")),
+            KeyBinding::new("cmd-c", text_field::Copy, Some("TextField")),
+            KeyBinding::new("cmd-x", text_field::Cut, Some("TextField")),
+            KeyBinding::new("cmd-v", text_field::Paste, Some("TextField")),
             KeyBinding::new("down", panel::SelectNext, Some("Panel")),
             KeyBinding::new("up", panel::SelectPrevious, Some("Panel")),
             KeyBinding::new("enter", panel::Confirm, Some("Panel")),

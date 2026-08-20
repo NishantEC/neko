@@ -9,6 +9,7 @@ use gpui::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::components::vendor::gpui_component::blink_cursor::CursorBlink;
+use crate::pasteboard;
 use crate::theme;
 
 actions!(
@@ -25,6 +26,16 @@ actions!(
         LineEnd,
         WordBackward,
         WordForward,
+        SelectLeft,
+        SelectRight,
+        SelectWordLeft,
+        SelectWordRight,
+        SelectLineStart,
+        SelectLineEnd,
+        SelectAll,
+        Copy,
+        Cut,
+        Paste,
     ]
 );
 
@@ -42,15 +53,23 @@ impl EventEmitter<ContentChanged> for TextField {}
 
 /// A minimal single-line text field.
 ///
-/// This deliberately skips mouse selection, clipboard, and IME composition
-/// (marked text) support — those are real, separate pieces of work. It wires
-/// up just enough of `EntityInputHandler` to receive typed characters through
-/// GPUI's native input path, which is the part worth proving here.
+/// Has real keyboard-driven selection (⇧←/⇧→, ⇧⌥←/⇧⌥→, ⇧⌘←/⇧⌘→, ⌘A) and
+/// clipboard (⌘C/⌘X/⌘V, via `pasteboard.rs`) — see this task's own commit
+/// history for why those were the seam and not a gap. Deliberately still
+/// skips mouse selection (click-drag) and IME composition (marked text) —
+/// those remain real, separate pieces of work. It wires up just enough of
+/// `EntityInputHandler` to receive typed characters through GPUI's native
+/// input path, which is the part worth proving here.
 pub struct TextField {
     focus_handle: FocusHandle,
     content: String,
     placeholder: SharedString,
     cursor: usize,
+    /// The fixed end of an in-progress selection; `cursor` is always the
+    /// moving end. `None` means no selection. A non-shift movement key
+    /// clears this (standard macOS behavior — see each `on_*` handler
+    /// below); any real edit clears it too, in `commit_edit`.
+    selection_anchor: Option<usize>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     blink: Entity<CursorBlink>,
@@ -76,6 +95,7 @@ impl TextField {
                 content: String::new(),
                 placeholder: DEFAULT_PLACEHOLDER.into(),
                 cursor: 0,
+                selection_anchor: None,
                 last_layout: None,
                 last_bounds: None,
                 blink,
@@ -98,11 +118,41 @@ impl TextField {
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.content.clear();
         self.cursor = 0;
+        self.selection_anchor = None;
         cx.notify();
     }
 
     fn touch_cursor(&mut self, cx: &mut Context<Self>) {
         self.blink.update(cx, |blink, cx| blink.pause(cx));
+    }
+
+    /// The current selection as a normalized `start..end` byte range
+    /// (`start <= end`, regardless of which of `cursor`/`selection_anchor`
+    /// is smaller) — `None` whenever there's no anchor, or the anchor and
+    /// cursor coincide (an empty selection is the same as no selection, per
+    /// standard text-field convention: it has nothing to copy/delete as a
+    /// unit).
+    pub fn selection_range(&self) -> Option<Range<usize>> {
+        let anchor = self.selection_anchor?;
+        if anchor == self.cursor {
+            return None;
+        }
+        Some(anchor.min(self.cursor)..anchor.max(self.cursor))
+    }
+
+    /// The shared shape every `Select*` handler below reduces to: extend
+    /// (or start, if none is active yet) the selection so its moving end is
+    /// `new_cursor`. The anchor, once set, never moves until the selection
+    /// is cleared (a real edit, or a non-shift movement key) — that's what
+    /// lets ⇧← then ⇧→ shrink a selection back down rather than always
+    /// growing it.
+    fn extend_selection_to(&mut self, new_cursor: usize, cx: &mut Context<Self>) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+        self.cursor = new_cursor;
+        self.touch_cursor(cx);
+        cx.notify();
     }
 
     /// The one place `content` actually mutates. Emits `ContentChanged` in
@@ -117,9 +167,19 @@ impl TextField {
     fn commit_edit(&mut self, range: Range<usize>, new_text: &str, cx: &mut Context<Self>) {
         self.content.replace_range(range.clone(), new_text);
         self.cursor = range.start + new_text.len();
+        self.selection_anchor = None;
         self.touch_cursor(cx);
         cx.notify();
         cx.emit(ContentChanged);
+    }
+
+    /// The range a typed character or a delete action should act on: the
+    /// active selection if there is one (typing/deleting over a selection
+    /// replaces it, standard text-field behavior — every `on_*` action
+    /// handler below that mutates content calls this first), otherwise a
+    /// collapsed range at the cursor.
+    fn edit_target_range(&self) -> Range<usize> {
+        self.selection_range().unwrap_or(self.cursor..self.cursor)
     }
 
     /// Replaces the whole field with `text`, as a single real edit (emits
@@ -155,6 +215,10 @@ impl TextField {
     }
 
     fn on_backspace(&mut self, _: &Backspace, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(range) = self.selection_range() {
+            self.commit_edit(range, "", cx);
+            return;
+        }
         if self.cursor == 0 {
             return;
         }
@@ -165,28 +229,103 @@ impl TextField {
 
     fn on_left(&mut self, _: &Left, _window: &mut Window, cx: &mut Context<Self>) {
         self.cursor = self.previous_char_boundary(self.cursor);
+        self.selection_anchor = None;
         self.touch_cursor(cx);
         cx.notify();
     }
 
     fn on_right(&mut self, _: &Right, _window: &mut Window, cx: &mut Context<Self>) {
         self.cursor = self.next_char_boundary(self.cursor);
+        self.selection_anchor = None;
         self.touch_cursor(cx);
         cx.notify();
     }
 
+    fn on_select_left(&mut self, _: &SelectLeft, _window: &mut Window, cx: &mut Context<Self>) {
+        let new_cursor = self.previous_char_boundary(self.cursor);
+        self.extend_selection_to(new_cursor, cx);
+    }
+
+    fn on_select_right(&mut self, _: &SelectRight, _window: &mut Window, cx: &mut Context<Self>) {
+        let new_cursor = self.next_char_boundary(self.cursor);
+        self.extend_selection_to(new_cursor, cx);
+    }
+
+    fn on_select_word_left(&mut self, _: &SelectWordLeft, _window: &mut Window, cx: &mut Context<Self>) {
+        let new_cursor = self.word_start_before(self.cursor);
+        self.extend_selection_to(new_cursor, cx);
+    }
+
+    fn on_select_word_right(&mut self, _: &SelectWordRight, _window: &mut Window, cx: &mut Context<Self>) {
+        let new_cursor = self.word_end_after(self.cursor);
+        self.extend_selection_to(new_cursor, cx);
+    }
+
+    fn on_select_line_start(&mut self, _: &SelectLineStart, _window: &mut Window, cx: &mut Context<Self>) {
+        self.extend_selection_to(0, cx);
+    }
+
+    fn on_select_line_end(&mut self, _: &SelectLineEnd, _window: &mut Window, cx: &mut Context<Self>) {
+        let end = self.content.len();
+        self.extend_selection_to(end, cx);
+    }
+
+    /// ⌘A. Deliberately does not go through `extend_selection_to` — select
+    /// all always re-anchors at the true start regardless of any selection
+    /// already in progress, rather than extending from wherever the cursor
+    /// currently sits.
+    fn on_select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
+        self.selection_anchor = Some(0);
+        self.cursor = self.content.len();
+        self.touch_cursor(cx);
+        cx.notify();
+    }
+
+    /// ⌘C. Read-only — does not touch `content`/`cursor`/`selection_anchor`,
+    /// so (unlike every edit path) this never calls `commit_edit` and never
+    /// emits `ContentChanged`.
+    fn on_copy(&mut self, _: &Copy, _window: &mut Window, _cx: &mut Context<Self>) {
+        if let Some(range) = self.selection_range() {
+            pasteboard::write_string(&self.content[range]);
+        }
+    }
+
+    /// ⌘X. A no-op (no pasteboard write, no edit) when there's no active
+    /// selection — mirrors macOS's own single-line field behavior: cut with
+    /// nothing selected does nothing, it doesn't fall back to deleting one
+    /// character.
+    fn on_cut(&mut self, _: &Cut, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(range) = self.selection_range() else {
+            return;
+        };
+        pasteboard::write_string(&self.content[range.clone()]);
+        self.commit_edit(range, "", cx);
+    }
+
+    /// ⌘V. Replaces the active selection if there is one, otherwise inserts
+    /// at the cursor — the same `edit_target_range` shape typing a character
+    /// uses. A pasteboard with no string representation (e.g. an image-only
+    /// copy) is a silent no-op, not an error — nothing to insert.
+    fn on_paste(&mut self, _: &Paste, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = pasteboard::read_string() else {
+            return;
+        };
+        let range = self.edit_target_range();
+        self.commit_edit(range, &text, cx);
+    }
+
     // ⌘⌫/⌘⌦/⌥⌫/⌥⌦/⌘←/⌘→/⌥←/⌥→ — standard macOS single-line editing
-    // shortcuts. Deliberately not a selection-range feature: there is still
-    // only ever one `cursor: usize` here, same as before this task — these
-    // are all either a cursor jump or a delete of `[start, cursor)`/
-    // `[cursor, end)`, never a highlighted range a person could then act on
-    // (copy, extend, retype-over). Real selection (⇧-arrows, ⌘A) and paste
-    // (⌘V/⌘C/⌘X) need that range concept added to `TextField` first — a
-    // bigger, separate piece of work the audit this task fixes from
-    // deliberately split out; this file's doc comment above still names it
-    // as not-yet-supported for exactly that reason.
+    // shortcuts. Each delete variant below checks for an active selection
+    // first and, if there is one, deletes exactly that instead of its own
+    // direction-specific range — standard macOS behavior: any delete command
+    // with a selection active removes the selection, not one word/line past
+    // it.
 
     fn on_delete_line_start(&mut self, _: &DeleteLineStart, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(range) = self.selection_range() {
+            self.commit_edit(range, "", cx);
+            return;
+        }
         if self.cursor == 0 {
             return;
         }
@@ -195,6 +334,10 @@ impl TextField {
     }
 
     fn on_delete_line_end(&mut self, _: &DeleteLineEnd, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(range) = self.selection_range() {
+            self.commit_edit(range, "", cx);
+            return;
+        }
         if self.cursor == self.content.len() {
             return;
         }
@@ -203,6 +346,10 @@ impl TextField {
     }
 
     fn on_delete_word_backward(&mut self, _: &DeleteWordBackward, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(range) = self.selection_range() {
+            self.commit_edit(range, "", cx);
+            return;
+        }
         let start = self.word_start_before(self.cursor);
         if start == self.cursor {
             return;
@@ -212,6 +359,10 @@ impl TextField {
     }
 
     fn on_delete_word_forward(&mut self, _: &DeleteWordForward, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(range) = self.selection_range() {
+            self.commit_edit(range, "", cx);
+            return;
+        }
         let end = self.word_end_after(self.cursor);
         if end == self.cursor {
             return;
@@ -222,24 +373,28 @@ impl TextField {
 
     fn on_line_start(&mut self, _: &LineStart, _window: &mut Window, cx: &mut Context<Self>) {
         self.cursor = 0;
+        self.selection_anchor = None;
         self.touch_cursor(cx);
         cx.notify();
     }
 
     fn on_line_end(&mut self, _: &LineEnd, _window: &mut Window, cx: &mut Context<Self>) {
         self.cursor = self.content.len();
+        self.selection_anchor = None;
         self.touch_cursor(cx);
         cx.notify();
     }
 
     fn on_word_backward(&mut self, _: &WordBackward, _window: &mut Window, cx: &mut Context<Self>) {
         self.cursor = self.word_start_before(self.cursor);
+        self.selection_anchor = None;
         self.touch_cursor(cx);
         cx.notify();
     }
 
     fn on_word_forward(&mut self, _: &WordForward, _window: &mut Window, cx: &mut Context<Self>) {
         self.cursor = self.word_end_after(self.cursor);
+        self.selection_anchor = None;
         self.touch_cursor(cx);
         cx.notify();
     }
@@ -338,10 +493,14 @@ impl EntityInputHandler for TextField {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        let at = self.utf16_offset_for_byte(self.cursor);
+        let (start, end, reversed) = match self.selection_anchor {
+            Some(anchor) if anchor <= self.cursor => (anchor, self.cursor, false),
+            Some(anchor) => (self.cursor, anchor, true),
+            None => (self.cursor, self.cursor, false),
+        };
         Some(UTF16Selection {
-            range: at..at,
-            reversed: false,
+            range: self.utf16_offset_for_byte(start)..self.utf16_offset_for_byte(end),
+            reversed,
         })
     }
 
@@ -364,7 +523,7 @@ impl EntityInputHandler for TextField {
     ) {
         let range = range_utf16
             .map(|r| self.range_from_utf16(&r))
-            .unwrap_or(self.cursor..self.cursor);
+            .unwrap_or_else(|| self.edit_target_range());
         self.commit_edit(range, new_text, cx);
     }
 
@@ -416,6 +575,7 @@ struct TextFieldElement {
 
 struct PrepaintState {
     line: ShapedLine,
+    selection: Option<gpui::PaintQuad>,
     cursor: Option<gpui::PaintQuad>,
 }
 
@@ -481,8 +641,27 @@ impl gpui::Element for TextFieldElement {
             .text_system()
             .shape_line(display_text, font_size, &[run], None);
 
-        let show_cursor =
-            field.focus_handle.is_focused(window) && field.blink.read(cx).visible();
+        // Painted behind the text (see `paint` below: selection first, then
+        // the shaped line on top) so selected characters stay legible rather
+        // than being covered by an opaque highlight — the same reason
+        // `panel.rs`'s row-selection highlight (`theme::SURFACE_SELECTED`,
+        // reused here rather than inventing a new token) sits behind its
+        // row's own content, not above it.
+        let selection = field.selection_range().map(|range| {
+            let start_x = bounds.left() + line.x_for_index(range.start);
+            let end_x = bounds.left() + line.x_for_index(range.end);
+            fill(
+                Bounds::new(
+                    point(start_x, bounds.top()),
+                    gpui::size(end_x - start_x, bounds.bottom() - bounds.top()),
+                ),
+                theme::SURFACE_SELECTED,
+            )
+        });
+
+        let show_cursor = field.selection_range().is_none()
+            && field.focus_handle.is_focused(window)
+            && field.blink.read(cx).visible();
         let cursor = if show_cursor {
             let x = bounds.left() + line.x_for_index(field.cursor);
             Some(fill(
@@ -496,7 +675,7 @@ impl gpui::Element for TextFieldElement {
             None
         };
 
-        PrepaintState { line, cursor }
+        PrepaintState { line, selection, cursor }
     }
 
     fn paint(
@@ -515,6 +694,9 @@ impl gpui::Element for TextFieldElement {
             ElementInputHandler::new(bounds, self.field.clone()),
             cx,
         );
+        if let Some(selection) = prepaint.selection.take() {
+            window.paint_quad(selection);
+        }
         prepaint
             .line
             .paint(bounds.origin, window.line_height(), gpui::TextAlign::Left, None, window, cx)
@@ -546,6 +728,16 @@ impl Render for TextField {
             .on_action(cx.listener(Self::on_line_end))
             .on_action(cx.listener(Self::on_word_backward))
             .on_action(cx.listener(Self::on_word_forward))
+            .on_action(cx.listener(Self::on_select_left))
+            .on_action(cx.listener(Self::on_select_right))
+            .on_action(cx.listener(Self::on_select_word_left))
+            .on_action(cx.listener(Self::on_select_word_right))
+            .on_action(cx.listener(Self::on_select_line_start))
+            .on_action(cx.listener(Self::on_select_line_end))
+            .on_action(cx.listener(Self::on_select_all))
+            .on_action(cx.listener(Self::on_copy))
+            .on_action(cx.listener(Self::on_cut))
+            .on_action(cx.listener(Self::on_paste))
             .w_full()
             .child(TextFieldElement { field: cx.entity() })
     }
@@ -805,5 +997,270 @@ mod tests {
         field.update(cx, |field, cx| field.commit_edit(0..0, "old query", cx));
         field.update(cx, |field, cx| field.set_content("new", cx));
         field.read_with(cx, |field, _| assert_eq!(field.content(), "new"));
+    }
+
+    // Selection. Each test drives the same `on_*` handlers a real key press
+    // dispatches, directly (no `Window`/action-dispatch layer needed — same
+    // convention the pre-existing shortcut tests above already use).
+
+    #[gpui::test]
+    fn shift_right_extends_selection_one_char_at_a_time(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello", cx);
+            field.cursor = 0;
+            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), Some(0..1));
+            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), Some(0..2));
+            assert_eq!(field.cursor, 2);
+        });
+    }
+
+    #[gpui::test]
+    fn shift_left_extends_selection_backward(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello", cx);
+            field.cursor = 5;
+            field.on_select_left(&SelectLeft, unsafe { std::mem::zeroed() }, cx);
+            field.on_select_left(&SelectLeft, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), Some(3..5));
+            assert_eq!(field.cursor, 3);
+        });
+    }
+
+    #[gpui::test]
+    fn shift_right_then_shift_left_shrinks_the_selection_back(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello", cx);
+            field.cursor = 0;
+            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), Some(0..3));
+            field.on_select_left(&SelectLeft, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(
+                field.selection_range(),
+                Some(0..2),
+                "the anchor stays fixed at 0 — shift-left shrinks toward it, not past it"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn a_non_shift_movement_key_collapses_the_selection(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello", cx);
+            field.cursor = 0;
+            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            assert!(field.selection_range().is_some());
+            field.on_right(&Right, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), None, "a plain arrow key must clear the selection");
+        });
+    }
+
+    #[gpui::test]
+    fn shift_alt_right_extends_selection_by_word(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = 0;
+            field.on_select_word_right(&SelectWordRight, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), Some(0..5), "extends to the end of \"hello\"");
+        });
+    }
+
+    #[gpui::test]
+    fn shift_alt_left_extends_selection_by_word(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = field.content.len();
+            field.on_select_word_left(&SelectWordLeft, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), Some(6..11), "extends back to \"world\"'s own start");
+        });
+    }
+
+    #[gpui::test]
+    fn shift_cmd_right_extends_selection_to_line_end(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = 0;
+            field.on_select_line_end(&SelectLineEnd, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), Some(0..11));
+        });
+    }
+
+    #[gpui::test]
+    fn shift_cmd_left_extends_selection_to_line_start(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = field.content.len();
+            field.on_select_line_start(&SelectLineStart, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), Some(0..11));
+        });
+    }
+
+    #[gpui::test]
+    fn cmd_a_selects_the_whole_field(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.cursor = 4;
+            field.on_select_all(&SelectAll, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), Some(0..11));
+            assert_eq!(field.cursor, 11);
+        });
+    }
+
+    #[gpui::test]
+    fn cmd_a_on_an_empty_field_selects_nothing_and_does_not_panic(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.on_select_all(&SelectAll, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), None, "0..0 is an empty selection, same as no selection");
+        });
+    }
+
+    #[gpui::test]
+    fn typing_a_character_replaces_the_active_selection(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.selection_anchor = Some(0);
+            field.cursor = 5; // "hello" selected
+            let range = field.edit_target_range();
+            field.commit_edit(range, "goodbye", cx);
+            assert_eq!(field.content, "goodbye world");
+            assert_eq!(field.cursor, "goodbye".len());
+            assert_eq!(field.selection_range(), None, "committing an edit must clear the selection");
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_with_a_selection_deletes_the_selection_not_one_char(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.selection_anchor = Some(6);
+            field.cursor = 11; // "world" selected
+            field.on_backspace(&Backspace, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.content, "hello ");
+            assert_eq!(field.cursor, 6);
+        });
+    }
+
+    #[gpui::test]
+    fn delete_word_backward_with_a_selection_deletes_the_selection_not_a_whole_word(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.selection_anchor = Some(2);
+            field.cursor = 4; // "ll" selected, well inside "hello"
+            field.on_delete_word_backward(&DeleteWordBackward, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.content, "heo world", "must delete exactly the selection, not the whole word");
+        });
+    }
+
+    // Clipboard. Copy/cut/paste round-trip through the real `NSPasteboard`
+    // (`pasteboard.rs`, autoreleasepool-wrapped) — verified here by reading
+    // back through the exact same API just written through, never by
+    // inspecting whatever the real system clipboard held before the test
+    // ran. Each test writes its own unique fixture string first, so nothing
+    // about the machine's real prior clipboard contents is ever read or
+    // asserted on.
+
+    #[gpui::test]
+    fn copy_writes_the_selection_to_the_real_pasteboard(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "neko-textinput-fixture-copy-9f2a", cx);
+            field.selection_anchor = Some(0);
+            field.cursor = field.content.len();
+            field.on_copy(&Copy, unsafe { std::mem::zeroed() }, cx);
+            // Content and cursor are untouched — copy is read-only.
+            assert_eq!(field.content, "neko-textinput-fixture-copy-9f2a");
+            assert_eq!(field.selection_range(), Some(0..field.content.len()));
+        });
+        assert_eq!(
+            pasteboard::read_string().as_deref(),
+            Some("neko-textinput-fixture-copy-9f2a"),
+            "read back through the same NSPasteboard API just written through"
+        );
+    }
+
+    #[gpui::test]
+    fn cut_writes_the_selection_and_removes_it_from_the_field(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "keep neko-textinput-fixture-cut-7c1e", cx);
+            field.selection_anchor = 5;
+            field.selection_anchor = Some(5);
+            field.cursor = field.content.len();
+            field.on_cut(&Cut, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.content, "keep ");
+            assert_eq!(field.selection_range(), None);
+        });
+        assert_eq!(
+            pasteboard::read_string().as_deref(),
+            Some("neko-textinput-fixture-cut-7c1e")
+        );
+    }
+
+    #[gpui::test]
+    fn cut_with_no_selection_is_a_no_op(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "unchanged", cx);
+            field.cursor = 3;
+            field.on_cut(&Cut, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.content, "unchanged");
+            assert_eq!(field.cursor, 3);
+        });
+    }
+
+    #[gpui::test]
+    fn paste_inserts_at_the_cursor_when_nothing_is_selected(cx: &mut TestAppContext) {
+        pasteboard::write_string("neko-textinput-fixture-paste-4b6d");
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "start end", cx);
+            field.cursor = 6; // right after "start "
+            field.on_paste(&Paste, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.content, "start neko-textinput-fixture-paste-4b6dend");
+        });
+    }
+
+    #[gpui::test]
+    fn paste_replaces_an_active_selection(cx: &mut TestAppContext) {
+        pasteboard::write_string("neko-textinput-fixture-paste-replace-2e91");
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "hello world", cx);
+            field.selection_anchor = Some(0);
+            field.cursor = field.content.len();
+            field.on_paste(&Paste, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.content, "neko-textinput-fixture-paste-replace-2e91");
+        });
+    }
+
+    #[gpui::test]
+    fn copy_cut_paste_round_trip_via_the_real_pasteboard(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.commit_edit(0..0, "roundtrip-neko-textinput-fixture-b83a", cx);
+            field.selection_anchor = Some(0);
+            field.cursor = field.content.len();
+            field.on_copy(&Copy, unsafe { std::mem::zeroed() }, cx);
+            field.clear(cx);
+            field.on_paste(&Paste, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.content, "roundtrip-neko-textinput-fixture-b83a");
+        });
     }
 }
