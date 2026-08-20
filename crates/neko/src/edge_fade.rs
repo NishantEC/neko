@@ -100,7 +100,7 @@ impl Element for ScrollEdgeFade {
         // Read fresh, after the child's own prepaint just clamped it for
         // this frame — see this module's own doc comment.
         let scrolled_down = -f32::from(self.scroll.offset().y);
-        let max_scroll = f32::from(self.scroll.max_offset().height);
+        let max_scroll = f32::from(self.scroll.max_offset().y);
         let (show_top, show_bottom) = edge_fade_visibility(scrolled_down, max_scroll);
 
         let band = px(self.band_px.min(f32::from(bounds.size.height)));

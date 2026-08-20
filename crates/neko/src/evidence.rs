@@ -350,7 +350,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
         }
         if scroll_mode_list_to_bottom_requested() {
-            let _ = cx.update(|cx| {
+            cx.update(|cx| {
                 let _ = window.update(cx, |root, _window, cx| {
                     root.scroll_mode_list_to_bottom_for_evidence(cx);
                 });
@@ -360,7 +360,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             // paint (which is what actually reads the corrected offset —
             // see `edge_fade.rs`'s own doc comment on paint-time gating)
             // has genuinely happened before the window-number line below.
-            Timer::after(std::time::Duration::from_millis(150)).await;
+            cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
         }
     }
     if show_actions_menu_requested() {
