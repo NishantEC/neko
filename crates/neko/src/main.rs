@@ -6,6 +6,7 @@ mod edge_fade;
 mod evidence;
 mod hotkey_client;
 mod material;
+mod menu_frost;
 mod modes;
 mod motion;
 mod onboarding;
@@ -217,7 +218,33 @@ fn main() {
                                 Err(e) => eprintln!("neko: native window shadow disable verification FAILED: {e}"),
                             }
                         }
-                        Root::new(client.clone(), accessibility.clone(), translucent, cx)
+                        // The `⌘K` actions menu's own smaller frost surface
+                        // — only meaningful when the whole-window material
+                        // itself installed (`translucent`); with the opaque
+                        // fallback there is no ambient glass for a menu-
+                        // scoped patch of it to look distinct against, so
+                        // the menu just keeps its existing fully-opaque
+                        // `SURFACE_RAISED` fill instead (`panel.rs`'s own
+                        // honest-fallback branch). Installed once, hidden
+                        // and zero-sized, right after the whole-window
+                        // material — see `material::install_menu_overlay`'s
+                        // own doc comment for the invariant this depends on.
+                        let menu_frost = translucent
+                            && match material::install_menu_overlay(window) {
+                                Ok(installed) => {
+                                    eprintln!("neko: menu overlay material installed: {installed:?}");
+                                    match material::verify_menu_overlay_installed(window, installed) {
+                                        Ok(readback) => eprintln!("neko: menu overlay material verified: {readback}"),
+                                        Err(e) => eprintln!("neko: menu overlay material readback verification FAILED: {e}"),
+                                    }
+                                    true
+                                }
+                                Err(e) => {
+                                    eprintln!("neko: menu overlay material install failed, actions menu stays opaque: {e}");
+                                    false
+                                }
+                            };
+                        Root::new(client.clone(), accessibility.clone(), translucent, menu_frost, cx)
                     }
                 },
             )
