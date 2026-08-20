@@ -1,0 +1,80 @@
+Patch against the `wingleeio/zed` gpui fork, pinned rev
+e2ddcc6805f8c5088e62a60dfe517abcccd61a9a (see workspace `Cargo.toml` and
+`AGENTS.md`'s "The GPUI dependency decision"). Applied by
+`scripts/setup-gpui-patch.sh` — see that script and `AGENTS.md`'s "Summon
+latency" section for the full diagnosis and why this specific change is
+correct.
+
+Root cause: `crates/gpui/src/window.rs`'s `on_request_frame` handler caps
+frame delivery to a window to ~30fps whenever the window isn't key
+(`!active.get()`), with no exemption for a pending `on_next_frame`/
+`request_animation_frame` callback — something a caller is *explicitly*
+waiting on, not an idle background redraw. This throttle does not exist at
+all in the published `gpui = "0.2.2"` crate. neko's summon panel is a
+non-activating `orderFrontRegardless` show (real summon also races the
+async `windowDidBecomeKey:` notification against its own first frame
+request), so it is essentially always "inactive" from this check's point of
+view at the moment its first post-summon frame is requested — every such
+frame was capped to the 30fps floor, and because a throttled frame never
+advances `last_frame_time`, every subsequent request landed in the same
+stale window and got throttled again, locking summon into a ~25-40ms
+cadence with no way out. This patch exempts a frame request carrying a
+pending callback from the inactive-window cap specifically, leaving thermal
+throttling (which protects the machine regardless of what's being waited
+on) untouched.
+
+Trade-off, accepted deliberately: a hypothetical future *repeating*
+animation (`request_animation_frame` called again from within its own
+callback) in a window that stays inactive/unfocused would no longer be
+power-throttled to 30fps either, since its callback queue is never
+genuinely empty. neko's own animation catalog (`crates/neko/src/motion.rs`)
+is exclusively one-shot as of this patch — see `AGENTS.md`'s "Comet craft
+pass" — so this does not regress anything today. If a repeating animation
+is ever added, revisit this patch (a "was this window ever active while
+this callback was pending" flag would be the more surgical fix, at the cost
+of new cross-platform `Platform`/`PlatformWindow` plumbing this patch
+avoids).
+
+diff --git a/crates/gpui/src/window.rs b/crates/gpui/src/window.rs
+--- a/crates/gpui/src/window.rs
++++ b/crates/gpui/src/window.rs
+@@ -1516,16 +1516,35 @@
+
+                 // Throttle frame rate based on conditions:
+                 // - Thermal pressure (Serious/Critical): cap to ~60fps
+-                // - Inactive window (not focused): cap to ~30fps to save energy
++                // - Inactive window (not focused) with nothing pending: cap to
++                //   ~30fps to save energy
++                //
++                // The inactive-window cap must not delay a frame that
++                // something is actually waiting on. A non-empty
++                // `next_frame_callbacks` means a caller explicitly asked to
++                // be told when the next frame lands (`Window::on_next_frame`/
++                // `request_animation_frame`) — not an idle background
++                // redraw. Applying the 30fps floor to it anyway means any
++                // window that is shown without also being made key first
++                // (e.g. `orderFrontRegardless`, or the brief window between
++                // a real activate call and the async `windowDidBecomeKey:`
++                // notification actually landing) has its very first paint
++                // — and every one after it, since a throttled frame never
++                // advances `last_frame_time` and the next request lands in
++                // the same stale window — locked to a ~33ms cadence with no
++                // way out. Exempting pending callbacks fixes that without
++                // touching thermal throttling, which still protects the
++                // machine regardless of what's being waited on.
++                let has_pending_callback = !next_frame_callbacks.borrow().is_empty();
+                 let min_frame_interval = if !request_frame_options.force_render
+                     && !request_frame_options.require_presentation
+-                    && next_frame_callbacks.borrow().is_empty()
++                    && !has_pending_callback
+                 {
+                     None
+-                } else if !active.get() {
+-                    Some(Duration::from_micros(33333))
+                 } else if let Some(ThermalState::Critical | ThermalState::Serious) = thermal_state {
+                     Some(Duration::from_micros(16667))
++                } else if !active.get() && !has_pending_callback {
++                    Some(Duration::from_micros(33333))
+                 } else {
+                     None
+                 };
