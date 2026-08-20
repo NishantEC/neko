@@ -30,20 +30,29 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, MouseButton,
-    Render, SharedString, Window, actions, div, img, prelude::*, px,
+    AnyElement, App, ClickEvent, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable,
+    MouseButton, MouseDownEvent, Render, SharedString, Window, actions, anchored, deferred, div, img,
+    prelude::*, px,
 };
 use neko_client::NekoClient;
 use neko_protocol::{Glyph, Icon, ItemAction, Request, Response, SearchItem};
 
 use crate::accessibility::AccessibilityChecker;
 use crate::modes::{self, ModeChrome};
+use crate::motion;
 use crate::text_field::{ContentChanged, DEFAULT_PLACEHOLDER, TextField};
 use crate::theme;
 
 actions!(panel, [SelectNext, SelectPrevious, Confirm, OpenActionsMenu]);
 
 const RESULT_LIMIT: usize = 8;
+/// How long a query has to stay in flight before the "still searching" tell
+/// (`render_searching_tell`) appears — long enough that the common fast
+/// case (apps/clipboard/settings, all answering well under this) never sees
+/// it, short enough to give a real signal well before `files::QUERY_TIMEOUT`
+/// (1.5s, `AGENTS.md`) — the one provider whose worst case actually reaches
+/// this window.
+const SEARCHING_TELL_DELAY_MS: u64 = 150;
 /// A mode's own list wants "as many of this one provider's matches as it
 /// can consider," not the shared, multi-provider root-list budget — a
 /// generous cap since the daemon does the real trimming to what actually
@@ -109,6 +118,29 @@ pub struct Root {
     /// `Some` while the `⌘K` actions menu is open for the currently
     /// selected row.
     actions_menu: Option<ActionsMenuState>,
+    /// Snapshot of `actions_menu.is_some()` taken at the very start of the
+    /// current mouse-down gesture, by a capture-phase listener on `render`'s
+    /// own outer panel div — see `handle_actions_menu_trigger_click`'s doc
+    /// comment for the click race this exists to resolve. Consumed (read
+    /// and reset to `false`) by that same handler; a stale `true` can never
+    /// leak into a later, unrelated click because it's overwritten by the
+    /// capture-phase listener on *every* mouse-down, not just ones that hit
+    /// the trigger.
+    menu_open_before_this_press: bool,
+    /// Set once a search has been in flight for `SEARCHING_TELL_DELAY_MS`
+    /// without a response landing for it — see `run_search`'s own doc
+    /// comment. Cleared the instant a new search starts or the in-flight one
+    /// resolves, so it never outlives the query it describes.
+    searching: bool,
+    /// `Some(generation)` from the moment `run_search` dispatches a request
+    /// for that generation until its response (success or error) lands —
+    /// `None` once resolved. The delayed-reveal task that flips `searching`
+    /// on checks this, not just `generation` alone: `generation` only
+    /// changes on the *next* search, so without this a response that
+    /// resolves well within `SEARCHING_TELL_DELAY_MS` (the common case)
+    /// would still see the delayed task fire later for the same,
+    /// already-answered generation and incorrectly flip the tell on.
+    pending_search_generation: Option<u64>,
 }
 
 /// The one piece of state a mode transition actually carries, beyond the
@@ -181,6 +213,9 @@ impl Root {
             row_icon_cache,
             active_mode: None,
             actions_menu: None,
+            menu_open_before_this_press: false,
+            searching: false,
+            pending_search_generation: None,
         };
         root.run_search(cx);
         root.fetch_accessibility_banner_state(cx);
@@ -216,9 +251,18 @@ impl Root {
     /// again — see `update_background_bounds`'s own doc comment for why
     /// this no longer resizes the real `NSWindow` at all.
     pub fn reset_for_summon(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Unconditional, not just inside the mode branch below: the actions
+        // menu is per-summon-session state exactly like a mode is (this
+        // method's own module-level reasoning), and it can be left open
+        // independent of any mode — e.g. the window lost activation
+        // (`main.rs`'s `cx.observe_window_activation`) while `⌘K` was open
+        // on a root-list row. That path hides the whole window without ever
+        // routing through `handle_dismiss`'s own "close the menu first"
+        // logic, so without this a stale open menu would silently reappear
+        // on the next summon.
+        self.actions_menu = None;
         if let Some(mode) = self.active_mode.take() {
             self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
-            self.actions_menu = None;
             if mode.chrome.has_detail {
                 self.update_background_bounds(window, theme::PANEL_WIDTH_PX);
             }
@@ -309,6 +353,16 @@ impl Root {
         self.handle_dismiss(&crate::DismissWindow, window, cx);
     }
 
+    /// Evidence/verification-only — drives the exact same `⌘K` path a real
+    /// keypress or a real click on the footer's "Actions ⌘K" trigger takes
+    /// (`open_actions_menu_for_selected_row`), for `evidence.rs`'s
+    /// `NEKO_SHOW_ACTIONS_MENU` hook. Same reasoning as
+    /// `confirm_for_evidence`/`dismiss_for_evidence` above: real synthetic
+    /// input was already ruled out for this panel.
+    pub fn open_actions_menu_for_evidence(&mut self, cx: &mut Context<Self>) {
+        self.open_actions_menu_for_selected_row(cx);
+    }
+
     /// Pushed by `main.rs`'s summon loop whenever `NekoClient::is_connected()`
     /// changes — see that method's doc comment for why this is a poll, not
     /// an event subscription. This is the fix for `data/neko-audit/report.md`
@@ -360,8 +414,19 @@ impl Root {
         // A stale activation-failure message from a previous result no
         // longer applies once the query changes underneath it.
         self.activation_error = None;
+        // Reset immediately, not after a delay — a query that resolves fast
+        // (the common case) must never flash the tell on before the delayed
+        // reveal below even gets a chance to check whether it's still
+        // needed.
+        self.searching = false;
         self.generation += 1;
         let generation = self.generation;
+        // Marks this generation's request outstanding *before* it's even
+        // sent — the delayed-reveal task below checks this, not just
+        // `generation` alone, precisely so a fast response (the common
+        // case, resolving well under `SEARCHING_TELL_DELAY_MS`) can clear
+        // it before that task ever fires. See this field's own doc comment.
+        self.pending_search_generation = Some(generation);
         let query = self.text_field.read(cx).content().to_string();
         // Snapshot *before* the request goes out, not when the response
         // lands: this is "what was highlighted going into this search",
@@ -392,10 +457,25 @@ impl Root {
             // for why a request failing here is the wrong place to decide
             // connection state.
             let Ok(Response::SearchResults { items }) = response else {
+                // Still clears `searching`/`pending_search_generation` for
+                // this generation on the way out — an errored/malformed
+                // response is a resolution too; without this, a query that
+                // started slow and then failed would leave the tell showing
+                // forever, since nothing else ever turns it back off for a
+                // generation that never produces a `SearchResults`.
+                let _ = this.update(cx, |root, cx| {
+                    if root.generation == generation {
+                        root.searching = false;
+                        root.pending_search_generation = None;
+                        cx.notify();
+                    }
+                });
                 return;
             };
             let _ = this.update(cx, |root, cx| {
                 if root.generation == generation {
+                    root.searching = false;
+                    root.pending_search_generation = None;
                     root.results = if root.active_mode.is_some() {
                         fit_mode_list(items, CONTENT_AREA_MIN_HEIGHT_PX)
                     } else {
@@ -410,6 +490,35 @@ impl Root {
             });
         })
         .detach();
+
+        // The "still searching" tell (`render_searching_tell`): a separate,
+        // delayed task rather than a timeout race bolted onto the request
+        // spawn above, so the fast common case (a response well under
+        // `SEARCHING_TELL_DELAY_MS`) is completely unaffected. The actual
+        // decision is `reveal_searching_tell_if_still_pending`, its own
+        // method rather than inlined here, so a test can drive it directly
+        // against a deliberately-still-pending generation without needing a
+        // request that hangs for real wall-clock time.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(SEARCHING_TELL_DELAY_MS)).await;
+            let _ = this.update(cx, |root, cx| root.reveal_searching_tell_if_still_pending(generation, cx));
+        })
+        .detach();
+    }
+
+    /// Flips the "still searching" tell on for `generation`, but only if
+    /// that generation's request is still genuinely outstanding
+    /// (`pending_search_generation`) — not just still current
+    /// (`self.generation == generation` alone can't distinguish "resolved"
+    /// from "still pending": `generation` only changes on the *next*
+    /// search, so a response that already landed well within the delay
+    /// (the common case) would otherwise still see this fire later and
+    /// incorrectly show the tell for an already-answered query).
+    fn reveal_searching_tell_if_still_pending(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if self.pending_search_generation == Some(generation) {
+            self.searching = true;
+            cx.notify();
+        }
     }
 
     fn select_next(&mut self, _: &SelectNext, _window: &mut Window, cx: &mut Context<Self>) {
@@ -572,14 +681,22 @@ impl Root {
         cx.notify();
     }
 
-    /// `⌘K` — opens the actions menu for the currently selected row, if it
-    /// has any (`SearchItem::actions`); a no-op for a row with none (apps,
-    /// files, settings, commands today), which is why the footer's
-    /// "Actions ⌘K" label is always shown rather than conditionally hidden
-    /// — matching Raycast's own convention of a menu that's simply empty
-    /// (here: inert) rather than a control that disappears depending on
-    /// selection.
+    /// `⌘K` — opens the actions menu for the currently selected row. Thin
+    /// wrapper over `open_actions_menu_for_selected_row` so the keybinding
+    /// (`OpenActionsMenu`) and the footer trigger's own click handler
+    /// (`handle_actions_menu_trigger_click`, below) share one real
+    /// implementation.
     fn open_actions_menu(&mut self, _: &OpenActionsMenu, _window: &mut Window, cx: &mut Context<Self>) {
+        self.open_actions_menu_for_selected_row(cx);
+    }
+
+    /// Opens the actions menu for the currently selected row, if it has any
+    /// (`SearchItem::actions`); a no-op for a row with none (apps, files,
+    /// settings, commands today), which is why the footer's "Actions ⌘K"
+    /// label is always shown rather than conditionally hidden — matching
+    /// Raycast's own convention of a menu that's simply empty (here: inert)
+    /// rather than a control that disappears depending on selection.
+    fn open_actions_menu_for_selected_row(&mut self, cx: &mut Context<Self>) {
         let Some(item) = self.results.get(self.selected) else {
             return;
         };
@@ -594,6 +711,71 @@ impl Root {
             confirm_armed: false,
         });
         cx.notify();
+    }
+
+    /// A capture-phase listener on `render`'s own outer panel div — see that
+    /// call site's own comment for why it must be capture, not bubble.
+    /// Snapshots whether the actions menu is mounted at the very start of
+    /// every mouse-down gesture, *before* any capture-phase handler
+    /// downstream (the menu card's own `on_mouse_down_out`, below) has a
+    /// chance to mutate it. `gpui` dispatches every capture-phase listener
+    /// across the whole window for one event before any bubble-phase
+    /// listener runs (confirmed by reading `gpui-0.2.2/src/window.rs`'s
+    /// `dispatch_mouse_event`: two full passes, capture forward then bubble
+    /// reversed, never interleaved) — registering this on an ancestor of
+    /// both the menu card and the footer trigger, rather than on the trigger
+    /// alone, is what makes the snapshot correct regardless of where either
+    /// of those sits in paint order (the menu card is `deferred`, painted
+    /// after the ordinary tree, but capture already visited this ancestor
+    /// before recursing into any child either way).
+    fn note_actions_menu_mouse_down(&mut self, _event: &MouseDownEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.menu_open_before_this_press = self.actions_menu.is_some();
+    }
+
+    /// The menu card's own `on_mouse_down_out` — a click anywhere outside
+    /// the card (but still inside the window; the trigger itself counts as
+    /// "outside" the card, since the two don't overlap) closes the menu
+    /// without touching anything else. Deliberately does *not* check whether
+    /// the click was inside the panel at all vs. the transparent margin —
+    /// `on_mouse_down_out` only fires for `MouseDownEvent`s the window
+    /// itself received, and a click on the margin already has its own
+    /// dismiss handler (`render_dismiss_margin`) that hides the whole
+    /// window, menu included, before this would ever matter.
+    fn close_actions_menu_from_outside_click(&mut self, _event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.actions_menu.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The footer's "Actions ⌘K" trigger — `on_click` (a full press+release
+    /// on the trigger itself), not a raw `on_mouse_down`, so a press that
+    /// drags off the trigger before releasing doesn't open it, matching
+    /// ordinary button semantics.
+    ///
+    /// **The race this guards against** (comet's own finding,
+    /// `data/neko-comet-design/report.md` §2.1, reimplemented here in
+    /// neko's own terms — no lingering "closing" state, since neko's menu
+    /// close is an instant cut, see `motion.rs`'s own doc comment on why):
+    /// the trigger sits outside the menu card, so clicking it while the menu
+    /// is open *always* fires `close_actions_menu_from_outside_click` too,
+    /// on the very same physical mouse-down (capture phase, before this
+    /// handler's own bubble-phase click even fires). A naive toggle —
+    /// "closed ⇒ open, open ⇒ close" — reads `actions_menu` fresh right
+    /// here and finds it already `None` (the outside handler beat it to the
+    /// close), so it would open a *fresh* menu instead of leaving the
+    /// captain's dismiss click alone: the menu would flicker closed-then-
+    /// reopened on a single click, never actually dismissible by clicking
+    /// the trigger again. `menu_open_before_this_press`
+    /// (`note_actions_menu_mouse_down`) is the fix: it's a snapshot of
+    /// whether the menu was mounted *before* this gesture's capture phase
+    /// ran at all, so this handler can tell "the outside click just closed
+    /// what was open a moment ago" (consume the note, stay closed) apart
+    /// from "the menu was already closed, this is a genuine open" (open it).
+    fn handle_actions_menu_trigger_click(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.menu_open_before_this_press) {
+            return;
+        }
+        self.open_actions_menu_for_selected_row(cx);
     }
 
     /// Enter, while the actions menu is open. A destructive action
@@ -662,13 +844,19 @@ impl Render for Root {
             Some(mode) if mode.chrome.has_detail => theme::PANEL_WIDTH_WITH_DETAIL_PX,
             _ => theme::PANEL_WIDTH_PX,
         };
-        let mut root = div()
+        let root = div()
             .key_context("Panel")
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::open_actions_menu))
             .on_action(cx.listener(Self::handle_dismiss))
+            // Capture phase, not bubble — see `note_actions_menu_mouse_down`'s
+            // own doc comment for why this has to run before any
+            // capture-phase handler further down the tree (the actions
+            // menu card's own `on_mouse_down_out`) has a chance to mutate
+            // `actions_menu` first.
+            .capture_any_mouse_down(cx.listener(Self::note_actions_menu_mouse_down))
             .relative()
             .flex()
             .flex_col()
@@ -687,13 +875,10 @@ impl Render for Root {
             .overflow_hidden()
             .child(self.render_input_row(cx))
             .child(match &self.active_mode {
-                Some(mode) => self.render_mode_content(mode).into_any_element(),
+                Some(mode) => self.render_mode_content(mode),
                 None => self.render_content_area(cx, query_is_empty).into_any_element(),
             })
-            .child(self.render_footer());
-        if let Some(menu) = self.actions_menu.clone() {
-            root = root.child(self.render_actions_menu(&menu));
-        }
+            .child(self.render_footer(cx));
         // The real `NSWindow` is always `PANEL_WIDTH_WITH_DETAIL_PX` wide
         // now, never resized at runtime for a mode transition — see
         // `AGENTS.md`, "Mode view resize seam", and
@@ -772,12 +957,34 @@ impl Root {
                 None => search_glyph().into_any_element(),
             })
             .child(div().flex_1().child(self.text_field.clone()))
+            .children(self.render_searching_tell())
             .child(
                 div()
                     .text_size(px(12.))
                     .text_color(theme::TEXT_TERTIARY)
                     .child("esc"),
             )
+    }
+
+    /// The "still searching" tell for a query that hasn't returned yet —
+    /// `self.searching`, set by `run_search`'s own delayed-reveal task once
+    /// `SEARCHING_TELL_DELAY_MS` has passed with no response for the current
+    /// generation. `None` (nothing rendered, not an invisible placeholder)
+    /// for the common fast case, which is the whole point: apps/clipboard/
+    /// settings all answer well under the delay, so this never appears for
+    /// them, and `run_search`'s own "keep the previous results on screen
+    /// while a new request is in flight" behavior is otherwise silent —
+    /// `AGENTS.md`'s own "Search and ranking" section records why that's the
+    /// right call for the fast case, and why `files.rs`'s up-to-1.5s worst
+    /// case needed a real signal instead of leaving the captain looking at
+    /// stale results with no indication a new answer is coming.
+    fn render_searching_tell(&self) -> Option<AnyElement> {
+        if !self.searching {
+            return None;
+        }
+        let reduced = motion::system_reduce_motion();
+        let tell = div().text_size(px(11.)).text_color(theme::TEXT_TERTIARY).child("Searching…");
+        Some(motion::fade_in("searching-tell-fade", reduced, tell))
     }
 
     fn render_content_area(&self, cx: &mut Context<Self>, query_is_empty: bool) -> impl IntoElement {
@@ -1014,7 +1221,7 @@ impl Root {
             }))
     }
 
-    fn render_footer(&self) -> impl IntoElement {
+    fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let base = div()
             .flex()
             .items_center()
@@ -1079,8 +1286,29 @@ impl Root {
                     .text_color(theme::TEXT_SECONDARY)
                     .child(primary_action)
                     .child(div().w(px(1.)).h(px(16.)).bg(theme::BORDER_HAIRLINE_STRONG))
-                    .child("Actions  ⌘K"),
+                    .child(self.render_actions_trigger(cx)),
             )
+    }
+
+    /// The "Actions ⌘K" footer label, now a real clickable trigger for the
+    /// menu it names, not just a static hint — Raycast's own footer actions
+    /// are clickable the same way. `.relative()` establishes the positioned
+    /// ancestor `render_actions_menu`'s own zero-size pin div needs (see
+    /// that function's doc comment) — mounted here, as the trigger's own
+    /// child, rather than as a `render()`-level sibling, is what anchors the
+    /// floating menu to the trigger's actual on-screen position instead of a
+    /// hand-tuned fixed offset from the panel's corner.
+    fn render_actions_trigger(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut trigger = div()
+            .id("actions-trigger")
+            .relative()
+            .cursor(CursorStyle::PointingHand)
+            .on_click(cx.listener(Self::handle_actions_menu_trigger_click))
+            .child("Actions  ⌘K");
+        if let Some(menu) = self.actions_menu.clone() {
+            trigger = trigger.child(self.render_actions_menu(&menu, cx));
+        }
+        trigger
     }
 
     /// The two-column mode view (`data/neko-design/mockups/
@@ -1090,14 +1318,31 @@ impl Root {
     /// where `render_content_area` sits for the root list; same content-area
     /// height budget (`CONTENT_AREA_MIN_HEIGHT_PX`), only ever a width
     /// change between the two.
-    fn render_mode_content(&self, mode: &ActiveMode) -> impl IntoElement {
-        div()
+    fn render_mode_content(&self, mode: &ActiveMode) -> AnyElement {
+        let content = div()
             .flex()
             .flex_1()
             .min_h(px(0.))
             .overflow_hidden()
             .child(self.render_mode_list())
-            .when(mode.chrome.has_detail, |el| el.child(self.render_mode_detail()))
+            .when(mode.chrome.has_detail, |el| el.child(self.render_mode_detail()));
+        // A one-shot opacity reveal on entry, not the width/geometry
+        // transition itself — the real `NSWindow` still never resizes at
+        // runtime (`AGENTS.md`, "Mode view resize seam" — "cost two days"),
+        // and this element doesn't touch `update_background_bounds` or the
+        // panel `div`'s own width/centering at all, only the content painted
+        // inside whatever width `render`'s own stage element already
+        // resolved to this frame. `AnimationElement` is layout-transparent
+        // (its own `request_layout` forwards the wrapped `Div`'s layout id
+        // directly — confirmed by reading `gpui-0.2.2/src/elements/
+        // animation.rs`), so this doesn't disturb `root`'s own `flex_1()`
+        // expectations of whatever fills this slot. Keyed by a fixed
+        // element id: since this whole subtree only exists while a mode is
+        // active, each fresh `enter_mode` is a genuinely new mount (no
+        // element state survives an exit), so the fade replays on every
+        // entry rather than only the first.
+        let reduced = motion::system_reduce_motion();
+        motion::fade_in("mode-content-fade", reduced, content)
     }
 
     /// The mode's own filtered, time-grouped list — reuses `render_row`
@@ -1198,13 +1443,45 @@ impl Root {
     /// note), so this reuses the existing visual language (raised surface,
     /// hairline border, the same selected-row fill and danger color every
     /// other surface in this panel already uses) rather than inventing new
-    /// tokens. Anchored above the footer's own "Actions ⌘K" label, the
-    /// control that opens it.
-    fn render_actions_menu(&self, menu: &ActionsMenuState) -> impl IntoElement {
-        div()
-            .absolute()
-            .bottom(px(theme::FOOTER_HEIGHT_PX + 8.))
-            .right(px(theme::PANEL_RADIUS_PX))
+    /// tokens. Given real floating-layer discipline per
+    /// `data/neko-comet-design/report.md` recommendation 1 (comet's
+    /// `crates/ui/src/popover.rs:395-416`, `anchored_menu` — read for the
+    /// pattern, reimplemented here against neko's own geometry and, unlike
+    /// comet's fork, without `frost.rs`'s backdrop blur, which needs a
+    /// `gpui` primitive (`paint_backdrop_blur`) that doesn't exist in the
+    /// published crate neko compiles against):
+    ///
+    /// - **`deferred(...)`** gives the card its own floating paint layer,
+    ///   painted after (so visually above) everything else already painted
+    ///   this frame — it can't be occluded by content painted later, the way
+    ///   a plain `.child()` sitting earlier in paint order could be.
+    /// - **`anchored().anchor(Corner::BottomRight)
+    ///   .snap_to_window_with_margin(px(8.0))`** positions the card relative
+    ///   to the trigger's own on-screen point (the zero-size pin div in
+    ///   `render_actions_trigger`, at the trigger's top-right corner —
+    ///   `BottomRight` anchoring means the *card's* bottom-right corner sits
+    ///   there, so it grows up and to the left, above the footer) and clamps
+    ///   it to stay inside the real window if the trigger sits close to an
+    ///   edge — genuinely reachable here: the clipboard mode's own detail
+    ///   view runs the panel at the full `PANEL_WIDTH_WITH_DETAIL_PX` with no
+    ///   side margin at all, putting the trigger right at the window's own
+    ///   edge.
+    /// - **`.occlude()`** on the card means a click on the card's own dead
+    ///   space (padding, the gap between rows) can't fall through to
+    ///   whatever sits underneath the floating layer.
+    /// - **`.on_mouse_down_out(...)`** dismisses on a click anywhere outside
+    ///   the card — not "any click anywhere" (which would double-fire with
+    ///   the trigger's own click and reopen the menu; see
+    ///   `handle_actions_menu_trigger_click`'s doc comment for that race and
+    ///   its fix).
+    ///
+    /// Wrapped in `motion::menu_fade_in` for the open transition — see that
+    /// module's own doc comment for why the close path stays an instant cut
+    /// instead of a matching fade-out.
+    fn render_actions_menu(&self, menu: &ActionsMenuState, cx: &mut Context<Self>) -> AnyElement {
+        let card = div()
+            .occlude()
+            .on_mouse_down_out(cx.listener(Self::close_actions_menu_from_outside_click))
             .w(px(200.))
             .flex()
             .flex_col()
@@ -1235,7 +1512,32 @@ impl Root {
                     .text_size(px(12.5))
                     .text_color(color)
                     .child(label)
-            }))
+            }));
+        let reduced = motion::system_reduce_motion();
+        let card = motion::menu_fade_in("actions-menu-fade", reduced, card);
+        // `paint_layer` discipline (`components::layered`, recommendation 3
+        // in `data/neko-comet-design/report.md`) — the card's background,
+        // border, and rows paint as one atomic scene layer, so a hover
+        // repaint elsewhere in the panel this same frame can't reassign any
+        // of this card's own quads to the wrong relative paint order. This
+        // task's first real call site; see that module's own doc comment
+        // for the rule going forward.
+        let card = crate::components::layered::layered(card);
+        div()
+            .absolute()
+            .top_0()
+            .right_0()
+            .size_0()
+            .child(
+                deferred(
+                    anchored()
+                        .anchor(Corner::BottomRight)
+                        .snap_to_window_with_margin(px(8.0))
+                        .child(card),
+                )
+                .priority(1),
+            )
+            .into_any_element()
     }
 }
 
@@ -2154,6 +2456,254 @@ mod tests {
         window
             .update(cx, |root, _window, _cx| {
                 assert!(!root.actions_menu.as_ref().unwrap().confirm_armed, "moving off the armed action must disarm it");
+            })
+            .unwrap();
+    }
+
+    // --- Motion/floating-layer craft pass: the actions menu's trigger-click
+    // race, Escape's menu-before-mode-or-panel ordering, the stale-menu
+    // reset fix, and the "still searching" tell's own timing.
+
+    fn clipboard_row_with_a_paste_action(id: &str) -> SearchItem {
+        let mut row = item_with_id("clipboard", id);
+        row.actions = vec![ItemAction { id: "paste".into(), label: "Paste".into(), destructive: false }];
+        row
+    }
+
+    #[gpui::test]
+    fn clicking_the_trigger_while_the_menu_is_open_does_not_reopen_it(cx: &mut TestAppContext) {
+        // The race `data/neko-comet-design/report.md` recommendation 1
+        // describes (comet's `popover.rs:67-180`, reimplemented here in
+        // neko's own terms — see `handle_actions_menu_trigger_click`'s doc
+        // comment for the full mechanism): the footer trigger sits outside
+        // the menu card, so a click on it while the menu is open fires the
+        // card's own outside-close handler (capture phase) on the very same
+        // physical mouse-down, strictly before the trigger's own click
+        // handler (bubble phase, on mouse-up) ever runs — `gpui` completes
+        // every capture-phase listener across the whole window before any
+        // bubble-phase listener starts (confirmed by reading
+        // `gpui-0.2.2/src/window.rs`'s `dispatch_mouse_event`). Exercised
+        // here by calling the three real handler methods directly, in
+        // exactly that dispatch order, rather than via a simulated window
+        // click — matching this suite's own established convention
+        // (`test_root`'s doc comment) of proving state-machine correctness
+        // headlessly, the same way comet's own equivalent test
+        // (`trigger_press_note_distinguishes_dismiss_from_open`) is a pure
+        // state test with no simulated mouse event either.
+        let window = test_root(cx);
+        cx.run_until_parked();
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![clipboard_row_with_a_paste_action("hello")];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .unwrap();
+        window
+            .update(cx, |root, _window, _cx| assert!(root.actions_menu.is_some(), "setup: the menu must be open"))
+            .unwrap();
+
+        window
+            .update(cx, |root, window, cx| {
+                // Capture phase: the note fires before anything mutates
+                // `actions_menu` for this gesture.
+                root.note_actions_menu_mouse_down(&MouseDownEvent::default(), window, cx);
+                // Still capture phase: the card's own outside-close handler
+                // fires next (the trigger is outside the card), closing the
+                // menu.
+                root.close_actions_menu_from_outside_click(&MouseDownEvent::default(), window, cx);
+                // Bubble phase, on mouse-up: the trigger's own click.
+                root.handle_actions_menu_trigger_click(&ClickEvent::default(), window, cx);
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(
+                    root.actions_menu.is_none(),
+                    "the trigger's own click must not reopen what the outside click in the same gesture just closed"
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn clicking_the_trigger_when_the_menu_is_already_closed_opens_it(cx: &mut TestAppContext) {
+        // The normal-path counterpart to the race test above — the guard
+        // must not suppress a genuine open when nothing closed it first.
+        let window = test_root(cx);
+        cx.run_until_parked();
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![clipboard_row_with_a_paste_action("hello")];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, _window, _cx| assert!(root.actions_menu.is_none(), "setup: the menu must start closed"))
+            .unwrap();
+
+        window
+            .update(cx, |root, window, cx| {
+                root.note_actions_menu_mouse_down(&MouseDownEvent::default(), window, cx);
+                // No outside-close handler fires this time — the menu was
+                // already closed, so there was nothing for it to dismiss.
+                root.handle_actions_menu_trigger_click(&ClickEvent::default(), window, cx);
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.actions_menu.is_some(), "a click on the trigger with the menu closed must open it");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn escape_closes_the_actions_menu_before_exiting_an_active_mode(cx: &mut TestAppContext) {
+        // "Escape closes the menu first, panel second" — the mode-active
+        // case is the one this headless suite can observe directly (window
+        // hide isn't visible from here, same limitation the pre-existing
+        // `escape_exits_the_mode_instead_of_hiding_when_one_is_active` test
+        // already has for the panel-level case). `handle_dismiss`'s own
+        // early-return structure makes the two mutually exclusive per call,
+        // so proving "the mode is still active after the first Escape"
+        // proves the menu branch, not the mode branch, actually ran.
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![command_item("clipboard")];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![clipboard_row_with_a_paste_action("hello")];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .unwrap();
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.actions_menu.is_some(), "setup: the menu must be open before Escape");
+                assert!(root.active_mode.is_some(), "setup: still inside the mode before Escape");
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, window, cx| root.handle_dismiss(&crate::DismissWindow, window, cx))
+            .unwrap();
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.actions_menu.is_none(), "the first Escape must close the menu");
+                assert!(root.active_mode.is_some(), "the first Escape must not also exit the mode in the same press");
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, window, cx| root.handle_dismiss(&crate::DismissWindow, window, cx))
+            .unwrap();
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.active_mode.is_none(), "the second Escape, with the menu already closed, must exit the mode");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn reset_for_summon_closes_a_stale_open_actions_menu_even_with_no_mode_active(cx: &mut TestAppContext) {
+        // The gap this task closed in `reset_for_summon`: the window losing
+        // activation (`main.rs`'s `cx.observe_window_activation`) hides the
+        // whole panel without ever routing through `handle_dismiss`'s own
+        // "close the menu first" logic, so a menu left open on a *root-list*
+        // row (no mode involved at all) used to survive into the next
+        // summon.
+        let window = test_root(cx);
+        cx.run_until_parked();
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![clipboard_row_with_a_paste_action("hello")];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .unwrap();
+        window
+            .update(cx, |root, _window, _cx| assert!(root.actions_menu.is_some(), "setup"))
+            .unwrap();
+
+        window.update(cx, |root, window, cx| root.reset_for_summon(window, cx)).unwrap();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.actions_menu.is_none(), "a fresh summon must never resume a stale open actions menu");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_still_pending_generation_shows_the_searching_tell(cx: &mut TestAppContext) {
+        // Driven directly against `reveal_searching_tell_if_still_pending`
+        // (rather than through `run_search`'s own real request and a real
+        // `advance_clock`) so this is deterministic regardless of how fast
+        // the test client's own connection resolves — see that client's
+        // "resolves immediately with `NotConnected` when disconnected" doc
+        // comment (`neko-client/src/lib.rs`), which makes a genuinely
+        // still-in-flight request unreproducible through the real path in
+        // this headless harness.
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.generation = 7;
+                root.pending_search_generation = Some(7);
+                root.reveal_searching_tell_if_still_pending(7, cx);
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.searching, "a generation still marked pending must show the tell");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn an_already_resolved_generation_never_shows_the_searching_tell_later(cx: &mut TestAppContext) {
+        // The bug `pending_search_generation` exists to prevent: without
+        // it, a response that lands well within the delay (the common,
+        // fast case) would still see the delayed-reveal task fire later for
+        // the same generation and incorrectly flip the tell on for an
+        // already-answered query. `self.generation == generation` alone
+        // can't tell the difference — only `pending_search_generation`,
+        // cleared the instant a response lands, can.
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.generation = 7;
+                root.pending_search_generation = None; // already resolved
+                root.reveal_searching_tell_if_still_pending(7, cx);
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(!root.searching, "an already-resolved generation must not have the tell flip on later");
             })
             .unwrap();
     }

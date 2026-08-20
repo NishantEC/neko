@@ -6,6 +6,7 @@ mod evidence;
 mod hotkey_client;
 mod material;
 mod modes;
+mod motion;
 mod onboarding;
 mod panel;
 mod row_icon_cache;

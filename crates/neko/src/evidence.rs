@@ -72,6 +72,18 @@
 //!   once more before the window-number "now capture" line prints — for
 //!   verifying a mode transition survives being cycled more than once in a
 //!   row, not just entered fresh.
+//! - `NEKO_SHOW_ACTIONS_MENU=1` (only read alongside `NEKO_SHOW_QUERY`)
+//!   opens the `⌘K` actions menu on whatever row `NEKO_SHOW_CONFIRM`/the
+//!   query landed the selection on, through the exact same
+//!   `open_actions_menu_for_selected_row` path a real `⌘K` press or a real
+//!   click on the footer trigger takes — `Root::open_actions_menu_for_evidence`
+//!   — for the craft-pass task's own floating-menu screenshots (open, and
+//!   clamped near the window edge inside clipboard mode) without synthetic
+//!   input. Applied *after* `NEKO_SHOW_CONFIRM`'s own mode-entry sequence
+//!   (if any) has settled, so the menu opens against whatever row is
+//!   actually selected at that point — a clipboard-mode row inside the
+//!   two-column detail view if `NEKO_SHOW_CONFIRM` entered that mode, or
+//!   the plain query's own top result otherwise.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -95,6 +107,7 @@ const SHOW_CONFIRM_ENV_VAR: &str = "NEKO_SHOW_CONFIRM";
 const BACKDROP_IMAGE_ENV_VAR: &str = "NEKO_BACKDROP_IMAGE";
 const REAL_CYCLES_BEFORE_SHOW_ENV_VAR: &str = "NEKO_REAL_CYCLES_BEFORE_SHOW";
 const CYCLE_MODE_ONCE_ENV_VAR: &str = "NEKO_CYCLE_MODE_ONCE";
+const SHOW_ACTIONS_MENU_ENV_VAR: &str = "NEKO_SHOW_ACTIONS_MENU";
 
 pub fn bench_iterations() -> Option<u32> {
     std::env::var(BENCH_ENV_VAR).ok()?.parse().ok()
@@ -118,6 +131,10 @@ pub fn show_confirm_requested() -> bool {
 
 pub fn cycle_mode_once_requested() -> bool {
     std::env::var_os(CYCLE_MODE_ONCE_ENV_VAR).is_some()
+}
+
+pub fn show_actions_menu_requested() -> bool {
+    std::env::var_os(SHOW_ACTIONS_MENU_ENV_VAR).is_some()
 }
 
 pub fn backdrop_image_path() -> Option<PathBuf> {
@@ -283,12 +300,19 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                 root.confirm_for_evidence(window, cx);
             });
         });
-        // `confirm()` makes its own real `Request::Activate` daemon
-        // round-trip before it sets `activation_error` and notifies — wait
-        // for it to land before the window-number "now capture" line below
-        // prints, or the screenshot below would race the still-in-flight
-        // request and show the pre-confirm footer instead.
-        Timer::after(std::time::Duration::from_millis(800)).await;
+        // `confirm()` makes its own real daemon round-trip before settling
+        // — either `Request::Activate` (an app/file/settings/clipboard row)
+        // or, for a command row, `enter_mode`'s own freshly mode-scoped
+        // `Request::Search` (commands never reach `Request::Activate` at
+        // all — see `crate::modes`'s own doc comment). Wait for it to land
+        // before the window-number "now capture" line below prints, or the
+        // screenshot would race the still-in-flight request and show
+        // pre-confirm content instead. 1.5s, not 800ms: confirmed live on
+        // this shared machine that 800ms was occasionally too tight for the
+        // mode-entry search specifically under real concurrent load from
+        // other agents' own processes (a genuinely local SQLite query, but
+        // not exempt from real scheduling contention).
+        Timer::after(std::time::Duration::from_millis(1500)).await;
         if cycle_mode_once_requested() {
             let _ = cx.update(|cx| {
                 let _ = window.update(cx, |root, window, cx| {
@@ -311,6 +335,40 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             Timer::after(std::time::Duration::from_millis(800)).await;
         }
     }
+    if show_actions_menu_requested() {
+        let _ = cx.update(|cx| {
+            let _ = window.update(cx, |root, _window, cx| {
+                root.open_actions_menu_for_evidence(cx);
+            });
+        });
+        // A synchronous state transition (no daemon round-trip), but give
+        // the next frame a beat to actually paint the open fade-in before
+        // the window-number "now capture" line below prints.
+        Timer::after(std::time::Duration::from_millis(300)).await;
+    }
+    // A real, if rare, failure mode confirmed live on a shared machine
+    // while capturing this task's own evidence: this window's activation
+    // can be lost mid-sequence (another concurrently-running agent's own
+    // `neko` client contending for key-window status is one confirmed
+    // cause, real environmental desktop noise generally is another), which
+    // routes through `main.rs`'s `cx.observe_window_activation` the same
+    // way a captain's real click-away would and orders the window out —
+    // `window.is_window_active()` false, `cx.hide()`. By this point every
+    // state transition this hook drove (query, confirm, actions menu)
+    // already landed correctly regardless — GPUI keeps processing view
+    // updates for a hidden window, only the *paint* stops being visible on
+    // screen. `order_front_regardless` (the same call `NEKO_BENCH` uses,
+    // precisely because it "structurally cannot reach `windowDidBecomeKey:`
+    // at all" — this file's own doc comment on that function) brings the
+    // window back on screen for the capture below without another real
+    // `activate_window`/`cx.activate` cycle that could lose activation all
+    // over again the same way.
+    let _ = cx.update(|cx| {
+        let _ = window.update(cx, |_root, window, _cx| {
+            let _ = material::order_front_regardless(window);
+        });
+    });
+    Timer::after(std::time::Duration::from_millis(200)).await;
     let _ = cx.update(|cx| {
         let _ = window.update(cx, |_root, window, _cx| {
             if let Ok(number) = material::window_number(window) {
