@@ -40,8 +40,18 @@ window and process stay resident between summons — see `AGENTS.md`.
 
 ## Toolchain
 
-Rust `1.97.1` (`rustup show` / `rustc --version` to confirm). No other setup —
-`cargo build` and `cargo test` are clean from a fresh clone.
+Rust `1.97.1` (`rustup show` / `rustc --version` to confirm). One setup step
+before the first `cargo build`/`cargo test`/`cargo clippy` (and again any
+time the pinned gpui fork rev changes):
+
+```sh
+./scripts/setup-gpui-patch.sh
+```
+
+Populates the local, patched checkout of the pinned `gpui` fork rev this
+repo's `[patch]` section depends on — see `AGENTS.md`'s "Summon latency"
+section for why the patch exists. Without it, `cargo build` fails with a
+missing-path error.
 
 ## Licence
 
