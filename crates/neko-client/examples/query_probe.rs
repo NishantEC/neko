@@ -29,7 +29,7 @@ fn main() {
         let request = Request::Search { query: q.to_string(), limit: 10, provider: None };
         let response = futures::executor::block_on(client.request(request));
         match response {
-            Ok(Response::SearchResults { items }) => {
+            Ok(Response::SearchResults { items, .. }) => {
                 let kinds: Vec<String> = items.iter().map(|i| i.kind.clone()).collect();
                 let settings_titles: Vec<&str> = items.iter().filter(|i| i.kind == "settings").map(|i| i.title.as_str()).collect();
                 println!("{q:15} kinds={kinds:?} settings_titles={settings_titles:?}");
