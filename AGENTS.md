@@ -146,7 +146,23 @@ transition entirely — the real `NSWindow` is now fixed at
 `PANEL_WIDTH_WITH_DETAIL_PX` for the process's whole lifetime, with the
 narrower root-list panel centered inside it — rather than working around
 the staleness. See "Mode view resize seam" below,
-`docs/evidence/mode-resize-seam-fix-report.md`.
+`docs/evidence/mode-resize-seam-fix-report.md`. A nineteenth task fixed a
+second defect the eighteenth's own fix introduced: the 40pt margin
+`justify_center()` left around a narrower root-list panel inside the now
+permanently-wide window was still real, clickable `NSWindow` frame with no
+gpui element covering it, silently swallowing clicks that should have
+dismissed the panel — fixed with two explicit margin `div`s carrying their
+own `on_mouse_down` dismiss handler. See "Mode view resize seam" below. A
+twentieth task (`neko-double-panel`) fixed a third, captain-reported defect
+from the same architecture change: the root list visibly drew two nested
+rounded rectangles at rest. Root-caused, after ruling out every candidate
+named in its own launch brief by live readback, to AppKit's own automatic
+window drop shadow — computed against the now-permanently-wide `NSWindow`
+frame rather than the narrower panel actually painted inside it — and
+fixed with one call, `NSWindow.setHasShadow(false)`, since the panel
+`div`'s own explicit `.shadow_lg()` was always the only shadow this app
+needed. See "The double-panel shadow defect" below,
+`docs/evidence/double-panel-shadow-fix-report.md`.
 
 ## Crate layout
 
@@ -1722,6 +1738,70 @@ correctness, but not run to ground either). The fix itself rests on the
 person to touch this area should get a real, interactive click on the
 margin from a clean session before trusting this description of the
 mechanism as the final word.
+
+**Correction to this section's own earlier claim, found by
+`neko-double-panel`**: the text above ("The 40pt margin outside the visible
+panel carries no material and no shadow of its own … the root list's
+resting state is visually unchanged") is wrong. It does carry a shadow —
+AppKit's own automatic window drop shadow, which (for this window's
+Metal-layer-backed, near-invisible-alpha-background construction — see
+"Window material" below) is computed against the **whole `NSWindow` frame**
+rather than the actually-painted content, and was invisible only because
+every screenshot taken by this section's own task happened to be judged by
+eye against a low-alpha, blurred region rather than pixel-probed. Once the
+window became permanently wider than the visible root-list panel, this
+produced a real, captain-reported "two nested rounded rectangles" defect —
+see "The double-panel shadow defect" below for the root cause, the fix
+(`NSWindow.setHasShadow(false)`, since the panel `div`'s own `.shadow_lg()`
+was always the shadow this app actually needed), and the corrected
+measurements.
+
+## The double-panel shadow defect
+
+`fm/neko-double-panel`, fixing the regression the correction just above
+describes. Full investigation (four candidates checked and ruled out by
+live readback before the real cause was found, the single-variable test
+that confirmed it, before/after pixel measurements, and the verification
+methodology — including a near-miss where the real `neko-daemon` was
+briefly, accidentally spawned and how that was caught): `docs/evidence/
+double-panel-shadow-fix-report.md`. Summary:
+
+**Root cause**: not a second painted surface — every candidate named in
+this bug's own launch brief (the native backdrop material view, the stage
+`div`, the margin divs, `main.rs`'s startup narrowing call) was confirmed
+clean by live readback. The real cause is AppKit's own automatic window
+drop shadow, which this window's construction (`WindowBackgroundAppearance::
+Transparent`, a single Metal-layer-backed rendering `NSView` covering the
+whole window) forces AppKit to compute against the **entire `NSWindow`
+frame** rather than the narrower content actually painted inside it. Before
+"Mode view resize seam" above, the real window's own frame always matched
+the visible panel's width, so this was invisible by construction; once the
+window became permanently `PANEL_WIDTH_WITH_DETAIL_PX` regardless of a
+narrower root-list panel, the shadow started extending
+`theme::PANEL_ROOT_INSET_PX` past the real panel edge on both sides, read
+by the captain as a second, correctly-rounded but wrongly-sized surface.
+
+**The fix**: `material::disable_native_shadow` calls
+`NSWindow.setHasShadow(false)` once, at window creation (`main.rs`, right
+after `material::install`), with `material::verify_shadow_disabled` reading
+it back immediately after — the same "verified, not trusted" pattern
+`verify_installed`/`spaces::verify` already establish. The panel `div`'s
+own `.shadow_lg()` (`panel.rs`, untouched) is unaffected and remains the
+only shadow this app draws, now correctly the *only* shadow visible too.
+No change to the fixed-width-window architecture itself — the real
+`NSWindow` still never resizes at runtime.
+
+**Verification tooling this task added, permanently**:
+`crates/neko-daemon/src/bin/verify_harness.rs` — a small second binary in
+the `neko-daemon` crate that hosts the real `server` module (real app
+index, real providers, real socket protocol) without ever starting
+`neko_core::clipboard::run_capture_loop`. This is now the standing way to
+verify anything that needs a live daemon connection without risking a real
+capture of the captain's actual pasteboard — the real `neko-daemon` binary
+must never be launched for verification, even under an isolated `HOME`, per
+the report's own near-miss account. Seed fixtures via
+`Db::record_clipboard_entry` directly; commit an obscure hotkey via
+`neko_core::hotkey::set_hotkey` before launching a client against it.
 
 ## Third-party UI code: evaluated, then narrowly vendored
 

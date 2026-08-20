@@ -1,0 +1,104 @@
+//! Verification-only daemon harness for `fm/neko-double-panel` — never part
+//! of the shipped app, never wired into `neko`'s own daemon-launch path.
+//!
+//! Standing rule (see the launch brief this task ran under, and `AGENTS.md`
+//! going forward): the real `neko-daemon` binary must never be launched for
+//! verification, even under an isolated `HOME`, because its clipboard
+//! capture loop (`neko_core::clipboard::run_capture_loop`) polls the
+//! *systemwide* pasteboard regardless of `HOME` and would record whatever
+//! the captain has really copied. This harness reuses `neko-daemon`'s own
+//! `server` module (real app index, real providers, real socket protocol)
+//! but never starts that capture loop — a clipboard fixture is seeded
+//! directly into the isolated SQLite database instead, via
+//! `record_clipboard_entry`, before the socket ever accepts a connection.
+//!
+//! Delete this file once the investigation it was built for is closed.
+
+#[path = "../server.rs"]
+mod server;
+
+use std::sync::Arc;
+
+use neko_core::Db;
+
+fn main() {
+    let socket_path = neko_protocol::socket_path();
+    let db_path = neko_protocol::database_path();
+
+    let listener = match server::bind_singleton(&socket_path) {
+        Ok(Some(listener)) => listener,
+        Ok(None) => {
+            eprintln!("verify-harness: another instance is already running, exiting");
+            return;
+        }
+        Err(e) => {
+            eprintln!("verify-harness: failed to bind {}: {e}", socket_path.display());
+            std::process::exit(1);
+        }
+    };
+
+    let db = Db::open(&db_path).unwrap_or_else(|e| {
+        eprintln!("verify-harness: failed to open database at {}: {e}", db_path.display());
+        std::process::exit(1);
+    });
+
+    // Obscure hotkey, committed before any client connects — per the
+    // launch brief's standing rule, so nothing anyone could realistically
+    // press lands on this isolated instance.
+    let _ = neko_core::hotkey::set_hotkey(
+        &db,
+        neko_protocol::HotkeyCombo::new(
+            vec![
+                neko_protocol::Modifier::Cmd,
+                neko_protocol::Modifier::Alt,
+                neko_protocol::Modifier::Ctrl,
+                neko_protocol::Modifier::Shift,
+            ],
+            "F13",
+        ),
+        server::now_unix_ms(),
+    );
+
+    // A seeded fixture, not a real capture — see this file's own doc
+    // comment for why the real capture loop never runs here.
+    let _ = db.record_clipboard_entry(
+        "neko-double-panel verification fixture: a short clipboard entry",
+        "text",
+        Some("Terminal"),
+        server::now_unix_ms(),
+        200,
+    );
+
+    eprintln!("verify-harness: scanning installed applications…");
+    let apps = neko_core::apps::scan_applications();
+    eprintln!("verify-harness: indexed {} applications", apps.len());
+
+    let state = Arc::new(server::AppState::new(db, apps));
+
+    {
+        let state = state.clone();
+        std::thread::spawn(move || {
+            neko_core::icons::purge_stale_icon_cache();
+            neko_core::icons::ensure_cached_icon(
+                neko_core::settings::SETTINGS_APP_ICON_ID,
+                std::path::Path::new(neko_core::settings::SETTINGS_APP_PATH),
+            );
+            let apps = state.apps.read().unwrap().clone();
+            for app in apps {
+                neko_core::icons::ensure_cached_icon(&app.id, &app.path);
+            }
+            server::notify_icons_updated(&state);
+        });
+    }
+
+    // Deliberately no `neko_core::clipboard::run_capture_loop` thread, and
+    // no `watch_applications` live-update thread (nothing in this
+    // investigation depends on either), per this file's own doc comment.
+
+    eprintln!("verify-harness: listening on {}", socket_path.display());
+    for stream in listener.incoming() {
+        let Ok(stream) = stream else { continue };
+        let state = state.clone();
+        std::thread::spawn(move || server::handle_connection(state, stream));
+    }
+}
