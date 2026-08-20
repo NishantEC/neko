@@ -6,6 +6,7 @@
 //! below, which work fine from a headless process.
 
 pub mod apps;
+pub mod cancel;
 pub mod clipboard;
 pub mod commands;
 pub mod db;
@@ -19,6 +20,7 @@ pub mod search;
 pub mod settings;
 
 pub use apps::AppEntry;
+pub use cancel::Cancel;
 pub use db::Db;
 pub use provider::{Provider, ProviderError};
 

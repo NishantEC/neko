@@ -92,6 +92,7 @@ use std::time::Duration;
 
 use neko_protocol::{Glyph, Icon, SearchItem};
 
+use crate::cancel::Cancel;
 use crate::provider::{Provider, ProviderError};
 use crate::search::{Candidate, fuzzy_score};
 
@@ -280,10 +281,12 @@ fn escape_predicate_literal(query: &str) -> String {
 
 /// One bounded `mdfind` query — see this module's doc comment for why both
 /// bounds ([`MAX_RAW_RESULTS`] lines, [`QUERY_TIMEOUT`] wall-clock) exist
-/// and what each protects against. Returns whatever was read before
-/// whichever bound was hit first; `mdfind` itself is always killed before
-/// returning, never left to run to completion in the background.
-fn query_spotlight_paths(query: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
+/// and what each protects against, and [`run_bounded_child`] for the third
+/// bound this task added (`cancel`: the captain typed another character and
+/// this query's answer is no longer wanted). Returns whatever was read
+/// before whichever bound was hit first; `mdfind` itself is always killed
+/// before returning, never left to run to completion in the background.
+fn query_spotlight_paths(query: &str, dirs: &[PathBuf], cancel: &Cancel) -> Vec<PathBuf> {
     if dirs.is_empty() {
         return Vec::new();
     }
@@ -306,12 +309,36 @@ fn query_spotlight_paths(query: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
 
+    run_bounded_child(command, cancel).0
+}
+
+/// How often [`run_bounded_child`] wakes to re-check `cancel` while waiting
+/// on the reader thread. Small enough that a superseded query's child dies
+/// within a keystroke's own interval rather than lingering, large enough
+/// that the wait is still a blocked thread rather than a spin — the whole
+/// point of cancelling is to stop competing with the *next* query for
+/// Spotlight's own query planner, so a cancellation that arrives 100ms late
+/// would defeat most of the benefit.
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Runs `command` to at most three bounds — [`MAX_RAW_RESULTS`] lines,
+/// [`QUERY_TIMEOUT`] wall-clock, and `cancel` — killing and reaping the
+/// child before returning under every one of them, including the ordinary
+/// "it finished on its own" path.
+///
+/// Returns the lines read *and the reaped child's own exit status*, which
+/// exists purely so a test can prove the third bound did what it claims:
+/// a cancelled run's status carries `SIGKILL` in `ExitStatusExt::signal()`,
+/// which is direct evidence the child process was killed rather than
+/// merely abandoned with its output discarded. [`query_spotlight_paths`]
+/// itself discards the status.
+fn run_bounded_child(mut command: Command, cancel: &Cancel) -> (Vec<PathBuf>, Option<std::process::ExitStatus>) {
     let Ok(mut child) = command.spawn() else {
-        return Vec::new();
+        return (Vec::new(), None);
     };
     let Some(stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        return Vec::new();
+        let status = kill_and_reap(&mut child, None);
+        return (Vec::new(), status);
     };
 
     let (tx, rx) = mpsc::channel::<Vec<PathBuf>>();
@@ -326,15 +353,43 @@ fn query_spotlight_paths(query: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
         let _ = tx.send(paths);
     });
 
-    let paths = rx.recv_timeout(QUERY_TIMEOUT).unwrap_or_default();
-    kill_and_reap(&mut child, reader);
-    paths
+    // The wait `recv_timeout(QUERY_TIMEOUT)` used to be, sliced so `cancel`
+    // is actually observable: a single long blocking wait cannot notice a
+    // token that flips halfway through it.
+    let deadline = std::time::Instant::now() + QUERY_TIMEOUT;
+    let paths = loop {
+        if cancel.is_cancelled() {
+            break Vec::new();
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            break Vec::new();
+        }
+        match rx.recv_timeout(remaining.min(CANCEL_POLL_INTERVAL)) {
+            Ok(paths) => break paths,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break Vec::new(),
+        }
+    };
+    let status = kill_and_reap(&mut child, Some(reader));
+    (paths, status)
 }
 
-fn kill_and_reap(child: &mut Child, reader: std::thread::JoinHandle<()>) {
+/// Kills `child` and waits for it, returning its reaped status. `reader`,
+/// when present, is joined *after* the kill — killing the child closes its
+/// stdout, which is what unblocks a reader thread still sitting in
+/// `BufRead::lines`; joining first would deadlock for as long as the child
+/// stayed alive.
+fn kill_and_reap(
+    child: &mut Child,
+    reader: Option<std::thread::JoinHandle<()>>,
+) -> Option<std::process::ExitStatus> {
     let _ = child.kill();
-    let _ = child.wait();
-    let _ = reader.join();
+    let status = child.wait().ok();
+    if let Some(reader) = reader {
+        let _ = reader.join();
+    }
+    status
 }
 
 fn glyph_for(path: &Path) -> Glyph {
@@ -408,12 +463,24 @@ impl Provider for FileProvider {
         "Files"
     }
 
-    fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+    fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate> {
+        self.search_cancellable(query, now_unix_ms, &Cancel::never())
+    }
+
+    /// True once the query is long enough for this provider to actually
+    /// shell out to `mdfind` — below [`MIN_QUERY_LEN`] `search` returns
+    /// instantly with nothing, and there is nothing to defer. See
+    /// [`Provider::defers_for`].
+    fn defers_for(&self, query: &str) -> bool {
+        query.trim().chars().count() >= MIN_QUERY_LEN
+    }
+
+    fn search_cancellable(&self, query: &str, _now_unix_ms: i64, cancel: &Cancel) -> Vec<Candidate> {
         let query = query.trim();
         if query.chars().count() < MIN_QUERY_LEN {
             return Vec::new();
         }
-        query_spotlight_paths(query, &self.scope_dirs)
+        query_spotlight_paths(query, &self.scope_dirs, cancel)
             .into_iter()
             .filter(|path| !is_noisy(path))
             .filter_map(|path| {
@@ -434,6 +501,93 @@ impl Provider for FileProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    /// A stand-in for `mdfind` with the same observable shape this module
+    /// depends on: it streams one result line immediately, then stays alive
+    /// far longer than [`QUERY_TIMEOUT`]. `sleep` is invoked directly (no
+    /// `sh -c` wrapper) so the process this test's `Child` handle refers to
+    /// is genuinely the long-running one, not a shell that may or may not
+    /// `exec` away from under it.
+    fn long_running_child_that_emits_one_line() -> Command {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("echo /tmp/neko-cancel-fixture.txt; exec sleep 30")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        command
+    }
+
+    #[test]
+    fn a_cancelled_query_abandons_the_child_immediately_and_kills_it() {
+        // The defect this proves fixed: before `Cancel` existed, a query
+        // superseded by the next keystroke still held this thread for the
+        // full `QUERY_TIMEOUT` and left its `mdfind` child running for that
+        // whole window, competing with the query the captain actually
+        // wanted. `SIGKILL` in the reaped status is direct evidence the
+        // child process was killed, not merely abandoned with its output
+        // thrown away.
+        let cancel = Cancel::new();
+        let canceller = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            canceller.cancel();
+        });
+
+        let started = std::time::Instant::now();
+        let (paths, status) = run_bounded_child(long_running_child_that_emits_one_line(), &cancel);
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < QUERY_TIMEOUT / 2,
+            "a cancelled query must return promptly, not run out its own {QUERY_TIMEOUT:?} bound (took {elapsed:?})"
+        );
+        assert!(paths.is_empty(), "a cancelled query contributes nothing, even if a line had already streamed in");
+        assert_eq!(
+            status.and_then(|s| s.signal()),
+            Some(9),
+            "the child process must be SIGKILLed, not left running to complete on its own"
+        );
+    }
+
+    #[test]
+    fn a_query_cancelled_before_it_starts_never_waits_at_all() {
+        // The common real shape: the supersede arrives while this request
+        // is still queued behind its own thread spawn. Nothing should block
+        // for any measurable time.
+        let cancel = Cancel::new();
+        cancel.cancel();
+        let started = std::time::Instant::now();
+        let (paths, status) = run_bounded_child(long_running_child_that_emits_one_line(), &cancel);
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(paths.is_empty());
+        assert_eq!(status.and_then(|s| s.signal()), Some(9));
+    }
+
+    #[test]
+    fn an_uncancelled_query_still_returns_the_lines_the_child_streamed() {
+        // The cancellation plumbing must not change the ordinary path: a
+        // child that finishes on its own still hands back everything it
+        // printed.
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("echo /tmp/one.txt; echo /tmp/two.txt")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let (paths, _status) = run_bounded_child(command, &Cancel::never());
+        assert_eq!(paths, vec![PathBuf::from("/tmp/one.txt"), PathBuf::from("/tmp/two.txt")]);
+    }
+
+    #[test]
+    fn the_file_provider_only_defers_once_the_query_is_long_enough_to_query_spotlight() {
+        let provider = FileProvider::empty();
+        assert!(!provider.defers_for(""), "an empty query never reaches mdfind");
+        assert!(!provider.defers_for("a"), "a single character is below MIN_QUERY_LEN");
+        assert!(!provider.defers_for("  a  "), "whitespace does not count toward the minimum");
+        assert!(provider.defers_for("do"), "two characters is the point mdfind actually runs");
+    }
 
     #[test]
     fn noisy_paths_are_excluded() {
