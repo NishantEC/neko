@@ -337,6 +337,16 @@ impl Root {
         self.text_field.update(cx, |field, cx| field.set_content_for_evidence(query, cx));
     }
 
+    /// Evidence/verification-only — selects the whole current query
+    /// (`TextField::select_all_for_evidence`, the exact logic ⌘A's real
+    /// handler uses) so the rendered selection highlight
+    /// (`theme::SURFACE_SELECTED`) shows up in a window-scoped screenshot,
+    /// for `evidence.rs`'s `NEKO_SHOW_SELECTION` hook. Same "no synthetic OS
+    /// input" reasoning as `set_query_for_evidence` above.
+    pub fn select_query_for_evidence(&mut self, cx: &mut Context<Self>) {
+        self.text_field.update(cx, |field, cx| field.select_all_for_evidence(cx));
+    }
+
     /// Evidence/verification-only — drives the exact same `confirm()` path
     /// a real Enter keystroke takes (activate the selected result, surface
     /// `Response::Error` inline on failure) without a synthetic OS

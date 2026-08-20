@@ -94,6 +94,18 @@
 //!   actually scrolled down) without synthetic OS input, same reasoning as
 //!   every other hook in this file. Unset, a mode with more entries than
 //!   fit shows only the bottom fade, at rest.
+//! - `NEKO_SHOW_SELECTION=1` (only read alongside `NEKO_SHOW_QUERY`) selects
+//!   the whole query just typed (`Root::select_query_for_evidence`, the
+//!   exact logic ⌘A's real handler uses — `TextField::select_all_for_evidence`)
+//!   before the window-number "now capture" line prints — for the search
+//!   field's own text-selection/clipboard task: a rendered
+//!   `theme::SURFACE_SELECTED` highlight needs a real active selection, and
+//!   this repo's standing rule is no synthetic OS input (no synthetic
+//!   keystrokes, no `System Events`) to produce one. Applied after
+//!   `NEKO_SHOW_CONFIRM`'s own mode-entry sequence (if any) has settled, on
+//!   whatever query text is in the field at that point — the root list's
+//!   plain query, or a mode's own filter text if `NEKO_SHOW_CONFIRM` entered
+//!   one.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -119,6 +131,7 @@ const REAL_CYCLES_BEFORE_SHOW_ENV_VAR: &str = "NEKO_REAL_CYCLES_BEFORE_SHOW";
 const CYCLE_MODE_ONCE_ENV_VAR: &str = "NEKO_CYCLE_MODE_ONCE";
 const SHOW_ACTIONS_MENU_ENV_VAR: &str = "NEKO_SHOW_ACTIONS_MENU";
 const SCROLL_MODE_LIST_TO_BOTTOM_ENV_VAR: &str = "NEKO_SCROLL_MODE_LIST_TO_BOTTOM";
+const SHOW_SELECTION_ENV_VAR: &str = "NEKO_SHOW_SELECTION";
 
 pub fn bench_iterations() -> Option<u32> {
     std::env::var(BENCH_ENV_VAR).ok()?.parse().ok()
@@ -150,6 +163,10 @@ pub fn show_actions_menu_requested() -> bool {
 
 pub fn scroll_mode_list_to_bottom_requested() -> bool {
     std::env::var_os(SCROLL_MODE_LIST_TO_BOTTOM_ENV_VAR).is_some()
+}
+
+pub fn show_selection_requested() -> bool {
+    std::env::var_os(SHOW_SELECTION_ENV_VAR).is_some()
 }
 
 pub fn backdrop_image_path() -> Option<PathBuf> {
@@ -373,6 +390,16 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // the next frame a beat to actually paint the open fade-in before
         // the window-number "now capture" line below prints.
         cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+    }
+    if show_selection_requested() {
+        cx.update(|cx| {
+            let _ = window.update(cx, |root, _window, cx| {
+                root.select_query_for_evidence(cx);
+            });
+        });
+        // A synchronous, local state change (no daemon round-trip) — same
+        // one-frame settle beat as the actions-menu branch above.
+        cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
     }
     // A real, if rare, failure mode confirmed live on a shared machine
     // while capturing this task's own evidence: this window's activation

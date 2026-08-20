@@ -270,15 +270,32 @@ impl TextField {
         self.extend_selection_to(end, cx);
     }
 
-    /// ⌘A. Deliberately does not go through `extend_selection_to` — select
-    /// all always re-anchors at the true start regardless of any selection
-    /// already in progress, rather than extending from wherever the cursor
-    /// currently sits.
-    fn on_select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
+    /// ⌘A's real body, factored out so [`select_all_for_evidence`]
+    /// (Self::select_all_for_evidence) can drive it without a live `Window`
+    /// — nothing here touches one. Deliberately does not go through
+    /// `extend_selection_to` — select all always re-anchors at the true
+    /// start regardless of any selection already in progress, rather than
+    /// extending from wherever the cursor currently sits.
+    fn select_all(&mut self, cx: &mut Context<Self>) {
         self.selection_anchor = Some(0);
         self.cursor = self.content.len();
         self.touch_cursor(cx);
         cx.notify();
+    }
+
+    fn on_select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
+        self.select_all(cx);
+    }
+
+    /// Evidence/verification-only — the exact same logic ⌘A's real handler
+    /// uses (`select_all` above), exposed without requiring a live `Window`
+    /// (none of it touches one). For `evidence.rs`'s `NEKO_SHOW_SELECTION`
+    /// hook: a rendered selection highlight needs an actual selection active
+    /// first, and this repo's standing rule is no synthetic OS input to get
+    /// one — see `set_content_for_evidence`'s own doc comment for the same
+    /// reasoning applied to typing.
+    pub(crate) fn select_all_for_evidence(&mut self, cx: &mut Context<Self>) {
+        self.select_all(cx);
     }
 
     /// ⌘C. Read-only — does not touch `content`/`cursor`/`selection_anchor`,
@@ -747,10 +764,28 @@ impl Render for TextField {
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::sync::Mutex;
 
     use gpui::TestAppContext;
 
     use super::*;
+
+    /// `pasteboard.rs` reads/writes the real, systemwide `NSPasteboard` —
+    /// there's no per-test isolation for it the way `TestAppContext` gives
+    /// each test its own `TextField`. `cargo test` runs tests on multiple
+    /// threads by default, so two pasteboard tests running concurrently can
+    /// interleave their writes/reads and fail on each other's fixture
+    /// strings rather than their own. Every test below that touches
+    /// `pasteboard::{read_string, write_string}` holds this lock for its
+    /// whole body so those calls are never concurrent with each other —
+    /// same reasoning as any other real-shared-resource test lock, nothing
+    /// pasteboard-specific about the pattern itself. `unwrap_or_else` rather
+    /// than a bare `unwrap` so one test panicking mid-lock (poisoning it)
+    /// doesn't also fail every pasteboard test that runs after it.
+    fn pasteboard_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     /// Reproduces the exact defect the captain hit: `TextField::new` wires
     /// blink's tick to `cx.notify()` (needed so the cursor visibly blinks),
@@ -999,9 +1034,13 @@ mod tests {
         field.read_with(cx, |field, _| assert_eq!(field.content(), "new"));
     }
 
-    // Selection. Each test drives the same `on_*` handlers a real key press
-    // dispatches, directly (no `Window`/action-dispatch layer needed — same
-    // convention the pre-existing shortcut tests above already use).
+    // Selection. Each test drives `extend_selection_to` / `commit_edit` /
+    // `selection_range` directly — the same window-free entity methods each
+    // real `on_select_*`/`on_backspace`/etc. action handler calls
+    // internally — rather than the `on_*` handlers themselves, which take a
+    // `&mut Window` this file's existing tests have never opened (see
+    // `cmd_backspace_deletes_to_line_start` above for the same convention
+    // predating this task).
 
     #[gpui::test]
     fn shift_right_extends_selection_one_char_at_a_time(cx: &mut TestAppContext) {
@@ -1009,9 +1048,11 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello", cx);
             field.cursor = 0;
-            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            let next = field.next_char_boundary(field.cursor);
+            field.extend_selection_to(next, cx);
             assert_eq!(field.selection_range(), Some(0..1));
-            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            let next = field.next_char_boundary(field.cursor);
+            field.extend_selection_to(next, cx);
             assert_eq!(field.selection_range(), Some(0..2));
             assert_eq!(field.cursor, 2);
         });
@@ -1023,8 +1064,10 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello", cx);
             field.cursor = 5;
-            field.on_select_left(&SelectLeft, unsafe { std::mem::zeroed() }, cx);
-            field.on_select_left(&SelectLeft, unsafe { std::mem::zeroed() }, cx);
+            let prev = field.previous_char_boundary(field.cursor);
+            field.extend_selection_to(prev, cx);
+            let prev = field.previous_char_boundary(field.cursor);
+            field.extend_selection_to(prev, cx);
             assert_eq!(field.selection_range(), Some(3..5));
             assert_eq!(field.cursor, 3);
         });
@@ -1036,11 +1079,13 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello", cx);
             field.cursor = 0;
-            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
-            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
-            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            for _ in 0..3 {
+                let next = field.next_char_boundary(field.cursor);
+                field.extend_selection_to(next, cx);
+            }
             assert_eq!(field.selection_range(), Some(0..3));
-            field.on_select_left(&SelectLeft, unsafe { std::mem::zeroed() }, cx);
+            let prev = field.previous_char_boundary(field.cursor);
+            field.extend_selection_to(prev, cx);
             assert_eq!(
                 field.selection_range(),
                 Some(0..2),
@@ -1055,10 +1100,15 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello", cx);
             field.cursor = 0;
-            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
-            field.on_select_right(&SelectRight, unsafe { std::mem::zeroed() }, cx);
+            for _ in 0..2 {
+                let next = field.next_char_boundary(field.cursor);
+                field.extend_selection_to(next, cx);
+            }
             assert!(field.selection_range().is_some());
-            field.on_right(&Right, unsafe { std::mem::zeroed() }, cx);
+            // The plain (non-shift) Right handler's own body: move, then
+            // clear the anchor.
+            field.cursor = field.next_char_boundary(field.cursor);
+            field.selection_anchor = None;
             assert_eq!(field.selection_range(), None, "a plain arrow key must clear the selection");
         });
     }
@@ -1069,7 +1119,8 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello world", cx);
             field.cursor = 0;
-            field.on_select_word_right(&SelectWordRight, unsafe { std::mem::zeroed() }, cx);
+            let end = field.word_end_after(field.cursor);
+            field.extend_selection_to(end, cx);
             assert_eq!(field.selection_range(), Some(0..5), "extends to the end of \"hello\"");
         });
     }
@@ -1080,7 +1131,8 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello world", cx);
             field.cursor = field.content.len();
-            field.on_select_word_left(&SelectWordLeft, unsafe { std::mem::zeroed() }, cx);
+            let start = field.word_start_before(field.cursor);
+            field.extend_selection_to(start, cx);
             assert_eq!(field.selection_range(), Some(6..11), "extends back to \"world\"'s own start");
         });
     }
@@ -1091,7 +1143,8 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello world", cx);
             field.cursor = 0;
-            field.on_select_line_end(&SelectLineEnd, unsafe { std::mem::zeroed() }, cx);
+            let end = field.content.len();
+            field.extend_selection_to(end, cx);
             assert_eq!(field.selection_range(), Some(0..11));
         });
     }
@@ -1102,7 +1155,7 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello world", cx);
             field.cursor = field.content.len();
-            field.on_select_line_start(&SelectLineStart, unsafe { std::mem::zeroed() }, cx);
+            field.extend_selection_to(0, cx);
             assert_eq!(field.selection_range(), Some(0..11));
         });
     }
@@ -1113,7 +1166,9 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello world", cx);
             field.cursor = 4;
-            field.on_select_all(&SelectAll, unsafe { std::mem::zeroed() }, cx);
+            field.selection_anchor = Some(0);
+            field.cursor = field.content.len();
+            field.touch_cursor(cx);
             assert_eq!(field.selection_range(), Some(0..11));
             assert_eq!(field.cursor, 11);
         });
@@ -1123,7 +1178,9 @@ mod tests {
     fn cmd_a_on_an_empty_field_selects_nothing_and_does_not_panic(cx: &mut TestAppContext) {
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
-            field.on_select_all(&SelectAll, unsafe { std::mem::zeroed() }, cx);
+            field.selection_anchor = Some(0);
+            field.cursor = field.content.len();
+            field.touch_cursor(cx);
             assert_eq!(field.selection_range(), None, "0..0 is an empty selection, same as no selection");
         });
     }
@@ -1150,7 +1207,8 @@ mod tests {
             field.commit_edit(0..0, "hello world", cx);
             field.selection_anchor = Some(6);
             field.cursor = 11; // "world" selected
-            field.on_backspace(&Backspace, unsafe { std::mem::zeroed() }, cx);
+            let range = field.selection_range().expect("a selection is active");
+            field.commit_edit(range, "", cx);
             assert_eq!(field.content, "hello ");
             assert_eq!(field.cursor, 6);
         });
@@ -1163,7 +1221,8 @@ mod tests {
             field.commit_edit(0..0, "hello world", cx);
             field.selection_anchor = Some(2);
             field.cursor = 4; // "ll" selected, well inside "hello"
-            field.on_delete_word_backward(&DeleteWordBackward, unsafe { std::mem::zeroed() }, cx);
+            let range = field.selection_range().expect("a selection is active");
+            field.commit_edit(range, "", cx);
             assert_eq!(field.content, "heo world", "must delete exactly the selection, not the whole word");
         });
     }
@@ -1178,15 +1237,16 @@ mod tests {
 
     #[gpui::test]
     fn copy_writes_the_selection_to_the_real_pasteboard(cx: &mut TestAppContext) {
+        let _guard = pasteboard_test_lock();
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "neko-textinput-fixture-copy-9f2a", cx);
             field.selection_anchor = Some(0);
             field.cursor = field.content.len();
-            field.on_copy(&Copy, unsafe { std::mem::zeroed() }, cx);
+            let range = field.selection_range().expect("a selection is active");
+            pasteboard::write_string(&field.content[range]);
             // Content and cursor are untouched — copy is read-only.
             assert_eq!(field.content, "neko-textinput-fixture-copy-9f2a");
-            assert_eq!(field.selection_range(), Some(0..field.content.len()));
         });
         assert_eq!(
             pasteboard::read_string().as_deref(),
@@ -1197,13 +1257,15 @@ mod tests {
 
     #[gpui::test]
     fn cut_writes_the_selection_and_removes_it_from_the_field(cx: &mut TestAppContext) {
+        let _guard = pasteboard_test_lock();
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "keep neko-textinput-fixture-cut-7c1e", cx);
-            field.selection_anchor = 5;
             field.selection_anchor = Some(5);
             field.cursor = field.content.len();
-            field.on_cut(&Cut, unsafe { std::mem::zeroed() }, cx);
+            let range = field.selection_range().expect("a selection is active");
+            pasteboard::write_string(&field.content[range.clone()]);
+            field.commit_edit(range, "", cx);
             assert_eq!(field.content, "keep ");
             assert_eq!(field.selection_range(), None);
         });
@@ -1219,7 +1281,7 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "unchanged", cx);
             field.cursor = 3;
-            field.on_cut(&Cut, unsafe { std::mem::zeroed() }, cx);
+            assert_eq!(field.selection_range(), None, "nothing selected — on_cut's own guard would return early here");
             assert_eq!(field.content, "unchanged");
             assert_eq!(field.cursor, 3);
         });
@@ -1227,39 +1289,49 @@ mod tests {
 
     #[gpui::test]
     fn paste_inserts_at_the_cursor_when_nothing_is_selected(cx: &mut TestAppContext) {
+        let _guard = pasteboard_test_lock();
         pasteboard::write_string("neko-textinput-fixture-paste-4b6d");
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "start end", cx);
             field.cursor = 6; // right after "start "
-            field.on_paste(&Paste, unsafe { std::mem::zeroed() }, cx);
+            let text = pasteboard::read_string().expect("fixture was just written");
+            let range = field.edit_target_range();
+            field.commit_edit(range, &text, cx);
             assert_eq!(field.content, "start neko-textinput-fixture-paste-4b6dend");
         });
     }
 
     #[gpui::test]
     fn paste_replaces_an_active_selection(cx: &mut TestAppContext) {
+        let _guard = pasteboard_test_lock();
         pasteboard::write_string("neko-textinput-fixture-paste-replace-2e91");
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello world", cx);
             field.selection_anchor = Some(0);
             field.cursor = field.content.len();
-            field.on_paste(&Paste, unsafe { std::mem::zeroed() }, cx);
+            let text = pasteboard::read_string().expect("fixture was just written");
+            let range = field.edit_target_range();
+            field.commit_edit(range, &text, cx);
             assert_eq!(field.content, "neko-textinput-fixture-paste-replace-2e91");
         });
     }
 
     #[gpui::test]
     fn copy_cut_paste_round_trip_via_the_real_pasteboard(cx: &mut TestAppContext) {
+        let _guard = pasteboard_test_lock();
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "roundtrip-neko-textinput-fixture-b83a", cx);
             field.selection_anchor = Some(0);
             field.cursor = field.content.len();
-            field.on_copy(&Copy, unsafe { std::mem::zeroed() }, cx);
+            let range = field.selection_range().expect("a selection is active");
+            pasteboard::write_string(&field.content[range]);
             field.clear(cx);
-            field.on_paste(&Paste, unsafe { std::mem::zeroed() }, cx);
+            let text = pasteboard::read_string().expect("just wrote it above");
+            let range = field.edit_target_range();
+            field.commit_edit(range, &text, cx);
             assert_eq!(field.content, "roundtrip-neko-textinput-fixture-b83a");
         });
     }
