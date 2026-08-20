@@ -615,7 +615,7 @@ impl Root {
     /// measurement, before and after this task, so including it would only
     /// add noise to the comparison the number exists to make.
     fn report_search_latency(&self, complete: bool, generation: u64, cx: &mut Context<Self>) {
-        if crate::evidence::bench_search_query().is_none() {
+        if !crate::evidence::log_search_latency() {
             return;
         }
         let Some((dispatched_generation, dispatched_at)) = self.search_dispatched_at else { return };
