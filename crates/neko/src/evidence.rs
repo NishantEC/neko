@@ -144,6 +144,11 @@
 //!   actually selected at that point — a clipboard-mode row inside the
 //!   two-column detail view if `NEKO_SHOW_CONFIRM` entered that mode, or
 //!   the plain query's own top result otherwise.
+//! - `NEKO_BENCH_SEARCH=<query>` (only read alongside `NEKO_SHOW_ON_LAUNCH`)
+//!   types `<query>` one character at a time through the panel's own real
+//!   edit path, one keystroke-to-first-render sample per character — see
+//!   `run_search_bench`. `panel::Root` prints the numbers.
+//!
 //! - `NEKO_SCROLL_MODE_LIST_TO_BOTTOM=1` (only read alongside
 //!   `NEKO_SHOW_CONFIRM`, added for the results-list edge fade —
 //!   `edge_fade.rs`) scrolls the mode list just entered to its own bottom
@@ -197,6 +202,7 @@ const SHOW_SELECTION_ENV_VAR: &str = "NEKO_SHOW_SELECTION";
 /// become key" safety rule for why activation is opt-in rather than the
 /// default it used to be.
 const ACTIVATE_ENV_VAR: &str = "NEKO_EVIDENCE_ACTIVATE";
+const BENCH_SEARCH_ENV_VAR: &str = "NEKO_BENCH_SEARCH";
 
 pub fn bench_iterations() -> Option<u32> {
     std::env::var(BENCH_ENV_VAR).ok()?.parse().ok()
@@ -224,6 +230,12 @@ pub fn cycle_mode_once_requested() -> bool {
 
 pub fn show_actions_menu_requested() -> bool {
     std::env::var_os(SHOW_ACTIONS_MENU_ENV_VAR).is_some()
+}
+
+/// `NEKO_BENCH_SEARCH=<query>` — the keystroke-to-first-render benchmark.
+/// See [`run_search_bench`].
+pub fn bench_search_query() -> Option<String> {
+    std::env::var(BENCH_SEARCH_ENV_VAR).ok().filter(|q| !q.is_empty())
 }
 
 pub fn scroll_mode_list_to_bottom_requested() -> bool {
@@ -523,6 +535,9 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
         }
     }
+    if let Some(bench_query) = bench_search_query() {
+        run_search_bench(&bench_query, window, cx).await;
+    }
     if show_actions_menu_requested() {
         cx.update(|cx| {
             let _ = window.update(cx, |root, _window, cx| {
@@ -589,6 +604,42 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             );
         });
     });
+}
+
+/// Types `query` one character at a time through the panel's own real
+/// edit path, giving one keystroke-to-first-render sample per character —
+/// `NEKO_BENCH_SEARCH`, read alongside `NEKO_SHOW_ON_LAUNCH`.
+///
+/// **Real keystrokes, not a synthetic OS event.** `set_query_for_evidence`
+/// goes through `TextField::commit_edit` and the `ContentChanged`
+/// subscription exactly as a physical keypress does, so each character
+/// really does dispatch a fresh `Request::Search` and supersede the
+/// previous one — which is also what makes this hook a live exercise of
+/// the cancellation path, not only of the latency. Synthetic input is
+/// categorically off the table in this repo (`AGENTS.md`); it would also
+/// measure the OS event pipeline rather than this app's own.
+///
+/// `panel::Root` prints the actual numbers (`neko: search-latency …`) —
+/// this function only drives the typing and the settle waits between
+/// characters. The wait has to comfortably exceed `files::QUERY_TIMEOUT`
+/// so each sample measures a keystroke landing on an idle daemon rather
+/// than one still finishing the previous character's `mdfind`; measuring
+/// the pile-up case is a different experiment, and one this task's own
+/// cancellation change deliberately makes rare.
+pub async fn run_search_bench(query: &str, window: WindowHandle<Root>, cx: &mut AsyncApp) {
+    eprintln!("neko: search bench over {} keystrokes of {query:?}", query.chars().count());
+    let mut typed = String::new();
+    for ch in query.chars() {
+        typed.push(ch);
+        let so_far = typed.clone();
+        cx.update(|cx| {
+            let _ = window.update(cx, |root, _window, cx| {
+                root.set_query_for_evidence(&so_far, cx);
+            });
+        });
+        cx.background_executor().timer(std::time::Duration::from_millis(2500)).await;
+    }
+    eprintln!("neko: search bench complete");
 }
 
 /// Re-measures warm summon latency `iterations` times — `NEKO_BENCH`. Each

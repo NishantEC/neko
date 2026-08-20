@@ -167,6 +167,14 @@ pub struct Root {
     /// Cleared at the top of every `run_search`, so it can never describe
     /// a generation other than the current one.
     partial_generation: Option<u64>,
+    /// Verification-only (`evidence::bench_search_query`,
+    /// `NEKO_BENCH_SEARCH`): when the current generation's request was
+    /// dispatched, so `apply_search_results` can report keystroke-to-render
+    /// latency for the frame that actually lands. Always recorded — an
+    /// `Instant::now()` per keystroke is far below the noise floor of the
+    /// thing being measured — but only ever *read* when the hook is on, so
+    /// normal operation prints nothing.
+    search_dispatched_at: Option<(u64, std::time::Instant)>,
     /// Tracks the mode list's own scroll position (`render_mode_list`) —
     /// the root list never scrolls (still budget-fit, `fit_within_budget`,
     /// per this module's "v1 simplification" doc comment above), so this is
@@ -254,6 +262,7 @@ impl Root {
             searching: false,
             pending_search_generation: None,
             partial_generation: None,
+            search_dispatched_at: None,
             mode_scroll: ScrollHandle::new(),
         };
         root.run_search(cx);
@@ -464,6 +473,7 @@ impl Root {
         // it before that task ever fires. See this field's own doc comment.
         self.pending_search_generation = Some(generation);
         self.partial_generation = None;
+        self.search_dispatched_at = Some((generation, std::time::Instant::now()));
         let query = self.text_field.read(cx).content().to_string();
         let client = self.client.clone();
         // The mode seam: while a mode is active, every keystroke scopes to
@@ -588,7 +598,37 @@ impl Root {
         let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
         self.selected = resolve_selection(previous, &self.results);
         self.sync_mode_scroll_to_selection();
+        self.report_search_latency(complete, generation, cx);
         cx.notify();
+    }
+
+    /// Prints one `neko: search-latency` line per applied frame when
+    /// `NEKO_BENCH_SEARCH` is set — nothing at all otherwise.
+    ///
+    /// **What "render" means here, stated precisely rather than left to be
+    /// assumed from the name**: the elapsed time from the keystroke's own
+    /// `run_search` dispatch to the moment this frame's results are
+    /// committed to `self.results` and `cx.notify()` schedules the repaint.
+    /// It deliberately does *not* include GPUI's own frame cadence between
+    /// that notify and the pixels changing (~8ms on this window, `AGENTS.md`'s
+    /// "Summon latency" section) — that sits identically on top of every
+    /// measurement, before and after this task, so including it would only
+    /// add noise to the comparison the number exists to make.
+    fn report_search_latency(&self, complete: bool, generation: u64, cx: &mut Context<Self>) {
+        if crate::evidence::bench_search_query().is_none() {
+            return;
+        }
+        let Some((dispatched_generation, dispatched_at)) = self.search_dispatched_at else { return };
+        if dispatched_generation != generation {
+            return;
+        }
+        let phase = if complete { "complete" } else { "partial" };
+        eprintln!(
+            "neko: search-latency gen={generation} phase={phase} query={:?} rows={} elapsed_ms={:.2}",
+            self.text_field.read(cx).content(),
+            self.results.len(),
+            dispatched_at.elapsed().as_secs_f64() * 1000.0,
+        );
     }
 
     /// Flips the "still searching" tell on for `generation`, but only if
