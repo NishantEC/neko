@@ -69,13 +69,19 @@ objc2-app-kit = { version = "0.3", features = [
     # feature adds zero new crate versions to the tree, same reasoning as
     # the rest of this block.
     "NSWorkspace",
+    # `pasteboard.rs`'s ⌘C/⌘X/⌘V read/write — already a transitive
+    # dependency of `objc2-app-kit` at this exact version (`neko-core`
+    # already enables it for the daemon's own clipboard-history capture),
+    # so this adds zero new crate versions to the tree, same reasoning as
+    # the rest of this block.
+    "NSPasteboard",
 ] }
 # Window-under-cursor multi-display placement (`src/display_placement.rs`)
 # needs `NSPoint`/`NSRect` directly to build the `setFrameTopLeftPoint:`
 # argument — already a transitive dependency of `objc2-app-kit` at this
 # exact version (verified via `Cargo.lock`), so this adds zero new crate
 # versions to the tree, same reasoning as the rest of this block.
-objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSArray", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSArray", "NSString", "objc2-core-foundation"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
 raw-window-handle = "0.6"
 
