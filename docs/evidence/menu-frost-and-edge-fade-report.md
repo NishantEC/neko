@@ -160,8 +160,16 @@ run intermittently printed `neko: summon window lost activation, hiding`
 early in the sequence and the captured frame showed the pre-confirm state
 even though `show_once`'s own re-activation-before-capture logic ran and
 printed a window number — reproduced with `NEKO_SHOW_CONFIRM` alone (no
-actions-menu hook involved), so this is a pre-existing race in the
-evidence-capture path under heavy contention, not something this task's
+actions-menu hook involved). `AGENTS.md`'s "Comet craft pass" section
+already documents the most likely root cause for exactly this class of
+capture flakiness on an unattended machine: the display's own idle sleep
+timer can leave `ScreenCaptureKit` unable to start a capture stream at all,
+and a window's content can stay stale in the compositor even after the
+display wakes until some new state change repaints it —
+`caffeinate -u -t <seconds>` before launching the client is the documented
+fix. Not confirmed as the specific cause here (not re-diagnosed via `log
+stream` this pass), but consistent with every symptom observed — so this is
+a pre-existing capture-path condition on this machine, not something this task's
 changes introduced. A retry of the identical command succeeded cleanly
 every time. Worth noting for whoever next captures evidence on a busy
 machine: if a `NEKO_SHOW_CONFIRM` capture shows the pre-confirm state
@@ -169,25 +177,43 @@ despite `show_once` completing normally, just retry.
 
 ## 4. Idle CPU and warm summon latency
 
-Measured on the release binary, `verify_harness` backing it, isolated
-`HOME`, on a shared machine with several other concurrent agent sessions
-running (load average ~11.8 over 15 min at measurement time — noted since
-it inflates both numbers somewhat above what a quiet machine would show).
+Measured twice: first against the published `gpui = "0.2.2"` crate (before
+`main` migrated to the `wingleeio/zed` fork, §6), then re-measured against
+the fork build after rebasing, since a dependency swap that size can and
+did move this number — see below. Both passes: release binary,
+`verify_harness` backing it, isolated `HOME`, on a shared machine with
+several other concurrent agent sessions running (load average ~11.8 over
+15 min at the first measurement — noted since it inflates both numbers
+somewhat above what a quiet machine would show).
 
 - **Idle CPU** (panel visible via `NEKO_SHOW_ON_LAUNCH`, nothing open, no
-  menu, no scrolling — 8 samples of `ps -o %cpu`, 2s apart): **0.5%–0.9%**,
-  mean ≈0.64%. No new per-frame work exists in either feature at idle: the
-  menu overlay is only ever touched from `MenuFrostSync::paint`, which is
-  only mounted while `actions_menu.is_some()`; the edge fade is only ever
-  mounted inside `render_mode_list`, which only exists while a mode is
-  active. Neither is in the tree at all in the idle/default state, so
-  idle cost is unchanged from before this task.
-- **Warm summon latency** (`NEKO_BENCH=12`, `order_front_regardless`/
-  `order_out`, excluding the first/cold summon): **1.2–4.6ms**, mean
-  ≈2.2ms across 11 samples — within the existing 4–6ms baseline
-  (`AGENTS.md`, "Summon latency"), no regression. Cold summon (first
-  sample): 45.0ms, consistent with the documented cold-summon cost
-  (extra panel content + compositing, paid once per process lifetime).
+  menu, no scrolling — 8 samples of `ps -o %cpu`, 2s apart): **0.5%–0.9%**
+  on the published-crate build, **0.1%–1.0%** on the fork build after
+  rebasing (mean ≈0.64% / ≈0.44%) — no regression either way. No new
+  per-frame work exists in either feature at idle: the menu overlay is only
+  ever touched from `MenuFrostSync::paint`, which is only mounted while
+  `actions_menu.is_some()`; the edge fade is only ever mounted inside
+  `render_mode_list`, which only exists while a mode is active. Neither is
+  in the tree at all in the idle/default state, so idle cost is unchanged
+  from before this task on either dependency.
+- **Warm summon latency** (`NEKO_BENCH`, `order_front_regardless`/
+  `order_out`, excluding the first/cold summon): **1.2–4.6ms** (mean ≈2.2ms,
+  11 samples) on the published-crate build — within the existing 4–6ms
+  baseline, no regression from this task. **25.8–40.6ms (mean ≈32.9ms, 15
+  samples) on the fork build after rebasing** — this is *not* a regression
+  this task introduced: it's the exact, already-documented,
+  not-yet-root-caused regression `AGENTS.md`'s own "Summon latency" section
+  records for the fork migration itself (`fm/neko-gpui-fork-migration`,
+  measured there at ~26–40ms, confirmed not to be shared-machine noise by
+  an interleaved A/B against the published crate on the same machine). This
+  task's own before/after pair on identical code either side of the
+  dependency swap — 2.2ms mean → 32.9ms mean, no code of this task's own
+  changed between those two measurements — independently reproduces that
+  same finding rather than just citing it. Unlike the published-crate build
+  (cold summon ~45ms, warm 1.2–4.6ms — a clear cold/warm split), the fork
+  build's own first sample (31.3ms) sits inside the same 25.8–40.6ms band as
+  every later one — no distinct cold-start spike, matching `AGENTS.md`'s own
+  "no warm-up trend" description of this regression.
 
 ## 5. Where this still differs from comet, and what closing it costs
 
@@ -214,7 +240,52 @@ it inflates both numbers somewhat above what a quiet machine would show).
   material regardless of GPUI's own content, since it can't see it. Not
   fixable without the same missing primitive.
 
-## 6. Verification
+## 6. Rebased onto the gpui fork migration (`a83d5da`) — still shipping the native path
+
+Mid-task, `main` moved from the published `gpui = "0.2.2"` crate to
+`wingleeio/zed`'s fork (`AGENTS.md`, "The GPUI dependency decision," rewritten
+by that migration). **This task's own decision, confirmed by the captain: keep
+shipping the native AppKit frost built here, do not switch to the fork's
+`paint_backdrop_blur` in this task.** Rebased cleanly onto it; two small API
+drifts fixed (`ScrollHandle::max_offset()` now returns `Point<Pixels>` instead
+of `Size<Pixels>` — `edge_fade.rs` reads `.y` instead of `.height`; the
+`NEKO_SCROLL_MODE_LIST_TO_BOTTOM` evidence hook still used the pre-migration
+free `Timer::after`/a `let _ = cx.update(...)` the rest of `evidence.rs` had
+already converted to `cx.background_executor().timer(...)`/a bare
+`cx.update(...)`, per the fork's `AsyncApp::update` returning `R` directly now
+instead of `Result<R>`). `cargo build`/`test`/`clippy` all clean afterward;
+material install, menu-overlay install, and their readback verifications all
+still succeed identically on the fork build (confirmed live, release binary,
+`docs/evidence/menu-frost-fork-build-verification.png` — pixel-identical to
+the pre-migration capture). One capture-time observation: `screencapture -l`
+was intermittently unable to grab the window on this specific build on the
+first few attempts (`could not create image from window`) despite the process
+being alive and the window number valid, clearing on retry — plausibly the
+same kind of shared-machine/activation-timing flakiness §3 already documents,
+not reproduced as a *build*-specific regression (a plain, non-evidence launch
+stayed capturable throughout a 15s poll on the same build).
+
+**The concrete follow-up this section exists to set up**: now that the fork
+is `main`'s own dependency, `window.paint_backdrop_blur` is real and present
+at `crates/gpui/src/window.rs:3992` (its own doc comment: "everything already
+painted beneath `bounds` is snapshotted and painted back gaussian-blurred...
+macOS Metal only... content painted after this call composites on top of the
+blur") and `EdgeFade` at `crates/gpui/src/window.rs:682` (its own doc
+comment names exactly the problem this task's `edge_fade.rs` also solved:
+"Built for scroll-edge fades over translucent/blurred window backgrounds,
+where a backdrop-colored gradient overlay cannot exist"). A future task
+should build the `paint_backdrop_blur` version of the menu frost and compare
+it against this native-AppKit one head-to-head — genuine scene-aware blur
+that reacts to whatever's actually behind the menu (including GPUI's own
+opaque content, §1's "honest limitation" this native approach can't reach)
+vs. this task's zero-new-dependency, works-on-either-crate native material —
+and keep whichever reads closer to comet's own result. `gpui::EdgeFade`
+could similarly replace `edge_fade.rs`'s hand-rolled paint-time gradient
+outright; that swap is far lower-risk than the blur one (no native bridging
+involved either way) and could reasonably happen as part of the same
+follow-up or independently.
+
+## 7. Verification
 
 - `cargo build`, `cargo test`, `cargo clippy` — clean at the workspace root
   (`cargo build --workspace`, `cargo test --workspace`, `cargo clippy
