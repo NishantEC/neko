@@ -128,6 +128,62 @@ pub fn set_background_frame(_window: &Window, _x_px: f32, _width_px: f32, _heigh
     Err("native window material is only implemented on macOS".to_string())
 }
 
+/// Disables AppKit's own automatic window drop shadow — the fix for the
+/// "two nested rounded rectangles" defect (`fm/neko-double-panel`,
+/// `docs/evidence/double-panel-shadow-fix-report.md`). This window is
+/// non-opaque (`window_background()` is `Transparent`, and even the
+/// opaque-fallback branch below fills only the panel `div`, not the whole
+/// `NSWindow`), with its entire visible surface drawn by a single
+/// Metal-layer-backed `NSView` (GPUI's own rendering view) — AppKit cannot
+/// inspect that layer's alpha channel to shape a shadow around the actual
+/// painted content, so its default automatic shadow instead follows the
+/// **whole `NSWindow` frame rectangle**, unconditionally.
+///
+/// Before the fixed-width-window fix (`AGENTS.md`, "Mode view resize
+/// seam"), the real window's own frame always matched whatever width the
+/// visible panel was (it resized with every mode transition), so this was
+/// never visible — the frame-shaped shadow and the panel's own edge were
+/// the same edge by construction. Once the window became permanently
+/// `theme::PANEL_WIDTH_WITH_DETAIL_PX` wide regardless of the narrower
+/// panel actually drawn inside it, this same automatic shadow started
+/// extending `theme::PANEL_ROOT_INSET_PX` past the real panel edge on both
+/// sides, at rest — a second, correctly-rounded (AppKit applies the
+/// window's own corner radius to this shadow too) but wrongly-sized
+/// "surface" around the real one. Confirmed by a single-variable live test
+/// (screenshot before/after this one call, nothing else changed) — see the
+/// evidence report.
+///
+/// The panel `div`'s own `.shadow_lg()` (`panel.rs`) is unaffected — it's
+/// GPUI's own explicit box-shadow, drawn as real pixels in the same Metal
+/// frame as everything else, already correctly sized to whatever width the
+/// panel actually is in every mode. It was always the only shadow this app
+/// needed; AppKit's own was redundant even when it happened to be
+/// correctly shaped, and actively wrong once the window and the panel's
+/// own width could diverge.
+#[cfg(target_os = "macos")]
+pub fn disable_native_shadow(window: &Window) -> Result<(), String> {
+    macos::disable_native_shadow(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn disable_native_shadow(_window: &Window) -> Result<(), String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
+/// A non-visual proof `disable_native_shadow`'s claim is real — same
+/// "verified, not trusted" pattern `verify_installed`/`spaces::verify`
+/// already establish in this file/`spaces.rs`. Called unconditionally by
+/// `main.rs` right after `disable_native_shadow`, on every real launch.
+#[cfg(target_os = "macos")]
+pub fn verify_shadow_disabled(window: &Window) -> Result<(), String> {
+    macos::verify_shadow_disabled(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn verify_shadow_disabled(_window: &Window) -> Result<(), String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     use objc2::MainThreadMarker;
@@ -430,6 +486,21 @@ mod macos {
             origin: NSPoint { x: x_px as f64, y: 0.0 },
             size: NSSize { width: width_px as f64, height: height_px as f64 },
         });
+        Ok(())
+    }
+
+    /// See `super::disable_native_shadow`'s doc comment.
+    pub fn disable_native_shadow(window: &Window) -> Result<(), String> {
+        native_window(window)?.setHasShadow(false);
+        Ok(())
+    }
+
+    /// See `super::verify_shadow_disabled`'s doc comment.
+    pub fn verify_shadow_disabled(window: &Window) -> Result<(), String> {
+        let has_shadow = native_window(window)?.hasShadow();
+        if has_shadow {
+            return Err("expected NSWindow.hasShadow false, readback true".to_string());
+        }
         Ok(())
     }
 

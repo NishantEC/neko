@@ -193,6 +193,23 @@ fn main() {
                         ) {
                             eprintln!("neko: could not narrow the initial native background frame: {e}");
                         }
+                        // The fixed-width window itself is always
+                        // `PANEL_WIDTH_WITH_DETAIL_PX` now, but AppKit's own
+                        // automatic window shadow doesn't know the visible
+                        // panel is narrower — it shadows the whole `NSWindow`
+                        // frame, producing a second, wrongly-sized "surface"
+                        // around the real one (`AGENTS.md`, "Window
+                        // material"; `docs/evidence/double-panel-shadow-fix-report.md`).
+                        // The panel `div`'s own `.shadow_lg()` is the only
+                        // shadow this app needs.
+                        if let Err(e) = material::disable_native_shadow(window) {
+                            eprintln!("neko: could not disable the native window shadow: {e}");
+                        } else {
+                            match material::verify_shadow_disabled(window) {
+                                Ok(()) => eprintln!("neko: native window shadow disabled (verified)"),
+                                Err(e) => eprintln!("neko: native window shadow disable verification FAILED: {e}"),
+                            }
+                        }
                         Root::new(client.clone(), accessibility.clone(), translucent, cx)
                     }
                 },
