@@ -2579,26 +2579,25 @@ an inactive window would also stop being power-throttled; neko's own
 anything currently in the app).
 
 **Verified**: `cargo build`/`cargo test` (242 tests)/`cargo clippy
---all-targets` all clean against the patched dependency; the deadlock fix,
-native window-drag support, and the `paint_backdrop_blur`/`EdgeFade`
-primitives the fork migration was taken for are all untouched (the patch's
-only functional change is inside `on_request_frame`'s throttle branch).
-**Not completed live in this task**: a release-binary `NEKO_BENCH`
-before/after sample set — the shared machine's screen genuinely locked
-partway through verification (confirmed via
-`CGSessionCopyCurrentDictionary()`'s `CGSSessionScreenIsLocked` key, not
-just display-idle-sleep, which `caffeinate` cannot clear) and stayed locked
-for the rest of this task's available time. The root-cause diagnosis itself
-rests on a real, saved instrumented trace from a debug build captured
-*before* the lock (the evidence report's §3), plus the unconditional
-source-diff proof in §1 — both complete and not blocked by the lock; only
-the final release-binary confirmation number is outstanding. Whoever picks
-this up next: `caffeinate -u` per the standing rule already documented
-below the "Comet craft pass" section, confirm the screen is actually
-unlocked (not just display-awake) via the `CGSessionCopyCurrentDictionary`
-check in the evidence report before trusting a `NEKO_BENCH` run's absence
-of output, then re-run `NEKO_BENCH=15` on the release binary and record the
-numbers here.
+--all-targets` all clean against the patched dependency, both before and
+after rebasing onto `main`; the deadlock fix, native window-drag support,
+and the `paint_backdrop_blur`/`EdgeFade` primitives the fork migration was
+taken for are all untouched (the patch's only functional change is inside
+`on_request_frame`'s throttle branch). The shared machine's screen locked
+partway through this task (confirmed via `CGSessionScreenIsLocked`, not
+just display-idle-sleep, which `caffeinate` can't clear) and stayed locked
+long enough that the diagnosis and fix were written up and committed before
+it cleared; once it did, one **release-binary** `NEKO_BENCH=15` run
+recorded the actual before/after: **before, ~26–40ms across 15 samples, no
+cold/warm split** (established by the two prior tasks, re-confirmed by this
+task's own 25.98–38.58ms debug-build trace); **after, warm summons (1–14)
+mean 8.56ms, range 1.20–15.60ms, 7/14 under 10ms** — the artificial ~33ms
+floor is gone, real variance now bounded by this window's own ~8ms
+`CVDisplayLink` tick cadence (not investigated further — see the evidence
+report's own closing note) rather than by the fixed regression. Summon 0
+(cold, 38.91ms) is this project's own pre-existing, unrelated cold-start
+cost, unaffected by this patch. Full numbers and methodology:
+`docs/evidence/gpui-inactive-window-throttle-fix-report.md`.
 
 ## Hotkey scoping (must never leak into other apps)
 

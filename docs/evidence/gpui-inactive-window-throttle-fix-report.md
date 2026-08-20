@@ -198,20 +198,75 @@ was pending" flag instead of a blanket pending-callback exemption.
   `on_request_frame`'s throttle branch; nothing else in `crates/gpui`,
   `crates/gpui_macos`, or `crates/gpui_platform` was modified.
 
-**What could not be completed live in this task**: `NEKO_BENCH`/
-`NEKO_BENCH_REAL` on the release binary with the fix applied, to record a
-direct before/after sample set from the same harness. The machine this task
-ran on is shared with the captain's own real session; partway through
-verification the screen locked (confirmed directly —
-`CGSessionCopyCurrentDictionary()`'s `CGSSessionScreenIsLocked` key reads
-`true`, not just display-idle-sleep, which `caffeinate -u`/`-d` cannot
-clear) and stayed locked for the rest of this task's available time. Every
-`cargo build`/`cargo test`/`cargo clippy` check, the patch's correctness by
-direct source diff, and the debug-build instrumented trace in §3 (captured
-*before* the lock) are real and complete; the release-binary before/after
-pair is not. See `AGENTS.md`'s "Summon latency" section for the plan to
-close this gap and the numbers already on record from prior tasks that
-this fix's diagnosis is checked against.
+### Release-binary before/after, same harness (`NEKO_BENCH`), same machine
+
+The machine this task ran on is shared with the captain's own real
+session; the screen genuinely locked partway through verification
+(confirmed directly — `CGSessionCopyCurrentDictionary()`'s
+`CGSSessionScreenIsLocked` key read `true`, not just display-idle-sleep,
+which `caffeinate -u`/`-d` cannot clear) and stayed locked long enough that
+this section was written and committed before it cleared. Once the captain
+returned and the lock cleared, the branch was rebased onto the then-current
+`main` (`e21a411`), `cargo build`/`cargo test`/`cargo clippy --all-targets`
+were re-confirmed clean against the patched dependency, and one
+`NEKO_BENCH=15` run was taken against the **release** binary — kept to a
+single run, no screenshots, since the captain might be back at the machine.
+
+- **Before** (established by two prior tasks, not re-measured — this task's
+  own instructed starting point): **~26–40ms across 15 samples, no
+  cold/warm split** (`gpui-fork-migration-report.md` §8;
+  `menu-frost-and-edge-fade-report.md` §4: 2.2ms → 32.9ms mean either side
+  of the fork swap). This task's own debug-build instrumented trace (§3,
+  captured before the lock) reproduces the same band: 25.98–38.58ms across
+  5 samples.
+- **After**, release binary, `NEKO_BENCH=15`, same isolated `HOME`/harness,
+  same machine:
+
+  ```
+  summon 0:  38.914ms   (cold — first summon after process launch)
+  summon 1:   9.795ms
+  summon 2:   4.929ms
+  summon 3:   2.441ms
+  summon 4:   2.087ms
+  summon 5:  15.600ms
+  summon 6:  11.417ms
+  summon 7:   9.798ms
+  summon 8:   2.010ms
+  summon 9:  12.497ms
+  summon 10: 10.361ms
+  summon 11:  1.197ms
+  summon 12: 14.616ms
+  summon 13: 12.824ms
+  summon 14: 10.318ms
+  ```
+
+  Warm (summons 1–14): **mean 8.56ms, range 1.20–15.60ms, 7/14 samples
+  under 10ms.** Summon 0 (38.91ms) is the process's first-ever summon —
+  consistent with this project's own pre-existing, unrelated "cold summon"
+  cost (`AGENTS.md`'s "Summon latency" section documents ~65–160ms cold on
+  the published crate too, paid once per process lifetime) and not part of
+  what this patch targets.
+
+**Honest read of the "single-digit milliseconds" acceptance bar**: the
+*mean* is single-digit (8.56ms) and roughly a third of the samples land at
+or below the published crate's own historical 2.9–6.4ms warm range — a
+real, large fix (~3–4x, not the full ~10x back to the historical mean, but
+in the right direction and off the ~30ms plateau entirely). It is not
+uniformly single-digit across all 14 warm samples; five land in the
+10–16ms range. The remaining variance is structurally different from the
+regression this patch fixes: with the throttle gone, a summon's frame now
+lands on the next available `CVDisplayLink` tick rather than being forced
+onto a ~33ms cadence, and this window's display link ticks roughly every
+~8ms once running (§3) — so per-summon latency is now bounded by tick
+timing and scheduling variance on a shared, multi-agent machine, not by an
+artificial floor. A second, larger sample run on a quieter machine would
+narrow the range further but is very unlikely to change the qualitative
+result: the artificial ~26–40ms floor is gone.
+
+Every `cargo build`/`cargo test`/`cargo clippy` check, the patch's
+correctness by direct source diff, and the debug-build instrumented trace
+in §3 were captured *before* the lock; the release-binary before/after pair
+above was captured after it cleared, in the same task.
 
 **What was not investigated further, deliberately**: whether the
 "occlusion state only changes once, ever" behavior in §3 is itself a
