@@ -102,31 +102,12 @@ pub fn verify_installed(_window: &Window, _installed: Installed) -> Result<Strin
     Err("native window material is only implemented on macOS".to_string())
 }
 
-/// Repositions and resizes the installed background material view directly
-/// — see `AGENTS.md`, "Mode view resize seam", for why a mode transition
-/// drives *this* instead of a native `NSWindow` resize. `x_px`/`width_px`
-/// let the panel's own visible rect sit anywhere within the window's fixed
-/// content bounds (`panel::Root::render`'s own centering math is the only
-/// caller and the only place that decides those numbers); `height_px` is
-/// taken explicitly too, even though it never actually changes between
-/// modes, rather than re-deriving it here from a constant this module has
-/// no reason to otherwise depend on.
-///
-/// Best-effort, the same shape every other native call in this module and
-/// `display_placement.rs` already uses: an `Err` (no raw window handle, no
-/// background view installed) is logged by the caller and otherwise
-/// ignored — the GPUI panel `div` this frame is meant to back still moves
-/// to the correct place on its own, so the only real failure mode is a
-/// visible seam on whatever machine hit the error, not a wrong layout.
-#[cfg(target_os = "macos")]
-pub fn set_background_frame(window: &Window, x_px: f32, width_px: f32, height_px: f32) -> Result<(), String> {
-    macos::set_background_frame(window, x_px, width_px, height_px)
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn set_background_frame(_window: &Window, _x_px: f32, _width_px: f32, _height_px: f32) -> Result<(), String> {
-    Err("native window material is only implemented on macOS".to_string())
-}
+// `set_background_frame` (a direct `NSView` frame set repositioning the
+// whole-window background material for a mode transition) was deleted here
+// — see `AGENTS.md`, "One constant panel width": the panel `div` is now
+// always exactly the window's own width, so `install`'s own full-
+// `contentView`-bounds install already matches it in every mode, and
+// nothing ever needs to reposition it again.
 
 /// Disables AppKit's own automatic window drop shadow — the fix for the
 /// "two nested rounded rectangles" defect (`fm/neko-double-panel`,
@@ -145,13 +126,14 @@ pub fn set_background_frame(_window: &Window, _x_px: f32, _width_px: f32, _heigh
 /// never visible — the frame-shaped shadow and the panel's own edge were
 /// the same edge by construction. Once the window became permanently
 /// `theme::PANEL_WIDTH_WITH_DETAIL_PX` wide regardless of the narrower
-/// panel actually drawn inside it, this same automatic shadow started
-/// extending `theme::PANEL_ROOT_INSET_PX` past the real panel edge on both
-/// sides, at rest — a second, correctly-rounded (AppKit applies the
-/// window's own corner radius to this shadow too) but wrongly-sized
-/// "surface" around the real one. Confirmed by a single-variable live test
-/// (screenshot before/after this one call, nothing else changed) — see the
-/// evidence report.
+/// root-list panel then drawn inside it (a two-width layout later replaced
+/// by "One constant panel width" — `AGENTS.md`), this same automatic
+/// shadow started extending past the real panel edge on both sides, at
+/// rest — a second, correctly-rounded (AppKit applies the window's own
+/// corner radius to this shadow too) but wrongly-sized "surface" around the
+/// real one. Confirmed by a single-variable live test (screenshot
+/// before/after this one call, nothing else changed) — see the evidence
+/// report.
 ///
 /// The panel `div`'s own `.shadow_lg()` (`panel.rs`) is unaffected — it's
 /// GPUI's own explicit box-shadow, drawn as real pixels in the same Metal
@@ -189,9 +171,8 @@ pub fn verify_shadow_disabled(_window: &Window) -> Result<(), String> {
 /// whole-window `install`/`verify_installed` succeed, then shown/repositioned
 /// on each real menu open (`show_menu_overlay`) and hidden on each close
 /// (`hide_menu_overlay`) rather than being created and torn down per open —
-/// no native view allocation on the menu-open path, matching this module's
-/// existing "install once, reposition forever" shape for the whole-window
-/// backdrop (`set_background_frame`).
+/// no native view allocation on the menu-open path — the same "install
+/// once" shape `install`'s own whole-window backdrop already uses.
 ///
 /// **Same sibling-below invariant as the whole-window material — see this
 /// module's own top doc comment.** This view is a second child of
@@ -250,9 +231,10 @@ pub fn verify_menu_overlay_installed(_window: &Window, _installed: Installed) ->
 /// top-left of the window's content area, y increasing downward). Converted
 /// internally to AppKit's unflipped `contentView` coordinate space (origin
 /// bottom-left, y increasing upward) — see the macOS impl's own doc comment
-/// for why this conversion is necessary here but was never needed for the
-/// whole-window backdrop (`set_background_frame` only ever spans the full
-/// content height, where the conversion is a no-op).
+/// for why this conversion is necessary here: the menu overlay is a genuine
+/// sub-rectangle of the window, unlike the whole-window backdrop `install`
+/// sets up once (which always spans the full content height, where the
+/// conversion would be a no-op).
 ///
 /// Called from `panel.rs`'s own paint-time element (`MenuFrostSync`) every
 /// frame the menu is actually painted — so the native view always tracks
@@ -568,11 +550,10 @@ mod macos {
     /// converted here to `contentView`'s unflipped (bottom-left-origin,
     /// y-up) AppKit coordinate space by reading `contentView`'s own live
     /// height and flipping around it: `appkit_y = content_height -
-    /// (y_px + height_px)`. The whole-window backdrop's own
-    /// `set_background_frame` never needed this conversion because it only
-    /// ever spans the *entire* content height (`y_px` and `content_height -
-    /// height_px` are always both `0` there); a sub-rectangle genuinely
-    /// needs it.
+    /// (y_px + height_px)`. The whole-window backdrop `install` sets up once
+    /// never needed this conversion, since it always spans the *entire*
+    /// content height (`y_px` and `content_height - height_px` are always
+    /// both `0` there); a sub-rectangle genuinely needs it.
     pub fn show_menu_overlay(window: &Window, x_px: f32, y_px: f32, width_px: f32, height_px: f32) -> Result<(), String> {
         let _mtm = MainThreadMarker::new()
             .ok_or_else(|| "menu overlay frame update attempted off the main thread".to_string())?;
@@ -593,7 +574,7 @@ mod macos {
 
     /// See `super::hide_menu_overlay`'s doc comment.
     pub fn hide_menu_overlay(window: &Window) -> Result<(), String> {
-        // Same gate `set_menu_overlay_frame`/`set_background_frame` use: a
+        // Same gate `show_menu_overlay`/`install` use: a
         // headless `#[gpui::test]` window's own `HasWindowHandle::
         // window_handle` panics rather than erroring, so this has to fail
         // gracefully *before* reaching it (via `root_content_view` below),
@@ -709,37 +690,6 @@ mod macos {
                 ))
             }
         }
-    }
-
-    /// See `super::set_background_frame`'s doc comment. `y` is always `0` —
-    /// the background view's own height always matches `contentView`'s
-    /// full height (`height_px` is the same in every mode this app has),
-    /// so `0..height_px` covers the identical vertical extent regardless of
-    /// whether `contentView` uses a flipped (top-down) or unflipped
-    /// (bottom-up) coordinate system; only `x`/`width` ever need to differ
-    /// between a call for the root list and one for a mode's own wider
-    /// detail view.
-    pub fn set_background_frame(window: &Window, x_px: f32, width_px: f32, height_px: f32) -> Result<(), String> {
-        // Same gate `install` uses: a headless `#[gpui::test]` window's own
-        // `HasWindowHandle::window_handle` implementation panics rather
-        // than erroring (`gpui-0.2.2/src/platform/test/window.rs`), so this
-        // has to fail gracefully *before* reaching it, not inside its own
-        // `Err` path — `MainThreadMarker::new()` already reliably returns
-        // `None` in that context (confirmed live: this is the same reason
-        // `enter_mode`/`exit_mode`'s own test coverage never hit this
-        // panic before this function existed).
-        let _mtm = MainThreadMarker::new()
-            .ok_or_else(|| "background frame update attempted off the main thread".to_string())?;
-        let content_view = root_content_view(window)?;
-        let subviews = content_view.subviews().to_vec();
-        let background = subviews
-            .first()
-            .ok_or_else(|| "contentView has no subviews — material not installed yet".to_string())?;
-        background.setFrame(NSRect {
-            origin: NSPoint { x: x_px as f64, y: 0.0 },
-            size: NSSize { width: width_px as f64, height: height_px as f64 },
-        });
-        Ok(())
     }
 
     /// See `super::disable_native_shadow`'s doc comment.

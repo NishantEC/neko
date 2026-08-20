@@ -21,17 +21,22 @@
 //! real defect (`AGENTS.md`, "Mode view resize seam"): resizing the real
 //! window for a mode transition left `gpui`'s own paint viewport silently
 //! out of sync with it once the window had been shown/hidden a few times.
-//! `render`'s own stage element centers the narrower root-list panel
-//! inside that fixed window instead; `Root::update_background_bounds`
-//! keeps the native material backdrop in lockstep via a direct `NSView`
-//! frame set, never a window resize.
+//! **The panel `div` itself is now always exactly this same width too, root
+//! list and clipboard mode alike** (`AGENTS.md`, "One constant panel
+//! width," a later captain override of the frozen design's original
+//! two-width rule) — `render` no longer varies `panel_width` by mode, and
+//! there is no longer a centering stage element, margin divs, or a
+//! `Root::update_background_bounds` call: the panel always fills the
+//! window exactly, so the native material backdrop `install` puts in place
+//! (sized to the window's own full `contentView` bounds, once, at startup)
+//! never needs repositioning for a mode transition either.
 
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui::{
     Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable,
-    MouseButton, MouseDownEvent, Render, ScrollHandle, SharedString, Window, actions, anchored, deferred,
+    MouseDownEvent, Render, ScrollHandle, SharedString, Window, actions, anchored, deferred,
     div, img, point, prelude::*, px,
 };
 use neko_client::NekoClient;
@@ -270,10 +275,10 @@ impl Root {
     /// clean query" above: if a captain hid the panel while inside
     /// clipboard-history mode (Escape, or clicking outside), the *next*
     /// hotkey press should re-summon the ordinary root list, not silently
-    /// resume the mode they were in. This is also what keeps the native
-    /// background material correctly narrowed before the panel is shown
-    /// again — see `update_background_bounds`'s own doc comment for why
-    /// this no longer resizes the real `NSWindow` at all.
+    /// resume the mode they were in. Since "One constant panel width" this
+    /// no longer touches the native background material at all — the panel
+    /// is the same width in and out of a mode, so there is nothing to
+    /// narrow back.
     pub fn reset_for_summon(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Unconditional, not just inside the mode branch below: the actions
         // menu is per-summon-session state exactly like a mode is (this
@@ -285,12 +290,9 @@ impl Root {
         // logic, so without this a stale open menu would silently reappear
         // on the next summon.
         self.close_actions_menu(window);
-        if let Some(mode) = self.active_mode.take() {
+        if self.active_mode.take().is_some() {
             self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
             self.mode_scroll.set_offset(point(px(0.), px(0.)));
-            if mode.chrome.has_detail {
-                self.update_background_bounds(window, theme::PANEL_WIDTH_PX);
-            }
         }
         self.text_field.update(cx, |field, cx| field.clear(cx));
         self.results.clear();
@@ -301,30 +303,6 @@ impl Root {
         // banner dismissed from a previous summon, since this window was
         // last shown.
         self.fetch_accessibility_banner_state(cx);
-    }
-
-    /// Updates the native background material view to match a mode
-    /// transition — see `AGENTS.md`, "Mode view resize seam", for why this
-    /// is a direct `NSView` frame set (`material::set_background_frame`)
-    /// rather than a native `NSWindow` resize: the real window is now
-    /// always `theme::PANEL_WIDTH_WITH_DETAIL_PX` wide (`main.rs`'s own
-    /// window creation), so this only ever moves/resizes the background
-    /// view *within* that fixed window, centering it at `new_width` — the
-    /// same centering `Render::render`'s own `justify_center()` stage
-    /// element produces for the panel `div` itself (flexbox centering a
-    /// `new_width`-wide child inside a `PANEL_WIDTH_WITH_DETAIL_PX`-wide
-    /// row lands on this exact same `x`), so the two always agree without
-    /// either one hard-coding the other's formula. Best-effort: an
-    /// error (no raw window handle, material not installed) is logged and
-    /// otherwise ignored, never a panic and never a blocked mode transition
-    /// — the panel's own `div` width/centering still changes either way, so
-    /// the *content* is always internally consistent even on the rare path
-    /// where the native backdrop fails to follow it.
-    fn update_background_bounds(&self, window: &Window, new_width: f32) {
-        let x = (theme::PANEL_WIDTH_WITH_DETAIL_PX - new_width) / 2.0;
-        if let Err(e) = crate::material::set_background_frame(window, x, new_width, PANEL_HEIGHT_PX) {
-            eprintln!("neko: could not update the native background frame for a mode transition: {e}");
-        }
     }
 
     /// Pushed by `Event::IconsUpdated` (`main.rs`'s daemon-event loop) once
@@ -702,16 +680,17 @@ impl Root {
     }
 
     /// Enters `mode_id`'s mode: saves the current query so `exit_mode` can
-    /// restore it, clears the field to start the mode's own list fresh,
-    /// swaps the placeholder, and — if the mode wants a detail pane —
-    /// widens the *visible* panel (`Render::render`'s own centering, driven
-    /// by `active_mode`, plus `update_background_bounds`'s matching native
-    /// backdrop — the real `NSWindow` itself never resizes, see that
-    /// method's doc comment). A no-op if `mode_id` doesn't name a
-    /// registered mode (a stale/corrupted value) or a mode is already
-    /// active (confirming a command row is only ever possible from the
-    /// root list, since commands never appear inside a mode's own scoped
-    /// search — but this guards the invariant rather than assuming it).
+    /// restore it, clears the field to start the mode's own list fresh, and
+    /// swaps the placeholder. Since "One constant panel width" the panel is
+    /// already the mode's own width before and after this call, so this no
+    /// longer touches the panel's size or the native background material at
+    /// all — `ModeChrome::has_detail` now only decides whether
+    /// `render_mode_content` renders a detail column, not how wide anything
+    /// is. A no-op if `mode_id` doesn't name a registered mode (a
+    /// stale/corrupted value) or a mode is already active (confirming a
+    /// command row is only ever possible from the root list, since commands
+    /// never appear inside a mode's own scoped search — but this guards the
+    /// invariant rather than assuming it).
     fn enter_mode(&mut self, mode_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.active_mode.is_some() {
             return;
@@ -724,9 +703,6 @@ impl Root {
         self.selected = 0;
         self.mode_scroll.set_offset(point(px(0.), px(0.)));
         self.close_actions_menu(window);
-        if chrome.has_detail {
-            self.update_background_bounds(window, theme::PANEL_WIDTH_WITH_DETAIL_PX);
-        }
         self.text_field.update(cx, |field, cx| {
             field.set_placeholder(chrome.placeholder, cx);
             // A real edit (emits `ContentChanged`), which is what actually
@@ -741,8 +717,9 @@ impl Root {
     /// Leaves the active mode, if any: restores the pre-entry query
     /// (triggering a real root-list search, same reasoning as
     /// `enter_mode`'s own `set_content` call), restores the default
-    /// placeholder, closes any open actions menu, and narrows the visible
-    /// panel back if it had widened.
+    /// placeholder, and closes any open actions menu. Since "One constant
+    /// panel width" the panel doesn't narrow back here either — see
+    /// `enter_mode`'s own doc comment.
     fn exit_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(mode) = self.active_mode.take() else {
             return;
@@ -750,9 +727,6 @@ impl Root {
         self.close_actions_menu(window);
         self.selected = 0;
         self.mode_scroll.set_offset(point(px(0.), px(0.)));
-        if mode.chrome.has_detail {
-            self.update_background_bounds(window, theme::PANEL_WIDTH_PX);
-        }
         self.text_field.update(cx, |field, cx| {
             field.set_placeholder(DEFAULT_PLACEHOLDER, cx);
             field.set_content(&mode.saved_query, cx);
@@ -814,12 +788,10 @@ impl Root {
     /// The menu card's own `on_mouse_down_out` — a click anywhere outside
     /// the card (but still inside the window; the trigger itself counts as
     /// "outside" the card, since the two don't overlap) closes the menu
-    /// without touching anything else. Deliberately does *not* check whether
-    /// the click was inside the panel at all vs. the transparent margin —
-    /// `on_mouse_down_out` only fires for `MouseDownEvent`s the window
-    /// itself received, and a click on the margin already has its own
-    /// dismiss handler (`render_dismiss_margin`) that hides the whole
-    /// window, menu included, before this would ever matter.
+    /// without touching anything else. Since "One constant panel width" the
+    /// panel fills the whole window with no margin, so every click the
+    /// window receives is a click inside the panel by construction — there
+    /// is no separate margin dismiss path to reason about any more.
     fn close_actions_menu_from_outside_click(&mut self, _event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if self.actions_menu.is_some() {
             self.close_actions_menu(window);
@@ -940,11 +912,7 @@ impl Focusable for Root {
 impl Render for Root {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let query_is_empty = self.text_field.read(cx).content().is_empty();
-        let panel_width = match &self.active_mode {
-            Some(mode) if mode.chrome.has_detail => theme::PANEL_WIDTH_WITH_DETAIL_PX,
-            _ => theme::PANEL_WIDTH_PX,
-        };
-        let root = div()
+        div()
             .key_context("Panel")
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_previous))
@@ -960,7 +928,7 @@ impl Render for Root {
             .relative()
             .flex()
             .flex_col()
-            .w(px(panel_width))
+            .w(px(theme::PANEL_WIDTH_WITH_DETAIL_PX))
             .h(px(PANEL_HEIGHT_PX))
             .bg(if self.translucent {
                 theme::SURFACE_PANEL_TRANSLUCENT
@@ -977,84 +945,25 @@ impl Render for Root {
             // native window shadow was disabled ("The double-panel shadow
             // defect" in `AGENTS.md`): `shadow_lg`'s blur/spread paints a
             // few px of soft, low-alpha black *outside* this div's own
-            // bounds, and since `235bf88` there's `theme::PANEL_ROOT_INSET_PX`
-            // of real, otherwise-empty transparent window on each side of
-            // the root-list panel for it to bleed into
-            // (`render_dismiss_margin`'s own margin `div`s, next to this
-            // one, paint nothing at all). Confirmed with a single-variable
-            // test, not assumed: alpha-channel analysis of a window-scoped
-            // capture showed a soft 0→~17/255 gradient in the margin with
-            // this line present, and a hard, exact 0 with it removed. Every
-            // other paint source in that margin was already deliberately
-            // eliminated for the same reason (the native auto-shadow fix
-            // above; the native backdrop material is intentionally
-            // narrowed to the panel's own width, not the window's) — this
-            // was the one holdout. The translucent Glass material
-            // (`self.translucent`) already reads as an elevated surface on
-            // its own via real vibrancy; the opaque fallback keeps its
-            // `.border_1()` above for edge definition, which never had any
-            // spill risk. See `docs/evidence/panel-shadow-tent-fix-report.md`.
+            // bounds. Since "One constant panel width" this div is always
+            // exactly the real `NSWindow`'s own width too, so there is no
+            // longer any margin at all for a shadow to bleed into — but the
+            // line stays removed regardless, since the translucent Glass
+            // material (`self.translucent`) already reads as an elevated
+            // surface on its own via real vibrancy, and the opaque fallback
+            // keeps its `.border_1()` above for edge definition.
+            // See `docs/evidence/panel-shadow-tent-fix-report.md`.
             .overflow_hidden()
             .child(self.render_input_row(cx))
             .child(match &self.active_mode {
                 Some(mode) => self.render_mode_content(mode),
                 None => self.render_content_area(cx, query_is_empty).into_any_element(),
             })
-            .child(self.render_footer(cx));
-        // The real `NSWindow` is always `PANEL_WIDTH_WITH_DETAIL_PX` wide
-        // now, never resized at runtime for a mode transition — see
-        // `AGENTS.md`, "Mode view resize seam", and
-        // `update_background_bounds`'s own doc comment. This stage element
-        // is what gpui actually lays out against the window's own (now
-        // fixed, always-correct) viewport; centering the narrower
-        // root-list `root` div inside it, rather than ever asking gpui to
-        // resize the window itself, is what the fix trades on — matched
-        // pixel-for-pixel by `update_background_bounds`'s identical
-        // centering of the native backdrop, so the two always agree.
-        //
-        // **Explicit margin children, not `justify_center()`'s implicit
-        // flex gap** — the margin is still real, clickable window area (the
-        // real `NSWindow` frame extends past `root`'s own edge whenever
-        // `panel_width < PANEL_WIDTH_WITH_DETAIL_PX`), and with no gpui
-        // element covering it, a click there used to be silently swallowed:
-        // this window is already key/frontmost (`WindowKind::PopUp`, no
-        // `ignoresMouseEvents`, no custom hit-testing anywhere in `gpui`),
-        // so it neither reaches whatever's behind it on the desktop nor
-        // triggers `main.rs`'s click-outside-dismiss (`cx.
-        // observe_window_activation`, which only fires on an actual
-        // activation *change* — clicking inside this window's own frame,
-        // margin included, is never that). Giving each margin div its own
-        // `on_mouse_down` restores the click-outside *behavior* (dismiss)
-        // for a region that can no longer be true click-through — see
-        // `AGENTS.md`, "Mode view resize seam", for why real click-through
-        // isn't available without a second overlay window or patching
-        // `gpui`'s own hit-testing, neither undertaken here.
-        let margin_width = (theme::PANEL_WIDTH_WITH_DETAIL_PX - panel_width) / 2.0;
-        div()
-            .w(px(theme::PANEL_WIDTH_WITH_DETAIL_PX))
-            .h(px(PANEL_HEIGHT_PX))
-            .flex()
-            .child(self.render_dismiss_margin(margin_width, "left", cx))
-            .child(root)
-            .child(self.render_dismiss_margin(margin_width, "right", cx))
+            .child(self.render_footer(cx))
     }
 }
 
 impl Root {
-    /// One of `render`'s own two margin children — see its call site's doc
-    /// comment for why this exists at all. `width` is `0` whenever the
-    /// panel is already the full `PANEL_WIDTH_WITH_DETAIL_PX` (detail
-    /// mode), which renders an empty, harmless, unclickable sliver rather
-    /// than needing a separate conditional.
-    fn render_dismiss_margin(&self, width: f32, side: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id(SharedString::from(format!("panel-margin-{side}")))
-            .w(px(width))
-            .h_full()
-            .flex_shrink_0()
-            .on_mouse_down(MouseButton::Left, cx.listener(|_root, _event, _window, cx| cx.hide()))
-    }
-
     fn render_input_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
@@ -1350,9 +1259,7 @@ impl Root {
             .justify_between()
             .flex_shrink_0()
             .h(px(theme::FOOTER_HEIGHT_PX))
-            .px_5()
-            .border_t_1()
-            .border_color(theme::BORDER_HAIRLINE);
+            .px_5();
 
         // An activation failure takes over the footer's own fixed strip
         // instead of opening a new toast surface — same geometry, same
@@ -1448,13 +1355,12 @@ impl Root {
             .overflow_hidden()
             .child(self.render_mode_list())
             .when(mode.chrome.has_detail, |el| el.child(self.render_mode_detail()));
-        // A one-shot opacity reveal on entry, not the width/geometry
-        // transition itself — the real `NSWindow` still never resizes at
-        // runtime (`AGENTS.md`, "Mode view resize seam" — "cost two days"),
-        // and this element doesn't touch `update_background_bounds` or the
-        // panel `div`'s own width/centering at all, only the content painted
-        // inside whatever width `render`'s own stage element already
-        // resolved to this frame. `AnimationElement` is layout-transparent
+        // A one-shot opacity reveal on entry, not a width/geometry
+        // transition — the real `NSWindow` still never resizes at runtime
+        // (`AGENTS.md`, "Mode view resize seam" — "cost two days"), and
+        // since "One constant panel width" the panel `div`'s own width
+        // never changes for a mode transition either; only the content
+        // painted inside it does. `AnimationElement` is layout-transparent
         // (its own `request_layout` forwards the wrapped `Div`'s layout id
         // directly — confirmed by reading `gpui-0.2.2/src/elements/
         // animation.rs`), so this doesn't disturb `root`'s own `flex_1()`

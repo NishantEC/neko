@@ -187,18 +187,23 @@ pub const INPUT_ROW_HEIGHT_PX: f32 = 56.0;
 pub const RESULT_ROW_HEIGHT_PX: f32 = 40.0;
 pub const SECTION_HEADER_HEIGHT_PX: f32 = 28.0;
 pub const FOOTER_HEIGHT_PX: f32 = 44.0;
+/// The onboarding window's own width (`onboarding/view.rs`) — no longer the
+/// summon panel's, since the captain overrode the frozen design's two-width
+/// rule to one constant `PANEL_WIDTH_WITH_DETAIL_PX` (see that constant's
+/// own doc comment and `AGENTS.md`, "One constant panel width"). Kept
+/// because onboarding's window still genuinely uses it; it is not summon-
+/// panel dead code.
 pub const PANEL_WIDTH_PX: f32 = 680.0;
+/// The summon panel's only width now, root list and clipboard mode alike —
+/// on direct captain instruction (`AGENTS.md`, "One constant panel width"),
+/// overriding the frozen design's original "680px list-only, 760px only
+/// with a detail pane" rule. It has to be 760, not 680: the real `NSWindow`
+/// is fixed at this size for the process's whole lifetime and can never be
+/// resized at runtime (`AGENTS.md`, "Mode view resize seam" — gpui's paint
+/// viewport goes stale after a show/hide cycle, with no public API to
+/// resync it), so a single constant has to match the window, not the other
+/// way around.
 pub const PANEL_WIDTH_WITH_DETAIL_PX: f32 = 760.0;
-/// Half the gap between the two panel widths above — the horizontal inset
-/// the root list's own 680px content sits at within the real `NSWindow`,
-/// which is now always `PANEL_WIDTH_WITH_DETAIL_PX` wide (see `AGENTS.md`,
-/// "Mode view resize seam"). Centering the narrower panel inside the fixed
-/// window this way, rather than resizing the window itself for a mode
-/// transition, is what keeps the root list landing in the exact same
-/// on-screen position `upper_third_offset`'s own 680px-based formula placed
-/// it at before that fix — `(680 - 760) / 2` cancels back out once this
-/// inset is added on top of the window's own 760px-based centering.
-pub const PANEL_ROOT_INSET_PX: f32 = (PANEL_WIDTH_WITH_DETAIL_PX - PANEL_WIDTH_PX) / 2.0;
 /// The two-column mode view's fixed left (list) column width —
 /// `data/neko-design/mockups/12-first-clipboard-use.html`'s
 /// `.panel-list.with-detail { flex: 0 0 264px }`. The detail pane takes
