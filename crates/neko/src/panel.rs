@@ -618,7 +618,7 @@ impl Root {
                 cx.notify();
             });
             if !failed && hide_on_success {
-                let _ = cx.update(|cx| cx.hide());
+                cx.update(|cx| cx.hide());
             }
         })
         .detach();

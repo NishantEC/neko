@@ -212,7 +212,7 @@ async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncA
     let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX), gpui::px(PANEL_HEIGHT_PX));
     for i in 0..cycles {
         eprintln!("neko: real-cycles-before-show cycle {i} activating");
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let _ = window.update(cx, |root, window, cx| {
                 root.reset_for_summon(window, cx);
                 if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
@@ -225,7 +225,7 @@ async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncA
         // before the next step.
         cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
         eprintln!("neko: real-cycles-before-show cycle {i} activated");
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let _ = window.update(cx, |_root, window, _cx| {
                 let _ = material::order_out(window);
             });
@@ -272,7 +272,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
     } else {
         cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
     }
-    let _ = cx.update(|cx| {
+    cx.update(|cx| {
         let _ = window.update(cx, |root, window, cx| {
             root.reset_for_summon(window, cx);
             window.activate_window();
@@ -295,7 +295,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         cx.background_executor().timer(std::time::Duration::from_millis(3500)).await;
     }
     if show_confirm_requested() {
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let _ = window.update(cx, |root, window, cx| {
                 root.confirm_for_evidence(window, cx);
             });
@@ -314,20 +314,20 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // not exempt from real scheduling contention).
         cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
         if cycle_mode_once_requested() {
-            let _ = cx.update(|cx| {
+            cx.update(|cx| {
                 let _ = window.update(cx, |root, window, cx| {
                     root.dismiss_for_evidence(window, cx);
                 });
             });
             cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
             let requery = query.clone().unwrap_or_default();
-            let _ = cx.update(|cx| {
+            cx.update(|cx| {
                 let _ = window.update(cx, |root, _window, cx| {
                     root.set_query_for_evidence(&requery, cx);
                 });
             });
             cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
-            let _ = cx.update(|cx| {
+            cx.update(|cx| {
                 let _ = window.update(cx, |root, window, cx| {
                     root.confirm_for_evidence(window, cx);
                 });
@@ -336,7 +336,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         }
     }
     if show_actions_menu_requested() {
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let _ = window.update(cx, |root, _window, cx| {
                 root.open_actions_menu_for_evidence(cx);
             });
@@ -363,13 +363,13 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
     // window back on screen for the capture below without another real
     // `activate_window`/`cx.activate` cycle that could lose activation all
     // over again the same way.
-    let _ = cx.update(|cx| {
+    cx.update(|cx| {
         let _ = window.update(cx, |_root, window, _cx| {
             let _ = material::order_front_regardless(window);
         });
     });
     cx.background_executor().timer(std::time::Duration::from_millis(200)).await;
-    let _ = cx.update(|cx| {
+    cx.update(|cx| {
         let _ = window.update(cx, |_root, window, _cx| {
             if let Ok(number) = material::window_number(window) {
                 eprintln!("neko: window number {number}");
@@ -420,7 +420,7 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
 
     for i in 0..iterations {
         let started = Instant::now();
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let _ = window.update(cx, |root, window, cx| {
                 root.reset_for_summon(window, cx);
                 if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
@@ -433,7 +433,7 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             });
         });
         cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let _ = window.update(cx, |_root, window, _cx| {
                 let _ = material::order_out(window);
             });
@@ -486,7 +486,7 @@ pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx:
     for i in 0..iterations {
         eprintln!("neko: real-bench cycle {i} activating");
         let started = Instant::now();
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let _ = window.update(cx, |root, window, cx| {
                 root.reset_for_summon(window, cx);
                 if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
@@ -509,7 +509,7 @@ pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx:
         cx.background_executor().timer(std::time::Duration::from_millis(900)).await;
 
         eprintln!("neko: real-bench cycle {i} hiding");
-        let _ = cx.update(|cx| cx.hide());
+        cx.update(|cx| cx.hide());
         cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
         eprintln!("neko: real-bench cycle {i} hidden");
         cx.background_executor().timer(std::time::Duration::from_millis(900)).await;
