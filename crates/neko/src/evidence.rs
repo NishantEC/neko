@@ -45,6 +45,7 @@
 //! | `NEKO_SHOW_ACTIONS_MENU` | no | same — `open_actions_menu_for_evidence` |
 //! | `NEKO_SCROLL_MODE_LIST_TO_BOTTOM` | no | same — a `ScrollHandle` mutation |
 //! | `NEKO_SHOW_SELECTION` | no | same — `select_query_for_evidence` |
+//! | `NEKO_PROVE_TYPING` | no | types through GPUI's own key dispatch and reads the field back; no OS input, does not focus |
 //! | `NEKO_REAL_CYCLES_BEFORE_SHOW` | no | already `order_front_regardless`/`order_out` only, by its own deliberate design |
 //! | `NEKO_BENCH` | no | `order_front_regardless`/`order_out` only, by its own deliberate design |
 //! | `NEKO_BENCH_REAL` | **yes, and must** | it exists to measure the real `activate_window` path; gated behind `NEKO_EVIDENCE_ACTIVATE=1` and refuses to start without it |
@@ -201,6 +202,9 @@ const CYCLE_MODE_ONCE_ENV_VAR: &str = "NEKO_CYCLE_MODE_ONCE";
 const SHOW_ACTIONS_MENU_ENV_VAR: &str = "NEKO_SHOW_ACTIONS_MENU";
 const SCROLL_MODE_LIST_TO_BOTTOM_ENV_VAR: &str = "NEKO_SCROLL_MODE_LIST_TO_BOTTOM";
 const SHOW_SELECTION_ENV_VAR: &str = "NEKO_SHOW_SELECTION";
+/// See `prove_typing` and `material::send_key_in_process` for what this
+/// delivers and why it is not synthetic OS input.
+const PROVE_TYPING_ENV_VAR: &str = "NEKO_PROVE_TYPING";
 /// The one explicit opt-in that permits an evidence window to become the
 /// system key window. See this module's own "an evidence window must never
 /// become key" safety rule for why activation is opt-in rather than the
@@ -435,6 +439,70 @@ async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncA
 /// reproducible at all. (That investigation used the activating path; it is
 /// reachable today with `NEKO_EVIDENCE_ACTIVATE=1`, which is exactly the
 /// kind of deliberate, stated intent the safety rule asks for.)
+fn prove_typing_text() -> Option<String> {
+    std::env::var(PROVE_TYPING_ENV_VAR).ok().filter(|v| !v.is_empty())
+}
+
+/// `NEKO_PROVE_TYPING=<text>`: type `<text>` into the search field one
+/// keystroke at a time through GPUI's own real key dispatch
+/// (`Window::dispatch_keystroke` — the same path a physical keypress takes
+/// once AppKit has handed the event to GPUI), then read the field back and
+/// print whether what arrived matches what was sent.
+///
+/// This exists because `98522de` cleared `NSTitledWindowMask`, which reset
+/// the window's first responder and silently stopped every keystroke from
+/// reaching the search field, while every check that task ran (corners,
+/// Spaces, shadow, the non-activating bit, the style mask itself) still
+/// passed. No readback of window *properties* can catch that class of
+/// regression; something has to push a character all the way into the field.
+///
+/// **What this proves and what it does not.** It proves GPUI's key
+/// dispatch, this app's key bindings, and `TextField`'s own editing model
+/// all genuinely turn keystrokes into query text. The AppKit half — that
+/// `keyDown:` reaches GPUI's view at all — is covered separately, by
+/// `material::verify_titled_cleared`'s first-responder assertion, which is
+/// precisely what the regression broke. Delivering a real `NSEvent` instead
+/// was tried and abandoned: GPUI routes printable keys through
+/// `-[NSTextInputContext handleEvent:]`, which does nothing for a window
+/// that is not key, and an evidence window must never be made key
+/// (this module's own standing safety rule). Confirmed by a control run on
+/// an ordinary *titled* window — the known-good configuration swallowed
+/// synthesized `NSEvent`s identically, so that harness could not have told
+/// a working build from a broken one.
+///
+/// No synthetic OS input: nothing is posted to the machine's event stream
+/// and no other application can observe any of this.
+async fn prove_typing(text: &str, window: WindowHandle<Root>, cx: &mut AsyncApp) {
+    for ch in text.chars() {
+        // `update_window`, not `window.update` — dispatching a keystroke
+        // re-enters `Root` (that is the point), and holding `Root`'s own
+        // update guard across the dispatch panics on the nested borrow.
+        let _ = cx.update_window(window.into(), |_view, window, cx| {
+            if let Ok(keystroke) = gpui::Keystroke::parse(&ch.to_string()) {
+                window.dispatch_keystroke(keystroke, cx);
+            } else {
+                eprintln!("neko: typing proof — {ch:?} is not a parseable keystroke, skipped");
+            }
+        });
+        cx.background_executor().timer(std::time::Duration::from_millis(40)).await;
+    }
+    cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+    cx.update(|cx| {
+        let _ = window.update(cx, |root, window, cx| {
+            let got = root.query_for_evidence(cx);
+            match material::first_responder_name(window) {
+                Ok(name) => eprintln!("neko: typing proof — first responder is {name}"),
+                Err(e) => eprintln!("neko: typing proof — could not read first responder: {e}"),
+            }
+            if got == text {
+                eprintln!("neko: typing proof PASSED — sent {text:?}, search field contains {got:?}");
+            } else {
+                eprintln!("neko: typing proof FAILED — sent {text:?}, search field contains {got:?}");
+            }
+        });
+    });
+}
+
 pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp) {
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
     if let Some(cycles) = real_cycles_before_show() {
@@ -495,6 +563,9 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // outside script's "now capture" signal) isn't printed before the
         // row this evidence run exists to show has actually rendered.
         cx.background_executor().timer(std::time::Duration::from_millis(3500)).await;
+    }
+    if let Some(text) = prove_typing_text() {
+        prove_typing(&text, window, cx).await;
     }
     if show_confirm_requested() {
         cx.update(|cx| {

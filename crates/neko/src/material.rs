@@ -283,20 +283,16 @@ pub fn verify_shadow_disabled(_window: &Window) -> Result<(), String> {
     Err("native window material is only implemented on macOS".to_string())
 }
 
-/// Read back the live `NSWindow`'s style mask, for logging only — this
-/// function never mutates it. `fm/neko-top-line-titled` (`98522de`) cleared
-/// `NSTitledWindowMask` here to remove AppKit's own top-edge rim and that
-/// broke keyboard input outright (see `AGENTS.md`, "The top line"); the mask
-/// is now left exactly as gpui creates it, and this readback exists so the
-/// value a build is actually running with is visible in the launch log
-/// rather than inferred.
+/// The class name of the window's live first responder — the object AppKit
+/// delivers `keyDown:` to. `"GPUIView"` means keystrokes reach GPUI; anything
+/// else means they do not. Read-only, for `evidence.rs`'s typing proof.
 #[cfg(target_os = "macos")]
-pub fn read_style_mask(window: &Window) -> Result<usize, String> {
-    macos::read_style_mask(window)
+pub fn first_responder_name(window: &Window) -> Result<String, String> {
+    macos::first_responder_name(window)
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn read_style_mask(_window: &Window) -> Result<usize, String> {
+pub fn first_responder_name(_window: &Window) -> Result<String, String> {
     Err("native window material is only implemented on macOS".to_string())
 }
 
@@ -517,6 +513,22 @@ mod macos {
         rendering_view
             .window()
             .ok_or_else(|| "GPUI's rendering view has no owning NSWindow yet".to_string())
+    }
+
+    /// GPUI's own rendering `NSView` — the same one `native_window` walks up
+    /// from, returned directly. This is the view AppKit delivers `keyDown:`
+    /// to, and therefore the one that has to be the window's first responder
+    /// for anything typed to reach `TextField` at all.
+    fn rendering_view(window: &Window) -> Result<Retained<NSView>, String> {
+        let handle = HasWindowHandle::window_handle(window)
+            .map_err(|e| format!("no raw window handle: {e}"))?;
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            return Err("not a macOS AppKit window handle".to_string());
+        };
+        // SAFETY: identical to `native_window`'s own — GPUI's rendering view
+        // is live for as long as this resident `Window` exists.
+        unsafe { Retained::retain(appkit.ns_view.as_ptr().cast()) }
+            .ok_or_else(|| "raw-window-handle returned a null NSView".to_string())
     }
 
     fn root_content_view(window: &Window) -> Result<Retained<NSView>, String> {
@@ -861,12 +873,52 @@ mod macos {
         native.setStyleMask(NSWindowStyleMask::from_bits_retain(
             wanted as usize as _,
         ));
+
+        // `setStyleMask:` makes AppKit rebuild the window's frame view, and
+        // that **resets the window's first responder** — measured live, not
+        // inferred: GPUI's `GPUIView` before the call, the panel itself
+        // (`NSKVONotifying_GPUIPanel`) after it. GPUI only ever calls
+        // `makeFirstResponder:` once, at window creation
+        // (`gpui_macos/src/window.rs`), so nothing restores it on its own,
+        // and with the panel as first responder `keyDown:` never reaches
+        // GPUI at all — the search field silently stops accepting input
+        // while the window still looks and behaves correct in every other
+        // way. That is exactly the regression `98522de` shipped. Re-make
+        // GPUI's rendering view the first responder here, in the same call
+        // that disturbed it, so the two can never drift apart.
+        //
+        // Note this is *not* a key-window problem: the fork's `GPUIPanel`
+        // overrides `canBecomeKeyWindow` to return `YES` unconditionally,
+        // regardless of style mask.
+        let view = rendering_view(window)?;
+        if !native.makeFirstResponder(Some(&view)) {
+            return Err(
+                "NSWindow refused to restore GPUI's rendering view as first responder                  after the style-mask change"
+                    .to_string(),
+            );
+        }
         Ok(())
     }
 
     /// See `super::verify_titled_cleared`'s doc comment.
     pub fn verify_titled_cleared(window: &Window) -> Result<u64, String> {
-        let bits = native_window(window)?.styleMask().bits() as u64;
+        // (see below — the responder check is the load-bearing half)
+        let native = native_window(window)?;
+        // The regression `98522de` shipped was invisible to a style-mask-only
+        // check, so this readback covers the responder too — see
+        // `clear_titled_style_mask`.
+        let responder = native.firstResponder();
+        let is_rendering_view = responder
+            .as_deref()
+            .zip(rendering_view(window).ok().as_deref())
+            .is_some_and(|(a, b)| std::ptr::eq(a as *const _ as *const (), b as *const _ as *const ()));
+        if !is_rendering_view {
+            return Err(format!(
+                "expected GPUI's rendering view to be the window's first responder after                  the style-mask change, found {:?} — keyboard input would not reach the                  search field",
+                responder.map(|r| format!("{:?}", r.class()))
+            ));
+        }
+        let bits = native.styleMask().bits() as u64;
         if !style_mask_is_untitled_panel(bits) {
             return Err(format!(
                 "expected NSTitledWindowMask clear with NSNonactivatingPanelMask and \
@@ -885,9 +937,11 @@ mod macos {
         Ok(())
     }
 
-    /// See `super::read_style_mask`'s doc comment. Read-only.
-    pub fn read_style_mask(window: &Window) -> Result<usize, String> {
-        Ok(native_window(window)?.styleMask().bits() as usize)
+    /// See `super::first_responder_name`'s doc comment.
+    pub fn first_responder_name(window: &Window) -> Result<String, String> {
+        Ok(native_window(window)?
+            .firstResponder()
+            .map_or_else(|| "<none>".to_string(), |r| r.class().name().to_string_lossy().into_owned()))
     }
 
     #[cfg(test)]
