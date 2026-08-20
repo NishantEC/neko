@@ -158,6 +158,33 @@ fn main() {
                     let client = client.clone();
                     let accessibility = accessibility.clone();
                     move |window, cx| {
+                        // Cleared first, before any native view is
+                        // installed: gpui creates this window *titled*
+                        // regardless of `titlebar: None` above, and AppKit
+                        // draws its own top-edge highlight on a titled
+                        // window over everything the app paints — the
+                        // captain's thrice-reported "line across the top"
+                        // (`AGENTS.md`, "The top line"). `setStyleMask:`
+                        // makes AppKit rebuild the window's frame view, so
+                        // it happens before `install` puts anything into
+                        // `contentView`, and before the shadow and Spaces
+                        // readbacks below, which then all observe the final
+                        // window. Before/after bits are logged the same way
+                        // the material and Spaces readbacks are.
+                        match material::style_mask_bits(window) {
+                            Ok(bits) => eprintln!("neko: window style mask before: {bits:#x}"),
+                            Err(e) => eprintln!("neko: window style mask readback FAILED: {e}"),
+                        }
+                        match material::clear_titled_style_mask(window) {
+                            Ok(()) => match material::verify_titled_cleared(window) {
+                                Ok(bits) => eprintln!(
+                                    "neko: window style mask after: {bits:#x} — NSTitledWindowMask cleared (verified), \
+                                     non-activating panel and full-size content view intact"
+                                ),
+                                Err(e) => eprintln!("neko: titled-style-bit clear verification FAILED: {e}"),
+                            },
+                            Err(e) => eprintln!("neko: could not clear the titled style bit: {e}"),
+                        }
                         // Installed once here, right after the window opens
                         // — this window is resident for the process
                         // lifetime (only ever hidden, never closed), so one
