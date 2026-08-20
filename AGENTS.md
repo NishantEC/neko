@@ -229,14 +229,21 @@ patch on top of the pinned rev (`patches/`, applied by
 `scripts/setup-gpui-patch.sh`), not a neko-side change, since no public
 gpui API exists to opt a window or request out of that throttle. See
 "Summon latency" below, `docs/evidence/gpui-inactive-window-throttle-fix-report.md`.
-A twenty-sixth task (`fm/neko-footer-hairline`) shipped two more small,
-captain-requested chrome changes together: removed the panel's one
-horizontal hairline (above the footer — the vertical divider inside the
-footer stays), and unified the panel to one constant width (760px, root
-list and clipboard mode alike, overriding the frozen design's original
-two-width rule), which also let a real chunk of now-dead centering/margin/
-native-backdrop-repositioning machinery come out. See "Footer hairline
-removal, and one constant panel width" below,
+A twenty-sixth task (`fm/neko-footer-hairline`) unified the panel to one
+constant width (760px, root list and clipboard mode alike, overriding the
+frozen design's original two-width rule) on captain instruction, which let
+a real chunk of now-dead centering/margin/native-backdrop-repositioning
+machinery come out. Its first pass also removed the footer's own
+horizontal hairline on a wrong inference about which "top line" the
+captain meant — corrected and restored once his own follow-up screenshot
+showed the real line sits **outside the panel's top-left edge, in the
+transparent margin**, not on the footer; that real line turned out to
+already be fixed by the width unification (a soft, low-alpha ghost of the
+panel's own top-edge highlight bleeding past its rounded corner into the
+680-vs-760 margin the width fix removes) — not, as first hypothesized, a
+Liquid Glass–specific specular rim (ruled out live: the same top-edge
+brightening persists on the `NSVisualEffectView(.popover)` fallback too).
+See "One constant panel width, and the real top line" below,
 `docs/evidence/footer-hairline-and-panel-width-report.md`.
 
 ## Crate layout
@@ -1961,34 +1968,34 @@ what was tried; the code-level argument above (a provably `0`-width margin
 in that mode) stands in for the missing screenshot. `evidence.rs` itself
 was not changed by this task.
 
-## Footer hairline removal, and one constant panel width
+## One constant panel width, and the real top line
 
-`fm/neko-footer-hairline`, two captain-requested changes landed together
-since both touch the same area of `panel.rs`. Full before/after screenshots
-(root list and clipboard mode, both changes): `docs/evidence/
-footer-hairline-and-panel-width-report.md`.
+`fm/neko-footer-hairline`. Full before/after screenshots and the pixel-level
+diagnosis: `docs/evidence/footer-hairline-and-panel-width-report.md`.
 
-**The horizontal hairline above the footer is gone.** `render_footer`
-carried the only horizontal rule anywhere in the panel
-(`.border_t_1().border_color(theme::BORDER_HAIRLINE)`) — removed outright,
-on the captain's own "there is a line above the footer, maybe we can
-remove that?" The vertical divider *inside* the footer (between
-`Open ↵`/`Paste ↵` and `Actions ⌘K`) is untouched — that one is named
-explicitly in the frozen design (`data/neko-design/report.md` §2's own
-footer anatomy) and stays. Judged live: the footer still reads as its own
-band without the line, on the existing `FOOTER_HEIGHT_PX` strip and
-whitespace alone — no new chrome, no palette/geometry/spacing/type change.
+**A wrong inference, corrected.** The captain reported "a top line, maybe we
+can remove that" on the current build; this task's first pass inferred that
+meant the footer's own horizontal hairline (`render_footer`'s
+`.border_t_1().border_color(theme::BORDER_HAIRLINE)` — the only horizontal
+rule anywhere in the panel) and removed it. Wrong: his own follow-up
+screenshot showed the line he meant sits **outside the panel's top-left
+edge, in the transparent margin**, roughly level with the panel's top edge,
+ending where the rounded corner begins. **The footer hairline is restored,
+unchanged from before this task** — the vertical divider inside the footer
+(between `Open ↵`/`Paste ↵` and `Actions ⌘K`, named explicitly in the
+frozen design, `data/neko-design/report.md` §2) was never touched either
+way.
 
 **The panel is now one constant width, 760px, root list and clipboard mode
-alike** — a captain override of the frozen design's original two-width
-rule (680px list-only / 760px only with a detail pane;
-`data/neko-design/report.md` §2, updated in place to record the override).
-It has to be 760, not 680: the real `NSWindow` was already permanently
-fixed at 760px for the process's whole lifetime for the unrelated reason
-"Mode view resize seam" above documents (gpui's own paint viewport goes
-stale after a show/hide cycle, with no public API to resync it), so one
-constant width has to match the window, not the other way around.
-`panel::Root::render` no longer varies width by `active_mode`.
+alike** — a captain override of the frozen design's original two-width rule
+(680px list-only / 760px only with a detail pane; `data/neko-design/
+report.md` §2, updated in place to record the override). It has to be 760,
+not 680: the real `NSWindow` was already permanently fixed at 760px for the
+process's whole lifetime for the unrelated reason "Mode view resize seam"
+above documents (gpui's own paint viewport goes stale after a show/hide
+cycle, with no public API to resync it), so one constant width has to match
+the window, not the other way around. `panel::Root::render` no longer
+varies width by `active_mode`.
 
 **What this let the implementation delete, since it was now genuinely
 dead**: `render`'s centering stage element and its two margin `div`s
@@ -2005,6 +2012,31 @@ narrowing that backdrop to 680px before the first summon; and
 impl), whose only two callers were the two removed just above. **What
 stayed, and why**: `theme::PANEL_WIDTH_PX` (680) — `onboarding/view.rs`
 still uses it for the onboarding window's own, unrelated size.
+
+**The real top line, diagnosed rather than guessed at.** The leading
+hypothesis handed off with the correction was Liquid Glass's own specular
+edge rim (`NSGlassEffectView`). Tested directly with
+`NEKO_FORCE_MATERIAL=popover` (skips `NSGlassEffectView`, forces the
+`NSVisualEffectView` fallback): the same ~2px, fully-opaque, brighter-
+than-fill top row exists under the panel with *either* material — so it is
+not Liquid Glass–specific, and that line of investigation stops there per
+the correction's own instruction. What actually produced a visible line
+**outside** the panel, before this task's width fix, was a secondary,
+softer artifact: that same top-edge brightening has a low-alpha falloff
+past the panel's own rounded top corners, and with the old two-width
+layout there was a real 40pt transparent margin between the 680px panel
+and the 760px window for that soft falloff to become visible in —
+confirmed by direct alpha-channel sampling of a pre-width-fix build
+(`ccdbc64`, via a temporary `git worktree`, never disturbing this branch):
+`rgba(248,248,248,38)` at the margin's top edge vs. `rgba(0,0,0,6)` a few
+rows down, present nowhere else in the margin's height. **The width fix
+above is also the fix for this**: with no margin left for the age to fall
+into, a same-settings before/after top-left-corner capture confirms the
+line is simply gone — no separate code change was needed or made.
+`screencapture -l<windowID>`'s own documented limitation (real alpha, but
+no live compositing with what's behind the window — "Window material"
+above) is why this used the window's own alpha channel directly rather
+than a synthetic backdrop image.
 
 ## Comet craft pass: floating-layer discipline, a throttled motion catalog, `paint_layer`
 

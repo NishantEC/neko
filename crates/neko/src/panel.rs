@@ -1259,7 +1259,9 @@ impl Root {
             .justify_between()
             .flex_shrink_0()
             .h(px(theme::FOOTER_HEIGHT_PX))
-            .px_5();
+            .px_5()
+            .border_t_1()
+            .border_color(theme::BORDER_HAIRLINE);
 
         // An activation failure takes over the footer's own fixed strip
         // instead of opening a new toast surface — same geometry, same
