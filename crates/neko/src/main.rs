@@ -2,6 +2,7 @@ mod accessibility;
 mod components;
 mod daemon_launcher;
 mod display_placement;
+mod edge_fade;
 mod evidence;
 mod hotkey_client;
 mod material;

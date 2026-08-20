@@ -31,13 +31,14 @@ use std::rc::Rc;
 
 use gpui::{
     Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable,
-    MouseButton, MouseDownEvent, Render, SharedString, Window, actions, anchored, deferred, div, img,
-    prelude::*, px,
+    MouseButton, MouseDownEvent, Render, ScrollHandle, SharedString, Window, actions, anchored, deferred,
+    div, img, point, prelude::*, px,
 };
 use neko_client::NekoClient;
 use neko_protocol::{Glyph, Icon, ItemAction, Request, Response, SearchItem};
 
 use crate::accessibility::AccessibilityChecker;
+use crate::edge_fade::scroll_edge_fade;
 use crate::modes::{self, ModeChrome};
 use crate::motion;
 use crate::text_field::{ContentChanged, DEFAULT_PLACEHOLDER, TextField};
@@ -54,10 +55,10 @@ const RESULT_LIMIT: usize = 8;
 /// this window.
 const SEARCHING_TELL_DELAY_MS: u64 = 150;
 /// A mode's own list wants "as many of this one provider's matches as it
-/// can consider," not the shared, multi-provider root-list budget — a
-/// generous cap since the daemon does the real trimming to what actually
-/// fits on screen (`fit_mode_list`, this file), same as `RESULT_LIMIT`
-/// does for the root list's own `fit_within_budget`.
+/// can consider," not the shared, multi-provider root-list budget — the
+/// mode list scrolls (`render_mode_list`, `edge_fade::scroll_edge_fade`)
+/// rather than being budget-fit to a fixed content area the way
+/// `RESULT_LIMIT`/`fit_within_budget` bound the root list.
 const MODE_RESULT_LIMIT: usize = 50;
 pub const CONTENT_AREA_MIN_HEIGHT_PX: f32 = theme::RESULT_ROW_HEIGHT_PX * RESULT_LIMIT as f32;
 pub const PANEL_HEIGHT_PX: f32 =
@@ -141,6 +142,14 @@ pub struct Root {
     /// would still see the delayed task fire later for the same,
     /// already-answered generation and incorrectly flip the tell on.
     pending_search_generation: Option<u64>,
+    /// Tracks the mode list's own scroll position (`render_mode_list`) —
+    /// the root list never scrolls (still budget-fit, `fit_within_budget`,
+    /// per this module's "v1 simplification" doc comment above), so this is
+    /// only ever read/written while a mode is active. One persistent handle
+    /// reused across mode entries rather than a fresh one each time, so
+    /// `edge_fade::scroll_edge_fade` and `select_next`/`select_previous`'s
+    /// own scroll-into-view calls are always looking at the same state.
+    mode_scroll: ScrollHandle,
 }
 
 /// The one piece of state a mode transition actually carries, beyond the
@@ -216,6 +225,7 @@ impl Root {
             menu_open_before_this_press: false,
             searching: false,
             pending_search_generation: None,
+            mode_scroll: ScrollHandle::new(),
         };
         root.run_search(cx);
         root.fetch_accessibility_banner_state(cx);
@@ -263,6 +273,7 @@ impl Root {
         self.actions_menu = None;
         if let Some(mode) = self.active_mode.take() {
             self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
+            self.mode_scroll.set_offset(point(px(0.), px(0.)));
             if mode.chrome.has_detail {
                 self.update_background_bounds(window, theme::PANEL_WIDTH_PX);
             }
@@ -363,6 +374,19 @@ impl Root {
         self.open_actions_menu_for_selected_row(cx);
     }
 
+    /// Evidence/verification-only — scrolls the active mode's list to its
+    /// own bottom (`ScrollHandle::scroll_to_bottom`, gpui's own public API,
+    /// not a synthetic scroll-wheel event), for capturing the top-edge fade
+    /// (`evidence.rs`'s `NEKO_SCROLL_MODE_LIST_TO_BOTTOM` hook) without
+    /// synthetic OS input — same reasoning as `confirm_for_evidence` above.
+    /// A no-op outside an active mode.
+    pub fn scroll_mode_list_to_bottom_for_evidence(&mut self, cx: &mut Context<Self>) {
+        if self.active_mode.is_some() {
+            self.mode_scroll.scroll_to_bottom();
+            cx.notify();
+        }
+    }
+
     /// Pushed by `main.rs`'s summon loop whenever `NekoClient::is_connected()`
     /// changes — see that method's doc comment for why this is a poll, not
     /// an event subscription. This is the fix for `data/neko-audit/report.md`
@@ -440,9 +464,9 @@ impl Root {
         // The mode seam: while a mode is active, every keystroke scopes to
         // its own provider (`Request::Search`'s `provider` field) with a
         // generous limit — the merged root-list budget/reservation logic
-        // (`fit_within_budget`) doesn't apply at all here, `fit_mode_list`
-        // does instead (see that function's own doc comment for why it's a
-        // different, simpler shape).
+        // (`fit_within_budget`) doesn't apply at all here; the mode list
+        // renders every returned item and scrolls instead (`render_mode_list`,
+        // `edge_fade::scroll_edge_fade`).
         let mode_provider = self.active_mode.as_ref().map(|m| m.chrome.provider_id.to_string());
         let limit = if mode_provider.is_some() { MODE_RESULT_LIMIT } else { RESULT_LIMIT };
         cx.spawn(async move |this, cx| {
@@ -476,8 +500,19 @@ impl Root {
                 if root.generation == generation {
                     root.searching = false;
                     root.pending_search_generation = None;
+                    // The mode list scrolls (`edge_fade::scroll_edge_fade`
+                    // in `render_mode_list`) rather than being budget-fit
+                    // like the root list — `items` is already capped at
+                    // `MODE_RESULT_LIMIT` by the request above, and
+                    // rendering all of it, letting overflow scroll, is what
+                    // makes the edge fade honest (see `edge_fade.rs`'s own
+                    // module doc comment: a fade over content the captain
+                    // has no way to actually reach would be decorative, not
+                    // correct). The root list is untouched: still budget-fit
+                    // before selection resolves, exactly as before this
+                    // change, since it never scrolls at all.
                     root.results = if root.active_mode.is_some() {
-                        fit_mode_list(items, CONTENT_AREA_MIN_HEIGHT_PX)
+                        items
                     } else {
                         fit_within_budget(items, CONTENT_AREA_MIN_HEIGHT_PX)
                     };
@@ -485,6 +520,7 @@ impl Root {
                         .as_ref()
                         .map(|(kind, id)| (kind.as_str(), id.as_str()));
                     root.selected = resolve_selection(previous, &root.results);
+                    root.sync_mode_scroll_to_selection();
                     cx.notify();
                 }
             });
@@ -532,6 +568,7 @@ impl Root {
         }
         if !self.results.is_empty() {
             self.selected = (self.selected + 1).min(self.results.len() - 1);
+            self.sync_mode_scroll_to_selection();
             cx.notify();
         }
     }
@@ -544,7 +581,33 @@ impl Root {
             return;
         }
         self.selected = self.selected.saturating_sub(1);
+        self.sync_mode_scroll_to_selection();
         cx.notify();
+    }
+
+    /// Keeps the mode list's own scroll position following keyboard
+    /// selection — called after every `self.selected` change while a mode
+    /// is active (`select_next`/`select_previous`, and `run_search`'s
+    /// mode-scoped response handler). A no-op for the root list, which
+    /// never scrolls at all (`fit_within_budget` still guarantees it always
+    /// fits — see this module's own "v1 simplification" doc comment).
+    ///
+    /// `ScrollHandle::scroll_to_item` takes an index into the tracked
+    /// container's own DIRECT children, which is `self.results`' index
+    /// *plus* one slot for every day-bucket header (`SearchItem::group_label`)
+    /// rendered ahead of it (`render_mode_list` interleaves header divs with
+    /// row divs) — `mode_list_child_index` below computes that offset. Its
+    /// `FirstVisible` scroll strategy only moves the offset if the target
+    /// isn't already visible, so this is safe to call on every selection
+    /// change without fighting a manual scroll the captain did in between
+    /// (nothing here runs on a bare scroll-wheel tick — only on an actual
+    /// `self.selected` change, which mouse-wheel scrolling alone never
+    /// causes).
+    fn sync_mode_scroll_to_selection(&self) {
+        if self.active_mode.is_none() {
+            return;
+        }
+        self.mode_scroll.scroll_to_item(mode_list_child_index(&self.results, self.selected));
     }
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
@@ -645,6 +708,7 @@ impl Root {
         let saved_query = self.text_field.read(cx).content().to_string();
         self.active_mode = Some(ActiveMode { chrome, saved_query });
         self.selected = 0;
+        self.mode_scroll.set_offset(point(px(0.), px(0.)));
         self.actions_menu = None;
         if chrome.has_detail {
             self.update_background_bounds(window, theme::PANEL_WIDTH_WITH_DETAIL_PX);
@@ -671,6 +735,7 @@ impl Root {
         };
         self.actions_menu = None;
         self.selected = 0;
+        self.mode_scroll.set_offset(point(px(0.), px(0.)));
         if mode.chrome.has_detail {
             self.update_background_bounds(window, theme::PANEL_WIDTH_PX);
         }
@@ -1354,6 +1419,15 @@ impl Root {
     /// cache (moot today — clipboard rows are always painted glyphs, never
     /// `img()` — but correct if a future mode's provider ever has real
     /// per-row icons).
+    /// Scrolls, unlike the root list's own fixed/budget-fit
+    /// `render_content_area` (see this module's "v1 simplification" doc
+    /// comment) — a mode's list can genuinely hold more entries
+    /// (`MODE_RESULT_LIMIT`, 50) than the fixed content-area height ever
+    /// fits, and letting the captain scroll to the rest is strictly better
+    /// than the old `fit_mode_list` behavior of silently dropping whatever
+    /// didn't fit. `edge_fade::scroll_edge_fade` wraps the scrollable
+    /// container so the fade only ever shows where there's real overflow to
+    /// scroll to — see that module's own doc comment.
     fn render_mode_list(&self) -> impl IntoElement {
         let mut container = div()
             .flex()
@@ -1361,27 +1435,33 @@ impl Root {
             .flex_shrink_0()
             .w(px(theme::MODE_LIST_COLUMN_WIDTH_PX))
             .h_full()
-            .overflow_hidden()
             .px_2()
             .border_r_1()
             .border_color(theme::BORDER_HAIRLINE)
-            .image_cache(self.row_icon_cache.clone());
+            // `image_cache` is a `Div`-only method (not on the `Stateful<Div>`
+            // `.id(...)` below produces), so it has to come first.
+            .image_cache(self.row_icon_cache.clone())
+            .id("mode-list-scroll")
+            .overflow_y_scroll()
+            .track_scroll(&self.mode_scroll);
 
         if self.results.is_empty() {
-            return container.child(render_empty_state_message("No matching entries."));
+            container = container.child(render_empty_state_message("No matching entries."));
+        } else {
+            let mut current_group: Option<&Option<String>> = None;
+            for (idx, item) in self.results.iter().enumerate() {
+                if current_group != Some(&item.group_label) {
+                    if let Some(label) = &item.group_label {
+                        container = container.child(section_header(label.clone()));
+                    }
+                    current_group = Some(&item.group_label);
+                }
+                container = container.child(self.render_row(idx, item, true));
+            }
         }
 
-        let mut current_group: Option<&Option<String>> = None;
-        for (idx, item) in self.results.iter().enumerate() {
-            if current_group != Some(&item.group_label) {
-                if let Some(label) = &item.group_label {
-                    container = container.child(section_header(label.clone()));
-                }
-                current_group = Some(&item.group_label);
-            }
-            container = container.child(self.render_row(idx, item, true));
-        }
-        container
+        let fade_color = if self.translucent { theme::SURFACE_PANEL_TRANSLUCENT } else { theme::SURFACE_PANEL };
+        scroll_edge_fade(self.mode_scroll.clone(), fade_color.into(), theme::EDGE_FADE_BAND_PX, container)
     }
 
     /// The mode's own preview + info pane — deliberately *not* a generic
@@ -1656,45 +1736,29 @@ fn fit_section(items: &[SearchItem], budget_px: f32) -> (usize, f32) {
     (kept, theme::SECTION_HEADER_HEIGHT_PX + kept as f32 * theme::RESULT_ROW_HEIGHT_PX)
 }
 
-/// The mode list's own budget-fitting pass — same "never a partial row,
-/// never a dangling header" invariant `fit_within_budget` enforces for the
-/// root list, but a simpler shape: a mode's list is always exactly one
-/// provider's results (no cross-provider crowd-out to guard against), just
-/// grouped by `SearchItem::group_label` (time buckets) instead of `kind`
-/// (provider identity). Groups are spent front-to-back — the most recent
-/// group can't be crowded out because there's nothing recency-ranked ahead
-/// of it to crowd it, matching "most recent copies first" being exactly
-/// what a captain wants visible when the budget is tight.
-fn fit_mode_list(results: Vec<SearchItem>, budget_px: f32) -> Vec<SearchItem> {
-    let groups = group_by_group_label(results);
-    let mut used_so_far = 0.0;
-    let mut out = Vec::new();
-    for group in groups {
-        let (kept, used_px) = fit_section(&group, budget_px - used_so_far);
-        used_so_far += used_px;
-        let group_len = group.len();
-        out.extend(group.into_iter().take(kept));
-        if kept < group_len {
-            break;
+/// Maps a `results` index to its position among `render_mode_list`'s own
+/// DIRECT children — the index space `ScrollHandle::scroll_to_item`
+/// operates in, which is *not* the same as `results`' own index once any
+/// day-bucket header divs (`SearchItem::group_label`, rendered as their own
+/// sibling child whenever it changes — `render_mode_list`'s own loop) are
+/// interleaved ahead of a given row. Pulled out as a pure function so the
+/// mapping is unit-testable without a live `Window`/`ScrollHandle`.
+fn mode_list_child_index(results: &[SearchItem], target: usize) -> usize {
+    let mut child_index = 0;
+    let mut current_group: Option<&Option<String>> = None;
+    for (idx, item) in results.iter().enumerate() {
+        if current_group != Some(&item.group_label) {
+            if item.group_label.is_some() {
+                child_index += 1;
+            }
+            current_group = Some(&item.group_label);
         }
-    }
-    out
-}
-
-/// Splits `results` into contiguous same-`group_label` runs, preserving
-/// order — `fit_mode_list`'s own grouping, and `Root::render_mode_list`'s
-/// (which renders one `section_header` per group boundary, mirroring
-/// `group_into_sections`/`render_content_area`'s identical shape for
-/// `kind` above).
-fn group_by_group_label(results: Vec<SearchItem>) -> Vec<Vec<SearchItem>> {
-    let mut groups: Vec<Vec<SearchItem>> = Vec::new();
-    for item in results {
-        match groups.last_mut() {
-            Some(group) if group.last().is_some_and(|last| last.group_label == item.group_label) => group.push(item),
-            _ => groups.push(vec![item]),
+        if idx == target {
+            return child_index;
         }
+        child_index += 1;
     }
-    groups
+    child_index
 }
 
 fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
@@ -2164,55 +2228,48 @@ mod tests {
         assert_eq!(kinds[0], "command", "the daemon's own section order must be preserved verbatim, not re-sorted here");
     }
 
-    // --- Commands and modes: fit_mode_list / group_by_group_label ---
+    // --- Commands and modes: mode_list_child_index (the mode list now
+    // scrolls — `edge_fade.rs` — rather than being budget-fit like the root
+    // list, so this is the one piece of client-side logic that still has to
+    // reason about `SearchItem::group_label` boundaries: mapping a
+    // `results` index to `render_mode_list`'s own direct-child index, the
+    // space `ScrollHandle::scroll_to_item` operates in.) ---
 
     fn mode_item(group: Option<&str>, id: &str) -> SearchItem {
         SearchItem { group_label: group.map(str::to_string), ..item_with_id("clipboard", id) }
     }
 
     #[test]
-    fn group_by_group_label_splits_contiguous_runs_by_group() {
+    fn mode_list_child_index_with_no_groups_is_the_identity() {
+        let items = vec![mode_item(None, "a"), mode_item(None, "b"), mode_item(None, "c")];
+        assert_eq!(mode_list_child_index(&items, 0), 0);
+        assert_eq!(mode_list_child_index(&items, 2), 2);
+    }
+
+    #[test]
+    fn mode_list_child_index_accounts_for_one_header_before_the_first_group() {
+        let items = vec![mode_item(Some("Today"), "a"), mode_item(Some("Today"), "b")];
+        // child 0 = the "Today" header, child 1 = row "a", child 2 = row "b"
+        assert_eq!(mode_list_child_index(&items, 0), 1);
+        assert_eq!(mode_list_child_index(&items, 1), 2);
+    }
+
+    #[test]
+    fn mode_list_child_index_accounts_for_every_header_crossed_so_far() {
         let items = vec![
             mode_item(Some("Today"), "a"),
             mode_item(Some("Today"), "b"),
             mode_item(Some("Yesterday"), "c"),
+            mode_item(Some("Yesterday"), "d"),
         ];
-        let groups = group_by_group_label(items);
-        assert_eq!(groups.len(), 2);
-        assert_eq!(groups[0].len(), 2);
-        assert_eq!(groups[1].len(), 1);
+        // 0: Today header, 1: a, 2: b, 3: Yesterday header, 4: c, 5: d
+        assert_eq!(mode_list_child_index(&items, 2), 4, "row c comes after both Today rows and the Yesterday header");
+        assert_eq!(mode_list_child_index(&items, 3), 5);
     }
 
     #[test]
-    fn fit_mode_list_never_shows_a_dangling_header_or_a_partial_row() {
-        // 3 "Today" entries + 3 "Yesterday" entries against a budget that
-        // only fits one full group plus a partial second one.
-        let budget = theme::SECTION_HEADER_HEIGHT_PX * 2.0 + theme::RESULT_ROW_HEIGHT_PX * 4.0;
-        let mut items: Vec<SearchItem> = (0..3).map(|i| mode_item(Some("Today"), &format!("t{i}"))).collect();
-        items.extend((0..3).map(|i| mode_item(Some("Yesterday"), &format!("y{i}"))));
-
-        let fitted = fit_mode_list(items, budget);
-
-        let today_kept = fitted.iter().filter(|i| i.group_label.as_deref() == Some("Today")).count();
-        let yesterday_kept = fitted.iter().filter(|i| i.group_label.as_deref() == Some("Yesterday")).count();
-        assert_eq!(today_kept, 3, "the first (most recent) group must fit in full before any budget goes elsewhere");
-        assert_eq!(yesterday_kept, 1, "leftover budget after the full first group is exactly one more row");
-        // No provider-crowd-out reservation exists for mode lists (unlike
-        // `fit_within_budget`) — a later group can be starved entirely by
-        // an earlier, larger one, which is the correct, simpler behavior
-        // for "most recent first" (see `fit_mode_list`'s own doc comment).
-    }
-
-    #[test]
-    fn fit_mode_list_keeps_everything_that_already_fits() {
-        let items = vec![mode_item(Some("Today"), "a"), mode_item(Some("Yesterday"), "b")];
-        let fitted = fit_mode_list(items.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
-        assert_eq!(fitted, items);
-    }
-
-    #[test]
-    fn fit_mode_list_on_an_empty_list_stays_empty() {
-        assert_eq!(fit_mode_list(Vec::new(), CONTENT_AREA_MIN_HEIGHT_PX), Vec::new());
+    fn mode_list_child_index_on_an_empty_list_is_zero() {
+        assert_eq!(mode_list_child_index(&[], 0), 0);
     }
 
     #[test]

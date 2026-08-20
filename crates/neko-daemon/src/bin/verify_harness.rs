@@ -69,6 +69,27 @@ fn main() {
         200,
     );
 
+    // `NEKO_VERIFY_SEED_CLIPBOARD_COUNT=<n>` — added for `fm/neko-frost`'s
+    // edge-fade verification (`crates/neko/src/edge_fade.rs`): seeds `n`
+    // more distinct fixtures (still `record_clipboard_entry`, still not a
+    // real capture) so the clipboard-history mode list genuinely has more
+    // entries than fit `panel::CONTENT_AREA_MIN_HEIGHT_PX`, which is what
+    // makes the edge fade non-decorative to screenshot — a single fixture
+    // (the one above) is the "short list, no fade" case on its own; this is
+    // the "content scrolled out of view" case. Unset by default, same
+    // pattern as every other verification-only env var in this codebase.
+    if let Some(count) = std::env::var("NEKO_VERIFY_SEED_CLIPBOARD_COUNT").ok().and_then(|v| v.parse::<u32>().ok()) {
+        for i in 0..count {
+            let _ = db.record_clipboard_entry(
+                &format!("neko-frost edge-fade verification fixture #{i}: a distinct clipboard entry"),
+                "text",
+                Some("Terminal"),
+                server::now_unix_ms() - i as i64,
+                200,
+            );
+        }
+    }
+
     eprintln!("verify-harness: scanning installed applications…");
     let apps = neko_core::apps::scan_applications();
     eprintln!("verify-harness: indexed {} applications", apps.len());
