@@ -41,6 +41,12 @@ objc2-app-kit = { version = "0.3", features = [
     "NSGlassEffectView",
     "NSScreen",
     "NSEvent",
+    # `motion.rs`'s reduced-motion read (`NSWorkspace.
+    # accessibilityDisplayShouldReduceMotion`) — already a transitive
+    # dependency of `objc2-app-kit` at this exact version, so enabling the
+    # feature adds zero new crate versions to the tree, same reasoning as
+    # the rest of this block.
+    "NSWorkspace",
 ] }
 # Window-under-cursor multi-display placement (`src/display_placement.rs`)
 # needs `NSPoint`/`NSRect` directly to build the `setFrameTopLeftPoint:`
