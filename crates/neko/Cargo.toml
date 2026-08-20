@@ -11,7 +11,29 @@ path = "src/main.rs"
 [dependencies]
 neko-protocol.workspace = true
 neko-client.workspace = true
-gpui = "0.2.2"
+# `wingleeio/zed` fork, pinned by rev (never a branch — see `AGENTS.md`, "The
+# GPUI dependency decision" for the full record of this reversal and its
+# licence consequence). Rev matches exactly what comet pins
+# (`data/helm/refs/comet/Cargo.toml`), so the primitives this migration was
+# taken for are known to exist at this exact commit.
+gpui = { git = "https://github.com/wingleeio/zed", rev = "e2ddcc6805f8c5088e62a60dfe517abcccd61a9a" }
+# The mac platform backend is its own crate at this rev — `gpui::Application::new()`
+# no longer exists; every real entry point in this fork (its own examples,
+# `zed` itself) bootstraps through `gpui_platform::application()` instead
+# (`crates/gpui_platform/src/gpui_platform.rs`, which internally selects
+# `gpui_macos::MacPlatform` on macOS). `wayland`/`x11` are no-ops on macOS
+# (they only gate `gpui_linux`, not present in this dependency graph on this
+# target) but kept to mirror comet's own feature set exactly rather than
+# introduce an untested configuration; `font-kit` matches `gpui`'s own
+# default features (real system font rendering); `runtime_shaders` stitches
+# Metal shaders for runtime compilation instead of `xcrun metal` at build
+# time, comet's own choice.
+gpui_platform = { git = "https://github.com/wingleeio/zed", rev = "e2ddcc6805f8c5088e62a60dfe517abcccd61a9a", features = [
+    "wayland",
+    "x11",
+    "font-kit",
+    "runtime_shaders",
+] }
 global-hotkey = "0.8.0"
 # `.shared()` on the background-executor task in `row_icon_cache.rs`, the
 # same call gpui's own `RetainAllImageCache`/`SimpleLruCache` make — already
@@ -59,5 +81,11 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 # Same `gpui` dependency above, `test-support` feature only for `cargo
-# test` — adds zero new crate versions to the tree.
-gpui = { version = "0.2.2", features = ["test-support"] }
+# test`. `#[gpui::test]` builds its own headless `TestAppContext` entirely
+# inside the `gpui` crate itself (confirmed by reading
+# `crates/gpui_macros/src/test.rs` at the pinned rev — it calls
+# `gpui::TestAppContext::build` directly, never `gpui_platform`), so no
+# `gpui_platform` dev-dependency is needed for the test suite.
+gpui = { git = "https://github.com/wingleeio/zed", rev = "e2ddcc6805f8c5088e62a60dfe517abcccd61a9a", features = [
+    "test-support",
+] }

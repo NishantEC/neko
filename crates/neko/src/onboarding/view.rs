@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use gpui::{
     App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable, IntoElement,
-    KeyDownEvent, ParentElement, Render, SharedString, Styled, Timer, TitlebarOptions, Window,
+    KeyDownEvent, ParentElement, Render, SharedString, Styled, TitlebarOptions, Window,
     WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, actions,
     div, point, prelude::*, px, size,
 };
@@ -118,7 +118,7 @@ pub fn open_window(
 
     *slot.borrow_mut() = Some(window);
     let _ = window.update(cx, |root, window, cx| {
-        window.focus(&root.focus_handle(cx));
+        window.focus(&root.focus_handle(cx), cx);
     });
 }
 
@@ -228,7 +228,7 @@ impl OnboardingRoot {
         let accessibility = self.accessibility.clone();
         cx.spawn(async move |this, cx| {
             loop {
-                Timer::after(Duration::from_millis(250)).await;
+                cx.background_executor().timer(Duration::from_millis(250)).await;
                 let trusted = accessibility.is_trusted();
                 let stop = this
                     .update(cx, |root, cx| {
@@ -265,7 +265,7 @@ impl OnboardingRoot {
 
     fn schedule_auto_advance(&mut self, from: Step, delay_ms: u64, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
-            Timer::after(Duration::from_millis(delay_ms)).await;
+            cx.background_executor().timer(Duration::from_millis(delay_ms)).await;
             let _ = this.update(cx, |root, cx| {
                 if root.flow.step != from {
                     return;

@@ -517,7 +517,7 @@ impl gpui::Element for TextFieldElement {
         );
         prepaint
             .line
-            .paint(bounds.origin, window.line_height(), window, cx)
+            .paint(bounds.origin, window.line_height(), gpui::TextAlign::Left, None, window, cx)
             .ok();
         if let Some(cursor) = prepaint.cursor.take() {
             window.paint_quad(cursor);
