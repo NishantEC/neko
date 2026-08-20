@@ -302,7 +302,7 @@ fn main() {
             let mut last_connected = true;
 
             if !onboarding_state.completed {
-                let _ = cx.update(|cx| {
+                cx.update(|cx| {
                     onboarding::open_window(
                         cx,
                         client.clone(),
@@ -321,7 +321,7 @@ fn main() {
                 {
                     let onboarding_window = *active_onboarding.borrow();
                     if let Some(onboarding_window) = onboarding_window {
-                        let _ = cx.update(|cx| {
+                        cx.update(|cx| {
                             let _ = onboarding_window.update(cx, |root, window, cx| {
                                 root.handle_global_hotkey_press(window, cx);
                             });
@@ -337,7 +337,7 @@ fn main() {
                         // above), which would otherwise make the *next*
                         // hotkey press silently no-op instead of
                         // re-summoning.
-                        let _ = cx.update(|cx| {
+                        cx.update(|cx| {
                             let _ = window.update(cx, |root, window, cx| {
                                 if window.is_window_active() {
                                     cx.hide();
@@ -367,7 +367,7 @@ fn main() {
                             }
                         }
                         Event::IconsUpdated => {
-                            let _ = cx.update(|cx| {
+                            cx.update(|cx| {
                                 let _ = window.update(cx, |root, _window, cx| {
                                     root.refresh_icons(cx);
                                 });
@@ -379,7 +379,7 @@ fn main() {
                 let is_connected = client.is_connected();
                 if is_connected != last_connected {
                     last_connected = is_connected;
-                    let _ = cx.update(|cx| {
+                    cx.update(|cx| {
                         let _ = window.update(cx, |root, _window, cx| {
                             root.set_connected(is_connected, cx);
                         });
