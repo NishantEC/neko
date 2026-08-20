@@ -265,7 +265,15 @@ captain actually wants, and late results append below what is already on
 screen rather than reordering it or displacing the selection. Keystroke to
 first render: **median 108.50ms → 0.36ms** on release binaries. See
 "Two-phase search: results as you type" below,
-`docs/evidence/instant-search-report.md`.
+`docs/evidence/instant-search-report.md`. A twenty-ninth task
+(`fm/neko-top-line-titled`) removed the line across the top of the panel
+that the captain had reported three times and that two prior tasks had
+attributed wrongly (first the AppKit window shadow, then the transparent
+margin the fixed-width window opened up — both real, separate defects with
+real fixes, neither this one). It is AppKit's own titled-window rim: gpui
+creates this window titled regardless of `WindowOptions.titlebar`, and no
+value of that field produces an untitled one. See "The top line — AppKit's
+titled-window rim" below, `docs/evidence/top-line-titled-window-fix-report.md`.
 
 ## Crate layout
 
@@ -2149,6 +2157,15 @@ with no drawn shadow needed; the opaque fallback keeps its pre-existing
 exactly `0` there) was never able to leak this shadow either way, before or
 after; the fix is unconditional, so both modes are affected identically.
 
+**Scope note added by `fm/neko-top-line-titled`**: this fix and
+`fm/neko-double-panel`'s are both correct and both stand — between them they
+removed the two shadow sources spilling into the margin. Neither, however,
+was the **top line** the captain has separately reported three times, even
+though the two were sometimes discussed as the same complaint: that line is
+AppKit's titled-window rim on the panel's own top edge, still present on
+binaries containing both fixes. See "The top line — AppKit's titled-window
+rim" below.
+
 **Not obtained this task**: a live window-scoped screenshot of clipboard
 mode itself. `evidence.rs`'s only non-synthetic-input hook that can drive a
 mode transition (`NEKO_SHOW_QUERY`+`NEKO_SHOW_CONFIRM`) holds the summon
@@ -2236,6 +2253,72 @@ line is simply gone — no separate code change was needed or made.
 no live compositing with what's behind the window — "Window material"
 above) is why this used the window's own alpha channel directly rather
 than a synthetic backdrop image.
+
+**Correction to this section's own claim, found by `fm/neko-top-line-titled`
+— this is the second wrong attribution for the same symptom, after the
+window shadow one two sections up.** "The width fix above is also the fix
+for this … the line is simply gone" is wrong. The width unification removed
+a *margin-side* artifact (the soft falloff of the panel's own top-edge
+brightening, past its rounded corner, into the 40pt margin), which was real
+and is genuinely gone — but the line the captain kept reporting is a
+separate, harder one **on the panel's own top edge**, and it survived this
+task untouched. Measured on `cda3765` (the build after this fix landed):
+the top 2 device px read `(66,66,66)` and `(43,43,43)` against a
+`(19,19,19)` fill, with every other edge flat `(19,19,19)`. The line-of-
+investigation this section did correctly close stays closed — it is not
+Liquid Glass's specular rim, confirmed here twice — but the reason it isn't
+material-specific is that **it isn't painted by neko at all**. See "The top
+line — AppKit's titled-window rim" immediately below.
+
+## The top line — AppKit's titled-window rim
+
+`fm/neko-top-line-titled`, the third and actual fix for the symptom the two
+corrections above misattribute. Root-caused by `data/neko-truth-pass/
+report.md` §2.4 (four escalating single-variable tests); applied and
+verified here. Full before/after pixel measurements, the survives-checks,
+and the latency/memory numbers: `docs/evidence/top-line-titled-window-fix-report.md`.
+
+**Cause**: gpui's mac backend creates this window **titled** no matter what
+`WindowOptions.titlebar` says — `titlebar: None` falls into an `else` branch
+setting `NSTitledWindowMask | NSFullSizeContentViewWindowMask`, and
+`titlebar: Some(..)` sets `NSTitledWindowMask` too. **No `WindowOptions`
+value produces an untitled window.** AppKit draws its own ~1pt top-edge
+highlight on a titled window, composited above everything the app paints.
+The truth pass proved neko doesn't paint it two independent ways: the
+brightening is identical under all three material paths (so not the
+material, and not Liquid Glass's specular rim), and it survives replacing
+the panel `div` with a flat opaque black rect.
+
+**Fix**: `material::clear_titled_style_mask` clears **only** bit 0 on the
+real `NSWindow`, via the same `raw-window-handle` walk this module and
+`spaces.rs` already use, with `material::verify_titled_cleared` reading the
+live mask back and asserting the bit is gone *and* that
+`NSNonactivatingPanelMask` (bit 7) and `NSFullSizeContentViewWindowMask`
+(bit 15) both survive — same "verified, not trusted" pattern as
+`verify_installed`/`verify_shadow_disabled`/`spaces::verify`. `0x8081` →
+`0x8080`, both halves logged on every launch next to the existing
+readbacks. **Called first in `main.rs`'s window-init closure, before
+`material::install`** — `setStyleMask:` makes AppKit rebuild the window's
+frame view, so every native view installed afterwards goes into the final
+one.
+
+**What survived, each checked live rather than assumed** (the real risk in
+mutating a live style mask): rounded corners — unchanged, since rounding
+here is GPUI's `.rounded()` plus the material view's own `cornerRadius=16`,
+never AppKit's titled frame; Spaces/full-screen reachability — `0x101`,
+a separate property; the non-activating panel bit — still set, and gpui's
+own window subclass overrides `canBecomeKeyWindow` to `YES` regardless of
+style mask anyway; the deliberately-disabled window shadow; and the whole
+material chain. Warm summon latency and RSS both unchanged.
+
+**Three overlapping causes, one symptom — the durable lesson.** The panel's
+top edge had *three* independent bright/dark artifacts at different times
+(AppKit's automatic window shadow, GPUI's own `.shadow_lg()`, and this
+titled-window rim), each invisible until the fixed-width window opened a
+margin for it, and each fix correctly removed one while leaving the others
+standing. A captain re-reporting the same symptom after a verified fix is
+evidence of *another* source, not of the fix having failed — measure the
+edge again with a single-variable test before attributing.
 
 ## Comet craft pass: floating-layer discipline, a throttled motion catalog, `paint_layer`
 
