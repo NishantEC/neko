@@ -184,6 +184,114 @@ pub fn verify_shadow_disabled(_window: &Window) -> Result<(), String> {
     Err("native window material is only implemented on macOS".to_string())
 }
 
+/// The `⌘K` actions menu's own, smaller frost surface — a *second* native
+/// material view, installed once (hidden, zero-sized) right after the
+/// whole-window `install`/`verify_installed` succeed, then shown/repositioned
+/// on each real menu open (`show_menu_overlay`) and hidden on each close
+/// (`hide_menu_overlay`) rather than being created and torn down per open —
+/// no native view allocation on the menu-open path, matching this module's
+/// existing "install once, reposition forever" shape for the whole-window
+/// backdrop (`set_background_frame`).
+///
+/// **Same sibling-below invariant as the whole-window material — see this
+/// module's own top doc comment.** This view is a second child of
+/// `window.contentView()`, inserted *above* the whole-window background view
+/// but still *below* GPUI's own rendering view (`install_below_rendering_view`
+/// in the macOS impl) — never above it, for the exact reason stated there:
+/// a subview above GPUI's rendering view would silently eat every pixel GPUI
+/// draws inside the menu itself (its border, its row text).
+///
+/// **The honest limitation this carries, disclosed here because it is easy
+/// to assume the opposite from the name "frost surface":** because GPUI owns
+/// exactly one rendering `NSView` for the whole window (there is no way to
+/// insert a native layer *between* two portions of GPUI's own single paint
+/// pass), this view — like the whole-window one — can only ever reveal
+/// what's genuinely behind *the window*, not GPUI's own already-painted
+/// content (the result rows) sitting in front of it in the very same scene.
+/// Wherever the menu overlaps a row that GPUI painted with an opaque fill
+/// (the selected-row highlight is the one real case in this app —
+/// `theme::SURFACE_SELECTED`), the visible result is the menu's own
+/// translucent fill blended with that opaque pixel *within GPUI's own draw
+/// pass* — a translucent tint, not a blur of it. Wherever the menu overlaps
+/// anything GPUI left translucent (true for nearly all of an unselected
+/// row's own footprint — see `panel::render_row`), this view's real blur
+/// genuinely shows through. Closing this gap for good would mean either a
+/// forked `gpui` with a real in-scene backdrop-blur primitive (reopening the
+/// closed GPL question — `AGENTS.md`, "The GPUI dependency decision") or a
+/// custom Metal-level compositing pass inside neko itself — a compositor
+/// feature, not a UI pattern, per `data/neko-comet-design/report.md` §1's
+/// identical conclusion about comet's own `frost.rs`.
+#[cfg(target_os = "macos")]
+pub fn install_menu_overlay(window: &Window) -> Result<Installed, String> {
+    macos::install_menu_overlay(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn install_menu_overlay(_window: &Window) -> Result<Installed, String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
+/// Non-visual proof `install_menu_overlay`'s claim is real — same
+/// "verified, not trusted" pattern `verify_installed` already establishes
+/// for the whole-window material. Called unconditionally by `main.rs` right
+/// after a successful `install_menu_overlay`.
+#[cfg(target_os = "macos")]
+pub fn verify_menu_overlay_installed(window: &Window, installed: Installed) -> Result<String, String> {
+    macos::verify_menu_overlay_installed(window, installed)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn verify_menu_overlay_installed(_window: &Window, _installed: Installed) -> Result<String, String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
+/// Shows and positions the menu overlay at `bounds` — GPUI's own paint-time
+/// `Bounds<Pixels>` for the menu card, in GPUI's coordinate space (origin
+/// top-left of the window's content area, y increasing downward). Converted
+/// internally to AppKit's unflipped `contentView` coordinate space (origin
+/// bottom-left, y increasing upward) — see the macOS impl's own doc comment
+/// for why this conversion is necessary here but was never needed for the
+/// whole-window backdrop (`set_background_frame` only ever spans the full
+/// content height, where the conversion is a no-op).
+///
+/// Called from `panel.rs`'s own paint-time element (`MenuFrostSync`) every
+/// frame the menu is actually painted — so the native view always tracks
+/// GPUI's real, laid-out position exactly, including a future clamped/
+/// anchored position (`AGENTS.md`), never a value this module or `panel.rs`
+/// computed independently. Best-effort: an `Err` (no raw window handle, the
+/// overlay not installed) is logged by the caller and otherwise ignored, the
+/// same as every other native call in this module.
+#[cfg(target_os = "macos")]
+pub fn show_menu_overlay(window: &Window, x_px: f32, y_px: f32, width_px: f32, height_px: f32) -> Result<(), String> {
+    macos::show_menu_overlay(window, x_px, y_px, width_px, height_px)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn show_menu_overlay(
+    _window: &Window,
+    _x_px: f32,
+    _y_px: f32,
+    _width_px: f32,
+    _height_px: f32,
+) -> Result<(), String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
+/// Hides the menu overlay — called whenever the actions menu closes (every
+/// site that sets `Root::actions_menu` back to `None`), so a closed menu
+/// never leaves a stale blurred patch on screen. Cheap and idempotent
+/// (`NSView.setHidden`, not a view teardown), safe to call even if the menu
+/// was never shown this session.
+#[cfg(target_os = "macos")]
+pub fn hide_menu_overlay(window: &Window) -> Result<(), String> {
+    macos::hide_menu_overlay(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn hide_menu_overlay(_window: &Window) -> Result<(), String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     use objc2::MainThreadMarker;
@@ -325,25 +433,43 @@ mod macos {
         Ok(native_window(window)?.windowNumber())
     }
 
+    /// The corner radius the `⌘K` actions menu's own overlay material
+    /// installs at — matches the menu card's own `.rounded(px(theme::
+    /// ROW_RADIUS_PX))` (`panel.rs`), the same "the background view's own
+    /// rounding has to agree with GPUI's `.rounded()`" rule
+    /// `CORNER_RADIUS_PT` states for the whole-window case, just at the
+    /// menu's own (smaller) radius rather than the panel's.
+    const MENU_CORNER_RADIUS_PT: f64 = crate::theme::ROW_RADIUS_PX as f64;
+
     fn install_glass(content_view: &NSView, mtm: MainThreadMarker) {
-        let glass = NSGlassEffectView::new(mtm);
-        glass.setFrame(content_view.bounds());
+        let glass = make_glass_view(mtm, content_view.bounds(), CORNER_RADIUS_PT);
         glass.setAutoresizingMask(
             NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
-        glass.setStyle(NSGlassEffectViewStyle::Regular);
-        // No separate CALayer step: unlike `NSVisualEffectView` below,
-        // `NSGlassEffectView` takes a corner radius directly (report §3/§5).
-        glass.setCornerRadius(CORNER_RADIUS_PT);
         content_view.addSubview_positioned_relativeTo(&glass, NSWindowOrderingMode::Below, None);
     }
 
     fn install_popover(content_view: &NSView, mtm: MainThreadMarker) {
-        let effect_view = NSVisualEffectView::new(mtm);
-        effect_view.setFrame(content_view.bounds());
+        let effect_view = make_popover_view(mtm, content_view.bounds(), CORNER_RADIUS_PT);
         effect_view.setAutoresizingMask(
             NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
+        content_view.addSubview_positioned_relativeTo(&effect_view, NSWindowOrderingMode::Below, None);
+    }
+
+    fn make_glass_view(mtm: MainThreadMarker, frame: NSRect, corner_radius: f64) -> Retained<NSGlassEffectView> {
+        let glass = NSGlassEffectView::new(mtm);
+        glass.setFrame(frame);
+        glass.setStyle(NSGlassEffectViewStyle::Regular);
+        // No separate CALayer step: unlike `NSVisualEffectView` below,
+        // `NSGlassEffectView` takes a corner radius directly (report §3/§5).
+        glass.setCornerRadius(corner_radius);
+        glass
+    }
+
+    fn make_popover_view(mtm: MainThreadMarker, frame: NSRect, corner_radius: f64) -> Retained<NSVisualEffectView> {
+        let effect_view = NSVisualEffectView::new(mtm);
+        effect_view.setFrame(frame);
         // `.popover`, not the better-measuring `.sidebar`/
         // `.underWindowBackground`: those two render pixel-identically to
         // each other under `BehindWindow` blending on this OS for reasons
@@ -352,8 +478,135 @@ mod macos {
         effect_view.setMaterial(NSVisualEffectMaterial::Popover);
         effect_view.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
         effect_view.setState(NSVisualEffectState::Active);
-        apply_continuous_corner_mask(&effect_view);
-        content_view.addSubview_positioned_relativeTo(&effect_view, NSWindowOrderingMode::Below, None);
+        apply_continuous_corner_mask(&effect_view, corner_radius);
+        effect_view
+    }
+
+    /// See `super::install_menu_overlay`'s own doc comment for the
+    /// invariant and the honest limitation this carries. Installed hidden,
+    /// zero-sized, positioned `Above` the whole-window background view
+    /// (`subviews()[0]`, already established as that view's own index by
+    /// `install`/`verify_installed`) but still below GPUI's rendering view —
+    /// `contentView.subviews()` is therefore always `[whole-window
+    /// background, menu overlay, GPUI's rendering view, ...]` after this
+    /// call, and `show_menu_overlay`/`hide_menu_overlay` below rely on the
+    /// menu overlay always being at index 1.
+    pub fn install_menu_overlay(window: &Window) -> Result<Installed, String> {
+        let mtm = MainThreadMarker::new()
+            .ok_or_else(|| "menu overlay install attempted off the main thread".to_string())?;
+        let content_view = root_content_view(window)?;
+        let subviews = content_view.subviews().to_vec();
+        let background = subviews
+            .first()
+            .ok_or_else(|| "contentView has no subviews — whole-window material not installed yet".to_string())?;
+
+        let zero_frame = NSRect { origin: NSPoint { x: 0.0, y: 0.0 }, size: NSSize { width: 0.0, height: 0.0 } };
+        if forced_fallback() != Some(ForcedFallback::Popover) && glass_class_available() {
+            let glass = make_glass_view(mtm, zero_frame, MENU_CORNER_RADIUS_PT);
+            glass.setHidden(true);
+            content_view.addSubview_positioned_relativeTo(&glass, NSWindowOrderingMode::Above, Some(background));
+            Ok(Installed::Glass)
+        } else {
+            let effect_view = make_popover_view(mtm, zero_frame, MENU_CORNER_RADIUS_PT);
+            effect_view.setHidden(true);
+            content_view.addSubview_positioned_relativeTo(&effect_view, NSWindowOrderingMode::Above, Some(background));
+            Ok(Installed::Popover)
+        }
+    }
+
+    /// See `super::verify_menu_overlay_installed`'s doc comment.
+    pub fn verify_menu_overlay_installed(window: &Window, installed: Installed) -> Result<String, String> {
+        let content_view = root_content_view(window)?;
+        let subviews = content_view.subviews().to_vec();
+        if subviews.len() < 3 {
+            return Err(format!(
+                "expected at least 3 subviews of contentView (whole-window background, \
+                 menu overlay, GPUI's own rendering view), found {}",
+                subviews.len()
+            ));
+        }
+        let overlay = subviews[1].clone();
+        let hidden = overlay.isHidden();
+        if !hidden {
+            return Err("expected the freshly-installed menu overlay to start hidden, readback visible".to_string());
+        }
+        match installed {
+            Installed::Glass => {
+                let glass = overlay.downcast::<NSGlassEffectView>().map_err(|v| {
+                    format!(
+                        "expected NSGlassEffectView at contentView subview index 1, found {}",
+                        v.class().name().to_string_lossy()
+                    )
+                })?;
+                let radius = glass.cornerRadius();
+                if (radius - MENU_CORNER_RADIUS_PT).abs() > 0.01 {
+                    return Err(format!("expected menu overlay cornerRadius {MENU_CORNER_RADIUS_PT}, readback {radius}"));
+                }
+                Ok(format!("NSGlassEffectView menu overlay at contentView.subviews()[1], hidden, cornerRadius={radius}"))
+            }
+            Installed::Popover => {
+                let effect = overlay.downcast::<NSVisualEffectView>().map_err(|v| {
+                    format!(
+                        "expected NSVisualEffectView at contentView subview index 1, found {}",
+                        v.class().name().to_string_lossy()
+                    )
+                })?;
+                let Some(layer) = effect.layer() else {
+                    return Err("expected the menu overlay to have a backing CALayer, found none".to_string());
+                };
+                let radius = layer.cornerRadius();
+                if (radius - MENU_CORNER_RADIUS_PT).abs() > 0.01 {
+                    return Err(format!("expected menu overlay layer.cornerRadius {MENU_CORNER_RADIUS_PT}, readback {radius}"));
+                }
+                Ok(format!("NSVisualEffectView menu overlay at contentView.subviews()[1], hidden, layer.cornerRadius={radius}"))
+            }
+        }
+    }
+
+    /// See `super::show_menu_overlay`'s doc comment for the calling
+    /// convention. `y_px` is GPUI's own top-left-origin, y-down coordinate —
+    /// converted here to `contentView`'s unflipped (bottom-left-origin,
+    /// y-up) AppKit coordinate space by reading `contentView`'s own live
+    /// height and flipping around it: `appkit_y = content_height -
+    /// (y_px + height_px)`. The whole-window backdrop's own
+    /// `set_background_frame` never needed this conversion because it only
+    /// ever spans the *entire* content height (`y_px` and `content_height -
+    /// height_px` are always both `0` there); a sub-rectangle genuinely
+    /// needs it.
+    pub fn show_menu_overlay(window: &Window, x_px: f32, y_px: f32, width_px: f32, height_px: f32) -> Result<(), String> {
+        let _mtm = MainThreadMarker::new()
+            .ok_or_else(|| "menu overlay frame update attempted off the main thread".to_string())?;
+        let content_view = root_content_view(window)?;
+        let subviews = content_view.subviews().to_vec();
+        let overlay = subviews
+            .get(1)
+            .ok_or_else(|| "contentView has fewer than 2 subviews — menu overlay not installed yet".to_string())?;
+        let content_height = content_view.bounds().size.height as f32;
+        let appkit_y = content_height - (y_px + height_px);
+        overlay.setFrame(NSRect {
+            origin: NSPoint { x: x_px as f64, y: appkit_y as f64 },
+            size: NSSize { width: width_px as f64, height: height_px as f64 },
+        });
+        overlay.setHidden(false);
+        Ok(())
+    }
+
+    /// See `super::hide_menu_overlay`'s doc comment.
+    pub fn hide_menu_overlay(window: &Window) -> Result<(), String> {
+        // Same gate `set_menu_overlay_frame`/`set_background_frame` use: a
+        // headless `#[gpui::test]` window's own `HasWindowHandle::
+        // window_handle` panics rather than erroring, so this has to fail
+        // gracefully *before* reaching it (via `root_content_view` below),
+        // not inside its own `Err` path.
+        let _mtm = MainThreadMarker::new()
+            .ok_or_else(|| "menu overlay hide attempted off the main thread".to_string())?;
+        let content_view = root_content_view(window)?;
+        let subviews = content_view.subviews().to_vec();
+        let overlay = subviews
+            .get(1)
+            .ok_or_else(|| "contentView has fewer than 2 subviews — menu overlay not installed yet".to_string())?;
+        overlay.setHidden(true);
+        Ok(())
     }
 
     /// `NSVisualEffectView`, unlike `NSGlassEffectView`, has no
@@ -361,12 +614,12 @@ mod macos {
     /// through its backing `CALayer` instead (report §5). Necessary, not
     /// cosmetic: without it, this view's square corners show past the edge
     /// of GPUI's own `.rounded()` panel content.
-    fn apply_continuous_corner_mask(view: &NSView) {
+    fn apply_continuous_corner_mask(view: &NSView, corner_radius: f64) {
         view.setWantsLayer(true);
         let Some(layer) = view.layer() else {
             return;
         };
-        layer.setCornerRadius(CORNER_RADIUS_PT);
+        layer.setCornerRadius(corner_radius);
         layer.setMasksToBounds(true);
         // SAFETY: reading an `extern "C"` static is unsafe only because
         // every extern-static read is, in Rust; `kCACornerCurveContinuous`

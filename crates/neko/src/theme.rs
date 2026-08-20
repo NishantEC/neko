@@ -82,6 +82,24 @@ pub const SURFACE_PANEL: Rgba = rgb_const(0x0d0d0d);
 /// for this machine, rather than trusting this reasoning indefinitely.
 pub const SURFACE_PANEL_TRANSLUCENT: Rgba = rgba_const(0x0d0d0d, 0.82);
 pub const SURFACE_RAISED: Rgba = rgb_const(0x161616);
+/// The `⌘K` actions menu's own fill when the native menu-overlay material
+/// installed (`material::install_menu_overlay`) — `SURFACE_RAISED`'s own
+/// RGB, translucent, so the native blur genuinely shows through wherever the
+/// menu overlaps content GPUI itself left translucent (nearly all of an
+/// unselected row's own footprint — see `panel::render_row`), the same
+/// "the panel's own fill has to be translucent for a material to be visible
+/// at all" rule `SURFACE_PANEL_TRANSLUCENT` already establishes for the
+/// whole window (`AGENTS.md`, "Window material"). Noticeably *more* opaque
+/// than `SURFACE_PANEL_TRANSLUCENT` (0.82) — calibrated against comet's own
+/// reference menu tint (`oklch(0.33 0 0 / 34%)`, read from
+/// `data/helm/refs/comet/crates/ui/src/theme.rs` for inspiration only, not
+/// copied) scaled up for legibility: this app has no real backdrop-blur
+/// primitive behind that tint (see `material::install_menu_overlay`'s own
+/// doc comment on the gap), so the fill alone carries more of the contrast
+/// duty a true blur would otherwise share. Unused when the menu overlay
+/// material didn't install (`panel::Root::menu_frost` false) — the menu
+/// keeps its original, fully-opaque `SURFACE_RAISED` fill instead.
+pub const MENU_GLASS_TINT: Rgba = rgba_const(0x161616, 0.62);
 /// The clipboard-history detail pane's own recessed preview box
 /// (`data/neko-design/mockups/12-first-clipboard-use.html`'s
 /// `--surface-input`). Same `L` as the blue ramp's own `SURFACE_INPUT`

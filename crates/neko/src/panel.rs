@@ -39,6 +39,7 @@ use neko_protocol::{Glyph, Icon, ItemAction, Request, Response, SearchItem};
 
 use crate::accessibility::AccessibilityChecker;
 use crate::edge_fade::scroll_edge_fade;
+use crate::menu_frost::sync_menu_frost;
 use crate::modes::{self, ModeChrome};
 use crate::motion;
 use crate::text_field::{ContentChanged, DEFAULT_PLACEHOLDER, TextField};
@@ -93,6 +94,16 @@ pub struct Root {
     /// hairline border instead, per the design report's own explicit
     /// fallback (§1: "opaque-plus-shadow... as the fallback").
     translucent: bool,
+    /// Whether `material::install_menu_overlay` put a *second*, menu-scoped
+    /// native background view behind the window — see that function's own
+    /// doc comment. `false` whenever `translucent` is `false` (no ambient
+    /// glass for a menu-scoped patch of it to read as distinct against) or
+    /// the overlay install itself errored; either way the actions menu
+    /// falls back to its original fully-opaque `SURFACE_RAISED` fill and
+    /// never attempts to sync a native view that isn't there — the same
+    /// "honest fallback" shape `translucent` already establishes for the
+    /// panel's own background.
+    menu_frost: bool,
     /// Mirrors `NekoClient::is_connected()` — pushed by `main.rs`'s summon
     /// loop, which already polls something else on a fixed short interval
     /// (see that method's own doc comment). Defaults optimistic (`true`):
@@ -182,9 +193,10 @@ impl Root {
         client: NekoClient,
         accessibility: Rc<dyn AccessibilityChecker>,
         translucent: bool,
+        menu_frost: bool,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::build(client, accessibility, translucent, cx))
+        cx.new(|cx| Self::build(client, accessibility, translucent, menu_frost, cx))
     }
 
     /// The real construction logic, factored out of [`new`](Self::new) so a
@@ -195,6 +207,7 @@ impl Root {
         client: NekoClient,
         accessibility: Rc<dyn AccessibilityChecker>,
         translucent: bool,
+        menu_frost: bool,
         cx: &mut Context<Self>,
     ) -> Self {
         let text_field = TextField::new(cx);
@@ -218,6 +231,7 @@ impl Root {
             accessibility_banner_dismissed: None,
             activation_error: None,
             translucent,
+            menu_frost,
             connected: true,
             row_icon_cache,
             active_mode: None,
@@ -270,7 +284,7 @@ impl Root {
         // routing through `handle_dismiss`'s own "close the menu first"
         // logic, so without this a stale open menu would silently reappear
         // on the next summon.
-        self.actions_menu = None;
+        self.close_actions_menu(window);
         if let Some(mode) = self.active_mode.take() {
             self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
             self.mode_scroll.set_offset(point(px(0.), px(0.)));
@@ -612,7 +626,7 @@ impl Root {
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
         if self.actions_menu.is_some() {
-            self.confirm_menu_action(cx);
+            self.confirm_menu_action(window, cx);
             return;
         }
         let Some(item) = self.results.get(self.selected).cloned() else {
@@ -709,7 +723,7 @@ impl Root {
         self.active_mode = Some(ActiveMode { chrome, saved_query });
         self.selected = 0;
         self.mode_scroll.set_offset(point(px(0.), px(0.)));
-        self.actions_menu = None;
+        self.close_actions_menu(window);
         if chrome.has_detail {
             self.update_background_bounds(window, theme::PANEL_WIDTH_WITH_DETAIL_PX);
         }
@@ -733,7 +747,7 @@ impl Root {
         let Some(mode) = self.active_mode.take() else {
             return;
         };
-        self.actions_menu = None;
+        self.close_actions_menu(window);
         self.selected = 0;
         self.mode_scroll.set_offset(point(px(0.), px(0.)));
         if mode.chrome.has_detail {
@@ -806,8 +820,9 @@ impl Root {
     /// itself received, and a click on the margin already has its own
     /// dismiss handler (`render_dismiss_margin`) that hides the whole
     /// window, menu included, before this would ever matter.
-    fn close_actions_menu_from_outside_click(&mut self, _event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.actions_menu.take().is_some() {
+    fn close_actions_menu_from_outside_click(&mut self, _event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.actions_menu.is_some() {
+            self.close_actions_menu(window);
             cx.notify();
         }
     }
@@ -850,10 +865,10 @@ impl Root {
     /// "Delete" can never silently destroy an entry; moving the menu
     /// selection at all (`select_next`/`select_previous`) disarms it again,
     /// so the confirmation can't survive being scrolled past and back.
-    fn confirm_menu_action(&mut self, cx: &mut Context<Self>) {
+    fn confirm_menu_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(menu) = &mut self.actions_menu else { return };
         let Some(action) = menu.actions.get(menu.selected).cloned() else {
-            self.actions_menu = None;
+            self.close_actions_menu(window);
             cx.notify();
             return;
         };
@@ -864,10 +879,29 @@ impl Root {
         }
         let kind = menu.kind.clone();
         let id = menu.id.clone();
-        self.actions_menu = None;
+        self.close_actions_menu(window);
         cx.notify();
         let request = Request::Activate { kind, id, action: Some(action.id) };
         self.perform_activation(request, false, cx);
+    }
+
+    /// Closes the `⌘K` actions menu, if one is open — the single place that
+    /// ever clears `actions_menu`, so the native menu-overlay material (when
+    /// installed — `menu_frost`) is always hidden in lockstep. Necessary
+    /// because closing the menu unmounts `menu_frost::MenuFrostSync`
+    /// entirely (it simply stops being painted), and that element has no
+    /// "hide" branch of its own to run when it disappears — see its own
+    /// module doc comment. A no-op, including no native call, when no menu
+    /// was open.
+    fn close_actions_menu(&mut self, window: &Window) {
+        if self.actions_menu.take().is_none() {
+            return;
+        }
+        if self.menu_frost
+            && let Err(e) = crate::material::hide_menu_overlay(window)
+        {
+            eprintln!("neko: could not hide the menu frost overlay: {e}");
+        }
     }
 
     /// `Escape` — closes the actions menu if it's open, else exits the
@@ -884,7 +918,8 @@ impl Root {
     /// keeping this one call site self-contained is clearer than routing
     /// back through the global handler.
     fn handle_dismiss(&mut self, _: &crate::DismissWindow, window: &mut Window, cx: &mut Context<Self>) {
-        if self.actions_menu.take().is_some() {
+        if self.actions_menu.is_some() {
+            self.close_actions_menu(window);
             cx.notify();
             return;
         }
@@ -1570,7 +1605,13 @@ impl Root {
             .p_1()
             .gap(px(1.))
             .rounded(px(theme::ROW_RADIUS_PX))
-            .bg(theme::SURFACE_RAISED)
+            // Translucent, letting the native menu-overlay material
+            // genuinely show through, only when that material actually
+            // installed (`Root::menu_frost`) — otherwise the original
+            // fully-opaque fill, the same honest-fallback shape
+            // `Render::render`'s own panel background already uses for
+            // `translucent`. See `theme::MENU_GLASS_TINT`'s own doc comment.
+            .bg(if self.menu_frost { theme::MENU_GLASS_TINT } else { theme::SURFACE_RAISED })
             .border_1()
             .border_color(theme::BORDER_HAIRLINE_STRONG)
             .shadow_lg()
@@ -1605,6 +1646,20 @@ impl Root {
         // task's first real call site; see that module's own doc comment
         // for the rule going forward.
         let card = crate::components::layered::layered(card);
+        // Syncs the native menu-overlay material's frame to this card's own
+        // real, finished screen position every frame it paints — layout-
+        // transparent like `layered`/`motion::menu_fade_in` above it, so it
+        // sees exactly the position `anchored()` resolves below (including
+        // its own edge-clamping), never a value computed independently. See
+        // `menu_frost::sync_menu_frost`'s own doc comment. Only meaningful
+        // when the overlay material actually installed (`Root::menu_frost`)
+        // — otherwise this card already fell back to the plain opaque fill
+        // above and there's no native view to keep in sync.
+        let card = if self.menu_frost {
+            sync_menu_frost(card).into_any_element()
+        } else {
+            card.into_any_element()
+        };
         div()
             .absolute()
             .top_0()
@@ -2294,7 +2349,7 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         )));
         let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
-        cx.add_window(|_window, cx| Root::build(client, accessibility, true, cx))
+        cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, cx))
     }
 
     /// A command row's `id`, `kind: "command"` — everything else is
