@@ -2311,6 +2311,33 @@ own window subclass overrides `canBecomeKeyWindow` to `YES` regardless of
 style mask anyway; the deliberately-disabled window shadow; and the whole
 material chain. Warm summon latency and RSS both unchanged.
 
+**It broke keyboard input, and was fixed forward rather than reverted
+(`fm/neko-revert-titled`).** `setStyleMask:` makes AppKit rebuild the window's
+frame view, and **the window's first responder is reset with it** — measured
+live, `GPUIView` before the call, `NSKVONotifying_GPUIPanel` after. gpui calls
+`makeFirstResponder:` exactly once, at window creation
+(`gpui_macos/src/window.rs:985`), so nothing restores it: `keyDown:` stopped
+reaching GPUI at all and the search field silently accepted nothing, while
+every property the original task checked still read back correct. **It was
+never a key-window problem** — the fork's `GPUIPanel` overrides
+`canBecomeKeyWindow` to return `YES` unconditionally, with no style-mask test
+(`gpui_macos/src/window.rs:365`), so notes elsewhere predicting an untitled
+window cannot become key do not apply here. `clear_titled_style_mask` now
+re-makes gpui's rendering view first responder in the same call that disturbs
+it, and `verify_titled_cleared` asserts the responder alongside the mask bits.
+No gpui patch was needed. A revert commit is kept on that branch as a
+fallback but is not the shipping state. Full A/B (including the negative
+control), and what the new `NEKO_PROVE_TYPING` hook does and does not prove:
+`docs/evidence/titled-window-first-responder-fix-report.md`.
+
+**Anything that mutates this window's style mask must re-assert the first
+responder afterwards, and any window-level change must be verified by
+actually typing** — property readbacks cannot see this failure. Note the
+converse trap the same investigation found: `Window::dispatch_keystroke`
+enters *below* AppKit's responder chain, so it reports success on a build
+that a real keypress cannot reach. The first-responder readback is the check
+that catches it.
+
 **Three overlapping causes, one symptom — the durable lesson.** The panel's
 top edge had *three* independent bright/dark artifacts at different times
 (AppKit's automatic window shadow, GPUI's own `.shadow_lg()`, and this

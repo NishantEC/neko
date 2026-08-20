@@ -356,6 +356,14 @@ impl Root {
         self.text_field.update(cx, |field, cx| field.set_content_for_evidence(query, cx));
     }
 
+    /// Evidence/verification-only — reads the search field's current
+    /// content back, for `evidence.rs`'s `NEKO_PROVE_TYPING` hook. Read-only:
+    /// this is how that hook proves a character delivered into AppKit's
+    /// responder chain actually landed in the field, rather than asserting it.
+    pub fn query_for_evidence(&self, cx: &App) -> String {
+        self.text_field.read(cx).content().to_string()
+    }
+
     /// Evidence/verification-only — selects the whole current query
     /// (`TextField::select_all_for_evidence`, the exact logic ⌘A's real
     /// handler uses) so the rendered selection highlight
