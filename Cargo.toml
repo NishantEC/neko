@@ -29,3 +29,16 @@ serde_json = "1"
 
 [profile.dev]
 opt-level = 0
+
+# Fixes a real ~30ms warm-summon regression in the pinned gpui fork rev (see
+# `AGENTS.md`'s "Summon latency" section and `patches/gpui-0001-*.patch`) —
+# an inactive-window frame throttle with no exemption for a pending
+# `on_next_frame` callback, not present in any published gpui release.
+# `gpui`/`gpui_platform` are redirected to a local checkout of the exact
+# pinned rev with that one small patch applied on top. Run
+# `scripts/setup-gpui-patch.sh` once (or again after the pinned rev
+# changes) to populate it — `cargo build` fails with a missing-path error
+# until that has been run at least once.
+[patch."https://github.com/wingleeio/zed"]
+gpui = { path = "/Users/nish/Library/Caches/neko-dev/gpui-fork-patched/crates/gpui" }
+gpui_platform = { path = "/Users/nish/Library/Caches/neko-dev/gpui-fork-patched/crates/gpui_platform" }
