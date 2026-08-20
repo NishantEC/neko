@@ -186,6 +186,23 @@ pub fn verify_shadow_disabled(_window: &Window) -> Result<(), String> {
     Err("native window material is only implemented on macOS".to_string())
 }
 
+/// Read back the live `NSWindow`'s style mask, for logging only — this
+/// function never mutates it. `fm/neko-top-line-titled` (`98522de`) cleared
+/// `NSTitledWindowMask` here to remove AppKit's own top-edge rim and that
+/// broke keyboard input outright (see `AGENTS.md`, "The top line"); the mask
+/// is now left exactly as gpui creates it, and this readback exists so the
+/// value a build is actually running with is visible in the launch log
+/// rather than inferred.
+#[cfg(target_os = "macos")]
+pub fn read_style_mask(window: &Window) -> Result<usize, String> {
+    macos::read_style_mask(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn read_style_mask(_window: &Window) -> Result<usize, String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
 /// The `⌘K` actions menu's own, smaller frost surface — a *second* native
 /// material view, installed once (hidden, zero-sized) right after the
 /// whole-window `install`/`verify_installed` succeed, then shown/repositioned
@@ -734,6 +751,11 @@ mod macos {
             return Err("expected NSWindow.hasShadow false, readback true".to_string());
         }
         Ok(())
+    }
+
+    /// See `super::read_style_mask`'s doc comment. Read-only.
+    pub fn read_style_mask(window: &Window) -> Result<usize, String> {
+        Ok(native_window(window)?.styleMask().bits() as usize)
     }
 
     #[cfg(test)]
