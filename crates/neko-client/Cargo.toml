@@ -7,6 +7,10 @@ license.workspace = true
 [dependencies]
 neko-protocol.workspace = true
 futures-channel = "0.3"
+# `Stream::poll_next` for `ResponseStream::next` — already a dependency of
+# `futures-channel` itself at this exact version, so this adds zero new crate
+# versions to the tree. MIT OR Apache-2.0.
+futures-core = "0.3"
 
 [dev-dependencies]
 futures = "0.3"
