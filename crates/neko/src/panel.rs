@@ -158,6 +158,15 @@ pub struct Root {
     /// would still see the delayed task fire later for the same,
     /// already-answered generation and incorrectly flip the tell on.
     pending_search_generation: Option<u64>,
+    /// `Some(generation)` once that generation's *partial* frame has been
+    /// applied — i.e. the fast providers' results are on screen and a
+    /// deferred one is still running. Two things read it: the complete
+    /// frame, to know it must merge rather than replace
+    /// (`apply_search_results`), and the "still searching" tell, which is
+    /// this state made visible rather than a timer's guess about it.
+    /// Cleared at the top of every `run_search`, so it can never describe
+    /// a generation other than the current one.
+    partial_generation: Option<u64>,
     /// Tracks the mode list's own scroll position (`render_mode_list`) —
     /// the root list never scrolls (still budget-fit, `fit_within_budget`,
     /// per this module's "v1 simplification" doc comment above), so this is
@@ -244,6 +253,7 @@ impl Root {
             menu_open_before_this_press: false,
             searching: false,
             pending_search_generation: None,
+            partial_generation: None,
             mode_scroll: ScrollHandle::new(),
         };
         root.run_search(cx);
@@ -453,15 +463,8 @@ impl Root {
         // case, resolving well under `SEARCHING_TELL_DELAY_MS`) can clear
         // it before that task ever fires. See this field's own doc comment.
         self.pending_search_generation = Some(generation);
+        self.partial_generation = None;
         let query = self.text_field.read(cx).content().to_string();
-        // Snapshot *before* the request goes out, not when the response
-        // lands: this is "what was highlighted going into this search",
-        // which `resolve_selection` uses to decide whether to keep the
-        // highlight in place or the result set is genuinely new.
-        let previous_selection = self
-            .results
-            .get(self.selected)
-            .map(|item| (item.kind.clone(), item.id.clone()));
         let client = self.client.clone();
         // The mode seam: while a mode is active, every keystroke scopes to
         // its own provider (`Request::Search`'s `provider` field) with a
@@ -472,57 +475,47 @@ impl Root {
         let mode_provider = self.active_mode.as_ref().map(|m| m.chrome.provider_id.to_string());
         let limit = if mode_provider.is_some() { MODE_RESULT_LIMIT } else { RESULT_LIMIT };
         cx.spawn(async move |this, cx| {
-            let response = client.request(Request::Search { query, limit, provider: mode_provider }).await;
-            // A request error (including a dead connection) is deliberately
-            // *not* surfaced here — `results`/`selected` just stay exactly
-            // as they were, per the design intent below. The live
-            // "can't reach neko-daemon" signal itself is
-            // `main.rs`'s poll of `NekoClient::is_connected()`
-            // (`Root::set_connected`), which doesn't depend on a search
-            // having been attempted at all — see that method's doc comment
-            // for why a request failing here is the wrong place to decide
-            // connection state.
-            let Ok(Response::SearchResults { items }) = response else {
-                // Still clears `searching`/`pending_search_generation` for
-                // this generation on the way out — an errored/malformed
-                // response is a resolution too; without this, a query that
-                // started slow and then failed would leave the tell showing
-                // forever, since nothing else ever turns it back off for a
-                // generation that never produces a `SearchResults`.
-                let _ = this.update(cx, |root, cx| {
-                    if root.generation == generation {
-                        root.searching = false;
-                        root.pending_search_generation = None;
-                        cx.notify();
+            // Streaming, not a single `request`: the daemon answers a root
+            // search in two frames whenever a slow provider is involved —
+            // the fast providers' own results first (`complete: false`),
+            // the full merged set once file search finishes
+            // (`complete: true`). See `NekoClient::request_streaming` and
+            // `AGENTS.md`'s "Two-phase search" section. A mode's own
+            // provider-scoped search is always a single complete frame; the
+            // loop below handles both shapes without branching on which.
+            let mut stream = client.request_streaming(Request::Search { query, limit, provider: mode_provider });
+            while let Some(response) = stream.next().await {
+                // A request error (including a dead connection) is
+                // deliberately *not* surfaced here — `results`/`selected`
+                // just stay exactly as they were, per the design intent
+                // below. The live "can't reach neko-daemon" signal itself
+                // is `main.rs`'s poll of `NekoClient::is_connected()`
+                // (`Root::set_connected`), which doesn't depend on a search
+                // having been attempted at all — see that method's doc
+                // comment for why a request failing here is the wrong place
+                // to decide connection state.
+                let Response::SearchResults { items, complete } = response else { continue };
+                let applied = this.update(cx, |root, cx| {
+                    if root.generation != generation {
+                        return;
                     }
+                    root.apply_search_results(items, complete, generation, cx);
                 });
-                return;
-            };
+                if applied.is_err() {
+                    return;
+                }
+            }
+            // The stream ended — either after the frame that completed this
+            // request, or because the connection dropped mid-request (which
+            // is why this cannot live only on the `complete` branch above).
+            // Clearing here is what stops a query that started slow and
+            // then failed from leaving the tell showing forever, since
+            // nothing else ever turns it back off for a generation that
+            // never produces a complete frame.
             let _ = this.update(cx, |root, cx| {
-                if root.generation == generation {
+                if root.generation == generation && root.pending_search_generation == Some(generation) {
                     root.searching = false;
                     root.pending_search_generation = None;
-                    // The mode list scrolls (`edge_fade::scroll_edge_fade`
-                    // in `render_mode_list`) rather than being budget-fit
-                    // like the root list — `items` is already capped at
-                    // `MODE_RESULT_LIMIT` by the request above, and
-                    // rendering all of it, letting overflow scroll, is what
-                    // makes the edge fade honest (see `edge_fade.rs`'s own
-                    // module doc comment: a fade over content the captain
-                    // has no way to actually reach would be decorative, not
-                    // correct). The root list is untouched: still budget-fit
-                    // before selection resolves, exactly as before this
-                    // change, since it never scrolls at all.
-                    root.results = if root.active_mode.is_some() {
-                        items
-                    } else {
-                        fit_within_budget(items, CONTENT_AREA_MIN_HEIGHT_PX)
-                    };
-                    let previous = previous_selection
-                        .as_ref()
-                        .map(|(kind, id)| (kind.as_str(), id.as_str()));
-                    root.selected = resolve_selection(previous, &root.results);
-                    root.sync_mode_scroll_to_selection();
                     cx.notify();
                 }
             });
@@ -542,6 +535,60 @@ impl Root {
             let _ = this.update(cx, |root, cx| root.reveal_searching_tell_if_still_pending(generation, cx));
         })
         .detach();
+    }
+
+    /// Applies one search frame — the partial one, the complete one, or the
+    /// single complete one a query with no deferred provider produces.
+    ///
+    /// **The partial frame replaces; the complete frame that follows one
+    /// merges.** That asymmetry is the whole "no flicker, no reordering
+    /// jump" requirement: by the time file results land, the captain has
+    /// been reading (and possibly navigating) a real list for anywhere up
+    /// to `files::QUERY_TIMEOUT`, and re-rendering the daemon's own
+    /// authoritative order wholesale would visibly reshuffle it underneath
+    /// them — `search::allocate` orders sections by content strength, so a
+    /// decisive file match can legitimately sort *above* the Applications
+    /// section that was already on screen. See [`merge_late_results`] for
+    /// the rule that replaces that reshuffle.
+    fn apply_search_results(&mut self, items: Vec<SearchItem>, complete: bool, generation: u64, cx: &mut Context<Self>) {
+        if complete {
+            self.searching = false;
+            self.pending_search_generation = None;
+        } else {
+            // The real, non-timer signal that something is still coming:
+            // results are on screen and at least one provider is still
+            // running. `reveal_searching_tell_if_still_pending` reads this
+            // rather than assuming a query that hasn't answered in
+            // `SEARCHING_TELL_DELAY_MS` must still be pending.
+            self.partial_generation = Some(generation);
+        }
+
+        // Re-read at apply time rather than snapshotting before the request
+        // went out: between a partial frame and the complete one the
+        // captain may have pressed Down, so "what is highlighted right now"
+        // is the only correct thing for `resolve_selection` to follow.
+        let previously_selected = self.results.get(self.selected).map(|item| (item.kind.clone(), item.id.clone()));
+
+        // The mode list scrolls (`edge_fade::scroll_edge_fade` in
+        // `render_mode_list`) rather than being budget-fit like the root
+        // list — `items` is already capped at `MODE_RESULT_LIMIT` by the
+        // request, and rendering all of it, letting overflow scroll, is
+        // what makes the edge fade honest (see `edge_fade.rs`'s own module
+        // doc comment). The root list never scrolls at all, so anything
+        // that doesn't fit has to be dropped rather than clipped.
+        self.results = if self.active_mode.is_some() {
+            items
+        } else if complete && self.partial_generation == Some(generation) {
+            let anchor = std::mem::take(&mut self.results);
+            merge_late_results(anchor, items, CONTENT_AREA_MIN_HEIGHT_PX, self.selected)
+        } else {
+            fit_within_budget(items, CONTENT_AREA_MIN_HEIGHT_PX)
+        };
+
+        let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
+        self.selected = resolve_selection(previous, &self.results);
+        self.sync_mode_scroll_to_selection();
+        cx.notify();
     }
 
     /// Flips the "still searching" tell on for `generation`, but only if
@@ -1636,6 +1683,66 @@ fn resolve_selection(previous: Option<(&str, &str)>, results: &[SearchItem]) -> 
         .unwrap_or(0)
 }
 
+/// Folds a late, authoritative result set into what is already on screen,
+/// under one rule: **late results may append, never reorder and never
+/// displace the selection.**
+///
+/// The problem this exists for is not the lag the two-phase daemon fixed —
+/// it is the thing that would otherwise feel *worse* than the lag. By the
+/// time file search answers (up to `files::QUERY_TIMEOUT`), the captain has
+/// been reading a real list for most of a second and may well have arrowed
+/// down it. `search::allocate` orders sections by content strength, so its
+/// authoritative answer can legitimately put a decisive Files match *above*
+/// the Applications section already on screen — correct as a one-shot
+/// answer, and a visible reshuffle under the captain's eyes as a late one.
+///
+/// So: `anchor` (what is rendered right now) keeps its exact order, and
+/// only items the authoritative set introduced — necessarily the deferred
+/// provider's own, since a fast provider cannot gain candidates between the
+/// two frames — are appended after it. `allocate`'s own reservation and
+/// section-strength ordering still decide *which* items exist and how many
+/// slots each provider gets; this decides only where the new ones are
+/// drawn relative to what the captain is already looking at.
+///
+/// Two consequences worth stating plainly rather than discovering later:
+///
+/// 1. **The result can be a different order than a single-shot response
+///    for the same query would have produced.** That is deliberate, and it
+///    self-corrects on the very next keystroke, which re-renders from a
+///    fresh partial frame with no anchor to preserve.
+/// 2. **If making room for the late section would drop the selected row,
+///    the late section is not shown at all** (`anchor` is returned
+///    unchanged). A captain who has arrowed down to row seven is about to
+///    press Enter; moving that row — or worse, dropping it and snapping the
+///    highlight back to the top — is a far worse outcome than file results
+///    waiting for the next keystroke. `fit_within_budget` has to take the
+///    room for a new section's header-plus-row from somewhere, and the only
+///    place it can take it from is the tail of an earlier section.
+fn merge_late_results(
+    anchor: Vec<SearchItem>,
+    authoritative: Vec<SearchItem>,
+    budget_px: f32,
+    selected: usize,
+) -> Vec<SearchItem> {
+    let already_shown = |item: &SearchItem| {
+        anchor.iter().any(|shown| shown.kind == item.kind && shown.id == item.id)
+    };
+    let late: Vec<SearchItem> = authoritative.into_iter().filter(|item| !already_shown(item)).collect();
+    if late.is_empty() {
+        return anchor;
+    }
+
+    let selected_item = anchor.get(selected).map(|item| (item.kind.clone(), item.id.clone()));
+    let mut merged = anchor.clone();
+    merged.extend(late);
+    let fitted = fit_within_budget(merged, budget_px);
+
+    let selection_survived = selected_item.is_none_or(|(kind, id)| {
+        fitted.iter().any(|item| item.kind == kind && item.id == id)
+    });
+    if selection_survived { fitted } else { anchor }
+}
+
 /// Trims `results` to what renders within `budget_px` without ever showing
 /// a partial row or a section header with no row beneath it — and, when a
 /// secondary provider (anything after the first section) has a match,
@@ -2072,6 +2179,105 @@ mod tests {
         }
     }
 
+    /// How many rows the root list's fixed content budget actually holds
+    /// when everything sits under one section header — derived from the
+    /// same tokens `fit_section` uses rather than hard-coded, so these
+    /// tests stay honest if the geometry ever changes.
+    fn rows_that_fit_in_one_section() -> usize {
+        ((CONTENT_AREA_MIN_HEIGHT_PX - theme::SECTION_HEADER_HEIGHT_PX) / theme::RESULT_ROW_HEIGHT_PX).floor()
+            as usize
+    }
+
+    #[test]
+    fn late_results_are_appended_below_what_is_already_on_screen_never_promoted_above_it() {
+        // The reordering jump this rule exists to prevent: `allocate`
+        // legitimately puts a decisive Files match in the *first* section
+        // (it orders sections by content strength), which as a late answer
+        // would shove everything the captain is reading downward.
+        let anchor = vec![item_with_id("app", "safari"), item_with_id("app", "notes")];
+        let authoritative = vec![
+            item_with_id("file", "safari-notes.md"),
+            item_with_id("app", "safari"),
+            item_with_id("app", "notes"),
+        ];
+
+        let merged = merge_late_results(anchor, authoritative, CONTENT_AREA_MIN_HEIGHT_PX, 0);
+
+        let order: Vec<(&str, &str)> = merged.iter().map(|i| (i.kind.as_str(), i.id.as_str())).collect();
+        assert_eq!(
+            order,
+            vec![("app", "safari"), ("app", "notes"), ("file", "safari-notes.md")],
+            "the anchor keeps its exact order and the late row lands after it"
+        );
+    }
+
+    #[test]
+    fn a_late_result_that_would_displace_the_selected_row_is_not_shown_at_all() {
+        // The requirement stated most sharply: late results must never move
+        // the selected row out from under a keypress. Filling the budget
+        // with one section and selecting its *last* visible row means
+        // making room for a Files header-plus-row can only come out of that
+        // row — so the merge declines the late section entirely rather than
+        // dropping the highlighted item and snapping the selection to the
+        // top.
+        let rows = rows_that_fit_in_one_section();
+        let anchor: Vec<SearchItem> = (0..rows).map(|i| item_with_id("app", &format!("app{i}"))).collect();
+        let selected = rows - 1;
+        let authoritative = {
+            let mut items = anchor.clone();
+            items.push(item_with_id("file", "late.txt"));
+            items
+        };
+
+        let merged = merge_late_results(anchor.clone(), authoritative, CONTENT_AREA_MIN_HEIGHT_PX, selected);
+
+        assert_eq!(merged, anchor, "nothing changed on screen — not one row moved, not one row dropped");
+        assert_eq!(
+            resolve_selection(Some(("app", &format!("app{selected}"))), &merged),
+            selected,
+            "and the highlight is still on exactly the row it was on"
+        );
+    }
+
+    #[test]
+    fn a_late_result_still_lands_when_it_costs_only_rows_below_the_selection() {
+        // The counterpart to the test above: declining the late section is
+        // the exception, not the rule. With the selection near the top,
+        // room for the Files section comes from rows the captain is not
+        // pointing at, and the file row must actually appear.
+        let rows = rows_that_fit_in_one_section();
+        let anchor: Vec<SearchItem> = (0..rows).map(|i| item_with_id("app", &format!("app{i}"))).collect();
+        let authoritative = {
+            let mut items = anchor.clone();
+            items.push(item_with_id("file", "late.txt"));
+            items
+        };
+
+        let merged = merge_late_results(anchor, authoritative, CONTENT_AREA_MIN_HEIGHT_PX, 0);
+
+        assert!(merged.iter().any(|i| i.kind == "file"), "the late file row is shown");
+        assert_eq!(merged[0].id, "app0", "and the row under the highlight did not move");
+    }
+
+    #[test]
+    fn a_complete_frame_that_adds_nothing_new_leaves_the_list_byte_identical() {
+        // The common shape when file search matched nothing: the complete
+        // frame carries exactly what the partial one did. Not one row may
+        // be rebuilt, re-ordered, or re-fitted for it.
+        let anchor = vec![item_with_id("app", "safari"), item_with_id("clipboard", "note")];
+        let merged = merge_late_results(anchor.clone(), anchor.clone(), CONTENT_AREA_MIN_HEIGHT_PX, 1);
+        assert_eq!(merged, anchor);
+    }
+
+    #[test]
+    fn a_late_result_merges_into_an_empty_list_without_any_anchor_to_preserve() {
+        // Nothing matched in the fast phase — there is no order to
+        // preserve, so the authoritative answer is used as-is.
+        let authoritative = vec![item_with_id("file", "budget.xlsx")];
+        let merged = merge_late_results(Vec::new(), authoritative.clone(), CONTENT_AREA_MIN_HEIGHT_PX, 0);
+        assert_eq!(merged, authoritative);
+    }
+
     #[test]
     fn resolve_selection_follows_the_previously_selected_item_to_its_new_index() {
         // "notes" was selected (via Down) before this search; the new
@@ -2297,6 +2503,88 @@ mod tests {
     /// matter to `confirm`'s own routing.
     fn command_item(mode: &str) -> SearchItem {
         SearchItem { enters_mode: Some(mode.to_string()), ..item_with_id("command", "clipboard-history") }
+    }
+
+    #[gpui::test]
+    fn a_late_complete_frame_never_moves_the_row_the_captain_arrowed_down_to(cx: &mut TestAppContext) {
+        // The same guarantee `a_late_result_that_would_displace_the_selected_row_is_not_shown_at_all`
+        // pins on the pure merge, driven through `Root`'s own real frame
+        // handling instead — including the case the pure test cannot
+        // express: the captain pressing Down *between* the partial frame
+        // and the complete one, so the selection the merge has to protect
+        // is not the one that existed when the request went out.
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        let rows = rows_that_fit_in_one_section();
+        let partial: Vec<SearchItem> = (0..rows).map(|i| item_with_id("app", &format!("app{i}"))).collect();
+        let complete = {
+            let mut items = partial.clone();
+            items.insert(0, item_with_id("file", "late.txt"));
+            items
+        };
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.generation = 1;
+                root.pending_search_generation = Some(1);
+                root.apply_search_results(partial.clone(), false, 1, cx);
+            })
+            .unwrap();
+
+        // The captain arrows all the way down to the last visible row while
+        // file search is still running.
+        for _ in 0..rows {
+            window.update(cx, |root, window, cx| root.select_next(&SelectNext, window, cx)).unwrap();
+        }
+        let selected_id = window
+            .update(cx, |root, _window, _cx| {
+                assert_eq!(root.selected, rows - 1, "arrowed to the last row");
+                root.results[root.selected].id.clone()
+            })
+            .unwrap();
+
+        window
+            .update(cx, |root, _window, cx| root.apply_search_results(complete, true, 1, cx))
+            .unwrap();
+
+        window
+            .update(cx, |root, _window, _cx| {
+                assert_eq!(root.results, partial, "not one row moved when the late frame landed");
+                assert_eq!(root.selected, rows - 1, "the highlight stayed on the same index");
+                assert_eq!(root.results[root.selected].id, selected_id, "and on the same item");
+                assert!(!root.searching, "the tell clears the moment the complete frame lands");
+                assert_eq!(root.pending_search_generation, None);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn the_still_searching_tell_tracks_the_real_deferred_phase_not_a_bare_timer(cx: &mut TestAppContext) {
+        // `reveal_searching_tell_if_still_pending` must only ever describe
+        // a query that genuinely still has a provider running — the tell is
+        // this state made visible, not a guess made from elapsed time.
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.generation = 4;
+                root.pending_search_generation = Some(4);
+                root.apply_search_results(vec![item_with_id("app", "safari")], false, 4, cx);
+                assert_eq!(root.partial_generation, Some(4), "the partial frame records that more is coming");
+                root.reveal_searching_tell_if_still_pending(4, cx);
+                assert!(root.searching, "with the deferred provider still running, the tell is honest");
+
+                root.apply_search_results(vec![item_with_id("app", "safari")], true, 4, cx);
+                assert!(!root.searching, "and clears as soon as the complete frame lands");
+
+                // A stale reveal for the same, now-resolved generation must
+                // not turn it back on.
+                root.reveal_searching_tell_if_still_pending(4, cx);
+                assert!(!root.searching);
+            })
+            .unwrap();
     }
 
     #[gpui::test]

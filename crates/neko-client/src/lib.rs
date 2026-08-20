@@ -288,13 +288,16 @@ mod tests {
     use std::os::unix::net::UnixListener;
 
     fn temp_socket_path() -> PathBuf {
+        // A monotonic counter, not just pid+timestamp: `cargo test` runs
+        // this module's tests in parallel and `SystemTime`'s resolution is
+        // coarse enough that two of them genuinely collided on the same
+        // path (an `AlreadyExists` bind failure, seen once for real).
+        static NEXT: AtomicU64 = AtomicU64::new(0);
         std::env::temp_dir().join(format!(
-            "neko-client-test-{}-{}.sock",
+            "neko-client-test-{}-{}-{}.sock",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
         ))
     }
 
