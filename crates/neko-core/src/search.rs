@@ -74,6 +74,13 @@ pub fn fuzzy_score(query: &str, title: &str) -> Option<f32> {
 /// Comparable across providers only because every built-in provider's score
 /// is ultimately built from [`fuzzy_score`] plus a same-shaped recency
 /// boost — see [`allocate`]'s doc comment for what that buys.
+///
+/// `Clone` because the daemon's two-phase search allocates the fast
+/// providers' candidates twice: once on their own for the partial frame,
+/// and once merged with the deferred provider's for the final one (see
+/// `neko-daemon`'s `handle_request`). Cloning the candidate list is
+/// strictly cheaper than re-running every fast provider's search.
+#[derive(Clone)]
 pub struct Candidate {
     pub score: f32,
     pub item: SearchItem,

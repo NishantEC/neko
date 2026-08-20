@@ -3,6 +3,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
+use neko_core::cancel::Cancel;
 use neko_core::provider::Provider;
 use neko_core::search::Candidate;
 use neko_core::{AppEntry, Db};
@@ -147,15 +148,37 @@ pub fn handle_connection(state: Arc<AppState>, stream: UnixStream) {
     };
     state.broadcast.lock().unwrap().push(writer.clone());
 
+    // The one piece of genuinely per-connection state this daemon has: the
+    // cancellation token of whichever `Search` is currently in flight for
+    // *this* client. See `supersede_previous_search` for why it lives here
+    // rather than on `AppState`.
+    let in_flight_search: Arc<Mutex<Option<Cancel>>> = Arc::new(Mutex::new(None));
+
     loop {
         match read_frame(&stream) {
             Ok(Some(Frame::Request { id, request })) => {
+                let cancel = match &request {
+                    Request::Search { .. } => supersede_previous_search(&in_flight_search),
+                    _ => Cancel::never(),
+                };
                 let state = state.clone();
                 let writer = writer.clone();
                 std::thread::spawn(move || {
-                    let response = handle_request(&state, request);
-                    let mut writer = writer.lock().unwrap();
-                    let _ = write_frame(&mut *writer, &Frame::Response { id, response });
+                    // A search can answer in two frames (see
+                    // `Response::SearchResults`'s own doc comment); every
+                    // other request answers in exactly one. Both go out
+                    // through this same per-connection writer lock, so a
+                    // partial frame can never interleave with another
+                    // thread's response.
+                    let ctx = RequestContext::new(cancel, {
+                        let writer = writer.clone();
+                        move |response| {
+                            let mut writer = writer.lock().unwrap();
+                            let _ = write_frame(&mut *writer, &Frame::Response { id, response });
+                        }
+                    });
+                    let response = handle_request(&state, request, &ctx);
+                    ctx.send(response);
                 });
             }
             Ok(Some(_)) => {} // Clients never send Response/Event frames.
@@ -164,7 +187,73 @@ pub fn handle_connection(state: Arc<AppState>, stream: UnixStream) {
     }
 }
 
-fn handle_request(state: &AppState, request: Request) -> Response {
+/// Cancels whatever `Search` this connection had in flight and installs a
+/// fresh token for the one about to start, returning that token.
+///
+/// **Per connection, not global** — two clients (a real one and, say, an
+/// evidence harness) must not cancel each other's searches; a single client
+/// superseding its own previous keystroke is exactly the intended
+/// behaviour and needs no new wire message to express it. The client
+/// already tells the daemon it has moved on simply by sending the next
+/// `Search` on the same socket: there is no such thing as a client that
+/// wants two of its own searches answered at once, in the root list or in
+/// a mode. See `neko_core::cancel` for what the cancelled side actually
+/// does with the signal.
+fn supersede_previous_search(in_flight: &Mutex<Option<Cancel>>) -> Cancel {
+    let fresh = Cancel::new();
+    let mut slot = in_flight.lock().unwrap();
+    if let Some(previous) = slot.replace(fresh.clone()) {
+        previous.cancel();
+    }
+    fresh
+}
+
+/// What one in-flight request can do beyond returning its final response:
+/// observe cancellation, and emit an *earlier*, partial response for the
+/// same request id.
+pub struct RequestContext {
+    cancel: Cancel,
+    send: Box<dyn Fn(Response) + Send + Sync>,
+}
+
+impl RequestContext {
+    fn new(cancel: Cancel, send: impl Fn(Response) + Send + Sync + 'static) -> Self {
+        Self { cancel, send: Box::new(send) }
+    }
+
+    /// A context that discards partial responses and is never cancelled —
+    /// for call sites with no client behind them (this module's own tests,
+    /// which assert on `handle_request`'s final return value).
+    #[cfg(test)]
+    fn inert() -> Self {
+        Self::new(Cancel::never(), |_| {})
+    }
+
+    fn send(&self, response: Response) {
+        (self.send)(response)
+    }
+}
+
+/// Runs `providers` concurrently, one thread each, and collects their
+/// candidates. `std::thread::scope` guarantees every spawned thread joins
+/// before this returns, so `query`/`now`/`cancel` are borrowed rather than
+/// cloned per provider.
+fn search_concurrently<'a>(
+    providers: &[&'a dyn Provider],
+    query: &str,
+    now: i64,
+    cancel: &Cancel,
+) -> Vec<(&'a str, Vec<Candidate>)> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = providers
+            .iter()
+            .map(|&provider| scope.spawn(move || (provider.id(), provider.search_cancellable(query, now, cancel))))
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    })
+}
+
+fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> Response {
     match request {
         Request::Ping => Response::Pong,
 
@@ -179,38 +268,53 @@ fn handle_request(state: &AppState, request: Request) -> Response {
             let Some(provider) = state.providers.iter().find(|p| p.id() == provider_id) else {
                 return Response::Error { message: format!("no such provider: {provider_id}") };
             };
-            let mut candidates = provider.search(&query, now);
+            let mut candidates = provider.search_cancellable(&query, now, &ctx.cancel);
             candidates.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.item.title.cmp(&b.item.title)));
             candidates.truncate(limit);
-            Response::SearchResults { items: candidates.into_iter().map(|c| c.item).collect() }
+            Response::SearchResults { items: candidates.into_iter().map(|c| c.item).collect(), complete: true }
         }
 
         Request::Search { query, limit, provider: None } => {
             let limit = limit.clamp(1, 50);
             let now = now_unix_ms();
-
-            // Every provider searches concurrently, on its own thread —
-            // `FileProvider`'s `mdfind` round-trip dominates this request's
-            // latency otherwise, even though `AppsProvider` and
-            // `ClipboardProvider` finish in well under a millisecond each.
-            // `std::thread::scope` guarantees every spawned thread joins
-            // before this block returns, so `query`/`now` can be borrowed
-            // rather than cloned per provider.
             let query = query.as_str();
-            let candidates: Vec<(&str, Vec<Candidate>)> = std::thread::scope(|scope| {
-                let handles: Vec<_> = state
-                    .providers
-                    .iter()
-                    .map(|provider| {
-                        let provider = provider.as_ref();
-                        scope.spawn(move || (provider.id(), provider.search(query, now)))
-                    })
-                    .collect();
-                handles.into_iter().map(|h| h.join().unwrap()).collect()
+
+            // **Two-phase, so a keystroke renders at the speed of the
+            // fastest provider rather than the slowest.** Splitting the
+            // registered providers by `defers_for` (see that method's doc
+            // comment, and `AGENTS.md`'s "Two-phase search" section):
+            // everything that answers from memory or SQLite runs first and
+            // its allocation goes out immediately as a partial frame; the
+            // slow one (file search's `mdfind`, up to
+            // `files::QUERY_TIMEOUT`) then runs and the *full* allocation
+            // — every provider's candidates, the same `allocate` call this
+            // request always made — goes out as the final frame.
+            //
+            // The fast phase's candidates are computed once and reused by
+            // the final `allocate`, so this costs one extra small frame per
+            // keystroke, never a second round of provider work.
+            let (deferred, immediate): (Vec<&dyn Provider>, Vec<&dyn Provider>) =
+                state.providers.iter().map(|provider| provider.as_ref()).partition(|provider| provider.defers_for(query));
+
+            let mut candidates = search_concurrently(&immediate, query, now, &ctx.cancel);
+
+            if deferred.is_empty() {
+                // Nothing slow to wait for: one frame, already final. The
+                // ordinary shape for a query shorter than
+                // `files::MIN_QUERY_LEN`, and for any build with no
+                // deferring provider registered.
+                let items = neko_core::search::allocate(candidates, limit, query);
+                return Response::SearchResults { items, complete: true };
+            }
+
+            ctx.send(Response::SearchResults {
+                items: neko_core::search::allocate(candidates.clone(), limit, query),
+                complete: false,
             });
 
+            candidates.extend(search_concurrently(&deferred, query, now, &ctx.cancel));
             let items = neko_core::search::allocate(candidates, limit, query);
-            Response::SearchResults { items }
+            Response::SearchResults { items, complete: true }
         }
 
         Request::Activate { kind, id, action } => match state.providers.iter().find(|p| p.id() == kind) {
@@ -337,6 +441,29 @@ pub fn notify_icons_updated(state: &AppState) {
 mod tests {
     use super::*;
     use neko_core::clipboard::ClipboardContentKind;
+    use neko_protocol::SearchItem;
+
+    /// `handle_request` with no client behind it — partial responses are
+    /// discarded and nothing is ever cancelled, so a test that only cares
+    /// about the final answer reads exactly as it did before searches
+    /// could answer in two frames. Tests that *do* care about the partial
+    /// frame use [`handle_request_capturing`] instead.
+    fn handle_request_for_test(state: &AppState, request: Request) -> Response {
+        handle_request(state, request, &RequestContext::inert())
+    }
+
+    /// Drives `handle_request` the way a real connection does, collecting
+    /// every frame it emits in order — the partial `complete: false`
+    /// response first (when there is one), then the final one.
+    fn handle_request_capturing(state: &AppState, request: Request) -> Vec<Response> {
+        let collected: Arc<Mutex<Vec<Response>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = collected.clone();
+        let ctx = RequestContext::new(Cancel::never(), move |response| sink.lock().unwrap().push(response));
+        let final_response = handle_request(state, request, &ctx);
+        let mut frames = collected.lock().unwrap().clone();
+        frames.push(final_response);
+        frames
+    }
 
     fn app(name: &str) -> AppEntry {
         AppEntry {
@@ -376,11 +503,11 @@ mod tests {
         let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
         let state = test_state(db, apps);
 
-        let response = handle_request(
+        let response = handle_request_for_test(
             &state,
             Request::Search { query: "cons".into(), limit: 8, provider: None },
         );
-        let Response::SearchResults { items } = response else {
+        let Response::SearchResults { items, .. } = response else {
             panic!("expected SearchResults")
         };
 
@@ -391,17 +518,171 @@ mod tests {
         assert!(items.len() <= 8);
     }
 
+    /// A provider that stands in for `FileProvider` without touching
+    /// `mdfind`: it defers (so the daemon splits the request in two), it
+    /// blocks until released (so the partial frame is observably *earlier*
+    /// than the final one), and it returns one candidate the fast providers
+    /// could never produce.
+    struct BlockingDeferredProvider {
+        release: Arc<std::sync::Barrier>,
+    }
+
+    impl Provider for BlockingDeferredProvider {
+        fn id(&self) -> &'static str {
+            "file"
+        }
+        fn section_label(&self) -> &'static str {
+            "Files"
+        }
+        fn defers_for(&self, query: &str) -> bool {
+            !query.is_empty()
+        }
+        fn search(&self, _query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+            self.release.wait();
+            vec![Candidate {
+                score: 100.0,
+                item: SearchItem {
+                    id: "/tmp/console-notes.txt".into(),
+                    kind: "file".into(),
+                    title: "console-notes.txt".into(),
+                    subtitle: None,
+                    icon: neko_protocol::Icon::Glyph(neko_protocol::Glyph::File),
+                    section_label: "Files".into(),
+                    action_label: "Open  ↵".into(),
+                    badge: None,
+                    accessory: None,
+                    enters_mode: None,
+                    group_label: None,
+                    actions: Vec::new(),
+                    source: None,
+                },
+            }]
+        }
+        fn activate(&self, _id: &str) -> Result<(), neko_core::ProviderError> {
+            Ok(())
+        }
+    }
+
+    fn state_with_deferred_provider(
+        db: Db,
+        apps: Vec<AppEntry>,
+        release: Arc<std::sync::Barrier>,
+    ) -> AppState {
+        let mut state = test_state(db, apps);
+        state.providers[1] = Box::new(BlockingDeferredProvider { release });
+        state
+    }
+
+    #[test]
+    fn a_slow_provider_does_not_hold_up_the_fast_providers_own_results() {
+        // The whole point of this task: the partial frame must be
+        // observable while the deferred provider is still blocked, carrying
+        // real results from every provider that was ready.
+        let db = Db::open_in_memory().unwrap();
+        let apps: Vec<AppEntry> = (0..3).map(|i| app(&format!("Console{i}"))).collect();
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let state = Arc::new(state_with_deferred_provider(db, apps, release.clone()));
+
+        let partials: Arc<Mutex<Vec<Response>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = partials.clone();
+        let ctx = RequestContext::new(Cancel::never(), move |response| sink.lock().unwrap().push(response));
+
+        let request_state = state.clone();
+        let handle = std::thread::spawn(move || {
+            handle_request(
+                &request_state,
+                Request::Search { query: "cons".into(), limit: 8, provider: None },
+                &ctx,
+            )
+        });
+
+        // While the deferred provider is still blocked on the barrier, poll
+        // for the partial frame. It must arrive without the deferred
+        // provider having returned anything at all.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if !partials.lock().unwrap().is_empty() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "no partial frame arrived while the slow provider was blocked");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        let partial = partials.lock().unwrap()[0].clone();
+        let Response::SearchResults { items, complete } = partial else {
+            panic!("expected SearchResults")
+        };
+        assert!(!complete, "the first frame must announce itself as partial");
+        assert!(items.iter().any(|i| i.kind == "app"), "fast providers' real results are in the partial frame");
+        assert!(!items.iter().any(|i| i.kind == "file"), "the deferred provider has not answered yet");
+
+        // Now let the deferred provider finish; the final frame carries the
+        // full, re-allocated set including its results.
+        release.wait();
+        let final_response = handle.join().unwrap();
+        let Response::SearchResults { items, complete } = final_response else {
+            panic!("expected SearchResults")
+        };
+        assert!(complete, "the second frame is the last one for this request id");
+        assert!(items.iter().any(|i| i.kind == "file"), "the deferred provider's results land in the final frame");
+        assert!(items.iter().any(|i| i.kind == "app"), "and the fast providers' results are still there");
+    }
+
+    #[test]
+    fn a_query_no_provider_defers_for_is_answered_in_exactly_one_complete_frame() {
+        // The short-query case (and any build with no slow provider): an
+        // extra wire frame and an extra client render would be pure cost.
+        let db = Db::open_in_memory().unwrap();
+        let state = test_state(db, vec![app("Console")]);
+        let frames = handle_request_capturing(
+            &state,
+            Request::Search { query: "cons".into(), limit: 8, provider: None },
+        );
+        assert_eq!(frames.len(), 1, "expected exactly one frame, got {}", frames.len());
+        assert!(matches!(frames[0], Response::SearchResults { complete: true, .. }));
+    }
+
+    #[test]
+    fn the_partial_and_final_frames_both_honour_allocates_own_reservation_rules() {
+        // `allocate` runs over the fast providers alone for the partial
+        // frame and over everything for the final one — the section
+        // reservation that stops one provider crowding out another has to
+        // hold in both, not just the merged case.
+        let db = Db::open_in_memory().unwrap();
+        neko_core::clipboard::record_entry(&db, "co-worker-notes", ClipboardContentKind::Text, None, 1000).unwrap();
+        let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
+        let release = Arc::new(std::sync::Barrier::new(1));
+        let state = state_with_deferred_provider(db, apps, release);
+
+        let frames = handle_request_capturing(
+            &state,
+            Request::Search { query: "cons".into(), limit: 8, provider: None },
+        );
+        assert_eq!(frames.len(), 2);
+        for (i, frame) in frames.iter().enumerate() {
+            let Response::SearchResults { items, .. } = frame else { panic!("expected SearchResults") };
+            assert!(
+                items.iter().any(|item| item.kind == "clipboard"),
+                "frame {i} dropped the clipboard reservation: {:?}",
+                items.iter().map(|item| item.kind.as_str()).collect::<Vec<_>>()
+            );
+            assert!(items.len() <= 8, "frame {i} exceeded the request's own limit");
+        }
+        let Response::SearchResults { items, .. } = &frames[1] else { panic!() };
+        assert!(items.iter().any(|item| item.kind == "file"), "the final frame reserves the deferred section a slot too");
+    }
+
     #[test]
     fn a_pure_app_query_still_returns_the_full_limit() {
         let db = Db::open_in_memory().unwrap();
         let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
         let state = test_state(db, apps);
 
-        let response = handle_request(
+        let response = handle_request_for_test(
             &state,
             Request::Search { query: "cons".into(), limit: 8, provider: None },
         );
-        let Response::SearchResults { items } = response else {
+        let Response::SearchResults { items, .. } = response else {
             panic!("expected SearchResults")
         };
         assert_eq!(items.len(), 8);
@@ -419,11 +700,11 @@ mod tests {
         let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
         let state = test_state(db, apps);
 
-        let response = handle_request(
+        let response = handle_request_for_test(
             &state,
             Request::Search { query: "co".into(), limit: 50, provider: Some("clipboard".to_string()) },
         );
-        let Response::SearchResults { items } = response else {
+        let Response::SearchResults { items, .. } = response else {
             panic!("expected SearchResults")
         };
         assert_eq!(items.len(), 1);
@@ -435,7 +716,7 @@ mod tests {
     fn a_provider_scoped_search_with_an_unknown_provider_id_errors() {
         let db = Db::open_in_memory().unwrap();
         let state = test_state(db, Vec::new());
-        let response = handle_request(
+        let response = handle_request_for_test(
             &state,
             Request::Search { query: "x".into(), limit: 8, provider: Some("nonexistent".to_string()) },
         );
@@ -456,11 +737,11 @@ mod tests {
         neko_core::clipboard::record_entry(&db, "older", ClipboardContentKind::Text, None, 100).unwrap();
         neko_core::clipboard::record_entry(&db, "newer", ClipboardContentKind::Text, None, 900).unwrap();
         let state = test_state(db, Vec::new());
-        let response = handle_request(
+        let response = handle_request_for_test(
             &state,
             Request::Search { query: "".into(), limit: 50, provider: Some("clipboard".to_string()) },
         );
-        let Response::SearchResults { items } = response else {
+        let Response::SearchResults { items, .. } = response else {
             panic!("expected SearchResults")
         };
         assert_eq!(items.len(), 2);
@@ -476,7 +757,7 @@ mod tests {
         // the right provider (a real app-not-found error), not a generic
         // "no such provider" failure.
         let response =
-            handle_request(&state, Request::Activate { kind: "app".into(), id: "does-not-exist".into(), action: None });
+            handle_request_for_test(&state, Request::Activate { kind: "app".into(), id: "does-not-exist".into(), action: None });
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
@@ -488,7 +769,7 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         let state = test_state(db, Vec::new());
         let response =
-            handle_request(&state, Request::Activate { kind: "nonexistent".into(), id: "x".into(), action: None });
+            handle_request_for_test(&state, Request::Activate { kind: "nonexistent".into(), id: "x".into(), action: None });
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
@@ -500,7 +781,7 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         neko_core::clipboard::record_entry(&db, "delete me", ClipboardContentKind::Text, None, 100).unwrap();
         let state = test_state(db, Vec::new());
-        let response = handle_request(
+        let response = handle_request_for_test(
             &state,
             Request::Activate { kind: "clipboard".into(), id: "delete me".into(), action: Some("delete".into()) },
         );
@@ -511,7 +792,7 @@ mod tests {
     fn activate_with_an_unknown_action_on_a_known_provider_errors() {
         let db = Db::open_in_memory().unwrap();
         let state = test_state(db, vec![app("Console")]);
-        let response = handle_request(
+        let response = handle_request_for_test(
             &state,
             Request::Activate { kind: "app".into(), id: "Console".into(), action: Some("teleport".into()) },
         );

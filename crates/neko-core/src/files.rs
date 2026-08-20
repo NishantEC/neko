@@ -467,12 +467,16 @@ impl Provider for FileProvider {
         self.search_cancellable(query, now_unix_ms, &Cancel::never())
     }
 
-    /// True once the query is long enough for this provider to actually
-    /// shell out to `mdfind` — below [`MIN_QUERY_LEN`] `search` returns
-    /// instantly with nothing, and there is nothing to defer. See
-    /// [`Provider::defers_for`].
+    /// True only when this provider will actually shell out to `mdfind`
+    /// for `query` — below [`MIN_QUERY_LEN`], or with no scope directory to
+    /// search (`FileProvider::empty`, or a home directory with no
+    /// `Documents`/`Desktop`/`Downloads`), `search` returns instantly with
+    /// nothing and there is nothing worth deferring. Getting this wrong in
+    /// the "yes" direction is not merely wasteful: it would make the daemon
+    /// answer every such query in two frames, the second one identical to
+    /// the first. See [`Provider::defers_for`].
     fn defers_for(&self, query: &str) -> bool {
-        query.trim().chars().count() >= MIN_QUERY_LEN
+        !self.scope_dirs.is_empty() && query.trim().chars().count() >= MIN_QUERY_LEN
     }
 
     fn search_cancellable(&self, query: &str, _now_unix_ms: i64, cancel: &Cancel) -> Vec<Candidate> {
@@ -582,11 +586,18 @@ mod tests {
 
     #[test]
     fn the_file_provider_only_defers_once_the_query_is_long_enough_to_query_spotlight() {
-        let provider = FileProvider::empty();
+        let provider = FileProvider { scope_dirs: vec![PathBuf::from("/tmp")] };
         assert!(!provider.defers_for(""), "an empty query never reaches mdfind");
         assert!(!provider.defers_for("a"), "a single character is below MIN_QUERY_LEN");
         assert!(!provider.defers_for("  a  "), "whitespace does not count toward the minimum");
         assert!(provider.defers_for("do"), "two characters is the point mdfind actually runs");
+    }
+
+    #[test]
+    fn a_provider_with_no_scope_directories_never_defers_however_long_the_query() {
+        // Otherwise the daemon would answer every such query in two frames,
+        // the second one byte-identical to the first.
+        assert!(!FileProvider::empty().defers_for("documents"));
     }
 
     #[test]

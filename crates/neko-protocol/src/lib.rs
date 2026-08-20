@@ -258,13 +258,42 @@ pub enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Response {
     Pong,
-    SearchResults { items: Vec<SearchItem> },
+    /// One search reply. **A single `Request::Search` can be answered by
+    /// more than one of these** — see [`Response::ends_request`] and
+    /// `AGENTS.md`'s "Two-phase search" section.
+    ///
+    /// `complete: false` is a *partial* answer: every provider that could
+    /// respond instantly has, and at least one slower provider
+    /// (`Provider::defers_for`, i.e. file search's `mdfind` round-trip) is
+    /// still running. Render it — that is the whole point, it arrives in
+    /// well under a millisecond where the merged answer can take up to
+    /// `files::QUERY_TIMEOUT` — but expect a second frame for the same
+    /// request id carrying the full, correctly-allocated result set.
+    ///
+    /// `complete: true` is the last frame for this request id, whether it
+    /// followed a partial one or answered the whole request on its own
+    /// (which is what happens whenever no registered provider defers for
+    /// this query — a short query, or a build with no slow provider
+    /// registered at all).
+    SearchResults { items: Vec<SearchItem>, complete: bool },
     Activated,
     Hotkey { config: HotkeyConfig },
     HotkeyConflict { reason: Option<String> },
     OnboardingState { completed: bool, accessibility_banner_dismissed: bool },
     ClipboardHistoryEnabled { enabled: bool },
     Error { message: String },
+}
+
+impl Response {
+    /// Whether this is the final response for its request id. Everything
+    /// except a partial [`Response::SearchResults`] is — this is the one
+    /// place the "a request may be answered more than once" rule is
+    /// written down, so `neko-client`'s reader loop can decide when to
+    /// retire a request's correlation entry without re-deriving the rule
+    /// from the payload shape at each call site.
+    pub fn ends_request(&self) -> bool {
+        !matches!(self, Response::SearchResults { complete: false, .. })
+    }
 }
 
 /// Server-initiated messages, delivered on the same connection as request
@@ -373,6 +402,14 @@ mod tests {
     fn empty_stream_reads_as_clean_eof() {
         let buf: &[u8] = &[];
         assert!(read_frame(buf).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_partial_search_result_does_not_end_its_request_but_everything_else_does() {
+        assert!(!Response::SearchResults { items: Vec::new(), complete: false }.ends_request());
+        assert!(Response::SearchResults { items: Vec::new(), complete: true }.ends_request());
+        assert!(Response::Pong.ends_request());
+        assert!(Response::Error { message: "x".into() }.ends_request());
     }
 
     #[test]
