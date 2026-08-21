@@ -14,7 +14,7 @@ neko-client.workspace = true
 # `wingleeio/zed` fork, pinned by rev (never a branch — see `AGENTS.md`, "The
 # GPUI dependency decision" for the full record of this reversal and its
 # licence consequence). Rev matches exactly what comet pins
-# (`data/helm/refs/comet/Cargo.toml`), so the primitives this migration was
+# (`refs/comet/Cargo.toml`), so the primitives this migration was
 # taken for are known to exist at this exact commit.
 gpui = { git = "https://github.com/wingleeio/zed", rev = "e2ddcc6805f8c5088e62a60dfe517abcccd61a9a" }
 # The mac platform backend is its own crate at this rev — `gpui::Application::new()`

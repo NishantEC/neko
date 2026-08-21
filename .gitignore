@@ -1,1 +1,8 @@
 /target
+
+# The reference clones (see refs/README.md) are five whole third-party
+# repositories checked out for reading, two of them GPL-3.0. They are never
+# committed here — only the README that records what they are and how they
+# may be used.
+/refs/*
+!/refs/README.md

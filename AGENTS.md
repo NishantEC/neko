@@ -207,7 +207,7 @@ built instead of each. A twenty-second task (`neko-gpui-fork-migration`)
 reversed the standing decision that same section's own "Explicitly not
 attempted" line depended on: on direct captain instruction, `crates/neko`
 now depends on the `wingleeio/zed` fork of `gpui` (pinned by rev, same
-commit `data/helm/refs/comet` pins), accepting a real GPL-3.0-or-later
+commit `refs/comet` pins), accepting a real GPL-3.0-or-later
 dependency-chain exposure the captain was shown and explicitly chose to
 accept — "its okay lets do it, i dont care about licence." This makes
 `paint_backdrop_blur`/`BackdropBlur` and `EdgeFade`/`with_edge_fade`
@@ -484,8 +484,8 @@ Normal` window that appears in the Dock, just without that strip.
 `onboarding::view::open_window`'s `WindowOptions` now sets `titlebar:
 Some(TitlebarOptions { title: None, appears_transparent: true,
 traffic_light_position: Some(point(px(14.), px(14.))) })` — frameless inset
-chrome, comet's own convention (`data/helm/refs/comet` in the firstmate
-home). `render_header` is the real chrome now, not content sitting under a
+chrome, comet's own convention (`refs/comet`, this repo's own
+read-only reference clones). `render_header` is the real chrome now, not content sitting under a
 system bar: it reserves `theme::ONBOARDING_TRAFFIC_LIGHT_CLEARANCE_PX` (88px)
 of left padding so the neko glyph/wordmark never collides with the real
 traffic-light cluster — a real, captain-reported defect on the first pass,
@@ -2396,7 +2396,7 @@ edge again with a single-variable test before attributing.
 
 `neko-craft-pass`, working from a read-only design study of `zeronsh/comet`
 (MIT; `data/neko-comet-design/report.md` in the firstmate home, vendored
-comet read at `data/helm/refs/comet`) commissioned specifically to find what
+comet read at `refs/comet`) commissioned specifically to find what
 neko's interaction craft could learn from comet's, on the captain's own
 instruction to "read and write as close as possible" — read for pattern,
 never copied. The report's own load-bearing finding shaped what was
@@ -3334,9 +3334,11 @@ are a separate, audited category** — seventeen built-in themes draw on eight
 upstream projects, every one MIT, each verified from its own source; see
 "Themes" above and `docs/evidence/themes-report.md` §2 for the table and the
 per-palette verification method. No third-party palette *code* is vendored,
-only values re-expressed in `theme.rs`'s own `Spec` form. `data/helm/refs/` (in the firstmate home) holds four
-reference GPUI apps — `comet` (MIT), `waku` (GPL-3.0), `codux` (GPL-3.0),
-`t3code` (MIT) — plus GPUI's own bundled `examples/` (Apache-2.0). All read for
+only values re-expressed in `theme.rs`'s own `Spec` form. `refs/` (this repo's
+own read-only reference clones, gitignored — see `refs/README.md` for the
+licence table and the standing rule) holds five reference GPUI apps — `comet`
+(MIT), `loungy` (MIT), `t3code` (MIT), `waku` (GPL-3.0), `codux` (GPL-3.0) —
+plus GPUI's own bundled `examples/` (Apache-2.0). All read for
 architecture and API shape, never copied. The aim is MIT end to end, plus the
 one attributed Apache-2.0 file — true of every line of *this repo's own
 source*, still. **It does not describe a built, distributed binary as of
@@ -3353,7 +3355,7 @@ you're touching this dependency again.**
 **Current state**: `crates/neko` depends on the `wingleeio/zed` fork of
 `gpui` (plus its own `gpui_platform`), pinned by git rev
 `e2ddcc6805f8c5088e62a60dfe517abcccd61a9a` — the same rev
-`data/helm/refs/comet` pins, chosen specifically so the primitives this
+`refs/comet` pins, chosen specifically so the primitives this
 migration was taken for are known to exist at that exact commit. Pinned by
 rev, never by branch. Full migration record, build-cost numbers, and the
 four-primitive availability confirmation:
@@ -3415,7 +3417,7 @@ functionally-inert GPL code creates a derivative work at all; an
 unreferenced Apache licence file sitting in `ztracing`'s own directory
 next to its GPL manifest declaration; `-or-later` semantics) are legal
 judgment calls, not settled facts, and weren't resolved by the decision
-above — only accepted as a known, live risk. **`data/helm/refs/comet`
+above — only accepted as a known, live risk. **`refs/comet`
 shipping MIT-declared binaries is not precedent for this** — an MIT grant
 on comet's own code doesn't discharge an obligation attaching to a
 distributed *combined* binary, and comet's own maintainer also owns the
