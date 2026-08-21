@@ -182,6 +182,43 @@ mod tests {
     }
 
     #[test]
+    fn the_words_a_person_actually_types_for_themes_all_find_the_themes_command() {
+        // "theme" matches the title "Themes" as a plain subsequence; none of
+        // the others do (`fuzzy_score` is a strict in-order subsequence over
+        // *one* string), so each of these passes only because of an alias.
+        let provider = CommandsProvider::new();
+        for query in ["theme", "themes", "color theme", "colour theme", "appearance"] {
+            let results = provider.search(query, 0);
+            assert!(
+                results.iter().any(|c| c.item.id == "themes"),
+                "query {query:?} must find the Themes command"
+            );
+        }
+    }
+
+    #[test]
+    fn the_themes_command_enters_the_theme_mode_and_carries_its_own_glyph() {
+        let provider = CommandsProvider::new();
+        let results = provider.search("themes", 0);
+        let themes = results.iter().find(|c| c.item.id == "themes").expect("Themes must match");
+        assert_eq!(themes.item.title, "Themes");
+        assert_eq!(themes.item.enters_mode.as_deref(), Some("theme"));
+        assert_eq!(themes.item.badge.as_deref(), Some("COMMAND"));
+        // Its own glyph, not the clipboard command's — the row-icon shape is
+        // per-command data now, which is what a second command proved was
+        // needed.
+        assert_eq!(themes.item.icon, Icon::Glyph(Glyph::Palette));
+    }
+
+    #[test]
+    fn a_clipboard_query_does_not_also_drag_in_the_themes_command() {
+        let provider = CommandsProvider::new();
+        let results = provider.search("clipboard", 0);
+        let ids: Vec<&str> = results.iter().map(|c| c.item.id.as_str()).collect();
+        assert_eq!(ids, vec!["clipboard-history"]);
+    }
+
+    #[test]
     fn an_unrelated_query_does_not_match() {
         let provider = CommandsProvider::new();
         assert_eq!(provider.search("safari", 0).len(), 0);
