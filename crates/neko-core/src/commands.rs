@@ -43,14 +43,36 @@ struct CommandSpec {
     title: &'static str,
     aliases: &'static [&'static str],
     mode: &'static str,
+    /// The row-icon shape — a command's own, not its target provider's, since
+    /// the root list shows this row long before that provider ever runs.
+    glyph: Glyph,
 }
 
-const COMMANDS: &[CommandSpec] = &[CommandSpec {
-    id: "clipboard-history",
-    title: "Clipboard History",
-    aliases: &["Clipboard History", "Clipboard Manager", "Clipboard"],
-    mode: "clipboard",
-}];
+const COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        id: "clipboard-history",
+        title: "Clipboard History",
+        aliases: &["Clipboard History", "Clipboard Manager", "Clipboard"],
+        mode: "clipboard",
+        glyph: Glyph::Clipboard,
+    },
+    // The second command, and the proof this table was worth having: adding
+    // it cost this entry plus one `ModeChrome` in the client, exactly the
+    // accounting `modes.rs`'s own doc comment promised.
+    //
+    // "Theme" (singular) matches the title as a plain subsequence; "themes",
+    // "colours"/"colors" and "appearance" do not, and are what a person
+    // actually types — hence the aliases. Both spellings of "colour" are
+    // listed because `fuzzy_score` is a strict in-order subsequence match, so
+    // the British one does not fall out of the American one for free.
+    CommandSpec {
+        id: "themes",
+        title: "Themes",
+        aliases: &["Themes", "Theme", "Colour Theme", "Color Theme", "Appearance"],
+        mode: "theme",
+        glyph: Glyph::Palette,
+    },
+];
 
 /// The command provider. Holds no state — the command list is a fixed,
 /// compiled-in table (see [`COMMANDS`]), not something scanned or
@@ -95,7 +117,7 @@ impl Provider for CommandsProvider {
                         kind: "command".to_string(),
                         title: cmd.title.to_string(),
                         subtitle: None,
-                        icon: Icon::Glyph(Glyph::Clipboard),
+                        icon: Icon::Glyph(cmd.glyph),
                         section_label: "Commands".to_string(),
                         action_label: "Open  ↵".to_string(),
                         // Uppercase to match the frozen row-badge's own
