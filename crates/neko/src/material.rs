@@ -264,8 +264,54 @@ pub fn disable_native_shadow(window: &Window) -> Result<(), String> {
     macos::disable_native_shadow(window)
 }
 
+/// Put the real `NSWindow` into the appearance the active theme belongs to.
+///
+/// **This is the one part of a theme that a token swap genuinely cannot
+/// do.** Everything GPUI paints is under this app's own control, but the
+/// surface *behind* the panel is not: `install`'s `NSGlassEffectView` (or the
+/// `NSVisualEffectView(.popover)` fallback) samples the desktop and tints it
+/// according to the window's `NSAppearance`. Leave a light theme in
+/// `darkAqua` and the blur reads dark everywhere the cream panel is thin — a
+/// muddy halo around the panel's own translucency, which
+/// `data/neko-cozy-theme/report.md` called out as the specific reason a light
+/// direction "needs real native work" rather than only new token values.
+///
+/// Setting it on the window (rather than on the material view) is deliberate:
+/// appearance inherits down the view tree, so this covers whichever material
+/// actually installed, plus the menu overlay, without either of them having
+/// to be found again or re-installed.
+pub fn set_window_appearance(
+    window: &Window,
+    appearance: crate::theme::Appearance,
+) -> Result<(), String> {
+    macos::set_window_appearance(window, appearance)
+}
+
+/// Reads the live `NSAppearance` name back off the real window — the same
+/// "verified, not trusted" pattern as `verify_installed`/
+/// `verify_shadow_disabled`/`spaces::verify`, and the only way to tell a
+/// `setAppearance:` that took effect from one that silently did not. Logged by
+/// `main.rs` at startup alongside the existing material/shadow/style-mask
+/// readbacks.
+pub fn window_appearance_name(window: &Window) -> Result<String, String> {
+    macos::window_appearance_name(window)
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn disable_native_shadow(_window: &Window) -> Result<(), String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_window_appearance(
+    _window: &Window,
+    _appearance: crate::theme::Appearance,
+) -> Result<(), String> {
+    Err("native window material is only implemented on macOS".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn window_appearance_name(_window: &Window) -> Result<String, String> {
     Err("native window material is only implemented on macOS".to_string())
 }
 
@@ -321,7 +367,7 @@ pub fn first_responder_name(_window: &Window) -> Result<String, String> {
 /// content (the result rows) sitting in front of it in the very same scene.
 /// Wherever the menu overlaps a row that GPUI painted with an opaque fill
 /// (the selected-row highlight is the one real case in this app —
-/// `theme::SURFACE_SELECTED`), the visible result is the menu's own
+/// `theme::active().surface_selected`), the visible result is the menu's own
 /// translucent fill blended with that opaque pixel *within GPUI's own draw
 /// pass* — a translucent tint, not a blur of it. Wherever the menu overlaps
 /// anything GPUI left translucent (true for nearly all of an unselected
@@ -410,6 +456,7 @@ mod macos {
     use objc2::rc::Retained;
     use objc2::runtime::AnyClass;
     use objc2_app_kit::{
+        NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
         NSAutoresizingMaskOptions, NSGlassEffectView, NSGlassEffectViewStyle, NSView, NSWindow,
         NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
         NSVisualEffectView, NSWindowOrderingMode, NSWindowStyleMask,
@@ -853,6 +900,42 @@ mod macos {
     pub fn disable_native_shadow(window: &Window) -> Result<(), String> {
         native_window(window)?.setHasShadow(false);
         Ok(())
+    }
+
+    /// See `super::set_window_appearance`'s doc comment.
+    pub fn set_window_appearance(
+        window: &Window,
+        appearance: crate::theme::Appearance,
+    ) -> Result<(), String> {
+        let native = native_window(window)?;
+        // SAFETY: both names are AppKit's own documented, always-present
+        // appearance constants; `appearanceNamed:` returns `nil` only for a
+        // name that names nothing, which is why the `None` arm below is an
+        // error rather than an unwrap.
+        let name = unsafe {
+            match appearance {
+                crate::theme::Appearance::Light => NSAppearanceNameAqua,
+                crate::theme::Appearance::Dark => NSAppearanceNameDarkAqua,
+            }
+        };
+        let Some(value) = NSAppearance::appearanceNamed(name) else {
+            return Err(format!("AppKit has no appearance named {name:?}"));
+        };
+        native.setAppearance(Some(&value));
+        Ok(())
+    }
+
+    /// See `super::window_appearance_name`'s doc comment.
+    pub fn window_appearance_name(window: &Window) -> Result<String, String> {
+        let native = native_window(window)?;
+        match native.appearance() {
+            Some(a) => Ok(a.name().to_string()),
+            // Never set, or explicitly cleared — the window inherits the
+            // application's own appearance. Reported as such rather than as
+            // an error, since it is a real, valid state (it is what every
+            // build before this one was in).
+            None => Ok("<inherited>".to_string()),
+        }
     }
 
     /// See `super::style_mask_bits`'s doc comment.

@@ -225,6 +225,17 @@ fn main() {
                             Ok(readback) => eprintln!("neko: Spaces/full-screen reachability verified: {readback}"),
                             Err(e) => eprintln!("neko: Spaces/full-screen reachability readback FAILED: {e}"),
                         }
+                        // The window's own `NSAppearance` — whatever the
+                        // material installed above renders in. `Root` keeps
+                        // this in step with the active theme every frame
+                        // (`panel::Root::sync_window_appearance`); this line
+                        // is the launch-time readback of what it actually
+                        // became, same "verified, not trusted" discipline as
+                        // the three readbacks above it.
+                        match material::window_appearance_name(window) {
+                            Ok(name) => eprintln!("neko: window appearance at launch: {name}"),
+                            Err(e) => eprintln!("neko: window appearance readback FAILED: {e}"),
+                        }
                         // No native-backdrop narrowing call here any more —
                         // the panel is now always `PANEL_WIDTH_WITH_DETAIL_PX`
                         // wide too (`AGENTS.md`, "One constant panel width"),
@@ -274,7 +285,14 @@ fn main() {
                                     false
                                 }
                             };
-                        Root::new(client.clone(), accessibility.clone(), translucent, menu_frost, cx)
+                        Root::new(
+                            client.clone(),
+                            accessibility.clone(),
+                            translucent,
+                            menu_frost,
+                            Rc::new(material::set_window_appearance),
+                            cx,
+                        )
                     }
                 },
             )
@@ -324,6 +342,31 @@ fn main() {
             let client = client.clone();
             cx.spawn(async move |cx| evidence::show_once(&client, window, cx).await)
                 .detach();
+        }
+
+        // The persisted theme, fetched in its own task rather than folded
+        // into the hotkey/onboarding sequence below, so it lands as early as
+        // the socket allows. There is no flash to race in practice — this
+        // window is created hidden and is not shown until the first summon,
+        // which is orders of magnitude later than a local socket round-trip
+        // — but a theme applied late enough to be *seen* changing would be
+        // the one bug this whole feature exists to avoid.
+        {
+            let client = client.clone();
+            cx.spawn(async move |cx| {
+                let id = fetch_persisted_theme(&client, cx).await;
+                if theme::set_active(&id) {
+                    cx.update(|cx| {
+                        let _ = window.update(cx, |_root, window, cx| {
+                            window.refresh();
+                            cx.notify();
+                        });
+                    });
+                } else {
+                    eprintln!("neko: daemon reported an unknown theme '{id}' — keeping the default");
+                }
+            })
+            .detach();
         }
 
         cx.spawn(async move |cx| {
@@ -442,6 +485,21 @@ fn main() {
                                 });
                             });
                         }
+                        // Another client (or the onboarding window's own
+                        // connection) committed a theme. Idempotent for the
+                        // client that sent it — it applied the palette itself
+                        // the moment the preview landed on it, long before
+                        // this round-trip.
+                        Event::ThemeChanged { id } => {
+                            if theme::set_active(&id) {
+                                cx.update(|cx| {
+                                    let _ = window.update(cx, |_root, window, cx| {
+                                        window.refresh();
+                                        cx.notify();
+                                    });
+                                });
+                            }
+                        }
                     }
                 }
 
@@ -460,6 +518,22 @@ fn main() {
         })
         .detach();
     });
+}
+
+/// The theme id the daemon has persisted, or the default if it can't be
+/// reached in time. Same brief-retry shape as [`fetch_initial_hotkey`] and for
+/// the same reason: the client and daemon start concurrently, so the socket
+/// may not be listening yet on a first launch, and giving up immediately would
+/// silently render the default palette for a captain who chose another one.
+async fn fetch_persisted_theme(client: &NekoClient, cx: &AsyncApp) -> String {
+    for _ in 0..25 {
+        if let Ok(Response::Theme { id }) = client.request(Request::GetTheme).await {
+            return id;
+        }
+        cx.background_executor().timer(Duration::from_millis(40)).await;
+    }
+    eprintln!("neko: could not reach neko-daemon for the persisted theme in time, using the default");
+    neko_protocol::DEFAULT_THEME_ID.to_string()
 }
 
 async fn fetch_initial_hotkey(client: &NekoClient, cx: &AsyncApp) -> HotkeyConfig {

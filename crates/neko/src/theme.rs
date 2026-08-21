@@ -782,6 +782,20 @@ pub const ONBOARDING_HEADER_BASE_PADDING_PX: f32 = 20.0;
 /// (<https://bottosson.github.io/posts/oklab/>), implemented independently from
 /// the published formulas — not ported from any reference app — to cross-check
 /// this file's own OKLCH-derived specs in a test.
+/// The process-global [`ACTIVE`] index is shared state, so **every** test in
+/// this crate that calls [`set_active`] — here, and in `panel.rs`'s theme-mode
+/// tests — must hold this same lock for its whole body. One lock, not one per
+/// module: `cargo test`'s default parallelism will happily run a `theme.rs`
+/// test and a `panel.rs` test at the same instant, and two separate mutexes
+/// would not stop them stepping on each other's palette. Same discipline
+/// `text_field::tests::pasteboard_test_lock` established for the systemwide
+/// `NSPasteboard` (`AGENTS.md`, "Text field editing shortcuts").
+#[cfg(test)]
+pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(test)]
 // Kept at Ottosson's own published precision (more digits than f32 can hold) so
 // this stays visually cross-referenceable against the source matrices rather
@@ -819,18 +833,6 @@ fn oklch_to_srgb_u8(l: f32, c: f32, h_degrees: f32) -> (u8, u8, u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
-
-    /// [`ACTIVE`] is process-global, so any test that calls [`set_active`] has
-    /// to hold this for its whole body — `cargo test`'s default parallelism
-    /// would otherwise let two such tests interleave a store and a load. Same
-    /// discipline `text_field::tests::pasteboard_test_lock` already established
-    /// for the systemwide `NSPasteboard` (`AGENTS.md`, "Text field editing
-    /// shortcuts").
-    fn theme_test_lock() -> MutexGuard<'static, ()> {
-        static LOCK: Mutex<()> = Mutex::new(());
-        LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
 
     fn rgba_to_u8(rgba: Rgba) -> (u8, u8, u8) {
         (
@@ -955,8 +957,9 @@ mod tests {
     /// before/after contrast numbers for each.
     #[test]
     fn vendored_themes_match_their_pinned_upstream_and_shipped_hex() {
-        // (theme id, [(token, upstream hex, shipped hex)])
-        let table: &[(&str, &[(&str, u32, u32)])] = &[
+        /// `(token name, the hex upstream publishes, the hex neko ships)`.
+        type PinnedToken = (&'static str, u32, u32);
+        let table: &[(&str, &[PinnedToken])] = &[
         ("neutral", &[("surface_panel", 0x0d0d0d, 0x0d0d0d), ("surface_raised", 0x161616, 0x161616), ("surface_input", 0x070707, 0x070707), ("surface_selected", 0x3a3a3a, 0x3a3a3a), ("text_primary", 0xe8e8e8, 0xe8e8e8), ("text_secondary", 0xa9a9a9, 0xa9a9a9), ("text_tertiary", 0x848484, 0x848484), ("text_on_light", 0x0f0f0f, 0x0f0f0f), ("keycap_shell_bg", 0x232323, 0x232323), ("state_success", 0x61bd67, 0x61bd67), ("state_danger", 0xe96e50, 0xe96e50)]),
         ("ember", &[("surface_panel", 0x350915, 0x350915), ("surface_raised", 0x48171e, 0x48171e), ("surface_input", 0x23040d, 0x23040d), ("surface_selected", 0x7b3820, 0x7b3820), ("text_primary", 0xf9eee0, 0xf9eee0), ("text_secondary", 0xcebcaa, 0xcebcaa), ("text_tertiary", 0xab9380, 0xab9380), ("text_on_light", 0x270e06, 0x270e06), ("keycap_shell_bg", 0x501e1c, 0x501e1c), ("state_success", 0x68ca80, 0x68ca80), ("state_danger", 0xf3715a, 0xf3715a)]),
         ("catnap", &[("surface_panel", 0x4b115b, 0x4b115b), ("surface_raised", 0x5f216c, 0x5f216c), ("surface_input", 0x320842, 0x320842), ("surface_selected", 0xa0186f, 0xa0186f), ("text_primary", 0xfff2fd, 0xfff2fd), ("text_secondary", 0xe4c9e1, 0xe4c9e1), ("text_tertiary", 0xc8a4c3, 0xc8a4c3), ("text_on_light", 0x2e0936, 0x2e0936), ("keycap_shell_bg", 0x672970, 0x672970), ("state_success", 0x4bdc9b, 0x4bdc9b), ("state_danger", 0xfe7f78, 0xfe7f78)]),
@@ -1190,7 +1193,7 @@ mod tests {
 
     #[test]
     fn the_default_theme_leads_the_list_and_is_what_a_fresh_process_renders() {
-        let _guard = theme_test_lock();
+        let _guard = test_lock();
         assert_eq!(THEMES[0].id, DEFAULT_THEME_ID);
         // ACTIVE starts at 0 and other tests restore it, so this is the
         // untouched-process state.
@@ -1201,7 +1204,7 @@ mod tests {
 
     #[test]
     fn setting_a_known_theme_swaps_every_token_at_once() {
-        let _guard = theme_test_lock();
+        let _guard = test_lock();
         assert!(set_active("gruvbox-light"));
         assert_eq!(active_theme().id, "gruvbox-light");
         assert_eq!(active_theme().appearance, Appearance::Light);
@@ -1211,7 +1214,7 @@ mod tests {
 
     #[test]
     fn an_unknown_theme_id_changes_nothing_rather_than_blanking_the_palette() {
-        let _guard = theme_test_lock();
+        let _guard = test_lock();
         set_active("catppuccin-mocha");
         assert!(!set_active("no-such-theme"));
         assert_eq!(active_theme().id, "catppuccin-mocha", "a bad persisted id must leave the live palette alone");

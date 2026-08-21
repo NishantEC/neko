@@ -93,7 +93,7 @@ pub struct Root {
     /// summon so it can never outlive the state that produced it.
     activation_error: Option<String>,
     /// Whether `material::install` put a native background view behind the
-    /// window. When `true`, the panel fills with `theme::SURFACE_PANEL_TRANSLUCENT`
+    /// window. When `true`, the panel fills with `theme::active().surface_panel_translucent`
     /// so that material actually shows through; when `false` (the material
     /// install errored — see `main.rs`), it fills fully opaque and grows a
     /// hairline border instead, per the design report's own explicit
@@ -183,7 +183,29 @@ pub struct Root {
     /// `edge_fade::scroll_edge_fade` and `select_next`/`select_previous`'s
     /// own scroll-into-view calls are always looking at the same state.
     mode_scroll: ScrollHandle,
+    /// The appearance last pushed to the real `NSWindow` — see
+    /// [`Root::sync_window_appearance`]. `None` until the first frame, so a
+    /// process that starts on a light theme sets it before anything is ever
+    /// painted rather than one frame late.
+    applied_appearance: Option<theme::Appearance>,
+    /// How this panel reaches AppKit to keep the window's `NSAppearance` in
+    /// step with the active theme — injected rather than called directly, the
+    /// same shape `accessibility` already uses for `AXIsProcessTrusted`.
+    ///
+    /// Two reasons, and the second is not optional: it lets a headless
+    /// `#[gpui::test]` assert *what appearance was asked for* without a real
+    /// window, and GPUI's own test-platform window `unimplemented!()`s
+    /// (panics, rather than returning `Err`) on `window_handle()`, so any
+    /// unconditional native call from `render` would take every panel test
+    /// down with it. Every other native call in this crate lives in
+    /// `main.rs`, which tests never run; this is the first one on the render
+    /// path.
+    appearance_setter: AppearanceSetter,
 }
+
+/// See [`Root::appearance_setter`]. The real one is
+/// `material::set_window_appearance`; tests inject a recorder.
+pub type AppearanceSetter = Rc<dyn Fn(&Window, theme::Appearance) -> Result<(), String>>;
 
 /// The one piece of state a mode transition actually carries, beyond the
 /// static `ModeChrome` — the query the root list had before entering, so
@@ -194,6 +216,21 @@ pub struct Root {
 struct ActiveMode {
     chrome: &'static ModeChrome,
     saved_query: String,
+    /// The theme that was active when this mode was entered, so leaving can
+    /// put it back. **This is what makes live preview safe to be live**: the
+    /// panel really does become each theme as the selection moves, and
+    /// Escape really does undo all of it.
+    ///
+    /// `None` for a mode that does not preview themes at all (clipboard
+    /// history), and `None` again once a theme has been *confirmed* — from
+    /// that moment there is nothing to revert to, because the previewed
+    /// palette is the chosen one.
+    ///
+    /// Deliberately not "every mode records the theme and restores it on
+    /// exit, which is a harmless no-op for modes that never changed it": that
+    /// version turns leaving *any* mode into a global palette write, which is
+    /// a real cross-effect for something that should have none.
+    restore_theme: Option<&'static str>,
 }
 
 /// The `⌘K` actions menu's own state — which row it's for (so a stray
@@ -216,9 +253,10 @@ impl Root {
         accessibility: Rc<dyn AccessibilityChecker>,
         translucent: bool,
         menu_frost: bool,
+        appearance_setter: AppearanceSetter,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::build(client, accessibility, translucent, menu_frost, cx))
+        cx.new(|cx| Self::build(client, accessibility, translucent, menu_frost, appearance_setter, cx))
     }
 
     /// The real construction logic, factored out of [`new`](Self::new) so a
@@ -230,6 +268,7 @@ impl Root {
         accessibility: Rc<dyn AccessibilityChecker>,
         translucent: bool,
         menu_frost: bool,
+        appearance_setter: AppearanceSetter,
         cx: &mut Context<Self>,
     ) -> Self {
         let text_field = TextField::new(cx);
@@ -264,6 +303,8 @@ impl Root {
             partial_generation: None,
             search_dispatched_at: None,
             mode_scroll: ScrollHandle::new(),
+            applied_appearance: None,
+            appearance_setter,
         };
         root.run_search(cx);
         root.fetch_accessibility_banner_state(cx);
@@ -367,7 +408,7 @@ impl Root {
     /// Evidence/verification-only — selects the whole current query
     /// (`TextField::select_all_for_evidence`, the exact logic ⌘A's real
     /// handler uses) so the rendered selection highlight
-    /// (`theme::SURFACE_SELECTED`) shows up in a window-scoped screenshot,
+    /// (`theme::active().surface_selected`) shows up in a window-scoped screenshot,
     /// for `evidence.rs`'s `NEKO_SHOW_SELECTION` hook. Same "no synthetic OS
     /// input" reasoning as `set_query_for_evidence` above.
     pub fn select_query_for_evidence(&mut self, cx: &mut Context<Self>) {
@@ -605,6 +646,30 @@ impl Root {
 
         let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
         self.selected = resolve_selection(previous, &self.results);
+        // Entering the theme mode must not immediately repaint the app in
+        // whatever palette happens to sort first. Land on the one already in
+        // use — which is also where a person expects the highlight to be —
+        // and let arrowing away from it be the first thing that previews
+        // anything.
+        //
+        // Gated on "the row that was highlighted a moment ago was not itself
+        // a theme", which is exactly the *entering* case: `enter_mode` does
+        // not clear `results`, so the first scoped response still sees the
+        // root-list row (the `Themes` command) that was confirmed to get
+        // here. Once the captain is filtering inside the mode the previous
+        // row *is* a theme, `resolve_selection`'s ordinary follow-the-row
+        // rule takes over, and previewing the top match is the point.
+        let entering_the_theme_mode = previous.is_none_or(|(kind, _)| kind != "theme");
+        if entering_the_theme_mode && self.active_mode.as_ref().is_some_and(|m| m.chrome.provider_id == "theme") {
+            let active = theme::active_theme().id;
+            if let Some(index) = self.results.iter().position(|item| item.id == active) {
+                self.selected = index;
+            }
+        }
+        // Typing to filter moves the selection just as arrowing does, so it
+        // previews too — `preview_selected_theme` is a no-op outside the
+        // theme mode and when the selected row is already the live palette.
+        self.preview_selected_theme();
         self.sync_mode_scroll_to_selection();
         self.report_search_latency(complete, generation, cx);
         cx.notify();
@@ -666,6 +731,13 @@ impl Root {
         if !self.results.is_empty() {
             self.selected = (self.selected + 1).min(self.results.len() - 1);
             self.sync_mode_scroll_to_selection();
+            if self.preview_selected_theme() {
+                // A palette swap touches surfaces outside `Root`'s own
+                // subtree (`TextField`'s custom element, the `⌘K` menu's
+                // deferred floating layer), so a plain `cx.notify()` is not
+                // enough on its own.
+                _window.refresh();
+            }
             cx.notify();
         }
     }
@@ -679,6 +751,9 @@ impl Root {
         }
         self.selected = self.selected.saturating_sub(1);
         self.sync_mode_scroll_to_selection();
+        if self.preview_selected_theme() {
+            _window.refresh();
+        }
         cx.notify();
     }
 
@@ -730,6 +805,18 @@ impl Root {
         // whether or not a mode happens to be active — Enter on a
         // clipboard-history row still pastes-and-dismisses, the same as
         // Enter on one in the root list always has.
+        // Confirming a theme is confirming what is *already on screen* — the
+        // preview applied it the moment the selection landed on it. All this
+        // does is stop `exit_mode` from putting the old one back, and let the
+        // daemon persist it. Cleared before the request is sent, not after:
+        // the panel hides on success, and a captain who saw the palette they
+        // picked survive Enter should not see it flicker back if the socket
+        // is slow.
+        if item.kind == "theme"
+            && let Some(mode) = self.active_mode.as_mut()
+        {
+            mode.restore_theme = None;
+        }
         let request = Request::Activate { kind: item.kind, id: item.id, action: None };
         self.perform_activation(request, true, cx);
     }
@@ -804,7 +891,11 @@ impl Root {
             return;
         };
         let saved_query = self.text_field.read(cx).content().to_string();
-        self.active_mode = Some(ActiveMode { chrome, saved_query });
+        self.active_mode = Some(ActiveMode {
+            chrome,
+            saved_query,
+            restore_theme: (chrome.provider_id == "theme").then(|| theme::active_theme().id),
+        });
         self.selected = 0;
         self.mode_scroll.set_offset(point(px(0.), px(0.)));
         self.close_actions_menu(window);
@@ -829,6 +920,13 @@ impl Root {
         let Some(mode) = self.active_mode.take() else {
             return;
         };
+        // Undo whatever the live preview applied. A no-op for a mode that
+        // never previewed (the id is the one already active) and for a theme
+        // that was confirmed (`restore_theme` is cleared by `confirm`).
+        if let Some(previous) = mode.restore_theme {
+            self.apply_theme(previous);
+            window.refresh();
+        }
         self.close_actions_menu(window);
         self.selected = 0;
         self.mode_scroll.set_offset(point(px(0.), px(0.)));
@@ -844,6 +942,80 @@ impl Root {
     /// (`OpenActionsMenu`) and the footer trigger's own click handler
     /// (`handle_actions_menu_trigger_click`, below) share one real
     /// implementation.
+    /// Make `id` the live palette. Returns whether anything changed.
+    ///
+    /// Deliberately window-free and repaint-free: every call site already
+    /// ends in a `cx.notify()` or a `window.refresh()` of its own, and the
+    /// one genuinely native part of a theme swap — the window's
+    /// `NSAppearance`, which the material behind the panel renders in — is
+    /// reconciled once per frame in [`Root::render`] via
+    /// [`Root::sync_window_appearance`] instead of at each call site. That
+    /// keeps a preview, a commit, a daemon `ThemeChanged` broadcast and the
+    /// startup read from needing four copies of the same two-step.
+    ///
+    /// A `false` return means `id` names no built-in — an id from a newer
+    /// build, or a corrupted persisted setting. The live palette is left
+    /// exactly as it was; a cosmetic setting is not worth interrupting
+    /// anyone over.
+    fn apply_theme(&self, id: &str) -> bool {
+        theme::set_active(id)
+    }
+
+    /// Keeps the real `NSWindow`'s appearance in step with the active
+    /// theme's, and does so *once per change*, not once per frame: the
+    /// comparison is one enum compare against [`Root::applied_appearance`],
+    /// and the AppKit call only happens when they differ.
+    ///
+    /// This matters because the panel is translucent over a native material
+    /// (`material.rs` — `NSGlassEffectView`, or the
+    /// `NSVisualEffectView(.popover)` fallback), and that material renders in
+    /// whatever appearance the window is in. A cream Latte panel over a
+    /// dark-appearance blur reads as a cream card with a dark halo leaking
+    /// through everywhere the fill is thin — which is exactly what
+    /// `data/neko-cozy-theme/report.md` predicted for a light direction, and
+    /// the one thing a token swap alone cannot fix.
+    fn sync_window_appearance(&mut self, window: &Window) {
+        let wanted = theme::active_theme().appearance;
+        if self.applied_appearance == Some(wanted) {
+            return;
+        }
+        match (self.appearance_setter)(window, wanted) {
+            Ok(()) => self.applied_appearance = Some(wanted),
+            Err(e) => {
+                // Recorded as applied anyway: retrying a failing AppKit call
+                // on every subsequent frame would turn one logged failure
+                // into an unbounded log flood on the render path.
+                eprintln!("neko: could not set the window appearance: {e}");
+                self.applied_appearance = Some(wanted);
+            }
+        }
+    }
+
+    /// Live preview: while the theme mode is active, moving the selection
+    /// *is* trying the theme on. Reading a palette's name tells you nothing;
+    /// watching the panel become it tells you everything.
+    ///
+    /// Gated on the active mode's own provider id rather than on the row's
+    /// `kind`, so an ordinary root-list search that happens to surface a
+    /// theme row never repaints the whole app as the captain arrows past it
+    /// — previewing is something the theme *mode* does, not something a
+    /// theme *row* does.
+    ///
+    /// Returns whether the palette actually changed, so callers that need a
+    /// full-window repaint (rather than the `cx.notify()` they were already
+    /// doing) can ask for one.
+    fn preview_selected_theme(&self) -> bool {
+        let Some(mode) = &self.active_mode else { return false };
+        if mode.chrome.provider_id != "theme" {
+            return false;
+        }
+        let Some(item) = self.results.get(self.selected) else { return false };
+        if item.id == theme::active_theme().id {
+            return false;
+        }
+        self.apply_theme(&item.id)
+    }
+
     fn open_actions_menu(&mut self, _: &OpenActionsMenu, _window: &mut Window, cx: &mut Context<Self>) {
         self.open_actions_menu_for_selected_row(cx);
     }
@@ -1015,7 +1187,11 @@ impl Focusable for Root {
 }
 
 impl Render for Root {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Reconciled here rather than at each theme-change call site — one
+        // enum compare per frame, one AppKit call per actual change. See
+        // this method's own doc comment.
+        self.sync_window_appearance(window);
         let query_is_empty = self.text_field.read(cx).content().is_empty();
         div()
             .key_context("Panel")
@@ -1036,12 +1212,12 @@ impl Render for Root {
             .w(px(theme::PANEL_WIDTH_WITH_DETAIL_PX))
             .h(px(PANEL_HEIGHT_PX))
             .bg(if self.translucent {
-                theme::SURFACE_PANEL_TRANSLUCENT
+                theme::active().surface_panel_translucent
             } else {
-                theme::SURFACE_PANEL
+                theme::active().surface_panel
             })
             .when(!self.translucent, |el| {
-                el.border_1().border_color(theme::BORDER_HAIRLINE_STRONG)
+                el.border_1().border_color(theme::active().border_hairline_strong)
             })
             .rounded(px(theme::PANEL_RADIUS_PX))
             // **Deliberately no drawn shadow here — this used to be
@@ -1077,7 +1253,7 @@ impl Root {
             .h(px(theme::INPUT_ROW_HEIGHT_PX))
             .px_5()
             .gap_3()
-            .text_color(theme::TEXT_PRIMARY)
+            .text_color(theme::active().text_primary)
             .text_size(px(18.))
             .child(match &self.active_mode {
                 // The back affordance the launch brief asks for: "a back
@@ -1097,7 +1273,7 @@ impl Root {
             .child(
                 div()
                     .text_size(px(12.))
-                    .text_color(theme::TEXT_TERTIARY)
+                    .text_color(theme::active().text_tertiary)
                     .child("esc"),
             )
     }
@@ -1119,7 +1295,7 @@ impl Root {
             return None;
         }
         let reduced = motion::system_reduce_motion();
-        let tell = div().text_size(px(11.)).text_color(theme::TEXT_TERTIARY).child("Searching…");
+        let tell = div().text_size(px(11.)).text_color(theme::active().text_tertiary).child("Searching…");
         Some(motion::fade_in("searching-tell-fade", reduced, tell))
     }
 
@@ -1196,13 +1372,13 @@ impl Root {
             .py_2()
             .mb_1()
             .rounded(px(theme::ROW_RADIUS_PX))
-            .bg(theme::BANNER_DANGER_BG)
+            .bg(theme::active().banner_danger_bg)
             .child(
                 div()
                     .flex_1()
                     .text_size(px(12.5))
                     .line_height(px(18.))
-                    .text_color(theme::TEXT_SECONDARY)
+                    .text_color(theme::active().text_secondary)
                     .child("⌥Space is off. Accessibility access was skipped, so the hotkey won't open neko. Reopen neko from the Dock to search anytime."),
             )
             .child(
@@ -1210,9 +1386,9 @@ impl Root {
                     .id("banner-open-settings")
                     .flex_shrink_0()
                     .text_size(px(12.))
-                    .text_color(theme::TEXT_SECONDARY)
+                    .text_color(theme::active().text_secondary)
                     .cursor(CursorStyle::PointingHand)
-                    .hover(|s| s.text_color(theme::TEXT_PRIMARY))
+                    .hover(|s| s.text_color(theme::active().text_primary))
                     .on_click(cx.listener(Self::open_accessibility_settings))
                     .child("Open System Settings"),
             )
@@ -1221,9 +1397,9 @@ impl Root {
                     .id("banner-dismiss")
                     .flex_shrink_0()
                     .text_size(px(12.))
-                    .text_color(theme::TEXT_TERTIARY)
+                    .text_color(theme::active().text_tertiary)
                     .cursor(CursorStyle::PointingHand)
-                    .hover(|s| s.text_color(theme::TEXT_PRIMARY))
+                    .hover(|s| s.text_color(theme::active().text_primary))
                     .on_click(cx.listener(Self::dismiss_accessibility_banner))
                     .child("Dismiss"),
             )
@@ -1245,13 +1421,13 @@ impl Root {
             .py_2()
             .mb_1()
             .rounded(px(theme::ROW_RADIUS_PX))
-            .bg(theme::BANNER_DANGER_BG)
+            .bg(theme::active().banner_danger_bg)
             .child(
                 div()
                     .flex_1()
                     .text_size(px(12.5))
                     .line_height(px(18.))
-                    .text_color(theme::TEXT_SECONDARY)
+                    .text_color(theme::active().text_secondary)
                     .child("Can't reach neko-daemon. Results may be out of date."),
             )
     }
@@ -1273,11 +1449,11 @@ impl Root {
     /// (`render_mode_detail`).
     fn render_row(&self, idx: usize, item: &SearchItem, compact: bool) -> impl IntoElement {
         let selected = idx == self.selected;
-        let title_color = theme::TEXT_PRIMARY;
+        let title_color = theme::active().text_primary;
         let subtitle_color = if selected {
-            theme::TEXT_TERTIARY_ON_SELECTED
+            theme::active().text_tertiary_on_selected
         } else {
-            theme::TEXT_TERTIARY
+            theme::active().text_tertiary
         };
 
         // What fills the icon slot is entirely provider data now (`item.icon`)
@@ -1292,7 +1468,7 @@ impl Root {
                 .w(px(theme::ROW_ICON_PX))
                 .h(px(theme::ROW_ICON_PX))
                 .rounded(px(theme::ROW_ICON_RADIUS_PX))
-                .bg(theme::ROW_ICON_SOCKET_BG)
+                .bg(theme::active().row_icon_socket_bg)
                 .into_any_element(),
             Icon::Glyph(glyph) => glyph_element(*glyph),
             // An icon the daemon hasn't finished extracting yet (a fresh
@@ -1312,7 +1488,7 @@ impl Root {
             .px_3()
             .gap_3()
             .when(selected, |row| {
-                row.bg(theme::SURFACE_SELECTED).rounded(px(theme::ROW_RADIUS_PX))
+                row.bg(theme::active().surface_selected).rounded(px(theme::ROW_RADIUS_PX))
             })
             .child(icon)
             .child(
@@ -1343,9 +1519,9 @@ impl Root {
                     .px(px(6.))
                     .py(px(2.))
                     .rounded(px(4.))
-                    .bg(theme::ROW_ICON_SOCKET_BG)
+                    .bg(theme::active().row_icon_socket_bg)
                     .text_size(px(10.))
-                    .text_color(theme::TEXT_TERTIARY)
+                    .text_color(theme::active().text_tertiary)
                     .child(SharedString::from(badge))
             }))
             .children(item.accessory.clone().filter(|_| !compact).map(|accessory| {
@@ -1366,7 +1542,7 @@ impl Root {
             .h(px(theme::FOOTER_HEIGHT_PX))
             .px_5()
             .border_t_1()
-            .border_color(theme::BORDER_HAIRLINE);
+            .border_color(theme::active().border_hairline);
 
         // An activation failure takes over the footer's own fixed strip
         // instead of opening a new toast surface — same geometry, same
@@ -1381,7 +1557,7 @@ impl Root {
                     .items_center()
                     .gap_2()
                     .text_size(px(12.))
-                    .text_color(theme::STATE_DANGER)
+                    .text_color(theme::active().state_danger)
                     .child(format!("Couldn't open — {message}")),
             );
         }
@@ -1410,7 +1586,7 @@ impl Root {
                     .items_center()
                     .gap_2()
                     .text_size(px(12.))
-                    .text_color(theme::TEXT_TERTIARY)
+                    .text_color(theme::active().text_tertiary)
                     .children(left_label),
             )
             .child(
@@ -1419,9 +1595,9 @@ impl Root {
                     .items_center()
                     .gap_3()
                     .text_size(px(12.))
-                    .text_color(theme::TEXT_SECONDARY)
+                    .text_color(theme::active().text_secondary)
                     .child(primary_action)
-                    .child(div().w(px(1.)).h(px(16.)).bg(theme::BORDER_HAIRLINE_STRONG))
+                    .child(div().w(px(1.)).h(px(16.)).bg(theme::active().border_hairline_strong))
                     .child(self.render_actions_trigger(cx)),
             )
     }
@@ -1460,7 +1636,7 @@ impl Root {
             .flex_1()
             .min_h(px(0.))
             .overflow_hidden()
-            .child(self.render_mode_list())
+            .child(self.render_mode_list(mode.chrome.has_detail))
             .when(mode.chrome.has_detail, |el| el.child(self.render_mode_detail()));
         // A one-shot opacity reveal on entry, not a width/geometry
         // transition — the real `NSWindow` still never resizes at runtime
@@ -1498,16 +1674,31 @@ impl Root {
     /// didn't fit. `edge_fade::scroll_edge_fade` wraps the scrollable
     /// container so the fade only ever shows where there's real overflow to
     /// scroll to — see that module's own doc comment.
-    fn render_mode_list(&self) -> impl IntoElement {
+    ///
+    /// **`has_detail` decides the column, not just the neighbour.** With a
+    /// detail pane the list is the frozen 264px column with a hairline down
+    /// its right edge, and its rows are `compact` (no subtitle, no accessory
+    /// — there is no room, and the detail pane says it better; see
+    /// `AGENTS.md`, "Mode-view row anatomy"). Without one there is no
+    /// neighbour to divide from and no reason to leave 496px empty, so the
+    /// list takes the full panel and its rows render in full. Same rows, same
+    /// renderer, same geometry tokens — only which of them apply.
+    fn render_mode_list(&self, has_detail: bool) -> impl IntoElement {
         let mut container = div()
             .flex()
             .flex_col()
-            .flex_shrink_0()
-            .w(px(theme::MODE_LIST_COLUMN_WIDTH_PX))
             .h_full()
             .px_2()
-            .border_r_1()
-            .border_color(theme::BORDER_HAIRLINE)
+            .map(|el| {
+                if has_detail {
+                    el.flex_shrink_0()
+                        .w(px(theme::MODE_LIST_COLUMN_WIDTH_PX))
+                        .border_r_1()
+                        .border_color(theme::active().border_hairline)
+                } else {
+                    el.flex_1().min_w(px(0.))
+                }
+            })
             // `image_cache` is a `Div`-only method (not on the `Stateful<Div>`
             // `.id(...)` below produces), so it has to come first.
             .image_cache(self.row_icon_cache.clone())
@@ -1526,11 +1717,11 @@ impl Root {
                     }
                     current_group = Some(&item.group_label);
                 }
-                container = container.child(self.render_row(idx, item, true));
+                container = container.child(self.render_row(idx, item, has_detail));
             }
         }
 
-        let fade_color = if self.translucent { theme::SURFACE_PANEL_TRANSLUCENT } else { theme::SURFACE_PANEL };
+        let fade_color = if self.translucent { theme::active().surface_panel_translucent } else { theme::active().surface_panel };
         scroll_edge_fade(self.mode_scroll.clone(), fade_color.into(), theme::EDGE_FADE_BAND_PX, container)
     }
 
@@ -1557,7 +1748,7 @@ impl Root {
             return col.child(
                 div()
                     .text_size(px(12.5))
-                    .text_color(theme::TEXT_TERTIARY)
+                    .text_color(theme::active().text_tertiary)
                     .child("Select an entry to preview it."),
             );
         };
@@ -1568,11 +1759,11 @@ impl Root {
             .overflow_hidden()
             .p_3()
             .rounded(px(theme::ROW_RADIUS_PX))
-            .bg(theme::SURFACE_INPUT)
+            .bg(theme::active().surface_input)
             .border_1()
-            .border_color(theme::BORDER_HAIRLINE)
+            .border_color(theme::active().border_hairline)
             .text_size(px(13.))
-            .text_color(theme::TEXT_PRIMARY)
+            .text_color(theme::active().text_primary)
             .child(SharedString::from(item.id.clone()));
 
         let mut info = div().flex().flex_col().gap_2();
@@ -1645,10 +1836,10 @@ impl Root {
             // installed (`Root::menu_frost`) — otherwise the original
             // fully-opaque fill, the same honest-fallback shape
             // `Render::render`'s own panel background already uses for
-            // `translucent`. See `theme::MENU_GLASS_TINT`'s own doc comment.
-            .bg(if self.menu_frost { theme::MENU_GLASS_TINT } else { theme::SURFACE_RAISED })
+            // `translucent`. See `theme::active().menu_glass_tint`'s own doc comment.
+            .bg(if self.menu_frost { theme::active().menu_glass_tint } else { theme::active().surface_raised })
             .border_1()
-            .border_color(theme::BORDER_HAIRLINE_STRONG)
+            .border_color(theme::active().border_hairline_strong)
             .shadow_lg()
             .children(menu.actions.iter().enumerate().map(|(idx, action)| {
                 let selected = idx == menu.selected;
@@ -1658,7 +1849,7 @@ impl Root {
                 } else {
                     action.label.clone().into()
                 };
-                let color = if action.destructive { theme::STATE_DANGER } else { theme::TEXT_PRIMARY };
+                let color = if action.destructive { theme::active().state_danger } else { theme::active().text_primary };
                 div()
                     .id(("actions-menu-row", idx))
                     .flex()
@@ -1666,7 +1857,7 @@ impl Root {
                     .h(px(30.))
                     .px_2()
                     .rounded(px(theme::ROW_RADIUS_PX))
-                    .when(selected, |el| el.bg(theme::SURFACE_SELECTED))
+                    .when(selected, |el| el.bg(theme::active().surface_selected))
                     .text_size(px(12.5))
                     .text_color(color)
                     .child(label)
@@ -1936,7 +2127,7 @@ fn render_empty_state_message(message: impl Into<SharedString>) -> impl IntoElem
         .h(px(theme::RESULT_ROW_HEIGHT_PX))
         .px_3()
         .text_size(px(13.))
-        .text_color(theme::TEXT_TERTIARY)
+        .text_color(theme::active().text_tertiary)
         .child(message.into())
 }
 
@@ -1948,7 +2139,7 @@ fn section_header(label: impl Into<SharedString>) -> impl IntoElement {
         .items_center()
         .px_3()
         .text_size(px(11.))
-        .text_color(theme::TEXT_TERTIARY)
+        .text_color(theme::active().text_tertiary)
         .child(label.into())
 }
 
@@ -1966,7 +2157,7 @@ fn app_icon_placeholder_glyph() -> AnyElement {
         .h(px(theme::ROW_ICON_PX))
         .flex_shrink_0()
         .rounded(px(theme::ROW_ICON_RADIUS_PX))
-        .bg(theme::ROW_ICON_SOCKET_BG)
+        .bg(theme::active().row_icon_socket_bg)
         .flex()
         .items_center()
         .justify_center()
@@ -1976,7 +2167,7 @@ fn app_icon_placeholder_glyph() -> AnyElement {
                 .h(px(10.))
                 .rounded(px(3.))
                 .border_2()
-                .border_color(theme::TEXT_TERTIARY),
+                .border_color(theme::active().text_tertiary),
         )
         .into_any_element()
 }
@@ -2000,10 +2191,38 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
             .items_center()
             .justify_center()
             .gap(px(2.))
-            .child(div().w(px(12.)).h(px(1.5)).rounded(px(1.)).bg(theme::TEXT_TERTIARY))
-            .child(div().w(px(9.)).h(px(1.5)).rounded(px(1.)).bg(theme::TEXT_TERTIARY))
-            .child(div().w(px(12.)).h(px(1.5)).rounded(px(1.)).bg(theme::TEXT_TERTIARY))
+            .child(div().w(px(12.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary))
+            .child(div().w(px(9.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary))
+            .child(div().w(px(12.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary))
             .into_any_element(),
+        // Four filled swatches in a 2x2 block, painted in the *live* theme's
+        // own colours — the one glyph in this vocabulary that changes with
+        // the active theme, deliberately: it is the affordance for changing
+        // that theme, so it should show what is currently on.
+        Glyph::Palette => {
+            let swatch = |color| div().w(px(8.)).h(px(8.)).rounded(px(2.)).bg(color);
+            let t = theme::active();
+            slot.flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(2.))
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(2.))
+                        .child(swatch(t.text_secondary))
+                        .child(swatch(t.state_success)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(2.))
+                        .child(swatch(t.state_danger))
+                        .child(swatch(t.surface_selected)),
+                )
+                .into_any_element()
+        }
         // Two overlapping rounded-square rings on a diagonal — a chain-link
         // mark.
         Glyph::Link => slot
@@ -2017,7 +2236,7 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
                     .h(px(11.))
                     .rounded(px(3.))
                     .border_2()
-                    .border_color(theme::TEXT_TERTIARY),
+                    .border_color(theme::active().text_tertiary),
             )
             .child(
                 div()
@@ -2028,7 +2247,7 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
                     .h(px(11.))
                     .rounded(px(3.))
                     .border_2()
-                    .border_color(theme::TEXT_TERTIARY),
+                    .border_color(theme::active().text_tertiary),
             )
             .into_any_element(),
         // A plain document outline (a portrait rounded-rect, border only —
@@ -2050,8 +2269,8 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
                     .h(px(15.))
                     .rounded(px(1.))
                     .border_2()
-                    .border_color(theme::TEXT_TERTIARY)
-                    .child(div().w(px(6.)).h(px(1.5)).rounded(px(1.)).bg(theme::TEXT_TERTIARY)),
+                    .border_color(theme::active().text_tertiary)
+                    .child(div().w(px(6.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary)),
             )
             .into_any_element(),
         // A folder shape: a wide rounded rectangle with a small tab along
@@ -2073,7 +2292,7 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
                             .w(px(6.))
                             .h(px(2.))
                             .rounded_t(px(1.))
-                            .bg(theme::TEXT_TERTIARY),
+                            .bg(theme::active().text_tertiary),
                     )
                     .child(
                         div()
@@ -2084,7 +2303,7 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
                             .h(px(10.))
                             .rounded(px(2.))
                             .border_2()
-                            .border_color(theme::TEXT_TERTIARY),
+                            .border_color(theme::active().text_tertiary),
                     ),
             )
             .into_any_element(),
@@ -2111,7 +2330,7 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
                             .w(px(7.))
                             .h(px(3.))
                             .rounded(px(1.))
-                            .bg(theme::TEXT_TERTIARY),
+                            .bg(theme::active().text_tertiary),
                     )
                     .child(
                         div()
@@ -2122,7 +2341,7 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
                             .h(px(14.5))
                             .rounded(px(2.))
                             .border_2()
-                            .border_color(theme::TEXT_TERTIARY),
+                            .border_color(theme::active().text_tertiary),
                     ),
             )
             .into_any_element(),
@@ -2140,7 +2359,7 @@ fn search_glyph() -> impl IntoElement {
         .h(px(14.))
         .rounded_full()
         .border_2()
-        .border_color(theme::TEXT_TERTIARY)
+        .border_color(theme::active().text_tertiary)
 }
 
 /// The mode input row's back affordance — "a back arrow in place of the
@@ -2164,7 +2383,7 @@ fn back_glyph() -> impl IntoElement {
             builder.line_to(pt(6.0, 10.0));
             builder.line_to(pt(12.0, 16.0));
             if let Ok(path) = builder.build() {
-                window.paint_path(path, theme::TEXT_TERTIARY);
+                window.paint_path(path, theme::active().text_tertiary);
             }
         },
     )
@@ -2182,8 +2401,8 @@ fn detail_info_row(label: &str, value: String) -> impl IntoElement {
         .justify_between()
         .gap_3()
         .text_size(px(12.))
-        .child(div().flex_shrink_0().text_color(theme::TEXT_TERTIARY).child(SharedString::from(label.to_string())))
-        .child(div().overflow_hidden().truncate().text_color(theme::TEXT_SECONDARY).child(SharedString::from(value)))
+        .child(div().flex_shrink_0().text_color(theme::active().text_tertiary).child(SharedString::from(label.to_string())))
+        .child(div().overflow_hidden().truncate().text_color(theme::active().text_secondary).child(SharedString::from(value)))
 }
 
 /// Translates a row badge's already-uppercase wire value (`"TEXT"`,
@@ -2543,12 +2762,225 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         )));
         let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
-        cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, cx))
+        cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, no_appearance_setter(), cx))
+    }
+
+    /// A headless stand-in for `material::set_window_appearance` — GPUI's own
+    /// test-platform window panics on `window_handle()`, so no test can make a
+    /// real one. Records nothing; `recording_appearance_setter` is the variant
+    /// for tests that need to assert what was asked for.
+    fn no_appearance_setter() -> AppearanceSetter {
+        Rc::new(|_window, _appearance| Ok(()))
+    }
+
+    type AppearanceLog = Rc<std::cell::RefCell<Vec<theme::Appearance>>>;
+
+    fn recording_appearance_setter() -> (AppearanceSetter, AppearanceLog) {
+        let log: AppearanceLog = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = log.clone();
+        (Rc::new(move |_window, appearance| { sink.borrow_mut().push(appearance); Ok(()) }), log)
+    }
+
+    fn test_root_recording_appearance(cx: &mut TestAppContext) -> (gpui::WindowHandle<Root>, AppearanceLog) {
+        let (client, _events) = NekoClient::connect(std::path::PathBuf::from(format!(
+            "/tmp/neko-panel-test-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        )));
+        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        let (setter, log) = recording_appearance_setter();
+        let window = cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, setter, cx));
+        (window, log)
     }
 
     /// A command row's `id`, `kind: "command"` — everything else is
     /// deliberately minimal, since only `enters_mode` and `action_label`
     /// matter to `confirm`'s own routing.
+    fn theme_item(id: &str) -> SearchItem {
+        SearchItem {
+            id: id.into(),
+            kind: "theme".into(),
+            title: id.into(),
+            subtitle: None,
+            icon: neko_protocol::Icon::Glyph(Glyph::Palette),
+            section_label: "Themes".into(),
+            action_label: "Use Theme  ↵".into(),
+            badge: None,
+            accessory: None,
+            enters_mode: None,
+            group_label: None,
+            actions: Vec::new(),
+            source: None,
+        }
+    }
+
+    /// Puts the panel into the theme mode with `items` listed, as if the
+    /// daemon's scoped search had answered.
+    fn enter_theme_mode(
+        window: &gpui::WindowHandle<Root>,
+        cx: &mut TestAppContext,
+        items: Vec<SearchItem>,
+    ) {
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![command_item("theme")];
+                root.selected = 0;
+                root.confirm(&Confirm, window, cx);
+                root.apply_search_results(items, true, root.generation, cx);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn entering_the_theme_mode_lands_on_the_theme_already_in_use_and_changes_nothing(cx: &mut TestAppContext) {
+        let _guard = theme::test_lock();
+        theme::set_active("gruvbox-dark");
+        let window = test_root(cx);
+        enter_theme_mode(
+            &window,
+            cx,
+            vec![theme_item("neutral"), theme_item("dracula"), theme_item("gruvbox-dark")],
+        );
+        window
+            .update(cx, |root, _window, _cx| {
+                assert_eq!(root.selected, 2, "the highlight must start on the theme in use, not on whatever sorts first");
+                assert_eq!(
+                    theme::active_theme().id,
+                    "gruvbox-dark",
+                    "merely opening the theme list must not repaint the app in another palette"
+                );
+            })
+            .unwrap();
+        theme::set_active(theme::DEFAULT_THEME_ID);
+    }
+
+    #[gpui::test]
+    fn arrowing_through_the_theme_list_previews_each_one_live(cx: &mut TestAppContext) {
+        let _guard = theme::test_lock();
+        theme::set_active("neutral");
+        let window = test_root(cx);
+        enter_theme_mode(&window, cx, vec![theme_item("neutral"), theme_item("catppuccin-latte")]);
+        window
+            .update(cx, |root, window, cx| {
+                assert_eq!(theme::active_theme().id, "neutral");
+                root.select_next(&SelectNext, window, cx);
+                assert_eq!(theme::active_theme().id, "catppuccin-latte", "moving the selection must apply the palette, not just highlight its name");
+                root.select_previous(&SelectPrevious, window, cx);
+                assert_eq!(theme::active_theme().id, "neutral", "arrowing back must come back too");
+            })
+            .unwrap();
+        theme::set_active(theme::DEFAULT_THEME_ID);
+    }
+
+    #[gpui::test]
+    fn escaping_the_theme_mode_reverts_every_previewed_change(cx: &mut TestAppContext) {
+        let _guard = theme::test_lock();
+        theme::set_active("nord");
+        let window = test_root(cx);
+        enter_theme_mode(&window, cx, vec![theme_item("nord"), theme_item("solarized-light"), theme_item("ember")]);
+        window
+            .update(cx, |root, window, cx| {
+                root.select_next(&SelectNext, window, cx);
+                root.select_next(&SelectNext, window, cx);
+                assert_eq!(theme::active_theme().id, "ember");
+                root.handle_dismiss(&crate::DismissWindow, window, cx);
+                assert!(root.active_mode.is_none());
+                assert_eq!(theme::active_theme().id, "nord", "Escape must put back the theme that was in use before the mode opened");
+            })
+            .unwrap();
+        theme::set_active(theme::DEFAULT_THEME_ID);
+    }
+
+    #[gpui::test]
+    fn confirming_a_theme_keeps_it_and_a_later_mode_exit_does_not_undo_it(cx: &mut TestAppContext) {
+        let _guard = theme::test_lock();
+        theme::set_active("neutral");
+        let window = test_root(cx);
+        enter_theme_mode(&window, cx, vec![theme_item("neutral"), theme_item("rose-pine")]);
+        window
+            .update(cx, |root, window, cx| {
+                root.select_next(&SelectNext, window, cx);
+                assert_eq!(theme::active_theme().id, "rose-pine");
+                // Enter. The daemon socket in these tests has nobody
+                // listening, so the `Request::Activate` this fires can never
+                // succeed — which is exactly the case worth pinning: the
+                // captain's choice must survive even when persistence fails,
+                // rather than snapping back.
+                root.confirm(&Confirm, window, cx);
+                root.exit_mode(window, cx);
+                assert_eq!(theme::active_theme().id, "rose-pine", "a confirmed theme must not be reverted by leaving the mode afterwards");
+            })
+            .unwrap();
+        theme::set_active(theme::DEFAULT_THEME_ID);
+    }
+
+    #[gpui::test]
+    fn filtering_the_theme_list_previews_the_top_match(cx: &mut TestAppContext) {
+        let _guard = theme::test_lock();
+        theme::set_active("neutral");
+        let window = test_root(cx);
+        enter_theme_mode(&window, cx, vec![theme_item("neutral"), theme_item("dracula")]);
+        window
+            .update(cx, |root, _window, cx| {
+                // What a keystroke's scoped search response looks like: a
+                // narrowed list with no previously-selected row surviving.
+                root.selected = 0;
+                root.results.clear();
+                root.apply_search_results(vec![theme_item("dracula")], true, root.generation, cx);
+                assert_eq!(theme::active_theme().id, "dracula", "typing to filter moves the selection, so it previews too");
+            })
+            .unwrap();
+        theme::set_active(theme::DEFAULT_THEME_ID);
+    }
+
+    #[gpui::test]
+    fn a_theme_row_in_the_root_list_never_previews_as_you_arrow_past_it(cx: &mut TestAppContext) {
+        let _guard = theme::test_lock();
+        theme::set_active("neutral");
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                // No mode active — an ordinary root-list search that happens
+                // to surface theme rows.
+                root.results = vec![item("app"), theme_item("dracula")];
+                root.selected = 0;
+                root.select_next(&SelectNext, window, cx);
+                assert_eq!(root.selected, 1);
+                assert_eq!(theme::active_theme().id, "neutral", "previewing belongs to the theme mode, not to a theme row");
+            })
+            .unwrap();
+        theme::set_active(theme::DEFAULT_THEME_ID);
+    }
+
+    #[gpui::test]
+    fn a_light_theme_puts_the_window_into_the_light_appearance_and_a_dark_one_takes_it_back(cx: &mut TestAppContext) {
+        let _guard = theme::test_lock();
+        theme::set_active("neutral");
+        let (window, log) = test_root_recording_appearance(cx);
+        // `render` calls this on every frame; driving it directly is the
+        // same call without needing a real draw (GPUI's test window cannot
+        // paint one).
+        window.update(cx, |root, window, _cx| root.sync_window_appearance(window)).unwrap();
+        assert_eq!(log.borrow().last(), Some(&theme::Appearance::Dark));
+
+        theme::set_active("catppuccin-latte");
+        window.update(cx, |root, window, _cx| root.sync_window_appearance(window)).unwrap();
+        assert_eq!(
+            log.borrow().last(),
+            Some(&theme::Appearance::Light),
+            "a light palette over a dark-appearance blur reads as a dark halo — the native appearance has to follow"
+        );
+
+        let before = log.borrow().len();
+        window.update(cx, |root, window, _cx| root.sync_window_appearance(window)).unwrap();
+        assert_eq!(log.borrow().len(), before, "an unchanged appearance must not make an AppKit call every frame");
+
+        theme::set_active("gruvbox-dark");
+        window.update(cx, |root, window, _cx| root.sync_window_appearance(window)).unwrap();
+        assert_eq!(log.borrow().last(), Some(&theme::Appearance::Dark));
+        theme::set_active(theme::DEFAULT_THEME_ID);
+    }
+
     fn command_item(mode: &str) -> SearchItem {
         SearchItem { enters_mode: Some(mode.to_string()), ..item_with_id("command", "clipboard-history") }
     }

@@ -79,13 +79,33 @@ pub struct ModeChrome {
     pub has_detail: bool,
 }
 
-pub const MODES: &[ModeChrome] = &[ModeChrome {
-    id: "clipboard",
-    provider_id: "clipboard",
-    title: "Clipboard History",
-    placeholder: "Type to filter entries…",
-    has_detail: true,
-}];
+pub const MODES: &[ModeChrome] = &[
+    ModeChrome {
+        id: "clipboard",
+        provider_id: "clipboard",
+        title: "Clipboard History",
+        placeholder: "Type to filter entries…",
+        has_detail: true,
+    },
+    // The second mode, and the one that proved the accounting above: it cost
+    // this entry, one `CommandSpec` in `neko_core::commands`, and one
+    // `Provider` — no change at all to `enter_mode`/`exit_mode`,
+    // `run_search`'s scoping branch, or the wire protocol.
+    //
+    // `has_detail: false` is a real design choice, not a shortcut. A detail
+    // pane would show a theme's *description* next to its name; the panel
+    // itself already shows the theme, live, in full, as you arrow — which is
+    // strictly more informative than any pane could be. A second column here
+    // would take 496px away from the very surface the captain is trying to
+    // look at.
+    ModeChrome {
+        id: "theme",
+        provider_id: "theme",
+        title: "Themes",
+        placeholder: "Type to filter themes…",
+        has_detail: false,
+    },
+];
 
 /// Looks up a mode's chrome by id — `None` for an id that doesn't name a
 /// real mode (a stale/corrupted `enters_mode` value; `panel::Root::confirm`
@@ -104,6 +124,30 @@ mod tests {
         assert_eq!(chrome.provider_id, "clipboard");
         assert_eq!(chrome.title, "Clipboard History");
         assert!(chrome.has_detail);
+    }
+
+    #[test]
+    fn the_theme_mode_is_registered_scopes_to_the_theme_provider_and_has_no_detail_pane() {
+        let chrome = chrome_for("theme").expect("the theme mode must be registered");
+        assert_eq!(chrome.provider_id, "theme");
+        assert_eq!(chrome.title, "Themes");
+        assert!(
+            !chrome.has_detail,
+            "the theme mode's preview is the whole panel; a detail column would cover it"
+        );
+    }
+
+    #[test]
+    fn every_mode_id_is_unique_and_names_a_real_provider_scope() {
+        let mut ids: Vec<&str> = MODES.iter().map(|m| m.id).collect();
+        ids.sort_unstable();
+        let before = ids.len();
+        ids.dedup();
+        assert_eq!(before, ids.len(), "duplicate mode id");
+        for m in MODES {
+            assert!(!m.provider_id.is_empty());
+            assert!(!m.placeholder.is_empty());
+        }
     }
 
     #[test]
