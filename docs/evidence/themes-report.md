@@ -228,6 +228,27 @@ It is set on the *window*, not on the material view, so appearance inherits down
 to whichever material actually installed **and** to the `⌘K` menu overlay,
 without either having to be found again.
 
+**Confirmed live, by native readback rather than by inference.**
+`evidence.rs` now prints `neko: window appearance <name>` at show and at
+capture, beside the existing key-window readback, so a themed capture is
+self-evidencing about this too:
+
+```
+== gruvbox-dark      neko: window appearance NSAppearanceNameDarkAqua (at capture)
+== nord              neko: window appearance NSAppearanceNameDarkAqua (at capture)
+== catppuccin-latte  neko: window appearance NSAppearanceNameAqua     (at capture)
+== solarized-light   neko: window appearance NSAppearanceNameAqua     (at capture)
+```
+
+Those same logs also show `<inherited>` at launch and `NSAppearanceNameDarkAqua`
+at "after show" even for the light themes — **the appearance is applied on the
+first frame after the theme is, not synchronously with it.** That is the cost of
+reconciling in `render` rather than at each of the four theme-change call sites,
+and it is the right trade: one frame (~8 ms on this window) of a light panel over
+a dark blur during a preview is imperceptible, and the alternative scatters a
+native call across four sites, two of which have no `&Window` to make it with.
+Stated here rather than left to be discovered.
+
 **Every built-in keeps its translucency** (panel alpha 0.82–0.90); none of the
 seventeen goes opaque and discards the material.
 `theme::tests::every_theme_keeps_the_native_material_visible` asserts it. The
