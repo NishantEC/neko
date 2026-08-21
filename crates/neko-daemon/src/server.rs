@@ -61,6 +61,12 @@ impl AppState {
             // — see `commands.rs`'s own doc comment), so it's exactly as
             // hermetic and fast in a test as in the real daemon.
             Box::new(neko_core::commands::CommandsProvider::new()),
+            // Sixth provider. Registered last on purpose: `search::allocate`
+            // orders sections by content strength, and registration order is
+            // only the tie-break, so a theme row never leads the root list
+            // unless a query genuinely names one. Its own mode is where it
+            // does the work.
+            Box::new(neko_core::themes::ThemesProvider::new(db.clone())),
         ];
         Self {
             db,
@@ -324,7 +330,17 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
                     Some(action_id) => provider.perform_action(&id, &action_id),
                 };
                 match result {
-                    Ok(()) => Response::Activated,
+                    Ok(()) => {
+                        // The committing client already applied this palette
+                        // itself (live preview happens before the round-trip),
+                        // so this exists for *other* connected clients — and,
+                        // in this process, for the separate onboarding window
+                        // if one is open. Harmlessly idempotent for the sender.
+                        if kind == "theme" {
+                            broadcast(state, &Event::ThemeChanged { id: id.clone() });
+                        }
+                        Response::Activated
+                    }
                     Err(e) => Response::Error {
                         message: e.to_string(),
                     },
@@ -385,6 +401,14 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             let db = state.db.lock().unwrap();
             match neko_core::onboarding::dismiss_accessibility_banner(&db) {
                 Ok(s) => onboarding_response(s),
+                Err(e) => error_response(e),
+            }
+        }
+
+        Request::GetTheme => {
+            let db = state.db.lock().unwrap();
+            match neko_core::themes::get_theme(&db) {
+                Ok(id) => Response::Theme { id },
                 Err(e) => error_response(e),
             }
         }

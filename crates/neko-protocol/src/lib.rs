@@ -68,6 +68,57 @@ pub struct HotkeyConfig {
     pub updated_at_unix_ms: i64,
 }
 
+/// One selectable built-in theme, as the daemon advertises it. **Names and
+/// ids only** — the actual colour values live in the `neko` app crate
+/// (`theme.rs`), because a palette is a client-side rendering concern the
+/// daemon has no use for and this crate must stay inert (serde types only, no
+/// `gpui`, no `Rgba`).
+///
+/// The two halves are pinned together by `theme::tests::themes_match_the_protocol_registry`
+/// in the client, so a theme added on one side and not the other fails a test
+/// rather than shipping as a row that cannot be selected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuiltinTheme {
+    pub id: &'static str,
+    pub name: &'static str,
+    /// One short line under the name in the `Themes` mode's list, e.g.
+    /// `"Dark · Catppuccin · translucent"`.
+    pub description: &'static str,
+}
+
+/// Every theme neko ships, in list order. This is a compiled-in table, not
+/// something scanned or persisted: "what themes exist" is a build-time fact
+/// (there is no user-supplied-palette loading, and no extension host yet — see
+/// `AGENTS.md`'s "Seams for follow-up work").
+pub const BUILTIN_THEMES: &[BuiltinTheme] = &[
+    BuiltinTheme { id: "neutral", name: "Neko Neutral", description: "Dark · neutral grey · translucent" },
+    BuiltinTheme { id: "ember", name: "Ember", description: "Dark · aubergine to rust · translucent" },
+    BuiltinTheme { id: "catnap", name: "Catnap", description: "Dark · violet and magenta · translucent" },
+    BuiltinTheme { id: "catppuccin-mocha", name: "Catppuccin Mocha", description: "Dark · Catppuccin · translucent" },
+    BuiltinTheme { id: "catppuccin-macchiato", name: "Catppuccin Macchiato", description: "Dark · Catppuccin · translucent" },
+    BuiltinTheme { id: "catppuccin-frappe", name: "Catppuccin Frappé", description: "Dark · Catppuccin · translucent" },
+    BuiltinTheme { id: "catppuccin-latte", name: "Catppuccin Latte", description: "Light · Catppuccin · translucent" },
+    BuiltinTheme { id: "gruvbox-dark", name: "Gruvbox Dark", description: "Dark · Gruvbox · translucent" },
+    BuiltinTheme { id: "gruvbox-light", name: "Gruvbox Light", description: "Light · Gruvbox · translucent" },
+    BuiltinTheme { id: "solarized-dark", name: "Solarized Dark", description: "Dark · Solarized · translucent" },
+    BuiltinTheme { id: "solarized-light", name: "Solarized Light", description: "Light · Solarized · translucent" },
+    BuiltinTheme { id: "nord", name: "Nord", description: "Dark · Nord · translucent" },
+    BuiltinTheme { id: "tokyo-night", name: "Tokyo Night", description: "Dark · Tokyo Night Storm · translucent" },
+    BuiltinTheme { id: "rose-pine", name: "Rosé Pine", description: "Dark · Rosé Pine · translucent" },
+    BuiltinTheme { id: "rose-pine-dawn", name: "Rosé Pine Dawn", description: "Light · Rosé Pine Dawn · translucent" },
+    BuiltinTheme { id: "dracula", name: "Dracula", description: "Dark · Dracula · translucent" },
+    BuiltinTheme { id: "everforest-dark", name: "Everforest Dark", description: "Dark · Everforest · translucent" },
+];
+
+/// The theme a fresh install renders, and the fallback for a persisted id that
+/// names no built-in. Deliberately the palette neko already shipped: upgrading
+/// must not change how anybody's app looks without them asking.
+pub const DEFAULT_THEME_ID: &str = "neutral";
+
+pub fn builtin_theme(id: &str) -> Option<&'static BuiltinTheme> {{
+    BUILTIN_THEMES.iter().find(|t| t.id == id)
+}}
+
 /// A row's icon slot content. Closed by design, unlike `SearchItem::kind`
 /// below — this is a bounded set of things the client actually knows how to
 /// paint (a cached raster, or one of a handful of hand-drawn glyphs), not an
@@ -111,6 +162,12 @@ pub enum Glyph {
     /// `data/neko-design/report.md`'s mockup 12 uses for the mode's own
     /// input-row glyph, reused here for the root-list row that leads to it.
     Clipboard,
+    /// Four filled swatches in a 2×2 block, painted in the *live* theme's own
+    /// panel/selected/success/danger colours — a theme row and the `Themes`
+    /// command both use it. The one glyph in this vocabulary whose appearance
+    /// changes with the active theme, deliberately: it is the affordance for
+    /// changing that theme.
+    Palette,
 }
 
 /// One named secondary action a row's `⌘K` actions menu can offer, beyond
@@ -253,6 +310,15 @@ pub enum Request {
     /// history watcher reads before it starts watching `NSPasteboard`.
     GetClipboardHistoryEnabled,
     SetClipboardHistoryEnabled { enabled: bool },
+    /// The persisted theme id (see [`BUILTIN_THEMES`]). The client asks once at
+    /// startup, before its first frame, so the very first summon already
+    /// renders in the chosen palette rather than flashing the default.
+    ///
+    /// There is deliberately no `SetTheme` counterpart: committing a theme goes
+    /// through the ordinary `Request::Activate { kind: "theme", id }` path like
+    /// every other provider's result, so the `Themes` mode needed no
+    /// theme-specific write request at all.
+    GetTheme,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,6 +347,7 @@ pub enum Response {
     HotkeyConflict { reason: Option<String> },
     OnboardingState { completed: bool, accessibility_banner_dismissed: bool },
     ClipboardHistoryEnabled { enabled: bool },
+    Theme { id: String },
     Error { message: String },
 }
 
@@ -314,6 +381,10 @@ pub enum Event {
     /// re-run a search (typing, or a fresh summon), which is not
     /// guaranteed to happen soon, or at all, in the same process lifetime.
     IconsUpdated,
+    /// A client committed a theme. Broadcast so every *other* connected client
+    /// repaints too — the committing one has already applied it locally (live
+    /// preview means it was applied before the round-trip even started).
+    ThemeChanged { id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -18,6 +18,7 @@ pub mod onboarding;
 pub mod provider;
 pub mod search;
 pub mod settings;
+pub mod themes;
 
 pub use apps::AppEntry;
 pub use cancel::Cancel;
