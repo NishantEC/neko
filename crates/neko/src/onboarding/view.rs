@@ -435,8 +435,8 @@ impl Render for OnboardingRoot {
             .flex()
             .flex_col()
             .size_full()
-            .bg(theme::SURFACE_PANEL)
-            .text_color(theme::TEXT_PRIMARY)
+            .bg(theme::active().surface_panel)
+            .text_color(theme::active().text_primary)
             .child(self.render_header(window, cx))
             .child(self.render_content(cx))
             .child(self.render_footer(cx))
@@ -468,7 +468,7 @@ impl OnboardingRoot {
             .pr(px(theme::ONBOARDING_HEADER_BASE_PADDING_PX))
             .gap_3()
             .border_b_1()
-            .border_color(theme::BORDER_HAIRLINE)
+            .border_color(theme::active().border_hairline)
             .on_mouse_down_out(cx.listener(|this, _, _, _| this.header_drag_armed = false))
             .on_mouse_up(
                 gpui::MouseButton::Left,
@@ -490,7 +490,7 @@ impl OnboardingRoot {
                     window.titlebar_double_click();
                 }
             })
-            .child(crate::components::glyphs::neko_wordmark_glyph(px(18.), theme::TEXT_PRIMARY))
+            .child(crate::components::glyphs::neko_wordmark_glyph(px(18.), theme::active().text_primary))
             .child(
                 div()
                     .text_size(px(15.))
@@ -580,7 +580,7 @@ impl OnboardingRoot {
                 .into_any_element(),
             div()
                 .text_size(px(12.5))
-                .text_color(theme::TEXT_TERTIARY)
+                .text_color(theme::active().text_tertiary)
                 .max_w(px(460.))
                 .child("macOS will show its own window for this next. Deny it there and neko still runs — just not from the hotkey.")
                 .into_any_element(),
@@ -757,7 +757,7 @@ impl OnboardingRoot {
             .h(px(theme::FOOTER_HEIGHT_PX))
             .px_5()
             .border_t_1()
-            .border_color(theme::BORDER_HAIRLINE)
+            .border_color(theme::active().border_hairline)
             .child(
                 div()
                     .flex()
@@ -766,22 +766,22 @@ impl OnboardingRoot {
                     .child(
                         div()
                             .text_size(px(11.))
-                            .text_color(theme::TEXT_TERTIARY)
+                            .text_color(theme::active().text_tertiary)
                             .child(format!("Setup · {phase} of 4")),
                     )
                     .child(
                         div()
                             .text_size(px(11.))
-                            .text_color(theme::BORDER_HAIRLINE_STRONG)
+                            .text_color(theme::active().border_hairline_strong)
                             .child("·"),
                     )
                     .child(
                         div()
                             .id("onboarding-skip")
                             .text_size(px(11.))
-                            .text_color(theme::TEXT_TERTIARY)
+                            .text_color(theme::active().text_tertiary)
                             .cursor(CursorStyle::PointingHand)
-                            .hover(|s| s.text_color(theme::TEXT_SECONDARY))
+                            .hover(|s| s.text_color(theme::active().text_secondary))
                             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                 this.skip_onboarding(window, cx)
                             }))
@@ -794,18 +794,18 @@ impl OnboardingRoot {
                     .items_center()
                     .gap_2()
                     .text_size(px(12.5))
-                    .text_color(if show_kbd { theme::TEXT_SECONDARY } else { theme::TEXT_TERTIARY })
+                    .text_color(if show_kbd { theme::active().text_secondary } else { theme::active().text_tertiary })
                     .child(label)
                     .when(show_kbd, |row| {
                         row.child(
                             div()
                                 .text_size(px(11.))
-                                .text_color(theme::TEXT_SECONDARY)
+                                .text_color(theme::active().text_secondary)
                                 .px_1p5()
                                 .py_0p5()
                                 .rounded(px(theme::CHIP_RADIUS_PX))
                                 .border_1()
-                                .border_color(theme::BORDER_HAIRLINE_STRONG)
+                                .border_color(theme::active().border_hairline_strong)
                                 .child("↵"),
                         )
                     }),
@@ -816,7 +816,7 @@ impl OnboardingRoot {
 fn eyebrow(label: &'static str) -> impl IntoElement {
     div()
         .text_size(px(11.))
-        .text_color(theme::TEXT_TERTIARY)
+        .text_color(theme::active().text_tertiary)
         .child(label)
 }
 
@@ -824,7 +824,7 @@ fn title(label: &'static str) -> impl IntoElement {
     div()
         .text_size(px(26.))
         .font_weight(gpui::FontWeight::NORMAL)
-        .text_color(theme::TEXT_PRIMARY)
+        .text_color(theme::active().text_primary)
         .child(label)
 }
 
@@ -836,11 +836,11 @@ fn title_with_glyph(rest: &'static str) -> impl IntoElement {
         .flex()
         .items_center()
         .gap_1()
-        .child(opt_glyph(px(22.), theme::TEXT_PRIMARY))
+        .child(opt_glyph(px(22.), theme::active().text_primary))
         .child(
             div()
                 .text_size(px(26.))
-                .text_color(theme::TEXT_PRIMARY)
+                .text_color(theme::active().text_primary)
                 .child(rest),
         )
 }
@@ -849,7 +849,7 @@ fn body(text: &'static str) -> impl IntoElement {
     div()
         .text_size(px(14.))
         .line_height(px(21.7))
-        .text_color(theme::TEXT_SECONDARY)
+        .text_color(theme::active().text_secondary)
         .max_w(px(460.))
         .child(text)
 }
@@ -862,14 +862,14 @@ fn permission_row(title: &'static str, description: &'static str) -> impl IntoEl
         .p_3()
         .rounded(px(theme::ROW_RADIUS_PX))
         .border_1()
-        .border_color(theme::BORDER_HAIRLINE)
+        .border_color(theme::active().border_hairline)
         .child(
             div()
                 .w(px(30.))
                 .h(px(30.))
                 .flex_shrink_0()
                 .rounded(px(6.))
-                .bg(theme::ROW_ICON_SOCKET_BG),
+                .bg(theme::active().row_icon_socket_bg),
         )
         .child(
             div()
@@ -881,14 +881,14 @@ fn permission_row(title: &'static str, description: &'static str) -> impl IntoEl
                     div()
                         .text_size(px(12.5))
                         .line_height(px(18.))
-                        .text_color(theme::TEXT_TERTIARY)
+                        .text_color(theme::active().text_tertiary)
                         .child(description),
                 ),
         )
 }
 
 fn icon_badge() -> impl IntoElement {
-    div().w(px(44.)).h(px(44.)).rounded(px(10.)).bg(theme::ROW_ICON_SOCKET_BG)
+    div().w(px(44.)).h(px(44.)).rounded(px(10.)).bg(theme::active().row_icon_socket_bg)
 }
 
 enum PillTone {
@@ -899,9 +899,9 @@ enum PillTone {
 
 fn status_pill(label: impl Into<SharedString>, tone: PillTone) -> impl IntoElement {
     let (dot_color, border_color) = match tone {
-        PillTone::Pending => (theme::TEXT_TERTIARY, theme::BORDER_HAIRLINE_STRONG),
-        PillTone::Success => (theme::STATE_SUCCESS, theme::STATE_SUCCESS_BORDER),
-        PillTone::Danger => (theme::STATE_DANGER, theme::STATE_DANGER_BORDER),
+        PillTone::Pending => (theme::active().text_tertiary, theme::active().border_hairline_strong),
+        PillTone::Success => (theme::active().state_success, theme::active().state_success_border),
+        PillTone::Danger => (theme::active().state_danger, theme::active().state_danger_border),
     };
     div()
         .flex()
@@ -916,7 +916,7 @@ fn status_pill(label: impl Into<SharedString>, tone: PillTone) -> impl IntoEleme
         .child(
             div()
                 .text_size(px(11.))
-                .text_color(theme::TEXT_SECONDARY)
+                .text_color(theme::active().text_secondary)
                 .child(label.into()),
         )
 }
@@ -927,14 +927,14 @@ fn keycap_shell() -> gpui::Div {
         .h(px(52.))
         .px_3p5()
         .rounded(px(12.))
-        .bg(theme::KEYCAP_SHELL_BG)
+        .bg(theme::active().keycap_shell_bg)
         .border_1()
-        .border_color(theme::BORDER_HAIRLINE_STRONG)
+        .border_color(theme::active().border_hairline_strong)
         .flex()
         .items_center()
         .justify_center()
         .text_size(px(20.))
-        .text_color(theme::TEXT_PRIMARY)
+        .text_color(theme::active().text_primary)
 }
 
 fn keycap(label: impl Into<SharedString>) -> impl IntoElement {
@@ -942,7 +942,7 @@ fn keycap(label: impl Into<SharedString>) -> impl IntoElement {
 }
 
 fn keycap_opt() -> impl IntoElement {
-    keycap_shell().child(opt_glyph(px(18.), theme::TEXT_PRIMARY))
+    keycap_shell().child(opt_glyph(px(18.), theme::active().text_primary))
 }
 
 fn keycap_row(combo: &HotkeyCombo) -> impl IntoElement {
@@ -954,7 +954,7 @@ fn keycap_row(combo: &HotkeyCombo) -> impl IntoElement {
             ProtoModifier::Ctrl => row.child(keycap("⌃")),
             ProtoModifier::Shift => row.child(keycap("⇧")),
         };
-        row = row.child(div().text_size(px(16.)).text_color(theme::TEXT_TERTIARY).child("+"));
+        row = row.child(div().text_size(px(16.)).text_color(theme::active().text_tertiary).child("+"));
     }
     row.child(keycap(combo.key.clone()))
 }
@@ -969,7 +969,7 @@ fn primary_button(
         .h(px(34.))
         .px_4()
         .rounded(px(theme::BTN_RADIUS_PX))
-        .bg(theme::TEXT_PRIMARY)
+        .bg(theme::active().text_primary)
         .flex()
         .items_center()
         .justify_center()
@@ -980,7 +980,7 @@ fn primary_button(
             div()
                 .text_size(px(13.))
                 .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(theme::TEXT_ON_LIGHT)
+                .text_color(theme::active().text_on_light)
                 .child(label.into()),
         )
 }
@@ -993,11 +993,11 @@ fn link_button(
     div()
         .id(id)
         .text_size(px(13.))
-        .text_color(theme::TEXT_TERTIARY)
+        .text_color(theme::active().text_tertiary)
         .border_b_1()
-        .border_color(theme::BORDER_HAIRLINE_STRONG)
+        .border_color(theme::active().border_hairline_strong)
         .cursor(CursorStyle::PointingHand)
-        .hover(|s| s.text_color(theme::TEXT_PRIMARY))
+        .hover(|s| s.text_color(theme::active().text_primary))
         .on_click(on_click)
         .child(label.into())
 }
@@ -1006,11 +1006,11 @@ fn progress_dots(phase: u8) -> impl IntoElement {
     let mut row = div().flex().gap_1p5().mb_1();
     for step in 1..=4u8 {
         let color = if step < phase {
-            theme::TEXT_TERTIARY
+            theme::active().text_tertiary
         } else if step == phase {
-            theme::TEXT_PRIMARY
+            theme::active().text_primary
         } else {
-            theme::BORDER_HAIRLINE_STRONG
+            theme::active().border_hairline_strong
         };
         row = row.child(div().w(px(14.)).h(px(3.)).rounded(px(2.)).bg(color));
     }

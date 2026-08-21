@@ -641,7 +641,7 @@ impl gpui::Element for TextFieldElement {
         let field = self.field.read(cx);
         let text_style = window.text_style();
         let (display_text, color) = if field.content.is_empty() {
-            (field.placeholder.clone(), theme::TEXT_TERTIARY.into())
+            (field.placeholder.clone(), theme::active().text_tertiary.into())
         } else {
             (field.content.clone().into(), text_style.color)
         };
@@ -661,7 +661,7 @@ impl gpui::Element for TextFieldElement {
         // Painted behind the text (see `paint` below: selection first, then
         // the shaped line on top) so selected characters stay legible rather
         // than being covered by an opaque highlight — the same reason
-        // `panel.rs`'s row-selection highlight (`theme::SURFACE_SELECTED`,
+        // `panel.rs`'s row-selection highlight (`theme::active().surface_selected`,
         // reused here rather than inventing a new token) sits behind its
         // row's own content, not above it.
         let selection = field.selection_range().map(|range| {
@@ -672,7 +672,7 @@ impl gpui::Element for TextFieldElement {
                     point(start_x, bounds.top()),
                     gpui::size(end_x - start_x, bounds.bottom() - bounds.top()),
                 ),
-                theme::SURFACE_SELECTED,
+                theme::active().surface_selected,
             )
         });
 
@@ -686,7 +686,7 @@ impl gpui::Element for TextFieldElement {
                     point(x, bounds.top()),
                     gpui::size(px(2.), bounds.bottom() - bounds.top()),
                 ),
-                theme::TEXT_PRIMARY,
+                theme::active().text_primary,
             ))
         } else {
             None

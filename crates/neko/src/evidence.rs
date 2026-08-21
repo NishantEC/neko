@@ -169,7 +169,7 @@
 //!   exact logic ⌘A's real handler uses — `TextField::select_all_for_evidence`)
 //!   before the window-number "now capture" line prints — for the search
 //!   field's own text-selection/clipboard task: a rendered
-//!   `theme::SURFACE_SELECTED` highlight needs a real active selection, and
+//!   `theme::active().surface_selected` highlight needs a real active selection, and
 //!   this repo's standing rule is no synthetic OS input (no synthetic
 //!   keystrokes, no `System Events`) to produce one. Applied after
 //!   `NEKO_SHOW_CONFIRM`'s own mode-entry sequence (if any) has settled, on
