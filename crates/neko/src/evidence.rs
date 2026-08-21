@@ -311,6 +311,20 @@ pub fn evidence_run_active() -> bool {
 /// <bool>`. Printed at every point that matters so a capture is
 /// self-evidencing about focus (this module's own safety rule), and shouts
 /// if a run that never opted into activation somehow ended up key anyway.
+/// Reads the live `NSAppearance` name back off the window and prints it —
+/// `neko: window appearance <name> (<at>)`. Printed next to the key-window
+/// readback so a themed capture is self-evidencing about the one part of a
+/// theme that is not painted by this app: a light palette has to put the
+/// window into `NSAppearanceNameAqua`, or the native material behind the
+/// translucent panel keeps rendering dark. Same "verified, not trusted"
+/// pattern as `verify_installed`/`verify_shadow_disabled`/`spaces::verify`.
+fn report_window_appearance(window: &Window, at: &str) {
+    match material::window_appearance_name(window) {
+        Ok(name) => eprintln!("neko: window appearance {name} ({at})"),
+        Err(e) => eprintln!("neko: window appearance readback FAILED ({at}): {e}"),
+    }
+}
+
 fn report_key_window(window: &Window, at: &str) {
     match material::is_key_window(window) {
         Ok(is_key) => {
@@ -579,7 +593,10 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         }
     });
     cx.update(|cx| {
-        let _ = window.update(cx, |_root, window, _cx| report_key_window(window, "after show"));
+        let _ = window.update(cx, |_root, window, _cx| {
+            report_key_window(window, "after show");
+            report_window_appearance(window, "after show");
+        });
     });
     if query.is_some() {
         // `set_query_for_evidence` re-runs search the same way a real
@@ -706,6 +723,7 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             // key" is a live native readback taken at capture time, not an
             // assertion made somewhere else in this function.
             report_key_window(window, "at capture");
+            report_window_appearance(window, "at capture");
             // Points, top-left origin, `-R<x,y,w,h>`-ready — lets an
             // outside script capture *exactly* this window's own on-screen
             // rect (`screencapture -R`) rather than the whole display, the
