@@ -1470,7 +1470,7 @@ impl Root {
                 .rounded(px(theme::ROW_ICON_RADIUS_PX))
                 .bg(theme::active().row_icon_socket_bg)
                 .into_any_element(),
-            Icon::Glyph(glyph) => glyph_element(*glyph),
+            Icon::Glyph(glyph) => glyph_element(*glyph, &item.id),
             // An icon the daemon hasn't finished extracting yet (a fresh
             // install, or right after a daemon restart — see
             // `Event::IconsUpdated`'s doc comment) — a neutral glyph in the
@@ -2180,7 +2180,16 @@ fn app_icon_placeholder_glyph() -> AnyElement {
 /// search icon). `Text`/`Link` predate this task (clipboard rows have no
 /// per-entry icon); `File`/`Folder` are this task's own addition for file
 /// search results that haven't gotten a real icon.
-fn glyph_element(glyph: Glyph) -> AnyElement {
+/// `row_id` is the row's own `SearchItem::id`. Only `Glyph::Palette` reads it
+/// — a theme row draws *its own* palette, so a list of themes is a list of
+/// previews rather than seventeen copies of the same mark. That is a lookup
+/// keyed on data already on the row, not a `match` on which provider produced
+/// it: any row whose id happens to name a built-in theme gets that theme's
+/// swatch, and any row whose id doesn't (the `Themes` command in the root
+/// list, whose id is `"themes"`) falls back to the live palette, which is the
+/// honest thing for a row that means "open the theme list" rather than "be
+/// this theme".
+fn glyph_element(glyph: Glyph, row_id: &str) -> AnyElement {
     let slot = div().w(px(theme::ROW_ICON_PX)).h(px(theme::ROW_ICON_PX)).flex_shrink_0();
     match glyph {
         // Three stacked bars of decreasing width — a plain "lines of text"
@@ -2201,18 +2210,22 @@ fn glyph_element(glyph: Glyph) -> AnyElement {
         // that theme, so it should show what is currently on.
         Glyph::Palette => {
             let swatch = |color| div().w(px(8.)).h(px(8.)).rounded(px(2.)).bg(color);
-            let t = theme::active();
+            // The row's own palette when it names one; the live one otherwise.
+            let t = theme::theme_by_id(row_id).map_or_else(theme::active, |t| &t.palette);
             slot.flex()
                 .flex_col()
                 .items_center()
                 .justify_center()
                 .gap(px(2.))
+                // The four tokens that actually identify a palette at 8px:
+                // what the panel is, what a selected row is, what text is,
+                // and its one state colour.
                 .child(
                     div()
                         .flex()
                         .gap(px(2.))
-                        .child(swatch(t.text_secondary))
-                        .child(swatch(t.state_success)),
+                        .child(swatch(t.surface_panel))
+                        .child(swatch(t.text_primary)),
                 )
                 .child(
                     div()
