@@ -49,7 +49,7 @@ hard-coded constant.
 **The menu's own GPUI fill** switches from opaque `SURFACE_RAISED` to a
 translucent `theme::MENU_GLASS_TINT` (`SURFACE_RAISED`'s RGB at 0.62 alpha
 — calibrated against comet's own reference tint, `oklch(0.33 0 0 / 34%)`,
-read from `data/helm/refs/comet/crates/ui/src/theme.rs` for inspiration
+read from `refs/comet/crates/ui/src/theme.rs` for inspiration
 only, scaled up since this app has no true blur behind that tint to share
 the contrast duty) whenever the overlay installed (`Root::menu_frost`).
 Falls back to the original fully-opaque fill whenever it didn't — either

@@ -11,7 +11,7 @@ what was decided and why) and the source decision documents:
 `crates/neko/Cargo.toml`'s `gpui` dependency moved from the published
 `gpui = "0.2.2"` crate to a git dependency on `https://github.com/wingleeio/zed`,
 pinned by rev `e2ddcc6805f8c5088e62a60dfe517abcccd61a9a` — the same rev comet
-pins (`data/helm/refs/comet/Cargo.toml`), on the captain's own explicit
+pins (`refs/comet/Cargo.toml`), on the captain's own explicit
 instruction ("exactly what comet uses, so the primitives are known to exist
 at that revision"). A new direct dependency, `gpui_platform` (same rev, same
 features comet takes: `wayland`, `x11`, `font-kit`, `runtime_shaders`), was
