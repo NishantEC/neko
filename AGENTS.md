@@ -5,6 +5,30 @@ in Rust on [GPUI](https://gpui.rs) (Zed's UI framework). See `README.md` for how
 to run it and `data/dim/plan.md` (in the firstmate home, not this repo) for the
 full product plan.
 
+## Documentation written for people
+
+Four documents cover the shape of this project for a human reader. Point
+someone at those first; they are shorter and they are current.
+
+| Document | Covers |
+| --- | --- |
+| `README.md` | What neko is and is not, build and run, the licence position |
+| `docs/architecture.md` | Crates, the daemon/client split, the wire protocol, providers, ranking, modes, themes, the window decisions |
+| `docs/adding-a-provider.md` | Adding a result type through the `Provider` seam |
+| `docs/adding-a-theme.md` | Adding a theme: the token contract and the tests that gate it |
+
+**This file stays the authority.** Those four are summaries chosen for a first
+read; every one of them drops nuance this file keeps — what was measured, what
+was tried and ruled out, and which fixes were wrong before they were right.
+When one of them disagrees with this file, this file is the record and the code
+is the truth. Nothing was removed from here to write them.
+
+Keep them in sync when a documented shape changes: the crate boundary, the
+`Provider` trait, `search::allocate`'s passes, the theme token contract, the
+build steps, or any of the window decisions in `architecture.md`'s last two
+sections. A behaviour change that leaves one of those pages wrong is not
+finished.
+
 ## Current scope: the spine, clipboard history, the first-run onboarding arc, and the provider abstraction
 
 Slice 1 was a single-crate proof that GPUI works at all. A follow-up task
