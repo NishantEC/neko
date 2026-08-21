@@ -40,6 +40,7 @@
 //! |---|---|---|
 //! | `NEKO_SHOW_ON_LAUNCH` | only with `NEKO_EVIDENCE_ACTIVATE=1` | was the incident's source; now `order_front_regardless` by default |
 //! | `NEKO_SHOW_QUERY` | no | a modifier on `NEKO_SHOW_ON_LAUNCH`; drives `set_query_for_evidence` directly, never focus |
+//! | `NEKO_SHOW_THEME` | no | same — one `theme::set_active` call, touches no window state whatsoever |
 //! | `NEKO_SHOW_CONFIRM` | no | same — drives `confirm_for_evidence` in-process |
 //! | `NEKO_CYCLE_MODE_ONCE` | no | same — `dismiss_for_evidence`/`confirm_for_evidence` |
 //! | `NEKO_SHOW_ACTIONS_MENU` | no | same — `open_actions_menu_for_evidence` |
@@ -195,6 +196,7 @@ const BENCH_ENV_VAR: &str = "NEKO_BENCH";
 const BENCH_REAL_ENV_VAR: &str = "NEKO_BENCH_REAL";
 const SHOW_ON_LAUNCH_ENV_VAR: &str = "NEKO_SHOW_ON_LAUNCH";
 const SHOW_QUERY_ENV_VAR: &str = "NEKO_SHOW_QUERY";
+const SHOW_THEME_ENV_VAR: &str = "NEKO_SHOW_THEME";
 const SHOW_CONFIRM_ENV_VAR: &str = "NEKO_SHOW_CONFIRM";
 const BACKDROP_IMAGE_ENV_VAR: &str = "NEKO_BACKDROP_IMAGE";
 const REAL_CYCLES_BEFORE_SHOW_ENV_VAR: &str = "NEKO_REAL_CYCLES_BEFORE_SHOW";
@@ -227,6 +229,21 @@ pub fn show_on_launch_requested() -> bool {
 
 pub fn show_query() -> Option<String> {
     std::env::var(SHOW_QUERY_ENV_VAR).ok()
+}
+
+/// `NEKO_SHOW_THEME=<theme id>` — renders this capture in a specific
+/// built-in palette (`neko_protocol::BUILTIN_THEMES`) instead of whatever the
+/// isolated daemon has persisted.
+///
+/// The alternative was driving the real `Themes` mode for every screenshot,
+/// which would mean synthesising Down-arrow keystrokes — ruled out by this
+/// repo's standing no-synthetic-input rule. This sets the same global the
+/// real mode's live preview sets (`theme::set_active`), through the same
+/// function, so what lands on screen is the real paint path rather than a
+/// capture-only rendering shortcut. Focus-neutral: it touches no window
+/// state at all.
+pub fn show_theme() -> Option<String> {
+    std::env::var(SHOW_THEME_ENV_VAR).ok().filter(|id| !id.is_empty())
 }
 
 pub fn show_confirm_requested() -> bool {
@@ -505,6 +522,17 @@ async fn prove_typing(text: &str, window: WindowHandle<Root>, cx: &mut AsyncApp)
 
 pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp) {
     let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
+    // Before the window is ever ordered front, so the very first painted
+    // frame is already in the requested palette — a capture must never race a
+    // theme swap. Applied here rather than after `reset_for_summon` for the
+    // same reason.
+    if let Some(id) = show_theme() {
+        if crate::theme::set_active(&id) {
+            eprintln!("neko: evidence theme {id}");
+        } else {
+            eprintln!("neko: NEKO_SHOW_THEME names no built-in theme: {id}");
+        }
+    }
     if let Some(cycles) = real_cycles_before_show() {
         run_real_cycles_before_show(window, cx, cycles).await;
     }

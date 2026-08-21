@@ -355,6 +355,15 @@ fn main() {
             let client = client.clone();
             cx.spawn(async move |cx| {
                 let id = fetch_persisted_theme(&client, cx).await;
+                // An evidence run has already picked its palette explicitly
+                // (`NEKO_SHOW_THEME`), and this reply lands hundreds of
+                // milliseconds later — letting it win would silently repaint
+                // the capture in whatever the isolated daemon had persisted.
+                // Caught live: two of seventeen theme screenshots came back
+                // in the default palette before this guard existed.
+                if evidence::show_theme().is_some() {
+                    return;
+                }
                 if theme::set_active(&id) {
                     cx.update(|cx| {
                         let _ = window.update(cx, |_root, window, cx| {
