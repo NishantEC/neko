@@ -1,0 +1,11 @@
+{
+  "name": "neko-gpuix-client",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "node --experimental-strip-types src/main.tsx" },
+  "dependencies": {
+    "@gpuix/react": "^0.4.0",
+    "@gpuix/native": "^0.4.0",
+    "react": "^19.0.0"
+  }
+}
