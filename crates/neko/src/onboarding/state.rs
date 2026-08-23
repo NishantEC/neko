@@ -183,6 +183,20 @@ impl Flow {
 }
 
 /// Fast, local, side-effect-free validity check on a captured key chord —
+/// `gpui` reports a keystroke's key in its own lower-case spelling
+/// (`"space"`, `"f13"`); `neko_protocol::HotkeyCombo` and `global-hotkey`
+/// both name it capitalised (`"Space"`, `"F13"`). One conversion, shared by
+/// onboarding's step 09 and the Summon Hotkey preferences screen, so the two
+/// can never disagree about what a given physical key is called.
+pub fn canonicalize_key_name(raw: &str) -> String {
+    let mut chars = raw.chars();
+    match chars.next() {
+        Some(first) if raw.chars().count() == 1 => first.to_uppercase().collect(),
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
 /// distinct from `neko_core::hotkey::check_known_conflict` (a remote,
 /// daemon-side heuristic against reserved combos) and from a live OS
 /// registration attempt (the only real proof). This just rejects shapes

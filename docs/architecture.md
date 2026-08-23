@@ -227,18 +227,63 @@ instead.
 
 A **mode** is client-side UI state. `crates/neko/src/modes.rs` holds the pure
 part (`ModeChrome`: id, scoped provider id, footer title, placeholder, whether
-it has a detail pane); `panel.rs` drives the I/O. While a mode is active, every
-keystroke searches with `Request::Search { provider: Some(id) }`. Escape or the
-back arrow exits and restores the query you had typed before entering, verbatim.
+it has a detail pane, and what its body is); `panel.rs` drives the I/O. While a
+mode is active, every keystroke searches with `Request::Search { provider:
+Some(id) }`. Escape or the back arrow exits and restores the query you had
+typed before entering, verbatim.
 
-Two exist: Clipboard History (a detail pane, list column 264pt) and Themes
-(no detail pane — the preview *is* the panel, so a second column would take
-496pt away from the thing being previewed).
+**Modes do not nest**, and `panel::Root::active_mode` is a single `Option`.
+
+Two exist: Clipboard History (a detail pane, list column 264pt) and Themes (no
+detail pane — the preview *is* the panel, so a second column would take 496pt
+away from the thing being previewed).
+
+**Preferences is a window, not a mode** — `crates/neko/src/preferences/`, split
+`state.rs` (pure) / `view.rs` (GPUI and I/O) the same way onboarding is. The
+`Preferences` command still carries `enters_mode` on the wire, because from the
+provider's side "this row changes the UI rather than performing a daemon
+action" is one statement; `panel::Root::confirm` is where a window and a mode
+part company. It is opened through an injected closure
+(`panel::PreferencesOpener`) which also hides the panel — GPUI's test platform
+panics on both `open_window` and `App::hide`, so nothing may call them
+unconditionally from the panel.
+
+The window owns no settings. It reads and writes them through the same scoped
+`Request::Search` and `Request::Activate` any surface would use, against
+`neko_core::preferences`. Its `folder-scope` list lives in
+`AppState::mode_providers` rather than the root-list providers: reachable by a
+scoped search or an activation, never by a root-list query. That is the seam
+for any list that only means something inside its own surface.
 
 The `⌘K` actions menu is populated from the selected row's
 `SearchItem::actions`, which already arrived with the last search response — no
 round-trip to open it. A destructive action needs a second Enter to run;
 moving the selection disarms it.
+
+## Agents
+
+`neko_core::agents` reads Paseo's own on-disk agent documents
+(`~/.paseo/agents/<workspace>/<id>.json`) — no subprocess, no network, no MCP.
+Running agents answer an empty root query (the one provider where that is the
+right answer); idle ones need a query and are off by default. Closed and
+Paseo-internal agents are never shown.
+
+`Backend` is an enum with one variant. A second agent source costs a variant, a
+read function, and one match arm — it does not touch the provider, the wire
+protocol, or the client.
+
+Configured in Preferences → Agents: the source (shown with a live census), a
+master toggle, and whether idle agents match.
+
+## Motion
+
+`crates/neko/src/motion.rs`. Two one-shot fade specs, and **one shared clock**.
+
+`PulseClock` is the only sanctioned way to drive a repeating animation. It
+ticks at 12.5Hz rather than frame rate, stops entirely when nothing is using
+it, and never starts under reduce-motion. It is driven from `render`, because
+only the render pass knows whether the thing being animated is actually on
+screen. Nothing else may call `.repeat()`.
 
 ## Themes
 

@@ -10,6 +10,7 @@ mod menu_frost;
 mod modes;
 mod motion;
 mod onboarding;
+mod preferences;
 mod panel;
 mod pasteboard;
 mod row_icon_cache;
@@ -119,6 +120,10 @@ fn main() {
             KeyBinding::new("escape", DismissWindow, Some("Panel")),
             KeyBinding::new("enter", onboarding::view::Primary, Some("Onboarding")),
             KeyBinding::new("escape", onboarding::view::Secondary, Some("Onboarding")),
+            // The Preferences window's own context. Only Enter is bound: the
+            // folder field is an ordinary `TextField`, so every editing and
+            // selection shortcut above already applies to it unchanged.
+            KeyBinding::new("enter", preferences::view::Submit, Some("Preferences")),
         ]);
         cx.on_action(|_: &DismissWindow, cx| cx.hide());
 
@@ -133,6 +138,21 @@ fn main() {
         // so it's created once, up front, and shared by the summon panel
         // (the step 08 banner) and onboarding alike.
         let accessibility: onboarding::SharedAccessibility = Rc::new(SystemAccessibilityChecker);
+
+        // The Summon Hotkey preferences screen rebinds through the *same*
+        // `HotkeyController` this summon loop uses, so a combination proven
+        // live there is exactly the registration that summons afterwards —
+        // the same rule onboarding's step 09 already follows. The controller
+        // cannot be built until the daemon has answered with the current
+        // combo, which is after this window exists, so the panel gets an
+        // empty slot now and `main` fills it below. See
+        // `panel::HotkeyRebinder`.
+        let rebinder: hotkey_client::SharedRebinder = Rc::new(RefCell::new(None));
+        // The Preferences window is opened through an injected closure rather
+        // than by `panel::Root` directly — see `panel::PreferencesOpener`.
+        let preferences_slot: preferences::SharedPreferencesSlot = Rc::new(RefCell::new(None));
+        let open_preferences =
+            preferences::view::opener(client.clone(), rebinder.clone(), preferences_slot.clone());
 
         // Always `PANEL_WIDTH_WITH_DETAIL_PX` — the real `NSWindow` never
         // resizes for a mode transition any more (see `AGENTS.md`, "Mode
@@ -291,6 +311,7 @@ fn main() {
                             translucent,
                             menu_frost,
                             Rc::new(material::set_window_appearance),
+                            open_preferences.clone(),
                             cx,
                         )
                     }
@@ -309,10 +330,27 @@ fn main() {
         // paths.
         let _ = window.update(cx, |_root, window, cx| {
             cx.observe_window_activation(window, |_root, window, cx| {
-                if !window.is_window_active() {
-                    eprintln!("neko: summon window lost activation, hiding");
-                    cx.hide();
+                if window.is_window_active() {
+                    return;
                 }
+                // `cx.hide()` is `[NSApp hide:]` — it hides *every* window
+                // this app owns. That was always fine when the summon panel
+                // was the only window that could be active, and stopped
+                // being fine the moment Preferences became a real window:
+                // opening it makes the panel inactive, and hiding the app
+                // here would take the window that just opened down with it.
+                //
+                // `active_window()` is the precise question — "did focus go
+                // to another neko window, or out of neko entirely?" — and
+                // needs no state of our own to answer. Only the second case
+                // should hide the app, because only then is there something
+                // for macOS to restore focus to.
+                if cx.active_window().is_some() {
+                    eprintln!("neko: summon window lost activation to another neko window, leaving the app alone");
+                    return;
+                }
+                eprintln!("neko: summon window lost activation, hiding");
+                cx.hide();
             })
             .detach();
         });
@@ -385,6 +423,7 @@ fn main() {
             let registrar = SystemRegistrar::new()
                 .expect("failed to talk to the OS hotkey service");
             let controller: onboarding::SharedHotkeyController = Rc::new(RefCell::new(HotkeyController::new(registrar)));
+            *rebinder.borrow_mut() = Some(Rc::new(ControllerRebinder(controller.clone())));
 
             // Accessibility is only required for the global hotkey (design
             // report §3, "Permission refusal — graceful degradation"): a
@@ -401,6 +440,10 @@ fn main() {
             // to the isolated daemon first," and a remember-to-do-it
             // mitigation is precisely what failed in the key-window incident
             // this guard's sibling in `evidence.rs` was added for.
+            eprintln!(
+                "neko: accessibility trusted: {} — the summon hotkey is only registered when this is true",
+                accessibility.is_trusted()
+            );
             if evidence::evidence_run_active() {
                 eprintln!("neko: evidence run — skipping live hotkey registration");
             } else if accessibility.is_trusted()
@@ -411,6 +454,11 @@ fn main() {
                     config.combo.display()
                 );
             }
+            eprintln!(
+                "neko: registered hotkey {} -> id {:?}",
+                config.combo.display(),
+                controller.borrow().current_hotkey_id()
+            );
 
             // `NekoClient::is_connected()` is a plain poll, not a push
             // channel (see that method's own doc comment) — this loop
@@ -543,6 +591,18 @@ async fn fetch_persisted_theme(client: &NekoClient, cx: &AsyncApp) -> String {
     }
     eprintln!("neko: could not reach neko-daemon for the persisted theme in time, using the default");
     neko_protocol::DEFAULT_THEME_ID.to_string()
+}
+
+/// Adapts the one live [`HotkeyController`] to the panel's
+/// [`panel::HotkeyRebinder`] seam. Thin on purpose: `rebind` already
+/// guarantees the old combo survives a failed attempt (see
+/// `hotkey_client.rs`), and nothing here should re-implement that.
+struct ControllerRebinder(onboarding::SharedHotkeyController);
+
+impl hotkey_client::HotkeyRebinder for ControllerRebinder {
+    fn rebind(&self, candidate: HotkeyCombo) -> Result<(), String> {
+        self.0.borrow_mut().rebind(candidate).map_err(|e| e.to_string())
+    }
 }
 
 async fn fetch_initial_hotkey(client: &NekoClient, cx: &AsyncApp) -> HotkeyConfig {

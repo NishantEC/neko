@@ -7,6 +7,9 @@
 //! `HotkeyRegistrar` exists so the rebind state machine below (`rebind`) is
 //! unit-testable without touching the real OS hotkey service.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use global_hotkey::GlobalHotKeyManager;
 use global_hotkey::hotkey::HotKey;
 use neko_protocol::{HotkeyCombo, HotkeyConfig, Modifier};
@@ -155,6 +158,26 @@ impl<R: HotkeyRegistrar> HotkeyController<R> {
         self.rebind(config.combo.clone())
     }
 }
+
+/// Performs a live OS hotkey re-registration on behalf of the Summon
+/// Hotkey screen.
+///
+/// **Injected rather than called directly**, for the same two reasons
+/// `AppearanceSetter` is: it keeps the screen headlessly testable, and the
+/// real implementation lives in `main.rs`, which owns the one
+/// `HotkeyController` the summon loop itself uses — a rebind proven live
+/// here must be *that* registration, not a second one.
+///
+/// It is a deferred slot rather than a plain value because of ordering:
+/// the controller cannot exist until the daemon has answered with the
+/// current combo, and the window (and this `Root`) are created before that
+/// round-trip completes. `None` means "not ready yet", which the screen
+/// reports rather than silently doing nothing.
+pub trait HotkeyRebinder {
+    fn rebind(&self, candidate: HotkeyCombo) -> Result<(), String>;
+}
+
+pub type SharedRebinder = Rc<RefCell<Option<Rc<dyn HotkeyRebinder>>>>;
 
 #[cfg(test)]
 mod tests {

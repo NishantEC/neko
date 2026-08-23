@@ -151,6 +151,17 @@ mod tests {
     }
 
     #[test]
+    fn preferences_is_a_window_and_therefore_not_a_mode_at_all() {
+        // The `Preferences` command still carries `enters_mode: "preference"`
+        // on the wire — from the provider's side "this row changes the UI" is
+        // one statement — but the client resolves that to a real window, so
+        // there must be no mode of that name for it to fall into instead.
+        for id in ["preference", "preference.hotkey", "preference.folders"] {
+            assert!(chrome_for(id).is_none(), "{id} must not be a mode");
+        }
+    }
+
+    #[test]
     fn an_unknown_mode_id_resolves_to_nothing() {
         assert!(chrome_for("does-not-exist").is_none());
     }
