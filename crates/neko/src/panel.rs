@@ -67,6 +67,13 @@ const SEARCHING_TELL_DELAY_MS: u64 = 150;
 /// `RESULT_LIMIT`/`fit_within_budget` bound the root list.
 const MODE_RESULT_LIMIT: usize = 50;
 pub const CONTENT_AREA_MIN_HEIGHT_PX: f32 = theme::RESULT_ROW_HEIGHT_PX * RESULT_LIMIT as f32;
+/// The panel is a fixed height for the process's whole lifetime (the real
+/// `NSWindow` is never resized — `AGENTS.md`, "Mode view resize seam"), so
+/// the agent grid can only ever take space *from* the rows. A grid taller
+/// than the content area would leave no rows at all, which is a build error
+/// rather than something to discover at runtime.
+const _: () = assert!(theme::AGENT_GRID_HEIGHT_PX < CONTENT_AREA_MIN_HEIGHT_PX);
+
 pub const PANEL_HEIGHT_PX: f32 =
     theme::INPUT_ROW_HEIGHT_PX + CONTENT_AREA_MIN_HEIGHT_PX + theme::FOOTER_HEIGHT_PX;
 
@@ -135,6 +142,11 @@ pub struct Root {
     /// A single `Option`: no mode nests. Preferences is a real window
     /// (`crate::preferences`), not a mode, so nothing here ever needed to.
     active_mode: Option<ActiveMode>,
+    /// Running agents, lifted out of `results` into the grid above the
+    /// search field. They are moved rather than copied: the same agent in
+    /// both places would be two rows for one thing, and Enter would have to
+    /// pick one of them.
+    agent_tiles: Vec<SearchItem>,
     /// The shared pulse clock (`motion::PulseClock`), observed so a tick
     /// repaints this panel. Held as an entity rather than read per frame so
     /// the subscription can exist at all.
@@ -326,6 +338,7 @@ impl Root {
             row_icon_cache,
             active_mode: None,
             open_preferences,
+            agent_tiles: Vec::new(),
             pulse,
             actions_menu: None,
             menu_open_before_this_press: false,
@@ -666,13 +679,31 @@ impl Root {
         // what makes the edge fade honest (see `edge_fade.rs`'s own module
         // doc comment). The root list never scrolls at all, so anything
         // that doesn't fit has to be dropped rather than clipped.
+        // Live agents are lifted out of the list and into the grid above the
+        // search field. Inside a mode this never applies — a mode is one
+        // provider's own list, and the grid is a root-list affordance.
+        let (tiles, items) = if self.active_mode().is_some() {
+            (Vec::new(), items)
+        } else {
+            split_agent_tiles(items)
+        };
+        self.agent_tiles = tiles;
+        // **The grid's height comes out of the row budget, it is not added to
+        // the panel.** `PANEL_HEIGHT_PX` is fixed for the process's whole
+        // lifetime and the real `NSWindow` is never resized (`AGENTS.md`,
+        // "Mode view resize seam"), so anything drawn above the input row is
+        // space the rows no longer have. Getting this wrong does not look
+        // like a layout bug — it looks like the last row being clipped by
+        // `overflow_hidden`, which is the exact defect `fit_within_budget`
+        // exists to prevent.
+        let budget = CONTENT_AREA_MIN_HEIGHT_PX - self.agent_grid_height();
         self.results = if self.active_mode().is_some() {
             items
         } else if complete && self.partial_generation == Some(generation) {
             let anchor = std::mem::take(&mut self.results);
-            merge_late_results(anchor, items, CONTENT_AREA_MIN_HEIGHT_PX, self.selected)
+            merge_late_results(anchor, items, budget, self.selected)
         } else {
-            fit_within_budget(items, CONTENT_AREA_MIN_HEIGHT_PX)
+            fit_within_budget(items, budget)
         };
 
         let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
@@ -945,6 +976,94 @@ impl Root {
             && self.results.iter().any(|item| item.badge.as_deref() == Some("LIVE"));
         self.pulse.update(cx, |clock, cx| clock.set_running(wanted, cx));
         gpui::Empty
+    }
+
+    /// The height the grid is currently taking, and therefore the height
+    /// the rows below it do not have. Zero when there is nothing to show, so
+    /// a machine with no agents running loses no space at all.
+    fn agent_grid_height(&self) -> f32 {
+        if self.agent_tiles.is_empty() { 0.0 } else { theme::AGENT_GRID_HEIGHT_PX }
+    }
+
+    /// The grid of running agents, above the search field.
+    ///
+    /// Above the field rather than in the list because it answers a
+    /// different question: the list is "what did you ask for", this is "what
+    /// is happening without you". It is only ever drawn when something is
+    /// genuinely running, so the resting panel is unchanged.
+    ///
+    /// Tiles are laid out in a single row that wraps, sized by
+    /// `AGENT_TILE_MIN_WIDTH_PX`, so one agent gets a wide tile and four get
+    /// four narrow ones without a column count being hard-coded.
+    fn render_agent_grid(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let intensity = self.pulse.read(cx).intensity();
+        let mut grid = div()
+            .flex()
+            .flex_wrap()
+            .gap(px(8.))
+            // `px_5`, matching the input row directly beneath it, so a tile's
+            // left edge lines up with the search glyph.
+            .px_5()
+            .pt(px(12.))
+            .pb(px(8.))
+            .h(px(theme::AGENT_GRID_HEIGHT_PX))
+            .overflow_hidden();
+        for item in &self.agent_tiles {
+            let kind = item.kind.clone();
+            let id = item.id.clone();
+            // The live dot breathes on the same shared clock the LIVE badge
+            // uses — one clock for the app, never a per-tile animation.
+            let mut dot = theme::active().state_success;
+            dot.a = 0.45 + 0.55 * intensity;
+            grid = grid.child(
+                div()
+                    .id(SharedString::from(format!("agent-tile-{id}")))
+                    .flex()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex_col()
+                    .justify_center()
+                    .gap(px(2.))
+                    .h(px(theme::AGENT_TILE_HEIGHT_PX))
+                    .px(px(10.))
+                    .rounded(px(theme::ROW_RADIUS_PX))
+                    .bg(theme::active().surface_input)
+                    .border_1()
+                    .border_color(theme::active().border_hairline)
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |root, _event, _window, cx| {
+                        root.perform_activation(
+                            Request::Activate { kind: kind.clone(), id: id.clone(), action: None },
+                            true,
+                            cx,
+                        );
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .child(div().w(px(6.)).h(px(6.)).rounded(px(3.)).bg(dot).flex_shrink_0())
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .overflow_hidden()
+                                    .text_size(px(12.5))
+                                    .text_color(theme::active().text_primary)
+                                    .child(SharedString::from(item.title.clone())),
+                            ),
+                    )
+                    .children(item.subtitle.clone().map(|subtitle| {
+                        div()
+                            .overflow_hidden()
+                            .text_size(px(11.))
+                            .text_color(theme::active().text_tertiary)
+                            .child(SharedString::from(subtitle))
+                    })),
+            );
+        }
+        grid
     }
 
     fn active_mode(&self) -> Option<&ActiveMode> {
@@ -1315,6 +1434,7 @@ impl Render for Root {
             // keeps its `.border_1()` above for edge definition.
             // See `docs/evidence/panel-shadow-tent-fix-report.md`.
             .overflow_hidden()
+            .when(!self.agent_tiles.is_empty(), |el| el.child(self.render_agent_grid(cx)))
             .child(self.render_input_row(cx))
             .child(match self.active_mode() {
                 Some(mode) => self.render_mode_content(mode, cx),
@@ -2116,6 +2236,18 @@ fn merge_late_results(
 /// greedy budget — the screen and the wire have to agree on what "primary"
 /// means, and this is how they stay in sync without duplicating the
 /// ordering logic client-side.
+/// Splits running agents out of a response into `(tiles, rows)`.
+///
+/// Keyed on the badge the provider already sets, not on `kind == "agent"`:
+/// an idle agent is an ordinary row and belongs in the list with everything
+/// else. Only the live ones are news worth a tile.
+///
+/// Order is preserved on both sides, so the rows that stay keep whatever
+/// section ordering `search::allocate` decided.
+fn split_agent_tiles(results: Vec<SearchItem>) -> (Vec<SearchItem>, Vec<SearchItem>) {
+    results.into_iter().partition(|item| item.kind == "agent" && item.badge.as_deref() == Some("LIVE"))
+}
+
 fn fit_within_budget(results: Vec<SearchItem>, budget_px: f32) -> Vec<SearchItem> {
     let sections = group_into_sections(results);
     if sections.is_empty() {
@@ -2983,6 +3115,69 @@ mod tests {
             badge: Some("COMMAND".to_string()),
             accessory: None,
             enters_mode: Some(crate::preferences::PREFERENCES_MODE_ID.to_string()),
+            group_label: None,
+            actions: Vec::new(),
+            source: None,
+        }
+    }
+
+    #[test]
+    fn only_live_agents_are_lifted_into_the_grid_idle_ones_stay_as_rows() {
+        let live = SearchItem { badge: Some("LIVE".to_string()), ..agent_row("live-1") };
+        let idle = SearchItem { badge: None, ..agent_row("idle-1") };
+        let app = SearchItem { kind: "app".to_string(), ..agent_row("Finder") };
+        let (tiles, rows) = split_agent_tiles(vec![app.clone(), live.clone(), idle.clone()]);
+        assert_eq!(tiles.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["live-1"]);
+        assert_eq!(rows.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["Finder", "idle-1"]);
+    }
+
+    #[test]
+    fn an_agent_never_appears_both_as_a_tile_and_as_a_row() {
+        let live = SearchItem { badge: Some("LIVE".to_string()), ..agent_row("a") };
+        let (tiles, rows) = split_agent_tiles(vec![live]);
+        assert_eq!(tiles.len(), 1);
+        assert!(rows.is_empty(), "a tile is a move, not a copy — two rows for one agent is two Enters");
+    }
+
+    #[test]
+    fn a_badge_that_is_not_live_on_a_non_agent_row_is_never_mistaken_for_a_tile() {
+        // Clipboard rows carry TEXT/LINK badges; commands carry COMMAND.
+        let clip = SearchItem {
+            kind: "clipboard".to_string(),
+            badge: Some("TEXT".to_string()),
+            ..agent_row("copied")
+        };
+        let (tiles, rows) = split_agent_tiles(vec![clip]);
+        assert!(tiles.is_empty());
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[gpui::test]
+    fn the_grid_takes_its_height_out_of_the_row_budget_rather_than_growing_the_panel(
+        cx: &mut TestAppContext,
+    ) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, _cx| {
+                assert_eq!(root.agent_grid_height(), 0.0, "no agents, no space taken");
+                root.agent_tiles = vec![SearchItem { badge: Some("LIVE".into()), ..agent_row("a") }];
+                assert_eq!(root.agent_grid_height(), theme::AGENT_GRID_HEIGHT_PX);
+            })
+            .unwrap();
+    }
+
+    fn agent_row(id: &str) -> SearchItem {
+        SearchItem {
+            id: id.to_string(),
+            kind: "agent".to_string(),
+            title: id.to_string(),
+            subtitle: Some("claude · ~/x".to_string()),
+            icon: Icon::Glyph(Glyph::AgentLive),
+            section_label: "Agents".to_string(),
+            action_label: "Open in Paseo  ↵".to_string(),
+            badge: None,
+            accessory: None,
+            enters_mode: None,
             group_label: None,
             actions: Vec::new(),
             source: None,

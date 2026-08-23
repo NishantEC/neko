@@ -761,6 +761,12 @@ pub const PANEL_WIDTH_PX: f32 = 680.0;
 pub const PANEL_WIDTH_WITH_DETAIL_PX: f32 = 760.0;
 /// The two-column mode view's fixed left (list) column width.
 pub const MODE_LIST_COLUMN_WIDTH_PX: f32 = 264.0;
+/// One agent tile in the grid above the search field, and the strip's own
+/// height. A tile is two lines of text plus its own padding; the strip adds
+/// the gap beneath it before the input row.
+pub const AGENT_TILE_HEIGHT_PX: f32 = 56.0;
+pub const AGENT_GRID_HEIGHT_PX: f32 = AGENT_TILE_HEIGHT_PX + 20.0;
+
 pub const ROW_ICON_PX: f32 = 22.0;
 pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
 
