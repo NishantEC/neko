@@ -1123,6 +1123,12 @@ impl Root {
     fn render_agent_grid(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let intensity = self.pulse.read(cx).intensity();
         let mut grid = div()
+            // The topmost strip of the panel, and so the most natural place
+            // to pick the window up from — which is exactly where the first
+            // attempt at this was grabbed, and the one place that was not a
+            // grab area. The tiles inside stop propagation (below), so a
+            // press on a tile still activates it instead of dragging.
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::begin_window_drag))
             .flex()
             .flex_wrap()
             .gap(px(8.))
@@ -1165,6 +1171,10 @@ impl Root {
                         theme::active().border_hairline
                     })
                     .cursor_pointer()
+                    // Runs before the strip's own handler (bubble phase goes
+                    // child first), so pressing a tile never starts a drag —
+                    // the tile activates on release instead.
+                    .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |root, _event, _window, cx| {
                         let query = root.query(cx);
                         root.perform_activation(
