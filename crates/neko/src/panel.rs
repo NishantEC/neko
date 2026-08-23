@@ -912,8 +912,14 @@ impl Root {
         if let Some(tile) = self.grid_selected
             && let Some(item) = self.agent_tiles.get(tile).cloned()
         {
+            // Identical to the tile's own click handler, deliberately: two
+            // paths to the same action that build the request differently
+            // are a keyboard-versus-mouse divergence waiting to be found.
+            // `query` is ignored by the agent provider — it is the New Agent
+            // mode's mechanism — but it is passed the same way regardless.
+            let query = self.query(cx);
             self.perform_activation(
-                Request::Activate { kind: item.kind, id: item.id, action: None },
+                Request::Activate { kind: item.kind, id: item.id, action: None, query },
                 true,
                 cx,
             );
