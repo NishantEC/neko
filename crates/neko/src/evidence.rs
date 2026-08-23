@@ -46,6 +46,7 @@
 //! | `NEKO_SHOW_ACTIONS_MENU` | no | same — `open_actions_menu_for_evidence` |
 //! | `NEKO_SCROLL_MODE_LIST_TO_BOTTOM` | no | same — a `ScrollHandle` mutation |
 //! | `NEKO_SHOW_SELECTION` | no | same — `select_query_for_evidence` |
+//! | `NEKO_SHOW_DRAG_GUIDES` | no | opens a second window with `focus: false` and `ignoresMouseEvents`; touches the panel's own focus not at all |
 //! | `NEKO_PROVE_TYPING` | no | types through GPUI's own key dispatch and reads the field back; no OS input, does not focus |
 //! | `NEKO_REAL_CYCLES_BEFORE_SHOW` | no | already `order_front_regardless`/`order_out` only, by its own deliberate design |
 //! | `NEKO_BENCH` | no | `order_front_regardless`/`order_out` only, by its own deliberate design |
@@ -104,6 +105,17 @@
 //!   does not obviously say so.
 //!   See `run_bench_real`'s own doc comment for the exact stderr markers an
 //!   outside script samples `vmmap`/`footprint` against.
+//! - `NEKO_SHOW_DRAG_GUIDES=1` (only read alongside `NEKO_SHOW_ON_LAUNCH`)
+//!   opens the drag-guide overlay (`window_drag::demo_overlay`) for a snap
+//!   the panel is not actually being dragged into, and prints its window
+//!   number so `screencapture -l<windowid>` can photograph the guides. It
+//!   exists because a real drag cannot be driven here at all — synthesising
+//!   mouse input is forbidden in this repo — so this runs the genuine path
+//!   (the same `snap::resolve`, the same overlay window, the same native
+//!   configuration) with only the cursor's contribution replaced by a fixed
+//!   desired origin. It also prints how long opening that window took, which
+//!   is the number the lazy-open decision in `window_drag.rs` rests on. The
+//!   overlay is deliberately left on screen; the process exits with it.
 //! - `NEKO_BACKDROP_IMAGE=<path>` opens a second, full-display window
 //!   showing the given image at `NSNormalWindowLevel` — strictly *below*
 //!   the summon panel's own `NSPopUpWindowLevel` (`gpui-0.2.2`'s own
@@ -202,6 +214,7 @@ const BACKDROP_IMAGE_ENV_VAR: &str = "NEKO_BACKDROP_IMAGE";
 const REAL_CYCLES_BEFORE_SHOW_ENV_VAR: &str = "NEKO_REAL_CYCLES_BEFORE_SHOW";
 const CYCLE_MODE_ONCE_ENV_VAR: &str = "NEKO_CYCLE_MODE_ONCE";
 const SHOW_ACTIONS_MENU_ENV_VAR: &str = "NEKO_SHOW_ACTIONS_MENU";
+const SHOW_DRAG_GUIDES_ENV_VAR: &str = "NEKO_SHOW_DRAG_GUIDES";
 const SCROLL_MODE_LIST_TO_BOTTOM_ENV_VAR: &str = "NEKO_SCROLL_MODE_LIST_TO_BOTTOM";
 const SHOW_SELECTION_ENV_VAR: &str = "NEKO_SHOW_SELECTION";
 /// See `prove_typing` and `material::send_key_in_process` for what this
@@ -256,6 +269,13 @@ pub fn cycle_mode_once_requested() -> bool {
 
 pub fn show_actions_menu_requested() -> bool {
     std::env::var_os(SHOW_ACTIONS_MENU_ENV_VAR).is_some()
+}
+
+/// See this module's own doc comment. Focus-neutral: the overlay it opens is
+/// `focus: false` and click-through, and the panel's own window state is never
+/// touched.
+pub fn show_drag_guides_requested() -> bool {
+    std::env::var_os(SHOW_DRAG_GUIDES_ENV_VAR).is_some()
 }
 
 /// `NEKO_BENCH_SEARCH=<query>` — the keystroke-to-first-render benchmark.
@@ -689,6 +709,23 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // A synchronous, local state change (no daemon round-trip) — same
         // one-frame settle beat as the actions-menu branch above.
         cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
+    }
+    if show_drag_guides_requested() {
+        cx.update(|cx| {
+            let _ = window.update(cx, |_root, window, cx| {
+                match crate::window_drag::demo_overlay(window, cx) {
+                    Ok(overlay) => eprintln!(
+                        "neko: drag-guide overlay window number {} ({} guides, opened in {:?})\n{}",
+                        overlay.window_number, overlay.guides, overlay.open_took, overlay.detail
+                    ),
+                    Err(e) => eprintln!("neko: could not open the drag-guide overlay: {e}"),
+                }
+            });
+        });
+        // One settle beat for the overlay's own first paint, the same shape
+        // as the actions-menu branch above — it is a second real window, and
+        // the "now capture" line below is what an outside script waits for.
+        cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
     }
     // A real, if rare, failure mode confirmed live on a shared machine
     // while capturing this task's own evidence: this window's activation

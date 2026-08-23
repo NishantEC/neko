@@ -35,9 +35,9 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui::{
-    Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable,
-    MouseDownEvent, Render, ScrollHandle, SharedString, Window, actions, anchored, deferred,
-    div, img, point, prelude::*, px, svg,
+    Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, DispatchPhase, Entity, FocusHandle,
+    Focusable, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, ScrollHandle, SharedString,
+    Window, actions, anchored, canvas, deferred, div, img, point, prelude::*, px, svg,
 };
 use neko_client::NekoClient;
 use neko_protocol::{Glyph, Icon, ItemAction, Request, Response, SearchItem};
@@ -50,6 +50,7 @@ use crate::modes::{self, ModeChrome};
 use crate::motion;
 use crate::text_field::{ContentChanged, DEFAULT_PLACEHOLDER, TextField};
 use crate::theme;
+use crate::window_drag::PanelDrag;
 
 actions!(panel, [SelectNext, SelectPrevious, Confirm, OpenActionsMenu]);
 
@@ -227,6 +228,19 @@ pub struct Root {
     /// process that starts on a light theme sets it before anything is ever
     /// painted rather than one frame late.
     applied_appearance: Option<theme::Appearance>,
+    /// How this panel picks itself up and moves. Injected for the same
+    /// reasons [`AppearanceSetter`] and [`PreferencesOpener`] are — every
+    /// method on it ends in a native window call, and GPUI's test platform
+    /// panics rather than erroring on those. See `window_drag.rs`.
+    drag: Rc<dyn PanelDrag>,
+    /// Whether a drag is live right now. The panel's own half of the drag
+    /// state and deliberately *all* of it: grab offsets, screens, snap targets
+    /// and the guide window all live in `window_drag.rs`, which is the only
+    /// thing that knows what a drag is. This flag exists because three
+    /// unrelated pieces of the panel have to behave differently while one is
+    /// in progress — the window-level mouse listeners, Escape, and a fresh
+    /// summon.
+    dragging: bool,
     /// How this panel reaches AppKit to keep the window's `NSAppearance` in
     /// step with the active theme — injected rather than called directly, the
     /// same shape `accessibility` already uses for `AXIsProcessTrusted`.
@@ -293,6 +307,7 @@ struct ActionsMenuState {
 }
 
 impl Root {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: NekoClient,
         accessibility: Rc<dyn AccessibilityChecker>,
@@ -300,10 +315,11 @@ impl Root {
         menu_frost: bool,
         appearance_setter: AppearanceSetter,
         open_preferences: PreferencesOpener,
+        drag: Rc<dyn PanelDrag>,
         cx: &mut App,
     ) -> Entity<Self> {
         cx.new(|cx| {
-            Self::build(client, accessibility, translucent, menu_frost, appearance_setter, open_preferences, cx)
+            Self::build(client, accessibility, translucent, menu_frost, appearance_setter, open_preferences, drag, cx)
         })
     }
 
@@ -311,6 +327,7 @@ impl Root {
     /// test can build a `Root` directly inside `TestAppContext::add_window`'s
     /// own closure (which needs a plain `V`, not an `Entity<V>` — `new`
     /// itself wraps this in `cx.new(...)`) without duplicating any of it.
+    #[allow(clippy::too_many_arguments)]
     fn build(
         client: NekoClient,
         accessibility: Rc<dyn AccessibilityChecker>,
@@ -318,6 +335,7 @@ impl Root {
         menu_frost: bool,
         appearance_setter: AppearanceSetter,
         open_preferences: PreferencesOpener,
+        drag: Rc<dyn PanelDrag>,
         cx: &mut Context<Self>,
     ) -> Self {
         let pulse = motion::PulseClock::global(cx);
@@ -363,6 +381,8 @@ impl Root {
             mode_scroll: ScrollHandle::new(),
             applied_appearance: None,
             appearance_setter,
+            drag,
+            dragging: false,
         };
         root.run_search(cx);
         root.fetch_accessibility_banner_state(cx);
@@ -408,6 +428,14 @@ impl Root {
         // logic, so without this a stale open menu would silently reappear
         // on the next summon.
         self.close_actions_menu(window);
+        // A drag cannot outlive the summon it started in. In practice the
+        // mouse-up that ends one always arrives first, but "always" here
+        // depends on AppKit delivering an event, and the failure mode if it
+        // ever does not — a panel that silently follows the cursor on the
+        // *next* summon, with a guide window left on screen — is bad enough
+        // that this is worth one unconditional line. `cancel`, not `finish`:
+        // a drag interrupted by the panel being hidden was never completed.
+        self.cancel_window_drag(window, cx);
         // Per-summon state, exactly like the mode and the menu above it: a
         // tile focused in one session must not still be focused in the next.
         self.grid_selected = None;
@@ -1468,6 +1496,16 @@ impl Root {
     /// keeping this one call site self-contained is clearer than routing
     /// back through the global handler.
     fn handle_dismiss(&mut self, _: &crate::DismissWindow, window: &mut Window, cx: &mut Context<Self>) {
+        // Ahead of every other branch, including the menu: while the panel is
+        // physically being moved, Escape can only sensibly mean "put it
+        // back". Hiding the panel mid-gesture would leave AppKit's implicit
+        // mouse capture pointed at a window nobody can see, and the mode or
+        // menu underneath is still there to Escape out of on the next press.
+        if self.dragging {
+            self.cancel_window_drag(window, cx);
+            cx.notify();
+            return;
+        }
         if self.actions_menu.is_some() {
             self.close_actions_menu(window);
             cx.notify();
@@ -1501,6 +1539,10 @@ impl Render for Root {
             // budget, a query that no longer matches one, or the panel not
             // being on screen all stop the clock for free.
             .child(self.sync_pulse(window, cx))
+            // Zero-sized and absolutely positioned: it draws nothing and
+            // occupies no space, it exists to reach paint phase. See its own
+            // doc comment for why the listeners cannot live on a `div`.
+            .child(self.sync_window_drag_listeners(cx))
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::confirm))
@@ -1552,22 +1594,123 @@ impl Render for Root {
 }
 
 impl Root {
-    /// Starts a native window drag.
+    /// Picks the panel up.
     ///
-    /// **Handed to AppKit rather than tracked here.**
-    /// `Window::start_window_move` calls `performWindowDragWithEvent:` with
-    /// `[NSApp currentEvent]`, so it must be invoked from inside GPUI's own
-    /// native mouse-down dispatch — which a `on_mouse_down` listener is —
-    /// and AppKit then owns the whole gesture: it follows the cursor,
-    /// respects display edges and Spaces, and ends on mouse-up without this
-    /// app tracking a single delta.
+    /// **This app owns the gesture; AppKit does not.** The first version of
+    /// drag was one call to `Window::start_window_move()` →
+    /// `performWindowDragWithEvent:`, which is shorter, well-behaved, and
+    /// impossible to snap with: it runs AppKit's own modal event loop until
+    /// the mouse comes up, so there is no point inside the gesture at which
+    /// proximity to a target could be measured or a guide drawn. See
+    /// `window_drag.rs`'s module doc comment for the whole shape, and for
+    /// what happens once the cursor leaves the panel (which a snap
+    /// guarantees it will).
     ///
-    /// **This only works because the window is `is_movable: true`**
-    /// (`main.rs`). `performWindowDragWithEvent:` honours that flag, so with
-    /// it false this is a silent no-op — which is exactly what "drag doesn't
-    /// work" looked like before.
-    fn begin_window_drag(&mut self, _: &MouseDownEvent, window: &mut Window, _cx: &mut Context<Self>) {
-        window.start_window_move();
+    /// Fires on mouse-*down*, not on a click: the gesture has to be picked up
+    /// before it becomes a drag, and a press that turns out to be a plain
+    /// click costs nothing — `start` only records where the cursor grabbed,
+    /// and no guide window is opened until a snap target is actually within
+    /// reach.
+    fn begin_window_drag(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.dragging {
+            return;
+        }
+        self.dragging = self.drag.start(window, cx);
+        if self.dragging {
+            // The window-level listeners below are registered at paint time,
+            // so the first frame after this is what starts them observing.
+            cx.notify();
+        }
+    }
+
+    /// One tick of a live drag.
+    ///
+    /// **The event is a clock, not a position.** `MouseMoveEvent::position` is
+    /// window-relative, and this drag moves the window out from under the
+    /// cursor, so measuring against it would be measuring against a datum that
+    /// moves with the thing being measured. `window_drag.rs` reads
+    /// `NSEvent.mouseLocation` — absolute — on every tick instead, which also
+    /// means a dropped or coalesced tick has no cost: the next one places the
+    /// panel exactly where it belongs regardless of how many were missed.
+    fn window_drag_moved(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.dragging {
+            return;
+        }
+        // The button came up without a `MouseUpEvent` reaching this window at
+        // all — belt and braces for the one thing that would otherwise leave
+        // the panel stuck to the cursor with a guide window on screen.
+        if event.pressed_button != Some(gpui::MouseButton::Left) {
+            self.finish_window_drag(window, cx);
+            return;
+        }
+        self.drag.update(window, cx);
+    }
+
+    fn window_drag_ended(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.dragging || event.button != gpui::MouseButton::Left {
+            return;
+        }
+        self.finish_window_drag(window, cx);
+    }
+
+    fn finish_window_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dragging = false;
+        self.drag.finish(window, cx);
+        cx.notify();
+    }
+
+    /// Puts the panel back where it was picked up and takes the guides down.
+    /// Safe to call when no drag is live — `cancel` on a finished session is a
+    /// no-op, which is what lets `reset_for_summon` call it unconditionally.
+    fn cancel_window_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.dragging {
+            return;
+        }
+        self.dragging = false;
+        self.drag.cancel(window, cx);
+    }
+
+    /// Registers the two **window-level** mouse listeners a drag needs, once
+    /// per frame, at paint time.
+    ///
+    /// Window-level (`Window::on_mouse_event`) rather than the element-level
+    /// `on_mouse_move`/`on_mouse_up` a `div` offers, and that is the whole
+    /// reason this exists as an element of its own: gpui gates a `div`'s own
+    /// mouse-move listener on `hitbox.is_hovered(window)`
+    /// (`gpui/src/elements/div.rs`), so it stops firing the instant the cursor
+    /// leaves the panel — which a snap makes happen by design, since the panel
+    /// stops while the hand keeps going. `dispatch_mouse_event`
+    /// (`gpui/src/window.rs`) runs window-level listeners for every event with
+    /// no position test at all.
+    ///
+    /// Registered unconditionally rather than only while `dragging`, so there
+    /// is never a frame between the mouse-down and the next paint in which a
+    /// move could arrive with nothing listening for it. The cost when no drag
+    /// is live is one early `return` per mouse event.
+    fn sync_window_drag_listeners(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let moved = cx.entity().downgrade();
+        let ended = moved.clone();
+        canvas(
+            |_bounds, _window, _cx| (),
+            move |_bounds, _, window, _cx| {
+                let moved = moved.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    let _ = moved.update(cx, |root, cx| root.window_drag_moved(event, window, cx));
+                });
+                let ended = ended.clone();
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    let _ = ended.update(cx, |root, cx| root.window_drag_ended(event, window, cx));
+                });
+            },
+        )
+        .absolute()
+        .size_0()
     }
 
     fn render_input_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1581,6 +1724,8 @@ impl Root {
             // selection is a documented gap (`AGENTS.md`, "Text field
             // editing shortcuts") — but if mouse selection is ever added,
             // this handler and it will be fighting over the same gesture.
+            // Bubble phase, so the mode's own back-arrow button (which stops
+            // propagation on click) is never turned into a drag handle.
             .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::begin_window_drag))
             .h(px(theme::INPUT_ROW_HEIGHT_PX))
             .px_5()
@@ -3048,7 +3193,7 @@ mod tests {
         let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
         let (opener, opened) = recording_preferences_opener();
         let window = cx.add_window(|_window, cx| {
-            Root::build(client, accessibility, true, true, no_appearance_setter(), opener, cx)
+            Root::build(client, accessibility, true, true, no_appearance_setter(), opener, crate::window_drag::disabled(), cx)
         });
         window
             .update(cx, |root, window, cx| {
@@ -3271,7 +3416,7 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         )));
         let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
-        cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, no_appearance_setter(), no_preferences_opener(), cx))
+        cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, no_appearance_setter(), no_preferences_opener(), crate::window_drag::disabled(), cx))
     }
 
     /// A headless stand-in for `material::set_window_appearance` — GPUI's own
@@ -3311,7 +3456,7 @@ mod tests {
         )));
         let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
         let (setter, log) = recording_appearance_setter();
-        let window = cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, setter, no_preferences_opener(), cx));
+        let window = cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, setter, no_preferences_opener(), crate::window_drag::disabled(), cx));
         (window, log)
     }
 
@@ -4114,5 +4259,179 @@ mod tests {
                 assert!(!root.searching, "an already-resolved generation must not have the tell flip on later");
             })
             .unwrap();
+    }
+
+    // ---- Dragging the panel -------------------------------------------
+    //
+    // Everything below drives `Root`'s own real handlers, in the order gpui
+    // dispatches them, against a recording `PanelDrag`. What it can prove is
+    // the *state machine*: which verb the panel sends, for which event, and
+    // that a drag can never be left live. What it cannot prove is anything
+    // native — where the window actually ends up, and whether the guide
+    // window renders — because GPUI's test platform panics on every native
+    // window call, which is exactly why `PanelDrag` is injected at all.
+
+    #[derive(Default)]
+    struct DragLog {
+        calls: std::cell::RefCell<Vec<&'static str>>,
+        start_succeeds: std::cell::Cell<bool>,
+    }
+
+    struct RecordingDrag(Rc<DragLog>);
+
+    impl crate::window_drag::PanelDrag for RecordingDrag {
+        fn start(&self, _window: &Window, _cx: &mut App) -> bool {
+            self.0.calls.borrow_mut().push("start");
+            self.0.start_succeeds.get()
+        }
+        fn update(&self, _window: &Window, _cx: &mut App) {
+            self.0.calls.borrow_mut().push("update");
+        }
+        fn finish(&self, _window: &Window, _cx: &mut App) {
+            self.0.calls.borrow_mut().push("finish");
+        }
+        fn cancel(&self, _window: &Window, _cx: &mut App) {
+            self.0.calls.borrow_mut().push("cancel");
+        }
+    }
+
+    fn test_root_recording_drag(cx: &mut TestAppContext) -> (gpui::WindowHandle<Root>, Rc<DragLog>) {
+        let (client, _events) = NekoClient::connect(std::path::PathBuf::from(format!(
+            "/tmp/neko-panel-test-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        )));
+        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        let log = Rc::new(DragLog::default());
+        log.start_succeeds.set(true);
+        let drag: Rc<dyn crate::window_drag::PanelDrag> = Rc::new(RecordingDrag(log.clone()));
+        let window = cx.add_window(|_window, cx| {
+            Root::build(client, accessibility, true, true, no_appearance_setter(), no_preferences_opener(), drag, cx)
+        });
+        (window, log)
+    }
+
+    fn press() -> MouseDownEvent {
+        MouseDownEvent { button: gpui::MouseButton::Left, click_count: 1, ..Default::default() }
+    }
+
+    fn drag_to() -> MouseMoveEvent {
+        MouseMoveEvent { pressed_button: Some(gpui::MouseButton::Left), ..Default::default() }
+    }
+
+    fn release() -> MouseUpEvent {
+        MouseUpEvent { button: gpui::MouseButton::Left, click_count: 1, ..Default::default() }
+    }
+
+    #[gpui::test]
+    fn a_press_drag_and_release_sends_exactly_start_update_finish(cx: &mut TestAppContext) {
+        let (window, log) = test_root_recording_drag(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.begin_window_drag(&press(), window, cx);
+                root.window_drag_moved(&drag_to(), window, cx);
+                root.window_drag_moved(&drag_to(), window, cx);
+                root.window_drag_ended(&release(), window, cx);
+                assert!(!root.dragging, "the release must end the drag");
+            })
+            .unwrap();
+        assert_eq!(*log.calls.borrow(), ["start", "update", "update", "finish"]);
+    }
+
+    #[gpui::test]
+    fn a_move_with_no_drag_in_progress_is_ignored_entirely(cx: &mut TestAppContext) {
+        // Mouse moves are listened for at the *window* level, unconditionally,
+        // so this is the common case by a wide margin: every ordinary cursor
+        // movement over the panel reaches this handler.
+        let (window, log) = test_root_recording_drag(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.window_drag_moved(&drag_to(), window, cx);
+                root.window_drag_ended(&release(), window, cx);
+            })
+            .unwrap();
+        assert!(log.calls.borrow().is_empty());
+    }
+
+    #[gpui::test]
+    fn a_drag_that_could_not_be_started_never_sends_anything_further(cx: &mut TestAppContext) {
+        // `start` fails when a native read does — no window handle, no
+        // `NSScreen`. The panel must then behave exactly as it did before drag
+        // existed rather than half-tracking a gesture it has no origin for.
+        let (window, log) = test_root_recording_drag(cx);
+        log.start_succeeds.set(false);
+        window
+            .update(cx, |root, window, cx| {
+                root.begin_window_drag(&press(), window, cx);
+                assert!(!root.dragging);
+                root.window_drag_moved(&drag_to(), window, cx);
+                root.window_drag_ended(&release(), window, cx);
+            })
+            .unwrap();
+        assert_eq!(*log.calls.borrow(), ["start"]);
+    }
+
+    #[gpui::test]
+    fn a_move_that_arrives_with_the_button_already_up_ends_the_drag(cx: &mut TestAppContext) {
+        // The safety net for the one event that must never be missed. If a
+        // `MouseUpEvent` somehow never reaches this window, the next move
+        // reports no pressed button — and without this the panel would follow
+        // the cursor forever with a guide window left on screen.
+        let (window, log) = test_root_recording_drag(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.begin_window_drag(&press(), window, cx);
+                root.window_drag_moved(&MouseMoveEvent::default(), window, cx);
+                assert!(!root.dragging);
+            })
+            .unwrap();
+        assert_eq!(*log.calls.borrow(), ["start", "finish"]);
+    }
+
+    #[gpui::test]
+    fn escape_during_a_drag_puts_the_panel_back_and_leaves_the_mode_alone(cx: &mut TestAppContext) {
+        // Escape means three different things in this panel depending on what
+        // is going on; while the panel is physically being moved it can only
+        // mean "put it back". The mode is still there to leave on the next
+        // press.
+        let (window, log) = test_root_recording_drag(cx);
+        window
+            .update(cx, |root, window, cx| {
+                // The clipboard mode, not the theme one: entering that writes
+                // the process-global palette and would need
+                // `theme::test_lock()` for a detail this test does not care
+                // about.
+                root.results = vec![command_item("clipboard")];
+                root.selected = 0;
+                root.confirm(&Confirm, window, cx);
+                assert!(root.active_mode().is_some());
+
+                root.begin_window_drag(&press(), window, cx);
+                root.handle_dismiss(&crate::DismissWindow, window, cx);
+                assert!(!root.dragging);
+                assert!(root.active_mode().is_some(), "cancelling a drag must not also leave the mode");
+            })
+            .unwrap();
+        assert_eq!(*log.calls.borrow(), ["start", "cancel"]);
+    }
+
+    #[gpui::test]
+    fn a_fresh_summon_cancels_a_drag_that_somehow_outlived_its_gesture(cx: &mut TestAppContext) {
+        let (window, log) = test_root_recording_drag(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.begin_window_drag(&press(), window, cx);
+                root.reset_for_summon(window, cx);
+                assert!(!root.dragging);
+            })
+            .unwrap();
+        assert_eq!(*log.calls.borrow(), ["start", "cancel"]);
+    }
+
+    #[gpui::test]
+    fn a_summon_with_no_drag_in_progress_does_not_touch_the_drag_at_all(cx: &mut TestAppContext) {
+        let (window, log) = test_root_recording_drag(cx);
+        window.update(cx, |root, window, cx| root.reset_for_summon(window, cx)).unwrap();
+        assert!(log.calls.borrow().is_empty());
     }
 }

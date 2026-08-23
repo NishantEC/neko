@@ -41,6 +41,8 @@
 
 use gpui::{Pixels, Point, Size, Window, point};
 
+use crate::snap::{self, Rect};
+
 /// The design report's §2 panel geometry: "positioned upper-third, not
 /// vertically centered", horizontally centered. Shared by `main.rs`'s
 /// initial-open placement (`upper_third`) and the native re-placement
@@ -53,30 +55,19 @@ pub(crate) fn upper_third_offset(display_size: Size<Pixels>, panel_size: Size<Pi
     point(x, y)
 }
 
-/// A screen's frame in native AppKit global coordinates (points, y-up,
-/// origin at the bottom-left of the primary display) — a plain, testable
-/// stand-in for `NSScreen.frame` so the "which screen contains this point"
-/// logic below doesn't need a real `NSScreen`/AppKit to unit-test.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ScreenFrame {
-    pub origin_x: f64,
-    pub origin_y: f64,
-    pub width: f64,
-    pub height: f64,
-}
-
 /// The index of the first screen in `screens` whose frame contains
 /// `(point_x, point_y)`, or `None` if no screen does (rare — e.g. a
 /// display was unplugged in the instant between reading the cursor
 /// position and reading the screen list; the caller falls back to the
 /// main screen).
-pub(crate) fn pick_screen_for_point(screens: &[ScreenFrame], point_x: f64, point_y: f64) -> Option<usize> {
-    screens.iter().position(|f| {
-        point_x >= f.origin_x
-            && point_x < f.origin_x + f.width
-            && point_y >= f.origin_y
-            && point_y < f.origin_y + f.height
-    })
+///
+/// Screens are [`snap::Rect`]s — native AppKit global coordinates (points,
+/// y-up, origin at the bottom-left of the primary display). That type used
+/// to be a local `ScreenFrame` struct here; it moved to `snap.rs` when the
+/// drag needed the identical rectangle, rather than leaving two structurally
+/// identical rectangles in one crate for a future reader to wonder about.
+pub(crate) fn pick_screen_for_point(screens: &[Rect], point_x: f64, point_y: f64) -> Option<usize> {
+    screens.iter().position(|f| f.contains(point_x, point_y))
 }
 
 #[cfg(target_os = "macos")]
@@ -89,6 +80,96 @@ pub fn reposition_to_cursor_display(_window: &Window, _panel_size: Size<Pixels>)
     Err("multi-display repositioning is only implemented on macOS".to_string())
 }
 
+/// Both frames of the display the cursor is on, in one read.
+///
+/// `full` and `visible` answer two different questions and the drag needs
+/// both: a summon is placed against the **full** frame
+/// ([`upper_third_offset`], and therefore [`home_origin`]), while a drag
+/// snaps and clamps against the **visible** one, which excludes the menu bar
+/// and the Dock. Read together, from one `NSScreen`, so the two can never
+/// describe different displays because the cursor moved between two calls.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CursorScreen {
+    pub full: Rect,
+    pub visible: Rect,
+}
+
+/// Where a summon puts a panel of `panel` size on a display whose full frame
+/// is `full`, as a y-up bottom-left origin.
+///
+/// Goes through [`upper_third_offset`] rather than restating its arithmetic:
+/// that function is already the single source of the summon position for both
+/// `main.rs`'s initial open and [`reposition_to_cursor_display`], and a drag
+/// that offered a "home" a few points away from where summon actually lands
+/// would be worse than offering none. The only work here is the coordinate
+/// flip — `upper_third_offset` returns a top-left, y-down offset, and
+/// everything in the drag is bottom-left, y-up.
+pub(crate) fn home_origin(full: Rect, panel: snap::Size) -> snap::Point {
+    let offset = upper_third_offset(
+        gpui::size(gpui::px(full.width as f32), gpui::px(full.height as f32)),
+        gpui::size(gpui::px(panel.width as f32), gpui::px(panel.height as f32)),
+    );
+    snap::Point {
+        x: full.x + offset.x.to_f64(),
+        y: full.max_y() - offset.y.to_f64() - panel.height,
+    }
+}
+
+/// The cursor's position in AppKit global coordinates — see `snap.rs`'s
+/// module doc comment for the space, and this module's own for why
+/// `NSEvent.mouseLocation` is the permission-free way to ask.
+#[cfg(target_os = "macos")]
+pub fn cursor_position() -> Result<snap::Point, String> {
+    macos::cursor_position()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn cursor_position() -> Result<snap::Point, String> {
+    Err("reading the cursor position is only implemented on macOS".to_string())
+}
+
+/// See [`CursorScreen`].
+#[cfg(target_os = "macos")]
+pub fn screen_under_cursor() -> Result<CursorScreen, String> {
+    macos::cursor_screen()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn screen_under_cursor() -> Result<CursorScreen, String> {
+    Err("reading the screen under the cursor is only implemented on macOS".to_string())
+}
+
+/// The real `NSWindow`'s live frame. Read rather than derived from
+/// `theme::PANEL_WIDTH_WITH_DETAIL_PX`/`panel::PANEL_HEIGHT_PX` so a drag can
+/// never be computed against a size the window does not actually have.
+#[cfg(target_os = "macos")]
+pub fn window_frame(window: &Window) -> Result<Rect, String> {
+    macos::window_frame(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn window_frame(_window: &Window) -> Result<Rect, String> {
+    Err("reading a window frame is only implemented on macOS".to_string())
+}
+
+/// Moves the real `NSWindow`'s bottom-left corner to `origin`.
+///
+/// `setFrameOrigin:` rather than `setFrameTopLeftPoint:` (which
+/// [`reposition_to_cursor_display`] uses) purely because the drag already
+/// works in bottom-left origins throughout; both are the same public AppKit
+/// API and neither cares that the window was created `is_movable: false` —
+/// that flag governs *user* dragging, and every placement this app has ever
+/// done has been programmatic.
+#[cfg(target_os = "macos")]
+pub fn move_window_origin(window: &Window, origin: snap::Point) -> Result<(), String> {
+    macos::move_window_origin(window, origin)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn move_window_origin(_window: &Window, _origin: snap::Point) -> Result<(), String> {
+    Err("moving a window is only implemented on macOS".to_string())
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     use objc2::MainThreadMarker;
@@ -97,7 +178,7 @@ mod macos {
     use objc2_foundation::NSPoint;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-    use super::{Pixels, ScreenFrame, Size, Window, pick_screen_for_point, upper_third_offset};
+    use super::{Pixels, Rect, Size, Window, pick_screen_for_point, snap, upper_third_offset};
 
     /// Walks from the `NSView` `raw-window-handle` hands out (GPUI's own
     /// rendering view) up to its owning `NSWindow` — the same walk
@@ -124,11 +205,11 @@ mod macos {
             .ok_or_else(|| "GPUI's rendering view has no owning NSWindow yet".to_string())
     }
 
-    fn screen_frame(screen: &NSScreen) -> ScreenFrame {
+    fn screen_frame(screen: &NSScreen) -> Rect {
         let frame = screen.frame();
-        ScreenFrame {
-            origin_x: frame.origin.x,
-            origin_y: frame.origin.y,
+        Rect {
+            x: frame.origin.x,
+            y: frame.origin.y,
             width: frame.size.width,
             height: frame.size.height,
         }
@@ -141,7 +222,7 @@ mod macos {
     fn screen_under_cursor(mtm: MainThreadMarker) -> Option<Retained<NSScreen>> {
         let cursor = NSEvent::mouseLocation();
         let screens: Vec<Retained<NSScreen>> = NSScreen::screens(mtm).to_vec();
-        let frames: Vec<ScreenFrame> = screens.iter().map(|s| screen_frame(s)).collect();
+        let frames: Vec<Rect> = screens.iter().map(|s| screen_frame(s)).collect();
         if let Some(idx) = pick_screen_for_point(&frames, cursor.x, cursor.y) {
             return screens.get(idx).cloned();
         }
@@ -167,6 +248,51 @@ mod macos {
             "screen frame origin=({}, {}) size=({}, {}), top-left set to ({}, {})",
             frame.origin.x, frame.origin.y, frame.size.width, frame.size.height, top_left.x, top_left.y
         ))
+    }
+
+    /// `NSEvent.mouseLocation` — a class method, no `MainThreadMarker` and no
+    /// permission, the same call `screen_under_cursor` above already relies
+    /// on. Read fresh on every drag tick rather than taken from GPUI's own
+    /// `MouseMoveEvent`, which carries a *window-relative* position: during a
+    /// drag the window is being moved out from under the cursor, so a
+    /// window-relative reading would be measuring against a moving datum. This
+    /// one is absolute, which also makes a dropped tick cost nothing — the
+    /// next one lands the panel in exactly the right place regardless of how
+    /// many were missed.
+    pub fn cursor_position() -> Result<snap::Point, String> {
+        let p = NSEvent::mouseLocation();
+        Ok(snap::Point { x: p.x, y: p.y })
+    }
+
+    pub fn cursor_screen() -> Result<super::CursorScreen, String> {
+        let mtm = MainThreadMarker::new()
+            .ok_or_else(|| "screen lookup attempted off the main thread".to_string())?;
+        let screen = screen_under_cursor(mtm).ok_or_else(|| "no NSScreen is available".to_string())?;
+        let visible = screen.visibleFrame();
+        Ok(super::CursorScreen {
+            full: screen_frame(&screen),
+            visible: Rect {
+                x: visible.origin.x,
+                y: visible.origin.y,
+                width: visible.size.width,
+                height: visible.size.height,
+            },
+        })
+    }
+
+    pub fn window_frame(window: &Window) -> Result<Rect, String> {
+        let frame = native_window(window)?.frame();
+        Ok(Rect {
+            x: frame.origin.x,
+            y: frame.origin.y,
+            width: frame.size.width,
+            height: frame.size.height,
+        })
+    }
+
+    pub fn move_window_origin(window: &Window, origin: snap::Point) -> Result<(), String> {
+        native_window(window)?.setFrameOrigin(NSPoint { x: origin.x, y: origin.y });
+        Ok(())
     }
 }
 
@@ -201,8 +327,8 @@ mod tests {
         // Built-in on the left (origin 0,0), external to the right —
         // a common two-display arrangement.
         let screens = [
-            ScreenFrame { origin_x: 0.0, origin_y: 0.0, width: 3456.0, height: 2234.0 },
-            ScreenFrame { origin_x: 3456.0, origin_y: 0.0, width: 1920.0, height: 1080.0 },
+            Rect { x: 0.0, y: 0.0, width: 3456.0, height: 2234.0 },
+            Rect { x: 3456.0, y: 0.0, width: 1920.0, height: 1080.0 },
         ];
         assert_eq!(pick_screen_for_point(&screens, 100.0, 100.0), Some(0));
         assert_eq!(pick_screen_for_point(&screens, 4000.0, 500.0), Some(1));
@@ -214,15 +340,54 @@ mod tests {
         // Settings' Displays arrangement gets negative-origin coordinates
         // in AppKit's shared global space — must still resolve correctly.
         let screens = [
-            ScreenFrame { origin_x: 0.0, origin_y: 0.0, width: 3456.0, height: 2234.0 },
-            ScreenFrame { origin_x: -1920.0, origin_y: 1000.0, width: 1920.0, height: 1080.0 },
+            Rect { x: 0.0, y: 0.0, width: 3456.0, height: 2234.0 },
+            Rect { x: -1920.0, y: 1000.0, width: 1920.0, height: 1080.0 },
         ];
         assert_eq!(pick_screen_for_point(&screens, -1000.0, 1500.0), Some(1));
     }
 
     #[test]
     fn pick_screen_for_point_returns_none_when_the_cursor_is_outside_every_screen() {
-        let screens = [ScreenFrame { origin_x: 0.0, origin_y: 0.0, width: 3456.0, height: 2234.0 }];
+        let screens = [Rect { x: 0.0, y: 0.0, width: 3456.0, height: 2234.0 }];
         assert_eq!(pick_screen_for_point(&screens, -50.0, -50.0), None);
+    }
+
+    /// The drag's "home" snap target has to be the position a summon actually
+    /// lands at, or the guide lies. Both are derived from
+    /// `upper_third_offset`; this pins the coordinate flip between them —
+    /// `reposition` writes a **top-left, y-up** point, `home_origin` returns a
+    /// **bottom-left, y-up** one, and they must describe the same rectangle.
+    #[test]
+    fn home_origin_is_the_same_place_reposition_puts_a_summoned_panel() {
+        let full = Rect { x: 0.0, y: 0.0, width: 1440.0, height: 900.0 };
+        let panel = snap::Size { width: 760.0, height: 420.0 };
+
+        let home = home_origin(full, panel);
+
+        // `reposition`'s own arithmetic, restated here as the reference:
+        // `top_left = (frame.origin.x + offset.x, frame.origin.y +
+        // frame.height − offset.y)`.
+        let offset = upper_third_offset(
+            gpui::size(px(full.width as f32), px(full.height as f32)),
+            gpui::size(px(panel.width as f32), px(panel.height as f32)),
+        );
+        let top_left_x = full.x + offset.x.to_f64();
+        let top_left_y = full.y + full.height - offset.y.to_f64();
+
+        assert_eq!(home.x, top_left_x);
+        assert_eq!(home.y + panel.height, top_left_y, "home is that same top edge, measured from the bottom");
+    }
+
+    /// The one number a display's own menu bar/Dock insets must **not** change:
+    /// home is computed from the full frame, so two displays of the same size
+    /// with different Dock settings still call the same place home.
+    #[test]
+    fn home_origin_ignores_the_visible_frame_and_tracks_the_display_it_is_given() {
+        let panel = snap::Size { width: 760.0, height: 420.0 };
+        let primary = home_origin(Rect { x: 0.0, y: 0.0, width: 1440.0, height: 900.0 }, panel);
+        let secondary =
+            home_origin(Rect { x: 1440.0, y: 0.0, width: 1440.0, height: 900.0 }, panel);
+        assert_eq!(secondary.x - primary.x, 1440.0);
+        assert_eq!(secondary.y, primary.y);
     }
 }
