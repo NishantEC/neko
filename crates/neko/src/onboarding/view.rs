@@ -43,7 +43,7 @@ use crate::components::glyphs::opt_glyph;
 use crate::hotkey_client::{HotkeyController, SystemRegistrar};
 use crate::theme;
 
-use super::state::{Flow, RecordingState, Step, validate_candidate};
+use super::state::{Flow, RecordingState, Step, canonicalize_key_name, validate_candidate};
 
 pub type SharedHotkeyController = Rc<RefCell<HotkeyController<SystemRegistrar>>>;
 pub type SharedAccessibility = Rc<dyn AccessibilityChecker>;
@@ -415,15 +415,6 @@ impl Focusable for OnboardingRoot {
 /// something readable for display — capitalized the way the rest of the
 /// UI capitalizes key names (`HotkeyCombo::default_summon()` is `"Space"`,
 /// not `"space"`).
-fn canonicalize_key_name(raw: &str) -> String {
-    let mut chars = raw.chars();
-    match chars.next() {
-        Some(first) if raw.chars().count() == 1 => first.to_uppercase().collect(),
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
-}
-
 impl Render for OnboardingRoot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()

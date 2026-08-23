@@ -88,6 +88,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use neko_protocol::{Glyph, Icon, SearchItem};
@@ -236,7 +237,7 @@ fn is_source_artifact(path: &Path) -> bool {
         .is_some_and(|ext| SOURCE_ARTIFACT_EXTENSIONS.iter().any(|candidate| candidate.eq_ignore_ascii_case(ext)))
 }
 
-fn default_scope_dirs() -> Vec<PathBuf> {
+pub fn default_scope_dirs() -> Vec<PathBuf> {
     let Some(home) = std::env::var_os("HOME") else {
         return Vec::new();
     };
@@ -463,12 +464,44 @@ fn build_candidate(score: f32, path: PathBuf, name: String) -> Candidate {
 /// own — see this module's doc comment for why a live query per search is
 /// the right shape here, unlike `AppsProvider`'s cached-and-watched index.
 pub struct FileProvider {
-    scope_dirs: Vec<PathBuf>,
+    scope: Scope,
+}
+
+/// Where this provider's search scope comes from.
+///
+/// `Configured` re-reads the persisted list (`crate::preferences::
+/// get_search_folders`) on every query rather than caching it, so a folder
+/// added or removed in the Search Folders screen takes effect on the very
+/// next keystroke with no daemon restart and no invalidation message. The
+/// cost is one point query against a two-column KV table per search —
+/// microseconds against SQLite's page cache, and far below the `mdfind`
+/// round-trip this same call is about to make anyway.
+enum Scope {
+    Fixed(Vec<PathBuf>),
+    Configured(Arc<Mutex<crate::Db>>),
 }
 
 impl FileProvider {
     pub fn new() -> Self {
-        Self { scope_dirs: default_scope_dirs() }
+        Self { scope: Scope::Fixed(default_scope_dirs()) }
+    }
+
+    /// The real daemon's constructor: scope follows the persisted setting.
+    pub fn with_db(db: Arc<Mutex<crate::Db>>) -> Self {
+        Self { scope: Scope::Configured(db) }
+    }
+
+    fn scope_dirs(&self) -> Vec<PathBuf> {
+        match &self.scope {
+            Scope::Fixed(dirs) => dirs.clone(),
+            Scope::Configured(db) => {
+                let db = db.lock().unwrap();
+                crate::preferences::get_search_folders(&db)
+                    .into_iter()
+                    .filter(|d| d.is_dir())
+                    .collect()
+            }
+        }
     }
 
     /// A provider with an empty scope — always returns no candidates
@@ -477,7 +510,7 @@ impl FileProvider {
     /// provider list but must stay hermetic and fast rather than depending
     /// on the test machine's own `~/Documents` contents.
     pub fn empty() -> Self {
-        Self { scope_dirs: Vec::new() }
+        Self { scope: Scope::Fixed(Vec::new()) }
     }
 }
 
@@ -509,7 +542,7 @@ impl Provider for FileProvider {
     /// answer every such query in two frames, the second one identical to
     /// the first. See [`Provider::defers_for`].
     fn defers_for(&self, query: &str) -> bool {
-        !self.scope_dirs.is_empty() && query.trim().chars().count() >= MIN_QUERY_LEN
+        !self.scope_dirs().is_empty() && query.trim().chars().count() >= MIN_QUERY_LEN
     }
 
     fn search_cancellable(&self, query: &str, _now_unix_ms: i64, cancel: &Cancel) -> Vec<Candidate> {
@@ -520,7 +553,7 @@ impl Provider for FileProvider {
         if !sleep_unless_cancelled(verification_delay(), cancel) {
             return Vec::new();
         }
-        query_spotlight_paths(query, &self.scope_dirs, cancel)
+        query_spotlight_paths(query, &self.scope_dirs(), cancel)
             .into_iter()
             .filter(|path| !is_noisy(path))
             .filter_map(|path| {
@@ -622,7 +655,7 @@ mod tests {
 
     #[test]
     fn the_file_provider_only_defers_once_the_query_is_long_enough_to_query_spotlight() {
-        let provider = FileProvider { scope_dirs: vec![PathBuf::from("/tmp")] };
+        let provider = FileProvider { scope: Scope::Fixed(vec![PathBuf::from("/tmp")]) };
         assert!(!provider.defers_for(""), "an empty query never reaches mdfind");
         assert!(!provider.defers_for("a"), "a single character is below MIN_QUERY_LEN");
         assert!(!provider.defers_for("  a  "), "whitespace does not count toward the minimum");
@@ -730,14 +763,14 @@ mod tests {
 
     #[test]
     fn a_query_shorter_than_the_minimum_returns_no_candidates_without_querying() {
-        let provider = FileProvider { scope_dirs: default_scope_dirs() };
+        let provider = FileProvider { scope: Scope::Fixed(default_scope_dirs()) };
         assert_eq!(provider.search("a", 0).len(), 0);
         assert_eq!(provider.search("", 0).len(), 0);
     }
 
     #[test]
     fn an_empty_scope_returns_no_candidates() {
-        let provider = FileProvider { scope_dirs: Vec::new() };
+        let provider = FileProvider { scope: Scope::Fixed(Vec::new()) };
         assert_eq!(provider.search("readme", 0).len(), 0);
     }
 

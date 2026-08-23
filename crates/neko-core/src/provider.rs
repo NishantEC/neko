@@ -115,6 +115,23 @@ pub trait Provider: Send + Sync {
     /// beyond their one primary action (apps, files, settings) don't need
     /// to implement this at all; only a provider that actually populates
     /// `SearchItem::actions` (clipboard) overrides it.
+    /// Whether an **empty root-list query** should reach this provider.
+    ///
+    /// `search("")` cannot answer this on its own, because the same call
+    /// serves two different questions: a root-list search with nothing typed
+    /// yet, and a surface that deliberately scopes to one provider and wants
+    /// its whole list (the `Themes` mode; the Preferences window loading its
+    /// values). Those want opposite answers, so the distinction belongs to
+    /// the provider rather than to the query string.
+    ///
+    /// `true` by default, which is right for anything whose full list is a
+    /// useful empty state — apps offer the top apps, clipboard the most
+    /// recent entries. Override to `false` when the list is only meaningful
+    /// once someone has actually asked for it.
+    fn answers_empty_root_query(&self) -> bool {
+        true
+    }
+
     fn perform_action(&self, _id: &str, action_id: &str) -> Result<(), ProviderError> {
         Err(ProviderError(format!("provider '{}' has no action '{action_id}'", self.id())))
     }
