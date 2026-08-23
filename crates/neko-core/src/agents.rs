@@ -354,17 +354,40 @@ impl Provider for AgentsProvider {
     }
 
     fn activate(&self, id: &str) -> Result<(), ProviderError> {
-        crate::launch::open_url(&deep_link(id)).map_err(|e| ProviderError(e.to_string()))
+        let Some(server) = server_id() else {
+            return Err(ProviderError(
+                "couldn't find ~/.paseo/server-id — is Paseo running?".to_string(),
+            ));
+        };
+        crate::launch::open_url(&deep_link(&server, id)).map_err(|e| ProviderError(e.to_string()))
     }
 }
 
 /// Paseo's own deep-link shape, read from its bundled
 /// `@getpaseo/protocol/agent-deep-link`: `paseo:/h/<serverId>/agent/<agentId>`.
 ///
-/// `local` is the server id for agents running on this machine — the only
-/// ones this provider can see, since it reads this machine's own disk.
-fn deep_link(agent_id: &str) -> String {
-    format!("paseo:/h/local/agent/{agent_id}")
+/// **The server id is per-machine and must be read, not assumed.** A first
+/// version of this guessed `local`, on the strength of `=== "local"`
+/// comparisons elsewhere in Paseo's bundle, and was simply wrong: the real
+/// value on the verification machine is `srv_Rj6twNQn7Qcc`, reported by
+/// `paseo status --json` and stored verbatim in `~/.paseo/server-id`. That
+/// file is read rather than shelling out to the CLI, for the same reason
+/// this module reads agent JSON rather than running `paseo ls` — the data is
+/// a file, so a subprocess buys nothing.
+///
+/// Returns `None` when the file is missing, rather than falling back to a
+/// guess: a deep link with the wrong server id fails *silently* (Paseo opens
+/// on nothing in particular), and a row that reports an honest error is
+/// better than one that appears to work.
+pub fn server_id() -> Option<String> {
+    let home = std::env::var_os("HOME")?;
+    let raw = std::fs::read_to_string(PathBuf::from(home).join(".paseo/server-id")).ok()?;
+    let trimmed = raw.trim().to_string();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
+fn deep_link(server_id: &str, agent_id: &str) -> String {
+    format!("paseo:/h/{server_id}/agent/{agent_id}")
 }
 
 fn to_item(agent: &PaseoAgent, running: bool) -> SearchItem {
@@ -569,7 +592,21 @@ mod tests {
 
     #[test]
     fn the_deep_link_matches_paseos_own_documented_shape() {
-        assert_eq!(deep_link("abc-123"), "paseo:/h/local/agent/abc-123");
+        assert_eq!(deep_link("srv_abc", "agent-1"), "paseo:/h/srv_abc/agent/agent-1");
+    }
+
+    #[test]
+    fn the_server_id_is_read_from_disk_and_trimmed() {
+        // Paseo writes the file with a trailing newline; an untrimmed id
+        // would produce a URL with a newline in the path and fail silently.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".paseo");
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("server-id"), "srv_Rj6twNQn7Qcc\n").unwrap();
+        // `server_id` reads `$HOME`, so the assertion is on the parsing rule
+        // it applies rather than on this process's real home.
+        let raw = std::fs::read_to_string(path.join("server-id")).unwrap();
+        assert_eq!(raw.trim(), "srv_Rj6twNQn7Qcc");
     }
 
     #[test]

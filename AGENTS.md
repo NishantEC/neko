@@ -2183,9 +2183,20 @@ without you". Two things about it are load-bearing:
   sets rather than on `kind == "agent"`, so an idle agent stays an ordinary
   row. Never applied inside a mode — a mode is one provider's own list.
 
-**Known gap: tiles are mouse-only.** Arrow keys still drive the results list;
-reaching the grid by keyboard needs a focus concept spanning two regions,
-which is its own change.
+**Tiles are keyboard-reachable, using the same Up/Down as the list.** That is
+forced rather than chosen: Left and Right are bound to the search field's own
+cursor movement (`main.rs`'s `cx.bind_keys`, `"TextField"` context), so a grid
+claiming them would break typing to reach it. Treating the tiles as rows that
+happen to sit above the input costs no new keys at all — `Root::grid_selected`
+is `Some` while the selection is up in the grid, Up from the first result
+walks into it (landing on the tile *nearest* the list, so the selection moves
+by one visually rather than across the whole strip), and Down off the last
+tile walks back out. Up at the top stays put rather than wrapping to the
+bottom of the list, which would read as the selection teleporting. A focused
+tile owns Enter, is cleared by `reset_for_summon` like every other
+per-summon state, and is **clamped** when a response arrives with fewer tiles
+— an agent finishing between two responses must not leave the selection
+pointing at nothing.
 
 ## The shared pulse clock, and the repeating-animation rule
 
