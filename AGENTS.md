@@ -2162,6 +2162,31 @@ row), and transcript sources (`~/.codex/sessions`, `~/.claude/projects`,
 prices each at ~1,000 lines in its own `docs/adding-a-session-source.md`, and
 it answers "what did an agent do", not "what is running".
 
+**The grid above the search field.** Running agents render as tiles above the
+input row rather than as rows in the list, because they answer a different
+question: the list is "what did you ask for", the grid is "what is happening
+without you". Two things about it are load-bearing:
+
+- **Its height comes out of the row budget, it does not grow the panel.**
+  `PANEL_HEIGHT_PX` is fixed for the process's whole lifetime and the real
+  `NSWindow` is never resized ("Mode view resize seam"), so anything drawn
+  above the input row is space the rows no longer have. Getting this wrong
+  does not look like a layout bug — it looks like the last row being clipped
+  by `overflow_hidden`, the exact defect `fit_within_budget` exists to
+  prevent. `panel::Root::agent_grid_height` returns `0.0` when there is
+  nothing to show, so a machine with no agents running loses no space at all,
+  and a `const _: () = assert!(...)` makes a grid taller than the content
+  area a **build** error rather than a runtime surprise.
+- **`split_agent_tiles` moves live agents out of `results`, never copies
+  them.** The same agent as both a tile and a row is two things to press
+  Enter on for one agent. It keys on the `LIVE` badge the provider already
+  sets rather than on `kind == "agent"`, so an idle agent stays an ordinary
+  row. Never applied inside a mode — a mode is one provider's own list.
+
+**Known gap: tiles are mouse-only.** Arrow keys still drive the results list;
+reaching the grid by keyboard needs a focus concept spanning two regions,
+which is its own change.
+
 ## The shared pulse clock, and the repeating-animation rule
 
 `motion::PulseClock` — the seam `motion.rs`'s own doc comment reserved, now
