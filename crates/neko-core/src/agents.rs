@@ -1,0 +1,581 @@
+//! Coding agents running on this machine.
+//!
+//! **Source of truth is Paseo's own on-disk state**, `~/.paseo/agents/
+//! <workspace>/<uuid>.json` — one plain JSON document per agent, which is
+//! everything this provider needs and nothing it has to ask permission for.
+//! Chosen over the two alternatives after checking all three against the
+//! same machine:
+//!
+//! - **Paseo's MCP API under-reported.** It returned one running agent where
+//!   both the disk and `ps` said two. A source that disagrees with the
+//!   process table about what is running is not the one to build on.
+//! - **The `paseo` CLI would mean a subprocess per search.** `apps.rs` and
+//!   `files.rs` already pay that cost for `mdfind` because Spotlight has no
+//!   in-process API; here the data is a file, so there is nothing to buy.
+//!
+//! **Every live agent on the verification machine was Paseo-hosted** — both
+//! running `claude` processes had `Paseo Daemon` as their parent and no
+//! controlling terminal at all. An agent started by hand in a terminal is a
+//! real possibility and is *not* covered here; see [`Backend`] for the
+//! seam it plugs into, and `AGENTS.md` for why building terminal-tab
+//! focusing before a single real instance existed would have been guesswork.
+//!
+//! **Transcript sources (`~/.codex/sessions`, `~/.claude/projects`,
+//! `~/.grok/sessions`) are deliberately not read here.** They answer "what
+//! did an agent do", not "what is running now", and `jazzyalex/agent-sessions`
+//! — which does read all thirteen — prices each one at roughly a thousand
+//! lines of source-specific parsing in its own `docs/adding-a-session-source.md`.
+//! That is its own task, and it is a history feature rather than a live one.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use neko_protocol::{Glyph, Icon, SearchItem};
+use serde::Deserialize;
+
+use crate::provider::{Provider, ProviderError};
+use crate::search::{Candidate, fuzzy_score};
+
+/// Where agents are read from.
+///
+/// **One backend today, and the seam is here because it was asked for, not
+/// imagined**: Paseo is what this machine runs now, with an explicit "I may
+/// change to something else later". A second backend adds a variant, a
+/// `read_*` function, and one arm in `read_agents` — it does not touch
+/// the provider, the wire protocol, or the client.
+///
+/// It is deliberately *not* a plugin system. Each backend reads a different
+/// tool's own on-disk format; there is nothing generic to abstract until a
+/// second one exists to compare against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    /// Managed by the Paseo daemon: `~/.paseo/agents/<workspace>/<id>.json`,
+    /// opened with a `paseo:` deep link.
+    Paseo,
+}
+
+impl Backend {
+    pub const ALL: &'static [Backend] = &[Backend::Paseo];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Backend::Paseo => "paseo",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Backend::Paseo => "Paseo",
+        }
+    }
+
+    /// Where this backend keeps its state, for the Preferences tab to show.
+    /// Displaying it is the point: a source of truth a person cannot see is
+    /// one they cannot debug when the list looks wrong.
+    pub fn root(self) -> Option<PathBuf> {
+        match self {
+            Backend::Paseo => agents_root(),
+        }
+    }
+}
+
+/// Persisted settings, daemon-owned, same KV table as every other setting.
+pub const AGENTS_ENABLED_KEY: &str = "agents_enabled";
+pub const AGENTS_INCLUDE_IDLE_KEY: &str = "agents_include_idle";
+
+/// Defaults **on**: a running agent is exactly the kind of thing worth
+/// seeing without being asked for, and an install with no agents at all
+/// simply returns nothing.
+pub fn agents_enabled(db: &crate::Db) -> bool {
+    db.get_setting(AGENTS_ENABLED_KEY).ok().flatten().as_deref() != Some("false")
+}
+
+/// Defaults **off**. Idle agents outnumber running ones roughly twenty-five
+/// to one on a real machine (53 idle, 2 running), so including them by
+/// default would make a query for a live agent worse, not better.
+pub fn include_idle(db: &crate::Db) -> bool {
+    db.get_setting(AGENTS_INCLUDE_IDLE_KEY).ok().flatten().as_deref() == Some("true")
+}
+
+pub fn set_agents_enabled(db: &crate::Db, enabled: bool) -> rusqlite::Result<()> {
+    db.set_setting(AGENTS_ENABLED_KEY, if enabled { "true" } else { "false" })
+}
+
+pub fn set_include_idle(db: &crate::Db, include: bool) -> rusqlite::Result<()> {
+    db.set_setting(AGENTS_INCLUDE_IDLE_KEY, if include { "true" } else { "false" })
+}
+
+/// How many agents each backend can currently see, for the Preferences tab.
+/// Reported as (running, idle) so the tab can say something true and
+/// specific rather than "configured".
+pub fn backend_census(backend: Backend) -> (usize, usize) {
+    let Some(root) = backend.root() else { return (0, 0) };
+    let agents = read_agents(&root);
+    let running = agents.iter().filter(|a| a.is_running()).count();
+    (running, agents.len() - running)
+}
+
+/// A running agent outranks everything else this provider can return, by a
+/// margin no recency bonus can close. "What is running right now" is the
+/// question being asked; an idle agent is context, not an answer.
+const RUNNING_BONUS: f32 = 6.0;
+/// An agent whose session is over is never a result. They outnumber the live
+/// ones roughly eighty to one on a real machine (227 files, 2 running), so
+/// including them would bury the thing being looked for.
+const STATUS_CLOSED: &str = "closed";
+const STATUS_RUNNING: &str = "running";
+
+/// The subset of Paseo's agent document this provider reads.
+///
+/// Deliberately partial: `serde` ignores unknown fields by default, so
+/// Paseo adding or renaming anything outside this set cannot break neko. The
+/// fields here are the ones with a visible job in a row.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PaseoAgent {
+    id: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    last_status: Option<String>,
+    #[serde(default)]
+    last_activity_at: Option<String>,
+    #[serde(default)]
+    updated_at: Option<String>,
+    /// Paseo's own marker for agents it runs for itself. Never shown.
+    #[serde(default)]
+    internal: bool,
+    #[serde(default)]
+    requires_attention: bool,
+}
+
+impl PaseoAgent {
+    fn is_running(&self) -> bool {
+        self.last_status.as_deref() == Some(STATUS_RUNNING)
+    }
+
+    fn is_closed(&self) -> bool {
+        self.last_status.as_deref() == Some(STATUS_CLOSED)
+    }
+
+    /// What the row is called. Paseo titles an agent from its first prompt,
+    /// which can be absent (never prompted) or a wall of text (a pasted
+    /// task), so neither is trusted raw: a missing title falls back to the
+    /// working directory's own name, which is how a person thinks about
+    /// "the agent in neko" anyway.
+    fn display_title(&self) -> String {
+        let from_title = self.title.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(first_line);
+        if let Some(title) = from_title {
+            return title;
+        }
+        self.cwd
+            .as_deref()
+            .map(|cwd| Path::new(cwd).file_name().map_or_else(|| cwd.to_string(), |n| n.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "Agent".to_string())
+    }
+
+    /// `"claude · ~/Documents/neko"` — what it is and where it is working,
+    /// which together are how a person tells two live agents apart.
+    fn subtitle(&self) -> Option<String> {
+        let provider = self.provider.as_deref().map(short_provider);
+        let cwd = self.cwd.as_deref().map(tildify);
+        match (provider, cwd) {
+            (Some(p), Some(c)) => Some(format!("{p} · {c}")),
+            (Some(p), None) => Some(p),
+            (None, Some(c)) => Some(c),
+            (None, None) => None,
+        }
+    }
+
+    fn activity_at(&self) -> Option<&str> {
+        self.last_activity_at.as_deref().or(self.updated_at.as_deref())
+    }
+}
+
+/// Paseo records the model as `"claude/claude-opus-5"` in some views and
+/// `"claude"` in others; the row wants the family, not the exact build.
+fn short_provider(raw: &str) -> String {
+    raw.split('/').next().unwrap_or(raw).to_string()
+}
+
+/// A title is one row tall. A pasted multi-line task must not push a row's
+/// own height around, and the first line is the part that identifies it.
+fn first_line(raw: &str) -> String {
+    raw.lines().next().unwrap_or(raw).trim().to_string()
+}
+
+fn tildify(path: &str) -> String {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return path.to_string();
+    };
+    let home = home.to_string_lossy().to_string();
+    match path.strip_prefix(&home) {
+        Some(rest) => format!("~{rest}"),
+        None => path.to_string(),
+    }
+}
+
+/// `~/.paseo/agents`. Not configurable: it is Paseo's own layout, not a neko
+/// setting, and a wrong value would silently mean "no agents" rather than an
+/// error worth surfacing.
+fn agents_root() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".paseo/agents"))
+}
+
+/// Reads every agent document under `root`, skipping anything unreadable or
+/// unparseable rather than failing the search.
+///
+/// **A malformed file is skipped silently and deliberately.** These are
+/// another application's files, written by a process neko does not control
+/// and may be mid-write; one bad document must never take out the whole
+/// list, and there is nothing a person could do about it if it were
+/// reported.
+fn read_agents(root: &Path) -> Vec<PaseoAgent> {
+    let Ok(workspaces) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut agents = Vec::new();
+    for workspace in workspaces.flatten() {
+        let Ok(entries) = std::fs::read_dir(workspace.path()) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
+            let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+            let Ok(agent) = serde_json::from_str::<PaseoAgent>(&raw) else { continue };
+            if agent.internal || agent.is_closed() {
+                continue;
+            }
+            agents.push(agent);
+        }
+    }
+    agents
+}
+
+pub struct AgentsProvider {
+    root: Option<PathBuf>,
+    /// `None` in tests that only exercise reading and ranking; the settings
+    /// then take their documented defaults.
+    db: Option<Arc<Mutex<crate::Db>>>,
+}
+
+impl AgentsProvider {
+    pub fn new(db: Arc<Mutex<crate::Db>>) -> Self {
+        Self { root: agents_root(), db: Some(db) }
+    }
+
+    /// A provider that reads a specific directory — for tests, which must
+    /// never depend on whatever agents happen to exist on the machine
+    /// running the suite.
+    pub fn with_root(root: PathBuf) -> Self {
+        Self { root: Some(root), db: None }
+    }
+
+    /// Settings are re-read per search rather than cached, so a toggle in
+    /// Preferences takes effect on the next keystroke — the same choice, for
+    /// the same reason, as `files::FileProvider`'s configured scope.
+    fn settings(&self) -> (bool, bool) {
+        let Some(db) = &self.db else { return (true, false) };
+        let db = db.lock().unwrap();
+        (agents_enabled(&db), include_idle(&db))
+    }
+}
+
+impl Provider for AgentsProvider {
+    fn id(&self) -> &'static str {
+        "agent"
+    }
+
+    fn section_label(&self) -> &'static str {
+        "Agents"
+    }
+
+    /// **An empty root query returns the running agents and nothing else.**
+    /// Unlike themes or preferences — which answer nothing until asked —
+    /// "what is running right now" is exactly the kind of thing worth seeing
+    /// the moment the panel opens, and it is self-limiting: two rows on a
+    /// real machine, not two hundred. Idle agents need a query, because they
+    /// are context rather than news.
+    fn answers_empty_root_query(&self) -> bool {
+        true
+    }
+
+    fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+        let Some(root) = &self.root else {
+            return Vec::new();
+        };
+        let (enabled, include_idle) = self.settings();
+        if !enabled {
+            return Vec::new();
+        }
+        let trimmed = query.trim();
+        let agents = read_agents(root);
+        agents
+            .into_iter()
+            .filter_map(|agent| {
+                let running = agent.is_running();
+                let score = if trimmed.is_empty() {
+                    // See `answers_empty_root_query`: news, not history.
+                    if !running {
+                        return None;
+                    }
+                    RUNNING_BONUS
+                } else if !running && !include_idle {
+                    return None;
+                } else {
+                    // Matched against the same three things the row shows,
+                    // best wins — a person looks for an agent by what it is
+                    // called, by what it is, or by where it is working, and
+                    // has no reason to know which one they are using.
+                    let title = agent.display_title();
+                    let haystacks = [
+                        Some(title.clone()),
+                        agent.provider.as_deref().map(short_provider),
+                        agent.cwd.as_deref().map(tildify),
+                        Some("agent".to_string()),
+                    ];
+                    let best = haystacks
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|hay| fuzzy_score(trimmed, &hay))
+                        .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?;
+                    if running { best + RUNNING_BONUS } else { best }
+                };
+                Some(Candidate { score, item: to_item(&agent, running) })
+            })
+            .collect()
+    }
+
+    fn activate(&self, id: &str) -> Result<(), ProviderError> {
+        crate::launch::open_url(&deep_link(id)).map_err(|e| ProviderError(e.to_string()))
+    }
+}
+
+/// Paseo's own deep-link shape, read from its bundled
+/// `@getpaseo/protocol/agent-deep-link`: `paseo:/h/<serverId>/agent/<agentId>`.
+///
+/// `local` is the server id for agents running on this machine — the only
+/// ones this provider can see, since it reads this machine's own disk.
+fn deep_link(agent_id: &str) -> String {
+    format!("paseo:/h/local/agent/{agent_id}")
+}
+
+fn to_item(agent: &PaseoAgent, running: bool) -> SearchItem {
+    SearchItem {
+        id: agent.id.clone(),
+        kind: "agent".to_string(),
+        title: agent.display_title(),
+        subtitle: agent.subtitle(),
+        icon: Icon::Glyph(if running { Glyph::AgentLive } else { Glyph::Agent }),
+        section_label: "Agents".to_string(),
+        action_label: "Open in Paseo  ↵".to_string(),
+        // The badge is what the client keys its live treatment off — the row
+        // says what it is, the client decides how that looks, the same
+        // "provider describes it" rule every other field follows.
+        badge: running.then(|| "LIVE".to_string()),
+        accessory: agent
+            .requires_attention
+            .then(|| "Needs you".to_string())
+            .or_else(|| agent.activity_at().map(short_time)),
+        enters_mode: None,
+        group_label: None,
+        actions: Vec::new(),
+        source: agent.cwd.clone(),
+    }
+}
+
+/// `"2026-08-23T01:48:18.912Z"` → `"01:48"`. Deliberately not a relative
+/// time: computing one needs the current instant, and `Provider::search`'s
+/// `now_unix_ms` is milliseconds while these are RFC 3339 strings — parsing
+/// them properly would mean a date/time dependency this codebase has so far
+/// declined to take on for one label (see `AGENTS.md`, "Commands and modes",
+/// on the same trade for clipboard timestamps).
+fn short_time(timestamp: &str) -> String {
+    timestamp
+        .split('T')
+        .nth(1)
+        .and_then(|time| time.get(0..5))
+        .map(str::to_string)
+        .unwrap_or_else(|| timestamp.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_agent(root: &Path, workspace: &str, id: &str, body: &str) {
+        let dir = root.join(workspace);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{id}.json")), body).unwrap();
+    }
+
+    fn fixture_root() -> (tempfile::TempDir, AgentsProvider) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        write_agent(
+            &root,
+            "neko",
+            "run-1",
+            r#"{"id":"run-1","title":"hi","provider":"claude","cwd":"/tmp/neko",
+                "lastStatus":"running","lastActivityAt":"2026-08-23T01:48:18.912Z"}"#,
+        );
+        write_agent(
+            &root,
+            "other",
+            "idle-1",
+            r#"{"id":"idle-1","title":"fix the parser","provider":"codex","cwd":"/tmp/parser",
+                "lastStatus":"idle","updatedAt":"2026-08-22T09:00:00.000Z"}"#,
+        );
+        write_agent(
+            &root,
+            "other",
+            "closed-1",
+            r#"{"id":"closed-1","title":"old work","provider":"claude","lastStatus":"closed"}"#,
+        );
+        write_agent(&root, "other", "internal-1", r#"{"id":"internal-1","lastStatus":"running","internal":true}"#);
+        let provider = AgentsProvider::with_root(root);
+        (dir, provider)
+    }
+
+    #[test]
+    fn an_empty_query_returns_only_the_running_agents() {
+        let (_dir, provider) = fixture_root();
+        let found = provider.search("", 0);
+        assert_eq!(found.len(), 1, "idle and closed agents are context, not news");
+        assert_eq!(found[0].item.id, "run-1");
+        assert_eq!(found[0].item.badge.as_deref(), Some("LIVE"));
+    }
+
+    #[test]
+    fn a_closed_agent_is_never_returned_even_by_an_exact_query() {
+        let (_dir, provider) = fixture_root();
+        assert!(provider.search("old work", 0).iter().all(|c| c.item.id != "closed-1"));
+    }
+
+    #[test]
+    fn paseos_own_internal_agents_are_never_shown() {
+        let (_dir, provider) = fixture_root();
+        assert!(provider.search("", 0).iter().all(|c| c.item.id != "internal-1"));
+        assert!(provider.search("agent", 0).iter().all(|c| c.item.id != "internal-1"));
+    }
+
+    #[test]
+    fn a_running_agent_outranks_an_idle_one_that_matches_the_query_just_as_well() {
+        let (_dir, provider) = fixture_root();
+        // Both match "agent" only through the shared alias, so the ordering
+        // is decided purely by whether one of them is live.
+        let found = provider.search("agent", 0);
+        let top = found.iter().max_by(|a, b| a.score.partial_cmp(&b.score).unwrap()).unwrap();
+        assert_eq!(top.item.id, "run-1");
+    }
+
+    #[test]
+    fn an_agent_is_findable_by_its_working_directory_not_only_by_its_title() {
+        let (_dir, provider) = fixture_root();
+        // "neko" appears only in the running agent's cwd, never in its title.
+        let found = provider.search("neko", 0);
+        assert!(found.iter().any(|c| c.item.id == "run-1"), "cwd must be searchable");
+    }
+
+    #[test]
+    fn idle_agents_are_excluded_by_default_and_included_once_the_setting_is_on() {
+        let (_dir, provider) = fixture_root();
+        // `with_root` carries no `Db`, so the documented defaults apply:
+        // agents on, idle off.
+        assert!(
+            provider.search("parser", 0).is_empty(),
+            "an idle agent must not match by default — they outnumber live ones heavily"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::Db::open_in_memory().unwrap();
+        set_include_idle(&db, true).unwrap();
+        write_agent(
+            dir.path(),
+            "w",
+            "idle-2",
+            r#"{"id":"idle-2","title":"fix the parser","lastStatus":"idle","cwd":"/tmp/parser"}"#,
+        );
+        let with_idle =
+            AgentsProvider { root: Some(dir.path().to_path_buf()), db: Some(Arc::new(Mutex::new(db))) };
+        assert_eq!(with_idle.search("parser", 0).len(), 1, "turning the setting on must include them");
+    }
+
+    #[test]
+    fn turning_agents_off_returns_nothing_at_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::Db::open_in_memory().unwrap();
+        set_agents_enabled(&db, false).unwrap();
+        write_agent(dir.path(), "w", "a", r#"{"id":"a","title":"hi","lastStatus":"running"}"#);
+        let provider =
+            AgentsProvider { root: Some(dir.path().to_path_buf()), db: Some(Arc::new(Mutex::new(db))) };
+        assert!(provider.search("", 0).is_empty());
+        assert!(provider.search("hi", 0).is_empty());
+    }
+
+    #[test]
+    fn a_malformed_document_is_skipped_without_losing_the_rest_of_the_list() {
+        let (dir, provider) = fixture_root();
+        write_agent(dir.path(), "broken", "bad", "{ this is not json");
+        assert_eq!(provider.search("", 0).len(), 1, "one unreadable file must not empty the list");
+    }
+
+    #[test]
+    fn an_untitled_agent_falls_back_to_its_working_directorys_name() {
+        let dir = tempfile::tempdir().unwrap();
+        write_agent(
+            dir.path(),
+            "w",
+            "a",
+            r#"{"id":"a","provider":"claude","cwd":"/Users/someone/Documents/triage-fe","lastStatus":"running"}"#,
+        );
+        let provider = AgentsProvider::with_root(dir.path().to_path_buf());
+        assert_eq!(provider.search("", 0)[0].item.title, "triage-fe");
+    }
+
+    #[test]
+    fn a_multi_line_pasted_title_is_reduced_to_its_first_line() {
+        let dir = tempfile::tempdir().unwrap();
+        write_agent(
+            dir.path(),
+            "w",
+            "a",
+            r#"{"id":"a","title":"first line\nsecond line\nthird","lastStatus":"running"}"#,
+        );
+        let provider = AgentsProvider::with_root(dir.path().to_path_buf());
+        assert_eq!(provider.search("", 0)[0].item.title, "first line", "a row is one line tall");
+    }
+
+    #[test]
+    fn an_agent_needing_attention_says_so_instead_of_showing_a_timestamp() {
+        let dir = tempfile::tempdir().unwrap();
+        write_agent(
+            dir.path(),
+            "w",
+            "a",
+            r#"{"id":"a","title":"blocked","lastStatus":"running","requiresAttention":true,
+                "lastActivityAt":"2026-08-23T01:48:18.912Z"}"#,
+        );
+        let provider = AgentsProvider::with_root(dir.path().to_path_buf());
+        assert_eq!(provider.search("", 0)[0].item.accessory.as_deref(), Some("Needs you"));
+    }
+
+    #[test]
+    fn the_deep_link_matches_paseos_own_documented_shape() {
+        assert_eq!(deep_link("abc-123"), "paseo:/h/local/agent/abc-123");
+    }
+
+    #[test]
+    fn a_missing_paseo_directory_is_an_empty_list_not_an_error() {
+        let provider = AgentsProvider::with_root(PathBuf::from("/definitely/not/here"));
+        assert!(provider.search("", 0).is_empty());
+        assert!(provider.search("claude", 0).is_empty());
+    }
+}

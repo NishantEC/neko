@@ -61,6 +61,7 @@
 //! is the seam for the day one does.
 
 use gpui::{AnimationExt, Div, IntoElement, Styled, px};
+use gpui::{App, AppContext as _, Context, Entity, Global};
 
 /// A CSS `cubic-bezier(x1, y1, x2, y2)` timing function (endpoints fixed at
 /// (0,0)/(1,1)) — evaluated by Newton–Raphson with a bisection fallback, the
@@ -306,5 +307,171 @@ mod tests {
         // value rather than only checking shape properties.
         let y = EASE_OUT.eval(0.5);
         assert_close(y, 0.839, 5e-3, "ease-out midpoint");
+    }
+}
+
+// ---------------------------------------------------------------------
+// The shared pulse clock
+// ---------------------------------------------------------------------
+
+/// Ticks 12.5 times a second (every 80ms): fast enough that the pulse reads
+/// as a pulse, and roughly a tenth of the frame rate that caused the
+/// incident described above.
+pub const PULSE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80);
+/// A full breath in and out.
+const PULSE_PERIOD_MS: f32 = 1600.0;
+
+/// One repeating clock for the whole app, and the only sanctioned way to
+/// drive a repeating animation here.
+///
+/// **This is the seam this module's own doc comment reserved.** The rule it
+/// exists to enforce, from comet's recorded incident: a single
+/// `with_animation(..).repeat()` element pinned a whole window at 120Hz and
+/// measured 36% CPU. Nothing in this catalog may repeat on its own; anything
+/// that needs to must read a phase from here instead.
+///
+/// Three properties make that safe, and all three are load-bearing:
+///
+/// 1. **It ticks at [`PULSE_INTERVAL`], not at frame rate.** A breathing dot
+///    conveys "alive"; it does not need 120 steps a second to do it.
+/// 2. **It stops completely when nothing is using it.** `set_running(false)`
+///    ends the task, so the resting cost of this module is exactly zero —
+///    the panel is hidden most of the time, and a clock that kept ticking
+///    behind a hidden window would be the same defect in a slower disguise.
+/// 3. **It never starts under reduce-motion.** `set_running` is a no-op then,
+///    and [`PulseClock::intensity`] returns a fixed value, so a live row
+///    still reads as live without moving.
+pub struct PulseClock {
+    elapsed_ms: f32,
+    running: bool,
+}
+
+struct GlobalPulseClock(Entity<PulseClock>);
+
+impl Global for GlobalPulseClock {}
+
+impl PulseClock {
+    /// The one clock. Created on first use, never more than one.
+    pub fn global(cx: &mut App) -> Entity<PulseClock> {
+        if !cx.has_global::<GlobalPulseClock>() {
+            let clock = cx.new(|_| PulseClock { elapsed_ms: 0.0, running: false });
+            cx.set_global(GlobalPulseClock(clock));
+        }
+        cx.global::<GlobalPulseClock>().0.clone()
+    }
+
+    /// `0.0..=1.0`, a smooth breath. Callers interpolate whatever they like
+    /// between two values with it rather than each inventing a waveform.
+    ///
+    /// Fixed at its midpoint while stopped or under reduce-motion, so a
+    /// caller never has to branch: the dot is simply steady instead of
+    /// breathing.
+    pub fn intensity(&self) -> f32 {
+        if !self.running {
+            return 0.5;
+        }
+        let phase = (self.elapsed_ms % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
+        // A cosine rather than a triangle: a linear ramp reverses with a
+        // visible corner, which reads as a blink rather than a breath.
+        0.5 - 0.5 * (phase * std::f32::consts::TAU).cos()
+    }
+
+    #[cfg(test)]
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+
+    /// Starts or stops ticking. Idempotent — calling it every frame with the
+    /// same value, which is exactly what a render pass will do, costs one
+    /// comparison and spawns nothing.
+    pub fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
+        if running == self.running {
+            return;
+        }
+        if running && system_reduce_motion() {
+            return;
+        }
+        self.running = running;
+        if !running {
+            // The loop below sees this on its next tick and returns, so the
+            // task ends on its own rather than needing to be cancelled.
+            self.elapsed_ms = 0.0;
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(PULSE_INTERVAL).await;
+                let keep_going = this.update(cx, |clock, cx| {
+                    if !clock.running {
+                        return false;
+                    }
+                    clock.elapsed_ms += PULSE_INTERVAL.as_millis() as f32;
+                    cx.notify();
+                    true
+                });
+                match keep_going {
+                    Ok(true) => {}
+                    // Stopped, or the clock itself is gone with the app.
+                    _ => break,
+                }
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod pulse_tests {
+    use super::*;
+
+    /// The clock's waveform is pure arithmetic on `elapsed_ms`, so it can be
+    /// checked without a running task or a window.
+    fn clock_at(elapsed_ms: f32, running: bool) -> PulseClock {
+        PulseClock { elapsed_ms, running }
+    }
+
+    #[test]
+    fn a_stopped_clock_reports_a_fixed_midpoint_so_callers_never_branch_on_it() {
+        assert_eq!(clock_at(0.0, false).intensity(), 0.5);
+        assert_eq!(clock_at(12345.0, false).intensity(), 0.5, "a stopped clock does not drift");
+    }
+
+    #[test]
+    fn intensity_stays_inside_the_unit_interval_across_a_dense_sweep() {
+        for step in 0..2000 {
+            let i = clock_at(step as f32 * 7.3, true).intensity();
+            assert!((0.0..=1.0).contains(&i), "intensity {i} out of range at step {step}");
+        }
+    }
+
+    #[test]
+    fn the_waveform_breathes_rather_than_blinking() {
+        // Starts dark, peaks at the half-period, returns — a corner here
+        // would read as a blink, which is what the cosine is for.
+        let start = clock_at(0.0, true).intensity();
+        let peak = clock_at(PULSE_PERIOD_MS / 2.0, true).intensity();
+        let end = clock_at(PULSE_PERIOD_MS, true).intensity();
+        assert!(start < 0.01, "starts dark, got {start}");
+        assert!(peak > 0.99, "peaks mid-period, got {peak}");
+        assert!(end < 0.01, "returns, got {end}");
+    }
+
+    #[test]
+    fn a_clock_reports_whether_it_is_running_so_the_stop_path_is_observable() {
+        assert!(!clock_at(0.0, false).is_running());
+        assert!(clock_at(0.0, true).is_running());
+    }
+
+    #[test]
+    fn the_tick_rate_stays_far_below_frame_rate() {
+        // The whole reason this clock exists: comet measured a repeating
+        // element pinning a window at 120Hz for 36% CPU. A regression here
+        // would be silent, so it is asserted rather than trusted to review.
+        assert!(
+            PULSE_INTERVAL.as_millis() >= 50,
+            "a shared clock ticking faster than 20Hz defeats its own purpose"
+        );
     }
 }

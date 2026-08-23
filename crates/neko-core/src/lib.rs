@@ -5,6 +5,7 @@
 //! to AppKit's window/event-loop APIs beyond the read-only icon/launch calls
 //! below, which work fine from a headless process.
 
+pub mod agents;
 pub mod apps;
 pub mod cancel;
 pub mod clipboard;
@@ -15,6 +16,7 @@ pub mod hotkey;
 pub mod icons;
 pub mod launch;
 pub mod onboarding;
+pub mod preferences;
 pub mod provider;
 pub mod search;
 pub mod settings;

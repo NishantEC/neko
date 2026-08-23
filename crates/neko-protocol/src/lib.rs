@@ -162,6 +162,19 @@ pub enum Glyph {
     /// `data/neko-design/report.md`'s mockup 12 uses for the mode's own
     /// input-row glyph, reused here for the root-list row that leads to it.
     Clipboard,
+    /// A rounded terminal-ish square with a dot — an agent that exists but
+    /// is not currently doing anything.
+    Agent,
+    /// The same mark with a filled presence dot — a *running* agent. A
+    /// separate variant rather than a flag on [`Glyph::Agent`] because the
+    /// client paints it differently (see `panel.rs`'s live treatment), and
+    /// the vocabulary here is "what to paint", not "what it means".
+    AgentLive,
+    /// Two stacked horizontal rails, each with a small knob at a different
+    /// offset — the settings/preferences mark. Painted rather than a font
+    /// glyph or an SVG asset, the same as every other shape in this
+    /// vocabulary (there is no icon-asset pipeline in this codebase).
+    Sliders,
     /// Four filled swatches in a 2×2 block, painted in the *live* theme's own
     /// panel/selected/success/danger colours — a theme row and the `Themes`
     /// command both use it. The one glyph in this vocabulary whose appearance

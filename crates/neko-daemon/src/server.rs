@@ -21,6 +21,10 @@ pub struct AppState {
     /// "Provider abstraction" and "Commands and modes" sections for the
     /// full accounting.
     providers: Vec<Box<dyn Provider>>,
+    /// Providers reachable only by an explicitly scoped search or an
+    /// activation — never included in a root-list query. See
+    /// `AppState::new` for why the folder-scope list is one.
+    mode_providers: Vec<Box<dyn Provider>>,
     /// One shared writer lock per connected client, keyed by nothing (just
     /// a flat list) since a connection never needs to look itself up — see
     /// `handle_connection`'s doc comment for why every write to a given
@@ -31,7 +35,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(db: Db, apps: Vec<AppEntry>) -> Self {
-        Self::with_test_providers(db, apps, neko_core::files::FileProvider::new(), neko_core::settings::SettingsProvider::new())
+        {
+            // The scope follows the persisted Search Folders setting, so it
+            // needs the same `Db` every other provider shares — which only
+            // exists inside `with_test_providers`, hence the closure-free
+            // two-step here rather than a direct call.
+            Self::with_test_providers(db, apps, None, neko_core::settings::SettingsProvider::new())
+        }
     }
 
     /// The real constructor, parameterized on the file and settings
@@ -43,13 +53,18 @@ impl AppState {
     /// also pick up whatever System Settings panes happen to exist on the
     /// machine running the test suite, which is both non-hermetic and
     /// varies by OS version.
+    /// `file_provider: None` means "the real one" — built from the shared
+    /// `Db` below so its scope follows the persisted Search Folders setting.
+    /// Tests pass `Some(FileProvider::empty())` to stay hermetic.
     fn with_test_providers(
         db: Db,
         apps: Vec<AppEntry>,
-        file_provider: neko_core::files::FileProvider,
+        file_provider: Option<neko_core::files::FileProvider>,
         settings_provider: neko_core::settings::SettingsProvider,
     ) -> Self {
         let db = Arc::new(Mutex::new(db));
+        let file_provider =
+            file_provider.unwrap_or_else(|| neko_core::files::FileProvider::with_db(db.clone()));
         let apps = Arc::new(RwLock::new(apps));
         let providers: Vec<Box<dyn Provider>> = vec![
             Box::new(neko_core::apps::AppsProvider::new(apps.clone(), db.clone())),
@@ -67,13 +82,39 @@ impl AppState {
             // unless a query genuinely names one. Its own mode is where it
             // does the work.
             Box::new(neko_core::themes::ThemesProvider::new(db.clone())),
+            // Seventh. Like the theme provider above it, its rows are worth
+            // finding directly from the root list — "hotkey" should reach
+            // the setting, not just a container to open it from.
+            Box::new(neko_core::preferences::PreferencesProvider::new(db.clone())),
+            // Eighth. Reads Paseo's own on-disk agent documents — no index
+            // to warm, no watcher, no subprocess; see `agents.rs`.
+            Box::new(neko_core::agents::AgentsProvider::new(db.clone())),
         ];
+        // Mode-only providers: reachable when a search explicitly scopes to
+        // them (`Request::Search`'s `provider` field) and by
+        // `Request::Activate`, but never searched for an ordinary root-list
+        // query. A configured search-folder path is not a result anybody
+        // wants back from the root list, and unlike every provider above,
+        // these rows only mean anything inside their own screen.
+        let mode_providers: Vec<Box<dyn Provider>> =
+            vec![Box::new(neko_core::preferences::FolderScopeProvider::new(db.clone()))];
         Self {
             db,
             apps,
             providers,
+            mode_providers,
             broadcast: Mutex::new(Vec::new()),
         }
+    }
+}
+
+impl AppState {
+    /// Every provider that an explicitly-scoped search or an activation can
+    /// reach: the root-list ones first, then the mode-only ones. Root-list
+    /// searches deliberately do **not** go through this — they iterate
+    /// `providers` directly.
+    fn all_providers(&self) -> impl Iterator<Item = &dyn Provider> {
+        self.providers.iter().chain(self.mode_providers.iter()).map(|p| p.as_ref())
     }
 }
 
@@ -271,7 +312,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             // every other result type.
             let limit = limit.clamp(1, 50);
             let now = now_unix_ms();
-            let Some(provider) = state.providers.iter().find(|p| p.id() == provider_id) else {
+            let Some(provider) = state.all_providers().find(|p| p.id() == provider_id) else {
                 return Response::Error { message: format!("no such provider: {provider_id}") };
             };
             let mut candidates = provider.search_cancellable(&query, now, &ctx.cancel);
@@ -299,8 +340,18 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             // The fast phase's candidates are computed once and reused by
             // the final `allocate`, so this costs one extra small frame per
             // keystroke, never a second round of provider work.
-            let (deferred, immediate): (Vec<&dyn Provider>, Vec<&dyn Provider>) =
-                state.providers.iter().map(|provider| provider.as_ref()).partition(|provider| provider.defers_for(query));
+            // A root-list search with nothing typed yet must not reach a
+            // provider whose whole list only means something once asked for
+            // (themes, preferences) — see `Provider::answers_empty_root_query`.
+            // Scoped searches return above and never come through here, so a
+            // surface that *does* want that whole list is unaffected.
+            let empty_query = query.trim().is_empty();
+            let (deferred, immediate): (Vec<&dyn Provider>, Vec<&dyn Provider>) = state
+                .providers
+                .iter()
+                .map(|provider| provider.as_ref())
+                .filter(|provider| !empty_query || provider.answers_empty_root_query())
+                .partition(|provider| provider.defers_for(query));
 
             let mut candidates = search_concurrently(&immediate, query, now, &ctx.cancel);
 
@@ -323,7 +374,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             Response::SearchResults { items, complete: true }
         }
 
-        Request::Activate { kind, id, action } => match state.providers.iter().find(|p| p.id() == kind) {
+        Request::Activate { kind, id, action } => match state.all_providers().find(|p| p.id() == kind) {
             Some(provider) => {
                 let result = match action {
                     None => provider.activate(&id),
@@ -505,9 +556,52 @@ mod tests {
         AppState::with_test_providers(
             db,
             apps,
-            neko_core::files::FileProvider::empty(),
+            Some(neko_core::files::FileProvider::empty()),
             neko_core::settings::SettingsProvider::with_panes(Vec::new()),
         )
+    }
+
+    #[test]
+    fn an_empty_root_query_never_returns_settings_or_theme_rows_but_a_scoped_one_still_does() {
+        // Caught live, not by a unit test: "Launch at Login" was rendering in
+        // the root list before anything had been typed, and seventeen themes
+        // were taking the top slots ahead of it.
+        let db = Db::open_in_memory().unwrap();
+        let state = test_state(db, vec![]);
+        let ctx = RequestContext::new(Cancel::never(), |_response| {});
+
+        let root = handle_request(
+            &state,
+            Request::Search { query: String::new(), limit: 20, provider: None },
+            &ctx,
+        );
+        let Response::SearchResults { items, .. } = root else { panic!("expected results") };
+        for item in &items {
+            assert!(
+                item.kind != "preference" && item.kind != "theme",
+                "{} must not answer an empty root query, got {:?}",
+                item.kind,
+                item.title
+            );
+        }
+
+        // The same empty query, scoped, is how the Preferences window loads
+        // its values — it must still return every setting.
+        let scoped = handle_request(
+            &state,
+            Request::Search { query: String::new(), limit: 20, provider: Some("preference".into()) },
+            &ctx,
+        );
+        let Response::SearchResults { items, .. } = scoped else { panic!("expected results") };
+        // Asserted by identity, not by count: settings get added over time,
+        // and a count here would fail for the wrong reason every time one is.
+        let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        for expected in ["hotkey", "launch-at-login", "search-folders"] {
+            assert!(
+                ids.contains(&expected),
+                "the window's own load must be unaffected by the root-list guard; missing {expected} from {ids:?}"
+            );
+        }
     }
 
     #[test]
