@@ -15,6 +15,7 @@ pub mod files;
 pub mod hotkey;
 pub mod icons;
 pub mod launch;
+pub mod new_agent;
 pub mod onboarding;
 pub mod preferences;
 pub mod provider;

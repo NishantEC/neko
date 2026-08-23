@@ -14,16 +14,17 @@ pub struct AppState {
     pub apps: Arc<RwLock<Vec<AppEntry>>>,
     /// Every registered result-type provider, in section render order —
     /// see `neko_core::search::allocate`'s doc comment for what that order
-    /// means for ranking. Registering a new provider (five are registered
-    /// today: app, file, clipboard, settings, command) is exactly one more
-    /// line here plus its own `impl Provider` — nothing else in this file,
-    /// the wire protocol, or the client needs to change. See `AGENTS.md`'s
-    /// "Provider abstraction" and "Commands and modes" sections for the
-    /// full accounting.
+    /// means for ranking. Registering a new provider (eight are registered
+    /// today: app, file, clipboard, settings, command, theme, preference,
+    /// agent) is exactly one more line here plus its own `impl Provider` —
+    /// nothing else in this file, the wire protocol, or the client needs to
+    /// change. See `AGENTS.md`'s "Provider abstraction" and "Commands and
+    /// modes" sections for the full accounting.
     providers: Vec<Box<dyn Provider>>,
     /// Providers reachable only by an explicitly scoped search or an
     /// activation — never included in a root-list query. See
-    /// `AppState::new` for why the folder-scope list is one.
+    /// `AppState::new` for why the folder-scope list and the new-agent
+    /// working-directory list are each one.
     mode_providers: Vec<Box<dyn Provider>>,
     /// One shared writer lock per connected client, keyed by nothing (just
     /// a flat list) since a connection never needs to look itself up — see
@@ -96,8 +97,17 @@ impl AppState {
         // query. A configured search-folder path is not a result anybody
         // wants back from the root list, and unlike every provider above,
         // these rows only mean anything inside their own screen.
-        let mode_providers: Vec<Box<dyn Provider>> =
-            vec![Box::new(neko_core::preferences::FolderScopeProvider::new(db.clone()))];
+        //
+        // `NewAgentProvider` is the second: its rows are working directories
+        // to start an agent in, which are only an answer once somebody has
+        // entered the `New Agent` mode and said what the task is. It takes no
+        // `Db` and does no I/O at construction — it reads Paseo's own
+        // projects file per search — so a test that never scopes to it never
+        // touches the machine's real Paseo state.
+        let mode_providers: Vec<Box<dyn Provider>> = vec![
+            Box::new(neko_core::preferences::FolderScopeProvider::new(db.clone())),
+            Box::new(neko_core::new_agent::NewAgentProvider::new()),
+        ];
         Self {
             db,
             apps,
@@ -374,10 +384,15 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             Response::SearchResults { items, complete: true }
         }
 
-        Request::Activate { kind, id, action } => match state.all_providers().find(|p| p.id() == kind) {
+        Request::Activate { kind, id, action, query } => match state.all_providers().find(|p| p.id() == kind) {
             Some(provider) => {
                 let result = match action {
-                    None => provider.activate(&id),
+                    // `activate_with_query`, never `activate` — it defaults to
+                    // dropping the query and delegating, so this is the same
+                    // call for every provider that does not care, and the only
+                    // way `new_agent` ever learns what was typed. Same
+                    // arrangement as `search_cancellable` above.
+                    None => provider.activate_with_query(&id, &query),
                     Some(action_id) => provider.perform_action(&id, &action_id),
                 };
                 match result {
@@ -875,7 +890,7 @@ mod tests {
         // the right provider (a real app-not-found error), not a generic
         // "no such provider" failure.
         let response =
-            handle_request_for_test(&state, Request::Activate { kind: "app".into(), id: "does-not-exist".into(), action: None });
+            handle_request_for_test(&state, Request::Activate { kind: "app".into(), id: "does-not-exist".into(), action: None, query: String::new() });
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
@@ -887,7 +902,7 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         let state = test_state(db, Vec::new());
         let response =
-            handle_request_for_test(&state, Request::Activate { kind: "nonexistent".into(), id: "x".into(), action: None });
+            handle_request_for_test(&state, Request::Activate { kind: "nonexistent".into(), id: "x".into(), action: None, query: String::new() });
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
@@ -901,7 +916,7 @@ mod tests {
         let state = test_state(db, Vec::new());
         let response = handle_request_for_test(
             &state,
-            Request::Activate { kind: "clipboard".into(), id: "delete me".into(), action: Some("delete".into()) },
+            Request::Activate { kind: "clipboard".into(), id: "delete me".into(), action: Some("delete".into()), query: String::new() },
         );
         assert!(matches!(response, Response::Activated), "expected Activated, got {response:?}");
     }
@@ -912,7 +927,7 @@ mod tests {
         let state = test_state(db, vec![app("Console")]);
         let response = handle_request_for_test(
             &state,
-            Request::Activate { kind: "app".into(), id: "Console".into(), action: Some("teleport".into()) },
+            Request::Activate { kind: "app".into(), id: "Console".into(), action: Some("teleport".into()), query: String::new() },
         );
         let Response::Error { message } = response else {
             panic!("expected an Error response")

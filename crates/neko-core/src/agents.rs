@@ -235,6 +235,17 @@ fn agents_root() -> Option<PathBuf> {
 /// list, and there is nothing a person could do about it if it were
 /// reported.
 fn read_agents(root: &Path) -> Vec<PaseoAgent> {
+    read_agent_documents(root).into_iter().filter(|agent| !agent.is_closed()).collect()
+}
+
+/// Every non-internal agent document under `root`, **closed ones included**.
+///
+/// Split out from [`read_agents`] for [`provider_usage`], which wants exactly
+/// what this provider does not: a *finished* agent is the best evidence there
+/// is of which tool the captain actually uses in a given directory, and on the
+/// verification machine 172 of 227 documents were closed. The malformed-file
+/// and unreadable-directory rules above apply here unchanged.
+fn read_agent_documents(root: &Path) -> Vec<PaseoAgent> {
     let Ok(workspaces) = std::fs::read_dir(root) else {
         return Vec::new();
     };
@@ -250,13 +261,51 @@ fn read_agents(root: &Path) -> Vec<PaseoAgent> {
             }
             let Ok(raw) = std::fs::read_to_string(&path) else { continue };
             let Ok(agent) = serde_json::from_str::<PaseoAgent>(&raw) else { continue };
-            if agent.internal || agent.is_closed() {
+            if agent.internal {
                 continue;
             }
             agents.push(agent);
         }
     }
     agents
+}
+
+/// One past agent, reduced to "which tool, working where, when".
+///
+/// This is the whole of what [`crate::new_agent`] needs from this module, and
+/// it is deliberately not the `PaseoAgent` document itself: the two modules
+/// share a *fact about the machine*, not a parser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderUse {
+    /// Paseo's own provider id — `"claude"`, `"codex"`, … — already reduced
+    /// from a `"claude/claude-opus-5"` style value by [`short_provider`].
+    pub provider: String,
+    pub cwd: PathBuf,
+    /// RFC 3339, compared as a string: see [`ProviderUse`]'s only consumer and
+    /// `new_agent::read_projects` for why that is chronological here.
+    pub at: String,
+}
+
+/// Which agent providers have really been used, where, most recent first.
+///
+/// Exists because **`paseo run` requires an explicit `--provider`** — verified
+/// live against the real CLI, which answers `MISSING_PROVIDER` without one, and
+/// there is no default anywhere in `~/.paseo/config.json` to fall back on. So
+/// `new_agent` has to name a tool, and the only honest way to name one without
+/// hard-coding a choice this app has no business making is to use the one
+/// already in use. Closed agents count (see [`read_agent_documents`]).
+pub fn provider_usage(root: &Path) -> Vec<ProviderUse> {
+    let mut uses: Vec<ProviderUse> = read_agent_documents(root)
+        .into_iter()
+        .filter_map(|agent| {
+            let provider = agent.provider.as_deref().map(short_provider).filter(|p| !p.is_empty())?;
+            let cwd = agent.cwd.as_deref().map(PathBuf::from)?;
+            let at = agent.activity_at().unwrap_or_default().to_string();
+            Some(ProviderUse { provider, cwd, at })
+        })
+        .collect();
+    uses.sort_by(|a, b| b.at.cmp(&a.at));
+    uses
 }
 
 pub struct AgentsProvider {

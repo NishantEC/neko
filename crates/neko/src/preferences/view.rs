@@ -301,6 +301,10 @@ impl PreferencesRoot {
                 kind: "folder-scope".to_string(),
                 id: typed,
                 action: Some("add".to_string()),
+                // This window has no search field; `query` only carries one
+                // for a row whose action takes what was typed as an argument
+                // (`new_agent`), and every provider else ignores it.
+                query: String::new(),
             },
             cx,
         );
@@ -308,7 +312,7 @@ impl PreferencesRoot {
 
     fn remove_folder(&mut self, path: String, cx: &mut Context<Self>) {
         self.apply(
-            Request::Activate { kind: "folder-scope".to_string(), id: path, action: None },
+            Request::Activate { kind: "folder-scope".to_string(), id: path, action: None, query: String::new() },
             cx,
         );
     }
@@ -656,6 +660,7 @@ impl PreferencesRoot {
                         kind: "preference".to_string(),
                         id: row_id.to_string(),
                         action: None,
+                        query: String::new(),
                     },
                     cx,
                 );
