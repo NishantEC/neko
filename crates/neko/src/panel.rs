@@ -37,12 +37,13 @@ use std::rc::Rc;
 use gpui::{
     Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, Entity, FocusHandle, Focusable,
     MouseDownEvent, Render, ScrollHandle, SharedString, Window, actions, anchored, deferred,
-    div, img, point, prelude::*, px,
+    div, img, point, prelude::*, px, svg,
 };
 use neko_client::NekoClient;
 use neko_protocol::{Glyph, Icon, ItemAction, Request, Response, SearchItem};
 
 use crate::accessibility::AccessibilityChecker;
+use crate::assets::{glyph_icon, icon};
 use crate::edge_fade::scroll_edge_fade;
 use crate::menu_frost::sync_menu_frost;
 use crate::modes::{self, ModeChrome};
@@ -2475,14 +2476,31 @@ fn app_icon_placeholder_glyph() -> AnyElement {
         .into_any_element()
 }
 
-/// A small hand-painted glyph for the row-icon slot, in the same spirit as
-/// `search_glyph` below (a painted shape composed from plain divs, not a
-/// font glyph or an SVG asset — this codebase has no bundled icon-asset
-/// pipeline, and a Unicode symbol is exactly what the design report's §6
-/// finding on unreliable glyph rendering in GPUI already ruled out for the
-/// search icon). `Text`/`Link` predate this task (clipboard rows have no
-/// per-entry icon); `File`/`Folder` are this task's own addition for file
-/// search results that haven't gotten a real icon.
+/// The row-icon slot's mark for a provider that has no per-item raster.
+///
+/// **These were hand-composed `div()` stacks until `assets.rs` existed.**
+/// Every one of their doc comments gave the same reason — "this codebase has
+/// no bundled icon-asset pipeline, and a Unicode symbol isn't a reliable
+/// substitute (design report §6)" — and the second half is still true; the
+/// first half stopped being true the moment an `AssetSource` was installed,
+/// because `gpui::svg()` was already in the gpui this crate compiles
+/// against. They are now vendored Lucide icons (ISC; see `assets.rs` and
+/// `crates/neko/src/components/vendor/MANIFEST.md`), which buys three things
+/// a `div()` stack could not: real curves (`Glyph::Link` is a chain, not two
+/// squares on a diagonal), one consistent stroke weight and optical size
+/// across every mark, and resolution independence — the SVG is rasterised at
+/// the window's live backing scale, so moving the panel to a different
+/// display re-renders it rather than resampling it.
+///
+/// **Colour still comes from `theme::active()`, at paint time.** `svg()`
+/// renders to an alpha mask that is tinted by the element's own
+/// `text_color`, so a theme change re-tints every icon with no per-theme
+/// asset, no cache to invalidate, and no `if themed` branch — the same
+/// property the painted versions had, kept deliberately.
+///
+/// Two arms do not simply name a file, both for reasons that are about the
+/// renderer rather than about taste — see each one.
+///
 /// `row_id` is the row's own `SearchItem::id`. Only `Glyph::Palette` reads it
 /// — a theme row draws *its own* palette, so a list of themes is a list of
 /// previews rather than seventeen copies of the same mark. That is a lookup
@@ -2494,295 +2512,121 @@ fn app_icon_placeholder_glyph() -> AnyElement {
 /// this theme".
 fn glyph_element(glyph: Glyph, row_id: &str) -> AnyElement {
     let slot = div().w(px(theme::ROW_ICON_PX)).h(px(theme::ROW_ICON_PX)).flex_shrink_0();
+
+    // `Glyph::Palette` is the one mark in this vocabulary that has no
+    // single-colour form, so it is the one that stays painted — permanently,
+    // not pending an asset. A gpui SVG is an alpha mask tinted by exactly one
+    // colour; a palette swatch that is all one colour is not a palette
+    // swatch. `assets::glyph_icon` returns `None` for precisely this, and
+    // that `None` is what routes here.
+    let Some(path) = glyph_icon(glyph) else {
+        return palette_glyph(slot, row_id);
+    };
+
+    // The agent marks keep the exact two-colour treatment the painted
+    // versions had — the mark's own outline in `state_success_border` when
+    // live, plus a presence dot — because an alpha mask cannot carry two
+    // tints on its own. The mark is the SVG; the dot is a `div` composited
+    // over it. Same mark either way, so a list of agents reads as one kind
+    // of thing and the live ones still pick themselves out, which is the
+    // property `AGENTS.md`'s "Agents" section is describing.
+    let live = glyph == Glyph::AgentLive;
+    let tint = if live {
+        theme::active().state_success_border
+    } else {
+        theme::active().text_tertiary
+    };
+
+    let mark = slot
+        .relative()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(svg().path(path).size(px(theme::ROW_ICON_GLYPH_PX)).text_color(tint));
+
     match glyph {
-        // Three stacked bars of decreasing width — a plain "lines of text"
-        // mark.
-        Glyph::Text => slot
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap(px(2.))
-            .child(div().w(px(12.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary))
-            .child(div().w(px(9.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary))
-            .child(div().w(px(12.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary))
-            .into_any_element(),
-        // A rounded terminal-ish square with a status dot. The two variants
-        // differ only in that dot: hollow and dim for an agent that exists,
-        // filled and in the success colour for one that is running. Same
-        // mark either way, so a list of agents reads as one kind of thing
-        // and the live ones still pick themselves out.
-        Glyph::Agent | Glyph::AgentLive => {
-            let live = glyph == Glyph::AgentLive;
-            slot.flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .relative()
-                        .w(px(15.))
-                        .h(px(13.))
-                        .rounded(px(3.))
-                        .border_1()
-                        .border_color(if live {
-                            theme::active().state_success_border
-                        } else {
-                            theme::active().text_tertiary
-                        })
-                        .child(
-                            div()
-                                .absolute()
-                                .top(px(4.))
-                                .left(px(5.))
-                                .w(px(5.))
-                                .h(px(5.))
-                                .rounded(px(2.5))
-                                .bg(if live {
-                                    theme::active().state_success
-                                } else {
-                                    theme::active().text_tertiary
-                                }),
-                        ),
-                )
-                .into_any_element()
-        }
-        // Two horizontal rails, each with a knob at a different offset — the
-        // settings mark. The offsets differ on purpose: two knobs at the same
-        // x read as an equals sign at this size, not as controls that move.
-        Glyph::Sliders => {
-            let rail = |knob_left: f32| {
-                div()
-                    .relative()
-                    .w(px(13.))
-                    .h(px(5.))
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(2.))
-                            .left(px(0.))
-                            .w(px(13.))
-                            .h(px(1.5))
-                            .rounded(px(1.))
-                            .bg(theme::active().text_tertiary),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(0.))
-                            .left(px(knob_left))
-                            .w(px(4.))
-                            .h(px(5.))
-                            .rounded(px(1.5))
-                            .bg(theme::active().text_secondary),
-                    )
-            };
-            slot.flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(px(3.))
-                .child(rail(8.))
-                .child(rail(2.))
-                .into_any_element()
-        }
-        // Four filled swatches in a 2x2 block, painted in the *live* theme's
-        // own colours — the one glyph in this vocabulary that changes with
-        // the active theme, deliberately: it is the affordance for changing
-        // that theme, so it should show what is currently on.
-        Glyph::Palette => {
-            let swatch = |color| div().w(px(8.)).h(px(8.)).rounded(px(2.)).bg(color);
-            // The row's own palette when it names one; the live one otherwise.
-            let t = theme::theme_by_id(row_id).map_or_else(theme::active, |t| &t.palette);
-            slot.flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(px(2.))
-                // The four tokens that actually identify a palette at 8px:
-                // what the panel is, what a selected row is, what text is,
-                // and its one state colour.
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(2.))
-                        .child(swatch(t.surface_panel))
-                        .child(swatch(t.text_primary)),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(2.))
-                        .child(swatch(t.state_danger))
-                        .child(swatch(t.surface_selected)),
-                )
-                .into_any_element()
-        }
-        // Two overlapping rounded-square rings on a diagonal — a chain-link
-        // mark.
-        Glyph::Link => slot
-            .relative()
+        Glyph::Agent | Glyph::AgentLive => mark
             .child(
+                // Bottom-right, not the painted version's inset position:
+                // Lucide's `square-terminal` puts its prompt caret where
+                // that dot used to sit. A presence badge on the corner is
+                // also the convention every OS uses for exactly this
+                // meaning, so nothing is lost by the move.
                 div()
                     .absolute()
-                    .top(px(3.))
-                    .left(px(2.))
-                    .w(px(11.))
-                    .h(px(11.))
-                    .rounded(px(3.))
-                    .border_2()
-                    .border_color(theme::active().text_tertiary),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .bottom(px(3.))
-                    .right(px(2.))
-                    .w(px(11.))
-                    .h(px(11.))
-                    .rounded(px(3.))
-                    .border_2()
-                    .border_color(theme::active().text_tertiary),
+                    .right(px(1.))
+                    .bottom(px(2.))
+                    .w(px(6.))
+                    .h(px(6.))
+                    .rounded_full()
+                    .bg(if live {
+                        theme::active().state_success
+                    } else {
+                        theme::active().text_tertiary
+                    }),
             )
             .into_any_element(),
-        // A plain document outline (a portrait rounded-rect, border only —
-        // no fill, so it composes correctly whether the row is selected or
-        // the window is translucent, unlike a shape that would need to fake
-        // a cutout against the background color) with one short bar
-        // standing in for a line of text, same weight as `Glyph::Text`'s
-        // bars.
-        Glyph::File => slot
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .w(px(12.))
-                    .h(px(15.))
-                    .rounded(px(1.))
-                    .border_2()
-                    .border_color(theme::active().text_tertiary)
-                    .child(div().w(px(6.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary)),
-            )
-            .into_any_element(),
-        // A folder shape: a wide rounded rectangle with a small tab along
-        // its top edge.
-        Glyph::Folder => slot
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .relative()
-                    .w(px(15.))
-                    .h(px(12.))
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left(px(1.))
-                            .w(px(6.))
-                            .h(px(2.))
-                            .rounded_t(px(1.))
-                            .bg(theme::active().text_tertiary),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(2.))
-                            .left_0()
-                            .w(px(15.))
-                            .h(px(10.))
-                            .rounded(px(2.))
-                            .border_2()
-                            .border_color(theme::active().text_tertiary),
-                    ),
-            )
-            .into_any_element(),
-        // A clipboard board with a small clip tab along the top edge —
-        // traces `data/neko-design/mockups/12-first-clipboard-use.html`'s
-        // own clipboard-mode input-row glyph (`<rect x="5" y="4" width="10"
-        // height="14" rx="2"/><rect x="7.5" y="2.5" width="5" height="3"
-        // rx="1" fill/>`, from a 20×20 viewBox), reused here for the
-        // root-list "Clipboard History" command row's own icon.
-        Glyph::Clipboard => slot
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .relative()
-                    .w(px(14.))
-                    .h(px(16.))
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left(px(3.5))
-                            .w(px(7.))
-                            .h(px(3.))
-                            .rounded(px(1.))
-                            .bg(theme::active().text_tertiary),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(1.5))
-                            .left_0()
-                            .w(px(14.))
-                            .h(px(14.5))
-                            .rounded(px(2.))
-                            .border_2()
-                            .border_color(theme::active().text_tertiary),
-                    ),
-            )
-            .into_any_element(),
+        _ => mark.into_any_element(),
     }
 }
 
+/// Four filled swatches in a 2x2 block, painted in the row's own palette (or
+/// the live one for a row whose id names no theme) — the one glyph in this
+/// vocabulary that changes with the active theme, deliberately: it is the
+/// affordance for changing that theme, so it should show what is currently
+/// on. Split out of [`glyph_element`] when everything around it became an
+/// `svg()` call, so that what stays painted, and why, is one named thing
+/// rather than the odd branch left in a match.
+fn palette_glyph(slot: gpui::Div, row_id: &str) -> AnyElement {
+    let swatch = |color| div().w(px(8.)).h(px(8.)).rounded(px(2.)).bg(color);
+    // The row's own palette when it names one; the live one otherwise.
+    let t = theme::theme_by_id(row_id).map_or_else(theme::active, |t| &t.palette);
+    slot.flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(px(2.))
+        // The four tokens that actually identify a palette at 8px: what the
+        // panel is, what a selected row is, what text is, and its one state
+        // colour.
+        .child(div().flex().gap(px(2.)).child(swatch(t.surface_panel)).child(swatch(t.text_primary)))
+        .child(
+            div()
+                .flex()
+                .gap(px(2.))
+                .child(swatch(t.state_danger))
+                .child(swatch(t.surface_selected)),
+        )
+        .into_any_element()
+}
+
+/// The input row's magnifier.
+///
+/// **This one was actually wrong, not just crude.** Its own comment claimed
+/// "a circle + a diagonal stroke", but the code was a bare `.rounded_full()
+/// .border_2()` — a ring with no handle at all, which reads as a dot rather
+/// than a search icon. That is what a mark assembled from `div()` primitives
+/// costs: `div()` has no rotation, so the diagonal was presumably dropped as
+/// undrawable and the comment was never corrected. Lucide's `search` is a
+/// real magnifier, and the design report's §6 finding (a Unicode symbol is
+/// not reliably rendered here) is still honoured — this is a vendored asset,
+/// not a font character.
 fn search_glyph() -> impl IntoElement {
-    // A hand-drawn glyph rather than a font character: the design report's
-    // §6 finding that the ⌥ modifier glyph has no reliable font rendering
-    // in GPUI applies just as much to a search icon, so this is a small
-    // painted shape (a circle + a diagonal stroke), not a Unicode symbol
-    // trusted to be in the system font.
-    div()
-        .w(px(14.))
-        .h(px(14.))
-        .rounded_full()
-        .border_2()
-        .border_color(theme::active().text_tertiary)
+    svg().path(icon::SEARCH).size(px(15.)).text_color(theme::active().text_tertiary)
 }
 
 /// The mode input row's back affordance — "a back arrow in place of the
-/// search glyph," per the launch brief. Traced with `gpui::PathBuilder`,
-/// the same mechanism `components::glyphs::opt_glyph`/`neko_wordmark_glyph`
-/// already use for a shape a plain axis-aligned `div()` border can't draw
-/// (a diagonal chevron) — GPUI's `div()` styling API has no rotation
-/// primitive, and per the design report's §6 finding, a Unicode `←`
-/// character isn't a reliable substitute either.
+/// search glyph," per the launch brief.
+///
+/// Was a hand-traced `gpui::PathBuilder` chevron, for the reason
+/// `components::glyphs` still traces the ⌥ mark: `div()` cannot draw a
+/// diagonal. An SVG can, so the whole `canvas`/`PathBuilder`/manual-scale
+/// closure is gone in favour of naming a file. `components::glyphs`'
+/// `opt_glyph`/`neko_wordmark_glyph` deliberately stay traced — the ⌥
+/// modifier symbol is not in any general-purpose icon set, and the wordmark
+/// is neko's own identity rather than an icon.
 fn back_glyph() -> impl IntoElement {
-    gpui::canvas(
-        move |_bounds, _window, _cx| (),
-        move |bounds, (), window, _cx| {
-            let scale = f32::from(bounds.size.width) / 20.0;
-            let ox = f32::from(bounds.origin.x);
-            let oy = f32::from(bounds.origin.y);
-            let pt = |x: f32, y: f32| gpui::point(px(ox + x * scale), px(oy + y * scale));
-
-            let mut builder = gpui::PathBuilder::stroke(px((1.6f32 * scale).max(1.0)));
-            builder.move_to(pt(12.0, 4.0));
-            builder.line_to(pt(6.0, 10.0));
-            builder.line_to(pt(12.0, 16.0));
-            if let Ok(path) = builder.build() {
-                window.paint_path(path, theme::active().text_tertiary);
-            }
-        },
-    )
-    .w(px(14.))
-    .h(px(14.))
+    svg().path(icon::CHEVRON_LEFT).size(px(15.)).text_color(theme::active().text_tertiary)
 }
 
 /// The detail pane's one repeated row shape: a label on the left, the
