@@ -92,6 +92,8 @@ const ICONS: &[(&str, &[u8])] = &[
     (icon::SLIDERS, include_bytes!("../assets/icons/lucide/sliders-horizontal.svg")),
     (icon::TERMINAL, include_bytes!("../assets/icons/lucide/square-terminal.svg")),
     (icon::TEXT_LINES, include_bytes!("../assets/icons/lucide/text-align-start.svg")),
+    (icon::TOOL_CLAUDE, include_bytes!("../assets/icons/simple-icons/claude.svg")),
+    (icon::TOOL_GEMINI, include_bytes!("../assets/icons/simple-icons/googlegemini.svg")),
 ];
 
 /// The asset paths this app draws with, named for what they *mean* here
@@ -109,6 +111,34 @@ pub mod icon {
     pub const SLIDERS: &str = "icons/lucide/sliders-horizontal.svg";
     pub const TERMINAL: &str = "icons/lucide/square-terminal.svg";
     pub const TEXT_LINES: &str = "icons/lucide/text-align-start.svg";
+
+    // Brand marks, from `simple-icons` (CC0-1.0). Unlike the Lucide set
+    // above these are **filled**, which is exactly right here: a brand mark
+    // is a single silhouette, and gpui renders an SVG to an alpha mask, so a
+    // filled path becomes the shape itself in one tint. A stroke-only logo
+    // would be the wrong thing to draw at 10px anyway.
+    pub const TOOL_CLAUDE: &str = "icons/simple-icons/claude.svg";
+    pub const TOOL_GEMINI: &str = "icons/simple-icons/googlegemini.svg";
+}
+
+/// The mark for a tool name, or `None` when there is no vendored logo for it.
+///
+/// **Deliberately not exhaustive, and the fallback is not a stopgap.**
+/// `simple-icons` has no `openai.svg`, so a tool this does not cover is
+/// normal rather than an oversight — the caller draws the tool's initial
+/// instead, which is why `panel::tool_initial` still exists.
+///
+/// Matched on a prefix so Paseo's own spellings (`claude`, `claude-code`)
+/// land on one entry.
+pub fn tool_icon(tool: &str) -> Option<&'static str> {
+    let tool = tool.trim().to_ascii_lowercase();
+    if tool.starts_with("claude") || tool.starts_with("anthropic") {
+        return Some(icon::TOOL_CLAUDE);
+    }
+    if tool.starts_with("gemini") || tool.starts_with("google") {
+        return Some(icon::TOOL_GEMINI);
+    }
+    None
 }
 
 /// The icon file for a wire [`Glyph`], or `None` for a glyph that must stay
@@ -244,7 +274,11 @@ mod tests {
         let named: Vec<&str> = ALL_GLYPHS
             .into_iter()
             .filter_map(glyph_icon)
+            // Named by `panel`'s own call sites rather than by a `Glyph`.
             .chain([icon::CHEVRON_LEFT, icon::SEARCH])
+            // Named by `tool_icon`, which is keyed on a tool name off the
+            // wire rather than on a closed enum.
+            .chain([icon::TOOL_CLAUDE, icon::TOOL_GEMINI])
             .collect();
         for (path, _) in ICONS {
             assert!(named.contains(path), "{path} is vendored but nothing names it");
@@ -267,7 +301,7 @@ mod tests {
     /// vendored palette's upstream hex: an edit that quietly walks a file
     /// away from upstream should fail rather than pass silently.
     #[test]
-    fn every_vendored_icon_is_a_stroke_only_24px_lucide_icon() {
+    fn every_vendored_icon_is_pinned_and_on_the_24px_grid() {
         // (path, upstream byte length at the pinned commit)
         let pinned: &[(&str, usize)] = &[
             (icon::CHEVRON_LEFT, 238),
@@ -279,6 +313,8 @@ mod tests {
             (icon::SLIDERS, 422),
             (icon::TERMINAL, 321),
             (icon::TEXT_LINES, 279),
+            (icon::TOOL_CLAUDE, 1921),
+            (icon::TOOL_GEMINI, 401),
         ];
         assert_eq!(pinned.len(), ICONS.len(), "an icon was vendored without pinning its length");
 
@@ -286,7 +322,19 @@ mod tests {
             let text = std::str::from_utf8(bytes).unwrap_or_else(|_| panic!("{path} is not UTF-8"));
             assert!(text.trim_start().starts_with("<svg"), "{path} is not an SVG document");
             assert!(text.contains(r#"viewBox="0 0 24 24""#), "{path} is not on the 24x24 grid");
-            assert!(text.contains(r#"fill="none""#), "{path} is not stroke-only");
+            // **Two sets, two rules, and the difference is deliberate.**
+            // Lucide's UI icons must stay stroke-only: gpui renders an SVG to
+            // an alpha mask, so a *filled* UI icon would come out a solid
+            // blob. A brand mark is the opposite — it *is* a silhouette, and
+            // filled is the only way it reads at badge size.
+            if path.starts_with("icons/lucide/") {
+                assert!(text.contains(r#"fill="none""#), "{path} is a UI icon and must be stroke-only");
+            } else {
+                assert!(
+                    !text.contains(r#"fill="none""#),
+                    "{path} is a brand mark and must be filled, or it renders as nothing"
+                );
+            }
             let expected = pinned
                 .iter()
                 .find(|(p, _)| p == path)
@@ -338,7 +386,21 @@ mod tests {
 
     #[test]
     fn list_filters_by_prefix() {
-        assert_eq!(NekoAssets.list("icons/lucide/").unwrap().len(), ICONS.len());
+        let lucide = NekoAssets.list("icons/lucide/").unwrap().len();
+        let brands = NekoAssets.list("icons/simple-icons/").unwrap().len();
+        assert_eq!(lucide + brands, ICONS.len(), "every vendored file must sit under one of the two prefixes");
+        assert!(brands > 0, "the brand marks are a separate set on purpose");
         assert!(NekoAssets.list("fonts/").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_tool_with_no_vendored_mark_falls_back_rather_than_drawing_nothing() {
+        // `simple-icons` has no OpenAI logo, so this is the normal case for a
+        // real tool, not a hypothetical.
+        assert_eq!(tool_icon("claude"), Some(icon::TOOL_CLAUDE));
+        assert_eq!(tool_icon("claude-code"), Some(icon::TOOL_CLAUDE));
+        assert_eq!(tool_icon("Gemini"), Some(icon::TOOL_GEMINI));
+        assert_eq!(tool_icon("codex"), None);
+        assert_eq!(tool_icon(""), None);
     }
 }

@@ -306,11 +306,11 @@ pub const THEMES: &[Theme] = &[
         name: "Neko Neutral",
         appearance: Appearance::Dark,
         surface_panel: 0x0d0d0d,
-        panel_alpha: 0.82,
+        panel_alpha: 0.0,
         surface_raised: 0x161616,
         menu_tint_alpha: 0.62,
         surface_input: 0x070707,
-        surface_selected: 0x3a3a3a,
+        surface_selected: 0x2f2f2f,
         text_primary: 0xe8e8e8,
         text_secondary: 0xa9a9a9,
         text_tertiary: 0x848484,
@@ -793,10 +793,41 @@ pub const PANEL_WIDTH_WITH_DETAIL_PX: f32 = 760.0;
 /// The two-column mode view's fixed left (list) column width.
 pub const MODE_LIST_COLUMN_WIDTH_PX: f32 = 264.0;
 /// One agent tile in the grid above the search field, and the strip's own
-/// height. A tile is two lines of text plus its own padding; the strip adds
-/// the gap beneath it before the input row.
-pub const AGENT_TILE_HEIGHT_PX: f32 = 56.0;
-pub const AGENT_GRID_HEIGHT_PX: f32 = AGENT_TILE_HEIGHT_PX + 20.0;
+/// height. A tile is two lines of text plus its own padding.
+///
+/// **Two rows of two.** Four tiles in a single row gave each ~180px, which
+/// truncated most agent titles to a few words; half the width and twice the
+/// height reads far better. It is not free — the grid's height comes out of
+/// the row budget (`panel::Root::agent_grid_height`), so a 2×2 grid costs
+/// roughly three result rows while it is showing.
+pub const AGENT_TILE_HEIGHT_PX: f32 = 60.0;
+pub const AGENT_GRID_COLUMNS: usize = 2;
+pub const AGENT_GRID_GAP_PX: f32 = 10.0;
+/// The strip's own padding: a little above, a little more below, so the grid
+/// reads as separated from the input row rather than stacked against it.
+pub const AGENT_GRID_PAD_TOP_PX: f32 = 14.0;
+pub const AGENT_GRID_PAD_BOTTOM_PX: f32 = 12.0;
+pub const AGENT_GRID_HEIGHT_PX: f32 = AGENT_TILE_HEIGHT_PX * 2.0
+    + AGENT_GRID_GAP_PX
+    + AGENT_GRID_PAD_TOP_PX
+    + AGENT_GRID_PAD_BOTTOM_PX;
+/// The results container's own horizontal inset, and now the agent grid's
+/// too.
+///
+/// **One token because they must line up.** The grid used its own 20px while
+/// the results container used 8px, so a tile's edge sat 12px inside the
+/// selected row's highlight and the two read as different widths. Anything
+/// drawn in the content area should inset by this.
+///
+/// The value is not arbitrary: it is what makes the panel's 16px corner
+/// radius concentric with a row's 8px pill (16 = 8 + 8).
+pub const CONTENT_INSET_PX: f32 = 8.0;
+
+/// Each tile's width: the panel's content width, less the gap, halved.
+pub const AGENT_TILE_WIDTH_PX: f32 = (PANEL_WIDTH_WITH_DETAIL_PX
+    - CONTENT_INSET_PX * 2.0
+    - AGENT_GRID_GAP_PX)
+    / AGENT_GRID_COLUMNS as f32;
 
 pub const ROW_ICON_PX: f32 = 22.0;
 pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
@@ -930,7 +961,13 @@ mod tests {
             ("surface_panel", 0.16, 0.0, 255.0, p.surface_panel),
             ("surface_raised", 0.20, 0.0, 255.0, p.surface_raised),
             ("surface_input", 0.13, 0.0, 255.0, p.surface_input),
-            ("surface_selected", 0.35, 0.0, 255.0, p.surface_selected),
+            // Softened from L 0.35 (#3a3a3a) on captain instruction — the
+            // selection step read as a hard block against the panel,
+            // especially once the agent tiles started using the same pill.
+            // Still clears `every_theme_has_a_visible_selection_step_away_from_its_panel`
+            // (1.45:1 against the panel, gate is 1.30) and *improves* text
+            // contrast on it (12.28:1, AA needs 4.5).
+            ("surface_selected", 0.305, 0.0, 255.0, p.surface_selected),
             ("text_primary", 0.93, 0.0, 257.0, p.text_primary),
             ("text_secondary", 0.735, 0.0, 255.0, p.text_secondary),
             ("text_tertiary", 0.615, 0.0, 252.0, p.text_tertiary),
@@ -1006,7 +1043,7 @@ mod tests {
         /// `(token name, the hex upstream publishes, the hex neko ships)`.
         type PinnedToken = (&'static str, u32, u32);
         let table: &[(&str, &[PinnedToken])] = &[
-        ("neutral", &[("surface_panel", 0x0d0d0d, 0x0d0d0d), ("surface_raised", 0x161616, 0x161616), ("surface_input", 0x070707, 0x070707), ("surface_selected", 0x3a3a3a, 0x3a3a3a), ("text_primary", 0xe8e8e8, 0xe8e8e8), ("text_secondary", 0xa9a9a9, 0xa9a9a9), ("text_tertiary", 0x848484, 0x848484), ("text_on_light", 0x0f0f0f, 0x0f0f0f), ("keycap_shell_bg", 0x232323, 0x232323), ("state_success", 0x61bd67, 0x61bd67), ("state_danger", 0xe96e50, 0xe96e50)]),
+        ("neutral", &[("surface_panel", 0x0d0d0d, 0x0d0d0d), ("surface_raised", 0x161616, 0x161616), ("surface_input", 0x070707, 0x070707), ("surface_selected", 0x3a3a3a, 0x2f2f2f), ("text_primary", 0xe8e8e8, 0xe8e8e8), ("text_secondary", 0xa9a9a9, 0xa9a9a9), ("text_tertiary", 0x848484, 0x848484), ("text_on_light", 0x0f0f0f, 0x0f0f0f), ("keycap_shell_bg", 0x232323, 0x232323), ("state_success", 0x61bd67, 0x61bd67), ("state_danger", 0xe96e50, 0xe96e50)]),
         ("ember", &[("surface_panel", 0x350915, 0x350915), ("surface_raised", 0x48171e, 0x48171e), ("surface_input", 0x23040d, 0x23040d), ("surface_selected", 0x7b3820, 0x7b3820), ("text_primary", 0xf9eee0, 0xf9eee0), ("text_secondary", 0xcebcaa, 0xcebcaa), ("text_tertiary", 0xab9380, 0xab9380), ("text_on_light", 0x270e06, 0x270e06), ("keycap_shell_bg", 0x501e1c, 0x501e1c), ("state_success", 0x68ca80, 0x68ca80), ("state_danger", 0xf3715a, 0xf3715a)]),
         ("catnap", &[("surface_panel", 0x4b115b, 0x4b115b), ("surface_raised", 0x5f216c, 0x5f216c), ("surface_input", 0x320842, 0x320842), ("surface_selected", 0xa0186f, 0xa0186f), ("text_primary", 0xfff2fd, 0xfff2fd), ("text_secondary", 0xe4c9e1, 0xe4c9e1), ("text_tertiary", 0xc8a4c3, 0xc8a4c3), ("text_on_light", 0x2e0936, 0x2e0936), ("keycap_shell_bg", 0x672970, 0x672970), ("state_success", 0x4bdc9b, 0x4bdc9b), ("state_danger", 0xfe7f78, 0xfe7f78)]),
         ("catppuccin-mocha", &[("surface_panel", 0x1e1e2e, 0x1e1e2e), ("surface_raised", 0x313244, 0x313244), ("surface_input", 0x181825, 0x181825), ("surface_selected", 0x45475a, 0x45475a), ("text_primary", 0xcdd6f4, 0xcdd6f4), ("text_secondary", 0xbac2de, 0xbac2de), ("text_tertiary", 0xa6adc8, 0xa6adc8), ("text_on_light", 0x11111b, 0x11111b), ("keycap_shell_bg", 0x45475a, 0x45475a), ("state_success", 0xa6e3a1, 0xa6e3a1), ("state_danger", 0xf38ba8, 0xf38ba8)]),
@@ -1052,8 +1089,14 @@ mod tests {
                 );
             }
         }
+        // 20 vendored-palette lightness corrections, plus one deliberate
+        // change to neko's *own* neutral selection colour (see
+        // `docs/evidence/themes-report.md`). The neutral entry is not a
+        // "correction" in the vendored sense — nothing upstream to be wrong
+        // about — but it is a departure from the frozen design, which is
+        // exactly what this count exists to keep visible.
         assert_eq!(
-            corrections, 20,
+            corrections, 21,
             "the number of tokens that deviate from upstream changed — update \
              docs/evidence/themes-report.md's correction table before changing this number"
         );

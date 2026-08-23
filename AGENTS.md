@@ -2235,6 +2235,67 @@ without you". Two things about it are load-bearing:
   sets rather than on `kind == "agent"`, so an idle agent stays an ordinary
   row. Never applied inside a mode — a mode is one provider's own list.
 
+**Four tiles, 2×2, below the search field.** Running agents first, then the
+most recent — running outranks recency, never the other way round, which is
+the rule that is easiest to break by sorting on time alone and is pinned by a
+test. The provider caps its own empty-query answer at `GRID_CAPACITY` and
+carries the order as **descending scores**, because `search::allocate` ranks
+by score and has no reason to know two agents with equal scores are ordered
+by time. Timestamps compare as strings: Paseo writes RFC 3339, which sorts
+lexicographically in chronological order, so this needs no date dependency
+(the same trade `clipboard`'s relative times already made).
+
+**Idle agents join the grid only when nothing is typed.** During a search
+only live ones do — otherwise typing would silently lift idle rows out of the
+list and the grid would mean two different things depending on whether you
+had typed. At rest it answers "what have you been working on"; during a
+search it stays out of the way.
+
+**Below the input row, not above it — and that is an interaction fix, not a
+position preference.** Above, the tiles sat outside the content area: Down
+from the field went straight past them into the rows, so the grid was
+unreachable going forward, and Up landed on the *last* tile first. Reaching
+tile 1 meant pressing Up four times. Below, the grid is simply the first
+thing in the content area, the selection starts there, and Down runs
+1→2→3→4→rows with Up the exact reverse.
+
+**A tile is a row that happens to sit in a grid.** No border and no resting
+fill: transparent until selected, then the same `surface_selected` pill a row
+gets. It also insets by `theme::CONTENT_INSET_PX`, the *same* token the
+results container uses — the two had drifted to 20px and 8px, which put every
+tile 12px inside the selected row's highlight and read as two different
+widths. A test asserts the grid spans **exactly** the results width rather
+than merely fitting inside it; "fits" was the old assertion and it passed
+happily while looking wrong.
+
+**Only one thing is selected at a time.** `Root::selected` is the list's own
+cursor and keeps its value while the keyboard is up in the grid — correct,
+and exactly why `row_is_highlighted` folds `grid_selected.is_none()` into the
+answer. Without it a focused tile and the list's remembered row both painted
+a highlight and the panel showed two selections at once.
+
+**The tile shows the host app's icon with the tool badged onto it**, the shape
+macOS uses for a document and its owning app. The icon is Paseo's own,
+extracted through the same cache every app row uses (cached once per process
+— extraction is real AppKit work at tens of ms, and this would otherwise run
+per agent per keystroke). The badge is the *tool* rather than the model,
+because a badge on a 22px icon has room for one glyph and "which tool" is the
+distinction that survives being reduced to one; `claude` renders Anthropic's
+own mark, and anything without a vendored logo falls back to its initial —
+`simple-icons` has no OpenAI mark, so that fallback is a real path, not a
+placeholder. The line under the title is the **workspace**, which is what
+tells two agents running the same model apart.
+
+**Brand marks are a separate vendored category from Lucide, and the tests say
+so.** gpui renders an SVG to an alpha mask, so a *filled* UI icon becomes a
+solid blob — but a brand mark **must** be filled, because it is a silhouette.
+`every_vendored_icon_is_pinned_and_on_the_24px_grid` asserts stroke-only for
+`icons/lucide/` and filled for everything else. See
+`THIRD_PARTY_LICENSES/simple-icons-CC0-1.0.txt`: CC0 waives copyright and
+cannot grant trademark rights, so the marks are used nominatively (naming the
+tool that runs an agent) and that position needs revisiting if neko is ever
+distributed.
+
 **Tiles are keyboard-reachable, using the same Up/Down as the list.** That is
 forced rather than chosen: Left and Right are bound to the search field's own
 cursor movement (`main.rs`'s `cx.bind_keys`, `"TextField"` context), so a grid
@@ -3667,6 +3728,23 @@ decision" below) — unrelated to this task's own four crates, but
 `docs/evidence/cargo-tree.txt`/`cargo-license.txt` now reflect the current,
 post-migration tree (GPL-3.0-or-later present via `gpui`'s own dependency
 chain), not the GPL-free state this paragraph describes.
+
+**Blur is binary and belongs to the material; transparency is continuous and
+belongs to the theme.** `NSGlassEffectViewStyle` has exactly two values —
+`.regular` and `.clear` — so there is no "a bit more frosted" at the material
+level, and `.clear` was tried live and read as far too little. Everything
+between is `panel_alpha` on the palette. The shipped `neutral` value is
+**0.0**: the panel paints no fill of its own at all, and what you see is
+purely `NSGlassEffectView`. The rounded shape survives because it comes from
+the material view's own `cornerRadius`, not from the `div`'s fill.
+
+**The consequence, stated rather than discovered later:** at zero fill,
+nothing but the glass sits between the desktop and the text, and
+`themes_all_pass_wcag_aa` **cannot see this** — it measures text against the
+opaque `surface_panel`, which no longer renders. Legibility over a light or
+busy wallpaper is now entirely the material's job. If it ever fails there,
+the fix is a small non-zero alpha (0.08–0.12 reads as no tint but restores a
+floor), not a different material.
 
 **Forcing a specific fallback branch for verification** (never set in
 normal operation): `NEKO_FORCE_MATERIAL=popover` skips the

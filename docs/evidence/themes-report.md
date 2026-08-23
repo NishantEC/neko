@@ -401,3 +401,31 @@ in the same rotation, rather than against a number from a different day.
   same `theme::active()` and compiles against the new table, and its window
   installs no material — but no window-scoped capture of it in a non-default
   theme was taken this pass.
+
+## Correction 21 — neutral's own selection colour, on captain instruction
+
+Not a vendored-palette correction: `neutral` is neko's own, so there is no
+upstream to be wrong about. It is recorded here because
+`vendored_themes_match_their_pinned_upstream_and_shipped_hex` counts every
+token that departs from its pinned value, and that count is what keeps a
+silent palette drift visible.
+
+| token | frozen | shipped | OKLCH `L` |
+| --- | --- | --- | --- |
+| `neutral` / `surface_selected` | `#3a3a3a` | `#2f2f2f` | 0.35 → 0.305 |
+
+**Why.** The selection step read as a hard block against the panel, and it
+got worse once the agent tiles adopted the same pill — two of them on screen
+at once (a focused tile and a selected row) made the panel look striped.
+Chroma stays 0, so this is a lightness change only, consistent with the
+"chrome is monochrome" rule the two earlier re-tones established.
+
+**Both gates still hold, and the second improves:**
+
+| pair | value | gate |
+| --- | --- | --- |
+| `surface_selected` vs `surface_panel` | 1.45:1 | ≥ 1.30 |
+| `text_primary` on `surface_selected` | 12.28:1 | ≥ 4.5 |
+
+The visibility gate is the one that binds here — `#262626` was tried first
+and fails it at 1.28:1, which is why the value is 0.305 and not lower.

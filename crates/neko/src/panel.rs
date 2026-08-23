@@ -68,6 +68,12 @@ const SEARCHING_TELL_DELAY_MS: u64 = 150;
 /// rather than being budget-fit to a fixed content area the way
 /// `RESULT_LIMIT`/`fit_within_budget` bound the root list.
 const MODE_RESULT_LIMIT: usize = 50;
+/// How many agents the grid shows. Matches `neko_core::agents::GRID_CAPACITY`
+/// — the provider caps its own empty-query answer at the same number, and the
+/// two are checked against each other in this module's tests rather than
+/// left to drift.
+pub const AGENT_GRID_CAPACITY: usize = 4;
+
 pub const CONTENT_AREA_MIN_HEIGHT_PX: f32 = theme::RESULT_ROW_HEIGHT_PX * RESULT_LIMIT as f32;
 /// The panel is a fixed height for the process's whole lifetime (the real
 /// `NSWindow` is never resized — `AGENTS.md`, "Mode view resize seam"), so
@@ -736,7 +742,7 @@ impl Root {
         let (tiles, items) = if self.active_mode().is_some() {
             (Vec::new(), items)
         } else {
-            split_agent_tiles(items)
+            split_agent_tiles(items, self.text_field.read(cx).content().trim().is_empty())
         };
         // A tile that no longer exists must not stay focused; clamp into the
         // new grid, or fall back to the list once it has emptied.
@@ -766,6 +772,13 @@ impl Root {
 
         let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
         self.selected = resolve_selection(previous, &self.results);
+        // The grid is the first thing in the content area, so it holds the
+        // selection to begin with — Down then runs 1, 2, 3, 4 and on into the
+        // rows. Without this the tiles were only reachable *backwards*, by
+        // pressing Up from the first row onto the last tile.
+        if self.grid_selected.is_none() && previously_selected.is_none() && !self.agent_tiles.is_empty() {
+            self.grid_selected = Some(0);
+        }
         // Entering the theme mode must not immediately repaint the app in
         // whatever palette happens to sort first. Land on the one already in
         // use — which is also where a person expects the highlight to be —
@@ -1131,49 +1144,41 @@ impl Root {
             .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::begin_window_drag))
             .flex()
             .flex_wrap()
-            .gap(px(8.))
-            // `px_5`, matching the input row directly beneath it, so a tile's
-            // left edge lines up with the search glyph.
-            .px_5()
-            .pt(px(12.))
-            .pb(px(8.))
+            .gap(px(theme::AGENT_GRID_GAP_PX))
+            // The same inset the results container uses, so a tile's edge
+            // lines up with the selected row's highlight rather than sitting
+            // 12px inside it.
+            .px(px(theme::CONTENT_INSET_PX))
+            .pt(px(theme::AGENT_GRID_PAD_TOP_PX))
+            .pb(px(theme::AGENT_GRID_PAD_BOTTOM_PX))
             .h(px(theme::AGENT_GRID_HEIGHT_PX))
             .overflow_hidden();
         for (index, item) in self.agent_tiles.iter().enumerate() {
             let focused = self.grid_selected == Some(index);
+            let live = item.badge.as_deref() == Some("LIVE");
             let kind = item.kind.clone();
             let id = item.id.clone();
-            // The live dot breathes on the same shared clock the LIVE badge
-            // uses — one clock for the app, never a per-tile animation.
             let mut dot = theme::active().state_success;
             dot.a = 0.45 + 0.55 * intensity;
             grid = grid.child(
                 div()
                     .id(SharedString::from(format!("agent-tile-{id}")))
+                    .relative()
                     .flex()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .flex_col()
-                    .justify_center()
-                    .gap(px(2.))
+                    .items_center()
+                    .gap(px(11.))
+                    .w(px(theme::AGENT_TILE_WIDTH_PX))
                     .h(px(theme::AGENT_TILE_HEIGHT_PX))
-                    .px(px(10.))
+                    .px(px(13.))
                     .rounded(px(theme::ROW_RADIUS_PX))
-                    .bg(if focused {
-                        theme::active().surface_selected
-                    } else {
-                        theme::active().surface_input
-                    })
-                    .border_1()
-                    .border_color(if focused {
-                        theme::active().border_hairline_strong
-                    } else {
-                        theme::active().border_hairline
-                    })
+                    // No border and no resting fill — a tile is a row that
+                    // happens to sit in a grid, so it gets a row's treatment:
+                    // transparent until selected, then the same
+                    // `surface_selected` pill. The bordered cards read as a
+                    // separate kind of surface stacked on the list rather
+                    // than part of it.
+                    .when(focused, |el| el.bg(theme::active().surface_selected))
                     .cursor_pointer()
-                    // Runs before the strip's own handler (bubble phase goes
-                    // child first), so pressing a tile never starts a drag —
-                    // the tile activates on release instead.
                     .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |root, _event, _window, cx| {
                         let query = root.query(cx);
@@ -1183,29 +1188,118 @@ impl Root {
                             cx,
                         );
                     }))
+                    // The host app's own icon, in the same socket treatment
+                    // every row icon gets — real artwork carries wildly
+                    // different amounts of transparent padding, and the plate
+                    // is what makes a set of them read as one system.
+                    .child(
+                        div()
+                            .relative()
+                            .flex_shrink_0()
+                            .w(px(theme::ROW_ICON_PX))
+                            .h(px(theme::ROW_ICON_PX))
+                            .rounded(px(theme::ROW_ICON_RADIUS_PX))
+                            .bg(theme::active().row_icon_socket_bg)
+                            .child(icon_element(&item.icon, &item.id))
+                            // The tool running the agent, badged onto the
+                            // corner of the host app's icon — the same shape
+                            // macOS itself uses for a document's owning app.
+                            //
+                            // **One character, because that is what fits.**
+                            // A badge on a 22px icon has room for a letter,
+                            // which is why the daemon sends the *tool*
+                            // ("claude") rather than the model: "which tool"
+                            // is the distinction that survives being reduced
+                            // to one glyph.
+                            //
+                            // **Not the vendor's real logo**, deliberately.
+                            // Anthropic's and OpenAI's marks are not openly
+                            // licensed the way Lucide's are, and every
+                            // vendored asset in this repo has its licence
+                            // pinned and verified (`AGENTS.md`, "Licence
+                            // rule"). A letter needs no permission.
+                            .children(item.source.clone().map(|tool| {
+                                div()
+                                    .absolute()
+                                    .bottom(px(-3.))
+                                    .right(px(-3.))
+                                    .w(px(12.))
+                                    .h(px(12.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(6.))
+                                    .bg(theme::active().surface_raised)
+                                    .border_1()
+                                    .border_color(theme::active().surface_input)
+                                    .text_size(px(8.))
+                                    .text_color(theme::active().text_secondary)
+                                    // The vendor's own mark where one is
+                                    // vendored, its initial where none is —
+                                    // `simple-icons` has no OpenAI logo, so
+                                    // the letter is a real fallback rather
+                                    // than a placeholder.
+                                    .child(match crate::assets::tool_icon(&tool) {
+                                        Some(path) => gpui::svg()
+                                            .path(path)
+                                            .w(px(8.))
+                                            .h(px(8.))
+                                            .text_color(theme::active().text_secondary)
+                                            .into_any_element(),
+                                        None => SharedString::from(tool_initial(&tool)).into_any_element(),
+                                    })
+                            })),
+                    )
                     .child(
                         div()
                             .flex()
-                            .items_center()
-                            .gap(px(6.))
-                            .child(div().w(px(6.)).h(px(6.)).rounded(px(3.)).bg(dot).flex_shrink_0())
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .gap(px(3.))
                             .child(
                                 div()
-                                    .flex_1()
-                                    .min_w(px(0.))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.))
+                                    .h(px(19.))
                                     .overflow_hidden()
-                                    .text_size(px(12.5))
-                                    .text_color(theme::active().text_primary)
-                                    .child(SharedString::from(item.title.clone())),
-                            ),
+                                    .when(live, |el| {
+                                        el.child(div().w(px(6.)).h(px(6.)).rounded(px(3.)).bg(dot).flex_shrink_0())
+                                    })
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.))
+                                            .overflow_hidden()
+                                            // **The actual fix for the
+                                            // wrapping title.** A fixed
+                                            // height only *cropped* a
+                                            // wrapped line — the text still
+                                            // laid out over two rows and the
+                                            // second was cut in half.
+                                            // `whitespace_nowrap` is what
+                                            // stops the wrap; `text_ellipsis`
+                                            // is what makes the overflow say
+                                            // so instead of vanishing.
+                                            .whitespace_nowrap()
+                                            .text_ellipsis()
+                                            .text_size(px(13.))
+                                            .text_color(theme::active().text_primary)
+                                            .child(SharedString::from(item.title.clone())),
+                                    ),
+                            )
+                            .children(item.subtitle.clone().map(|subtitle| {
+                                div()
+                                    .h(px(15.))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_size(px(11.5))
+                                    .text_color(theme::active().text_tertiary)
+                                    .child(SharedString::from(subtitle))
+                            })),
                     )
-                    .children(item.subtitle.clone().map(|subtitle| {
-                        div()
-                            .overflow_hidden()
-                            .text_size(px(11.))
-                            .text_color(theme::active().text_tertiary)
-                            .child(SharedString::from(subtitle))
-                    })),
             );
         }
         grid
@@ -1593,8 +1687,15 @@ impl Render for Root {
             // keeps its `.border_1()` above for edge definition.
             // See `docs/evidence/panel-shadow-tent-fix-report.md`.
             .overflow_hidden()
-            .when(!self.agent_tiles.is_empty(), |el| el.child(self.render_agent_grid(cx)))
             .child(self.render_input_row(cx))
+            // **Below the search field, not above it.** Above, the tiles sat
+            // between the top of the panel and the field, so Down from the
+            // field went straight past them into the rows and the only way in
+            // was to press Up — landing on the *last* tile first. Below, the
+            // grid is simply the first thing in the content area, and the
+            // selection runs through it in reading order before reaching the
+            // rows.
+            .when(!self.agent_tiles.is_empty(), |el| el.child(self.render_agent_grid(cx)))
             .child(match self.active_mode() {
                 Some(mode) => self.render_mode_content(mode, cx),
                 None => self.render_content_area(cx, query_is_empty).into_any_element(),
@@ -1805,7 +1906,9 @@ impl Root {
             .flex_1()
             .min_h(px(0.))
             .overflow_hidden()
-            .px_2()
+            // Was `px_2()`, the same 8px — now read from the token the agent
+            // grid also uses, so the two cannot drift apart again.
+            .px(px(theme::CONTENT_INSET_PX))
             // Every `img(path)` row icon under this container loads through
             // one bounded cache instance, not GPUI's default never-evicted
             // per-`App` asset cache — see `row_icon_cache.rs`.
@@ -1934,8 +2037,19 @@ impl Root {
     /// never carries them, since `Application`/`Copied` already have a
     /// dedicated, unhurried home in the detail pane
     /// (`render_mode_detail`).
+    /// Whether row `idx` paints the selected pill. See `render_row` for why
+    /// the grid's own focus is part of the answer.
+    fn row_is_highlighted(&self, idx: usize) -> bool {
+        idx == self.selected && self.grid_selected.is_none()
+    }
+
     fn render_row(&self, idx: usize, item: &SearchItem, compact: bool, cx: &App) -> impl IntoElement {
-        let selected = idx == self.selected;
+        // **Only one thing is selected at a time.** `self.selected` is where
+        // the list's own cursor is parked, and it keeps its value while the
+        // keyboard is up in the agent grid — so without this the grid's
+        // focused tile and the list's remembered row both painted a
+        // highlight, and the panel showed two selections at once.
+        let selected = self.row_is_highlighted(idx);
         let title_color = theme::active().text_primary;
         let subtitle_color = if selected {
             theme::active().text_tertiary_on_selected
@@ -1950,21 +2064,7 @@ impl Root {
         // changes here; one that wants a genuinely new painted shape adds a
         // `Glyph` variant and a case in `glyph_element` below, nothing else
         // in this file.
-        let icon: AnyElement = match &item.icon {
-            Icon::Image(path) => img(PathBuf::from(path))
-                .w(px(theme::ROW_ICON_PX))
-                .h(px(theme::ROW_ICON_PX))
-                .rounded(px(theme::ROW_ICON_RADIUS_PX))
-                .bg(theme::active().row_icon_socket_bg)
-                .into_any_element(),
-            Icon::Glyph(glyph) => glyph_element(*glyph, &item.id),
-            // An icon the daemon hasn't finished extracting yet (a fresh
-            // install, or right after a daemon restart — see
-            // `Event::IconsUpdated`'s doc comment) — a neutral glyph in the
-            // socket rather than an empty hole, self-healing to the real
-            // icon on the next `refresh_icons` without a layout change.
-            Icon::Placeholder => app_icon_placeholder_glyph(),
-        };
+        let icon = icon_element(&item.icon, &item.id);
 
         div()
             .id(("result-row", idx))
@@ -2527,16 +2627,35 @@ fn merge_late_results(
 /// greedy budget — the screen and the wire have to agree on what "primary"
 /// means, and this is how they stay in sync without duplicating the
 /// ordering logic client-side.
-/// Splits running agents out of a response into `(tiles, rows)`.
+/// Splits agents out of a response into `(tiles, rows)`.
 ///
-/// Keyed on the badge the provider already sets, not on `kind == "agent"`:
-/// an idle agent is an ordinary row and belongs in the list with everything
-/// else. Only the live ones are news worth a tile.
+/// **Live agents always become tiles. Idle ones only do when nothing has been
+/// typed**, which is the rule that keeps the grid meaning one thing: at rest
+/// it answers "what have you been working on", and during a search it stays
+/// out of the way so a query's own matches are read as a list. Without that
+/// gate, typing would silently move idle agent rows up into the grid.
+///
+/// Capped at [`AGENT_GRID_CAPACITY`]. The provider already caps an empty
+/// query at the same number and orders it running-first-then-recent, so this
+/// is a floor against a future provider change rather than the primary
+/// mechanism — but the grid has a fixed height, and one row too many would
+/// be clipped rather than reported.
 ///
 /// Order is preserved on both sides, so the rows that stay keep whatever
 /// section ordering `search::allocate` decided.
-fn split_agent_tiles(results: Vec<SearchItem>) -> (Vec<SearchItem>, Vec<SearchItem>) {
-    results.into_iter().partition(|item| item.kind == "agent" && item.badge.as_deref() == Some("LIVE"))
+fn split_agent_tiles(results: Vec<SearchItem>, query_is_empty: bool) -> (Vec<SearchItem>, Vec<SearchItem>) {
+    let mut tiles = Vec::new();
+    let mut rows = Vec::new();
+    for item in results {
+        let is_agent = item.kind == "agent";
+        let live = item.badge.as_deref() == Some("LIVE");
+        if is_agent && (live || query_is_empty) && tiles.len() < AGENT_GRID_CAPACITY {
+            tiles.push(item);
+        } else {
+            rows.push(item);
+        }
+    }
+    (tiles, rows)
 }
 
 fn fit_within_budget(results: Vec<SearchItem>, budget_px: f32) -> Vec<SearchItem> {
@@ -2728,6 +2847,32 @@ fn app_icon_placeholder_glyph() -> AnyElement {
 /// list, whose id is `"themes"`) falls back to the live palette, which is the
 /// honest thing for a row that means "open the theme list" rather than "be
 /// this theme".
+/// The one character a 12px badge can hold: the tool's own initial,
+/// uppercased. `"claude"` → `"C"`, `"gpt"` → `"G"`.
+fn tool_initial(tool: &str) -> String {
+    tool.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default()
+}
+
+/// One icon slot, shared by result rows and agent tiles so the two can never
+/// render the same `Icon` differently.
+fn icon_element(icon: &Icon, row_id: &str) -> AnyElement {
+    match icon {
+        Icon::Image(path) => img(PathBuf::from(path))
+            .w(px(theme::ROW_ICON_PX))
+            .h(px(theme::ROW_ICON_PX))
+            .rounded(px(theme::ROW_ICON_RADIUS_PX))
+            .bg(theme::active().row_icon_socket_bg)
+            .into_any_element(),
+        Icon::Glyph(glyph) => glyph_element(*glyph, row_id),
+        // An icon the daemon hasn't finished extracting yet (a fresh install,
+        // or right after a daemon restart — see `Event::IconsUpdated`'s doc
+        // comment) — a neutral glyph in the socket rather than an empty hole,
+        // self-healing to the real icon on the next `refresh_icons` without a
+        // layout change.
+        Icon::Placeholder => app_icon_placeholder_glyph(),
+    }
+}
+
 fn glyph_element(glyph: Glyph, row_id: &str) -> AnyElement {
     let slot = div().w(px(theme::ROW_ICON_PX)).h(px(theme::ROW_ICON_PX)).flex_shrink_0();
 
@@ -3256,6 +3401,58 @@ mod tests {
     }
 
     #[gpui::test]
+    fn a_focused_tile_and_a_list_row_are_never_highlighted_at_the_same_time(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, _cx| {
+                root.agent_tiles = vec![tile("a")];
+                root.results = vec![agent_row("row-1"), agent_row("row-2")];
+                root.selected = 0;
+
+                // The list keeps its cursor while the grid holds the keyboard
+                // — which is correct, and is exactly why the row must not
+                // paint a highlight for it.
+                root.grid_selected = Some(0);
+                assert!(!root.row_is_highlighted(0), "the grid has focus, so no row is selected");
+
+                root.grid_selected = None;
+                assert!(root.row_is_highlighted(0), "focus back in the list, the row highlights again");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn down_runs_through_the_tiles_in_reading_order_before_reaching_the_rows(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.agent_tiles = vec![tile("a"), tile("b"), tile("c"), tile("d")];
+                root.results = vec![agent_row("row-1")];
+                // The grid is the first thing in the content area, so it
+                // starts with the selection.
+                root.grid_selected = Some(0);
+                root.selected = 0;
+
+                for expected in [1, 2, 3] {
+                    root.select_next(&SelectNext, window, cx);
+                    assert_eq!(root.grid_selected, Some(expected), "tiles run 1,2,3,4 in order");
+                }
+                root.select_next(&SelectNext, window, cx);
+                assert_eq!(root.grid_selected, None, "past the last tile is the first row");
+                assert_eq!(root.selected, 0);
+
+                // And exactly back again.
+                root.select_previous(&SelectPrevious, window, cx);
+                assert_eq!(root.grid_selected, Some(3));
+                for expected in [2, 1, 0] {
+                    root.select_previous(&SelectPrevious, window, cx);
+                    assert_eq!(root.grid_selected, Some(expected));
+                }
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     fn up_from_the_first_row_walks_into_the_grid_and_down_walks_back_out(cx: &mut TestAppContext) {
         let window = test_root(cx);
         window
@@ -3337,19 +3534,83 @@ mod tests {
     }
 
     #[test]
-    fn only_live_agents_are_lifted_into_the_grid_idle_ones_stay_as_rows() {
+    fn the_tool_badge_is_one_uppercase_character_because_that_is_what_fits() {
+        assert_eq!(tool_initial("claude"), "C");
+        assert_eq!(tool_initial("gpt"), "G");
+        assert_eq!(tool_initial("Codex"), "C");
+        assert_eq!(tool_initial(""), "", "no tool, no badge — never an empty circle");
+    }
+
+    #[test]
+    fn at_rest_the_grid_takes_recent_agents_too_not_only_the_live_ones() {
         let live = SearchItem { badge: Some("LIVE".to_string()), ..agent_row("live-1") };
         let idle = SearchItem { badge: None, ..agent_row("idle-1") };
         let app = SearchItem { kind: "app".to_string(), ..agent_row("Finder") };
-        let (tiles, rows) = split_agent_tiles(vec![app.clone(), live.clone(), idle.clone()]);
+        let (tiles, rows) = split_agent_tiles(vec![app, live, idle], true);
+        assert_eq!(tiles.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["live-1", "idle-1"]);
+        assert_eq!(rows.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["Finder"]);
+    }
+
+    #[test]
+    fn during_a_search_only_live_agents_are_lifted_so_typing_never_reshuffles_the_grid() {
+        let live = SearchItem { badge: Some("LIVE".to_string()), ..agent_row("live-1") };
+        let idle = SearchItem { badge: None, ..agent_row("idle-1") };
+        let (tiles, rows) = split_agent_tiles(vec![live, idle], false);
         assert_eq!(tiles.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["live-1"]);
-        assert_eq!(rows.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["Finder", "idle-1"]);
+        assert_eq!(rows.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["idle-1"]);
+    }
+
+    #[test]
+    fn the_grid_is_two_rows_of_two_and_its_capacity_matches_that() {
+        assert_eq!(
+            AGENT_GRID_CAPACITY,
+            theme::AGENT_GRID_COLUMNS * 2,
+            "capacity and layout must agree, or the last tile is drawn outside the strip"
+        );
+        // Two tiles plus the gap between them must actually fit the width the
+        // strip has, or they wrap into three rows and the third is clipped.
+        let inset = theme::CONTENT_INSET_PX * 2.0;
+        let used = theme::AGENT_TILE_WIDTH_PX * theme::AGENT_GRID_COLUMNS as f32
+            + theme::AGENT_GRID_GAP_PX;
+        assert!(
+            used <= theme::PANEL_WIDTH_WITH_DETAIL_PX - inset + 0.01,
+            "a row of tiles ({used}) must fit the panel inset by {inset}"
+        );
+        // The whole point of the shared inset: a tile's outer edge and a
+        // selected row's highlight must land on the same pixel.
+        assert!(
+            (used - (theme::PANEL_WIDTH_WITH_DETAIL_PX - inset)).abs() < 0.01,
+            "the grid must span exactly the width the results list does"
+        );
+    }
+
+    #[test]
+    fn the_grid_never_takes_more_than_it_can_draw() {
+        let many: Vec<SearchItem> = (0..9).map(|i| agent_row(&format!("a{i}"))).collect();
+        let (tiles, rows) = split_agent_tiles(many, true);
+        assert_eq!(tiles.len(), AGENT_GRID_CAPACITY, "the grid has a fixed height; extras must not be clipped");
+        assert_eq!(rows.len(), 9 - AGENT_GRID_CAPACITY, "the overflow stays reachable as rows");
+    }
+
+    #[test]
+    fn the_clients_capacity_matches_the_providers_own_cap() {
+        // The provider caps an empty query at its own constant and orders it
+        // running-first; a drift here would silently push an agent out of the
+        // grid and into the list.
+        assert_eq!(AGENT_GRID_CAPACITY, neko_core_grid_capacity());
+    }
+
+    /// `neko` cannot depend on `neko-core` (the crate split exists to stop
+    /// exactly that), so the provider's constant is mirrored here and pinned
+    /// by the test above rather than imported.
+    fn neko_core_grid_capacity() -> usize {
+        4
     }
 
     #[test]
     fn an_agent_never_appears_both_as_a_tile_and_as_a_row() {
         let live = SearchItem { badge: Some("LIVE".to_string()), ..agent_row("a") };
-        let (tiles, rows) = split_agent_tiles(vec![live]);
+        let (tiles, rows) = split_agent_tiles(vec![live], true);
         assert_eq!(tiles.len(), 1);
         assert!(rows.is_empty(), "a tile is a move, not a copy — two rows for one agent is two Enters");
     }
@@ -3362,7 +3623,7 @@ mod tests {
             badge: Some("TEXT".to_string()),
             ..agent_row("copied")
         };
-        let (tiles, rows) = split_agent_tiles(vec![clip]);
+        let (tiles, rows) = split_agent_tiles(vec![clip], true);
         assert!(tiles.is_empty());
         assert_eq!(rows.len(), 1);
     }

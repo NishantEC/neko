@@ -710,6 +710,14 @@ mod macos {
     fn make_glass_view(mtm: MainThreadMarker, frame: NSRect, corner_radius: f64) -> Retained<NSGlassEffectView> {
         let glass = NSGlassEffectView::new(mtm);
         glass.setFrame(frame);
+        // **`.regular`, the heavier frost.** This API offers exactly two
+        // styles — `.regular` and `.clear` — so blur here is a switch, not a
+        // dial. `.clear` was tried on captain instruction and read as too
+        // little; the transparency it was paired with stayed, and lives on
+        // the palette's `panel_alpha` instead. That split is the useful part
+        // to remember: **blur is binary and belongs to the material,
+        // transparency is continuous and belongs to the theme** — so "a bit
+        // more/less frosted" is almost always an alpha change, not this line.
         glass.setStyle(NSGlassEffectViewStyle::Regular);
         // No separate CALayer step: unlike `NSVisualEffectView` below,
         // `NSGlassEffectView` takes a corner radius directly (report §3/§5).

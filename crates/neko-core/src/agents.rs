@@ -115,6 +115,12 @@ pub fn backend_census(backend: Backend) -> (usize, usize) {
     (running, agents.len() - running)
 }
 
+/// How many agents the client's grid can show. The provider caps an empty
+/// query at this so the resting panel is exactly the grid and nothing else —
+/// a fifth agent would arrive as an ordinary row underneath, which is not
+/// what the grid is for.
+pub const GRID_CAPACITY: usize = 4;
+
 /// A running agent outranks everything else this provider can return, by a
 /// margin no recency bonus can close. "What is running right now" is the
 /// question being asked; an idle agent is context, not an answer.
@@ -151,6 +157,16 @@ struct PaseoAgent {
     internal: bool,
     #[serde(default)]
     requires_attention: bool,
+    /// `config.model`, e.g. `"claude-opus-5"`. The nested shape is Paseo's;
+    /// only the one field is read, so anything else it adds there is ignored.
+    #[serde(default)]
+    config: AgentConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AgentConfig {
+    #[serde(default)]
+    model: Option<String>,
 }
 
 impl PaseoAgent {
@@ -178,17 +194,28 @@ impl PaseoAgent {
             .unwrap_or_else(|| "Agent".to_string())
     }
 
-    /// `"claude · ~/Documents/neko"` — what it is and where it is working,
-    /// which together are how a person tells two live agents apart.
+    /// **The workspace, not the model.** The model moved to its own mark in
+    /// the corner of the tile (`SearchItem::source` carries it), which frees
+    /// this line for the thing that actually distinguishes two agents running
+    /// the same model: where they are working.
     fn subtitle(&self) -> Option<String> {
-        let provider = self.provider.as_deref().map(short_provider);
-        let cwd = self.cwd.as_deref().map(tildify);
-        match (provider, cwd) {
-            (Some(p), Some(c)) => Some(format!("{p} · {c}")),
-            (Some(p), None) => Some(p),
-            (None, Some(c)) => Some(c),
-            (None, None) => None,
-        }
+        self.cwd.as_deref().map(tildify)
+    }
+
+    /// Which tool is running the agent — `"claude"`, `"codex"` — for the
+    /// small badge the client overlays on the host app's icon.
+    ///
+    /// The *model* is deliberately not this: a badge that sits on the corner
+    /// of a 22px icon has room for about one character, and "which tool" is
+    /// the distinction that survives being reduced to one. The model is still
+    /// searchable through this provider's own `search`.
+    fn provider_mark(&self) -> Option<String> {
+        let provider = self.provider.as_deref().map(short_provider).filter(|p| !p.is_empty());
+        provider.or_else(|| {
+            // No `provider` field, but the model usually names its family.
+            let model = self.config.model.as_deref()?;
+            model.split(['-', '/']).next().map(str::to_string).filter(|p| !p.is_empty())
+        })
     }
 
     fn activity_at(&self) -> Option<&str> {
@@ -366,16 +393,17 @@ impl Provider for AgentsProvider {
         }
         let trimmed = query.trim();
         let agents = read_agents(root);
-        agents
+        let mut scored: Vec<(String, bool, Candidate)> = agents
             .into_iter()
             .filter_map(|agent| {
                 let running = agent.is_running();
                 let score = if trimmed.is_empty() {
-                    // See `answers_empty_root_query`: news, not history.
-                    if !running {
-                        return None;
-                    }
-                    RUNNING_BONUS
+                    // The grid's own list: running first, then the most
+                    // recent, capped below. Idle agents are included here —
+                    // unlike a *query*, where they stay behind the
+                    // `include_idle` setting — because "what were you just
+                    // working on" is the question the resting panel answers.
+                    if running { RUNNING_BONUS } else { 0.0 }
                 } else if !running && !include_idle {
                     return None;
                 } else {
@@ -397,7 +425,33 @@ impl Provider for AgentsProvider {
                         .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?;
                     if running { best + RUNNING_BONUS } else { best }
                 };
-                Some(Candidate { score, item: to_item(&agent, running) })
+                Some((agent.activity_at().unwrap_or("").to_string(), running, Candidate { score, item: to_item(&agent, running) }))
+            })
+            .collect::<Vec<_>>();
+
+        if !trimmed.is_empty() {
+            return scored.into_iter().map(|(_, _, candidate)| candidate).collect();
+        }
+
+        // The grid's own ordering: every running agent first, then the rest
+        // by most recent activity. Sorted here rather than left to
+        // `search::allocate`, which ranks by score alone and has no reason to
+        // know that two agents with the same score are ordered by *time*.
+        //
+        // Timestamps are RFC 3339 from Paseo, which sort lexicographically in
+        // chronological order — so comparing the strings is correct and needs
+        // no date parsing (this codebase has declined a date/time dependency
+        // more than once; see `to_item`'s own note on `short_time`).
+        scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
+        scored.truncate(GRID_CAPACITY);
+        // `allocate` orders rows by score, so the order settled above has to
+        // survive as descending scores rather than as position in this Vec.
+        scored
+            .into_iter()
+            .enumerate()
+            .map(|(rank, (_, _, mut candidate))| {
+                candidate.score = RUNNING_BONUS + (GRID_CAPACITY - rank) as f32;
+                candidate
             })
             .collect()
     }
@@ -439,13 +493,32 @@ fn deep_link(server_id: &str, agent_id: &str) -> String {
     format!("paseo:/h/{server_id}/agent/{agent_id}")
 }
 
+/// The host app's icon, cached once per process. `ensure_cached_icon` is real
+/// AppKit work (`icons.rs`: "tens of ms each"), and this would otherwise run
+/// once per agent per keystroke.
+fn host_icon() -> Option<&'static PathBuf> {
+    static ICON: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    ICON.get_or_init(|| {
+        let app = PathBuf::from("/Applications/Paseo.app");
+        app.is_dir().then(|| crate::icons::ensure_cached_icon("com.paseo.app", &app))?
+    })
+    .as_ref()
+}
+
 fn to_item(agent: &PaseoAgent, running: bool) -> SearchItem {
     SearchItem {
         id: agent.id.clone(),
         kind: "agent".to_string(),
         title: agent.display_title(),
         subtitle: agent.subtitle(),
-        icon: Icon::Glyph(if running { Glyph::AgentLive } else { Glyph::Agent }),
+        // The host application's own icon (Paseo's), extracted through the
+        // same cache every app row uses — no second icon pipeline. Falls back
+        // to the painted glyph when the app is not installed where expected,
+        // which is also what a future non-Paseo backend gets for free.
+        icon: host_icon().map_or(
+            Icon::Glyph(if running { Glyph::AgentLive } else { Glyph::Agent }),
+            |path| Icon::Image(path.display().to_string()),
+        ),
         section_label: "Agents".to_string(),
         action_label: "Open in Paseo  ↵".to_string(),
         // The badge is what the client keys its live treatment off — the row
@@ -459,7 +532,10 @@ fn to_item(agent: &PaseoAgent, running: bool) -> SearchItem {
         enters_mode: None,
         group_label: None,
         actions: Vec::new(),
-        source: agent.cwd.clone(),
+        // The tool running this agent, for the badge the client overlays on
+        // the host icon. `source` is the wire's "bare value for a labelled
+        // field" slot; how it renders is the client's business.
+        source: agent.provider_mark(),
     }
 }
 
@@ -517,12 +593,58 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_query_returns_only_the_running_agents() {
+    fn an_empty_query_returns_running_agents_first_then_the_most_recent() {
         let (_dir, provider) = fixture_root();
         let found = provider.search("", 0);
-        assert_eq!(found.len(), 1, "idle and closed agents are context, not news");
-        assert_eq!(found[0].item.id, "run-1");
+        // The grid's own list: live first, then what was worked on last.
+        // Closed agents are still never included.
+        assert_eq!(
+            found.iter().map(|c| c.item.id.as_str()).collect::<Vec<_>>(),
+            vec!["run-1", "idle-1"]
+        );
         assert_eq!(found[0].item.badge.as_deref(), Some("LIVE"));
+        assert!(found[0].score > found[1].score, "allocate orders by score, so the order must survive as one");
+    }
+
+    #[test]
+    fn an_empty_query_never_returns_more_than_the_grid_can_show() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..9 {
+            write_agent(
+                dir.path(),
+                "w",
+                &format!("a{i}"),
+                &format!(
+                    r#"{{"id":"a{i}","title":"agent {i}","lastStatus":"idle","updatedAt":"2026-08-2{i}T00:00:00.000Z"}}"#
+                ),
+            );
+        }
+        let provider = AgentsProvider::with_root(dir.path().to_path_buf());
+        let found = provider.search("", 0);
+        assert_eq!(found.len(), GRID_CAPACITY);
+        // Most recent first, so the cap keeps the useful end of the list.
+        assert_eq!(found[0].item.id, "a8");
+        assert_eq!(found[GRID_CAPACITY - 1].item.id, "a5");
+    }
+
+    #[test]
+    fn a_running_agent_still_leads_even_when_an_idle_one_was_touched_more_recently() {
+        let dir = tempfile::tempdir().unwrap();
+        write_agent(
+            dir.path(),
+            "w",
+            "old-running",
+            r#"{"id":"old-running","title":"busy","lastStatus":"running","updatedAt":"2020-01-01T00:00:00.000Z"}"#,
+        );
+        write_agent(
+            dir.path(),
+            "w",
+            "fresh-idle",
+            r#"{"id":"fresh-idle","title":"just closed","lastStatus":"idle","updatedAt":"2030-01-01T00:00:00.000Z"}"#,
+        );
+        let provider = AgentsProvider::with_root(dir.path().to_path_buf());
+        let found = provider.search("", 0);
+        assert_eq!(found[0].item.id, "old-running", "running outranks recency, not the other way round");
     }
 
     #[test]
@@ -595,8 +717,9 @@ mod tests {
     #[test]
     fn a_malformed_document_is_skipped_without_losing_the_rest_of_the_list() {
         let (dir, provider) = fixture_root();
+        let before = provider.search("", 0).len();
         write_agent(dir.path(), "broken", "bad", "{ this is not json");
-        assert_eq!(provider.search("", 0).len(), 1, "one unreadable file must not empty the list");
+        assert_eq!(provider.search("", 0).len(), before, "one unreadable file must not shrink the list");
     }
 
     #[test]
@@ -623,6 +746,35 @@ mod tests {
         );
         let provider = AgentsProvider::with_root(dir.path().to_path_buf());
         assert_eq!(provider.search("", 0)[0].item.title, "first line", "a row is one line tall");
+    }
+
+    #[test]
+    fn the_badge_names_the_tool_and_the_line_under_the_title_is_the_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        write_agent(
+            dir.path(),
+            "w",
+            "a",
+            r#"{"id":"a","title":"x","provider":"claude","cwd":"/tmp/w","lastStatus":"running",
+                "config":{"model":"claude-opus-5[1m]"}}"#,
+        );
+        let provider = AgentsProvider::with_root(dir.path().to_path_buf());
+        let item = provider.search("", 0).remove(0).item;
+        assert_eq!(item.source.as_deref(), Some("claude"), "the badge names the tool, not the model");
+        assert_eq!(item.subtitle.as_deref(), Some("/tmp/w"), "the line under the title is the workspace");
+    }
+
+    #[test]
+    fn the_badge_falls_back_to_the_models_family_when_no_provider_is_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        write_agent(
+            dir.path(),
+            "w",
+            "a",
+            r#"{"id":"a","title":"x","lastStatus":"running","config":{"model":"gpt-5-codex"}}"#,
+        );
+        let provider = AgentsProvider::with_root(dir.path().to_path_buf());
+        assert_eq!(provider.search("", 0)[0].item.source.as_deref(), Some("gpt"));
     }
 
     #[test]
