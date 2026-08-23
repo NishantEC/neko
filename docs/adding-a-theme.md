@@ -26,6 +26,7 @@ token from it:
 | `banner_danger_bg` | `state_danger` at `BANNER_ALPHA` |
 | `state_success_border` / `state_danger_border` | the state colour at `STATE_BORDER_ALPHA` |
 | `row_icon_socket_bg` | one socket hue at `icon_socket_alpha` |
+| `snap_guide` / `snap_guide_muted` | `text_primary` at `SNAP_GUIDE_ALPHA` and at half it |
 
 A theme that wanted a *weaker* strong hairline cannot express it. Changing that
 means editing `build()`, which is one place, reviewed once, rather than

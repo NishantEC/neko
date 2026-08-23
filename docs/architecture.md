@@ -319,7 +319,7 @@ screen. Nothing else may call `.repeat()`.
 
 - Geometry, spacing and type stay `pub const`. A theme cannot move a row or
   resize the panel.
-- Colour lives on `Palette`, 20 `Rgba` fields. Every paint site reads
+- Colour lives on `Palette`, 22 `Rgba` fields. Every paint site reads
   `theme::active()`, which is one relaxed atomic load and a slice index into
   `&'static [Theme]`. No lock, no allocation, no `Arc` on the render path.
 - A theme supplies *independent* colours as a `Spec`; one `const fn build()`
@@ -417,6 +417,39 @@ first summon. `display_placement::reposition_to_cursor_display` moves it to the
 `NSScreen` under the cursor before each later summon, reading
 `NSEvent.mouseLocation()` — permission-free, unlike asking which window is
 active, which needs the same Accessibility grant as the hotkey.
+
+**It can also be dragged, and neko drives the gesture itself.** Grab the input
+row or the footer. The obvious implementation — `start_window_move()` →
+`performWindowDragWithEvent:` — shipped first and was replaced, because it runs
+**AppKit's own modal event loop** until the mouse comes up: there is no moment
+inside it to measure proximity to a snap target, choose one, or draw a guide.
+So `is_movable` is back to `false` (that flag only governs the API no longer
+used) and three pieces do the work:
+
+- `crates/neko/src/snap.rs` — **pure, no gpui.** Visible frame + panel size +
+  home + desired origin → snapped origin and guides. All the correctness, and
+  all the tests, live here. One coordinate space throughout, AppKit's own
+  (points, y-up, bottom-left origins), so the drag never converts anything.
+- `crates/neko/src/window_drag.rs` — the native half: cursor, window move, and
+  the guide overlay. Injected into the panel as `Rc<dyn PanelDrag>`, because
+  gpui's test platform panics on `window_handle()` and `open_window`.
+- `panel::Root` — four verbs and one bool.
+
+Targets are the visible frame's edges and centres plus **home**, the position a
+summon puts the panel at, computed through the same `upper_third_offset` that
+places every summon so the guide cannot drift from it. Within
+`snap::SNAP_THRESHOLD_PT` (16pt) a guide appears; the one that will actually
+take the panel is drawn strongly and any other in reach is muted. The desired
+origin is hard-clamped into the visible frame first, so a drag cannot leave the
+panel somewhere it can no longer be picked up; Escape puts it back.
+
+Guides are a second, transparent, click-through, never-key `PopUp` window
+ordered below the panel — an element cannot paint outside its own window, and
+every guide is at a screen edge. It is opened lazily (a plain click, or a drag
+that never nears a target, opens no window) and torn down on every path that
+ends a drag. `docs/evidence/drag-snap-guides-report.md`, including the one thing
+that could not be checked here: **no real drag was ever performed**, because
+synthesising mouse input is forbidden in this repo.
 
 **Spaces.** gpui sets `CanJoinAllSpaces | FullScreenAuxiliary` for any
 `WindowKind::PopUp`. `crates/neko/src/spaces.rs` reads the bits back at every
