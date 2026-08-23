@@ -1,4 +1,5 @@
 mod accessibility;
+mod assets;
 mod components;
 mod daemon_launcher;
 mod display_placement;
@@ -59,7 +60,15 @@ fn main() {
     // decision") — every real bootstrap on that fork goes through
     // `gpui_platform::application()`, which selects the mac platform
     // backend (`gpui_macos::MacPlatform`) internally.
-    let app = gpui_platform::application();
+    //
+    // `with_assets` is what makes `gpui::svg()` able to resolve a path at
+    // all: it installs the source *and* rebuilds `SvgRenderer` around it
+    // (`gpui`'s `Application::with_assets`), so it has to happen here on
+    // the builder, before `run`, and not from inside it. Without it every
+    // `svg()` in this app would resolve to nothing and paint nothing —
+    // silently, since an unresolvable asset path is not an error anywhere.
+    // See `assets.rs`.
+    let app = gpui_platform::application().with_assets(assets::NekoAssets);
     app.on_reopen(|cx| {
         let Some((window, active_onboarding)) = cx
             .try_global::<ReopenTargets>()

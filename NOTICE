@@ -1,11 +1,25 @@
 neko's own source is MIT-licensed (see LICENSE). It vendors one small,
-adapted file from a third-party Apache-2.0 project:
+adapted source file, and one set of icon assets, from third parties:
 
   crates/neko/src/components/vendor/gpui_component/blink_cursor.rs
     Adapted from gpui-component 0.5.1 (https://github.com/longbridge/gpui-component)
     Copyright the gpui-component contributors
     Licensed under the Apache License, Version 2.0
     Full license text: THIRD_PARTY_LICENSES/gpui-component-APACHE-2.0.txt
+
+  crates/neko/assets/icons/lucide/*.svg  (9 files, unmodified)
+    From Lucide (https://github.com/lucide-icons/lucide), commit
+    33a44aa8b0b43d9b0ed14eb08860a1b5550a1573
+    Copyright (c) 2026 Lucide Icons and Contributors
+    Licensed under the ISC License
+    Full license text: THIRD_PARTY_LICENSES/lucide-ISC.txt
+
+    NOTE: Lucide is ISC, not MIT. Four of the nine vendored icons —
+    chevron-left, clipboard, link, search — are named on Lucide's own
+    Feather-derived list and additionally carry Feather's MIT grant
+    (Copyright (c) 2013-present Cole Bemis). The ISC grant covers all nine
+    either way; the file above reproduces both notices verbatim, which is
+    what both licences require.
 
 See crates/neko/src/components/vendor/MANIFEST.md for what was vendored, what was
 deliberately not vendored, and why.

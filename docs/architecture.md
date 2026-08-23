@@ -302,6 +302,47 @@ because the native material behind the panel renders in it — a cream panel ove
 a `darkAqua` blur reads as a dark halo. See
 [adding-a-theme.md](adding-a-theme.md).
 
+## Icons
+
+`crates/neko/src/assets.rs`. Two unrelated things are both called "icon" here:
+
+- **Application icons** are real per-app rasters, extracted from
+  `NSWorkspace::iconForFile` by the daemon and cached as 128px PNGs. They
+  arrive on the wire as `Icon::Image(path)` and render through `img()`.
+- **Everything else** — clipboard entries, files, folders, commands, agents,
+  preferences — has no per-item artwork and renders a `Glyph`: a small, closed
+  vocabulary of marks the client knows how to draw.
+
+Glyphs used to be hand-composed stacks of `div()`s. They are now **vendored
+Lucide SVGs rendered through `gpui::svg()`**, which needed no dependency —
+only an `AssetSource` and some files. `assets::NekoAssets` is that source: a
+compile-time `include_bytes!` table installed once on the `Application`
+builder in `main.rs` (`with_assets`, which must happen before `run`, because
+it is also what rebuilds gpui's `SvgRenderer` around the source).
+
+Three consequences of how gpui renders an SVG, all of which shape the code:
+
+- **It renders an alpha mask, tinted by the element's `text_color`.** Colour
+  still comes from `theme::active()` at every call site, so a theme change
+  re-tints every icon with no per-theme asset. It also means **an icon can only
+  be one colour** — which is why `Glyph::Palette`, four swatches in the live
+  theme's own colours, stays hand-painted, and why `assets::glyph_icon` returns
+  `None` for it. `Glyph::Agent`/`AgentLive` keep a painted presence dot
+  composited over the SVG for the same reason.
+- **A filled icon would render as a solid blob.** Lucide's set is stroke-only;
+  a test asserts every vendored file is `fill="none"` on a 24×24 grid.
+- **An unresolvable path is not an error.** `paint_svg` draws nothing and
+  returns `Ok`. So a typo'd asset path is a silent hole in a row — which is why
+  `assets.rs`'s tests resolve every path, rasterise every file through gpui's
+  own `SvgRenderer`, and assert the result actually has coverage.
+
+Adding an icon: drop the file in `crates/neko/assets/icons/lucide/`, add one
+row to `ICONS` and one constant to `assets::icon`, and pin its byte length in
+the test. Licence paperwork is `NOTICE`, `THIRD_PARTY_LICENSES/lucide-ISC.txt`,
+and the table in `crates/neko/src/components/vendor/MANIFEST.md`. **Lucide is
+ISC, not MIT** — permissive either way, but the distinction is recorded because
+this repo's own notes got it wrong first.
+
 ## The window, and why it looks the way it does
 
 `crates/neko/src/main.rs` opens one `WindowKind::PopUp` window and configures
@@ -375,6 +416,7 @@ one local patch applied on top by `scripts/setup-gpui-patch.sh`.
 | Question | File |
 | --- | --- |
 | How a row is rendered | `crates/neko/src/panel.rs` |
+| Where an icon comes from | `crates/neko/src/assets.rs` |
 | How the text field edits, selects, and pastes | `crates/neko/src/text_field.rs` |
 | How the daemon dispatches a request | `crates/neko-daemon/src/server.rs`, `handle_request` |
 | What the first-run arc does | `crates/neko/src/onboarding/` (`state.rs` is pure, `view.rs` does the I/O) |

@@ -770,6 +770,15 @@ pub const AGENT_GRID_HEIGHT_PX: f32 = AGENT_TILE_HEIGHT_PX + 20.0;
 pub const ROW_ICON_PX: f32 = 22.0;
 pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
 
+/// The drawn size of the mark *inside* the 22px row-icon socket, leaving a
+/// small inset of `ROW_ICON_SOCKET_BG` visible around it. Matches the
+/// footprint the hand-painted marks this replaced already occupied (their
+/// own bodies ran 12–16px inside the same slot), so swapping to `svg()`
+/// moved no row and changed no row height. One token rather than a `px()`
+/// per call site because it is now shared by every glyph — a per-icon size
+/// is exactly how a list of icons stops reading as one set.
+pub const ROW_ICON_GLYPH_PX: f32 = 15.0;
+
 /// The results list's own scroll edge-fade band height (`edge_fade.rs`).
 pub const EDGE_FADE_BAND_PX: f32 = 18.0;
 
