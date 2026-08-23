@@ -36,6 +36,7 @@
 //! | `banner_danger_bg` | `state_danger` at [`BANNER_ALPHA`] |
 //! | `state_success_border` / `state_danger_border` | the state colour at [`STATE_BORDER_ALPHA`] |
 //! | `row_icon_socket_bg` | one socket hue at `icon_socket_alpha` |
+//! | `snap_guide` / `_muted` | `text_primary` at [`SNAP_GUIDE_ALPHA`] / half it |
 //!
 //! A theme that wanted `border_hairline_strong` to be *weaker* than
 //! `border_hairline`, or the danger banner to be built out of the success
@@ -105,9 +106,13 @@ pub const BANNER_ALPHA: f32 = 0.078_431_37;
 /// Status-pill borders (`status_pill` in `onboarding/view.rs`): the state
 /// colour at ~34.9% alpha. Frozen, same reasoning as [`BANNER_ALPHA`].
 pub const STATE_BORDER_ALPHA: f32 = 0.349_019_6;
+/// The drag guide's own alpha over `text_primary` (see
+/// [`Palette::snap_guide`]). Frozen here rather than per theme, for the same
+/// reason [`BANNER_ALPHA`] is: a theme picks the *hue*, never the weight.
+pub const SNAP_GUIDE_ALPHA: f32 = 0.9;
 /// How many `Rgba` fields [`Palette`] has. Pinned by a test so this doc, the
 /// struct, and `AGENTS.md` cannot silently disagree.
-pub const PALETTE_TOKEN_COUNT: usize = 20;
+pub const PALETTE_TOKEN_COUNT: usize = 22;
 
 /// Whether a theme reads as light or dark **to AppKit**, not just to a person.
 ///
@@ -183,6 +188,21 @@ pub struct Palette {
     /// rule ("a low-alpha plate of the opposite polarity to the panel") is
     /// unchanged, only the value is.
     pub row_icon_socket_bg: Rgba,
+    /// The line drawn along a snap target while the panel is being dragged
+    /// (`window_drag.rs`) — the theme's own foreground at
+    /// [`SNAP_GUIDE_ALPHA`].
+    ///
+    /// It is `text_primary` and not a colour of its own on purpose: this is
+    /// the one thing this app draws *outside* its own panel, over an
+    /// arbitrary desktop, and the only honest answer to "what colour is neko
+    /// here" is the colour neko is everywhere else. The paint site pairs it
+    /// with a `surface_panel` hairline so it reads on a wallpaper of either
+    /// polarity.
+    pub snap_guide: Rgba,
+    /// The same line for a target that is in reach but *not* the one the panel
+    /// has been taken to — exactly half the alpha, the same "one hue, two
+    /// weights" relationship [`Palette::border_hairline_strong`] has.
+    pub snap_guide_muted: Rgba,
 }
 
 /// One built-in theme: identity, appearance, and its finished [`Palette`].
@@ -266,6 +286,8 @@ const fn build(s: Spec) -> Theme {
             border_hairline: rgba_const(s.hairline, s.hairline_alpha),
             border_hairline_strong: rgba_const(s.hairline, s.hairline_alpha * 2.0),
             row_icon_socket_bg: rgba_const(s.icon_socket, s.icon_socket_alpha),
+            snap_guide: rgba_const(s.text_primary, SNAP_GUIDE_ALPHA),
+            snap_guide_muted: rgba_const(s.text_primary, SNAP_GUIDE_ALPHA / 2.0),
         },
     }
 }
@@ -738,6 +760,15 @@ pub fn set_active(id: &str) -> bool {
     }
 }
 
+/// How thick a drag guide is drawn (`window_drag.rs`), including its own 1pt
+/// outline — so 2pt of colour with a hairline either side. Thin enough to
+/// read as a measuring line rather than a bar, thick enough to survive being
+/// composited over a busy wallpaper at 1x.
+///
+/// Geometry, so it stays a `const` here and a theme cannot change it: a theme
+/// is colour and surface only (this module's own doc comment).
+pub const SNAP_GUIDE_THICKNESS_PX: f32 = 4.0;
+
 pub const PANEL_RADIUS_PX: f32 = 16.0;
 pub const ROW_RADIUS_PX: f32 = 8.0;
 pub const DIALOG_RADIUS_PX: f32 = 14.0;
@@ -1064,6 +1095,13 @@ mod tests {
             assert_eq!(p.state_danger_border.a, STATE_BORDER_ALPHA, "{id}: danger border alpha drifted");
             assert_eq!(p.state_success_border.a, STATE_BORDER_ALPHA, "{id}: success border alpha drifted");
 
+            // One guide hue, two weights, muted is exactly half — the same
+            // relationship the two hairlines have, in the other direction.
+            assert_eq!(rgba_to_u8(p.snap_guide), rgba_to_u8(p.text_primary), "{id}: the drag guide is not built from text_primary");
+            assert_eq!(rgba_to_u8(p.snap_guide_muted), rgba_to_u8(p.snap_guide), "{id}: the two guide weights are different colours");
+            assert!((p.snap_guide_muted.a - p.snap_guide.a / 2.0).abs() < 1e-6, "{id}: snap_guide_muted is not half snap_guide");
+            assert_eq!(p.snap_guide.a, SNAP_GUIDE_ALPHA, "{id}: guide alpha drifted");
+
             // The icon plate is always a low-alpha film, never opaque chrome.
             assert!(p.row_icon_socket_bg.a > 0.0 && p.row_icon_socket_bg.a < 0.5, "{id}: the row-icon socket is not a low-alpha plate");
         }
@@ -1166,13 +1204,16 @@ mod tests {
             border_hairline,
             border_hairline_strong,
             row_icon_socket_bg,
+            snap_guide,
+            snap_guide_muted,
         } = THEMES[0].palette;
         let all = [
             surface_panel, surface_panel_translucent, surface_raised, menu_glass_tint,
             surface_input, surface_selected, text_primary, text_secondary, text_tertiary,
             text_tertiary_on_selected, text_on_light, keycap_shell_bg, state_success,
             state_danger, state_success_border, state_danger_border, banner_danger_bg,
-            border_hairline, border_hairline_strong, row_icon_socket_bg,
+            border_hairline, border_hairline_strong, row_icon_socket_bg, snap_guide,
+            snap_guide_muted,
         ];
         assert_eq!(all.len(), PALETTE_TOKEN_COUNT);
     }

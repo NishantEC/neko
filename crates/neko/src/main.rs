@@ -15,9 +15,11 @@ mod preferences;
 mod panel;
 mod pasteboard;
 mod row_icon_cache;
+mod snap;
 mod spaces;
 mod text_field;
 mod theme;
+mod window_drag;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -175,12 +177,18 @@ fn main() {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: None,
                     kind: WindowKind::PopUp,
-                    // Draggable. It was `false` for as long as the panel had
-                    // no drag affordance at all, and `performWindowDragWithEvent:`
-                    // — what gpui's mac `start_window_move` calls — honours
-                    // this flag, so leaving it false made the drag handler a
-                    // no-op rather than a bug worth finding.
-                    is_movable: true,
+                    // `false`, and it went back to `false` the moment the
+                    // drag stopped being AppKit's. `setMovable:` governs
+                    // *user* dragging — the `performWindowDragWithEvent:`
+                    // path this panel no longer uses (`window_drag.rs` owns
+                    // the gesture now, because AppKit's own drag loop cannot
+                    // be snapped). Every placement neko has ever done is
+                    // programmatic (`setFrameOrigin:`/`setFrameTopLeftPoint:`),
+                    // which this flag has never affected: multi-display
+                    // repositioning worked with it `false` for the whole
+                    // project's life. Left `true`, it would leave a second,
+                    // competing way to move the window that snaps nothing.
+                    is_movable: false,
                     is_resizable: false,
                     is_minimizable: false,
                     focus: false,
@@ -326,6 +334,7 @@ fn main() {
                             menu_frost,
                             Rc::new(material::set_window_appearance),
                             open_preferences.clone(),
+                            window_drag::native(),
                             cx,
                         )
                     }

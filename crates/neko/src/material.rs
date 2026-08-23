@@ -65,6 +65,56 @@ pub fn install(_window: &Window) -> Result<Installed, String> {
     Err("native window material is only implemented on macOS".to_string())
 }
 
+/// Makes a window transparent to the mouse — every click goes to whatever is
+/// underneath it, and the window can never be hovered, clicked or dragged.
+///
+/// Used for the drag-guide overlay (`window_drag.rs`), which is drawn *over*
+/// other applications and must not intercept anything. A whole-window
+/// property, which is exactly why the summon panel itself can never use it
+/// (`AGENTS.md`, "Mode view resize seam" — it would make the visible panel
+/// unclickable too).
+#[cfg(target_os = "macos")]
+pub fn set_ignores_mouse_events(window: &Window, ignores: bool) -> Result<(), String> {
+    macos::set_ignores_mouse_events(window, ignores)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_ignores_mouse_events(_window: &Window, _ignores: bool) -> Result<(), String> {
+    Err("click-through is only implemented on macOS".to_string())
+}
+
+/// Reads `ignoresMouseEvents` straight back off the live window — the same
+/// "verified, not trusted" pattern as `verify_installed`/
+/// `verify_shadow_disabled`, for a property whose failure mode (a window
+/// silently eating the captain's clicks) is severe and invisible.
+#[cfg(target_os = "macos")]
+pub fn ignores_mouse_events(window: &Window) -> Result<bool, String> {
+    macos::ignores_mouse_events(window)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn ignores_mouse_events(_window: &Window) -> Result<bool, String> {
+    Err("click-through is only implemented on macOS".to_string())
+}
+
+/// Orders `window` directly beneath the window with number
+/// `other_window_number`, without changing either one's level or activating
+/// anything.
+///
+/// The drag-guide overlay is deliberately at the same `NSPopUpWindowLevel` as
+/// the panel — a lower level would bury the guides under other applications'
+/// windows, which is where they are least useful — so the two are separated by
+/// explicit ordering rather than by level.
+#[cfg(target_os = "macos")]
+pub fn order_below(window: &Window, other_window_number: isize) -> Result<(), String> {
+    macos::order_below(window, other_window_number)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn order_below(_window: &Window, _other_window_number: isize) -> Result<(), String> {
+    Err("window ordering is only implemented on macOS".to_string())
+}
+
 /// Test/evidence-only, for the `NEKO_BENCH` latency loop — see
 /// `macos::order_front_regardless`'s own doc comment.
 #[cfg(target_os = "macos")]
@@ -600,6 +650,20 @@ mod macos {
     /// See `order_front_regardless`.
     pub fn order_out(window: &Window) -> Result<(), String> {
         native_window(window)?.orderOut(None);
+        Ok(())
+    }
+
+    pub fn set_ignores_mouse_events(window: &Window, ignores: bool) -> Result<(), String> {
+        native_window(window)?.setIgnoresMouseEvents(ignores);
+        Ok(())
+    }
+
+    pub fn ignores_mouse_events(window: &Window) -> Result<bool, String> {
+        Ok(native_window(window)?.ignoresMouseEvents())
+    }
+
+    pub fn order_below(window: &Window, other_window_number: isize) -> Result<(), String> {
+        native_window(window)?.orderWindow_relativeTo(NSWindowOrderingMode::Below, other_window_number);
         Ok(())
     }
 
