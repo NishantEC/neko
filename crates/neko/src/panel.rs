@@ -565,6 +565,12 @@ impl Root {
         cx.notify();
     }
 
+    /// What is currently typed. One place, so `run_search` and every
+    /// `Request::Activate` can never disagree about what "the query" is.
+    fn query(&self, cx: &Context<Self>) -> String {
+        self.text_field.read(cx).content().to_string()
+    }
+
     fn run_search(&mut self, cx: &mut Context<Self>) {
         // A stale activation-failure message from a previous result no
         // longer applies once the query changes underneath it.
@@ -956,8 +962,29 @@ impl Root {
         {
             mode.restore_theme = None;
         }
-        let request = Request::Activate { kind: item.kind, id: item.id, action: None };
+        let request = self.primary_activation_request(&item, cx);
         self.perform_activation(request, true, cx);
+    }
+
+    /// The `Request::Activate` a row's primary action sends.
+    ///
+    /// Its own method rather than three lines inside `confirm` so a test can
+    /// assert what actually goes on the wire without a daemon to answer it.
+    ///
+    /// **The search field's own contents ride along with every activation.**
+    /// Almost every provider ignores them (`Provider::activate_with_query`
+    /// defaults to dropping the query and delegating), and the one whose rows
+    /// are a thing to do *with what was typed* — starting an agent on a
+    /// prompt — takes them as its argument. Read here, at the moment Enter is
+    /// pressed, rather than carried on the row: a row was built at the
+    /// previous keystroke, and the prompt is whatever is on screen now.
+    fn primary_activation_request(&self, item: &SearchItem, cx: &Context<Self>) -> Request {
+        Request::Activate {
+            kind: item.kind.clone(),
+            id: item.id.clone(),
+            action: None,
+            query: self.query(cx),
+        }
     }
 
     /// Confirming a row's primary action (`confirm`, above) and confirming
@@ -1105,8 +1132,9 @@ impl Root {
                     })
                     .cursor_pointer()
                     .on_click(cx.listener(move |root, _event, _window, cx| {
+                        let query = root.query(cx);
                         root.perform_activation(
-                            Request::Activate { kind: kind.clone(), id: id.clone(), action: None },
+                            Request::Activate { kind: kind.clone(), id: id.clone(), action: None, query },
                             true,
                             cx,
                         );
@@ -1397,7 +1425,7 @@ impl Root {
         let id = menu.id.clone();
         self.close_actions_menu(window);
         cx.notify();
-        let request = Request::Activate { kind, id, action: Some(action.id) };
+        let request = Request::Activate { kind, id, action: Some(action.id), query: self.query(cx) };
         self.perform_activation(request, false, cx);
     }
 
@@ -3555,6 +3583,70 @@ mod tests {
                 let mode = root.active_mode().expect("confirming a command row must enter a mode");
                 assert_eq!(mode.chrome.id, "clipboard");
                 assert_eq!(mode.saved_query, "safari", "the query typed before entering the mode must be saved");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn confirming_the_new_agent_command_enters_its_mode_with_an_empty_field_for_the_prompt(
+        cx: &mut TestAppContext,
+    ) {
+        // The `new-agent` mode's field is the *task*, not a filter, so it has
+        // to start empty even though the captain had typed something to find
+        // the command — and that something still has to come back on Escape,
+        // like every other mode.
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.text_field.update(cx, |field, cx| field.set_content("new agent", cx));
+                root.results = vec![command_item("new-agent")];
+                root.selected = 0;
+            })
+            .unwrap();
+        window.update(cx, |root, window, cx| root.confirm(&Confirm, window, cx)).unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                let mode = root.active_mode().expect("the New Agent command must enter a mode");
+                assert_eq!(mode.chrome.id, "new-agent");
+                assert_eq!(mode.chrome.provider_id, "new-agent");
+                assert_eq!(mode.saved_query, "new agent");
+                assert_eq!(root.query(cx), "", "the prompt starts blank, not with the command's own query");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn activating_a_row_carries_what_is_currently_typed_as_the_query(cx: &mut TestAppContext) {
+        // The client half of starting an agent: `id` names the directory and
+        // the query carries the prompt. Both halves matter — an id that moved
+        // with the prompt would break `resolve_selection`, and a query left
+        // empty would start an agent with no task.
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.text_field.update(cx, |field, cx| field.set_content("fix the parser", cx));
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                let row = item_with_id("new-agent", "/Users/someone/Documents/neko");
+                match root.primary_activation_request(&row, cx) {
+                    Request::Activate { kind, id, action, query } => {
+                        assert_eq!(kind, "new-agent");
+                        assert_eq!(id, "/Users/someone/Documents/neko");
+                        assert_eq!(action, None);
+                        assert_eq!(query, "fix the parser");
+                    }
+                    other => panic!("expected an Activate request, got {other:?}"),
+                }
             })
             .unwrap();
     }

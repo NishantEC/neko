@@ -72,6 +72,32 @@ const COMMANDS: &[CommandSpec] = &[
         mode: "theme",
         glyph: Glyph::Palette,
     },
+    // The fourth command, and the first whose mode's *query is not a filter*:
+    // inside `new-agent` the text typed is the task the agent is given, and
+    // the rows are directories to start it in (`crate::new_agent`).
+    //
+    // "New Agent" matches the title as a plain subsequence; none of the words
+    // a person actually reaches for do ("run an agent", "spawn", "claude",
+    // "codex" — `fuzzy_score` is a strict in-order subsequence over *one*
+    // string), so they are aliases. "Claude" and "Codex" are listed on
+    // purpose: the captain thinks in terms of the tool he is starting, not
+    // Paseo's word for the thing it hosts.
+    CommandSpec {
+        id: "new-agent",
+        title: "New Agent",
+        aliases: &[
+            "New Agent",
+            "Start Agent",
+            "Run Agent",
+            "Spawn Agent",
+            "New Task",
+            "Claude",
+            "Codex",
+            "Paseo",
+        ],
+        mode: "new-agent",
+        glyph: Glyph::Agent,
+    },
     // The third command. "Settings" is listed as an alias rather than being
     // the title because `crate::settings` already owns the word on screen —
     // its section is "Settings" (macOS System Settings panes). Two sections
@@ -230,6 +256,32 @@ mod tests {
         let results = provider.search("clipboard", 0);
         let ids: Vec<&str> = results.iter().map(|c| c.item.id.as_str()).collect();
         assert_eq!(ids, vec!["clipboard-history"]);
+    }
+
+    #[test]
+    fn the_words_a_person_types_to_start_an_agent_all_find_the_new_agent_command() {
+        // "new agent" matches the title as a plain subsequence; the rest only
+        // match through aliases, and "claude"/"codex" are there because that
+        // is what the captain calls the thing he is starting.
+        let provider = CommandsProvider::new();
+        for query in ["new agent", "start agent", "run agent", "spawn", "claude", "codex", "paseo"] {
+            let results = provider.search(query, 0);
+            assert!(
+                results.iter().any(|c| c.item.id == "new-agent"),
+                "query {query:?} must find the New Agent command"
+            );
+        }
+    }
+
+    #[test]
+    fn the_new_agent_command_enters_the_new_agent_mode() {
+        let provider = CommandsProvider::new();
+        let results = provider.search("new agent", 0);
+        let row = results.iter().find(|c| c.item.id == "new-agent").expect("New Agent must match");
+        assert_eq!(row.item.title, "New Agent");
+        assert_eq!(row.item.enters_mode.as_deref(), Some("new-agent"));
+        assert_eq!(row.item.badge.as_deref(), Some("COMMAND"));
+        assert_eq!(row.item.icon, Icon::Glyph(Glyph::Agent));
     }
 
     #[test]

@@ -103,7 +103,7 @@ cached PNG and extract it in a background pass, the way
 `crates/neko-core/src/icons.rs` does for apps. Never extract on the search
 path — real AppKit icon extraction is tens of milliseconds each.
 
-## The four optional methods
+## The optional methods
 
 All defaulted. Implement one only when you have a real reason.
 
@@ -119,10 +119,26 @@ directly; the default delegates. The point is not to ignore a superseded
 result, it is to **abandon** it: `files.rs` kills the `mdfind` child, because a
 query nobody wants any more still competes for CPU with the one they do.
 
+**`activate_with_query(&self, id, query)`** — implement when your row's action
+takes *what was typed* as an argument, rather than being a thing to open. The
+daemon always calls this, never `activate` directly; the default drops the
+query and delegates, so a provider that does not care implements nothing.
+`new_agent::NewAgentProvider` is the only override: its `id` is the working
+directory and the query is the prompt the agent gets. Note the rule that forces
+this — keep `id` **stable across keystrokes**, because `panel::resolve_selection`
+follows the highlight by `(kind, id)`; an id that folds in the query resets the
+selection on every character typed.
+
 **`perform_action(&self, id, action_id)`** — implement when you populate
 `SearchItem::actions` with secondary `⌘K` menu entries. Only
 `ClipboardProvider` does. Mark an action `destructive: true` and the client
 requires a second Enter before running it.
+
+**`answers_empty_root_query(&self) -> bool`** — return `false` when your whole
+list only means something once somebody has asked for it (themes, preferences).
+It gates the *root list with nothing typed* only; a scoped search still gets
+your full list, which is how the Themes mode and the Preferences window load
+theirs.
 
 **`enters_mode`** on a `SearchItem` — not a trait method, but the same idea.
 Set it and confirming the row transitions the panel into a client-side mode
