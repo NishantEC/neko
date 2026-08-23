@@ -175,7 +175,12 @@ fn main() {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: None,
                     kind: WindowKind::PopUp,
-                    is_movable: false,
+                    // Draggable. It was `false` for as long as the panel had
+                    // no drag affordance at all, and `performWindowDragWithEvent:`
+                    // — what gpui's mac `start_window_move` calls — honours
+                    // this flag, so leaving it false made the drag handler a
+                    // no-op rather than a bug worth finding.
+                    is_movable: true,
                     is_resizable: false,
                     is_minimizable: false,
                     focus: false,

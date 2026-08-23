@@ -1552,11 +1552,36 @@ impl Render for Root {
 }
 
 impl Root {
+    /// Starts a native window drag.
+    ///
+    /// **Handed to AppKit rather than tracked here.**
+    /// `Window::start_window_move` calls `performWindowDragWithEvent:` with
+    /// `[NSApp currentEvent]`, so it must be invoked from inside GPUI's own
+    /// native mouse-down dispatch — which a `on_mouse_down` listener is —
+    /// and AppKit then owns the whole gesture: it follows the cursor,
+    /// respects display edges and Spaces, and ends on mouse-up without this
+    /// app tracking a single delta.
+    ///
+    /// **This only works because the window is `is_movable: true`**
+    /// (`main.rs`). `performWindowDragWithEvent:` honours that flag, so with
+    /// it false this is a silent no-op — which is exactly what "drag doesn't
+    /// work" looked like before.
+    fn begin_window_drag(&mut self, _: &MouseDownEvent, window: &mut Window, _cx: &mut Context<Self>) {
+        window.start_window_move();
+    }
+
     fn render_input_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .items_center()
             .flex_shrink_0()
+            // The panel has no title bar, so the input row is the top strip
+            // and the natural place to pick it up from. Safe today because
+            // click-drag inside the search field does nothing — mouse
+            // selection is a documented gap (`AGENTS.md`, "Text field
+            // editing shortcuts") — but if mouse selection is ever added,
+            // this handler and it will be fighting over the same gesture.
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::begin_window_drag))
             .h(px(theme::INPUT_ROW_HEIGHT_PX))
             .px_5()
             .gap_3()
@@ -1865,6 +1890,10 @@ impl Root {
             .items_center()
             .justify_between()
             .flex_shrink_0()
+            // A second grab area. The footer is inert chrome apart from the
+            // `⌘K` trigger, which has its own click handler and so takes the
+            // gesture before this ever sees it.
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::begin_window_drag))
             .h(px(theme::FOOTER_HEIGHT_PX))
             .px_5()
             .border_t_1()
