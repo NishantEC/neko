@@ -318,7 +318,15 @@ own pairs (a hard test, not a report) and both the upstream and the shipped
 hex pinned so a departure stays visible. Light themes also move the real
 `NSWindow`'s `NSAppearance`, because the native material behind the panel
 renders in it. See "Themes" below,
-`docs/evidence/themes-report.md`.
+`docs/evidence/themes-report.md`. A later task (`fm/neko-icons`) gave the
+app real icons, closing the "still open" note this file had been carrying
+since the gpui-component evaluation: `gpui::svg()` was already in the gpui
+this crate compiles against, so nine vendored Lucide SVGs plus a
+compile-time `AssetSource` (`crates/neko/src/assets.rs`) replaced the
+hand-composed `div()` marks — with one deliberate, permanent exception,
+`Glyph::Palette`, which paints four swatches in the live theme's own colours
+and therefore cannot be an alpha mask. See "Icons: real SVGs, and the one
+that stays painted" below, `docs/evidence/icons-svg-report.md`.
 
 ## Crate layout
 
@@ -1104,12 +1112,15 @@ window, no relaunch and no per-frame filesystem check anywhere on the client
 side (the daemon is the only place that stats an icon file, once per search
 it already has to run). `panel::app_icon_placeholder_glyph` fills a
 not-yet-resolved app row's `Icon::Placeholder` slot with a small
-hand-painted neutral mark (same painted-div convention as `glyph_element`
-below — no bundled icon-asset pipeline in this codebase) instead of an
+hand-painted neutral mark instead of an
 empty hole, self-healing to the real icon in place once `refresh_icons`
 re-renders it — see "Provider abstraction" below for `Icon`/`Glyph`, the
 wire-level rendering vocabulary this and every other provider's row now
-draws from instead of a client-side `match` on result type.
+draws from instead of a client-side `match` on result type. **It stays a
+painted `div` mark even now that there is an icon-asset pipeline**
+(`fm/neko-icons`, "Icons: real SVGs, and the one that stays painted"
+below) — reading as a *different* kind of mark from the real glyph
+vocabulary is its whole job.
 `NEKO_ICON_EXTRACT_DELAY_MS` (`neko-daemon/src/main.rs`) is a
 verification-only, unset-by-default hook (same pattern as `evidence.rs`'s
 `NEKO_BENCH`/`NEKO_FORCE_MATERIAL`) that stretches out the startup
@@ -1257,9 +1268,13 @@ it's just another `Request`/`Response` pair, per the search section above.
   ever fill it in. `panel::glyph_element` fills the slot instead: a
   three-bar mark for `Glyph::Text`, two overlapping rounded-square rings for
   `Glyph::Link` — hand-painted from plain `div`s, the same pattern
-  `search_glyph` already established (no bundled SVG-asset pipeline exists
-  in this codebase, and per the design report's §6 finding, a Unicode
-  symbol isn't a reliable substitute either). See "Provider abstraction"
+  `search_glyph` already established (no bundled SVG-asset pipeline existed
+  in this codebase then, and per the design report's §6 finding, a Unicode
+  symbol isn't a reliable substitute either). **Both are vendored Lucide
+  SVGs now** — `fm/neko-icons` built the asset pipeline whose absence this
+  sentence gives as the reason; the design report's §6 finding still
+  stands, since an SVG asset is not a font glyph. See "Icons: real SVGs,
+  and the one that stays painted" below. See "Provider abstraction"
   below for `Icon`/`Glyph`, the same rendering vocabulary every other
   provider's rows draw from now, and `glyph_element`'s own `File`/`Folder`
   cases the file-search provider added.
@@ -2250,10 +2265,114 @@ Importing mostly-duplicate code to obtain a div is the worse outcome. neko's
 version renders **one cap per key**, which is what Raycast does and what
 makes `⌃⇧K` read as three keys rather than one string.
 
-**Still open, and the better path than any library**: real icons via
-`gpui::svg()` — the primitive is already in neko's gpui
-(`elements/svg.rs:20`), which is what gpui-component's own `icon.rs` is built
-on. Lucide is MIT. That gets a real icon set with no dependency and no drift.
+**Built — see "Icons: real SVGs, and the one that stays painted" below.** This
+paragraph used to read "still open, and the better path than any library:
+real icons via `gpui::svg()` … Lucide is MIT." The route was right and it was
+taken. **Two corrections it forces on this section's own text**: Lucide is
+**ISC**, not MIT (verified from its own `LICENSE`; permissive either way, but
+the record was wrong), and gpui-component's published crate ships **zero**
+`.svg` files — its `icon.rs` names paths a consuming app's `AssetSource` must
+resolve, so adopting it would not have supplied icons even if the gpui-version
+mismatch above had not already ruled it out.
+
+## Icons: real SVGs, and the one that stays painted
+
+`fm/neko-icons`. Full record, including what was and was not verified live:
+`docs/evidence/icons-svg-report.md`. **Read `crates/neko/src/assets.rs`'s
+module doc comment before touching anything icon-shaped** — it is the
+normative statement of the constraints below.
+
+**What changed**: `panel::glyph_element`'s hand-composed `div()` stacks,
+`search_glyph` and `back_glyph` are now vendored Lucide SVGs drawn with
+`gpui::svg()`. The wire vocabulary is untouched — `neko-protocol`'s `Icon`/
+`Glyph` are exactly as they were, and no provider changed. This is a
+client-side rendering change only.
+
+**What made it free**: `gpui::svg()` was already in the gpui this crate
+compiles against; all that was missing was an `AssetSource`. `assets::
+NekoAssets` is a compile-time `include_bytes!` table (nine files, ~3KB total,
+no `include_dir`/`rust-embed` — a directory walk buys growth this closed set
+does not have and costs a build script), installed on the `Application`
+builder via `with_assets` **before `run`**, because that call is also what
+rebuilds gpui's `SvgRenderer` around the source.
+
+**The one constraint everything else follows from: gpui renders an SVG to an
+alpha mask, tinted by the element's own `text_color`.** Three consequences,
+all load-bearing:
+
+1. **Colour still comes from `theme::active()`**, at paint time, at every
+   call site — so a theme change re-tints every icon with no per-theme asset,
+   no cache to invalidate, and no `if themed` branch. Swapping to SVG changed
+   the *shape* source, never the colour source.
+2. **An icon can only be one colour.** `Glyph::Palette` — four swatches in
+   the *live* theme's own colours — therefore **stays hand-painted,
+   permanently, not pending an asset**; a single-tint palette swatch is not a
+   palette swatch. `assets::glyph_icon` returns `None` for exactly this one
+   variant, and that `None` is what routes to `panel::palette_glyph`.
+   `Glyph::Agent`/`AgentLive` keep a painted presence dot composited over the
+   SVG for the same reason (two tints, one mask) — preserving the documented
+   "same mark either way, live ones still pick themselves out" behaviour. The
+   dot moved to the slot's bottom-right corner because Lucide's
+   `square-terminal` puts its prompt caret where the old dot sat.
+3. **A filled icon renders as a solid blob**, since coverage is all the mask
+   keeps. Lucide's set is stroke-only, and a test asserts every vendored file
+   is `fill="none"` on a 24×24 grid rather than trusting that.
+
+**A missing icon is silent — this is why the tests look the way they do.**
+`Window::paint_svg` on a path the asset source cannot serve returns `Ok(())`
+and draws nothing: no panic, no log, just a hole in a row. So `assets.rs`
+resolves every named path, asserts no vendored file is unreachable from a
+name, and — the load-bearing one — **rasterises every file through gpui's own
+`SvgRenderer` and asserts the result has non-zero alpha coverage**, which
+catches a file that is valid SVG containing nothing. `glyph_icon`'s `match` is
+exhaustive, so a new `Glyph` variant is a compile error that forces the real
+decision: name a file, or return `None` and paint it.
+
+**Vendored byte-for-byte, pinned two ways.** Files live in
+`crates/neko/assets/icons/lucide/`, unmodified — size and colour are applied
+at the call site (`theme::ROW_ICON_GLYPH_PX`), never by editing a file, so a
+`curl`-and-`diff` against the pinned upstream commit
+(`33a44aa8b0b43d9b0ed14eb08860a1b5550a1573`) stays meaningful. Byte lengths
+are pinned in the test suite, the same discipline `theme.rs` uses for
+vendored palette hex.
+
+**Licence: ISC, verified from Lucide's own `LICENSE` on 2026-08-23 — not a
+badge, and not the "MIT" this file previously recorded.** Four of the nine
+(`chevron-left`, `clipboard`, `link`, `search`) additionally carry Feather's
+MIT grant. Both notices are reproduced verbatim in
+`THIRD_PARTY_LICENSES/lucide-ISC.txt`; `NOTICE` and
+`crates/neko/src/components/vendor/MANIFEST.md` carry the rest of the
+paperwork. **Icon assets are the same audited category vendored palette
+values already are** (see "Licence rule" below): no third-party *code* was
+vendored, and gpui-component's `icon.rs` was read and declined on evidence
+(372 lines of enum-to-string `match` plus a sizing wrapper — nothing this app
+does not already have three lines of).
+
+**What stays painted, deliberately, besides `Glyph::Palette`**:
+`components::glyphs::opt_glyph`/`neko_wordmark_glyph` (⌥ is in no
+general-purpose icon set; the wordmark is neko's own identity) and
+`panel::app_icon_placeholder_glyph` (its whole job is reading as a *different*
+kind of mark — "a real per-app raster is still warming", not "this row has no
+artwork").
+
+**A real defect found on the way**: `search_glyph`'s own comment claimed "a
+circle + a diagonal stroke", but the code was a bare `.rounded_full()
+.border_2()` — a ring with no handle, reading as a dot. `div()` has no
+rotation, so the diagonal was presumably dropped as undrawable and the comment
+never corrected. That is the general cost of assembling a mark from layout
+primitives, and it is what this change removes.
+
+**Verified live** on the release binaries under the standing isolated-`HOME`/
+`verify_harness`/window-scoped-capture discipline, `key window false` at every
+capture: `search`, `clipboard`, `text-align-start`, `square-terminal`+dot,
+`sliders-horizontal`, `chevron-left`, and `Glyph::Palette` still painting each
+theme row in its own palette (`docs/evidence/icons-svg-*.png`). **Not seen on
+screen**: `file`, `folder`, `link` — Spotlight cannot index the isolated
+`HOME`, and the harness seeds no URL entry; all three rasterise headlessly and
+take the identical code path, but that is an argument, not a picture. **Not
+measured**: summon latency and memory — `paint_svg` keys the sprite atlas on
+`(path, size)` and rasterises only on a miss, so the per-frame cost should be
+nil after first paint, but nothing was benchmarked.
 
 ## Mode-view row anatomy and the neutral re-tone
 
@@ -3712,12 +3831,22 @@ typed `-AFTER` back into TextEdit — result `BASELINE—AFTER` with nothing
 
 **Every line in this repo is written fresh**, with one documented exception:
 see "Third-party UI code" above (`gpui-component`'s `blink_cursor.rs`,
-Apache-2.0, attributed). **Colour *values* vendored from third-party palettes
-are a separate, audited category** — seventeen built-in themes draw on eight
-upstream projects, every one MIT, each verified from its own source; see
-"Themes" above and `docs/evidence/themes-report.md` §2 for the table and the
-per-palette verification method. No third-party palette *code* is vendored,
-only values re-expressed in `theme.rs`'s own `Spec` form. `refs/` (this repo's
+Apache-2.0, attributed). **Vendored *assets* are a separate, audited
+category** — nothing executes, nothing is copied into a `.rs` file, and the
+upstream is pinned so a drift stays visible. Two things are in it:
+
+- **Colour values.** Seventeen built-in themes draw on eight upstream
+  projects, every one MIT, each verified from its own source; see "Themes"
+  above and `docs/evidence/themes-report.md` §2 for the table and the
+  per-palette verification method. No third-party palette *code* is
+  vendored, only values re-expressed in `theme.rs`'s own `Spec` form.
+- **Icon geometry.** Nine Lucide SVGs, **ISC** (not MIT — verified from
+  Lucide's own `LICENSE`, 2026-08-23), vendored byte-for-byte and pinned to
+  one upstream commit; four of them additionally carry Feather's MIT grant.
+  See "Icons: real SVGs, and the one that stays painted" above,
+  `THIRD_PARTY_LICENSES/lucide-ISC.txt`, and the icon table in
+  `crates/neko/src/components/vendor/MANIFEST.md`. gpui-component's own
+  `icon.rs` was read and declined; no icon *code* is vendored. `refs/` (this repo's
 own read-only reference clones, gitignored — see `refs/README.md` for the
 licence table and the standing rule) holds five reference GPUI apps — `comet`
 (MIT), `loungy` (MIT), `t3code` (MIT), `waku` (GPL-3.0), `codux` (GPL-3.0) —
@@ -3983,6 +4112,20 @@ short (3 cycles) and didn't re-attempt that measurement.
   the click-outside dismissal while a native panel is open), a visual pass
   on the hotkey capture screen, and `SMAppService` once neko is packaged as
   a `.app`.
+- **Real icons**: built — see "Icons: real SVGs, and the one that stays
+  painted" above. `assets::NekoAssets` is now this app's `AssetSource`, so
+  **any future asset — an icon, a bundled font, an image — has a home**;
+  adding one is a row in `ICONS` and a constant, not a pipeline. Still open:
+  real per-file and per-System-Settings-pane icons (both still deliberate
+  scope cuts for the *daemon-side* reasons in "File search" and "System
+  Settings pane search" above — extraction cost and Apple's private
+  iconography stack, neither of which this change touches); a light-theme
+  capture; a latency/memory measurement of the sprite-atlas cost (argued nil
+  after first paint from reading `paint_svg`, never benchmarked); and
+  `file`/`folder`/`link` never being seen on screen (`docs/evidence/
+  icons-svg-report.md` §6). One thing worth knowing before reaching for
+  `svg()` elsewhere: it is an **alpha mask**, so anything genuinely
+  multi-colour (`Glyph::Palette`) has to stay painted.
 - **A real menu-bar `NSStatusItem`**: see "Onboarding" above — GPUI 0.2.2 has
   no usable status-item API; this is raw AppKit bridging, its own task.
 - **Text field selection and paste**: built — see "Text field editing
