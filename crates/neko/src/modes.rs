@@ -105,6 +105,26 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Type to filter themes…",
         has_detail: false,
     },
+    // The third mode, and the first where **the query is not a filter**: what
+    // is typed here is the task the agent is given, and the rows are the
+    // directories it could work in (`neko_core::new_agent`). Nothing in this
+    // module needed a new field to express that — a mode has always been "one
+    // provider's own list, scoped by `Request::Search`'s `provider`", and that
+    // provider is free to ignore the query when ranking. The placeholder is
+    // the only place the difference is stated to a person, which is why it
+    // reads as an instruction rather than as "type to filter…".
+    //
+    // `has_detail: false`: the second column would show a project's own
+    // details, and the thing being composed is the *prompt*, which lives in
+    // the input row. A detail pane here would take 496px to say nothing the
+    // row does not.
+    ModeChrome {
+        id: "new-agent",
+        provider_id: "new-agent",
+        title: "New Agent",
+        placeholder: "Describe the task, then pick where to run it…",
+        has_detail: false,
+    },
 ];
 
 /// Looks up a mode's chrome by id — `None` for an id that doesn't name a
@@ -159,6 +179,20 @@ mod tests {
         for id in ["preference", "preference.hotkey", "preference.folders"] {
             assert!(chrome_for(id).is_none(), "{id} must not be a mode");
         }
+    }
+
+    #[test]
+    fn the_new_agent_mode_is_registered_and_says_the_query_is_a_task_not_a_filter() {
+        let chrome = chrome_for("new-agent").expect("the new-agent mode must be registered");
+        assert_eq!(chrome.provider_id, "new-agent");
+        assert_eq!(chrome.title, "New Agent");
+        assert!(!chrome.has_detail);
+        // The placeholder is the only surface that tells a person the field is
+        // not a filter here, so it must not read like every other mode's.
+        assert!(
+            !chrome.placeholder.contains("filter"),
+            "the new-agent field is the prompt; calling it a filter would be a lie"
+        );
     }
 
     #[test]

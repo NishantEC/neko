@@ -295,7 +295,30 @@ pub enum Request {
     /// (and, optionally, `perform_action`) implementation of its own.
     /// Replaces what used to be two separate per-kind requests (`Launch`,
     /// `Paste`) — see `AGENTS.md`'s "Provider abstraction" section.
-    Activate { kind: String, id: String, action: Option<String> },
+    ///
+    /// `query` is the search field's own contents at the moment of
+    /// activation — empty for every activation that isn't driven by one
+    /// (the Preferences window's own writes, for instance). It exists
+    /// because a row's action can legitimately take an *argument*: the
+    /// `new-agent` provider's rows are "start an agent **on what you
+    /// typed**, here", where `id` names the working directory and `query`
+    /// carries the prompt. Every other provider ignores it for free —
+    /// `Provider::activate_with_query` defaults to dropping it and calling
+    /// `activate`, exactly as `search_cancellable` defaults to dropping its
+    /// cancel token.
+    ///
+    /// **Two cheaper-looking alternatives were tried first and are wrong**,
+    /// recorded here so they are not re-tried: encoding the prompt into
+    /// `id` alongside the directory makes the row's identity change on
+    /// every keystroke, and `panel::resolve_selection` keys the highlight
+    /// on `(kind, id)` — so a captain who picks a project and then types
+    /// one more word is silently returned to the first row, and Enter
+    /// starts the agent in the wrong repository. Having the provider
+    /// remember the last query it was searched with races the daemon's own
+    /// documented out-of-order request completion (`handle_connection`),
+    /// which can leave a stale prompt behind. Both failures are silent and
+    /// both produce a *wrong action*, not a visible error.
+    Activate { kind: String, id: String, action: Option<String>, #[serde(default)] query: String },
     GetHotkey,
     /// Fast, side-effect-free check against known OS/third-party reserved
     /// combinations (Spotlight, Mission Control, ...). Does not persist
