@@ -108,6 +108,26 @@ pub trait Provider: Send + Sync {
     /// file. Called from `Request::Activate` when `action` is `None`.
     fn activate(&self, id: &str) -> Result<(), ProviderError>;
 
+    /// [`Provider::activate`], plus the search field's own contents at the
+    /// moment Enter was pressed (`Request::Activate`'s `query`).
+    ///
+    /// **The daemon always calls this, never `activate` directly** — the
+    /// same arrangement `search_cancellable` has with `search`, and for the
+    /// same reason: defaulted to drop the extra argument and delegate, so a
+    /// provider whose rows are things to *open* implements exactly one
+    /// method, exactly as before this existed.
+    ///
+    /// Overriding it is for the case where a row is a thing to do *with
+    /// what was typed* rather than a thing to open — `new_agent::
+    /// NewAgentProvider` is the first: its rows are working directories and
+    /// the query is the prompt the agent gets. `Request::Activate`'s own
+    /// doc comment records the two alternatives (prompt-in-the-id, and a
+    /// provider that remembers its last query) that were tried before this
+    /// and why both are silently wrong.
+    fn activate_with_query(&self, id: &str, _query: &str) -> Result<(), ProviderError> {
+        self.activate(id)
+    }
+
     /// Perform a named *secondary* action from a row's own
     /// `SearchItem::actions` (e.g. clipboard's "copy"/"delete" alongside its
     /// default "paste") — called from `Request::Activate` when `action` is
@@ -134,5 +154,45 @@ pub trait Provider: Send + Sync {
 
     fn perform_action(&self, _id: &str, action_id: &str) -> Result<(), ProviderError> {
         Err(ProviderError(format!("provider '{}' has no action '{action_id}'", self.id())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// A provider that implements only what a provider must, and records
+    /// which method the trait's own defaults ended up calling.
+    #[derive(Default)]
+    struct MinimalProvider {
+        activated: Mutex<Vec<String>>,
+    }
+
+    impl Provider for MinimalProvider {
+        fn id(&self) -> &'static str {
+            "minimal"
+        }
+        fn section_label(&self) -> &'static str {
+            "Minimal"
+        }
+        fn search(&self, _query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+            Vec::new()
+        }
+        fn activate(&self, id: &str) -> Result<(), ProviderError> {
+            self.activated.lock().unwrap().push(id.to_string());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_provider_that_ignores_the_query_still_gets_its_activate_called() {
+        // The daemon only ever calls `activate_with_query`, so this default
+        // is what keeps "a new provider is one `impl` plus one line" true —
+        // if it stopped delegating, every provider that never asked for a
+        // query would silently stop activating at all.
+        let provider = MinimalProvider::default();
+        provider.activate_with_query("/Applications/Safari.app", "saf").unwrap();
+        assert_eq!(provider.activated.lock().unwrap().as_slice(), ["/Applications/Safari.app"]);
     }
 }

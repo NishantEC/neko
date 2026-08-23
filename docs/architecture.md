@@ -103,7 +103,7 @@ generic over provider:
 | Request | Meaning |
 | --- | --- |
 | `Search { query, limit, provider }` | `provider: None` is the merged root list; `Some(id)` scopes to one provider — this is the mode seam |
-| `Activate { kind, id, action }` | `kind` routes to the provider; `action: None` is its primary action, `Some(id)` a secondary one |
+| `Activate { kind, id, action, query }` | `kind` routes to the provider; `action: None` is its primary action, `Some(id)` a secondary one; `query` is the search field's contents at the moment Enter was pressed, for the rows whose action takes an argument |
 | `GetTheme` | There is deliberately no `SetTheme` — committing a theme is `Activate { kind: "theme", .. }` |
 
 ## Providers
@@ -120,11 +120,12 @@ pub trait Provider: Send + Sync {
 
     fn defers_for(&self, query: &str) -> bool { false }        // slow for this query?
     fn search_cancellable(&self, …, cancel: &Cancel) -> …      // defaults to search()
+    fn activate_with_query(&self, id, query) -> …              // defaults to activate()
     fn perform_action(&self, id, action_id) -> …               // defaults to an error
 }
 ```
 
-Six are registered, in `AppState::with_test_providers`
+Eight are registered in the root list, in `AppState::with_test_providers`
 (`crates/neko-daemon/src/server.rs`):
 
 | id | Source of truth | File |
@@ -135,12 +136,18 @@ Six are registered, in `AppState::with_test_providers`
 | `settings` | `/System/Library/ExtensionKit/Extensions/*.appex`, scanned once | `crates/neko-core/src/settings.rs` |
 | `command` | A compiled-in table | `crates/neko-core/src/commands.rs` |
 | `theme` | `neko_protocol::BUILTIN_THEMES` | `crates/neko-core/src/themes.rs` |
+| `preference` | neko's own settings, in the same SQLite KV table | `crates/neko-core/src/preferences.rs` |
+| `agent` | Paseo's own agent documents on disk | `crates/neko-core/src/agents.rs` |
+
+Two more are registered as **mode-only** providers (reachable by a scoped
+search or an activation, never by a root-list query): `folder-scope`
+(`preferences.rs`) and `new-agent` (`new_agent.rs`).
 
 **The panel knows nothing about any of them.** `crates/neko/src/panel.rs` has
 no `match` on provider identity anywhere. Everything a row needs to render —
 section header, action verb, icon, badge, subtitle, secondary actions, whether
 confirming it enters a mode — is data the provider set on the `SearchItem`.
-That is what makes adding a seventh cheap; see
+That is what makes adding another one cheap; see
 [adding-a-provider.md](adding-a-provider.md).
 
 Two source-of-truth notes that repeatedly surprise people:
@@ -234,9 +241,19 @@ typed before entering, verbatim.
 
 **Modes do not nest**, and `panel::Root::active_mode` is a single `Option`.
 
-Two exist: Clipboard History (a detail pane, list column 264pt) and Themes (no
+Three exist: Clipboard History (a detail pane, list column 264pt), Themes (no
 detail pane — the preview *is* the panel, so a second column would take 496pt
-away from the thing being previewed).
+away from the thing being previewed), and New Agent.
+
+**New Agent is the one mode where the query is not a filter.** What is typed is
+the task the agent is given; the rows are directories to start it in. That
+needed no new mode machinery — a mode has always been "one provider's own list,
+scoped by `Request::Search { provider }`", and a provider may ignore the query
+when ranking. It did need one additive wire field, `Request::Activate`'s
+`query`, because the row's action takes what was typed as an argument, and the
+id must stay stable across keystrokes or the highlight (`resolve_selection`,
+keyed on `(kind, id)`) resets and Enter starts the agent in the wrong
+repository.
 
 **Preferences is a window, not a mode** — `crates/neko/src/preferences/`, split
 `state.rs` (pure) / `view.rs` (GPUI and I/O) the same way onboarding is. The
@@ -274,6 +291,17 @@ protocol, or the client.
 
 Configured in Preferences → Agents: the source (shown with a live census), a
 master toggle, and whether idle agents match.
+
+**Starting one** is `neko_core::new_agent` (the `New Agent` command and mode).
+Rows are the projects Paseo already knows about
+(`~/.paseo/projects/projects.json`), so the working directory is chosen rather
+than inferred; the tool is the one the most recent real agent used in that
+directory, because `paseo run` requires an explicit `--provider` and there is
+no default to inherit. Enter shells out to the `paseo` CLI, waits for it to
+confirm, and reports any failure inline in the panel's footer. The child's
+environment is stripped of `PASEO_AGENT_ID`/`PASEO_AGENT_CWD`/
+`PASEO_WORKSPACE_ID`: with those inherited, the CLI resolves the *caller's*
+workspace and `--cwd` silently loses.
 
 ## Motion
 
