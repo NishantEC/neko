@@ -1872,6 +1872,364 @@ memory were still not re-measured by that task either, since neither the
 resize path nor the daemon changed — only a client-side row-rendering
 conditional and a palette constant table did.
 
+## Preferences: a real window, and the two rejected shapes before it
+
+`fm/neko-preferences`, from the captain's own *"it's better to have a
+settings or preference as well... we haven't built the settings panel yet,
+right?"*. Three settings, chosen by him: **the summon hotkey, launch at
+login, and the file-search folders**. Clipboard-history on/off was
+deliberately left out even though it is the cheapest possible row.
+
+**Read this section before proposing a surface for anything settings-like.**
+This shipped in three shapes in one sitting, and the two that were discarded
+are the useful part of the record:
+
+1. **In-panel mode with drill-in sub-screens.** A `preference` mode plus
+   `preference.hotkey` and `preference.folders` as modes of their own. Forced
+   `active_mode: Option<ActiveMode>` to become a `mode_stack: Vec<ActiveMode>`
+   so Escape could pop one level.
+2. **In-panel sidebar with in-pane editing.** `has_detail: true` like
+   clipboard history, and the captain's own follow-up — *"they don't have to
+   open their own window as well, right?"* — replaced the drill-ins with a
+   `PaneFocus` model: Enter moved the keyboard into the detail pane, Escape
+   brought it back. **The mode stack was reverted here**, because with
+   nothing nesting it was generality nothing asked for.
+3. **A real window** (shipped), after the captain compared it against
+   Raycast's own settings window.
+
+**Why the window is right, stated as a rule rather than a preference.** A
+launcher panel is a *transient* surface: it hides on click-outside, its field
+is a query, its Enter means "do the thing and get out of the way", and — the
+load-bearing one — it is a **non-activating** `NSPopUpWindowLevel` panel.
+Settings are the opposite of transient. They want a surface you can leave
+open beside the thing you are configuring, and they need controls (a path
+you type, a control that records raw key presses) that only make sense in a
+window that can genuinely become key. Both earlier shapes were fighting that
+one fact.
+
+**Nothing daemon-side changed across all three shapes.** The settings live in
+`neko_core::preferences` behind the ordinary `Provider` seam, and the window
+reads and writes them through exactly the requests the panel used: a scoped
+`Request::Search` per list, `Request::Activate` per change. That is the seam
+working — the surface is the client's own business. `neko-protocol` gained
+exactly one thing across the whole task: a `Glyph::Sliders` variant plus its
+paint case, the documented cost of a new painted shape.
+
+**The window** is `crate::preferences`, split `state.rs` (pure, unit-tested:
+which tab, and what a recorded key press means) / `view.rs` (GPUI and all
+I/O), the same split `crate::onboarding` uses. Chrome matches onboarding's
+exactly — frameless inset title bar, native traffic lights repositioned into
+it, `WindowKind::Normal`, fixed 720×520, opaque (it is read for minutes at a
+time, so legibility beats the vibrancy that makes a transient overlay feel
+light). Three tabs: **General** (summon hotkey, launch at login), **Search**
+(the folder list), **About**. **There is no AI tab** — a tab bar padded out
+with tabs that say "nothing here yet" is worse than a small one.
+
+- **It is opened through an injected closure**, `panel::PreferencesOpener =
+  Rc<dyn Fn(&Window, &mut App)>`, for the same two reasons `AppearanceSetter`
+  is: the pieces it needs (client, live registrar, single-window slot) belong
+  to `main.rs` rather than to a list of results, and **GPUI's test platform
+  `unimplemented!()`s — panics — on `open_window`, `App::hide`, and every
+  native window call**, so an unconditional call from `confirm` takes every
+  panel test down with it. Dismissing the panel lives *inside* that closure:
+  it is part of "open Preferences", not a second thing a caller might forget.
+
+- **Dismissing the panel here is `material::order_out`, never `cx.hide()` —
+  a second window changes what "hide" has to mean.** `App::hide` is
+  `[NSApp hide:]`: it hides *every* window this app owns. That was
+  indistinguishable from "hide the panel" for as long as the panel was the
+  only window that could be active, and stopped being so the moment
+  Preferences became a real one — the first version of this genuinely called
+  `cx.hide()` right after opening the window, i.e. asked macOS to hide the
+  window it had just opened. **The same trap is in
+  `main.rs`'s click-outside observer**, which hides on the panel losing
+  activation: opening Preferences *is* the panel losing activation. It now
+  asks `cx.active_window()` first — "did focus go to another neko window, or
+  out of neko entirely?" — and only hides the app in the second case, which
+  is also the only case where macOS has a previous app to restore focus to.
+  That question needs no state of our own, which is why it is preferred over
+  tracking whether a Preferences window happens to be open.
+- **`SharedPreferencesSlot` keeps it singular.** Confirming the row again
+  focuses the live window; two settings windows could disagree on screen
+  about what a setting currently is.
+- **Every value is re-read from the daemon after every change**, never
+  mutated optimistically — installing a LaunchAgent can genuinely fail, and a
+  settings window showing a value it merely *hopes* is true is the exact
+  defect `set_launch_at_login` is written to avoid.
+- **`Response::Error`'s message is shown verbatim.** The daemon already
+  phrases these for a person ("not a folder: /nope"); rewording loses detail.
+
+**The rebind goes through the *same* `HotkeyController` the summon loop
+uses**, exactly as onboarding step 09 does — a combination proven live in
+Preferences is the registration that summons afterwards, not a second one.
+`hotkey_client::HotkeyRebinder` is an injected trait held in a **deferred
+slot** (`SharedRebinder = Rc<RefCell<Option<...>>>`), because the controller
+cannot exist until the daemon has answered with the current combo, which is
+after the window and `panel::Root` are created; `main.rs` fills it then.
+`None` renders as "neko is still starting up" rather than silently ignoring a
+press. Order matters and matches onboarding: **register live first, persist
+only on success**, so a combination the OS refuses never reaches storage and
+a working hotkey is never lost. The daemon's `CheckHotkeyConflict` heuristic
+supplies the human-readable *reason*, since a Carbon failure is an opaque
+status code. `onboarding::state::canonicalize_key_name` moved from `view.rs`
+to `state.rs` and is shared by both callers, so the two can never disagree
+about what a physical key is called. `state::candidate_from_press` **ignores
+a bare modifier press rather than rejecting it** — gpui reports those as
+ordinary key presses, and treating one as a candidate would flash "no key"
+every time somebody started holding ⌘.
+
+**Two providers, one of them mode-only — a new registry in `AppState`.**
+`neko_core::preferences::PreferencesProvider` (id `"preference"`, section
+"Preferences") is registered in the root list on purpose: typing "hotkey"
+reaches the setting itself. It **cannot** be called `"settings"` —
+`neko_core::settings::SettingsProvider` already owns that id for macOS System
+Settings panes, which is also why the command is titled "Preferences" with
+`"Settings"` only as an alias (verified live: a root query for "settings"
+returns macOS's own **System Settings** app *and* neko's **Preferences**
+command, unambiguously). Its sibling `FolderScopeProvider` (id
+`"folder-scope"`) is registered in a **second** list,
+`AppState::mode_providers`: reachable by an explicitly scoped search and by
+`Request::Activate`, never by a root-list query, because a configured
+search-folder path is not a result anybody wants back from the root list.
+`AppState::all_providers()` is the union, used by the scoped-search and
+activate paths only. **This is the seam for any future list that only means
+something inside its own surface.**
+
+**Launch at login writes a `~/Library/LaunchAgents` plist, not
+`SMAppService`.** `SMAppService::mainApp` registers *the calling app's
+bundle*, and neko is a bare Mach-O (`target/release/neko`), not a `.app` —
+there is no bundle to register. The plist names the **client** binary
+(resolved as the sibling `neko` next to the daemon's own `current_exe()`),
+never the daemon: the client spawns the daemon itself, while starting the
+daemon alone would leave no window to summon. `launchctl load -w`/`unload -w`
+rather than `bootstrap`/`bootout` purely to avoid a `libc` dependency for
+`getuid()`. **If neko is ever packaged as a `.app`, move this to
+`SMAppService`** — the plist route needs the binary to stay at one path,
+which a real install guarantees and a `cargo build` output directory does
+not. The flag and the agent on disk are always written together, so "On" can
+never mean "persisted true, nothing installed".
+
+**File-search scope is now live-configurable.** `files::FileProvider` holds a
+`Scope` (`Fixed` for tests, `Configured(Arc<Mutex<Db>>)` for the real daemon)
+and re-reads `preferences::get_search_folders` on every query rather than
+caching, so a folder added in the window takes effect on the next keystroke
+with no restart and no invalidation message — one KV point query per search,
+far below the `mdfind` round-trip the same call is about to make. An unset
+key falls back to `files::default_scope_dirs()`, so an untouched install
+behaves exactly as before; a persisted **empty** list is honoured as a real
+choice ("search nothing"), and a corrupted value degrades to the default, the
+same rule `themes.rs` applies.
+
+**An empty root query must not reach every provider —
+`Provider::answers_empty_root_query`, caught live from a captain
+screenshot.** With nothing typed, the root list was returning seventeen
+**Themes** rows ahead of everything else and a **Preferences → Launch at
+Login** row underneath them. Neither is a useful answer to "I have not asked
+for anything yet", while apps (top apps) and clipboard (recent entries)
+genuinely are.
+
+The fix is a defaulted trait method, not a guard inside `search()`, and the
+reason is worth keeping: **`search("")` serves two opposite questions**. It
+is both the root-list search with nothing typed *and* the call a surface
+makes when it deliberately scopes to one provider and wants its whole list —
+the `Themes` mode's browsable palette list, and the **Preferences window
+loading its own values**. A guard inside `search()` would have silently
+broken the window, which is exactly what a first attempt at this did before
+that call site was noticed. `themes.rs`'s own doc comment had named this
+distinction for a long time without anything being able to act on it; there
+was no way for a provider to express it until this method existed. The
+daemon applies it in `handle_request`'s **root-list branch only** — the
+scoped branch returns earlier and never sees the filter.
+Pinned by `server.rs`'s own
+`an_empty_root_query_never_returns_settings_or_theme_rows_but_a_scoped_one_still_does`,
+which asserts both halves.
+
+**Verified over the real wire protocol against a real daemon**, not just by
+unit test: an empty root query returns Applications / Commands / Clipboard
+and nothing else; "hotkey" in the root list leads with **Preferences → Summon
+Hotkey ⌥Space**; the scoped `preference` search returns all three rows with
+live accessories; the scoped `folder-scope` search returns the configured
+folders; `folder-scope` is absent from a root query for "documents". Both
+mutations were exercised and then **reverted, leaving no residue** — the
+launch-at-login toggle really did write and then remove
+`~/Library/LaunchAgents/com.neko.launcher.plist` with the correct client path
+inside it, and a folder add/remove round-tripped with a bogus path correctly
+rejected inline (`not a folder: /nope/not/real`).
+
+### Three real defects in one control, none visible from reading the code
+
+The Summon Hotkey recorder said "Listening…" and recorded nothing. Three
+separate causes, found one at a time, each only by a live readback — two
+wrong hypotheses were killed by logs before the third stuck. **The general
+lesson: a control that takes keyboard input has three independent
+preconditions, and failing any one of them looks identical from the
+outside.**
+
+1. **The window has to be key, and one opened from the summon panel is
+   not.** The panel is `NSNonactivatingPanelMask` by design (style-mask
+   readback `0x8080`, bit 7) — clicking the launcher must not steal
+   activation from whatever you were working in — so a window opened from it
+   inherits an inactive app: visible, clickable, never key. **AppKit
+   delivers clicks to a non-key window but not key events**, which is
+   exactly the "the button responds, typing does nothing" shape.
+   `open_window` now calls `cx.activate(true)` (make *neko* frontmost) *and*
+   `window.activate_window()` (make *this window* key), with
+   `material::is_key_window` read back and logged — same "verified, not
+   trusted" discipline as `verify_installed`.
+2. **Being key is not being focused.** `window.focus(...)` is GPUI's own
+   internal focus: it draws the caret and routes actions, and **cannot pull
+   real OS keystrokes into a window the OS does not consider key**. Both are
+   required, and they fail independently. (This one turned out *not* to be
+   the remaining bug — the readback said `focused before=true` — but the
+   distinction is what the first two rounds of debugging got wrong.)
+3. **A key recorder must listen in the capture phase.** GPUI matches key
+   bindings and dispatches actions **between** the capture and bubble
+   phases, so a bubble-phase `on_key_down` only ever sees keystrokes nothing
+   else wanted. Measured live: an unmodified **Escape reached a bubble
+   handler while ⌃⇧K never did** — and a hotkey is made entirely of modified
+   keystrokes. `capture_key_down` is the fix, and this repo already knew it:
+   the earlier in-panel version of this same control used capture phase
+   deliberately and said why. The knowledge was lost moving the control into
+   a window, because onboarding's structure was copied instead — and
+   onboarding binds almost nothing, so the phase never mattered there.
+
+**Not verified: anything rendered on screen.** No window-scoped screenshot
+was taken, and the recorder has never been driven by a real keypress —
+synthesizing one is forbidden here. The window's layout, the tab bar's
+traffic-light clearance, the painted toggle switch and the `Glyph::Sliders`
+mark are all unproven visually. **The traffic-light clearance is the most
+likely thing to be wrong**, since it reuses onboarding's constant against a
+different header layout.
+
+## Agents: what is running right now
+
+`fm/neko-preferences`, from the captain's own *"I also want the feasibility
+of seeing all the agents that are running on my device."*
+`neko_core::agents::AgentsProvider` (id `"agent"`, section "Agents"), the
+eighth provider.
+
+**Source of truth is Paseo's own on-disk state**, `~/.paseo/agents/
+<workspace>/<uuid>.json` — one plain JSON document per agent. All three
+candidate sources were checked against the same machine before choosing:
+
+| source | what it reported | verdict |
+| --- | --- | --- |
+| the JSON files | 2 running, 53 idle, 172 closed | **chosen** |
+| `ps` (process table) | 2 live `claude` processes | agreed with the files |
+| Paseo's MCP `list_agents` | **1** running | under-reported — not built on |
+| the `paseo` CLI | correct, but a subprocess per search | nothing to buy; the data is a file |
+
+A source that disagrees with the process table about what is running is not
+the one to build on. `apps.rs`/`files.rs` pay a subprocess cost for `mdfind`
+because Spotlight has no in-process API; here there is no such excuse.
+
+**Every live agent on the machine was Paseo-hosted** — both running `claude`
+processes had `Paseo Daemon` as their parent and **no controlling terminal at
+all** (`tty: ??`). That is why the captain's own "if it's a claude session in
+a Ghostty tab, focus that tab" is **not built**: there was not one real
+instance to build against, and terminal-tab focusing needs Accessibility APIs
+and a process→tab mapping that would have been written entirely on
+speculation. `agents::Backend` is the enum a second host slots into.
+
+**`Provider::answers_empty_root_query` returns `true` here, unlike themes and
+preferences.** "What is running right now" is exactly what is worth seeing
+the moment the panel opens, and it is self-limiting — two rows on a real
+machine, not two hundred. Idle agents need a query, because they are context
+rather than news, and they outnumber live ones roughly 25:1.
+
+**Two settings, an Agents tab, and a `Backend` seam that exists because it
+was asked for.** The captain's *"Paseo is something we use currently, maybe I
+change to something else later"* is a stated requirement, not an imagined
+one — so `Backend` is an enum with one variant, and adding a second costs a
+variant, a read function, and one arm. It is deliberately **not** a plugin
+system: each backend reads a different tool's own on-disk format, and there
+is nothing generic to abstract until a second exists to compare against. The
+tab shows the source as a **statement, not a picker** — a dropdown with one
+entry is a promise the app cannot keep — along with a live census
+(`2 running · 53 idle · read from ~/.paseo/agents`), because a source of
+truth you cannot see is one you cannot debug when the list looks wrong.
+
+**Unverified, and shipped anyway: the deep link.**
+`activate` opens `paseo:/h/local/agent/<id>`. The route shape is read from
+Paseo's own bundled `@getpaseo/protocol/agent-deep-link`
+(`buildAgentDeepLinkRoute`); `local` as the server id is **inferred** from
+`=== "local"` comparisons in the same bundle and has never been opened. If
+Enter on an agent row does nothing, this is the first thing to check.
+
+**Also not built**: spawning agents (`paseo run <prompt>` would be a command
+row), and transcript sources (`~/.codex/sessions`, `~/.claude/projects`,
+`~/.grok/sessions`). The latter is deliberate — `jazzyalex/agent-sessions`
+prices each at ~1,000 lines in its own `docs/adding-a-session-source.md`, and
+it answers "what did an agent do", not "what is running".
+
+## The shared pulse clock, and the repeating-animation rule
+
+`motion::PulseClock` — the seam `motion.rs`'s own doc comment reserved, now
+built for the LIVE agent badge. **It is the only sanctioned way to drive a
+repeating animation in this app**; nothing in the catalog may repeat on its
+own. The rule comes from comet's recorded incident: one
+`with_animation(..).repeat()` element pinned a window at 120Hz and measured
+36% CPU.
+
+Three properties, all load-bearing:
+
+1. **Ticks at `PULSE_INTERVAL` (80ms, 12.5Hz), not at frame rate.** Asserted
+   by a test rather than left to review — a regression to frame rate here
+   would be silent.
+2. **Stops completely when unused**, and is driven **from `render`**, not
+   from `run_search`. Only the render pass knows whether a live row was
+   actually *painted* (`fit_within_budget` drops what does not fit) and
+   whether the window is even on screen — which the panel is not, almost all
+   of the time. A clock ticking behind a hidden window is the same defect in
+   a slower disguise.
+3. **Never starts under reduce-motion**; `intensity()` returns a fixed
+   midpoint so callers never branch and a live row still reads as live
+   without moving.
+
+Measured: **resting CPU with the panel hidden, 0.52%** — unchanged from
+before the clock existed, which is the number that matters. The badge
+interpolates *alpha* rather than swapping colours, so it reads as one thing
+brightening rather than two states flipping.
+
+## Third-party UI, re-evaluated: gpui-component cannot be a dependency here
+
+The captain asked twice about component libraries. Recorded so nobody
+re-runs it:
+
+- **`rust-ui.com` (Leptos) and `dioxus.rust-ui.com`** are Tailwind/DOM
+  component registries. neko has no DOM and no CSS engine — `div()` here is a
+  layout struct compiled to Metal draw calls. Adopting either means putting a
+  webview under neko. **Rule: a UI library is only a candidate for this repo
+  if it targets GPUI.** That one line rules out nearly all of them.
+- **`longbridge/gpui-component`** (Apache-2.0, 13.3k stars) does target GPUI,
+  and **still cannot be used** — measured both ways, not argued:
+  - added as-is → `error[E0308]`, with the compiler's own note *"there are
+    multiple different versions of crate `gpui` in the dependency graph"*.
+    It depends on **crates.io** `gpui`; neko runs the **wingleeio fork**.
+    A plain `cargo check` **passes** in this state and is a false positive —
+    it only fails once something actually calls a component.
+  - forced onto one gpui via `[patch.crates-io]` → **13 × `error[E0432]`**,
+    `no Corner in the root`, `no Timer in the root`. It is written against
+    crates.io gpui 0.2.2 and the fork has drifted.
+
+  The only remaining route is abandoning the fork, which costs
+  `paint_backdrop_blur`, `EdgeFade`, native window drag, the
+  `windowDidBecomeKey:` deadlock fix and the ~30ms summon patch. Not taken.
+
+**`components/keycap.rs` is what came of it.** gpui-component's `kbd.rs` was
+read and declined on evidence rather than on principle: ~250 of its 324 lines
+are `format(Keystroke) -> String` and `binding_for_action` lookups, both of
+which neko already has or does not need, and the valuable ~30 lines are a
+styled div that must be rewritten against this app's tokens anyway.
+Importing mostly-duplicate code to obtain a div is the worse outcome. neko's
+version renders **one cap per key**, which is what Raycast does and what
+makes `⌃⇧K` read as three keys rather than one string.
+
+**Still open, and the better path than any library**: real icons via
+`gpui::svg()` — the primitive is already in neko's gpui
+(`elements/svg.rs:20`), which is what gpui-component's own `icon.rs` is built
+on. Lucide is MIT. That gets a real icon set with no dependency and no drift.
+
 ## Mode-view row anatomy and the neutral re-tone
 
 `neko-mode-visual`, prompted by a captain screenshot of the clipboard mode
@@ -3592,6 +3950,14 @@ short (3 cycles) and didn't re-attempt that measurement.
   `themes_all_pass_wcag_aa` only gates compiled-in ones), and a window-scoped
   capture of *onboarding* in a non-default theme (it compiles and reads the
   same tokens, but was not re-screenshotted).
+- **Preferences**: built — see "Preferences: neko's own settings, and the
+  mode stack" above. Three settings (summon hotkey, launch at login, search
+  folders). Still open: the clipboard-history toggle (deliberately left out
+  of this pass though it is nearly free — one `RowSpec` over the existing
+  `clipboard_history_enabled` key), a real folder picker (needs suppressing
+  the click-outside dismissal while a native panel is open), a visual pass
+  on the hotkey capture screen, and `SMAppService` once neko is packaged as
+  a `.app`.
 - **A real menu-bar `NSStatusItem`**: see "Onboarding" above — GPUI 0.2.2 has
   no usable status-item API; this is raw AppKit bridging, its own task.
 - **Text field selection and paste**: built — see "Text field editing

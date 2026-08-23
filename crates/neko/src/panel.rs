@@ -129,9 +129,23 @@ pub struct Root {
     /// a bounded LRU rather than a full clear on every summon.
     row_icon_cache: Entity<crate::row_icon_cache::RowIconCache>,
     /// `Some` while a command's mode is active (`SearchItem::enters_mode`) —
-    /// see `crate::modes`'s module doc comment for the full concept. `None`
+    /// see `crate::modes`'s module doc comment for the full concept. Empty
     /// is the ordinary root list.
+    ///
+    /// A single `Option`: no mode nests. Preferences is a real window
+    /// (`crate::preferences`), not a mode, so nothing here ever needed to.
     active_mode: Option<ActiveMode>,
+    /// The shared pulse clock (`motion::PulseClock`), observed so a tick
+    /// repaints this panel. Held as an entity rather than read per frame so
+    /// the subscription can exist at all.
+    pulse: Entity<motion::PulseClock>,
+    /// Opens the Preferences window. Injected for the same two reasons
+    /// [`AppearanceSetter`] is: GPUI's test-platform window panics rather
+    /// than erroring on real window operations, so an unconditional call
+    /// here would take every panel test down with it — and the pieces the
+    /// window needs (the client, the live hotkey registrar, the
+    /// single-window slot) belong to `main.rs`, not to a list of results.
+    open_preferences: PreferencesOpener,
     /// `Some` while the `⌘K` actions menu is open for the currently
     /// selected row.
     actions_menu: Option<ActionsMenuState>,
@@ -205,6 +219,12 @@ pub struct Root {
 
 /// See [`Root::appearance_setter`]. The real one is
 /// `material::set_window_appearance`; tests inject a recorder.
+/// Opens the Preferences window and orders the summon panel out — see
+/// [`Root::open_preferences`]. Takes the panel's own `Window` because
+/// hiding *just that window* is a native call, and every native call on this
+/// path has to sit behind the injection for tests to survive it.
+pub type PreferencesOpener = Rc<dyn Fn(&Window, &mut App)>;
+
 pub type AppearanceSetter = Rc<dyn Fn(&Window, theme::Appearance) -> Result<(), String>>;
 
 /// The one piece of state a mode transition actually carries, beyond the
@@ -254,9 +274,12 @@ impl Root {
         translucent: bool,
         menu_frost: bool,
         appearance_setter: AppearanceSetter,
+        open_preferences: PreferencesOpener,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::build(client, accessibility, translucent, menu_frost, appearance_setter, cx))
+        cx.new(|cx| {
+            Self::build(client, accessibility, translucent, menu_frost, appearance_setter, open_preferences, cx)
+        })
     }
 
     /// The real construction logic, factored out of [`new`](Self::new) so a
@@ -269,8 +292,14 @@ impl Root {
         translucent: bool,
         menu_frost: bool,
         appearance_setter: AppearanceSetter,
+        open_preferences: PreferencesOpener,
         cx: &mut Context<Self>,
     ) -> Self {
+        let pulse = motion::PulseClock::global(cx);
+        // A tick is only worth anything if it repaints — see
+        // `sync_pulse` for why it is the render pass, not this
+        // subscription, that decides whether the clock runs at all.
+        cx.observe(&pulse, |_root, _clock, cx| cx.notify()).detach();
         let text_field = TextField::new(cx);
         let row_icon_cache = crate::row_icon_cache::RowIconCache::new(cx);
         // Subscribed to `ContentChanged` specifically, not observed via
@@ -296,6 +325,8 @@ impl Root {
             connected: true,
             row_icon_cache,
             active_mode: None,
+            open_preferences,
+            pulse,
             actions_menu: None,
             menu_open_before_this_press: false,
             searching: false,
@@ -451,7 +482,7 @@ impl Root {
     /// synthetic OS input — same reasoning as `confirm_for_evidence` above.
     /// A no-op outside an active mode.
     pub fn scroll_mode_list_to_bottom_for_evidence(&mut self, cx: &mut Context<Self>) {
-        if self.active_mode.is_some() {
+        if self.active_mode().is_some() {
             self.mode_scroll.scroll_to_bottom();
             cx.notify();
         }
@@ -531,7 +562,7 @@ impl Root {
         // (`fit_within_budget`) doesn't apply at all here; the mode list
         // renders every returned item and scrolls instead (`render_mode_list`,
         // `edge_fade::scroll_edge_fade`).
-        let mode_provider = self.active_mode.as_ref().map(|m| m.chrome.provider_id.to_string());
+        let mode_provider = self.active_mode().map(|m| m.chrome.provider_id.to_string());
         let limit = if mode_provider.is_some() { MODE_RESULT_LIMIT } else { RESULT_LIMIT };
         cx.spawn(async move |this, cx| {
             // Streaming, not a single `request`: the daemon answers a root
@@ -635,7 +666,7 @@ impl Root {
         // what makes the edge fade honest (see `edge_fade.rs`'s own module
         // doc comment). The root list never scrolls at all, so anything
         // that doesn't fit has to be dropped rather than clipped.
-        self.results = if self.active_mode.is_some() {
+        self.results = if self.active_mode().is_some() {
             items
         } else if complete && self.partial_generation == Some(generation) {
             let anchor = std::mem::take(&mut self.results);
@@ -660,7 +691,7 @@ impl Root {
         // row *is* a theme, `resolve_selection`'s ordinary follow-the-row
         // rule takes over, and previewing the top match is the point.
         let entering_the_theme_mode = previous.is_none_or(|(kind, _)| kind != "theme");
-        if entering_the_theme_mode && self.active_mode.as_ref().is_some_and(|m| m.chrome.provider_id == "theme") {
+        if entering_the_theme_mode && self.active_mode().is_some_and(|m| m.chrome.provider_id == "theme") {
             let active = theme::active_theme().id;
             if let Some(index) = self.results.iter().position(|item| item.id == active) {
                 self.selected = index;
@@ -776,7 +807,7 @@ impl Root {
     /// `self.selected` change, which mouse-wheel scrolling alone never
     /// causes).
     fn sync_mode_scroll_to_selection(&self) {
-        if self.active_mode.is_none() {
+        if self.active_mode().is_none() {
             return;
         }
         self.mode_scroll.scroll_to_item(mode_list_child_index(&self.results, self.selected));
@@ -794,6 +825,19 @@ impl Root {
         // confirming it is a client-side UI transition, not a daemon
         // action (see `crate::modes`'s module doc comment).
         if let Some(mode_id) = item.enters_mode {
+            // Preferences is a real window, not a mode — the one
+            // `enters_mode` value that opens one. Everything else names a
+            // mode; an unknown value resolves to nothing and is ignored.
+            if mode_id == crate::preferences::PREFERENCES_MODE_ID {
+                // The opener also dismisses the panel — that is one
+                // operation, not two: the window is where the interaction
+                // continues, and leaving the launcher floating over it would
+                // be two competing surfaces for the same task. Both halves
+                // live inside the injected closure because both are native
+                // calls GPUI's test platform panics on.
+                (self.open_preferences)(window, cx);
+                return;
+            }
             self.enter_mode(&mode_id, window, cx);
             return;
         }
@@ -813,7 +857,7 @@ impl Root {
         // picked survive Enter should not see it flicker back if the socket
         // is slow.
         if item.kind == "theme"
-            && let Some(mode) = self.active_mode.as_mut()
+            && let Some(mode) = self.active_mode_mut()
         {
             mode.restore_theme = None;
         }
@@ -883,7 +927,39 @@ impl Root {
     /// command row is only ever possible from the root list, since commands
     /// never appear inside a mode's own scoped search — but this guards the
     /// invariant rather than assuming it).
+    /// Runs the shared pulse clock exactly while a live agent row is on
+    /// screen, and stops it otherwise.
+    ///
+    /// **Called from `render`, deliberately.** The alternative — starting it
+    /// in `run_search` when results contain a live row — cannot see the two
+    /// cases that matter most: results that are present but not *painted*
+    /// (`fit_within_budget` drops what does not fit), and a window that is
+    /// hidden, which is what the panel is almost all of the time. A clock
+    /// ticking behind a hidden window is the same defect this whole
+    /// mechanism exists to prevent, just harder to notice.
+    ///
+    /// Returns an empty element so it can sit in the render tree; it paints
+    /// nothing.
+    fn sync_pulse(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let wanted = window.is_window_active()
+            && self.results.iter().any(|item| item.badge.as_deref() == Some("LIVE"));
+        self.pulse.update(cx, |clock, cx| clock.set_running(wanted, cx));
+        gpui::Empty
+    }
+
+    fn active_mode(&self) -> Option<&ActiveMode> {
+        self.active_mode.as_ref()
+    }
+
+    fn active_mode_mut(&mut self) -> Option<&mut ActiveMode> {
+        self.active_mode.as_mut()
+    }
+
     fn enter_mode(&mut self, mode_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        // Entering a mode from inside one would capture the *mode's* query
+        // as `saved_query`, so exiting would restore the wrong text. Not
+        // reachable today (commands only appear in the root list), but the
+        // invariant is guarded rather than assumed.
         if self.active_mode.is_some() {
             return;
         }
@@ -1005,7 +1081,7 @@ impl Root {
     /// full-window repaint (rather than the `cx.notify()` they were already
     /// doing) can ask for one.
     fn preview_selected_theme(&self) -> bool {
-        let Some(mode) = &self.active_mode else { return false };
+        let Some(mode) = self.active_mode() else { return false };
         if mode.chrome.provider_id != "theme" {
             return false;
         }
@@ -1015,7 +1091,6 @@ impl Root {
         }
         self.apply_theme(&item.id)
     }
-
     fn open_actions_menu(&mut self, _: &OpenActionsMenu, _window: &mut Window, cx: &mut Context<Self>) {
         self.open_actions_menu_for_selected_row(cx);
     }
@@ -1172,7 +1247,7 @@ impl Root {
             cx.notify();
             return;
         }
-        if self.active_mode.is_some() {
+        if self.active_mode().is_some() {
             self.exit_mode(window, cx);
             return;
         }
@@ -1195,6 +1270,11 @@ impl Render for Root {
         let query_is_empty = self.text_field.read(cx).content().is_empty();
         div()
             .key_context("Panel")
+            // Started and stopped by what is actually being painted, which
+            // is the only thing that knows. A live row dropped by the pixel
+            // budget, a query that no longer matches one, or the panel not
+            // being on screen all stop the clock for free.
+            .child(self.sync_pulse(window, cx))
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::confirm))
@@ -1236,8 +1316,8 @@ impl Render for Root {
             // See `docs/evidence/panel-shadow-tent-fix-report.md`.
             .overflow_hidden()
             .child(self.render_input_row(cx))
-            .child(match &self.active_mode {
-                Some(mode) => self.render_mode_content(mode),
+            .child(match self.active_mode() {
+                Some(mode) => self.render_mode_content(mode, cx),
                 None => self.render_content_area(cx, query_is_empty).into_any_element(),
             })
             .child(self.render_footer(cx))
@@ -1255,7 +1335,7 @@ impl Root {
             .gap_3()
             .text_color(theme::active().text_primary)
             .text_size(px(18.))
-            .child(match &self.active_mode {
+            .child(match self.active_mode() {
                 // The back affordance the launch brief asks for: "a back
                 // arrow in place of the search glyph." Clickable — exits
                 // the mode the same way Escape does, sharing `exit_mode`
@@ -1350,7 +1430,7 @@ impl Root {
                 container = container.child(section_header(item.section_label.clone()));
                 current_section = Some(item.kind.as_str());
             }
-            container = container.child(self.render_row(idx, item, false));
+            container = container.child(self.render_row(idx, item, false, cx));
         }
         container
     }
@@ -1447,7 +1527,7 @@ impl Root {
     /// never carries them, since `Application`/`Copied` already have a
     /// dedicated, unhurried home in the detail pane
     /// (`render_mode_detail`).
-    fn render_row(&self, idx: usize, item: &SearchItem, compact: bool) -> impl IntoElement {
+    fn render_row(&self, idx: usize, item: &SearchItem, compact: bool, cx: &App) -> impl IntoElement {
         let selected = idx == self.selected;
         let title_color = theme::active().text_primary;
         let subtitle_color = if selected {
@@ -1514,14 +1594,33 @@ impl Root {
                     })),
             )
             .children(item.badge.clone().map(|badge| {
+                // A live agent's badge breathes; every other badge is a
+                // static type tag and stays exactly as it was. The waveform
+                // comes from the one shared clock (`motion::PulseClock`) —
+                // this element never animates itself, which is the rule that
+                // keeps a repeating animation from pinning the window.
+                let live = badge == "LIVE";
+                let intensity = if live { self.pulse.read(cx).intensity() } else { 1.0 };
+                let (bg, fg) = if live {
+                    // Interpolating alpha rather than swapping colours, so
+                    // the pulse reads as one thing brightening instead of
+                    // two states flipping.
+                    let mut bg = theme::active().state_success;
+                    bg.a = 0.14 + 0.16 * intensity;
+                    let mut fg = theme::active().state_success;
+                    fg.a = 0.72 + 0.28 * intensity;
+                    (bg, fg)
+                } else {
+                    (theme::active().row_icon_socket_bg, theme::active().text_tertiary)
+                };
                 div()
                     .flex_shrink_0()
                     .px(px(6.))
                     .py(px(2.))
                     .rounded(px(4.))
-                    .bg(theme::active().row_icon_socket_bg)
+                    .bg(bg)
                     .text_size(px(10.))
-                    .text_color(theme::active().text_tertiary)
+                    .text_color(fg)
                     .child(SharedString::from(badge))
             }))
             .children(item.accessory.clone().filter(|_| !compact).map(|accessory| {
@@ -1576,7 +1675,7 @@ impl Root {
         // `footer-source`: "Clipboard History", constant regardless of
         // selection) rather than the selected row's title — the mode *is*
         // the context now, not whatever happens to be highlighted.
-        let left_label: Option<SharedString> = match &self.active_mode {
+        let left_label: Option<SharedString> = match self.active_mode() {
             Some(mode) => Some(mode.chrome.title.into()),
             None => selected_item.map(|item| SharedString::from(item.title.clone())),
         };
@@ -1630,13 +1729,13 @@ impl Root {
     /// where `render_content_area` sits for the root list; same content-area
     /// height budget (`CONTENT_AREA_MIN_HEIGHT_PX`), only ever a width
     /// change between the two.
-    fn render_mode_content(&self, mode: &ActiveMode) -> AnyElement {
+    fn render_mode_content(&self, mode: &ActiveMode, cx: &App) -> AnyElement {
         let content = div()
             .flex()
             .flex_1()
             .min_h(px(0.))
             .overflow_hidden()
-            .child(self.render_mode_list(mode.chrome.has_detail))
+            .child(self.render_mode_list(mode.chrome.has_detail, cx))
             .when(mode.chrome.has_detail, |el| el.child(self.render_mode_detail()));
         // A one-shot opacity reveal on entry, not a width/geometry
         // transition — the real `NSWindow` still never resizes at runtime
@@ -1683,7 +1782,7 @@ impl Root {
     /// neighbour to divide from and no reason to leave 496px empty, so the
     /// list takes the full panel and its rows render in full. Same rows, same
     /// renderer, same geometry tokens — only which of them apply.
-    fn render_mode_list(&self, has_detail: bool) -> impl IntoElement {
+    fn render_mode_list(&self, has_detail: bool, cx: &App) -> impl IntoElement {
         let mut container = div()
             .flex()
             .flex_col()
@@ -1717,7 +1816,7 @@ impl Root {
                     }
                     current_group = Some(&item.group_label);
                 }
-                container = container.child(self.render_row(idx, item, has_detail));
+                container = container.child(self.render_row(idx, item, has_detail, cx));
             }
         }
 
@@ -2204,6 +2303,84 @@ fn glyph_element(glyph: Glyph, row_id: &str) -> AnyElement {
             .child(div().w(px(9.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary))
             .child(div().w(px(12.)).h(px(1.5)).rounded(px(1.)).bg(theme::active().text_tertiary))
             .into_any_element(),
+        // A rounded terminal-ish square with a status dot. The two variants
+        // differ only in that dot: hollow and dim for an agent that exists,
+        // filled and in the success colour for one that is running. Same
+        // mark either way, so a list of agents reads as one kind of thing
+        // and the live ones still pick themselves out.
+        Glyph::Agent | Glyph::AgentLive => {
+            let live = glyph == Glyph::AgentLive;
+            slot.flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .relative()
+                        .w(px(15.))
+                        .h(px(13.))
+                        .rounded(px(3.))
+                        .border_1()
+                        .border_color(if live {
+                            theme::active().state_success_border
+                        } else {
+                            theme::active().text_tertiary
+                        })
+                        .child(
+                            div()
+                                .absolute()
+                                .top(px(4.))
+                                .left(px(5.))
+                                .w(px(5.))
+                                .h(px(5.))
+                                .rounded(px(2.5))
+                                .bg(if live {
+                                    theme::active().state_success
+                                } else {
+                                    theme::active().text_tertiary
+                                }),
+                        ),
+                )
+                .into_any_element()
+        }
+        // Two horizontal rails, each with a knob at a different offset — the
+        // settings mark. The offsets differ on purpose: two knobs at the same
+        // x read as an equals sign at this size, not as controls that move.
+        Glyph::Sliders => {
+            let rail = |knob_left: f32| {
+                div()
+                    .relative()
+                    .w(px(13.))
+                    .h(px(5.))
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(2.))
+                            .left(px(0.))
+                            .w(px(13.))
+                            .h(px(1.5))
+                            .rounded(px(1.))
+                            .bg(theme::active().text_tertiary),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(0.))
+                            .left(px(knob_left))
+                            .w(px(4.))
+                            .h(px(5.))
+                            .rounded(px(1.5))
+                            .bg(theme::active().text_secondary),
+                    )
+            };
+            slot.flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(3.))
+                .child(rail(8.))
+                .child(rail(2.))
+                .into_any_element()
+        }
         // Four filled swatches in a 2x2 block, painted in the *live* theme's
         // own colours — the one glyph in this vocabulary that changes with
         // the active theme, deliberately: it is the affordance for changing
@@ -2748,6 +2925,70 @@ mod tests {
         assert_eq!(mode_list_child_index(&items, 3), 5);
     }
 
+    // --- Preferences: it is a window, so the panel's only job is to open
+    // one. Everything the window itself does is tested in
+    // `crate::preferences::state` (pure) or is real I/O this cannot reach.
+
+    #[gpui::test]
+    fn confirming_the_preferences_command_opens_the_window_instead_of_entering_a_mode(
+        cx: &mut TestAppContext,
+    ) {
+        let (client, _events) = NekoClient::connect(std::path::PathBuf::from("/tmp/neko-prefs-test.sock"));
+        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        let (opener, opened) = recording_preferences_opener();
+        let window = cx.add_window(|_window, cx| {
+            Root::build(client, accessibility, true, true, no_appearance_setter(), opener, cx)
+        });
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![preferences_command_row()];
+                root.selected = 0;
+                root.confirm(&Confirm, window, cx);
+                assert_eq!(opened.get(), 1, "confirming the row must open the Preferences window");
+                assert!(
+                    root.active_mode().is_none(),
+                    "Preferences is a window; entering a mode here would put settings in the panel too"
+                );
+                assert!(root.activation_error.is_none(), "a UI transition is not a daemon activation");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_command_row_naming_no_real_mode_is_ignored_rather_than_breaking_the_panel(
+        cx: &mut TestAppContext,
+    ) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                let mut row = preferences_command_row();
+                row.enters_mode = Some("no-such-mode".to_string());
+                root.results = vec![row];
+                root.selected = 0;
+                root.confirm(&Confirm, window, cx);
+                assert!(root.active_mode().is_none());
+            })
+            .unwrap();
+    }
+
+    fn preferences_command_row() -> SearchItem {
+        SearchItem {
+            id: "preferences".to_string(),
+            kind: "command".to_string(),
+            title: "Preferences".to_string(),
+            subtitle: None,
+            icon: Icon::Glyph(Glyph::Sliders),
+            section_label: "Commands".to_string(),
+            action_label: "Open  ↵".to_string(),
+            badge: Some("COMMAND".to_string()),
+            accessory: None,
+            enters_mode: Some(crate::preferences::PREFERENCES_MODE_ID.to_string()),
+            group_label: None,
+            actions: Vec::new(),
+            source: None,
+        }
+    }
+
     #[test]
     fn mode_list_child_index_on_an_empty_list_is_zero() {
         assert_eq!(mode_list_child_index(&[], 0), 0);
@@ -2775,13 +3016,26 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         )));
         let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
-        cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, no_appearance_setter(), cx))
+        cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, no_appearance_setter(), no_preferences_opener(), cx))
     }
 
     /// A headless stand-in for `material::set_window_appearance` — GPUI's own
     /// test-platform window panics on `window_handle()`, so no test can make a
     /// real one. Records nothing; `recording_appearance_setter` is the variant
     /// for tests that need to assert what was asked for.
+    /// GPUI's test-platform window `unimplemented!()`s on real window
+    /// operations, so a panel test can never let the true opener run.
+    fn no_preferences_opener() -> PreferencesOpener {
+        Rc::new(|_window, _cx| {})
+    }
+
+    /// Records that the panel asked for the window, without opening one.
+    fn recording_preferences_opener() -> (PreferencesOpener, Rc<std::cell::Cell<usize>>) {
+        let count = Rc::new(std::cell::Cell::new(0usize));
+        let seen = count.clone();
+        (Rc::new(move |_window, _cx| seen.set(seen.get() + 1)), count)
+    }
+
     fn no_appearance_setter() -> AppearanceSetter {
         Rc::new(|_window, _appearance| Ok(()))
     }
@@ -2802,7 +3056,7 @@ mod tests {
         )));
         let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
         let (setter, log) = recording_appearance_setter();
-        let window = cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, setter, cx));
+        let window = cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, setter, no_preferences_opener(), cx));
         (window, log)
     }
 
@@ -2897,7 +3151,7 @@ mod tests {
                 root.select_next(&SelectNext, window, cx);
                 assert_eq!(theme::active_theme().id, "ember");
                 root.handle_dismiss(&crate::DismissWindow, window, cx);
-                assert!(root.active_mode.is_none());
+                assert!(root.active_mode().is_none());
                 assert_eq!(theme::active_theme().id, "nord", "Escape must put back the theme that was in use before the mode opened");
             })
             .unwrap();
@@ -3106,7 +3360,7 @@ mod tests {
 
         window
             .update(cx, |root, _window, _cx| {
-                let mode = root.active_mode.as_ref().expect("confirming a command row must enter a mode");
+                let mode = root.active_mode().expect("confirming a command row must enter a mode");
                 assert_eq!(mode.chrome.id, "clipboard");
                 assert_eq!(mode.saved_query, "safari", "the query typed before entering the mode must be saved");
             })
@@ -3130,7 +3384,7 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         window
-            .update(cx, |root, _window, _cx| assert!(root.active_mode.is_some(), "must be in the mode before exiting it"))
+            .update(cx, |root, _window, _cx| assert!(root.active_mode().is_some(), "must be in the mode before exiting it"))
             .unwrap();
 
         window
@@ -3140,7 +3394,7 @@ mod tests {
 
         window
             .update(cx, |root, _window, cx| {
-                assert!(root.active_mode.is_none());
+                assert!(root.active_mode().is_none());
                 assert_eq!(root.text_field.read(cx).content(), "safari", "exiting must restore the pre-entry query");
             })
             .unwrap();
@@ -3173,7 +3427,7 @@ mod tests {
             .update(cx, |root, window, cx| root.handle_dismiss(&crate::DismissWindow, window, cx))
             .unwrap();
 
-        window.update(cx, |root, _window, _cx| assert!(root.active_mode.is_none())).unwrap();
+        window.update(cx, |root, _window, _cx| assert!(root.active_mode().is_none())).unwrap();
     }
 
     #[gpui::test]
@@ -3432,7 +3686,7 @@ mod tests {
         window
             .update(cx, |root, _window, _cx| {
                 assert!(root.actions_menu.is_some(), "setup: the menu must be open before Escape");
-                assert!(root.active_mode.is_some(), "setup: still inside the mode before Escape");
+                assert!(root.active_mode().is_some(), "setup: still inside the mode before Escape");
             })
             .unwrap();
 
@@ -3442,7 +3696,7 @@ mod tests {
         window
             .update(cx, |root, _window, _cx| {
                 assert!(root.actions_menu.is_none(), "the first Escape must close the menu");
-                assert!(root.active_mode.is_some(), "the first Escape must not also exit the mode in the same press");
+                assert!(root.active_mode().is_some(), "the first Escape must not also exit the mode in the same press");
             })
             .unwrap();
 
@@ -3451,7 +3705,7 @@ mod tests {
             .unwrap();
         window
             .update(cx, |root, _window, _cx| {
-                assert!(root.active_mode.is_none(), "the second Escape, with the menu already closed, must exit the mode");
+                assert!(root.active_mode().is_none(), "the second Escape, with the menu already closed, must exit the mode");
             })
             .unwrap();
     }

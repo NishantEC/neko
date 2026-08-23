@@ -77,11 +77,18 @@ impl Provider for ThemesProvider {
         "Themes"
     }
 
+    /// Seventeen palettes are not a useful answer to "I have not typed
+    /// anything yet" — this file's own comment named that distinction long
+    /// before anything acted on it, and until `answers_empty_root_query`
+    /// existed there was no way for a provider to express it.
+    fn answers_empty_root_query(&self) -> bool {
+        false
+    }
+
     /// An empty query lists **every** theme, in registry order, rather than
     /// nothing. That is the whole point of the mode: entering it clears the
     /// query (`panel::Root::enter_mode`), and a browsable list of palettes to
-    /// arrow through is the feature — unlike the root list, where an empty
-    /// query legitimately means "I have not asked for anything yet".
+    /// arrow through is the feature.
     fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
         let active = self
             .db

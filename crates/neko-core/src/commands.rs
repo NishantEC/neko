@@ -72,6 +72,20 @@ const COMMANDS: &[CommandSpec] = &[
         mode: "theme",
         glyph: Glyph::Palette,
     },
+    // The third command. "Settings" is listed as an alias rather than being
+    // the title because `crate::settings` already owns the word on screen —
+    // its section is "Settings" (macOS System Settings panes). Two sections
+    // both called Settings, one of which is not neko's own, is exactly the
+    // confusion the separate provider ids exist to avoid. The alias means
+    // typing "settings" still finds this row; the row itself says
+    // "Preferences", which is unambiguous next to it.
+    CommandSpec {
+        id: "preferences",
+        title: "Preferences",
+        aliases: &["Preferences", "Settings", "neko Settings", "Options", "Configure"],
+        mode: "preference",
+        glyph: Glyph::Sliders,
+    },
 ];
 
 /// The command provider. Holds no state — the command list is a fixed,
