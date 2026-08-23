@@ -2050,6 +2050,17 @@ Login** row underneath them. Neither is a useful answer to "I have not asked
 for anything yet", while apps (top apps) and clipboard (recent entries)
 genuinely are.
 
+**Clipboard opted out of the empty root query later, on captain
+instruction, and the reason generalises.** Apps are a useful thing to be
+shown unprompted; the most recently copied thing very often is not. A
+password manager's payload is already filtered (`is_privacy_marked`), but
+an invoice, a client email or a chunk of somebody's source is not, and
+rendering it the instant the panel opens puts it on screen in front of
+whoever happens to be standing there. Typing is the signal that it was
+actually wanted — and clipboard search itself is untouched, as is the
+`Clipboard History` mode, which scopes to the provider explicitly and so
+never passes through the root-list guard at all.
+
 The fix is a defaulted trait method, not a guard inside `search()`, and the
 reason is worth keeping: **`search("")` serves two opposite questions**. It
 is both the root-list search with nothing typed *and* the call a surface

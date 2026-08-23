@@ -593,7 +593,7 @@ mod tests {
         let Response::SearchResults { items, .. } = root else { panic!("expected results") };
         for item in &items {
             assert!(
-                item.kind != "preference" && item.kind != "theme",
+                item.kind != "preference" && item.kind != "theme" && item.kind != "clipboard",
                 "{} must not answer an empty root query, got {:?}",
                 item.kind,
                 item.title

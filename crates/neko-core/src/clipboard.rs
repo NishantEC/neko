@@ -300,6 +300,22 @@ impl Provider for ClipboardProvider {
         "Clipboard"
     }
 
+    /// **An empty root query returns no clipboard entries.** Unlike apps —
+    /// where the top few are a useful thing to be shown unprompted — the most
+    /// recent thing copied is very often the most private: a password
+    /// manager's payload is already filtered
+    /// ([`is_privacy_marked`]), but an invoice, a client email or a chunk of
+    /// somebody's source is not, and rendering it the instant the panel opens
+    /// puts it on screen in front of whoever is standing there. Typing is the
+    /// signal that it was actually wanted.
+    ///
+    /// The `Clipboard History` mode is unaffected: it scopes to this provider
+    /// explicitly, and a scoped search never passes through the root-list
+    /// guard.
+    fn answers_empty_root_query(&self) -> bool {
+        false
+    }
+
     fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate> {
         let stored = {
             let db = self.db.lock().unwrap();
@@ -594,6 +610,20 @@ pub fn run_capture_loop(db: &std::sync::Mutex<crate::Db>) {
 /// off macOS or if the write failed.
 pub fn write_to_pasteboard(content: &str) -> bool {
     pasteboard::write_string(content)
+}
+
+#[cfg(test)]
+mod empty_query_tests {
+    use super::*;
+    use crate::provider::Provider;
+
+    #[test]
+    fn the_clipboard_never_answers_an_empty_root_query() {
+        // The most recent thing copied is very often the most private, and
+        // an empty query means nobody asked for it yet.
+        let db = std::sync::Arc::new(std::sync::Mutex::new(crate::Db::open_in_memory().unwrap()));
+        assert!(!ClipboardProvider::new(db).answers_empty_root_query());
+    }
 }
 
 #[cfg(test)]

@@ -145,9 +145,10 @@ pub trait Provider: Send + Sync {
     /// the provider rather than to the query string.
     ///
     /// `true` by default, which is right for anything whose full list is a
-    /// useful empty state — apps offer the top apps, clipboard the most
-    /// recent entries. Override to `false` when the list is only meaningful
-    /// once someone has actually asked for it.
+    /// useful empty state — apps offer the top apps, agents show what is
+    /// running. Override to `false` when the list is only meaningful once
+    /// someone has actually asked for it, which includes anything private
+    /// enough that showing it unprompted is itself the problem (clipboard).
     fn answers_empty_root_query(&self) -> bool {
         true
     }
