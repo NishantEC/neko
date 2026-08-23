@@ -125,3 +125,24 @@ would be strictly more risk for no capability we need.
 `SelectDown`/`SelectUp`/`Cancel`/`Confirm` action handling, but it's ~15 lines of index
 clamp/wrap logic once separated from `IndexPath`/`ListDelegate` — not worth a vendor entry.
 Hand-rolled directly in `panel.rs` against our own `Vec<SearchItem>`.
+
+## simple-icons — brand marks (CC0-1.0)
+
+| file | source | licence |
+| --- | --- | --- |
+| `crates/neko/assets/icons/simple-icons/claude.svg` | simple-icons `icons/claude.svg` | CC0-1.0 |
+| `crates/neko/assets/icons/simple-icons/googlegemini.svg` | simple-icons `icons/googlegemini.svg` | CC0-1.0 |
+
+Pinned to upstream commit `c956d67dfa7c37ae65206fc0775b0c02d1e695c2`, vendored
+byte-for-byte, verified 2026-08-24.
+
+**CC0 waives copyright; it does not grant trademark rights** — and that is the
+whole reason these sit apart from the Lucide set rather than beside it. The
+Claude and Gemini marks remain trademarks of Anthropic PBC and Google LLC.
+neko uses them *nominatively*: to say which tool is running a given agent, on
+a row describing that agent. See `THIRD_PARTY_LICENSES/simple-icons-CC0-1.0.txt`
+for the full note, and revisit it before neko is ever distributed.
+
+Unlike Lucide's stroke-only icons these are **filled**, which is correct here:
+gpui renders an SVG to an alpha mask, so a filled path becomes the silhouette
+in one tint — which is what a brand mark is.

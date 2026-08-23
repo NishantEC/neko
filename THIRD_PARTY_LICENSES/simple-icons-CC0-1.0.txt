@@ -1,0 +1,31 @@
+simple-icons — https://github.com/simple-icons/simple-icons
+Vendored files: icons/claude.svg, icons/googlegemini.svg
+Upstream commit: c956d67dfa7c37ae65206fc0775b0c02d1e695c2 (verified 2026-08-24)
+
+The simple-icons project is licensed CC0-1.0 (public domain dedication).
+Verified from the repository's own LICENSE.md on 2026-08-24.
+
+  CC0 1.0 Universal — the person who associated a work with this deed has
+  dedicated the work to the public domain by waiving all of his or her rights
+  to the work worldwide under copyright law, including all related and
+  neighboring rights, to the extent allowed by law.
+
+  Full text: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+TRADEMARK NOTE — this is the part CC0 does not cover, and it is why these
+files are recorded separately from the Lucide set.
+
+  CC0 waives *copyright*. It does not and cannot grant trademark rights.
+  "Claude" and the Claude mark are trademarks of Anthropic PBC; "Gemini" and
+  the Gemini mark are trademarks of Google LLC. simple-icons states this in
+  its own README: brand icons are provided for identification purposes, and
+  use of a mark remains subject to the owner's trademark policy.
+
+  neko uses these marks nominatively — to identify which tool is running a
+  given agent, on a row describing that agent. That is the ordinary
+  descriptive use trademark law allows. It is not an endorsement, affiliation,
+  or a claim of origin, and the marks are not used in neko's own branding.
+
+  If neko is ever distributed (see AGENTS.md, "The GPUI dependency decision",
+  for why that is not the case today), review this alongside the GPL question
+  already recorded there.
