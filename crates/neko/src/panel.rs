@@ -147,6 +147,18 @@ pub struct Root {
     /// both places would be two rows for one thing, and Enter would have to
     /// pick one of them.
     agent_tiles: Vec<SearchItem>,
+    /// Which grid tile has the keyboard, if the selection is up in the grid
+    /// rather than down in the list.
+    ///
+    /// **The grid is navigated with the same Up/Down as the list, not with
+    /// Left/Right**, and that is forced rather than chosen: Left and Right
+    /// are bound to the search field's own cursor movement (`main.rs`'s
+    /// `cx.bind_keys`, `"TextField"` context), so a grid that claimed them
+    /// would break typing to reach it. Treating the tiles as rows that
+    /// happen to sit above the input costs no new keys at all: Up from the
+    /// first result walks into the grid, Down off the last tile walks back
+    /// into the list.
+    grid_selected: Option<usize>,
     /// The shared pulse clock (`motion::PulseClock`), observed so a tick
     /// repaints this panel. Held as an entity rather than read per frame so
     /// the subscription can exist at all.
@@ -339,6 +351,7 @@ impl Root {
             active_mode: None,
             open_preferences,
             agent_tiles: Vec::new(),
+            grid_selected: None,
             pulse,
             actions_menu: None,
             menu_open_before_this_press: false,
@@ -394,6 +407,9 @@ impl Root {
         // logic, so without this a stale open menu would silently reappear
         // on the next summon.
         self.close_actions_menu(window);
+        // Per-summon state, exactly like the mode and the menu above it: a
+        // tile focused in one session must not still be focused in the next.
+        self.grid_selected = None;
         if self.active_mode.take().is_some() {
             self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
             self.mode_scroll.set_offset(point(px(0.), px(0.)));
@@ -687,7 +703,14 @@ impl Root {
         } else {
             split_agent_tiles(items)
         };
+        // A tile that no longer exists must not stay focused; clamp into the
+        // new grid, or fall back to the list once it has emptied.
         self.agent_tiles = tiles;
+        self.grid_selected = match self.grid_selected {
+            Some(_) if self.agent_tiles.is_empty() => None,
+            Some(tile) => Some(tile.min(self.agent_tiles.len() - 1)),
+            None => None,
+        };
         // **The grid's height comes out of the row budget, it is not added to
         // the panel.** `PANEL_HEIGHT_PX` is fixed for the process's whole
         // lifetime and the real `NSWindow` is never resized (`AGENTS.md`,
@@ -790,6 +813,18 @@ impl Root {
             }
             return;
         }
+        // Down off the last tile lands on the first row; the grid and the
+        // list are one continuous run as far as the arrow keys are concerned.
+        if let Some(tile) = self.grid_selected {
+            if tile + 1 < self.agent_tiles.len() {
+                self.grid_selected = Some(tile + 1);
+            } else {
+                self.grid_selected = None;
+                self.selected = 0;
+            }
+            cx.notify();
+            return;
+        }
         if !self.results.is_empty() {
             self.selected = (self.selected + 1).min(self.results.len() - 1);
             self.sync_mode_scroll_to_selection();
@@ -808,6 +843,22 @@ impl Root {
         if let Some(menu) = &mut self.actions_menu {
             menu.selected = menu.selected.saturating_sub(1);
             menu.confirm_armed = false;
+            cx.notify();
+            return;
+        }
+        if let Some(tile) = self.grid_selected {
+            // Already at the top of everything — stay put rather than
+            // wrapping to the bottom of the list, which would feel like the
+            // selection teleported.
+            self.grid_selected = Some(tile.saturating_sub(1));
+            cx.notify();
+            return;
+        }
+        // Up from the first row walks into the grid, landing on its last
+        // tile — the one nearest the list, so the selection moves by one
+        // visually rather than jumping across the whole strip.
+        if self.selected == 0 && !self.agent_tiles.is_empty() {
+            self.grid_selected = Some(self.agent_tiles.len() - 1);
             cx.notify();
             return;
         }
@@ -847,6 +898,18 @@ impl Root {
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
         if self.actions_menu.is_some() {
             self.confirm_menu_action(window, cx);
+            return;
+        }
+        // A focused tile owns Enter — the grid is part of the same
+        // selection run, so the row underneath must not act instead.
+        if let Some(tile) = self.grid_selected
+            && let Some(item) = self.agent_tiles.get(tile).cloned()
+        {
+            self.perform_activation(
+                Request::Activate { kind: item.kind, id: item.id, action: None },
+                true,
+                cx,
+            );
             return;
         }
         let Some(item) = self.results.get(self.selected).cloned() else {
@@ -1008,7 +1071,8 @@ impl Root {
             .pb(px(8.))
             .h(px(theme::AGENT_GRID_HEIGHT_PX))
             .overflow_hidden();
-        for item in &self.agent_tiles {
+        for (index, item) in self.agent_tiles.iter().enumerate() {
+            let focused = self.grid_selected == Some(index);
             let kind = item.kind.clone();
             let id = item.id.clone();
             // The live dot breathes on the same shared clock the LIVE badge
@@ -1027,9 +1091,17 @@ impl Root {
                     .h(px(theme::AGENT_TILE_HEIGHT_PX))
                     .px(px(10.))
                     .rounded(px(theme::ROW_RADIUS_PX))
-                    .bg(theme::active().surface_input)
+                    .bg(if focused {
+                        theme::active().surface_selected
+                    } else {
+                        theme::active().surface_input
+                    })
                     .border_1()
-                    .border_color(theme::active().border_hairline)
+                    .border_color(if focused {
+                        theme::active().border_hairline_strong
+                    } else {
+                        theme::active().border_hairline
+                    })
                     .cursor_pointer()
                     .on_click(cx.listener(move |root, _event, _window, cx| {
                         root.perform_activation(
@@ -3119,6 +3191,87 @@ mod tests {
             actions: Vec::new(),
             source: None,
         }
+    }
+
+    #[gpui::test]
+    fn up_from_the_first_row_walks_into_the_grid_and_down_walks_back_out(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.agent_tiles = vec![tile("a"), tile("b")];
+                root.results = vec![agent_row("row-1"), agent_row("row-2")];
+                root.selected = 0;
+
+                // Up lands on the tile *nearest* the list, so the selection
+                // moves by one visually rather than across the whole strip.
+                root.select_previous(&SelectPrevious, window, cx);
+                assert_eq!(root.grid_selected, Some(1));
+                root.select_previous(&SelectPrevious, window, cx);
+                assert_eq!(root.grid_selected, Some(0));
+                // Already at the top of everything: stay, never wrap to the
+                // bottom of the list.
+                root.select_previous(&SelectPrevious, window, cx);
+                assert_eq!(root.grid_selected, Some(0));
+
+                root.select_next(&SelectNext, window, cx);
+                assert_eq!(root.grid_selected, Some(1));
+                root.select_next(&SelectNext, window, cx);
+                assert_eq!(root.grid_selected, None, "off the last tile is back into the list");
+                assert_eq!(root.selected, 0);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn with_no_tiles_the_arrow_keys_behave_exactly_as_they_always_did(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![agent_row("row-1"), agent_row("row-2")];
+                root.selected = 0;
+                root.select_previous(&SelectPrevious, window, cx);
+                assert_eq!(root.grid_selected, None, "no grid to walk into");
+                assert_eq!(root.selected, 0);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_focused_tile_that_disappears_does_not_leave_the_selection_pointing_at_nothing(
+        cx: &mut TestAppContext,
+    ) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, _cx| {
+                root.agent_tiles = vec![tile("a"), tile("b")];
+                root.grid_selected = Some(1);
+                // Simulates the agent finishing between two responses.
+                root.agent_tiles = vec![tile("a")];
+                root.grid_selected = match root.grid_selected {
+                    Some(_) if root.agent_tiles.is_empty() => None,
+                    Some(t) => Some(t.min(root.agent_tiles.len() - 1)),
+                    None => None,
+                };
+                assert_eq!(root.grid_selected, Some(0), "clamped, not dangling");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn summoning_afresh_clears_a_focused_tile(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.agent_tiles = vec![tile("a")];
+                root.grid_selected = Some(0);
+                root.reset_for_summon(window, cx);
+                assert_eq!(root.grid_selected, None);
+            })
+            .unwrap();
+    }
+
+    fn tile(id: &str) -> SearchItem {
+        SearchItem { badge: Some("LIVE".to_string()), ..agent_row(id) }
     }
 
     #[test]
