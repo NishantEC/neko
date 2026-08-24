@@ -135,12 +135,62 @@ fn centered_bounds(cx: &App, window_size: gpui::Size<gpui::Pixels>) -> gpui::Bou
     gpui::Bounds::new(origin, window_size)
 }
 
+
+/// One keyboard stop in the Preferences window.
+///
+/// The window's controls had **no keyboard path at all**: `on_key_down`
+/// returned early unless the hotkey recorder was listening, so the four
+/// tabs, both toggles and every folder's Remove answered only the mouse —
+/// in an app whose panel is otherwise keyboard-first.
+///
+/// The search-folder text field is deliberately **not** a stop: it already
+/// has a working path (type, then Enter to add), it holds gpui's own focus,
+/// and putting it in this ring would mean intercepting the keys it needs.
+#[derive(Debug, Clone, PartialEq)]
+enum Control {
+    Tab(Tab),
+    /// "Click to record a new combination."
+    RecordHotkey,
+    /// A switch, named by the `neko_core::preferences` row it drives.
+    Toggle(&'static str),
+    RemoveFolder(String),
+}
+
+
+/// The keyboard's position, drawn.
+///
+/// A 2px ring in `text_primary` rather than a tinted fill: several of these
+/// controls already use fill to mean *selected* (the current tab) or *on*
+/// (a switch), and a second fill on top of either is unreadable. Drawn as
+/// an outline outside the control's own bounds so it never resizes what it
+/// surrounds — a ring that reflows the row it is on reads as a glitch.
+fn focus_ring<E: Styled>(element: E, focused: bool) -> E {
+    if focused {
+        element
+            .border_2()
+            .border_color(theme::active().text_primary)
+    } else {
+        element.border_2().border_color(gpui::transparent_black())
+    }
+}
+
 pub struct PreferencesRoot {
     client: NekoClient,
     rebinder: SharedRebinder,
     slot: SharedPreferencesSlot,
     focus_handle: FocusHandle,
     tab: Tab,
+    /// Which control the keyboard is on, as an index into the tab's own
+    /// ordered control list ([`PreferencesRoot::controls`]).
+    ///
+    /// A hand-rolled focus ring rather than gpui's `tab_stop`/`focus_next`,
+    /// for the same reason `panel::Root::selected` is: it is the model the
+    /// rest of this app already uses, it survives the control list changing
+    /// under it (adding a search folder does exactly that), and it is
+    /// testable without a live window — which matters here, because a real
+    /// keypress into this window cannot be synthesised under this repo's
+    /// own rules.
+    focused: usize,
     /// The summon combination as the daemon reports it. A `String`, not a
     /// `HotkeyCombo`, because it arrives as the already-rendered accessory of
     /// the Summon Hotkey row — this window does not re-derive a display form
@@ -190,6 +240,7 @@ impl PreferencesRoot {
             slot,
             focus_handle: cx.focus_handle(),
             tab: Tab::General,
+            focused: 0,
             hotkey_label: String::new(),
             recording: Recording::default(),
             launch_at_login: false,
@@ -279,7 +330,7 @@ impl PreferencesRoot {
             let error = match outcome {
                 Ok(Response::Error { message }) => Some(message),
                 Ok(_) => None,
-                Err(_) => Some("Couldn't reach neko-daemon.".to_string()),
+                Err(_) => Some(crate::panel::DAEMON_UNREACHABLE.to_string()),
             };
             let _ = this.update(cx, |root, cx| {
                 root.error = error;
@@ -288,6 +339,141 @@ impl PreferencesRoot {
             });
         })
         .detach();
+    }
+
+
+    /// Every keyboard stop on the current tab, in reading order: the tab bar
+    /// first, then the tab's own controls top to bottom.
+    ///
+    /// Rebuilt per press rather than cached, because it genuinely changes
+    /// under the focus index — adding or removing a search folder adds or
+    /// removes a stop — and a stale list would put the ring on a control
+    /// that is no longer there.
+    fn controls(&self) -> Vec<Control> {
+        let mut controls: Vec<Control> = Tab::ALL.iter().map(|t| Control::Tab(*t)).collect();
+        match self.tab {
+            Tab::General => {
+                controls.push(Control::RecordHotkey);
+                controls.push(Control::Toggle(neko_core_ids::LAUNCH_AT_LOGIN));
+            }
+            Tab::Search => {
+                controls.extend(self.folders.iter().cloned().map(Control::RemoveFolder));
+            }
+            Tab::Agents => {
+                controls.push(Control::Toggle(neko_core_ids::AGENTS_ENABLED));
+                controls.push(Control::Toggle(neko_core_ids::AGENTS_INCLUDE_IDLE));
+            }
+            Tab::About => {}
+        }
+        controls
+    }
+
+    fn focused_control(&self) -> Option<Control> {
+        self.controls().get(self.focused).cloned()
+    }
+
+    fn is_focused(&self, control: &Control) -> bool {
+        self.focused_control().as_ref() == Some(control)
+    }
+
+    /// Tab and Shift-Tab, wrapping. Wrapping rather than stopping at the
+    /// ends because this is a small closed ring, not a document.
+    fn move_focus(&mut self, forward: bool) {
+        let n = self.controls().len();
+        if n == 0 {
+            return;
+        }
+        self.focused = if forward { (self.focused + 1) % n } else { (self.focused + n - 1) % n };
+    }
+
+    /// Switching tabs changes the control list under the focus index, so it
+    /// goes back to the tab bar — landing on the tab just opened, which is
+    /// where the eye already is.
+    fn select_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
+        self.tab = tab;
+        // Recording is a live OS listener; leaving the tab it belongs to
+        // must stop it, or key presses aimed at another tab would be
+        // captured as hotkeys.
+        self.recording = Recording::Idle;
+        self.error = None;
+        self.focused = Tab::ALL.iter().position(|t| *t == tab).unwrap_or(0);
+        cx.notify();
+    }
+
+    fn toggle_row(&mut self, row_id: &str, cx: &mut Context<Self>) {
+        self.apply(
+            Request::Activate {
+                kind: "preference".to_string(),
+                id: row_id.to_string(),
+                action: None,
+                query: String::new(),
+            },
+            cx,
+        );
+    }
+
+    /// Enter and Space on the focused control — the same work its own
+    /// `on_click` does, routed through the same methods so the two can
+    /// never drift apart.
+    fn activate_focused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.focused_control() {
+            Some(Control::Tab(tab)) => self.select_tab(tab, cx),
+            Some(Control::RecordHotkey) => self.start_recording(window, cx),
+            Some(Control::Toggle(row)) => self.toggle_row(row, cx),
+            Some(Control::RemoveFolder(path)) => self.remove_folder(path, cx),
+            None => {}
+        }
+    }
+
+
+    /// Keyboard navigation for everything that is not the hotkey recorder.
+    ///
+    /// Runs in the capture phase alongside the recorder (see `render`), and
+    /// claims only the keys it handles — anything else, including every
+    /// character, falls through to the search-folder text field, which is
+    /// why typing a path still works while this is installed.
+    ///
+    /// Left and Right move between tabs only while a tab is focused, which
+    /// is the ARIA tabs pattern; elsewhere they belong to the text field's
+    /// own cursor.
+    fn on_navigation_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keystroke = &event.keystroke;
+        let shift = keystroke.modifiers.shift;
+        match keystroke.key.as_str() {
+            "tab" => self.move_focus(!shift),
+            "left" | "right" => match self.focused_control() {
+                Some(Control::Tab(tab)) => {
+                    self.select_tab(tab.step(keystroke.key == "right"), cx);
+                    cx.stop_propagation();
+                    return;
+                }
+                _ => return,
+            },
+            "enter" | "space" => {
+                // Enter belongs to the folder field whenever there is no
+                // control under the ring to activate — "Press ↵ to add".
+                if self.focused_control().is_none() {
+                    return;
+                }
+                self.activate_focused(window, cx);
+                cx.stop_propagation();
+                return;
+            }
+            // The window has no menu bar, so this is the only key that
+            // closes it. Its own traffic light still works.
+            "escape" => {
+                window.remove_window();
+                return;
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+        cx.notify();
     }
 
     fn add_folder(&mut self, cx: &mut Context<Self>) {
@@ -336,8 +522,9 @@ impl PreferencesRoot {
     /// Every key press while listening is a hotkey candidate. Escape stops
     /// listening rather than being recorded — it is refused as a hotkey
     /// anyway, and "get me out of this control" is what a person means by it.
-    fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if self.recording != Recording::Listening && !matches!(self.recording, Recording::Rejected(_)) {
+            self.on_navigation_key(event, window, cx);
             return;
         }
         let keystroke = &event.keystroke;
@@ -494,14 +681,9 @@ impl PreferencesRoot {
                         theme::active().text_secondary
                     })
                     .cursor_pointer()
+                    .map(|el| focus_ring(el, self.is_focused(&Control::Tab(tab))))
                     .on_click(cx.listener(move |root, _event, _window, cx| {
-                        root.tab = tab;
-                        // Recording is a live OS listener; leaving the tab it
-                        // belongs to must stop it, or key presses aimed at
-                        // another tab would be captured as hotkeys.
-                        root.recording = Recording::Idle;
-                        root.error = None;
-                        cx.notify();
+                        root.select_tab(tab, cx);
                     }))
                     .child(tab.title()),
             );
@@ -520,14 +702,14 @@ impl PreferencesRoot {
             Tab::Agents => body
                 .child(self.render_agent_source())
                 .child(self.render_toggle_row(
-                    "Show Agents",
+                    "Show agents",
                     "List running coding agents in search results.",
                     self.agents_enabled,
                     neko_core_ids::AGENTS_ENABLED,
                     cx,
                 ))
                 .child(self.render_toggle_row(
-                    "Include Idle Agents",
+                    "Include idle agents",
                     "Match agents that are not currently running. Off by default — idle agents outnumber live ones heavily.",
                     self.agents_include_idle,
                     neko_core_ids::AGENTS_INCLUDE_IDLE,
@@ -587,8 +769,16 @@ impl PreferencesRoot {
                     .self_start()
                     .p(px(4.))
                     .rounded(px(theme::BTN_RADIUS_PX))
-                    .when(listening, |el| {
-                        el.border_1().border_color(theme::active().state_danger_border)
+                    // Listening is its own state and outranks the focus
+                    // ring: while it is live, every key is going here, so
+                    // saying where the keyboard *is* would be redundant and
+                    // the two borders would fight.
+                    .map(|el| {
+                        if listening {
+                            el.border_2().border_color(theme::active().state_danger_border)
+                        } else {
+                            focus_ring(el, self.is_focused(&Control::RecordHotkey))
+                        }
                     })
                     .cursor_pointer()
                     .on_click(cx.listener(|root, _event, window, cx| root.start_recording(window, cx)))
@@ -610,12 +800,12 @@ impl PreferencesRoot {
                         Recording::Idle => "Click to record a new combination.".to_string(),
                     })),
             );
-        Self::labelled("Summon Hotkey", control)
+        Self::labelled("Summon hotkey", control)
     }
 
     fn render_launch_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         self.render_toggle_row(
-            "Launch at Login",
+            "Launch at login",
             "Starts neko automatically when you log in.",
             self.launch_at_login,
             neko_core_ids::LAUNCH_AT_LOGIN,
@@ -654,16 +844,9 @@ impl PreferencesRoot {
             })
             .relative()
             .cursor_pointer()
+            .map(|el| focus_ring(el, self.is_focused(&Control::Toggle(row_id))))
             .on_click(cx.listener(move |root, _event, _window, cx| {
-                root.apply(
-                    Request::Activate {
-                        kind: "preference".to_string(),
-                        id: row_id.to_string(),
-                        action: None,
-                        query: String::new(),
-                    },
-                    cx,
-                );
+                root.toggle_row(row_id, cx);
             }))
             .child(
                 div()
@@ -766,6 +949,9 @@ impl PreferencesRoot {
                             .text_size(px(11.))
                             .text_color(theme::active().state_danger)
                             .cursor_pointer()
+                            .map(|el| {
+                                focus_ring(el, self.is_focused(&Control::RemoveFolder(path.clone())))
+                            })
                             .on_click(cx.listener(move |root, _event, _window, cx| {
                                 root.remove_folder(path_for_remove.clone(), cx)
                             }))
@@ -795,7 +981,7 @@ impl PreferencesRoot {
                     .text_color(theme::active().text_tertiary)
                     .child("Press ↵ to add. Paths starting with ~ are expanded."),
             );
-        Self::labelled("Search Folders", control)
+        Self::labelled("Search folders", control)
     }
 
     fn render_error(&self) -> impl IntoElement {

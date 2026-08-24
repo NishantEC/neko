@@ -22,6 +22,16 @@ pub enum Tab {
 impl Tab {
     pub const ALL: &'static [Tab] = &[Tab::General, Tab::Search, Tab::Agents, Tab::About];
 
+    /// The next tab along, wrapping — Left/Right on a focused tab, the
+    /// ARIA tabs pattern. Wrapping rather than stopping because four tabs
+    /// in a row read as a ring, and stopping at the end just feels broken.
+    pub fn step(self, forward: bool) -> Tab {
+        let all = Tab::ALL;
+        let i = all.iter().position(|t| *t == self).unwrap_or(0);
+        let n = all.len();
+        all[if forward { (i + 1) % n } else { (i + n - 1) % n }]
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Tab::General => "General",
@@ -131,4 +141,27 @@ mod tests {
             vec!["General", "Search", "Agents", "About"]
         );
     }
+
+    #[test]
+    fn arrow_keys_walk_the_tab_bar_as_a_ring() {
+        // Four tabs in a row read as a ring; stopping at the end feels
+        // broken rather than protective.
+        assert_eq!(Tab::General.step(true), Tab::Search);
+        assert_eq!(Tab::About.step(true), Tab::General);
+        assert_eq!(Tab::General.step(false), Tab::About);
+        // Every tab is reachable from every other, in both directions.
+        for start in Tab::ALL {
+            let mut seen = vec![*start];
+            let mut at = *start;
+            for _ in 1..Tab::ALL.len() {
+                at = at.step(true);
+                seen.push(at);
+            }
+            assert_eq!(seen.len(), Tab::ALL.len());
+            for tab in Tab::ALL {
+                assert!(seen.contains(tab), "{tab:?} unreachable from {start:?}");
+            }
+        }
+    }
+
 }
