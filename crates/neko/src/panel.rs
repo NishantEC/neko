@@ -2420,6 +2420,31 @@ impl Root {
                     .text_color(subtitle_color)
                     .child(SharedString::from(accessory))
             }))
+            // **What Enter will do, on the row Enter would do it to.**
+            //
+            // Every provider has always set `SearchItem::action_label` and
+            // for a while nothing rendered it: the footer that used to carry
+            // it was removed and nothing replaced it, so the field was live
+            // data going nowhere. That is tolerable for a row whose verb is
+            // obvious — Enter on an application launches it — and genuinely
+            // unsafe for two of the rows built since. A schedule's Enter
+            // *pauses or resumes* and the label is the only thing that says
+            // which. An `ask` row's Enter runs a proposed tool call, and a
+            // confirmation step that does not say it is one is not a
+            // confirmation.
+            //
+            // On the selected row only, which is Raycast's own arrangement:
+            // it is the row about to be acted on, it costs no chrome, and
+            // showing a verb on all eight rows at once would be eight
+            // answers to a question with one.
+            .children((selected && !compact).then(|| {
+                let verb = item.action_label.clone();
+                div()
+                    .flex_shrink_0()
+                    .text_size(px(11.))
+                    .text_color(theme::active().text_tertiary_on_selected)
+                    .child(SharedString::from(verb))
+            }))
     }
 
     /// The "Actions ⌘K" footer label, now a real clickable trigger for the

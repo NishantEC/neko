@@ -46,6 +46,7 @@
 //! | `NEKO_SHOW_ACTIONS_MENU` | no | same — `open_actions_menu_for_evidence` |
 //! | `NEKO_SCROLL_MODE_LIST_TO_BOTTOM` | no | same — a `ScrollHandle` mutation |
 //! | `NEKO_SHOW_SELECTION` | no | same — `select_query_for_evidence` |
+//! | `NEKO_MODE_QUERY` / `NEKO_MODE_CONFIRM` | no | a modifier on `NEKO_SHOW_CONFIRM`; types inside an already-open mode and optionally confirms again, through the same real edit and confirm paths |
 //! | `NEKO_SHOW_PREFERENCES` | no | opens the Preferences window with `order_front_regardless` and parks the focus ring on one control, so the ring can be photographed without a keystroke |
 //! | `NEKO_SHOW_DRAG_GUIDES` | no | opens a second window with `focus: false` and `ignoresMouseEvents`; touches the panel's own focus not at all |
 //! | `NEKO_PROVE_TYPING` | no | types through GPUI's own key dispatch and reads the field back; no OS input, does not focus |
@@ -329,6 +330,16 @@ pub fn show_selection_requested() -> bool {
 /// was set. Focus-neutral: it touches no window state at all.
 pub fn dock_badge_count() -> Option<usize> {
     std::env::var("NEKO_DOCK_BADGE").ok()?.trim().parse().ok()
+}
+
+/// Text to type once a mode is already open. See `show_once`.
+pub fn mode_query() -> Option<String> {
+    std::env::var("NEKO_MODE_QUERY").ok().filter(|t| !t.is_empty())
+}
+
+/// Whether to press Enter again on whatever `NEKO_MODE_QUERY` produced.
+pub fn mode_confirm_requested() -> bool {
+    std::env::var("NEKO_MODE_CONFIRM").is_ok()
 }
 
 /// Which Preferences control to park the focus ring on, if any.
@@ -704,6 +715,30 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                 });
             });
             cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
+        }
+        // **Typing *inside* a mode, and optionally confirming again.**
+        // Every hook above stops at the moment a mode opens, which is
+        // enough for a list but not for a mode whose whole behaviour is a
+        // second step — `ask` proposes a tool call only after you have said
+        // what you want, and that row is exactly the one worth photographing.
+        if let Some(text) = mode_query() {
+            cx.update(|cx| {
+                let _ = window.update(cx, |root, _window, cx| {
+                    root.set_query_for_evidence(&text, cx);
+                });
+            });
+            cx.background_executor().timer(std::time::Duration::from_millis(1200)).await;
+            if mode_confirm_requested() {
+                cx.update(|cx| {
+                    let _ = window.update(cx, |root, window, cx| {
+                        root.confirm_for_evidence(window, cx);
+                    });
+                });
+                // Longer than the mode-entry settle above: this one can be
+                // a real model round trip (`neko_core::ask`), which is
+                // seconds rather than a local query.
+                cx.background_executor().timer(std::time::Duration::from_millis(9000)).await;
+            }
         }
         if scroll_mode_list_to_bottom_requested() {
             cx.update(|cx| {
