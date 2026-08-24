@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use neko_protocol::{Glyph, Icon, SearchItem};
+use neko_protocol::{Glyph, Icon, ItemAction, SearchItem};
 use serde::Deserialize;
 
 use crate::provider::{Provider, ProviderError};
@@ -621,6 +621,28 @@ impl Provider for AgentsProvider {
             .collect()
     }
 
+    /// Cancel and Archive, over `neko_core::mcp`.
+    ///
+    /// Paseo's daemon is the only thing that can do either — an agent is a
+    /// process it supervises, not a file on disk — so unlike this provider's
+    /// *reads*, which come from `~/.paseo/agents`, these have a hard
+    /// dependency on the daemon being up. That asymmetry is deliberate and is
+    /// why the read path was not rewritten onto MCP as well: seeing your
+    /// agents should not stop working because a daemon restarted.
+    fn perform_action(&self, id: &str, action: &str) -> Result<(), ProviderError> {
+        let tool = match action {
+            "cancel" => "cancel_agent",
+            "archive" => "archive_agent",
+            other => return Err(ProviderError(format!("no such action: {other}"))),
+        };
+        let client =
+            crate::mcp::McpClient::discover().map_err(|e| ProviderError(e.to_string()))?;
+        client
+            .call(tool, serde_json::json!({ "agentId": id }))
+            .map(|_| ())
+            .map_err(|e| ProviderError(e.to_string()))
+    }
+
     fn activate(&self, id: &str) -> Result<(), ProviderError> {
         let Some(server) = server_id() else {
             return Err(ProviderError(
@@ -682,6 +704,28 @@ fn host_icon() -> Option<&'static PathBuf> {
     .as_ref()
 }
 
+/// What the `⌘K` menu offers on an agent row.
+///
+/// **Cancel is not destructive and Archive is.** Cancelling stops the
+/// current run and leaves the agent to be prompted again — the everyday
+/// "stop, that's wrong" — and putting it behind a second Enter would make
+/// the recovery slower than the mistake it is recovering from. Archiving
+/// interrupts *and* soft-deletes, which is the one a mis-key must not do
+/// silently.
+///
+/// A closed agent has no run to cancel and nothing to interrupt, so it is
+/// offered neither: a menu that lists what it cannot do is worse than a
+/// shorter menu.
+fn agent_actions(running: bool) -> Vec<ItemAction> {
+    if !running {
+        return Vec::new();
+    }
+    vec![
+        ItemAction { id: "cancel".to_string(), label: "Cancel run".to_string(), destructive: false },
+        ItemAction { id: "archive".to_string(), label: "Archive".to_string(), destructive: true },
+    ]
+}
+
 fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceName>) -> SearchItem {
     SearchItem {
         id: agent.id.clone(),
@@ -708,7 +752,11 @@ fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceN
             .or_else(|| agent.activity_at().map(short_time)),
         enters_mode: None,
         group_label: None,
-        actions: Vec::new(),
+        // **L1 of `docs/plan-agent-control-plane.md`.** A running agent can
+        // be stopped or thrown away without leaving the panel — the two
+        // things a person actually does to an agent that is misbehaving.
+        // Both go over `neko_core::mcp`.
+        actions: agent_actions(running),
         // The tool running this agent, for the badge the client overlays on
         // the host icon. `source` is the wire's "bare value for a labelled
         // field" slot; how it renders is the client's business.

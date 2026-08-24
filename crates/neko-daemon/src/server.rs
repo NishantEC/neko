@@ -41,7 +41,13 @@ impl AppState {
             // needs the same `Db` every other provider shares — which only
             // exists inside `with_test_providers`, hence the closure-free
             // two-step here rather than a direct call.
-            Self::with_test_providers(db, apps, None, neko_core::settings::SettingsProvider::new())
+            Self::with_test_providers(
+                db,
+                apps,
+                None,
+                neko_core::settings::SettingsProvider::new(),
+                neko_core::permissions::PermissionsProvider::new(),
+            )
         }
     }
 
@@ -62,6 +68,7 @@ impl AppState {
         apps: Vec<AppEntry>,
         file_provider: Option<neko_core::files::FileProvider>,
         settings_provider: neko_core::settings::SettingsProvider,
+        permissions_provider: neko_core::permissions::PermissionsProvider,
     ) -> Self {
         let db = Arc::new(Mutex::new(db));
         let file_provider =
@@ -90,6 +97,13 @@ impl AppState {
             // Eighth. Reads Paseo's own on-disk agent documents — no index
             // to warm, no watcher, no subprocess; see `agents.rs`.
             Box::new(neko_core::agents::AgentsProvider::new(db.clone())),
+            // Ninth, and appended rather than inserted at the front even
+            // though its rows always lead: `search::allocate` orders sections
+            // by content strength and `permissions::ATTENTION_BONUS` settles
+            // that outright, so registration order is only the tie-break —
+            // and the positions in this list are load-bearing for the daemon
+            // tests, which address a provider by index.
+            Box::new(permissions_provider),
         ];
         // Mode-only providers: reachable when a search explicitly scopes to
         // them (`Request::Search`'s `provider` field) and by
@@ -578,6 +592,9 @@ mod tests {
             apps,
             Some(neko_core::files::FileProvider::empty()),
             neko_core::settings::SettingsProvider::with_panes(Vec::new()),
+            // Never reaches the daemon: whether Paseo happens to be running
+            // must not decide whether this suite passes.
+            neko_core::permissions::PermissionsProvider::disabled(),
         )
     }
 
