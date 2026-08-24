@@ -112,7 +112,13 @@ pub const STATE_BORDER_ALPHA: f32 = 0.349_019_6;
 pub const SNAP_GUIDE_ALPHA: f32 = 0.9;
 /// How many `Rgba` fields [`Palette`] has. Pinned by a test so this doc, the
 /// struct, and `AGENTS.md` cannot silently disagree.
-pub const PALETTE_TOKEN_COUNT: usize = 22;
+pub const PALETTE_TOKEN_COUNT: usize = 23;
+
+/// An agent tile's resting fill, as an alpha over the theme's foreground.
+/// Twice `icon_socket_alpha`'s usual weight: a tile is a surface a person
+/// clicks, where the icon socket is a plate behind artwork.
+pub const TILE_ALPHA: f32 = 0.12;
+
 
 /// Whether a theme reads as light or dark **to AppKit**, not just to a person.
 ///
@@ -188,6 +194,16 @@ pub struct Palette {
     /// rule ("a low-alpha plate of the opposite polarity to the panel") is
     /// unchanged, only the value is.
     pub row_icon_socket_bg: Rgba,
+    /// An agent tile's resting fill — the theme's own foreground at
+    /// [`TILE_ALPHA`], **not** an opaque surface.
+    ///
+    /// It has to be translucent for the same reason the panel is: the panel
+    /// no longer paints an opaque fill, so an opaque tile on top of it reads
+    /// as a block pasted onto glass rather than as part of it. A low-alpha
+    /// wash of the foreground lifts the tile off the panel while still
+    /// letting the material through, and it does that over any wallpaper
+    /// rather than only a dark one.
+    pub surface_tile: Rgba,
     /// The line drawn along a snap target while the panel is being dragged
     /// (`window_drag.rs`) — the theme's own foreground at
     /// [`SNAP_GUIDE_ALPHA`].
@@ -286,6 +302,7 @@ const fn build(s: Spec) -> Theme {
             border_hairline: rgba_const(s.hairline, s.hairline_alpha),
             border_hairline_strong: rgba_const(s.hairline, s.hairline_alpha * 2.0),
             row_icon_socket_bg: rgba_const(s.icon_socket, s.icon_socket_alpha),
+            surface_tile: rgba_const(s.text_primary, TILE_ALPHA),
             snap_guide: rgba_const(s.text_primary, SNAP_GUIDE_ALPHA),
             snap_guide_muted: rgba_const(s.text_primary, SNAP_GUIDE_ALPHA / 2.0),
         },
@@ -306,7 +323,7 @@ pub const THEMES: &[Theme] = &[
         name: "Neko Neutral",
         appearance: Appearance::Dark,
         surface_panel: 0x0d0d0d,
-        panel_alpha: 0.0,
+        panel_alpha: 0.40,
         surface_raised: 0x161616,
         menu_tint_alpha: 0.62,
         surface_input: 0x070707,
@@ -779,6 +796,11 @@ pub const INPUT_ROW_HEIGHT_PX: f32 = 56.0;
 pub const RESULT_ROW_HEIGHT_PX: f32 = 40.0;
 pub const SECTION_HEADER_HEIGHT_PX: f32 = 28.0;
 pub const FOOTER_HEIGHT_PX: f32 = 44.0;
+/// The breathing space below the last row, where the panel footer used to be.
+/// Smaller than the footer it replaces — it is quiet space, not a reserved
+/// strip — and it exists because a fully transparent panel has no colour for
+/// a fade to resolve into.
+pub const CONTENT_BOTTOM_SPACE_PX: f32 = 14.0;
 /// The onboarding window's own width (`onboarding/view.rs`) — no longer the
 /// summon panel's, since the captain overrode the frozen design's two-width
 /// rule to one constant `PANEL_WIDTH_WITH_DETAIL_PX` (see that constant's own
@@ -801,16 +823,16 @@ pub const MODE_LIST_COLUMN_WIDTH_PX: f32 = 264.0;
 /// the row budget (`panel::Root::agent_grid_height`), so a 2×2 grid costs
 /// roughly three result rows while it is showing.
 pub const AGENT_TILE_HEIGHT_PX: f32 = 60.0;
-pub const AGENT_GRID_COLUMNS: usize = 2;
+pub const AGENT_GRID_COLUMNS: usize = 4;
 pub const AGENT_GRID_GAP_PX: f32 = 10.0;
 /// The strip's own padding: a little above, a little more below, so the grid
 /// reads as separated from the input row rather than stacked against it.
 pub const AGENT_GRID_PAD_TOP_PX: f32 = 14.0;
 pub const AGENT_GRID_PAD_BOTTOM_PX: f32 = 12.0;
-pub const AGENT_GRID_HEIGHT_PX: f32 = AGENT_TILE_HEIGHT_PX * 2.0
-    + AGENT_GRID_GAP_PX
-    + AGENT_GRID_PAD_TOP_PX
-    + AGENT_GRID_PAD_BOTTOM_PX;
+/// One strip, not two rows — the panel is tall enough now that the grid does
+/// not need to be, and four across keeps it a single glance.
+pub const AGENT_GRID_HEIGHT_PX: f32 =
+    AGENT_TILE_HEIGHT_PX + AGENT_GRID_PAD_TOP_PX + AGENT_GRID_PAD_BOTTOM_PX;
 /// The results container's own horizontal inset, and now the agent grid's
 /// too.
 ///
@@ -826,7 +848,7 @@ pub const CONTENT_INSET_PX: f32 = 8.0;
 /// Each tile's width: the panel's content width, less the gap, halved.
 pub const AGENT_TILE_WIDTH_PX: f32 = (PANEL_WIDTH_WITH_DETAIL_PX
     - CONTENT_INSET_PX * 2.0
-    - AGENT_GRID_GAP_PX)
+    - AGENT_GRID_GAP_PX * (AGENT_GRID_COLUMNS as f32 - 1.0))
     / AGENT_GRID_COLUMNS as f32;
 
 pub const ROW_ICON_PX: f32 = 22.0;
@@ -1247,6 +1269,7 @@ mod tests {
             border_hairline,
             border_hairline_strong,
             row_icon_socket_bg,
+            surface_tile,
             snap_guide,
             snap_guide_muted,
         } = THEMES[0].palette;
@@ -1255,8 +1278,8 @@ mod tests {
             surface_input, surface_selected, text_primary, text_secondary, text_tertiary,
             text_tertiary_on_selected, text_on_light, keycap_shell_bg, state_success,
             state_danger, state_success_border, state_danger_border, banner_danger_bg,
-            border_hairline, border_hairline_strong, row_icon_socket_bg, snap_guide,
-            snap_guide_muted,
+            border_hairline, border_hairline_strong, row_icon_socket_bg, surface_tile,
+            snap_guide, snap_guide_muted,
         ];
         assert_eq!(all.len(), PALETTE_TOKEN_COUNT);
     }

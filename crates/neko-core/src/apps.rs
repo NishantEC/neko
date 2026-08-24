@@ -77,6 +77,10 @@ pub struct AppEntry {
 /// per-launch frequency term. Recency dominates frequency: a thing you used
 /// once yesterday should usually beat a thing you used fifty times last
 /// year.
+/// How many apps an empty root query suggests. Short deliberately — see
+/// `AppsProvider::search`.
+pub const SUGGESTION_COUNT: usize = 5;
+
 fn recency_boost(last_launched_at_unix_ms: i64, launch_count: i64, now_unix_ms: i64) -> f32 {
     let age_ms = (now_unix_ms - last_launched_at_unix_ms).max(0) as f32;
     let age_days = age_ms / (1000.0 * 60.0 * 60.0 * 24.0);
@@ -113,9 +117,19 @@ impl Provider for AppsProvider {
     }
 
     fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate> {
+        let suggesting = query.trim().is_empty();
+        // **"Suggested" with nothing typed, "Applications" once there is.**
+        // The rows are the same rows; what differs is what they *are*. With
+        // no query the order is pure frecency (`recency_boost` over
+        // `last_launched_at` and `launch_count`, recorded by `activate`), so
+        // the list is a suggestion — "what you reach for" — rather than a
+        // set of matches. Once something is typed it is an answer to that
+        // query, and calling it Applications is the honest label.
+        let section = if suggesting { "Suggested" } else { "Applications" };
         let apps = self.apps.read().unwrap();
         let recency = self.db.lock().unwrap().recency().unwrap_or_default();
-        apps.iter()
+        let mut scored: Vec<Candidate> = apps
+            .iter()
             .filter_map(|app| {
                 let mut score = fuzzy_score(query, &app.name)?;
                 if let Some(&(last, count)) = recency.get(&app.id) {
@@ -133,7 +147,7 @@ impl Provider for AppsProvider {
                         title: app.name.clone(),
                         subtitle: None,
                         icon,
-                        section_label: "Applications".to_string(),
+                        section_label: section.to_string(),
                         action_label: "Open  ↵".to_string(),
                         badge: None,
                         accessory: None,
@@ -144,7 +158,20 @@ impl Provider for AppsProvider {
                     },
                 })
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        if !suggesting {
+            return scored;
+        }
+        // **A suggestion list is short on purpose.** With nothing typed the
+        // ordering is pure frecency, so the tail is not "more suggestions",
+        // it is every app on the machine in a slightly arbitrary order —
+        // which is noise, not depth. Sorted here rather than left to
+        // `search::allocate` because the cap has to be applied to the *best*
+        // few, and allocate only ever sees what this returns.
+        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(SUGGESTION_COUNT);
+        scored
     }
 
     fn activate(&self, id: &str) -> Result<(), ProviderError> {
@@ -814,6 +841,14 @@ mod tests {
         assert_eq!(results[0].item.id, "a");
         assert_eq!(results[0].item.kind, "app");
         assert_eq!(results[0].item.section_label, "Applications");
+        // With nothing typed the same rows are a frecency-ranked suggestion,
+        // and say so.
+        let suggested = provider.search("", 0);
+        assert!(suggested.iter().all(|c| c.item.section_label == "Suggested"));
+        assert!(
+            suggested.len() <= SUGGESTION_COUNT,
+            "a suggestion list is short on purpose — the tail is every app on the machine, not more suggestions"
+        );
         assert_eq!(results[0].item.action_label, "Open  ↵");
     }
 
@@ -842,6 +877,45 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             path: PathBuf::from(format!("/Applications/{name}.app")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod suggestion_tests {
+    use super::*;
+    use crate::provider::Provider;
+
+    /// The cap must keep the *best* few, not the first few the index happens
+    /// to yield — otherwise "suggested" would mean "alphabetically early".
+    #[test]
+    fn an_empty_query_suggests_the_most_used_apps_not_an_arbitrary_slice() {
+        let db = crate::Db::open_in_memory().unwrap();
+        let apps: Vec<AppEntry> = (0..12)
+            .map(|i| AppEntry {
+                id: format!("/Applications/App{i}.app"),
+                name: format!("App{i}"),
+                path: std::path::PathBuf::from(format!("/Applications/App{i}.app")),
+            })
+            .collect();
+        // The last three are the ones actually launched, so they are the
+        // ones a suggestion list has to surface.
+        for i in [9, 10, 11] {
+            for _ in 0..5 {
+                db.record_launch(&format!("/Applications/App{i}.app"), 1_000_000 + i as i64).unwrap();
+            }
+        }
+        let provider = AppsProvider::new(
+            std::sync::Arc::new(std::sync::RwLock::new(apps)),
+            std::sync::Arc::new(std::sync::Mutex::new(db)),
+        );
+
+        let suggested = provider.search("", 2_000_000);
+        assert_eq!(suggested.len(), SUGGESTION_COUNT);
+        let ids: Vec<&str> = suggested.iter().map(|c| c.item.id.as_str()).collect();
+        for i in [9, 10, 11] {
+            let wanted = format!("/Applications/App{i}.app");
+            assert!(ids.contains(&wanted.as_str()), "a launched app must be suggested, got {ids:?}");
         }
     }
 }
