@@ -852,6 +852,27 @@ pub const SECTION_HEADER_HEIGHT_PX: f32 = 28.0;
 /// (`panel::render_content_area`). Shorter than a section header: it is a
 /// footnote about the list, not a division within it.
 pub const TRUNCATION_CUE_HEIGHT_PX: f32 = 22.0;
+
+/// The family a `SearchItem::preview` renders in.
+///
+/// **`Menlo`, not `SF Mono`** — and the difference was invisible until it
+/// was photographed. `SF Mono` ships with Xcode and Terminal.app rather
+/// than with macOS, and is genuinely absent from this machine
+/// (`/System/Library/Fonts` has `Menlo.ttc` and `Monaco.ttf`; there is no
+/// SF Mono anywhere). gpui resolves an unknown family by **falling back to
+/// the system default without an error**, so the first attempt here looked
+/// exactly like "monospace did not work" — a proportional `ls -la` with
+/// columns that did not line up.
+///
+/// Menlo is a core system font, not a supplemental one, so it is present on
+/// every machine this app can run on. Terminal output is column-aligned and
+/// unreadable proportionally.
+pub const MONOSPACE_FAMILY: &str = "Menlo";
+
+/// Smaller than the 13px a prose preview uses: a terminal line is 80
+/// columns, and at 13px monospace that wraps inside the detail pane, which
+/// undoes the alignment the monospace family is there to preserve.
+pub const PREVIEW_MONOSPACE_SIZE_PX: f32 = 11.0;
 pub const FOOTER_HEIGHT_PX: f32 = 44.0;
 /// The breathing space below the last row, where the panel footer used to be.
 /// Smaller than the footer it replaces — it is quiet space, not a reserved

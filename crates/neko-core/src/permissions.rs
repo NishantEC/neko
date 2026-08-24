@@ -322,7 +322,11 @@ impl Provider for PermissionsProvider {
                         kind: "permission".to_string(),
                         title: headline,
                         subtitle: p.detail.clone(),
-                        icon: Icon::Glyph(Glyph::AgentLive),
+                        // **`Agent`, not `AgentLive`.** A blocked agent is
+                        // stopped — that is the entire reason the row
+                        // exists — and the live glyph carries a presence dot
+                        // that would say the opposite.
+                        icon: Icon::Glyph(Glyph::Agent),
                         section_label: "Needs you".to_string(),
                         action_label: "Approve  \u{21b5}".to_string(),
                         badge: Some(p.kind.to_uppercase()),
@@ -367,7 +371,10 @@ impl PermissionsProvider {
             .ok_or_else(|| ProviderError("that permission row is malformed".to_string()))?;
         let client = self
             .client()
-            .ok_or_else(|| ProviderError("Paseo isn't running any more".to_string()))?;
+            // One wording for one condition: `McpError::NotRunning` already
+            // says this, and a second phrasing of the same fact is the
+            // "Can't reach" / "Couldn't reach" split all over again.
+            .ok_or_else(|| ProviderError(McpError::NotRunning.to_string()))?;
         let result = client.call(
             "respond_to_permission",
             json!({ "agentId": agent_id, "requestId": request_id, "response": response }),

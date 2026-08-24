@@ -2572,8 +2572,23 @@ impl Root {
             .bg(theme::active().surface_input)
             .border_1()
             .border_color(theme::active().border_hairline)
-            .text_size(px(13.))
             .text_color(theme::active().text_primary)
+            // **A real preview is monospace; the clipboard's is not.**
+            // `terminals::capture_text` goes to the trouble of substituting
+            // rather than deleting a glyph so that column alignment
+            // survives — and then rendering it in a proportional font would
+            // throw that away at the last step, turning every table and
+            // tree view back into ragged text. Gated on the field rather
+            // than applied to the pane, because a clipboard entry is prose
+            // and reads worse in monospace.
+            .map(|el| {
+                if item.preview.is_some() {
+                    el.font_family(theme::MONOSPACE_FAMILY)
+                        .text_size(px(theme::PREVIEW_MONOSPACE_SIZE_PX))
+                } else {
+                    el.text_size(px(13.))
+                }
+            })
             // **`preview` when the provider offers one, `id` otherwise.**
             // The clipboard mode predates the field and works only because a
             // clipboard entry's id *is* its content; nothing else has that
