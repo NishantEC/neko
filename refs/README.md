@@ -1,6 +1,6 @@
 # Reference clones — read-only
 
-`refs/` holds six third-party repositories, cloned here for reading. They are
+`refs/` holds seven third-party repositories, cloned here for reading. They are
 not part of neko's build, are not vendored into it, and are not committed —
 `.gitignore` keeps everything in this directory out of the repository except
 this file. Only this README is tracked, because what it records is a rule, not
@@ -27,6 +27,7 @@ attributed exception.
 | `waku` (egoist/waku) | **GPL-3.0** | **forbidden — never copy a line.** Copyleft would infect neko |
 | `codux` (duxweb/codux) | **GPL-3.0** | **forbidden — never copy a line.** Copyleft would infect neko |
 | `agent-sessions` (jazzyalex/agent-sessions) | MIT (verified from its own `LICENSE`, 2026-08-22) | permitted with attribution — inspiration only. Swift/AppKit, so nothing is copyable in practice anyway |
+| `paseo` (getpaseo/paseo) | **AGPL-3.0** (verified from its own `LICENSE`, 2026-08-24) | **forbidden — never copy a line.** Stricter than the two GPL entries below: AGPL's copyleft reaches *network use*, not only distribution |
 
 The two GPL-3.0 entries are the reason this file exists. neko's own source is
 MIT end to end and is meant to stay that way; a copied line from `waku` or
@@ -61,3 +62,17 @@ These are shallow clones (`--depth 1`) placed by hand. Nothing in the build
 looks for them, so a missing or stale `refs/` breaks nothing; re-clone whichever
 one you need to read. If you add a sixth, add its licence row to the table
 above before you read a line of it.
+
+## A note on `paseo`, because interop is not derivation
+
+neko talks to Paseo — it reads `~/.paseo/agents/*.json`, opens `paseo://` deep
+links, and could call the daemon's local HTTP API. **None of that creates an
+AGPL obligation.** Copyleft attaches to code derived from the licensed work,
+not to a separate program that speaks to it over a documented interface, and
+AGPL's network clause governs offering *Paseo itself* over a network, not
+being a client of it.
+
+What would create one is copying source, or transliterating a non-trivial
+implementation out of this checkout into `neko-core`. So the standing rule
+applies here with more force than anywhere else in this table: read it to
+learn what the daemon exposes, then write neko's own client from scratch.
