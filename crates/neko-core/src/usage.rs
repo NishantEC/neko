@@ -192,15 +192,18 @@ pub struct UsageWindow {
     pub utilization: f32,
     /// Unix seconds. `None` for a window with no reset.
     pub resets_at: Option<i64>,
-    /// An extra labelled value worth showing beside the percentage — a
-    /// credit count, where the percentage alone hides the magnitude.
+    /// The qualifier shown beside the reading, when a percentage alone
+    /// hides the magnitude — 20% of 150 credits and 20% of 15,000 are very
+    /// different amounts of headroom. `None` falls back to the remaining
+    /// percentage, which is all a percentage-only window can say.
     pub detail: Option<UsageDetail>,
 }
 
+/// Rendered as `"{value} {label}"` — `"120 of 150", "credits left"`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageDetail {
-    pub label: String,
     pub value: String,
+    pub label: String,
 }
 
 /// What one vendor has to say.
@@ -209,9 +212,10 @@ pub enum Reading {
     Windows(Vec<UsageWindow>),
     /// A true statement with no number behind it — an account with no
     /// credit allocation, a plan with no metered window. Renders as an
-    /// ordinary row, because a bar at 0% would be a claim about quota this
-    /// answer cannot make.
-    Note(String),
+    /// ordinary row, because a meter at 0% would be a claim about quota
+    /// this answer cannot make. `title` names the same thing a window
+    /// would, so the left column still lines up with the meters above it.
+    Note { title: String, detail: String },
     /// Signed out, or the token expired — actionable, unlike a generic error.
     NeedsAuth,
     Failed(String),
@@ -462,7 +466,10 @@ pub fn parse_codex(body: &str) -> Reading {
         });
     }
     if windows.is_empty() {
-        return Reading::Note("No metered limit on this plan".to_string());
+        return Reading::Note {
+            title: "Rate limits".to_string(),
+            detail: "no metered limit on this plan".to_string(),
+        };
     }
     Reading::Windows(windows)
 }
@@ -498,7 +505,10 @@ pub fn parse_grok(body: &str) -> Reading {
         return Reading::Failed("no credit balance in the billing response".to_string());
     };
     if limit <= 0.0 {
-        return Reading::Note("No credit allocation on this account".to_string());
+        return Reading::Note {
+            title: "Monthly credits".to_string(),
+            detail: "no allocation on this account".to_string(),
+        };
     }
     Reading::Windows(vec![UsageWindow {
         id: "monthly_credits".to_string(),
@@ -509,8 +519,8 @@ pub fn parse_grok(body: &str) -> Reading {
             .and_then(serde_json::Value::as_str)
             .and_then(epoch_from_rfc3339),
         detail: Some(UsageDetail {
-            label: "Credits".to_string(),
-            value: format!("{used:.0} of {limit:.0}"),
+            value: format!("{:.0} of {limit:.0}", limit - used),
+            label: "credits left".to_string(),
         }),
     }])
 }
@@ -681,17 +691,22 @@ pub fn rows_for(readings: &[VendorUsage], now_unix_ms: i64) -> Vec<Row> {
             Reading::Windows(windows) => {
                 for w in windows {
                     let used = w.utilization.clamp(0.0, 100.0);
-                    let mut stats = vec![MeterStat {
-                        label: "Used".to_string(),
-                        value: format!("{used:.0}%"),
-                    }];
-                    stats.push(match &w.detail {
-                        Some(d) => MeterStat { label: d.label.clone(), value: d.value.clone() },
-                        None => MeterStat {
-                            label: "Remaining".to_string(),
-                            value: format!("{:.0}%", 100.0 - used),
+                    // The reading leads, the qualifier follows —
+                    // `panel::render_meter` colours the first and mutes the
+                    // rest. Headroom is what the pane is opened to ask, so
+                    // it is always the qualifier rather than an omission.
+                    let stats = vec![
+                        MeterStat { value: format!("{used:.0}%"), label: "used".to_string() },
+                        match &w.detail {
+                            Some(d) => {
+                                MeterStat { value: d.value.clone(), label: d.label.clone() }
+                            }
+                            None => MeterStat {
+                                value: format!("{:.0}%", 100.0 - used),
+                                label: "left".to_string(),
+                            },
                         },
-                    });
+                    ];
                     push(
                         &w.id,
                         w.label.clone(),
@@ -700,7 +715,9 @@ pub fn rows_for(readings: &[VendorUsage], now_unix_ms: i64) -> Vec<Row> {
                     );
                 }
             }
-            Reading::Note(note) => push("note", note.clone(), None, None),
+            Reading::Note { title, detail } => {
+                push("note", title.clone(), Some(detail.clone()), None)
+            }
             Reading::NeedsAuth => push(
                 "needs-auth",
                 format!("{} is signed out", vendor.name()),
@@ -819,7 +836,9 @@ mod tests {
         assert_eq!(w[0].utilization, 20.0);
         // The percentage alone hides the magnitude — 20% of 150 and 20% of
         // 15000 are very different amounts of headroom.
-        assert_eq!(w[0].detail.as_ref().unwrap().value, "30 of 150");
+        // Headroom, not consumption: "how much is left" is the question
+        // the pane is opened to ask.
+        assert_eq!(w[0].detail.as_ref().unwrap().value, "120 of 150");
     }
 
     #[test]
@@ -827,14 +846,14 @@ mod tests {
         // Exactly what this machine's own account reports. Zero of zero is
         // not "0% used"; an empty bar and a full one would both be lies.
         let body = r#"{"config":{"monthlyLimit":{"val":0},"used":{"val":0}}}"#;
-        assert!(matches!(parse_grok(body), Reading::Note(_)));
+        assert!(matches!(parse_grok(body), Reading::Note { .. }));
     }
 
     #[test]
     fn a_response_with_nothing_applicable_says_so_rather_than_showing_an_empty_pane() {
         assert!(matches!(parse_claude(r#"{"five_hour": null}"#), Reading::Failed(_)));
         assert!(matches!(parse_claude("garbage"), Reading::Failed(_)));
-        assert!(matches!(parse_codex(r#"{"rate_limit":null}"#), Reading::Note(_)));
+        assert!(matches!(parse_codex(r#"{"rate_limit":null}"#), Reading::Note { .. }));
         assert!(matches!(parse_grok("{}"), Reading::Failed(_)));
     }
 
@@ -895,8 +914,8 @@ mod tests {
         assert_eq!(rows[0].group.as_deref(), Some("Claude Code"));
         assert_eq!(rows[1].group.as_deref(), Some("Codex"));
         let stats = &rows[0].meter.as_ref().unwrap().stats;
-        assert_eq!(stats[0].value, "68%");
-        assert_eq!(stats[1].value, "32%");
+        assert_eq!((stats[0].value.as_str(), stats[0].label.as_str()), ("68%", "used"));
+        assert_eq!((stats[1].value.as_str(), stats[1].label.as_str()), ("32%", "left"));
     }
 
     #[test]
@@ -904,7 +923,11 @@ mod tests {
         // A card with an empty bar would read as "0% used", which is a
         // claim about quota none of these states can make.
         for reading in
-            [Reading::Note("no allocation".into()), Reading::NeedsAuth, Reading::Failed("x".into())]
+            [
+                Reading::Note { title: "Monthly credits".into(), detail: "none".into() },
+                Reading::NeedsAuth,
+                Reading::Failed("x".into()),
+            ]
         {
             let rows = rows_for(&[VendorUsage { vendor: Vendor::Grok, reading }], NOW_MS);
             assert_eq!(rows.len(), 1);

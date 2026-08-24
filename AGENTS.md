@@ -2482,35 +2482,61 @@ lines there.
 
 **`SearchItem::meter` is the render half, and it is a wire-vocabulary
 addition rather than a client-side special case.** A row carrying a `Meter`
-(a `0..=1` fraction plus labelled stats) renders as a headline number over a
-bar instead of the single-line `render_row` treatment. Same bounded-
-vocabulary rule as `Icon`/`Glyph`: the provider supplies numbers and labels,
-the client owns entirely what a meter looks like. Deliberately **not**
+(a `0..=1` fraction plus labelled stats) renders as a two-column reading
+instead of the single-line `render_row` treatment. Same bounded-vocabulary
+rule as `Icon`/`Glyph`: the provider supplies numbers and labels, the client
+owns entirely what a meter looks like. Deliberately **not**
 `if kind == "usage"` in `panel.rs`, which is what "Provider abstraction"
 above exists to forbid — any provider with a quantity (a disk, a download)
-gets the same treatment free. **The first stat is the headline, the rest
-qualify it** — a vocabulary rule, not knowledge of who produced the row.
+gets the same treatment free.
 
-**No card.** A bordered, filled box around each reading turned a two-line
-fact into furniture and stacked several into a form. A meter is a different
-*shape* of row, not a different kind of surface: same `px_3` rail, same
-`surface_selected` pill, no border and no divider. Vendors separate with the
-mode list's existing `group_label` headers, which cost nothing new.
+**The layout is StackAI's, and it came out of a Mobbin sweep rather than
+taste** (Wise "Spending limits", GitHub Copilot iOS "Usage", StackAI
+"Usage", Monzo, Glide, Firecrawl). Six read-only quota screens converged on
+four things this originally got wrong: the qualifying note sits **directly
+under the title**, not stranded in a far-right column; **headroom** is
+stated, not just consumption ("how much is left" is the question the pane is
+opened to ask); the meter carries its numbers **beneath** it rather than
+beside the title; and **no card or border anywhere**. `render_meter` is
+title-plus-note on the left, meter-plus-numbers in a fixed
+`METER_COLUMN_WIDTH_PX` column on the right — fixed rather than a flex share
+so every reading's meter starts at the same x however long its title runs.
 
-**The colour ramp spans the track, not the fill, and it interpolates in
-HSL.** `state_success` at empty → `state_danger` at full, so a reading's
-colour means the same fraction however long the bar is; the fill ends at
-`theme::ramp(success, danger, fraction)`, which is arithmetically the same
-as clipping a track-wide gradient without needing a pixel width at build
-time. The headline takes the same colour, so number and bar cannot
-disagree. **The space is the point**: mixing those two tokens channel-wise
-in RGB passes through grey — the neutral theme's own midpoint is `#a5965c`,
-a dirty khaki — while interpolating hue the short way round sweeps green →
-lime → amber → red (`#c4d457` at the same midpoint). Two tests pin it
-across all seventeen themes: saturation never drops below either endpoint's,
-and the ramp lands exactly on the tokens at 0 and 1. Both endpoints are
-ordinary palette tokens, so **no palette token was added** —
-`PALETTE_TOKEN_COUNT` is still 23.
+- **Discrete ticks, not one continuous fill** (`METER_TICK_COUNT`, 32). They
+  give the eye something to count against, so two rows compare without
+  reading either number, and **each lit tick takes its own point on the
+  ramp**, which makes the ramp legible as a scale rather than a wash.
+- **The first stat is the reading, the rest qualify it** — the first takes
+  the ramp colour and leads, the others follow muted. Rendered
+  `"{value} {label}"`, so a provider writes `("13%", "used")` and
+  `("120 of 150", "credits left")`. A vocabulary rule, not knowledge of who
+  produced the row.
+- **`tnum` on every number in that column** (`panel::tabular_numerals`,
+  gpui's `FontFeatures`). Proportional digits are different widths, so a
+  column of percentages shifts under the eye each time the pane refreshes.
+- **A row with no number stays an ordinary row**, and `Reading::Note` still
+  carries a *title* so its left column lines up with the meters above it.
+
+**The colour ramp interpolates in OKLCH — the space this palette is already
+authored in — and two cheaper spaces were measured and rejected.**
+`theme::ramp(state_success, state_danger, fraction)`, so a reading's colour
+means the same fraction however wide the column is, every theme gets its own
+ramp, and **no palette token was added** (`PALETTE_TOKEN_COUNT` is still 23).
+
+| space | what it does to the neutral theme's own pair |
+| --- | --- |
+| RGB, channel-wise | `#a5965c` at half full — a dirty khaki; `tokyo-night` collapses to **3%** of its endpoints' chroma, which is grey |
+| HSL | hue is fine, lightness is not: bulges to OKLCH L `0.844` at 60% against `0.721`/`0.680` at the ends, so a meter shouts loudest where nothing is happening |
+| **OKLCH** | `0.721 → 0.680` monotonically; worst chroma across all seventeen themes is 0.755 of its endpoints |
+
+`oklch_to_srgb_u8` is no longer `#[cfg(test)]` — `ramp` runs it at paint
+time, which also pins the frozen palette table and the live meter colour to
+one conversion rather than two that can drift. Three tests hold the
+property: lightness never leaves the endpoints' range, chroma never drops
+below `RAMP_CHROMA_FLOOR` (0.70 — **not** 1.0, because sRGB cannot hold a
+saturated yellow at these lightnesses and clamping is the gamut's doing, not
+the interpolation's), and a **negative control** asserting the RGB mix this
+replaced would fail that same bound.
 
 **Still open**: Copilot and the four unverifiable vendors above, and anything
 on screen (no window-scoped capture was taken; the wire response and the
