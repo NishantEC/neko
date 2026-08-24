@@ -138,6 +138,10 @@ impl AppState {
             Box::new(neko_core::ask::AskProvider::new()),
             // The sixth: Paseo's supervised terminals.
             Box::new(neko_core::terminals::TerminalsProvider::new()),
+            // The seventh: the same agents the root list shows, but with
+            // Enter meaning "send this prompt" rather than "open it in
+            // Paseo". One provider cannot have two primary actions.
+            Box::new(neko_core::agents::AgentControlProvider::new()),
         ];
         Self {
             db,

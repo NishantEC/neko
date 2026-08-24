@@ -28,6 +28,7 @@
 //! That is its own task, and it is a history feature rather than a live one.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -789,6 +790,244 @@ fn short_time(timestamp: &str) -> String {
         .unwrap_or_else(|| timestamp.to_string())
 }
 
+// ------------------------------------------------------- the Agents mode
+
+/// How long the per-provider mode list stays good. It is configuration, not
+/// state — it changes when somebody edits `~/.paseo/config.json`, not while
+/// you are looking at a list.
+const PROVIDER_MODES_TTL: Duration = Duration::from_secs(120);
+
+type ProviderModes = HashMap<String, Vec<(String, String)>>;
+
+static MODES: Mutex<Option<(Instant, ProviderModes)>> = Mutex::new(None);
+
+/// Each provider's session modes, as `(id, label)` — `plan` / "Plan Mode",
+/// `bypassPermissions` / "Bypass", and so on.
+///
+/// Read from the daemon rather than hard-coded: the modes belong to the
+/// provider, so a Codex agent and a Claude agent genuinely offer different
+/// ones, and a compiled-in list would be wrong for whichever provider was
+/// not used to write it.
+pub fn provider_modes(client: &crate::mcp::McpClient) -> ProviderModes {
+    if let Some((at, cached)) = MODES.lock().unwrap().as_ref()
+        && at.elapsed() < PROVIDER_MODES_TTL
+    {
+        return cached.clone();
+    }
+    let found = client
+        .call("list_providers", serde_json::json!({}))
+        .map(|value| parse_provider_modes(&value))
+        .unwrap_or_default();
+    *MODES.lock().unwrap() = Some((Instant::now(), found.clone()));
+    found
+}
+
+/// Reads `{"providers": [{id, modes: [{id, label}]}]}`.
+pub fn parse_provider_modes(value: &serde_json::Value) -> ProviderModes {
+    let mut found: ProviderModes = HashMap::new();
+    let Some(providers) = value.get("providers").and_then(serde_json::Value::as_array) else {
+        return found;
+    };
+    for provider in providers {
+        let Some(id) = provider.get("id").and_then(serde_json::Value::as_str) else { continue };
+        let modes: Vec<(String, String)> = provider
+            .get("modes")
+            .and_then(serde_json::Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|mode| {
+                        let mode_id = mode.get("id")?.as_str()?.to_string();
+                        let label = mode
+                            .get("label")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(&mode_id)
+                            .to_string();
+                        Some((mode_id, label))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // A provider with no modes contributes no menu entries at all,
+        // rather than an empty submenu.
+        if !modes.is_empty() {
+            found.insert(id.to_string(), modes);
+        }
+    }
+    found
+}
+
+/// The arguments for `send_agent_prompt`.
+///
+/// Split out from the call so the one property that matters can be tested
+/// without a network round trip or a real agent: **`background` is always
+/// `true`.** Paseo derives it as `Boolean(callerAgentId)`
+/// (`paseo-tools.ts:1881`) and neko is a top-level caller with no agent id,
+/// so the default is `false` — and `false` makes the tool `await
+/// waitForAgentWithTimeout` (`:1906`), holding the request until the agent
+/// finishes, which can be minutes. Read out of Paseo's own source rather
+/// than discovered by hanging.
+pub fn send_prompt_arguments(agent_id: &str, prompt: &str) -> serde_json::Value {
+    serde_json::json!({ "agentId": agent_id, "prompt": prompt, "background": true })
+}
+
+/// The `agent` mode's list: every agent, with the keyboard pointed at the
+/// thing you actually came to do — say something else to it.
+///
+/// Separate from [`AgentsProvider`] rather than a flag on it, because Enter
+/// means something different here. In the root list an agent row opens the
+/// session in Paseo; here it *sends a prompt*, and one provider cannot have
+/// two meanings for the primary action.
+pub struct AgentControlProvider {
+    root: Option<PathBuf>,
+}
+
+impl AgentControlProvider {
+    pub fn new() -> Self {
+        Self { root: agents_root() }
+    }
+
+    pub fn with_root(root: PathBuf) -> Self {
+        Self { root: Some(root) }
+    }
+
+    fn client(&self) -> Result<crate::mcp::McpClient, ProviderError> {
+        crate::mcp::McpClient::discover().map_err(|e| ProviderError(e.to_string()))
+    }
+}
+
+impl Default for AgentControlProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Provider for AgentControlProvider {
+    fn id(&self) -> &'static str {
+        "agent-control"
+    }
+
+    fn section_label(&self) -> &'static str {
+        "Agents"
+    }
+
+    /// **The query is ignored on purpose** — it is the prompt to send, not a
+    /// filter. Filtering on it would make the list shrink as you described
+    /// the task, and the row you were aiming at would move out from under
+    /// the selection mid-sentence. Same rule `new_agent` follows.
+    fn search(&self, _query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+        let Some(root) = &self.root else { return Vec::new() };
+        let names = read_workspace_names(root);
+        let modes = self.client().map(|c| provider_modes(&c)).unwrap_or_default();
+
+        let mut agents: Vec<PaseoAgent> =
+            read_agents(root).into_iter().filter(|a| !a.is_closed()).collect();
+        // Running first, then most recent — the same order the grid uses, and
+        // for the same reason: what is happening now outranks what happened
+        // last.
+        agents.sort_by(|a, b| {
+            b.is_running()
+                .cmp(&a.is_running())
+                .then_with(|| b.activity_at().unwrap_or("").cmp(a.activity_at().unwrap_or("")))
+        });
+
+        let count = agents.len();
+        agents
+            .iter()
+            .enumerate()
+            .map(|(rank, agent)| {
+                let title = agent.display_title(&names);
+                let subtitle = agent.subtitle(&names);
+                // **Every agent, whatever is typed.** The query is the prompt
+                // to send, not a filter — the same rule `new_agent` follows,
+                // and for the same reason: filtering on it would make the
+                // list shrink as you described the task.
+                let score = (count - rank) as f32;
+                let running = agent.is_running();
+                let mut actions: Vec<ItemAction> = modes
+                    .get(agent.provider.as_deref().unwrap_or("claude"))
+                    .map(|list| {
+                        list.iter()
+                            .map(|(mode_id, label)| ItemAction {
+                                id: format!("mode:{mode_id}"),
+                                label: format!("Set mode: {label}"),
+                                destructive: false,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                actions.extend(agent_actions(running));
+                Candidate {
+                    score,
+                    item: SearchItem {
+                        id: agent.id.clone(),
+                        kind: "agent-control".to_string(),
+                        title,
+                        subtitle,
+                        icon: Icon::Glyph(if running { Glyph::AgentLive } else { Glyph::Agent }),
+                        section_label: "Agents".to_string(),
+                        action_label: "Send  \u{21b5}".to_string(),
+                        badge: running.then(|| "LIVE".to_string()),
+                        accessory: None,
+                        enters_mode: None,
+                        group_label: None,
+                        actions,
+                        source: agent.provider_mark(),
+                        meter: None,
+                        keeps_open: false,
+                        preview: None,
+                    },
+                }
+            })
+            // An agent with no id cannot be prompted, cancelled or archived,
+            // so a row for one could only ever fail.
+            .filter(|c| !c.item.id.is_empty())
+            .collect()
+    }
+
+    fn activate(&self, _id: &str) -> Result<(), ProviderError> {
+        Err(ProviderError("type what to send first".to_string()))
+    }
+
+    /// Enter sends the search field's contents to the agent.
+    ///
+    /// **`background: true`, and it is not optional.** Paseo derives that
+    /// flag as `Boolean(callerAgentId)`, and neko is a top-level caller with
+    /// no agent id — so the default is `false`, which makes the tool *wait
+    /// for the agent to finish*. A prompt sent from the panel would hold a
+    /// daemon request thread for as long as the agent worked, which can be
+    /// minutes. Read out of `paseo-tools.ts` rather than discovered by
+    /// hanging.
+    fn activate_with_query(&self, id: &str, query: &str) -> Result<(), ProviderError> {
+        let prompt = query.trim();
+        if prompt.is_empty() {
+            return Err(ProviderError("type what to send first".to_string()));
+        }
+        self.client()?
+            .call("send_agent_prompt", send_prompt_arguments(id, prompt))
+            .map(|_| ())
+            .map_err(|e| ProviderError(e.to_string()))
+    }
+
+    fn perform_action(&self, id: &str, action: &str) -> Result<(), ProviderError> {
+        if let Some(mode_id) = action.strip_prefix("mode:") {
+            return self
+                .client()?
+                .call("set_agent_mode", serde_json::json!({ "agentId": id, "modeId": mode_id }))
+                .map(|_| ())
+                .map_err(|e| ProviderError(e.to_string()));
+        }
+        let tool = match action {
+            "cancel" => "cancel_agent",
+            "archive" => "archive_agent",
+            other => return Err(ProviderError(format!("no such action: {other}"))),
+        };
+        self.client()?
+            .call(tool, serde_json::json!({ "agentId": id }))
+            .map(|_| ())
+            .map_err(|e| ProviderError(e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1286,6 +1525,53 @@ mod tests {
         let item = provider.search("", 0).remove(0).item;
         assert_eq!(item.title, "feat/doctors-maps");
         assert_eq!(item.subtitle.as_deref(), Some("Care-Connect-AI/triage-fe"));
+    }
+
+
+    #[test]
+    fn a_prompt_is_always_sent_in_the_background() {
+        // The default is `false` for a top-level caller like neko, and
+        // `false` makes Paseo wait for the agent to *finish* before
+        // answering — a panel keystroke holding a request thread for
+        // minutes. This is the assertion that keeps that from creeping back.
+        let args = send_prompt_arguments("agent-1", "run the tests");
+        assert_eq!(args["background"], serde_json::json!(true));
+        assert_eq!(args["agentId"], serde_json::json!("agent-1"));
+        assert_eq!(args["prompt"], serde_json::json!("run the tests"));
+    }
+
+    #[test]
+    fn sending_nothing_is_refused_before_it_reaches_the_daemon() {
+        // The query *is* the prompt here, so an empty one is a mis-keyed
+        // Enter rather than a request.
+        let provider = AgentControlProvider::with_root(PathBuf::from("/nonexistent"));
+        assert!(provider.activate_with_query("a", "   ").is_err());
+        assert!(provider.activate("a").is_err());
+    }
+
+    #[test]
+    fn the_modes_offered_come_from_the_provider_that_owns_them() {
+        // Claude and Codex genuinely offer different session modes, so a
+        // compiled-in list would be wrong for whichever one it was not
+        // written against.
+        let value = serde_json::json!({"providers": [
+            {"id": "claude", "modes": [
+                {"id": "plan", "label": "Plan Mode"},
+                {"id": "bypassPermissions", "label": "Bypass"}
+            ]},
+            {"id": "codex", "modes": [{"id": "auto"}]},
+            {"id": "no-modes", "modes": []}
+        ]});
+        let parsed = parse_provider_modes(&value);
+        assert_eq!(parsed["claude"], vec![
+            ("plan".to_string(), "Plan Mode".to_string()),
+            ("bypassPermissions".to_string(), "Bypass".to_string()),
+        ]);
+        // A mode with no label falls back to its id rather than rendering
+        // an empty menu entry.
+        assert_eq!(parsed["codex"], vec![("auto".to_string(), "auto".to_string())]);
+        // A provider with no modes contributes no menu at all.
+        assert!(!parsed.contains_key("no-modes"));
     }
 
 }
