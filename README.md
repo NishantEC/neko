@@ -1,14 +1,15 @@
 # neko
 
-A hotkey-summoned launcher for macOS, written from scratch in Rust on
-[GPUI](https://gpui.rs). Press ⌥Space anywhere, type, press Enter.
+A hotkey-summoned launcher and agent control plane for macOS, written from
+scratch in Rust on [GPUI](https://gpui.rs). Press ⌥Space anywhere, type, press
+Enter.
 
 ![The neko panel, showing application, System Settings, command and clipboard
 results for one query](docs/screenshot.png)
 
 ## What it does
 
-One query searches five sources at once, each under its own section header:
+One query searches every source at once, each under its own section header:
 
 - **Applications** — every app Spotlight knows about, plus the ones on the
   sealed system volume that Spotlight does not index. Enter launches.
@@ -18,12 +19,39 @@ One query searches five sources at once, each under its own section header:
   and `~/Downloads`. Enter opens.
 - **System Settings panes** — "displays", "bluetooth", "sound". Enter opens
   that pane.
+- **Agents** — the coding agents running on this machine right now, as tiles
+  above the results.
+- **Needs you** — any agent stopped waiting for a permission. These lead the
+  list: Enter approves, ⌘K denies.
 - **Commands** — rows that open a mode inside the panel instead of launching
-  something. Two exist: Clipboard History and Themes.
+  something: Clipboard History, Themes, Agents, Schedules, Terminals, Usage,
+  New Agent, and Ask neko.
 
 ⌘K opens the actions menu for the selected row. Escape leaves a mode, then
 hides the panel. Seventeen themes ship built in, with live preview as you
 arrow through them.
+
+## Agents
+
+neko drives the agents [Paseo](https://paseo.sh) supervises, over its daemon's
+own MCP endpoint, so the things you would switch apps for are a keypress away:
+
+- **An agent blocked on a permission** leads the root list, and the Dock icon
+  badges the count even while the panel is hidden — so you find out without
+  looking.
+- **Agents** lists every session; Enter sends a follow-up prompt, ⌘K changes
+  its session mode or cancels the run.
+- **Schedules** shows what runs on a cron and when it next fires. Enter pauses
+  or resumes; running one now is behind ⌘K, because Enter is what a finger
+  presses on the way past a list.
+- **Terminals** shows what is open and what each last printed.
+- **Usage** reads your quota straight from each provider's own API — Claude
+  Code, Codex and Grok.
+- **Ask neko** takes a sentence. It proposes exactly one tool call, shows you
+  the call, and runs nothing until you press Enter again.
+
+All of it degrades to nothing if Paseo is not running; none of it is required
+for the launcher half to work.
 
 ## What it is not
 
@@ -32,8 +60,16 @@ arrow through them.
 - **Not a plugin host.** Result types are compiled in. The extension seam is
   the `Provider` trait, not WASM — see
   [docs/adding-a-provider.md](docs/adding-a-provider.md).
-- **Not networked.** Nothing leaves the machine. Search runs against a local
-  SQLite database and Spotlight's own index.
+- **Not a cloud app, but no longer entirely offline.** Searching is local:
+  SQLite and Spotlight's own index, with nothing leaving the machine. Three
+  features do make outbound requests, all of them to somewhere you are already
+  signed in, and none of them running unless you use it: **Usage** reads quota
+  from Anthropic, OpenAI and xAI; **Ask neko** sends your sentence and the
+  names of your agents to Anthropic's Messages API to plan a tool call; and
+  everything under **Agents** talks to Paseo's daemon on `127.0.0.1`.
+  Credentials are read from the Keychain and from the CLIs' own config files,
+  are never persisted by neko, and are passed to `curl` on stdin so they
+  cannot appear in `ps` output.
 - **Not distributable.** See the licence section below.
 
 ## Build and run
@@ -81,7 +117,8 @@ index, a thin client SDK, and the GPUI app. Read
 | Document | What it covers |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | Crates, the daemon/client split, the wire protocol, providers, ranking, modes, the window |
-| [docs/adding-a-provider.md](docs/adding-a-provider.md) | Adding a sixth result type |
+| [docs/adding-a-provider.md](docs/adding-a-provider.md) | Adding a result type through the `Provider` seam |
+| [docs/plan-agent-control-plane.md](docs/plan-agent-control-plane.md) | How the agent half was surveyed and built, including the two layers that turned out differently |
 | [docs/adding-a-theme.md](docs/adding-a-theme.md) | Adding an eighteenth theme |
 | `AGENTS.md` | The full engineering record: every decision, what was measured, and what was ruled out |
 | `docs/evidence/` | Reports and window-scoped screenshots behind each of those decisions |
