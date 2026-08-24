@@ -341,6 +341,7 @@ impl Provider for PermissionsProvider {
                         }],
                         source: None,
                         meter: None,
+                        keeps_open: false,
                     },
                 })
             })

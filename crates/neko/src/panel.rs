@@ -1093,7 +1093,15 @@ impl Root {
             mode.restore_theme = None;
         }
         let request = self.primary_activation_request(&item, cx);
-        self.perform_activation(request, true, cx);
+        // **A row that performs a *step* keeps the panel.** Every ordinary
+        // row means "do this and get out of my way", which is why hiding is
+        // the default — but a row that proposes something (`neko_core::ask`:
+        // type a sentence, read the tool call, press Enter again to run it)
+        // would be unusable if the first Enter dismissed the panel it is
+        // asking you to look at. This takes the path `⌘K` menu actions
+        // already take, which also re-runs the search — exactly what makes
+        // the proposal appear where the invitation was.
+        self.perform_activation(request, !item.keeps_open, cx);
     }
 
     /// The `Request::Activate` a row's primary action sends.
@@ -3294,6 +3302,7 @@ mod tests {
             actions: Vec::new(),
             source: None,
             meter: None,
+            keeps_open: false,
         }
     }
 
@@ -3697,6 +3706,7 @@ mod tests {
             actions: Vec::new(),
             source: None,
             meter: None,
+            keeps_open: false,
         }
     }
 
@@ -3958,6 +3968,7 @@ mod tests {
             actions: Vec::new(),
             source: None,
             meter: None,
+            keeps_open: false,
         }
     }
 
@@ -4051,6 +4062,7 @@ mod tests {
             actions: Vec::new(),
             source: None,
             meter: None,
+            keeps_open: false,
         }
     }
 

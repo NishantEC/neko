@@ -348,6 +348,7 @@ impl Provider for ClipboardProvider {
                         actions: clipboard_item_actions(),
                         source: entry.source_app.clone(),
                         meter: None,
+                        keeps_open: false,
                     },
                 })
             })

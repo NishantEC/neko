@@ -137,6 +137,7 @@ impl Provider for ThemesProvider {
                         actions: Vec::new(),
                         source: None,
                         meter: None,
+                        keeps_open: false,
                     },
                 })
             })

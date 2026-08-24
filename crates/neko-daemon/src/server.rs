@@ -132,6 +132,10 @@ impl AppState {
             // root-list query, and "0 4 * * *" matching a search for "4"
             // would be a surprise.
             Box::new(neko_core::schedules::SchedulesProvider::new()),
+            // The fifth: the planner. Mode-only and emphatically so — a
+            // provider that calls a model must never be reachable from an
+            // ordinary root-list keystroke.
+            Box::new(neko_core::ask::AskProvider::new()),
         ];
         Self {
             db,
@@ -768,6 +772,7 @@ mod tests {
                     actions: Vec::new(),
                     source: None,
                     meter: None,
+                    keeps_open: false,
                 },
             }]
         }

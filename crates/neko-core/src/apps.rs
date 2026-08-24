@@ -156,6 +156,7 @@ impl Provider for AppsProvider {
                         actions: Vec::new(),
                         source: None,
                         meter: None,
+                        keeps_open: false,
                     },
                 })
             })

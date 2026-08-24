@@ -130,6 +130,15 @@ pub const MODES: &[ModeChrome] = &[
     // query is ignored and there is no detail column to fill.
     // Paseo's own cron: agents that start themselves. Enter toggles pause
     // — see `neko_core::schedules` for why not "Run now".
+    // Say what you want; neko proposes one tool call and runs nothing until
+    // you confirm it. See `neko_core::ask`.
+    ModeChrome {
+        id: "ask",
+        provider_id: "ask",
+        title: "Ask neko",
+        placeholder: "Say what you want done\u{2026}",
+        has_detail: false,
+    },
     ModeChrome {
         id: "schedule",
         provider_id: "schedule",

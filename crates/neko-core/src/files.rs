@@ -457,6 +457,7 @@ fn build_candidate(score: f32, path: PathBuf, name: String) -> Candidate {
             actions: Vec::new(),
             source: None,
             meter: None,
+            keeps_open: false,
         },
     }
 }
