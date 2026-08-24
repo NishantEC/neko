@@ -18,6 +18,7 @@ pub mod launch;
 pub mod mcp;
 pub mod new_agent;
 pub mod onboarding;
+pub mod permissions;
 pub mod preferences;
 pub mod provider;
 pub mod search;
