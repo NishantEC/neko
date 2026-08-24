@@ -178,13 +178,21 @@ impl PaseoAgent {
         self.last_status.as_deref() == Some(STATUS_CLOSED)
     }
 
-    /// What the row is called. Paseo titles an agent from its first prompt,
-    /// which can be absent (never prompted) or a wall of text (a pasted
-    /// task), so neither is trusted raw: a missing title falls back to the
-    /// working directory's own name, which is how a person thinks about
-    /// "the agent in neko" anyway.
+    /// What the row is called.
+    ///
+    /// **Paseo's `title` is the first prompt, verbatim — there is no
+    /// generated title anywhere to prefer instead.** Checked before writing
+    /// this: an agent's JSON carries only `title` and an empty `labels`;
+    /// Paseo's own UI renders `agent.title` straight
+    /// (`command-center.tsx`); and Claude Code's transcripts hold no
+    /// `summary` record in any of the sixty checked. So the job here is not
+    /// picking a better field, it is making a prompt read like a title —
+    /// [`title_from_prompt`]. A missing one falls back to the working
+    /// directory's name, which is how a person thinks about "the agent in
+    /// neko" anyway.
     fn display_title(&self) -> String {
-        let from_title = self.title.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(first_line);
+        let from_title =
+            self.title.as_deref().map(title_from_prompt).filter(|t| !t.is_empty());
         if let Some(title) = from_title {
             return title;
         }
@@ -229,10 +237,74 @@ fn short_provider(raw: &str) -> String {
     raw.split('/').next().unwrap_or(raw).to_string()
 }
 
-/// A title is one row tall. A pasted multi-line task must not push a row's
-/// own height around, and the first line is the part that identifies it.
-fn first_line(raw: &str) -> String {
-    raw.lines().next().unwrap_or(raw).trim().to_string()
+/// Turns a raw first prompt into something title-shaped.
+///
+/// A title is one row tall, so a pasted multi-line task is cut to its first
+/// line — the part that identifies it — before anything else. Then the
+/// leading decoration people open a message with (`>` quotes, `#` headings,
+/// list bullets, the `\u{258e}` bar a quoted block starts with, stray
+/// backticks and quote marks) comes off, because none of it says anything
+/// about the task and all of it eats the front of a 150px tile.
+///
+/// A prompt that is *nothing but* a URL — a pull request, a Figma file — is
+/// the common case this exists for, and truncating it raw is the worst
+/// possible cut: `https://github.co…` spends the whole tile on the scheme
+/// and the host, the two parts every such link shares. [`compact_url`]
+/// keeps the identifying end instead.
+fn title_from_prompt(raw: &str) -> String {
+    let line = raw.lines().next().unwrap_or(raw).trim();
+    let line = line.trim_start_matches(|c: char| {
+        matches!(c, '\u{258e}' | '>' | '#' | '-' | '*' | '`' | '"' | '\'' | ' ' | '\t')
+    });
+    if let Some(compact) = compact_url(line) {
+        return compact;
+    }
+    // Collapse the runs a pasted prompt leaves behind, so one line of it
+    // does not render as a title with a hole in the middle.
+    line.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `https://github.com/HealthifyMe/athena/pull/4501` → `github.com/…/pull/4501`.
+///
+/// `None` unless the whole string is one URL: a prompt that merely mentions
+/// a link is still a sentence, and rewriting the link inside it would be
+/// rewriting what was typed.
+///
+/// Two rules, both about spending a narrow tile on the parts that identify
+/// the thing. **Opaque segments are dropped** — Figma and Notion put a
+/// 22-character key in the middle of every path, and it is the least
+/// informative run of characters in the URL. **Only the last two segments
+/// are kept**, elided with `…`, because the tail is what names the specific
+/// page (`pull/4501`, `Care-Comms`) while the head repeats across every
+/// link from the same place.
+fn compact_url(raw: &str) -> Option<String> {
+    let rest = raw.strip_prefix("https://").or_else(|| raw.strip_prefix("http://"))?;
+    if rest.split_whitespace().count() != 1 || rest.is_empty() {
+        return None;
+    }
+    // Query strings and fragments are routing, never a name.
+    let rest = rest.split(['?', '#']).next().unwrap_or(rest).trim_end_matches('/');
+    let mut parts = rest.split('/');
+    let host = parts.next()?.trim_start_matches("www.");
+    if host.is_empty() {
+        return None;
+    }
+    let segments: Vec<&str> = parts.filter(|s| !s.is_empty() && !is_opaque_id(s)).collect();
+    Some(match segments.len() {
+        0 => host.to_string(),
+        n if n <= 2 => format!("{host}/{}", segments.join("/")),
+        n => format!("{host}/\u{2026}/{}", segments[n - 2..].join("/")),
+    })
+}
+
+/// A long run of letters and digits with no word structure — a Figma file
+/// key, a Notion page id. Length alone would catch real words, and digits
+/// alone would catch a PR number, so it takes both.
+fn is_opaque_id(segment: &str) -> bool {
+    segment.len() >= 16
+        && segment.chars().all(|c| c.is_ascii_alphanumeric())
+        && segment.chars().any(|c| c.is_ascii_digit())
+        && segment.chars().any(|c| c.is_ascii_alphabetic())
 }
 
 fn tildify(path: &str) -> String {
@@ -836,4 +908,68 @@ mod tests {
         assert!(provider.search("", 0).is_empty());
         assert!(provider.search("claude", 0).is_empty());
     }
+
+    #[test]
+    fn a_bare_link_keeps_the_end_that_names_it() {
+        // Every one of these is a real title from this machine. Truncated
+        // raw they all read "https://github.co…" — the whole tile spent on
+        // the two parts every such link shares.
+        assert_eq!(
+            title_from_prompt("https://github.com/HealthifyMe/athena/pull/4501"),
+            "github.com/\u{2026}/pull/4501"
+        );
+        // Figma puts a 22-character file key in the middle of the path; it
+        // is the least informative run of characters in the URL.
+        assert_eq!(
+            title_from_prompt(
+                "https://www.figma.com/design/ihcBLzmf4sBM0KJCMo8ryO/Care-Comms"
+            ),
+            "figma.com/design/Care-Comms"
+        );
+        assert_eq!(title_from_prompt("https://example.com/"), "example.com");
+        assert_eq!(title_from_prompt("https://example.com/a/b?x=1#frag"), "example.com/a/b");
+    }
+
+    #[test]
+    fn a_prompt_that_merely_mentions_a_link_is_left_alone() {
+        // Rewriting the link inside a sentence would be rewriting what was
+        // typed. Only a prompt that is *nothing but* a URL is compacted.
+        let raw = "have a look at https://github.com/a/b/pull/1 when you get a chance";
+        assert_eq!(title_from_prompt(raw), raw);
+        assert_eq!(compact_url("ftp://example.com/x"), None);
+    }
+
+    #[test]
+    fn leading_decoration_comes_off_the_front_of_the_tile() {
+        // A real closed agent on this machine opened with a quoted block.
+        assert_eq!(
+            title_from_prompt("\u{258e} Heads-up: one small change needed"),
+            "Heads-up: one small change needed"
+        );
+        assert_eq!(title_from_prompt("> quoted request"), "quoted request");
+        assert_eq!(title_from_prompt("## Fix the parser"), "Fix the parser");
+        assert_eq!(title_from_prompt("- do the thing"), "do the thing");
+    }
+
+    #[test]
+    fn a_pasted_task_is_cut_to_one_line_with_its_gaps_closed() {
+        // A title is one row tall, and a pasted prompt's own spacing must
+        // not render as a title with a hole in the middle of it.
+        assert_eq!(
+            title_from_prompt("rebase   the\tbranch\n\nthen run the tests"),
+            "rebase the branch"
+        );
+        assert_eq!(title_from_prompt("   \n  "), "");
+    }
+
+    #[test]
+    fn an_opaque_key_is_dropped_but_a_real_word_or_a_number_is_not() {
+        assert!(is_opaque_id("ihcBLzmf4sBM0KJCMo8ryO"));
+        // A long word with no digits is a name, not a key.
+        assert!(!is_opaque_id("documentation-index"));
+        assert!(!is_opaque_id("internationalization"));
+        // A PR number is short and is the whole point of the link.
+        assert!(!is_opaque_id("4501"));
+    }
+
 }

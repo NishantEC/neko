@@ -2286,6 +2286,22 @@ own mark, and anything without a vendored logo falls back to its initial —
 placeholder. The line under the title is the **workspace**, which is what
 tells two agents running the same model apart.
 
+**A tile's title is Paseo's `title`, and that field is the first prompt
+verbatim — there is no generated title anywhere to prefer instead.** Checked
+before touching it: an agent's JSON carries only `title` and an empty
+`labels`; Paseo's own UI renders `agent.title` straight
+(`command-center.tsx:166`); and Claude Code's transcripts hold no `summary`
+record in any of the sixty examined. So `agents::title_from_prompt` does the
+only thing available — makes a prompt *read* like a title. One line, leading
+decoration stripped (`>`, `#`, bullets, the `▎` a quoted block opens with),
+whitespace runs collapsed. **A prompt that is nothing but a URL is the case
+it exists for**: truncated raw, `https://github.co…` spends a 150px tile on
+the scheme and host, the two parts every such link shares, so `compact_url`
+keeps the identifying tail instead — `github.com/…/pull/4501`,
+`figma.com/design/Care-Comms` (Figma's 22-character file key is dropped as
+an opaque id). A prompt that merely *mentions* a link is left alone;
+rewriting inside a sentence would be rewriting what was typed.
+
 **Brand marks are a separate vendored category from Lucide, and the tests say
 so.** gpui renders an SVG to an alpha mask, so a *filled* UI icon becomes a
 solid blob — but a brand mark **must** be filled, because it is a silhouette.
