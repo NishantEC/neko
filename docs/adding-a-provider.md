@@ -109,9 +109,12 @@ All defaulted. Implement one only when you have a real reason.
 
 **`defers_for(&self, query) -> bool`** — return `true` when answering *this
 query* will be slow enough that the other providers should not wait. The daemon
-then delivers your candidates in a second frame. `files::FileProvider` is the
-only override; it returns `false` below its minimum query length, because
-answering "nothing, instantly" in two frames is strictly worse than one.
+then delivers your candidates in a second frame. Two providers override it:
+`files::FileProvider` returns `false` below its minimum query length, and
+`permissions::PermissionsProvider` gates on whether the daemon is reachable
+*and* whether its cache is already warm. Both are the same rule — answering
+"nothing, instantly" in two frames is strictly worse than one, and a warm
+cache has no round trip to keep off the fast path.
 
 **`search_cancellable(&self, query, now, cancel)`** — implement when your
 search does interruptible I/O. The daemon always calls this, never `search`
@@ -123,19 +126,41 @@ query nobody wants any more still competes for CPU with the one they do.
 takes *what was typed* as an argument, rather than being a thing to open. The
 daemon always calls this, never `activate` directly; the default drops the
 query and delegates, so a provider that does not care implements nothing.
-`new_agent::NewAgentProvider` is the only override: its `id` is the working
-directory and the query is the prompt the agent gets. Note the rule that forces
+Three override it: `new_agent::NewAgentProvider` (its `id` is the working
+directory and the query is the prompt), `agents::AgentControlProvider` (the
+query is a follow-up prompt for an existing session), and `ask::AskProvider`
+(the query is the request being planned). Note the rule that forces
 this — keep `id` **stable across keystrokes**, because `panel::resolve_selection`
 follows the highlight by `(kind, id)`; an id that folds in the query resets the
 selection on every character typed.
 
 **`perform_action(&self, id, action_id)`** — implement when you populate
-`SearchItem::actions` with secondary `⌘K` menu entries. Only
-`ClipboardProvider` does. Mark an action `destructive: true` and the client
-requires a second Enter before running it.
+`SearchItem::actions` with secondary `⌘K` menu entries. Mark an action
+`destructive: true` and the client requires a second Enter before running it.
+
+Six providers do, and what belongs on Enter versus in the menu is the decision
+worth thinking about rather than the code:
+
+- `schedules` puts **Run now** in the menu and *pause* on Enter, because Enter
+  is what a finger presses on the way past a list and running a schedule
+  starts a real agent doing real work.
+- `terminals` puts **Kill** in the menu and *open the folder* on Enter, for the
+  same reason.
+- `permissions` puts **Deny** in the menu but does **not** mark it destructive:
+  denying is a normal answer, not a mis-key to guard against, and arming it
+  behind a second Enter would make the safer reply the slower one.
+
+Whatever you choose, `SearchItem::action_label` has to name it — it renders on
+the selected row, and for a row whose Enter is not obvious it is the only thing
+that says what will happen. `schedules` sets it per row (`"Pause ↵"` /
+`"Resume ↵"`) because a label naming the wrong direction is the one thing a
+person cannot recover from misreading.
 
 **`answers_empty_root_query(&self) -> bool`** — return `false` when your whole
 list only means something once somebody has asked for it (themes, preferences).
+Return `true` only for something that is genuinely *news*: `agents` (what is
+running) and `permissions` (what is blocked waiting for you) are the two that
+earn it, and both are self-limiting — a machine has a handful, not hundreds.
 It gates the *root list with nothing typed* only; a scoped search still gets
 your full list, which is how the Themes mode and the Preferences window load
 theirs.
@@ -192,6 +217,31 @@ detail pane's content is inherently mode-specific. You would write your own,
 next to `render_mode_detail` in `panel.rs`. `has_detail: false` costs nothing
 beyond the two steps above; the Themes mode chose it deliberately, because the
 live preview *is* the panel.
+
+## If your provider talks to Paseo
+
+Everything that acts on an agent, schedule or terminal goes through
+`neko_core::mcp` — one MCP-over-HTTP client against the local daemon. Do not
+add a second way to reach it.
+
+Four rules that came out of building six of these:
+
+- **Give it a `disabled()` constructor.** `AppState::new` delegates to
+  `with_test_providers`, which the whole daemon suite goes through, so an
+  always-live provider puts a real network round trip inside every hermetic
+  test. Same shape as `FileProvider::empty()`.
+- **Rediscover the daemon per call, do not hold it.** Paseo restarts
+  constantly; a provider that resolved once stays silently dead for the rest
+  of neko's process lifetime.
+- **Never cache a failure.** An error yields an empty result, and caching that
+  makes a daemon restart look like a feature disappearing for as long as the
+  TTL runs.
+- **Read the tool's schema before designing around it.** `list_terminals`
+  takes `all: true`; the plan for that mode assumed a fan-out over 22
+  workspaces, which would have been forty-four subprocesses per keystroke.
+  `send_agent_prompt` defaults to *waiting for the agent to finish* for a
+  top-level caller like neko, which would hold a request thread for minutes.
+  Both were in the schema.
 
 ## Testing it
 
