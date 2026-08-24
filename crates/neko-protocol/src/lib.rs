@@ -292,6 +292,16 @@ pub struct SearchItem {
     /// `hide_on_success: false` — rather than adding a second one.
     #[serde(default)]
     pub keeps_open: bool,
+    /// Many lines of text a mode's detail pane should show verbatim — a
+    /// terminal's captured output, and anything else too big for a row.
+    ///
+    /// The clipboard mode's detail pane predates this and renders
+    /// `SearchItem::id`, which works only because a clipboard entry's id
+    /// *is* its content. Nothing else has that coincidence, so a provider
+    /// with a preview to show now says so directly instead of smuggling it
+    /// through an identifier.
+    #[serde(default)]
+    pub preview: Option<String>,
 }
 
 /// A 0..=1 reading plus the labelled values that explain it. See

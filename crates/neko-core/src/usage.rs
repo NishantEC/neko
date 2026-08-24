@@ -646,6 +646,7 @@ impl Provider for UsageProvider {
                     source: None,
                     meter: row.meter,
                     keeps_open: false,
+                    preview: None,
                 },
             })
             .collect()

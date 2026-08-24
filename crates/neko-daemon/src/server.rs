@@ -136,6 +136,8 @@ impl AppState {
             // provider that calls a model must never be reachable from an
             // ordinary root-list keystroke.
             Box::new(neko_core::ask::AskProvider::new()),
+            // The sixth: Paseo's supervised terminals.
+            Box::new(neko_core::terminals::TerminalsProvider::new()),
         ];
         Self {
             db,
@@ -773,6 +775,7 @@ mod tests {
                     source: None,
                     meter: None,
                     keeps_open: false,
+                    preview: None,
                 },
             }]
         }

@@ -157,6 +157,7 @@ impl Provider for AppsProvider {
                         source: None,
                         meter: None,
                         keeps_open: false,
+                        preview: None,
                     },
                 })
             })
