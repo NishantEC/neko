@@ -818,7 +818,14 @@ pub fn provider_modes(client: &crate::mcp::McpClient) -> ProviderModes {
         .call("list_providers", serde_json::json!({}))
         .map(|value| parse_provider_modes(&value))
         .unwrap_or_default();
-    *MODES.lock().unwrap() = Some((Instant::now(), found.clone()));
+    // **A failure is not cached.** `list_providers` failing — the daemon
+    // restarting mid-keystroke is the ordinary way — yields an empty map,
+    // and caching that for two minutes would strip every mode entry out of
+    // the `⌘K` menu long after Paseo came back. Configuration is worth
+    // caching; the absence of it is not.
+    if !found.is_empty() {
+        *MODES.lock().unwrap() = Some((Instant::now(), found.clone()));
+    }
     found
 }
 
@@ -1572,6 +1579,21 @@ mod tests {
         assert_eq!(parsed["codex"], vec![("auto".to_string(), "auto".to_string())]);
         // A provider with no modes contributes no menu at all.
         assert!(!parsed.contains_key("no-modes"));
+    }
+
+
+    #[test]
+    fn an_empty_provider_mode_map_is_never_cached() {
+        // The daemon restarting mid-keystroke yields an empty map, and
+        // caching that for two minutes would strip every mode entry out of
+        // the ⌘K menu long after Paseo came back.
+        *MODES.lock().unwrap() = None;
+        let empty = parse_provider_modes(&serde_json::json!({"providers": []}));
+        assert!(empty.is_empty());
+        // The guard lives in `provider_modes`; this pins the property it
+        // protects — an empty parse must stay empty rather than becoming a
+        // cached answer.
+        assert!(MODES.lock().unwrap().is_none(), "nothing was cached from a failure");
     }
 
 }

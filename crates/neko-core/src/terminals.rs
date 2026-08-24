@@ -140,15 +140,24 @@ fn is_private_use(c: char) -> bool {
 /// A terminal id and the screen it last showed.
 type Capture = (String, String);
 
-static CAPTURES: Mutex<Option<(Instant, Vec<Capture>)>> = Mutex::new(None);
+/// Which terminals a cached capture set was taken from, so a set taken
+/// before one was killed is not handed back describing it.
+type CaptureKey = Vec<String>;
 
-fn cached_captures() -> Option<Vec<Capture>> {
+static CAPTURES: Mutex<Option<(Instant, CaptureKey, Vec<Capture>)>> = Mutex::new(None);
+
+/// **Keyed on the terminal ids, not only on the clock.** Two seconds is
+/// nothing to a person and plenty for a session to be opened or killed from
+/// Paseo's own window; a set keyed on time alone would hand back a preview
+/// for a terminal that is gone and none for one that just appeared. The kill
+/// path clears this too, but only for kills that went through neko.
+fn cached_captures(key: &CaptureKey) -> Option<Vec<Capture>> {
     CAPTURES
         .lock()
         .unwrap()
         .as_ref()
-        .filter(|(at, _)| at.elapsed() < CAPTURE_TTL)
-        .map(|(_, captures)| captures.clone())
+        .filter(|(at, cached_key, _)| at.elapsed() < CAPTURE_TTL && cached_key == key)
+        .map(|(_, _, captures)| captures.clone())
 }
 
 /// The `terminal` mode's list.
@@ -188,7 +197,8 @@ impl TerminalsProvider {
     /// terminals happen to be open. Same `thread::scope` shape `usage` uses
     /// to fan out across vendors.
     fn captures(&self, terminals: &[Terminal]) -> Vec<Capture> {
-        if let Some(cached) = cached_captures() {
+        let key: CaptureKey = terminals.iter().map(|t| t.id.clone()).collect();
+        if let Some(cached) = cached_captures(&key) {
             return cached;
         }
         let Ok(client) = self.client() else { return Vec::new() };
@@ -213,7 +223,7 @@ impl TerminalsProvider {
                 .collect();
             running.into_iter().filter_map(|h| h.join().ok()).collect()
         });
-        *CAPTURES.lock().unwrap() = Some((Instant::now(), fresh.clone()));
+        *CAPTURES.lock().unwrap() = Some((Instant::now(), key, fresh.clone()));
         fresh
     }
 }
@@ -408,4 +418,19 @@ mod tests {
         assert!(provider.search("", 0).is_empty());
         assert!(provider.perform_action("x", "nonsense").is_err());
     }
+
+    #[test]
+    fn a_capture_set_is_keyed_on_which_terminals_it_came_from() {
+        // Two seconds is nothing to a person and plenty for a session to be
+        // killed from Paseo's own window. Keyed on time alone, the pane
+        // would show a preview for a terminal that is gone.
+        let one: CaptureKey = vec!["a".to_string()];
+        let two: CaptureKey = vec!["a".to_string(), "b".to_string()];
+        *CAPTURES.lock().unwrap() =
+            Some((Instant::now(), one.clone(), vec![("a".to_string(), "hi".to_string())]));
+        assert!(cached_captures(&one).is_some(), "the same set is reused");
+        assert!(cached_captures(&two).is_none(), "a changed set is refetched");
+        *CAPTURES.lock().unwrap() = None;
+    }
+
 }
