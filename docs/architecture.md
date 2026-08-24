@@ -104,6 +104,19 @@ generic over provider:
 | --- | --- |
 | `Search { query, limit, provider }` | `provider: None` is the merged root list; `Some(id)` scopes to one provider — this is the mode seam |
 | `Activate { kind, id, action, query }` | `kind` routes to the provider; `action: None` is its primary action, `Some(id)` a secondary one; `query` is the search field's contents at the moment Enter was pressed, for the rows whose action takes an argument |
+
+`SearchItem` carries everything a row needs to render itself, and four of its
+fields exist because a surface needed something the row shape could not say:
+`meter` (a `0..=1` reading plus labelled stats — a usage window, a disk, a
+download), `keeps_open` (confirming this row is a *step*, so the panel stays
+and re-searches instead of getting out of the way), `preview` (many lines for
+a detail pane — a terminal's captured screen), and `enters_mode`. Each is
+additive with a serde default, and none of them is a provider-identity switch:
+`panel.rs` reads the field, never the `kind`.
+
+`Event::AttentionChanged { count }` is the one server-initiated message that
+is not about data a client asked for — it is how a hidden panel's Dock badge
+learns an agent is blocked.
 | `GetTheme` | There is deliberately no `SetTheme` — committing a theme is `Activate { kind: "theme", .. }` |
 
 ## Providers
@@ -125,7 +138,7 @@ pub trait Provider: Send + Sync {
 }
 ```
 
-Eight are registered in the root list, in `AppState::with_test_providers`
+Nine are registered in the root list, in `AppState::with_test_providers`
 (`crates/neko-daemon/src/server.rs`):
 
 | id | Source of truth | File |
@@ -138,10 +151,12 @@ Eight are registered in the root list, in `AppState::with_test_providers`
 | `theme` | `neko_protocol::BUILTIN_THEMES` | `crates/neko-core/src/themes.rs` |
 | `preference` | neko's own settings, in the same SQLite KV table | `crates/neko-core/src/preferences.rs` |
 | `agent` | Paseo's own agent documents on disk | `crates/neko-core/src/agents.rs` |
+| `permission` | Paseo's daemon over MCP — agents blocked waiting for you | `crates/neko-core/src/permissions.rs` |
 
-Two more are registered as **mode-only** providers (reachable by a scoped
-search or an activation, never by a root-list query): `folder-scope`
-(`preferences.rs`) and `new-agent` (`new_agent.rs`).
+Seven more are **mode-only** (reachable by a scoped search or an activation,
+never by a root-list query): `folder-scope` (`preferences.rs`), `new-agent`
+(`new_agent.rs`), `usage` (`usage.rs`), `schedule` (`schedules.rs`), `ask`
+(`ask.rs`), `terminal` (`terminals.rs`) and `agent-control` (`agents.rs`).
 
 **The panel knows nothing about any of them.** `crates/neko/src/panel.rs` has
 no `match` on provider identity anywhere. Everything a row needs to render —
@@ -241,12 +256,16 @@ typed before entering, verbatim.
 
 **Modes do not nest**, and `panel::Root::active_mode` is a single `Option`.
 
-Three exist: Clipboard History (a detail pane, list column 264pt), Themes (no
-detail pane — the preview *is* the panel, so a second column would take 496pt
-away from the thing being previewed), and New Agent.
+Eight exist: Clipboard History and Terminals (both with a detail pane, list
+column 264pt), Themes (no detail pane — the preview *is* the panel, so a second
+column would take 496pt away from the thing being previewed), New Agent,
+Agents, Schedules, Usage, and Ask neko.
 
-**New Agent is the one mode where the query is not a filter.** What is typed is
-the task the agent is given; the rows are directories to start it in. That
+**Two modes treat the query as a payload rather than a filter**: New Agent,
+where what is typed is the task and the rows are directories to start it in;
+and Agents, where it is the prompt to send to the selected session. Filtering
+in either would shrink the list as you described the task and move the row out
+from under the selection mid-sentence. That
 needed no new mode machinery — a mode has always been "one provider's own list,
 scoped by `Request::Search { provider }`", and a provider may ignore the query
 when ranking. It did need one additive wire field, `Request::Activate`'s
@@ -277,7 +296,51 @@ The `⌘K` actions menu is populated from the selected row's
 round-trip to open it. A destructive action needs a second Enter to run;
 moving the selection disarms it.
 
-## Agents
+## The agent control plane
+
+neko is a launcher and an agent control plane. `docs/plan-agent-control-plane.md`
+is the plan it was built to; this is the shape that came out.
+
+**Everything that *acts* goes through `neko_core::mcp`.** Paseo's daemon
+exposes its whole agent surface at `POST /mcp/agents` as Model Context
+Protocol over HTTP — 61 tools — and that one client is the only way anything
+here reaches it. The endpoint comes from `~/.paseo/paseo.pid`'s `listen`
+field, parsed as a socket address so a stale pid file fails discovery rather
+than aiming a request somewhere unexpected. The client is stateless: it
+re-initializes per call and holds nothing, because the daemon restarts
+constantly during development and a client caching a dead session is silently
+wrong until something notices.
+
+**Reads and writes deliberately use different sources.** Listing agents comes
+off disk; acting on one goes over MCP. Seeing your agents should not stop
+working because a daemon restarted.
+
+| surface | what it does | file |
+| --- | --- | --- |
+| **Needs you** | Agents blocked on a permission. Leads the root list, Enter approves, `⌘K` denies. | `permissions.rs` |
+| Agents (root) | What is running, as tiles | `agents.rs` |
+| Agents (mode) | Enter sends a follow-up prompt; `⌘K` sets the session mode | `agents.rs` |
+| New Agent | Start one in a known project | `new_agent.rs` |
+| Schedules | Paseo's cron. Enter pauses — never runs | `schedules.rs` |
+| Terminals | What is open and what it last said | `terminals.rs` |
+| Usage | Quota, read from each vendor's own API | `usage.rs` |
+| **Ask neko** | A sentence becomes one tool call you confirm | `ask.rs` |
+
+**The permission inbox is the reason the rest exists.** An agent that hits
+something it may not do stops and waits, and the only way to notice used to be
+switching to Paseo. `neko-daemon` polls for blocked agents every five seconds,
+which both keeps the panel's answer warm (so those rows land in its *first*
+frame) and drives `Event::AttentionChanged` → a **Dock tile badge**, the one
+ambient surface neko has. Notifications need a bundle identifier and neko is a
+bare Mach-O; gpui's menu-bar API is dead code.
+
+**Ask neko proposes; it never acts alone.** Planning and running are separate
+keystrokes with the exact call rendered between them — which is what
+`SearchItem::keeps_open` exists for — and the model may only choose from a
+fixed catalog of eight verbs, so nothing becomes possible through it that was
+not already possible by hand.
+
+## Agents on disk
 
 `neko_core::agents` reads Paseo's own on-disk agent documents
 (`~/.paseo/agents/<workspace>/<id>.json`) — no subprocess, no network, no MCP.
