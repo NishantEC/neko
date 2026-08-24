@@ -2445,27 +2445,34 @@ here is neko's own, which matters more for that clone than any other in
 
 **`SearchItem::meter` is the render half, and it is a wire-vocabulary
 addition rather than a client-side special case.** A row carrying a `Meter`
-(a `0..=1` fraction plus labelled stat columns) renders as a card — title,
-the note qualifying it, a bar, then the values — instead of the single-line
-`render_row` treatment. Same bounded-vocabulary rule as `Icon`/`Glyph`: the
-provider supplies numbers and labels, the client owns entirely what a meter
-looks like. Deliberately **not** `if kind == "usage"` in `panel.rs`, which is
-what "Provider abstraction" above exists to forbid — any provider with a
-quantity (a disk, a download) gets the card for free.
+(a `0..=1` fraction plus labelled stats) renders as a headline number over a
+bar instead of the single-line `render_row` treatment. Same bounded-
+vocabulary rule as `Icon`/`Glyph`: the provider supplies numbers and labels,
+the client owns entirely what a meter looks like. Deliberately **not**
+`if kind == "usage"` in `panel.rs`, which is what "Provider abstraction"
+above exists to forbid — any provider with a quantity (a disk, a download)
+gets the same treatment free. **The first stat is the headline, the rest
+qualify it** — a vocabulary rule, not knowledge of who produced the row.
 
-**The bar's gradient runs across the whole track, not across the fill.**
-`state_success` at empty → `state_danger` at full, so a bar's colour means
-the same thing at the same fraction whatever its length. Implemented by
-ending the fill's own gradient at `theme::mix(success, danger, fraction)` —
-arithmetically identical to clipping a track-wide ramp, and it needs no
-pixel width at build time (the mode list scrolls and its width varies with
-`has_detail`). Both endpoints are ordinary palette tokens, so all seventeen
-themes get their own ramp and **no palette token was added** —
-`PALETTE_TOKEN_COUNT` is still 23. Selection on a card is a brighter
-*border*, not a fill: the card already carries `surface_tile`, so a second
-fill on top of it is the barely-visible step
-`every_theme_has_a_visible_selection_step_away_from_its_panel` exists to
-catch one layer down.
+**No card.** A bordered, filled box around each reading turned a two-line
+fact into furniture and stacked two of them into a form. A meter is a
+different *shape* of row, not a different kind of surface: same `px_3` rail,
+same `surface_selected` pill, no border and no divider.
+
+**The colour ramp spans the track, not the fill, and it interpolates in
+HSL.** `state_success` at empty → `state_danger` at full, so a reading's
+colour means the same fraction however long the bar is; the fill ends at
+`theme::ramp(success, danger, fraction)`, which is arithmetically the same
+as clipping a track-wide gradient without needing a pixel width at build
+time. The headline takes the same colour, so number and bar cannot
+disagree. **The space is the point**: mixing those two tokens channel-wise
+in RGB passes through grey — the neutral theme's own midpoint is `#a5965c`,
+a dirty khaki — while interpolating hue the short way round sweeps green →
+lime → amber → red (`#c4d457` at the same midpoint). Two tests pin it
+across all seventeen themes: saturation never drops below either endpoint's,
+and the ramp lands exactly on the tokens at 0 and 1. Both endpoints are
+ordinary palette tokens, so **no palette token was added** —
+`PALETTE_TOKEN_COUNT` is still 23.
 
 **Still open**: the other providers' quota (codex, copilot, cursor, grok,
 kimi, minimax, zai — 80–340 lines each in Paseo's own fetchers, each a

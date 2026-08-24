@@ -2133,53 +2133,54 @@ impl Root {
     }
 
     /// A row that is *about a quantity* rather than a thing to open —
-    /// `SearchItem::meter`. Renders as a card (title, the note that
-    /// qualifies it, a bar, then the labelled values) instead of the
-    /// single-line `render_row` treatment, because a quota window read as
-    /// a list row is a list of things to press Enter on and none of them
-    /// do anything: the number *is* the content, and a 14px title with a
-    /// grey "10%" hanging off the right edge is the least legible place to
-    /// put it.
+    /// `SearchItem::meter`. The number is the entire content, so it is set
+    /// as the headline and the bar sits under it; rendering this as an
+    /// ordinary row put the one thing worth reading in the grey accessory
+    /// slot at the far right edge.
     ///
-    /// **The gradient runs across the whole track, and the fill shows the
-    /// part of it that has been reached.** `state_success` at empty →
-    /// `state_danger` at full, so a bar's colour means the same thing at
-    /// the same fraction regardless of how long it happens to be. That is
-    /// done by ending the fill's own gradient at
-    /// `mix(success, danger, fraction)` — arithmetically identical to
-    /// clipping a track-wide ramp, without needing to know the track's
-    /// pixel width at build time (this list is scrollable and its width
-    /// varies with `has_detail`). Both endpoints are ordinary palette
-    /// tokens, so every theme gets its own ramp for free and no new token
-    /// was added.
-    fn render_meter_card(&self, idx: usize, item: &SearchItem, meter: &Meter) -> AnyElement {
+    /// **No card.** A bordered, filled box around every reading turned a
+    /// two-line fact into furniture, and stacked two of them into a form.
+    /// This is the panel's own surface with the same `px_3` rail and the
+    /// same `surface_selected` pill every other row uses — a different
+    /// *shape* of row, not a different kind of surface.
+    ///
+    /// **The colour ramp spans the track, not the fill.** `state_success`
+    /// at empty → `state_danger` at full, so a reading's colour means the
+    /// same thing at the same fraction however long the bar is; the fill
+    /// simply ends at whatever `theme::ramp` gives for `fraction`, which
+    /// is arithmetically the same as clipping a track-wide gradient and
+    /// needs no pixel width at build time. The headline takes that colour
+    /// too, so the number and the bar can never disagree. Both endpoints
+    /// are ordinary palette tokens, so all seventeen themes get their own
+    /// ramp and no palette token was added for this.
+    ///
+    /// **The first stat is the headline; the rest qualify it.** That is a
+    /// vocabulary rule, not knowledge of who produced the row — a provider
+    /// orders `stats` by what it wants read first.
+    fn render_meter(&self, idx: usize, item: &SearchItem, meter: &Meter) -> AnyElement {
         let selected = self.row_is_highlighted(idx);
         let fraction = meter.fraction.clamp(0.0, 1.0);
         let empty = theme::active().state_success;
-        let reached = theme::mix(empty, theme::active().state_danger, fraction);
+        let full = theme::active().state_danger;
+        let reached = theme::ramp(empty, full, fraction);
+
+        let (headline, qualifiers) = meter.stats.split_first().map_or((None, &[][..]), |(h, r)| (Some(h), r));
+        let trailing = qualifiers
+            .iter()
+            .map(|s| format!("{} {}", s.label, s.value))
+            .collect::<Vec<_>>()
+            .join("  ·  ");
 
         div()
-            .id(("meter-card", idx))
+            .id(("meter", idx))
             .flex()
             .flex_col()
             .flex_shrink_0()
-            .mt_2()
-            .mb_1()
-            .p_4()
-            .gap_3()
-            .rounded(px(theme::DIALOG_RADIUS_PX))
-            .bg(theme::active().surface_tile)
-            .border_1()
-            // The card already carries a fill, so selection reads as a
-            // brighter *edge* — a second fill on top of `surface_tile`
-            // would be a barely-visible step, which is the failure mode
-            // `every_theme_has_a_visible_selection_step_away_from_its_panel`
-            // exists to catch one layer down.
-            .border_color(if selected {
-                theme::active().border_hairline_strong
-            } else {
-                theme::active().border_hairline
-            })
+            .px_3()
+            .py_3()
+            .gap_2()
+            .rounded(px(theme::ROW_RADIUS_PX))
+            .when(selected, |el| el.bg(theme::active().surface_selected))
             .child(
                 div()
                     .flex()
@@ -2194,21 +2195,24 @@ impl Root {
                             .text_color(theme::active().text_primary)
                             .child(SharedString::from(item.title.clone())),
                     )
-                    .children(item.subtitle.clone().map(|note| {
+                    .children(headline.map(|stat| {
                         div()
                             .flex_shrink_0()
-                            .text_size(px(11.))
-                            .text_color(theme::active().text_tertiary)
-                            .child(SharedString::from(note))
+                            .text_size(px(24.))
+                            .text_color(reached)
+                            .child(SharedString::from(stat.value.clone()))
                     })),
             )
-            .child(div().h(px(1.)).bg(theme::active().border_hairline))
             .child(
                 div()
                     .w_full()
                     .h(px(theme::METER_TRACK_HEIGHT_PX))
                     .rounded_full()
-                    .bg(theme::active().surface_input)
+                    // The track is the same faint plate a row icon sits on
+                    // rather than `surface_input`'s recessed well — a well
+                    // needs an edge to read as recessed, and an edge is
+                    // exactly the furniture this row is doing without.
+                    .bg(theme::active().row_icon_socket_bg)
                     .child(
                         div()
                             .h_full()
@@ -2216,30 +2220,24 @@ impl Root {
                             .rounded_full()
                             .bg(linear_gradient(
                                 90.0,
-                                linear_color_stop(empty, 0.0),
+                                linear_color_stop(theme::ramp(empty, full, 0.0), 0.0),
                                 linear_color_stop(reached, 1.0),
                             )),
                     ),
             )
             .child(
-                div().flex().gap_8().children(meter.stats.iter().map(|stat| {
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_size(px(10.))
-                                .text_color(theme::active().text_tertiary)
-                                .child(SharedString::from(stat.label.clone())),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(22.))
-                                .text_color(theme::active().text_primary)
-                                .child(SharedString::from(stat.value.clone())),
-                        )
-                })),
+                div()
+                    .flex()
+                    .items_baseline()
+                    .gap_3()
+                    .text_size(px(11.))
+                    .text_color(theme::active().text_tertiary)
+                    .children(item.subtitle.clone().map(|note| {
+                        div().flex_1().min_w(px(0.)).truncate().child(SharedString::from(note))
+                    }))
+                    .when(!trailing.is_empty(), |el| {
+                        el.child(div().flex_shrink_0().child(SharedString::from(trailing)))
+                    }),
             )
             .into_any_element()
     }
@@ -2452,7 +2450,7 @@ impl Root {
                     current_group = Some(&item.group_label);
                 }
                 container = container.child(match &item.meter {
-                    Some(meter) => self.render_meter_card(idx, item, meter),
+                    Some(meter) => self.render_meter(idx, item, meter),
                     None => self.render_row(idx, item, has_detail, cx).into_any_element(),
                 });
             }
