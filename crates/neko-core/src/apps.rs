@@ -155,6 +155,7 @@ impl Provider for AppsProvider {
                         group_label: None,
                         actions: Vec::new(),
                         source: None,
+                        meter: None,
                     },
                 })
             })

@@ -22,6 +22,7 @@ pub mod provider;
 pub mod search;
 pub mod settings;
 pub mod themes;
+pub mod usage;
 
 pub use apps::AppEntry;
 pub use cancel::Cancel;

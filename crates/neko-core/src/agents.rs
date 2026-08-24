@@ -548,6 +548,7 @@ fn to_item(agent: &PaseoAgent, running: bool) -> SearchItem {
         // the host icon. `source` is the wire's "bare value for a labelled
         // field" slot; how it renders is the client's business.
         source: agent.provider_mark(),
+        meter: None,
     }
 }
 

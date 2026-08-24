@@ -396,6 +396,7 @@ impl Provider for PreferencesProvider {
                         group_label: None,
                         actions: Vec::new(),
                         source: None,
+                        meter: None,
                     },
                 })
             })
@@ -499,6 +500,7 @@ impl Provider for FolderScopeProvider {
                             destructive: true,
                         }],
                         source: None,
+                        meter: None,
                     },
                 }
             })

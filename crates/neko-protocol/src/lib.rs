@@ -267,6 +267,39 @@ pub struct SearchItem {
     /// sentence would be redundant against a label already saying what the
     /// field means. `None` for providers with nothing to say here.
     pub source: Option<String>,
+    /// A quantity this row is *about*, rather than a thing to open — a
+    /// quota window, a disk, a download. A row carrying one renders as a
+    /// card with a bar and stat columns instead of an ordinary text row
+    /// (`panel::render_meter_card`); `None` — every provider before this
+    /// field existed — renders exactly as before.
+    ///
+    /// Same bounded-vocabulary rule as [`Icon`]/[`Glyph`]: the provider
+    /// supplies numbers and labels, the client owns entirely what a meter
+    /// *looks* like. Adding this is deliberately not a client-side `match`
+    /// on `kind == "usage"`, which is what `AGENTS.md`'s "Provider
+    /// abstraction" section exists to forbid.
+    #[serde(default)]
+    pub meter: Option<Meter>,
+}
+
+/// A 0..=1 reading plus the labelled values that explain it. See
+/// [`SearchItem::meter`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Meter {
+    /// Clamped to `0.0..=1.0` by the renderer, so a provider that reports
+    /// over-quota draws a full bar rather than one that overflows its own
+    /// track.
+    pub fraction: f32,
+    /// Small-label-over-large-value pairs, rendered as evenly spaced
+    /// columns beneath the bar. Two is the shape this was designed
+    /// against; the renderer lays out however many it is given.
+    pub stats: Vec<MeterStat>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeterStat {
+    pub label: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

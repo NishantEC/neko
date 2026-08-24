@@ -2410,6 +2410,68 @@ the captain's own machine: 8 real project rows, each naming the tool actually
 used there. **Not verified**: anything on screen (no client launch, no
 screenshot), and the env-stripping fix above.
 
+## Usage: quota read from the provider's own API, and the meter card
+
+`/usage` — the captain's own *"establish our own method to get the usages
+from the added model providers"*. `neko_core::usage` is the read;
+`neko_protocol::Meter` plus `panel::render_meter_card` is the render.
+
+**The source is the provider's API, not Paseo.** Paseo's own WebSocket was
+tried first and abandoned: the handshake needs an undocumented
+`protocolVersion` and `provider.usage.list.request` was never answered — the
+session routing it needs is not written down anywhere. Reading the vendor
+API directly is fewer moving parts and has no daemon to be running. The
+*method* is Paseo's, because it is simply how the provider works; every line
+here is neko's own, which matters more for that clone than any other in
+`refs/` — it is **AGPL-3.0**.
+
+- **The credential is in the macOS Keychain** (`security find-generic-password
+  -s "Claude Code-credentials"`), **not** `~/.claude/.credentials.json` —
+  that path is Paseo's Linux case and does not exist on this machine.
+- **The token never touches `argv`.** It goes to `curl` on **stdin** via
+  `--config -`. `-H "Authorization: Bearer …"` would put an OAuth credential
+  in the process arguments, readable by any local process through `ps`. It
+  is never logged and never persisted.
+- **`CACHE_TTL` is 90s** because a mode re-searches on every keystroke —
+  without it, typing in the pane is one Keychain read and one network
+  round-trip per character.
+- **Only windows in `KNOWN_WINDOWS` are shown.** The response also carries
+  `nimbus_quill`/`amber_ladder`/`cinder_cove` — real numbers against
+  codenames whose meaning is not public. Rendering "amber_ladder 0%" is
+  noise dressed as information. Pinned by a test, including the case where a
+  codename does carry a value.
+- **Every failure is a row, never a blank pane**: signed out, no credential,
+  and the transport error each say what to do next.
+
+**`SearchItem::meter` is the render half, and it is a wire-vocabulary
+addition rather than a client-side special case.** A row carrying a `Meter`
+(a `0..=1` fraction plus labelled stat columns) renders as a card — title,
+the note qualifying it, a bar, then the values — instead of the single-line
+`render_row` treatment. Same bounded-vocabulary rule as `Icon`/`Glyph`: the
+provider supplies numbers and labels, the client owns entirely what a meter
+looks like. Deliberately **not** `if kind == "usage"` in `panel.rs`, which is
+what "Provider abstraction" above exists to forbid — any provider with a
+quantity (a disk, a download) gets the card for free.
+
+**The bar's gradient runs across the whole track, not across the fill.**
+`state_success` at empty → `state_danger` at full, so a bar's colour means
+the same thing at the same fraction whatever its length. Implemented by
+ending the fill's own gradient at `theme::mix(success, danger, fraction)` —
+arithmetically identical to clipping a track-wide ramp, and it needs no
+pixel width at build time (the mode list scrolls and its width varies with
+`has_detail`). Both endpoints are ordinary palette tokens, so all seventeen
+themes get their own ramp and **no palette token was added** —
+`PALETTE_TOKEN_COUNT` is still 23. Selection on a card is a brighter
+*border*, not a fill: the card already carries `surface_tile`, so a second
+fill on top of it is the barely-visible step
+`every_theme_has_a_visible_selection_step_away_from_its_panel` exists to
+catch one layer down.
+
+**Still open**: the other providers' quota (codex, copilot, cursor, grok,
+kimi, minimax, zai — 80–340 lines each in Paseo's own fetchers, each a
+different auth story), and anything on screen (no window-scoped capture was
+taken; the wire response and the tests are the whole verification).
+
 ## The shared pulse clock, and the repeating-animation rule
 
 `motion::PulseClock` — the seam `motion.rs`'s own doc comment reserved, now

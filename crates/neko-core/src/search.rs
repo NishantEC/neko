@@ -490,6 +490,7 @@ mod tests {
             group_label: None,
             actions: Vec::new(),
             source: None,
+            meter: None,
         }
     }
 

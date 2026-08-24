@@ -37,10 +37,11 @@ use std::rc::Rc;
 use gpui::{
     Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, DispatchPhase, Entity, FocusHandle,
     Focusable, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, ScrollHandle, SharedString,
-    Window, actions, anchored, canvas, deferred, div, img, point, prelude::*, px, svg,
+    Window, actions, anchored, canvas, deferred, div, img, linear_color_stop, linear_gradient,
+    point, prelude::*, px, relative, svg,
 };
 use neko_client::NekoClient;
-use neko_protocol::{Glyph, Icon, ItemAction, Request, Response, SearchItem};
+use neko_protocol::{Glyph, Icon, ItemAction, Meter, Request, Response, SearchItem};
 
 use crate::accessibility::AccessibilityChecker;
 use crate::assets::{glyph_icon, icon};
@@ -2131,6 +2132,118 @@ impl Root {
         idx == self.selected && self.grid_selected.is_none()
     }
 
+    /// A row that is *about a quantity* rather than a thing to open —
+    /// `SearchItem::meter`. Renders as a card (title, the note that
+    /// qualifies it, a bar, then the labelled values) instead of the
+    /// single-line `render_row` treatment, because a quota window read as
+    /// a list row is a list of things to press Enter on and none of them
+    /// do anything: the number *is* the content, and a 14px title with a
+    /// grey "10%" hanging off the right edge is the least legible place to
+    /// put it.
+    ///
+    /// **The gradient runs across the whole track, and the fill shows the
+    /// part of it that has been reached.** `state_success` at empty →
+    /// `state_danger` at full, so a bar's colour means the same thing at
+    /// the same fraction regardless of how long it happens to be. That is
+    /// done by ending the fill's own gradient at
+    /// `mix(success, danger, fraction)` — arithmetically identical to
+    /// clipping a track-wide ramp, without needing to know the track's
+    /// pixel width at build time (this list is scrollable and its width
+    /// varies with `has_detail`). Both endpoints are ordinary palette
+    /// tokens, so every theme gets its own ramp for free and no new token
+    /// was added.
+    fn render_meter_card(&self, idx: usize, item: &SearchItem, meter: &Meter) -> AnyElement {
+        let selected = self.row_is_highlighted(idx);
+        let fraction = meter.fraction.clamp(0.0, 1.0);
+        let empty = theme::active().state_success;
+        let reached = theme::mix(empty, theme::active().state_danger, fraction);
+
+        div()
+            .id(("meter-card", idx))
+            .flex()
+            .flex_col()
+            .flex_shrink_0()
+            .mt_2()
+            .mb_1()
+            .p_4()
+            .gap_3()
+            .rounded(px(theme::DIALOG_RADIUS_PX))
+            .bg(theme::active().surface_tile)
+            .border_1()
+            // The card already carries a fill, so selection reads as a
+            // brighter *edge* — a second fill on top of `surface_tile`
+            // would be a barely-visible step, which is the failure mode
+            // `every_theme_has_a_visible_selection_step_away_from_its_panel`
+            // exists to catch one layer down.
+            .border_color(if selected {
+                theme::active().border_hairline_strong
+            } else {
+                theme::active().border_hairline
+            })
+            .child(
+                div()
+                    .flex()
+                    .items_baseline()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .truncate()
+                            .text_size(px(15.))
+                            .text_color(theme::active().text_primary)
+                            .child(SharedString::from(item.title.clone())),
+                    )
+                    .children(item.subtitle.clone().map(|note| {
+                        div()
+                            .flex_shrink_0()
+                            .text_size(px(11.))
+                            .text_color(theme::active().text_tertiary)
+                            .child(SharedString::from(note))
+                    })),
+            )
+            .child(div().h(px(1.)).bg(theme::active().border_hairline))
+            .child(
+                div()
+                    .w_full()
+                    .h(px(theme::METER_TRACK_HEIGHT_PX))
+                    .rounded_full()
+                    .bg(theme::active().surface_input)
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(fraction))
+                            .rounded_full()
+                            .bg(linear_gradient(
+                                90.0,
+                                linear_color_stop(empty, 0.0),
+                                linear_color_stop(reached, 1.0),
+                            )),
+                    ),
+            )
+            .child(
+                div().flex().gap_8().children(meter.stats.iter().map(|stat| {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_size(px(10.))
+                                .text_color(theme::active().text_tertiary)
+                                .child(SharedString::from(stat.label.clone())),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(22.))
+                                .text_color(theme::active().text_primary)
+                                .child(SharedString::from(stat.value.clone())),
+                        )
+                })),
+            )
+            .into_any_element()
+    }
+
     fn render_row(&self, idx: usize, item: &SearchItem, compact: bool, cx: &App) -> impl IntoElement {
         // **Only one thing is selected at a time.** `self.selected` is where
         // the list's own cursor is parked, and it keeps its value while the
@@ -2338,7 +2451,10 @@ impl Root {
                     }
                     current_group = Some(&item.group_label);
                 }
-                container = container.child(self.render_row(idx, item, has_detail, cx));
+                container = container.child(match &item.meter {
+                    Some(meter) => self.render_meter_card(idx, item, meter),
+                    None => self.render_row(idx, item, has_detail, cx).into_any_element(),
+                });
             }
         }
 
@@ -3055,6 +3171,7 @@ mod tests {
             group_label: None,
             actions: Vec::new(),
             source: None,
+            meter: None,
         }
     }
 
@@ -3457,6 +3574,7 @@ mod tests {
             group_label: None,
             actions: Vec::new(),
             source: None,
+            meter: None,
         }
     }
 
@@ -3717,6 +3835,7 @@ mod tests {
             group_label: None,
             actions: Vec::new(),
             source: None,
+            meter: None,
         }
     }
 
@@ -3809,6 +3928,7 @@ mod tests {
             group_label: None,
             actions: Vec::new(),
             source: None,
+            meter: None,
         }
     }
 

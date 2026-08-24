@@ -228,6 +228,7 @@ fn build_candidate(score: f32, pane: &SettingsPane, icon: Icon) -> Candidate {
             group_label: None,
             actions: Vec::new(),
             source: None,
+            meter: None,
         },
     }
 }

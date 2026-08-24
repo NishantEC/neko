@@ -136,6 +136,7 @@ impl Provider for ThemesProvider {
                         group_label: None,
                         actions: Vec::new(),
                         source: None,
+                        meter: None,
                     },
                 })
             })

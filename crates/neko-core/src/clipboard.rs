@@ -347,6 +347,7 @@ impl Provider for ClipboardProvider {
                         group_label: Some(day_bucket_label(now_unix_ms, entry.copied_at_unix_ms)),
                         actions: clipboard_item_actions(),
                         source: entry.source_app.clone(),
+                        meter: None,
                     },
                 })
             })
