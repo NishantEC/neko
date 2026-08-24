@@ -72,7 +72,7 @@ mod macos {
     /// this app depends on. `None` means no badge, which is also what an
     /// off-main-thread call returns, since it did nothing.
     pub fn set_waiting_count(count: usize) -> Option<String> {
-        let Some(mtm) = MainThreadMarker::new() else { return None };
+        let mtm = MainThreadMarker::new()?;
         // Pooled like every other AppKit call site in this project — see
         // `AGENTS.md`, "Clipboard capture memory": an unpooled call in
         // something that runs repeatedly is exactly the defect class that

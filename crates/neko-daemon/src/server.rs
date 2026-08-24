@@ -127,6 +127,11 @@ impl AppState {
             // window is not an answer to a root-list query — "5-hour limit"
             // surfacing for a search containing "limit" would be a surprise.
             Box::new(neko_core::usage::UsageProvider::new()),
+            // The fourth: Paseo's schedules. Mode-only for the same reason
+            // the usage pane is — a cron entry is not an answer to a
+            // root-list query, and "0 4 * * *" matching a search for "4"
+            // would be a surprise.
+            Box::new(neko_core::schedules::SchedulesProvider::new()),
         ];
         Self {
             db,
