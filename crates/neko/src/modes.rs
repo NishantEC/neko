@@ -128,6 +128,15 @@ pub const MODES: &[ModeChrome] = &[
     // Reads the model provider's own quota API — see
     // `neko_core::usage`. A status pane rather than a list, so the typed
     // query is ignored and there is no detail column to fill.
+    // Paseo's own cron: agents that start themselves. Enter toggles pause
+    // — see `neko_core::schedules` for why not "Run now".
+    ModeChrome {
+        id: "schedule",
+        provider_id: "schedule",
+        title: "Schedules",
+        placeholder: "Type to filter schedules\u{2026}",
+        has_detail: false,
+    },
     ModeChrome {
         id: "usage",
         provider_id: "usage",

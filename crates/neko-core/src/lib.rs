@@ -21,6 +21,7 @@ pub mod onboarding;
 pub mod permissions;
 pub mod preferences;
 pub mod provider;
+pub mod schedules;
 pub mod search;
 pub mod settings;
 pub mod themes;

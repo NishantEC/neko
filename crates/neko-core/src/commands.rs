@@ -113,6 +113,13 @@ const COMMANDS: &[CommandSpec] = &[
         glyph: Glyph::Sliders,
     },
     CommandSpec {
+        id: "schedules",
+        title: "Schedules",
+        aliases: &["Schedules", "Cron", "Recurring Agents", "Automations"],
+        mode: "schedule",
+        glyph: Glyph::Sliders,
+    },
+    CommandSpec {
         id: "preferences",
         title: "Preferences",
         aliases: &["Preferences", "Settings", "neko Settings", "Options", "Configure"],
