@@ -77,7 +77,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use gpui::{Hsla, Rgba, hsla};
+use gpui::Rgba;
 
 /// `gpui::rgb()` isn't `const fn` (it goes through `u32::to_be_bytes().map(..)`),
 /// so the token table below needs its own const-evaluable version.
@@ -91,31 +91,56 @@ const fn rgb_const(hex: u32) -> Rgba {
 }
 
 /// A point on a continuous ramp between two live palette colours,
-/// interpolated in **HSL** rather than RGB.
+/// interpolated in **OKLCH** — the space this file's own palette is
+/// authored in (`base_palette_matches_the_frozen_oklch_table`).
 ///
-/// The space is the whole point. `state_success` → `state_danger` mixed
-/// channel-wise in RGB passes through a muddy olive at the halfway mark —
-/// a bar at 50% looked dirty rather than cautionary. Interpolating hue
-/// instead sweeps green → yellow → amber → red, which is the ramp people
-/// already read on a gauge, and it costs nothing but taking the shorter
-/// way around the wheel.
+/// The space is the whole point, and two cheaper ones were measured and
+/// rejected. Blending channel-wise in **RGB** passes through grey: the
+/// neutral theme's success → danger lands on `#a5965c` at half full, a
+/// dirty khaki that reads as a rendering fault rather than a warning.
+/// Interpolating in **HSL** fixes the hue but not the lightness — the same
+/// pair bulges to OKLCH L `0.844` at 60% against `0.721` and `0.680` at the
+/// ends, so a bar shouts loudest in the middle, exactly where nothing
+/// special is happening. In OKLCH the ramp runs `0.721 → 0.680`
+/// monotonically, so every point on it carries the same visual weight and
+/// very nearly the same contrast against the panel.
 ///
 /// Not a token, deliberately: the two endpoints are the theme's business
 /// and every value between them is the renderer's. A token per step would
 /// be a table nobody could keep in sync with seventeen palettes.
-pub fn ramp(from: Rgba, to: Rgba, t: f32) -> Hsla {
+pub fn ramp(from: Rgba, to: Rgba, t: f32) -> Rgba {
     let t = t.clamp(0.0, 1.0);
-    let (a, b): (Hsla, Hsla) = (from.into(), to.into());
+    let (a, b) = (oklch_from_rgba(from), oklch_from_rgba(to));
     // Hue is a circle, so the plain difference can describe the long way
     // round — green to red the wrong way is a trip through cyan and blue.
-    let mut dh = b.h - a.h;
-    if dh > 0.5 {
-        dh -= 1.0;
-    } else if dh < -0.5 {
-        dh += 1.0;
+    let mut dh = b.2 - a.2;
+    if dh > 180.0 {
+        dh -= 360.0;
+    } else if dh < -180.0 {
+        dh += 360.0;
     }
     let lerp = |x: f32, y: f32| x + (y - x) * t;
-    hsla((a.h + dh * t).rem_euclid(1.0), lerp(a.s, b.s), lerp(a.l, b.l), lerp(a.a, b.a))
+    let (r, g, bl) = oklch_to_srgb_u8(lerp(a.0, b.0), lerp(a.1, b.1), a.2 + dh * t);
+    Rgba { r: r as f32 / 255.0, g: g as f32 / 255.0, b: bl as f32 / 255.0, a: lerp(from.a, to.a) }
+}
+
+/// The inverse of [`oklch_to_srgb_u8`], so a ramp can start and end exactly
+/// on two tokens that were authored as hex.
+#[allow(clippy::excessive_precision)]
+fn oklch_from_rgba(c: Rgba) -> (f32, f32, f32) {
+    let lin = |v: f32| {
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    let (r, g, b) = (lin(c.r), lin(c.g), lin(c.b));
+
+    let l_ = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).cbrt();
+    let m_ = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b).cbrt();
+    let s_ = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b).cbrt();
+
+    let l = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+    let a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+    let b2 = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+    (l, a.hypot(b2), b2.atan2(a).to_degrees().rem_euclid(360.0))
 }
 
 const fn rgba_const(hex: u32, a: f32) -> Rgba {
@@ -879,10 +904,20 @@ pub const AGENT_TILE_WIDTH_PX: f32 = (PANEL_WIDTH_WITH_DETAIL_PX
     - AGENT_GRID_GAP_PX * (AGENT_GRID_COLUMNS as f32 - 1.0))
     / AGENT_GRID_COLUMNS as f32;
 
-/// The bar in a `SearchItem::meter` reading (`panel::render_meter`).
-/// Thin: the headline number is what gets read, and the bar is there to
-/// be glanced at rather than measured.
-pub const METER_TRACK_HEIGHT_PX: f32 = 6.0;
+/// A `SearchItem::meter` reads as a row of discrete ticks rather than one
+/// continuous fill (`panel::render_meter`) — the treatment StackAI's own
+/// usage list uses, and the captain's pick. Ticks give the eye something
+/// to count against, so two readings can be compared without reading
+/// either number, and each lit tick takes its *own* point on the colour
+/// ramp, which makes the ramp legible as a scale instead of a wash.
+pub const METER_TICK_COUNT: usize = 32;
+pub const METER_TICK_HEIGHT_PX: f32 = 16.0;
+pub const METER_TICK_GAP_PX: f32 = 2.0;
+pub const METER_TICK_RADIUS_PX: f32 = 1.5;
+/// The reading's own column. Fixed rather than a flex share so every
+/// meter's ticks start at the same x however long its title runs — the
+/// alignment is what makes the column comparable.
+pub const METER_COLUMN_WIDTH_PX: f32 = 300.0;
 
 pub const ROW_ICON_PX: f32 = 22.0;
 pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
@@ -928,10 +963,11 @@ pub(crate) fn test_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-#[cfg(test)]
 // Kept at Ottosson's own published precision (more digits than f32 can hold) so
 // this stays visually cross-referenceable against the source matrices rather
-// than clippy's minimal-f32-round-trip truncation.
+// than clippy's minimal-f32-round-trip truncation. No longer test-only: `ramp`
+// runs it at paint time, which is also what pins the frozen palette table and
+// the live meter colour to one conversion rather than two that can drift.
 #[allow(clippy::excessive_precision)]
 fn oklch_to_srgb_u8(l: f32, c: f32, h_degrees: f32) -> (u8, u8, u8) {
     let h = h_degrees.to_radians();
@@ -1236,38 +1272,96 @@ mod tests {
     /// that depends on the wallpaper, and this app's own worst case was
     /// measured separately in `data/neko-native-material/report.md` §6.
     #[test]
-    fn every_theme_ramps_through_amber_instead_of_desaturating_to_mud() {
-        // The reason `ramp` interpolates in HSL. Blending two saturated
-        // hues channel-wise in RGB passes through grey: the neutral
-        // theme's own success → danger mixed that way is #a5965c at half
-        // full, which reads as dirty rather than cautionary. Interpolating
-        // hue keeps the chroma up the whole way, and this is the property
-        // that catches a revert to the cheaper arithmetic.
+    fn every_theme_ramps_without_a_lightness_bulge() {
+        // The reason `ramp` works in OKLCH rather than HSL. Interpolating
+        // HSL fixes the hue but not the lightness: the neutral theme's
+        // success → danger bulges to OKLCH L 0.844 at 60% against 0.721 and
+        // 0.680 at its ends, so a meter shouts loudest in the middle,
+        // exactly where nothing special is happening. In OKLCH every step
+        // stays between the two endpoints.
         for t in THEMES {
             let (a, b) = (t.palette.state_success, t.palette.state_danger);
-            let floor = f32::min(Hsla::from(a).s, Hsla::from(b).s);
-            for step in 0..=10 {
-                let f = step as f32 / 10.0;
-                let mid = ramp(a, b, f);
+            let (lo, hi) = {
+                let (la, lb) = (oklch_from_rgba(a).0, oklch_from_rgba(b).0);
+                (la.min(lb), la.max(lb))
+            };
+            for step in 0..=20 {
+                let f = step as f32 / 20.0;
+                let l = oklch_from_rgba(ramp(a, b, f)).0;
                 assert!(
-                    mid.s >= floor - f32::EPSILON,
-                    "{}: ramp at {f} desaturates to {}, below both endpoints ({floor})",
-                    t.id,
-                    mid.s
+                    l >= lo - 0.01 && l <= hi + 0.01,
+                    "{}: ramp at {f} has lightness {l}, outside [{lo}, {hi}]",
+                    t.id
+                );
+            }
+        }
+    }
+
+    /// The floor `ramp` holds, as a fraction of its dimmer endpoint's own
+    /// chroma. It is not `1.0` because sRGB cannot hold a saturated yellow
+    /// at these lightnesses: `oklch_to_srgb_u8` clamps and the ramp gives
+    /// up some colourfulness near the middle. That is the display gamut,
+    /// not the interpolation. Measured worst case across the seventeen
+    /// built-ins is 0.755 (`catppuccin-latte`).
+    const RAMP_CHROMA_FLOOR: f32 = 0.70;
+
+    #[test]
+    fn every_theme_ramps_without_collapsing_toward_grey() {
+        // The other cheap space this rejects. Blending two saturated hues
+        // channel-wise in RGB passes through grey — the neutral theme's own
+        // pair is #a5965c at half full, which reads as a rendering fault
+        // rather than a warning.
+        for t in THEMES {
+            let (a, b) = (t.palette.state_success, t.palette.state_danger);
+            let floor = f32::min(oklch_from_rgba(a).1, oklch_from_rgba(b).1);
+            for step in 0..=20 {
+                let f = step as f32 / 20.0;
+                let ratio = oklch_from_rgba(ramp(a, b, f)).1 / floor;
+                assert!(
+                    ratio >= RAMP_CHROMA_FLOOR,
+                    "{}: ramp at {f} keeps only {ratio} of its endpoints' chroma",
+                    t.id
                 );
             }
         }
     }
 
     #[test]
+    fn the_rgb_mix_this_replaced_would_fail_that_bound() {
+        // The negative control. Without it the bound above is just a number
+        // that happens to pass — this is what says the cheaper arithmetic
+        // genuinely could not clear it. `tokyo-night` is the worst case: a
+        // channel-wise blend of its own two state colours keeps 3% of their
+        // chroma, which is grey with a rumour of colour in it.
+        let worst = THEMES
+            .iter()
+            .map(|t| {
+                let (a, b) = (t.palette.state_success, t.palette.state_danger);
+                let floor = f32::min(oklch_from_rgba(a).1, oklch_from_rgba(b).1);
+                (0..=20)
+                    .map(|step| {
+                        let f = step as f32 / 20.0;
+                        let l = |x: f32, y: f32| x + (y - x) * f;
+                        let mixed =
+                            Rgba { r: l(a.r, b.r), g: l(a.g, b.g), b: l(a.b, b.b), a: 1.0 };
+                        oklch_from_rgba(mixed).1 / floor
+                    })
+                    .fold(f32::INFINITY, f32::min)
+            })
+            .fold(f32::INFINITY, f32::min);
+        assert!(worst < RAMP_CHROMA_FLOOR, "an RGB mix kept {worst}, clearing the bound");
+    }
+
+    #[test]
     fn the_meter_ramp_starts_and_ends_exactly_on_the_theme_tokens() {
-        // A ramp that only approximates its endpoints would mean a bar at
+        // A ramp that only approximates its endpoints would mean a meter at
         // zero is not quite `state_success` — an off-palette colour nobody
-        // chose, in every theme at once.
+        // chose, in every theme at once. The round trip through OKLCH and
+        // back has to land on the authored hex.
         for t in THEMES {
             let (a, b) = (t.palette.state_success, t.palette.state_danger);
             for (f, expected) in [(0.0, a), (1.0, b)] {
-                let got = Rgba::from(ramp(a, b, f));
+                let got = ramp(a, b, f);
                 for (channel, x, y) in
                     [("r", got.r, expected.r), ("g", got.g, expected.g), ("b", got.b, expected.b)]
                 {

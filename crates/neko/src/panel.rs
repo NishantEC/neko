@@ -33,15 +33,16 @@
 
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::{Arc, OnceLock};
 
 use gpui::{
     Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, DispatchPhase, Entity, FocusHandle,
     Focusable, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, ScrollHandle, SharedString,
-    Window, actions, anchored, canvas, deferred, div, img, linear_color_stop, linear_gradient,
-    point, prelude::*, px, relative, svg,
+    FontFeatures, Window, actions, anchored, canvas, deferred, div, img, point, prelude::*, px,
+    svg,
 };
 use neko_client::NekoClient;
-use neko_protocol::{Glyph, Icon, ItemAction, Meter, Request, Response, SearchItem};
+use neko_protocol::{Glyph, Icon, ItemAction, Meter, MeterStat, Request, Response, SearchItem};
 
 use crate::accessibility::AccessibilityChecker;
 use crate::assets::{glyph_icon, icon};
@@ -2133,111 +2134,102 @@ impl Root {
     }
 
     /// A row that is *about a quantity* rather than a thing to open —
-    /// `SearchItem::meter`. The number is the entire content, so it is set
-    /// as the headline and the bar sits under it; rendering this as an
-    /// ordinary row put the one thing worth reading in the grey accessory
-    /// slot at the far right edge.
+    /// `SearchItem::meter`. Two columns: what it is on the left (title, and
+    /// the qualifying note under it), the reading itself on the right.
+    /// Adapted from StackAI's own usage list, which is the shape six
+    /// read-only quota screens converged on: no card, no border, the
+    /// qualifying note directly beneath the title rather than stranded in a
+    /// far column, and the numbers under the meter rather than beside the
+    /// title.
     ///
-    /// **No card.** A bordered, filled box around every reading turned a
-    /// two-line fact into furniture, and stacked two of them into a form.
-    /// This is the panel's own surface with the same `px_3` rail and the
-    /// same `surface_selected` pill every other row uses — a different
-    /// *shape* of row, not a different kind of surface.
+    /// **Discrete ticks, not one continuous fill.** Ticks give the eye
+    /// something to count against, so two rows can be compared without
+    /// reading either number — and each lit tick takes its *own* point on
+    /// `theme::ramp`, which makes the ramp legible as a scale rather than a
+    /// wash. `state_success` at empty → `state_danger` at full, so a
+    /// reading's colour means the same fraction however wide the column is.
     ///
-    /// **The colour ramp spans the track, not the fill.** `state_success`
-    /// at empty → `state_danger` at full, so a reading's colour means the
-    /// same thing at the same fraction however long the bar is; the fill
-    /// simply ends at whatever `theme::ramp` gives for `fraction`, which
-    /// is arithmetically the same as clipping a track-wide gradient and
-    /// needs no pixel width at build time. The headline takes that colour
-    /// too, so the number and the bar can never disagree. Both endpoints
-    /// are ordinary palette tokens, so all seventeen themes get their own
-    /// ramp and no palette token was added for this.
-    ///
-    /// **The first stat is the headline; the rest qualify it.** That is a
-    /// vocabulary rule, not knowledge of who produced the row — a provider
-    /// orders `stats` by what it wants read first.
+    /// **The first stat is the reading, the rest qualify it.** The first
+    /// takes the ramp colour and leads; the others follow in the tertiary
+    /// weight. That is a vocabulary rule, not knowledge of who produced the
+    /// row — a provider orders `stats` by what it wants read first.
     fn render_meter(&self, idx: usize, item: &SearchItem, meter: &Meter) -> AnyElement {
         let selected = self.row_is_highlighted(idx);
         let fraction = meter.fraction.clamp(0.0, 1.0);
-        let empty = theme::active().state_success;
-        let full = theme::active().state_danger;
+        let (empty, full) = (theme::active().state_success, theme::active().state_danger);
+        let lit = (fraction * theme::METER_TICK_COUNT as f32).round() as usize;
         let reached = theme::ramp(empty, full, fraction);
 
-        let (headline, qualifiers) = meter.stats.split_first().map_or((None, &[][..]), |(h, r)| (Some(h), r));
-        let trailing = qualifiers
-            .iter()
-            .map(|s| format!("{} {}", s.label, s.value))
-            .collect::<Vec<_>>()
-            .join("  ·  ");
+        let ticks = div()
+            .flex()
+            .gap(px(theme::METER_TICK_GAP_PX))
+            .children((0..theme::METER_TICK_COUNT).map(|i| {
+                div()
+                    .flex_1()
+                    .h(px(theme::METER_TICK_HEIGHT_PX))
+                    .rounded(px(theme::METER_TICK_RADIUS_PX))
+                    .bg(if i < lit {
+                        // Each tick's own position on the scale, not the
+                        // row's — which is what makes the ramp readable.
+                        theme::ramp(empty, full, i as f32 / (theme::METER_TICK_COUNT - 1) as f32)
+                    } else {
+                        theme::active().row_icon_socket_bg
+                    })
+            }));
+
+        let (reading, qualifiers) = meter.stats.split_first().map_or((None, &[][..]), |(a, b)| (Some(a), b));
+        let stat = |s: &MeterStat| SharedString::from(format!("{} {}", s.value, s.label));
 
         div()
             .id(("meter", idx))
             .flex()
-            .flex_col()
+            .items_center()
             .flex_shrink_0()
+            .gap_7()
             .px_3()
-            .py_3()
-            .gap_2()
+            .py_2p5()
             .rounded(px(theme::ROW_RADIUS_PX))
             .when(selected, |el| el.bg(theme::active().surface_selected))
+            .when(!selected, |el| el.hover(|el| el.bg(theme::active().row_icon_socket_bg)))
             .child(
                 div()
-                    .flex()
-                    .items_baseline()
-                    .gap_3()
+                    .flex_1()
+                    .min_w(px(0.))
                     .child(
                         div()
-                            .flex_1()
-                            .min_w(px(0.))
                             .truncate()
-                            .text_size(px(15.))
+                            .text_size(px(14.))
                             .text_color(theme::active().text_primary)
                             .child(SharedString::from(item.title.clone())),
                     )
-                    .children(headline.map(|stat| {
+                    .children(item.subtitle.clone().map(|note| {
                         div()
-                            .flex_shrink_0()
-                            .text_size(px(24.))
-                            .text_color(reached)
-                            .child(SharedString::from(stat.value.clone()))
+                            .truncate()
+                            .text_size(px(11.))
+                            .text_color(theme::active().text_tertiary)
+                            .child(SharedString::from(note))
                     })),
             )
             .child(
                 div()
-                    .w_full()
-                    .h(px(theme::METER_TRACK_HEIGHT_PX))
-                    .rounded_full()
-                    // The track is the same faint plate a row icon sits on
-                    // rather than `surface_input`'s recessed well — a well
-                    // needs an edge to read as recessed, and an edge is
-                    // exactly the furniture this row is doing without.
-                    .bg(theme::active().row_icon_socket_bg)
+                    .flex_shrink_0()
+                    .w(px(theme::METER_COLUMN_WIDTH_PX))
+                    // Percentages sit in a column and change as the pane
+                    // refreshes; proportional digits would shift the column
+                    // under the eye every time one did.
+                    .font_features(tabular_numerals())
+                    .child(ticks)
                     .child(
                         div()
-                            .h_full()
-                            .w(relative(fraction))
-                            .rounded_full()
-                            .bg(linear_gradient(
-                                90.0,
-                                linear_color_stop(theme::ramp(empty, full, 0.0), 0.0),
-                                linear_color_stop(reached, 1.0),
-                            )),
+                            .flex()
+                            .justify_between()
+                            .mt(px(6.))
+                            .text_size(px(11.))
+                            .children(reading.map(|s| div().text_color(reached).child(stat(s))))
+                            .children(qualifiers.iter().map(|s| {
+                                div().text_color(theme::active().text_tertiary).child(stat(s))
+                            })),
                     ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_baseline()
-                    .gap_3()
-                    .text_size(px(11.))
-                    .text_color(theme::active().text_tertiary)
-                    .children(item.subtitle.clone().map(|note| {
-                        div().flex_1().min_w(px(0.)).truncate().child(SharedString::from(note))
-                    }))
-                    .when(!trailing.is_empty(), |el| {
-                        el.child(div().flex_shrink_0().child(SharedString::from(trailing)))
-                    }),
             )
             .into_any_element()
     }
@@ -2841,6 +2833,18 @@ fn fit_section(items: &[SearchItem], budget_px: f32) -> (usize, f32) {
         ((budget_px - theme::SECTION_HEADER_HEIGHT_PX) / theme::RESULT_ROW_HEIGHT_PX).floor() as usize;
     let kept = rows_that_fit.min(items.len());
     (kept, theme::SECTION_HEADER_HEIGHT_PX + kept as f32 * theme::RESULT_ROW_HEIGHT_PX)
+}
+
+/// `tnum` — fixed-width digits.
+///
+/// Every number in a meter's own column changes as the pane refreshes, and
+/// proportional digits are different widths, so a column of them shifts
+/// under the eye on every update. Built once and cloned: `FontFeatures`
+/// wraps an `Arc`, so this costs a refcount bump per row rather than an
+/// allocation.
+fn tabular_numerals() -> FontFeatures {
+    static TABULAR: OnceLock<FontFeatures> = OnceLock::new();
+    TABULAR.get_or_init(|| FontFeatures(Arc::new(vec![("tnum".to_string(), 1)]))).clone()
 }
 
 /// Maps a `results` index to its position among `render_mode_list`'s own
