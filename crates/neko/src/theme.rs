@@ -90,6 +90,24 @@ const fn rgb_const(hex: u32) -> Rgba {
     }
 }
 
+/// Blends two live palette colours, `t` of the way from `a` to `b`.
+///
+/// Not a token and deliberately not one: this is for a *continuous* ramp
+/// between two tokens a theme already supplies (`state_success` →
+/// `state_danger` across a meter's track), where the endpoints are the
+/// theme's business and every value between them is the renderer's. A
+/// token per step would be a table nobody could keep in sync with 17
+/// palettes.
+pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
+    let t = t.clamp(0.0, 1.0);
+    Rgba {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a + (b.a - a.a) * t,
+    }
+}
+
 const fn rgba_const(hex: u32, a: f32) -> Rgba {
     Rgba {
         r: ((hex >> 16) & 0xff) as f32 / 255.0,
@@ -850,6 +868,11 @@ pub const AGENT_TILE_WIDTH_PX: f32 = (PANEL_WIDTH_WITH_DETAIL_PX
     - CONTENT_INSET_PX * 2.0
     - AGENT_GRID_GAP_PX * (AGENT_GRID_COLUMNS as f32 - 1.0))
     / AGENT_GRID_COLUMNS as f32;
+
+/// The bar in a `SearchItem::meter` card (`panel::render_meter_card`).
+/// Chunky enough that its colour reads at a glance, which is the only job
+/// it has — the exact value is spelled out underneath it.
+pub const METER_TRACK_HEIGHT_PX: f32 = 10.0;
 
 pub const ROW_ICON_PX: f32 = 22.0;
 pub const ROW_ICON_RADIUS_PX: f32 = 6.0;

@@ -106,6 +106,13 @@ const COMMANDS: &[CommandSpec] = &[
     // typing "settings" still finds this row; the row itself says
     // "Preferences", which is unambiguous next to it.
     CommandSpec {
+        id: "usage",
+        title: "Usage",
+        aliases: &["Usage", "Quota", "Limits", "Rate Limit", "Tokens"],
+        mode: "usage",
+        glyph: Glyph::Sliders,
+    },
+    CommandSpec {
         id: "preferences",
         title: "Preferences",
         aliases: &["Preferences", "Settings", "neko Settings", "Options", "Configure"],
@@ -181,6 +188,7 @@ impl Provider for CommandsProvider {
                         group_label: None,
                         actions: Vec::new(),
                         source: None,
+                        meter: None,
                     },
                 })
             })

@@ -125,6 +125,16 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Describe the task, then pick where to run it…",
         has_detail: false,
     },
+    // Reads the model provider's own quota API — see
+    // `neko_core::usage`. A status pane rather than a list, so the typed
+    // query is ignored and there is no detail column to fill.
+    ModeChrome {
+        id: "usage",
+        provider_id: "usage",
+        title: "Usage",
+        placeholder: "Claude Code usage",
+        has_detail: false,
+    },
 ];
 
 /// Looks up a mode's chrome by id — `None` for an id that doesn't name a

@@ -107,6 +107,11 @@ impl AppState {
         let mode_providers: Vec<Box<dyn Provider>> = vec![
             Box::new(neko_core::preferences::FolderScopeProvider::new(db.clone())),
             Box::new(neko_core::new_agent::NewAgentProvider::new()),
+            // The third: a quota pane, read from the model provider's own
+            // API (`neko_core::usage`). Mode-only because a rate-limit
+            // window is not an answer to a root-list query — "5-hour limit"
+            // surfacing for a search containing "limit" would be a surprise.
+            Box::new(neko_core::usage::UsageProvider::new()),
         ];
         Self {
             db,
@@ -688,6 +693,7 @@ mod tests {
                     group_label: None,
                     actions: Vec::new(),
                     source: None,
+                    meter: None,
                 },
             }]
         }

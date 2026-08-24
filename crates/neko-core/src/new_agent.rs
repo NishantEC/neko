@@ -698,6 +698,7 @@ fn to_item(project: &Project, prompt: &str, provider: Option<&str>) -> SearchIte
         group_label: None,
         actions: Vec::new(),
         source: Some(project.root.to_string_lossy().to_string()),
+        meter: None,
     }
 }
 #[cfg(test)]
