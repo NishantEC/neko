@@ -2286,21 +2286,38 @@ own mark, and anything without a vendored logo falls back to its initial —
 placeholder. The line under the title is the **workspace**, which is what
 tells two agents running the same model apart.
 
-**A tile's title is Paseo's `title`, and that field is the first prompt
-verbatim — there is no generated title anywhere to prefer instead.** Checked
-before touching it: an agent's JSON carries only `title` and an empty
-`labels`; Paseo's own UI renders `agent.title` straight
-(`command-center.tsx:166`); and Claude Code's transcripts hold no `summary`
-record in any of the sixty examined. So `agents::title_from_prompt` does the
-only thing available — makes a prompt *read* like a title. One line, leading
-decoration stripped (`>`, `#`, bullets, the `▎` a quoted block opens with),
-whitespace runs collapsed. **A prompt that is nothing but a URL is the case
-it exists for**: truncated raw, `https://github.co…` spends a 150px tile on
-the scheme and host, the two parts every such link shares, so `compact_url`
-keeps the identifying tail instead — `github.com/…/pull/4501`,
-`figma.com/design/Care-Comms` (Figma's 22-character file key is dropped as
-an opaque id). A prompt that merely *mentions* a link is left alone;
-rewriting inside a sentence would be rewriting what was typed.
+**Paseo keeps three names per agent and they are not interchangeable.** The
+**title** is the first prompt, verbatim and never updated — `"hi"` on a
+session with 872 messages since, and three of this machine's agents share
+`"what's the update on the agents tasks"`. The **workspace** `displayName`
+is the branch or worktree the session runs in (`feat/doctors-maps`, `main`).
+The **project** `displayName` is the repository
+(`Care-Connect-AI/triage-fe`). Only the last two distinguish one session
+from another, so a tile is **branch over repository**, and the prompt stays
+in the search haystack — it is how a person remembers what they asked for,
+even though it does not identify a session on screen.
+`agents::read_workspace_names` does the join from `~/.paseo/projects/`
+(`workspaces.json`, `projects.json`); 215 of this machine's 229 agents
+resolve, and the rest fall back to the directory name, then the prompt.
+
+**`projects/` is `agents/`'s sibling, not its child** — `~/.paseo/agents`
+and `~/.paseo/projects` — so `read_workspace_names` takes the agents root
+and steps up. Getting that wrong is silent: every lookup misses and every
+tile falls back to its path, which reads as a deliberate design rather than
+a bug. It was wrong in the first draft here and was caught by checking the
+constant, not by the tests, which had no `projects/` fixture until this
+found the need for one.
+
+**`agents::title_from_prompt` still tidies that prompt** for the fallback
+case and for search: one line, leading decoration off (`>`, `#`, bullets,
+the `▎` a quoted block opens with), whitespace runs collapsed, and a prompt
+that is *nothing but* a URL compacted — `https://github.co…` truncated raw
+spends a 150px tile on the scheme and host, the two parts every such link
+shares, so `compact_url` keeps the identifying tail
+(`github.com/…/pull/4501`, `figma.com/design/Care-Comms`, with Figma's
+22-character file key dropped as an opaque id). A prompt that merely
+*mentions* a link is left alone; rewriting inside a sentence would be
+rewriting what was typed.
 
 **Brand marks are a separate vendored category from Lucide, and the tests say
 so.** gpui renders an SVG to an alpha mask, so a *filled* UI icon becomes a

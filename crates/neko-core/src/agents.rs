@@ -27,6 +27,7 @@
 //! lines of source-specific parsing in its own `docs/adding-a-session-source.md`.
 //! That is its own task, and it is a history feature rather than a live one.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -142,6 +143,7 @@ struct PaseoAgent {
     id: String,
     #[serde(default)]
     title: Option<String>,
+    workspace_id: Option<String>,
     #[serde(default)]
     provider: Option<String>,
     #[serde(default)]
@@ -178,36 +180,41 @@ impl PaseoAgent {
         self.last_status.as_deref() == Some(STATUS_CLOSED)
     }
 
-    /// What the row is called.
+    /// What the row is called: the **workspace** — the branch or worktree
+    /// this session runs in. See [`WorkspaceName`] for why not the title.
     ///
-    /// **Paseo's `title` is the first prompt, verbatim — there is no
-    /// generated title anywhere to prefer instead.** Checked before writing
-    /// this: an agent's JSON carries only `title` and an empty `labels`;
-    /// Paseo's own UI renders `agent.title` straight
-    /// (`command-center.tsx`); and Claude Code's transcripts hold no
-    /// `summary` record in any of the sixty checked. So the job here is not
-    /// picking a better field, it is making a prompt read like a title —
-    /// [`title_from_prompt`]. A missing one falls back to the working
-    /// directory's name, which is how a person thinks about "the agent in
-    /// neko" anyway.
-    fn display_title(&self) -> String {
-        let from_title =
-            self.title.as_deref().map(title_from_prompt).filter(|t| !t.is_empty());
-        if let Some(title) = from_title {
-            return title;
+    /// Falls back to the working directory's own name, which is how a
+    /// person thinks about "the agent in neko" anyway, and only then to the
+    /// first prompt.
+    fn display_title(&self, names: &HashMap<String, WorkspaceName>) -> String {
+        if let Some(workspace) = self.names(names).workspace {
+            return workspace;
         }
         self.cwd
             .as_deref()
-            .map(|cwd| Path::new(cwd).file_name().map_or_else(|| cwd.to_string(), |n| n.to_string_lossy().to_string()))
+            .and_then(|cwd| Path::new(cwd).file_name().map(|n| n.to_string_lossy().to_string()))
+            .or_else(|| self.prompt())
             .unwrap_or_else(|| "Agent".to_string())
     }
 
-    /// **The workspace, not the model.** The model moved to its own mark in
-    /// the corner of the tile (`SearchItem::source` carries it), which frees
-    /// this line for the thing that actually distinguishes two agents running
-    /// the same model: where they are working.
-    fn subtitle(&self) -> Option<String> {
-        self.cwd.as_deref().map(tildify)
+    /// **The project, not the model and no longer the raw path.** The model
+    /// moved to its own mark in the corner of the tile
+    /// (`SearchItem::source` carries it); the path said
+    /// `~/Documents/tcc/triage-fe` where Paseo itself says
+    /// `Care-Connect-AI/triage-fe`, which is what the repository is called
+    /// everywhere else a person sees it.
+    fn subtitle(&self, names: &HashMap<String, WorkspaceName>) -> Option<String> {
+        self.names(names).project.or_else(|| self.cwd.as_deref().map(tildify))
+    }
+
+    fn names(&self, names: &HashMap<String, WorkspaceName>) -> WorkspaceName {
+        self.workspace_id.as_deref().and_then(|id| names.get(id)).cloned().unwrap_or_default()
+    }
+
+    /// The first prompt, tidied — searchable, never shown. See
+    /// [`WorkspaceName`].
+    fn prompt(&self) -> Option<String> {
+        self.title.as_deref().map(title_from_prompt).filter(|t| !t.is_empty())
     }
 
     /// Which tool is running the agent — `"claude"`, `"codex"` — for the
@@ -333,6 +340,65 @@ fn agents_root() -> Option<PathBuf> {
 /// and may be mid-write; one bad document must never take out the whole
 /// list, and there is nothing a person could do about it if it were
 /// reported.
+/// What Paseo calls a session and where it lives.
+///
+/// Paseo keeps three names per agent and they are not interchangeable. The
+/// **title** is the first prompt, verbatim and never updated — `"hi"` on a
+/// session with 872 messages since. The **workspace** `displayName` is the
+/// branch or worktree the session runs in (`feat/doctors-maps`, `main`).
+/// The **project** `displayName` is the repository
+/// (`Care-Connect-AI/triage-fe`). Only the last two actually distinguish
+/// one session from another — three of this machine's agents share the
+/// prompt "what's the update on the agents tasks" — which is why the tile
+/// leads with them and the prompt stays searchable rather than shown.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorkspaceName {
+    pub workspace: Option<String>,
+    pub project: Option<String>,
+}
+
+/// `workspaceId` → its names, read from `~/.paseo/projects/`.
+///
+/// Takes the **agents** root and steps up, because `projects/` is that
+/// directory's sibling rather than its child — `~/.paseo/agents` and
+/// `~/.paseo/projects`. Getting that wrong is silent: every lookup misses
+/// and every tile quietly falls back to its path, which looks like a
+/// deliberate design rather than a bug.
+///
+/// Two small files (a 95KB workspace list, a 3KB project list) read once
+/// per search, against the couple of hundred agent documents `read_agents`
+/// is already opening on the same call — not worth a cache with an
+/// invalidation story attached.
+pub fn read_workspace_names(agents_root: &Path) -> HashMap<String, WorkspaceName> {
+    let Some(home) = agents_root.parent() else {
+        return HashMap::new();
+    };
+    let list = |name: &str| -> Vec<serde_json::Value> {
+        std::fs::read_to_string(home.join("projects").join(name))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Vec<serde_json::Value>>(&raw).ok())
+            .unwrap_or_default()
+    };
+    let name_of = |v: &serde_json::Value| -> Option<String> {
+        v.get("displayName")?.as_str().map(str::to_string).filter(|s| !s.is_empty())
+    };
+    let projects: HashMap<String, String> = list("projects.json")
+        .iter()
+        .filter_map(|p| Some((p.get("projectId")?.as_str()?.to_string(), name_of(p)?)))
+        .collect();
+    list("workspaces.json")
+        .iter()
+        .filter_map(|w| {
+            let id = w.get("workspaceId")?.as_str()?.to_string();
+            let project = w
+                .get("projectId")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|id| projects.get(id).cloned());
+            Some((id, WorkspaceName { workspace: name_of(w), project }))
+        })
+        .collect()
+}
+
 fn read_agents(root: &Path) -> Vec<PaseoAgent> {
     read_agent_documents(root).into_iter().filter(|agent| !agent.is_closed()).collect()
 }
@@ -465,6 +531,7 @@ impl Provider for AgentsProvider {
         }
         let trimmed = query.trim();
         let agents = read_agents(root);
+        let names = read_workspace_names(root);
         let mut scored: Vec<(String, bool, Candidate)> = agents
             .into_iter()
             .filter_map(|agent| {
@@ -483,9 +550,13 @@ impl Provider for AgentsProvider {
                     // best wins — a person looks for an agent by what it is
                     // called, by what it is, or by where it is working, and
                     // has no reason to know which one they are using.
-                    let title = agent.display_title();
+                    // The prompt is in here but never rendered: it is how a
+                    // person remembers what they asked for, even though it
+                    // does not distinguish two sessions on screen.
                     let haystacks = [
-                        Some(title.clone()),
+                        Some(agent.display_title(&names)),
+                        agent.subtitle(&names),
+                        agent.prompt(),
                         agent.provider.as_deref().map(short_provider),
                         agent.cwd.as_deref().map(tildify),
                         Some("agent".to_string()),
@@ -497,7 +568,7 @@ impl Provider for AgentsProvider {
                         .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?;
                     if running { best + RUNNING_BONUS } else { best }
                 };
-                Some((agent.activity_at().unwrap_or("").to_string(), running, Candidate { score, item: to_item(&agent, running) }))
+                Some((agent.activity_at().unwrap_or("").to_string(), running, Candidate { score, item: to_item(&agent, running, &names) }))
             })
             .collect::<Vec<_>>();
 
@@ -589,12 +660,12 @@ fn host_icon() -> Option<&'static PathBuf> {
     .as_ref()
 }
 
-fn to_item(agent: &PaseoAgent, running: bool) -> SearchItem {
+fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceName>) -> SearchItem {
     SearchItem {
         id: agent.id.clone(),
         kind: "agent".to_string(),
-        title: agent.display_title(),
-        subtitle: agent.subtitle(),
+        title: agent.display_title(names),
+        subtitle: agent.subtitle(names),
         // The host application's own icon (Paseo's), extracted through the
         // same cache every app row uses — no second icon pipeline. Falls back
         // to the painted glyph when the app is not installed where expected,
@@ -970,6 +1041,105 @@ mod tests {
         assert!(!is_opaque_id("internationalization"));
         // A PR number is short and is the whole point of the link.
         assert!(!is_opaque_id("4501"));
+    }
+
+
+    /// Lays out a real `~/.paseo` shape: `agents/` and its **sibling**
+    /// `projects/`, which is the relationship `read_workspace_names` has to
+    /// walk up to find.
+    fn write_paseo_home(home: &Path) -> PathBuf {
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        std::fs::write(
+            home.join("projects/projects.json"),
+            r#"[{"projectId":"remote:github.com/Care-Connect-AI/triage-fe",
+                 "displayName":"Care-Connect-AI/triage-fe"}]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("projects/workspaces.json"),
+            r#"[{"workspaceId":"wks_1","displayName":"feat/doctors-maps",
+                 "projectId":"remote:github.com/Care-Connect-AI/triage-fe"},
+                {"workspaceId":"wks_2","displayName":"main"}]"#,
+        )
+        .unwrap();
+        home.join("agents")
+    }
+
+    #[test]
+    fn a_tile_is_named_by_its_branch_and_repository_not_by_its_first_prompt() {
+        // Three of this machine's real agents share the prompt "what's the
+        // update on the agents tasks"; none of them share a branch.
+        let dir = tempfile::tempdir().unwrap();
+        let root = write_paseo_home(dir.path());
+        write_agent(
+            &root,
+            "triage",
+            "a1",
+            r#"{"id":"a1","title":"https://www.figma.com/design/ihcBLzmf4sBM0KJCMo8ryO/Care",
+                "workspaceId":"wks_1","cwd":"/Users/x/Documents/tcc/triage-fe",
+                "lastStatus":"running"}"#,
+        );
+        let provider = AgentsProvider::with_root(root);
+        let items: Vec<_> = provider.search("", 0).into_iter().map(|c| c.item).collect();
+        assert_eq!(items[0].title, "feat/doctors-maps");
+        assert_eq!(items[0].subtitle.as_deref(), Some("Care-Connect-AI/triage-fe"));
+    }
+
+    #[test]
+    fn a_workspace_with_no_project_still_names_the_tile() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = write_paseo_home(dir.path());
+        write_agent(
+            &root,
+            "neko",
+            "a2",
+            r#"{"id":"a2","title":"hi","workspaceId":"wks_2",
+                "cwd":"/Users/x/Documents/neko","lastStatus":"running"}"#,
+        );
+        let provider = AgentsProvider::with_root(root);
+        let items: Vec<_> = provider.search("", 0).into_iter().map(|c| c.item).collect();
+        assert_eq!(items[0].title, "main");
+        // No project for this workspace, so the path is still better than
+        // nothing. Asserted by suffix because `tildify` reads the real
+        // `$HOME`, which is not this fixture's `/Users/x`.
+        assert!(items[0].subtitle.as_deref().unwrap().ends_with("Documents/neko"));
+    }
+
+    #[test]
+    fn an_unresolvable_workspace_falls_back_to_the_directory_then_the_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = write_paseo_home(dir.path());
+        write_agent(
+            &root,
+            "gone",
+            "a3",
+            r#"{"id":"a3","title":"fix the parser","workspaceId":"wks_missing",
+                "cwd":"/Users/x/Documents/parser","lastStatus":"running"}"#,
+        );
+        write_agent(&root, "gone", "a4", r#"{"id":"a4","title":"fix the parser","lastStatus":"running"}"#);
+        let provider = AgentsProvider::with_root(root);
+        let titles: Vec<_> = provider.search("", 0).into_iter().map(|c| c.item.title).collect();
+        assert!(titles.contains(&"parser".to_string()), "{titles:?}");
+        assert!(titles.contains(&"fix the parser".to_string()), "{titles:?}");
+    }
+
+    #[test]
+    fn the_prompt_is_still_searchable_even_though_it_is_never_shown() {
+        // It is how a person remembers what they asked for, even though it
+        // does not distinguish two sessions on screen.
+        let dir = tempfile::tempdir().unwrap();
+        let root = write_paseo_home(dir.path());
+        write_agent(
+            &root,
+            "triage",
+            "a1",
+            r#"{"id":"a1","title":"testimonials carousel","workspaceId":"wks_1",
+                "cwd":"/Users/x/Documents/tcc/triage-fe","lastStatus":"running"}"#,
+        );
+        let provider = AgentsProvider::with_root(root);
+        let found = provider.search("testimonials", 0);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].item.title, "feat/doctors-maps");
     }
 
 }
