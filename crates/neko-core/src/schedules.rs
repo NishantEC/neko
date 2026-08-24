@@ -238,7 +238,22 @@ impl Provider for SchedulesProvider {
         // is looking at can be seconds old, and resuming something already
         // running is a confusing no-op where toggling from live state is
         // always the thing they meant.
-        let paused = self.list().iter().find(|s| s.id == id).map(|s| s.paused).unwrap_or(false);
+        // **The daemon is asked about first, on purpose.** `list` swallows a
+        // transport failure into an empty `Vec`, so without this a daemon
+        // that is simply down would report "that schedule is gone" — the
+        // schedule is not gone, and telling somebody their thing was deleted
+        // when it was not is the worse of the two wrong answers.
+        self.client()?;
+        // A schedule deleted between the list rendering and Enter landing
+        // would otherwise fall through to `pause_schedule` on an id that no
+        // longer exists, and the daemon's own validator message is a worse
+        // answer than the true one.
+        let paused = self
+            .list()
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.paused)
+            .ok_or_else(|| ProviderError("that schedule is gone".to_string()))?;
         self.call(if paused { "resume_schedule" } else { "pause_schedule" }, id)
     }
 
@@ -364,4 +379,18 @@ mod tests {
         let provider = SchedulesProvider::disabled();
         assert!(provider.search("", NOW_MS).is_empty(), "a disabled provider reaches nothing");
     }
+
+    #[test]
+    fn a_schedule_that_vanished_between_render_and_enter_says_so() {
+        // The list in front of you can be seconds old. Falling through to
+        // `pause_schedule` on an id that no longer exists would answer with
+        // the daemon's own validator message instead of the true one.
+        let provider = SchedulesProvider::disabled();
+        // A disabled provider stands in for a daemon that is down, and that
+        // has to report *itself* — "that schedule is gone" would be telling
+        // somebody their thing was deleted when it was not.
+        let err = provider.activate("gone").expect_err("no daemon");
+        assert!(format!("{err:?}").contains("Paseo isn't running"), "{err:?}");
+    }
+
 }
