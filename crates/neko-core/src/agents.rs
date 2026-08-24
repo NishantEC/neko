@@ -466,8 +466,20 @@ impl Provider for AgentsProvider {
     }
 }
 
-/// Paseo's own deep-link shape, read from its bundled
-/// `@getpaseo/protocol/agent-deep-link`: `paseo:/h/<serverId>/agent/<agentId>`.
+/// Paseo's own deep-link shape: `paseo://h/<serverId>/agent/<agentId>`.
+///
+/// **Two slashes, and that is the whole bug this had.** Paseo's own
+/// `buildAgentDeepLink` writes `` `paseo:/${route}` `` — one slash — and
+/// copying it produced a URL its *own* `parseAgentDeepLink` rejects, because
+/// that function tests `url.hostname === "h"`. With one slash `h` parses as
+/// the first path segment and the hostname is empty, so the link resolved to
+/// nothing and Paseo merely came to the front. Verified against the real
+/// parse rules rather than assumed:
+///
+/// ```text
+/// paseo:/h/srv/agent/ID    hostname ""   -> rejected
+/// paseo://h/srv/agent/ID   hostname "h"  -> accepted
+/// ```
 ///
 /// **The server id is per-machine and must be read, not assumed.** A first
 /// version of this guessed `local`, on the strength of `=== "local"`
@@ -490,7 +502,7 @@ pub fn server_id() -> Option<String> {
 }
 
 fn deep_link(server_id: &str, agent_id: &str) -> String {
-    format!("paseo:/h/{server_id}/agent/{agent_id}")
+    format!("paseo://h/{server_id}/agent/{agent_id}")
 }
 
 /// The host app's icon, cached once per process. `ensure_cached_icon` is real
@@ -792,8 +804,15 @@ mod tests {
     }
 
     #[test]
-    fn the_deep_link_matches_paseos_own_documented_shape() {
-        assert_eq!(deep_link("srv_abc", "agent-1"), "paseo:/h/srv_abc/agent/agent-1");
+    fn the_deep_link_puts_h_in_the_host_where_paseos_parser_requires_it() {
+        let link = deep_link("srv_abc", "agent-1");
+        assert_eq!(link, "paseo://h/srv_abc/agent/agent-1");
+        // The exact conditions `parseAgentDeepLink` applies: `h` must be the
+        // host, and the path must be exactly three segments with "agent" in
+        // the middle. A single-slash URL fails the first and the third.
+        let rest = link.strip_prefix("paseo://h/").expect("`h` must be the host, not a path segment");
+        let segments: Vec<&str> = rest.split('/').collect();
+        assert_eq!(segments, vec!["srv_abc", "agent", "agent-1"]);
     }
 
     #[test]

@@ -55,6 +55,15 @@ use crate::window_drag::PanelDrag;
 actions!(panel, [SelectNext, SelectPrevious, Confirm, OpenActionsMenu]);
 
 const RESULT_LIMIT: usize = 8;
+/// How many rows an **empty** root query asks for.
+///
+/// Larger than [`RESULT_LIMIT`] because the two answer different questions. A
+/// typed query wants the best few matches and must fit without reflowing; an
+/// empty one is a browsable frecency-ranked suggestion list, so it scrolls
+/// and can afford depth. Nothing defers on an empty query either
+/// (`FileProvider::defers_for` needs two characters), so there is no
+/// second frame to reconcile against.
+const SUGGESTED_LIMIT: usize = 24;
 /// How long a query has to stay in flight before the "still searching" tell
 /// (`render_searching_tell`) appears — long enough that the common fast
 /// case (apps/clipboard/settings, all answering well under this) never sees
@@ -74,7 +83,11 @@ const MODE_RESULT_LIMIT: usize = 50;
 /// left to drift.
 pub const AGENT_GRID_CAPACITY: usize = 4;
 
-pub const CONTENT_AREA_MIN_HEIGHT_PX: f32 = theme::RESULT_ROW_HEIGHT_PX * RESULT_LIMIT as f32;
+/// The content area is deliberately far taller than a typed query's own
+/// `RESULT_LIMIT` needs: with nothing typed the root list is a browsable
+/// frecency-ranked suggestion list (`SUGGESTED_LIMIT`) that scrolls, and a
+/// short panel would make that list a keyhole.
+pub const CONTENT_AREA_MIN_HEIGHT_PX: f32 = theme::RESULT_ROW_HEIGHT_PX * 10.0;
 /// The panel is a fixed height for the process's whole lifetime (the real
 /// `NSWindow` is never resized — `AGENTS.md`, "Mode view resize seam"), so
 /// the agent grid can only ever take space *from* the rows. A grid taller
@@ -83,7 +96,7 @@ pub const CONTENT_AREA_MIN_HEIGHT_PX: f32 = theme::RESULT_ROW_HEIGHT_PX * RESULT
 const _: () = assert!(theme::AGENT_GRID_HEIGHT_PX < CONTENT_AREA_MIN_HEIGHT_PX);
 
 pub const PANEL_HEIGHT_PX: f32 =
-    theme::INPUT_ROW_HEIGHT_PX + CONTENT_AREA_MIN_HEIGHT_PX + theme::FOOTER_HEIGHT_PX;
+    theme::INPUT_ROW_HEIGHT_PX + CONTENT_AREA_MIN_HEIGHT_PX;
 
 pub struct Root {
     text_field: Entity<TextField>,
@@ -167,6 +180,16 @@ pub struct Root {
     /// first result walks into the grid, Down off the last tile walks back
     /// into the list.
     grid_selected: Option<usize>,
+    /// Whether the query that produced the results now on screen was empty.
+    ///
+    /// Captured when the search is *dispatched*, not read from the field when
+    /// the answer arrives — a response can land after the field has changed,
+    /// and judging a frame by a query it did not answer is exactly the class
+    /// of bug the generation counter exists to prevent elsewhere.
+    results_are_for_empty_query: bool,
+    /// The root list's own scroll position. The list scrolls only when
+    /// nothing is typed — see `apply_results`.
+    root_scroll: ScrollHandle,
     /// The shared pulse clock (`motion::PulseClock`), observed so a tick
     /// repaints this panel. Held as an entity rather than read per frame so
     /// the subscription can exist at all.
@@ -377,6 +400,8 @@ impl Root {
             open_preferences,
             agent_tiles: Vec::new(),
             grid_selected: None,
+            root_scroll: ScrollHandle::new(),
+            results_are_for_empty_query: true,
             pulse,
             actions_menu: None,
             menu_open_before_this_press: false,
@@ -624,7 +649,6 @@ impl Root {
         self.pending_search_generation = Some(generation);
         self.partial_generation = None;
         self.search_dispatched_at = Some((generation, std::time::Instant::now()));
-        let query = self.text_field.read(cx).content().to_string();
         let client = self.client.clone();
         // The mode seam: while a mode is active, every keystroke scopes to
         // its own provider (`Request::Search`'s `provider` field) with a
@@ -633,7 +657,13 @@ impl Root {
         // renders every returned item and scrolls instead (`render_mode_list`,
         // `edge_fade::scroll_edge_fade`).
         let mode_provider = self.active_mode().map(|m| m.chrome.provider_id.to_string());
-        let limit = if mode_provider.is_some() { MODE_RESULT_LIMIT } else { RESULT_LIMIT };
+        let query = self.text_field.read(cx).content().to_string();
+        self.results_are_for_empty_query = query.trim().is_empty();
+        let limit = match (&mode_provider, query.trim().is_empty()) {
+            (Some(_), _) => MODE_RESULT_LIMIT,
+            (None, true) => SUGGESTED_LIMIT,
+            (None, false) => RESULT_LIMIT,
+        };
         cx.spawn(async move |this, cx| {
             // Streaming, not a single `request`: the daemon answers a root
             // search in two frames whenever a slow provider is involved —
@@ -761,7 +791,15 @@ impl Root {
         // `overflow_hidden`, which is the exact defect `fit_within_budget`
         // exists to prevent.
         let budget = CONTENT_AREA_MIN_HEIGHT_PX - self.agent_grid_height();
-        self.results = if self.active_mode().is_some() {
+        // **An empty root query keeps everything and scrolls; a typed one is
+        // still budget-fit.** They are different things: the suggestion list
+        // is browsable, so dropping rows to fit would be throwing away the
+        // depth it exists to offer. A typed query is a ranked answer that
+        // must not reflow under the captain's hands, which is what
+        // `fit_within_budget` and `merge_late_results` protect — and neither
+        // concern applies with nothing typed, since nothing defers on an
+        // empty query so there is no second frame to reconcile.
+        self.results = if self.active_mode().is_some() || self.results_are_for_empty_query {
             items
         } else if complete && self.partial_generation == Some(generation) {
             let anchor = std::mem::take(&mut self.results);
@@ -772,13 +810,12 @@ impl Root {
 
         let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
         self.selected = resolve_selection(previous, &self.results);
-        // The grid is the first thing in the content area, so it holds the
-        // selection to begin with — Down then runs 1, 2, 3, 4 and on into the
-        // rows. Without this the tiles were only reachable *backwards*, by
-        // pressing Up from the first row onto the last tile.
-        if self.grid_selected.is_none() && previously_selected.is_none() && !self.agent_tiles.is_empty() {
-            self.grid_selected = Some(0);
-        }
+        // **No tile is selected to begin with.** The grid sits directly above
+        // the rows now, so Up from the first row lands on the last tile — the
+        // move that is spatially correct — and the selection can start where
+        // a launcher's selection belongs, on the top result. Starting it on a
+        // tile meant the panel opened with an agent highlighted rather than
+        // the thing Enter would actually run.
         // Entering the theme mode must not immediately repaint the app in
         // whatever palette happens to sort first. Land on the one already in
         // use — which is also where a person expects the highlight to be —
@@ -1171,13 +1208,43 @@ impl Root {
                     .h(px(theme::AGENT_TILE_HEIGHT_PX))
                     .px(px(13.))
                     .rounded(px(theme::ROW_RADIUS_PX))
-                    // No border and no resting fill — a tile is a row that
-                    // happens to sit in a grid, so it gets a row's treatment:
-                    // transparent until selected, then the same
-                    // `surface_selected` pill. The bordered cards read as a
-                    // separate kind of surface stacked on the list rather
-                    // than part of it.
-                    .when(focused, |el| el.bg(theme::active().surface_selected))
+                    // A resting fill, so a tile reads as a tile rather than
+                    // as floating text — the panel itself paints nothing now
+                    // (`panel_alpha` is 0), so without this there is no
+                    // surface here at all. Still no border: the fill is the
+                    // whole of the treatment, and the selected state is the
+                    // same pill a row gets.
+                    // Translucent, not an opaque surface — the panel itself
+                    // is glass now, and an opaque tile on top of it reads as
+                    // a block pasted on rather than part of the same pane.
+                    //
+                    // **A running agent's tile carries a live green wash that
+                    // breathes**; an idle one is the flat neutral fill. The
+                    // wash is a gradient strongest at the icon end and gone
+                    // by the far edge, so it reads as coming *from* the agent
+                    // rather than as a coloured card, and its intensity rides
+                    // the shared `PulseClock` — the same clock the badge and
+                    // the dot use. Nothing here animates itself; see
+                    // `motion.rs` on why a repeating animation must always go
+                    // through that one throttled clock.
+                    .map(|tile| {
+                        if focused {
+                            return tile.bg(theme::active().surface_selected);
+                        }
+                        if !live {
+                            return tile.bg(theme::active().surface_tile);
+                        }
+                        let mut lead = theme::active().state_success;
+                        lead.a = 0.14 + 0.16 * intensity;
+                        tile.bg(gpui::linear_gradient(
+                            110.0,
+                            gpui::linear_color_stop(lead, 0.0),
+                            gpui::linear_color_stop(theme::active().surface_tile, 0.85),
+                        ))
+                    })
+                    .when(!focused, |tile| {
+                        tile.hover(|tile| tile.bg(theme::active().row_icon_socket_bg))
+                    })
                     .cursor_pointer()
                     .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |root, _event, _window, cx| {
@@ -1509,36 +1576,6 @@ impl Root {
         }
     }
 
-    /// The footer's "Actions ⌘K" trigger — `on_click` (a full press+release
-    /// on the trigger itself), not a raw `on_mouse_down`, so a press that
-    /// drags off the trigger before releasing doesn't open it, matching
-    /// ordinary button semantics.
-    ///
-    /// **The race this guards against** (comet's own finding,
-    /// `data/neko-comet-design/report.md` §2.1, reimplemented here in
-    /// neko's own terms — no lingering "closing" state, since neko's menu
-    /// close is an instant cut, see `motion.rs`'s own doc comment on why):
-    /// the trigger sits outside the menu card, so clicking it while the menu
-    /// is open *always* fires `close_actions_menu_from_outside_click` too,
-    /// on the very same physical mouse-down (capture phase, before this
-    /// handler's own bubble-phase click even fires). A naive toggle —
-    /// "closed ⇒ open, open ⇒ close" — reads `actions_menu` fresh right
-    /// here and finds it already `None` (the outside handler beat it to the
-    /// close), so it would open a *fresh* menu instead of leaving the
-    /// captain's dismiss click alone: the menu would flicker closed-then-
-    /// reopened on a single click, never actually dismissible by clicking
-    /// the trigger again. `menu_open_before_this_press`
-    /// (`note_actions_menu_mouse_down`) is the fix: it's a snapshot of
-    /// whether the menu was mounted *before* this gesture's capture phase
-    /// ran at all, so this handler can tell "the outside click just closed
-    /// what was open a moment ago" (consume the note, stay closed) apart
-    /// from "the menu was already closed, this is a genuine open" (open it).
-    fn handle_actions_menu_trigger_click(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if std::mem::take(&mut self.menu_open_before_this_press) {
-            return;
-        }
-        self.open_actions_menu_for_selected_row(cx);
-    }
 
     /// Enter, while the actions menu is open. A destructive action
     /// (`ItemAction::destructive`) needs a *second* Enter to actually run —
@@ -1688,6 +1725,24 @@ impl Render for Root {
             // See `docs/evidence/panel-shadow-tent-fix-report.md`.
             .overflow_hidden()
             .child(self.render_input_row(cx))
+            // A hairline between the field and everything it produces, so
+            // the query reads as the thing driving the list rather than the
+            // first item in it.
+            .child(div().h(px(1.)).flex_shrink_0().bg(theme::active().border_hairline))
+            // **The `⌘K` menu's anchor.** It used to hang off the footer's
+            // "Actions ⌘K" trigger; with the footer gone it needs a pin of
+            // its own, or `open_actions_menu` would set state that nothing
+            // ever paints — a menu that opens invisibly, including its
+            // destructive-delete confirmation.
+            .children(self.actions_menu.clone().map(|menu| {
+                div()
+                    .absolute()
+                    .bottom(px(theme::CONTENT_BOTTOM_SPACE_PX))
+                    .right(px(theme::CONTENT_INSET_PX))
+                    .w(px(0.))
+                    .h(px(0.))
+                    .child(self.render_actions_menu(&menu, cx))
+            }))
             // **Below the search field, not above it.** Above, the tiles sat
             // between the top of the panel and the field, so Down from the
             // field went straight past them into the rows and the only way in
@@ -1700,7 +1755,6 @@ impl Render for Root {
                 Some(mode) => self.render_mode_content(mode, cx),
                 None => self.render_content_area(cx, query_is_empty).into_any_element(),
             })
-            .child(self.render_footer(cx))
     }
 }
 
@@ -1909,10 +1963,25 @@ impl Root {
             // Was `px_2()`, the same 8px — now read from the token the agent
             // grid also uses, so the two cannot drift apart again.
             .px(px(theme::CONTENT_INSET_PX))
+            // **Where the footer used to be.** A real fade mask is not
+            // available here: `edge_fade` works by painting a quad in the
+            // surface's own colour, and `panel_alpha` is 0 — there is
+            // nothing to fade *into*, and a dark gradient would just be the
+            // bar again in softer form. Open space is the honest version:
+            // the list simply stops short of the edge, and the glass carries
+            // the bottom of the panel on its own.
+            .pb(px(theme::CONTENT_BOTTOM_SPACE_PX))
             // Every `img(path)` row icon under this container loads through
             // one bounded cache instance, not GPUI's default never-evicted
             // per-`App` asset cache — see `row_icon_cache.rs`.
-            .image_cache(self.row_icon_cache.clone());
+            //
+            // `image_cache` is a `Div`-only method (not on the `Stateful<Div>`
+            // that `.id(...)` produces), so it has to come before the scroll
+            // wiring — the same ordering `render_mode_list` documents.
+            .image_cache(self.row_icon_cache.clone())
+            .id("root-list-scroll")
+            .overflow_y_scroll()
+            .track_scroll(&self.root_scroll);
 
         if !self.connected {
             container = container.child(self.render_connection_banner());
@@ -2074,8 +2143,17 @@ impl Root {
             .h(px(theme::RESULT_ROW_HEIGHT_PX))
             .px_3()
             .gap_3()
-            .when(selected, |row| {
-                row.bg(theme::active().surface_selected).rounded(px(theme::ROW_RADIUS_PX))
+            .rounded(px(theme::ROW_RADIUS_PX))
+            .when(selected, |row| row.bg(theme::active().surface_selected))
+            // **A hover tint, distinctly weaker than the selected pill.**
+            // `row_icon_socket_bg` is `text_primary` at 6% — already the
+            // token this app uses for "a surface a shade above the panel" —
+            // so hovering reads as the pointer being somewhere rather than
+            // as a second selection competing with the keyboard's.
+            // Deliberately not applied to the selected row: brightening what
+            // is already selected on mouse-over says nothing.
+            .when(!selected, |row| {
+                row.hover(|row| row.bg(theme::active().row_icon_socket_bg))
             })
             .child(icon)
             .child(
@@ -2139,79 +2217,6 @@ impl Root {
             }))
     }
 
-    fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let base = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .flex_shrink_0()
-            // A second grab area. The footer is inert chrome apart from the
-            // `⌘K` trigger, which has its own click handler and so takes the
-            // gesture before this ever sees it.
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::begin_window_drag))
-            .h(px(theme::FOOTER_HEIGHT_PX))
-            .px_5()
-            .border_t_1()
-            .border_color(theme::active().border_hairline);
-
-        // An activation failure takes over the footer's own fixed strip
-        // instead of opening a new toast surface — same geometry, same
-        // always-on-screen location, just different content until the next
-        // query or summon clears it (`run_search`). Reuses the danger
-        // tokens the accessibility banner already established
-        // (`render_accessibility_banner`) rather than inventing a new color.
-        if let Some(message) = &self.activation_error {
-            return base.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .text_size(px(12.))
-                    .text_color(theme::active().state_danger)
-                    .child(format!("Couldn't open — {message}")),
-            );
-        }
-
-        let selected_item = self.results.get(self.selected);
-        // The primary action's verb matches what enter actually does — data
-        // straight from the selected row's own provider (`item.action_label`),
-        // not a client-side match on which provider produced it. Falls back
-        // to the app provider's own verb when nothing is selected, matching
-        // this footer's pre-existing behavior on an empty result list.
-        let primary_action: SharedString = selected_item
-            .map(|item| SharedString::from(item.action_label.clone()))
-            .unwrap_or_else(|| "Open  ↵".into());
-        // The footer's left side is the mode's own name while a mode is
-        // active (`data/neko-design/mockups/12-first-clipboard-use.html`'s
-        // `footer-source`: "Clipboard History", constant regardless of
-        // selection) rather than the selected row's title — the mode *is*
-        // the context now, not whatever happens to be highlighted.
-        let left_label: Option<SharedString> = match self.active_mode() {
-            Some(mode) => Some(mode.chrome.title.into()),
-            None => selected_item.map(|item| SharedString::from(item.title.clone())),
-        };
-        base.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .text_size(px(12.))
-                    .text_color(theme::active().text_tertiary)
-                    .children(left_label),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .text_size(px(12.))
-                    .text_color(theme::active().text_secondary)
-                    .child(primary_action)
-                    .child(div().w(px(1.)).h(px(16.)).bg(theme::active().border_hairline_strong))
-                    .child(self.render_actions_trigger(cx)),
-            )
-    }
-
     /// The "Actions ⌘K" footer label, now a real clickable trigger for the
     /// menu it names, not just a static hint — Raycast's own footer actions
     /// are clickable the same way. `.relative()` establishes the positioned
@@ -2220,19 +2225,6 @@ impl Root {
     /// child, rather than as a `render()`-level sibling, is what anchors the
     /// floating menu to the trigger's actual on-screen position instead of a
     /// hand-tuned fixed offset from the panel's corner.
-    fn render_actions_trigger(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut trigger = div()
-            .id("actions-trigger")
-            .relative()
-            .cursor(CursorStyle::PointingHand)
-            .on_click(cx.listener(Self::handle_actions_menu_trigger_click))
-            .child("Actions  ⌘K");
-        if let Some(menu) = self.actions_menu.clone() {
-            trigger = trigger.child(self.render_actions_menu(&menu, cx));
-        }
-        trigger
-    }
-
     /// The two-column mode view (`data/neko-design/mockups/
     /// 12-first-clipboard-use.html`): a fixed-width filtered list on the
     /// left, a preview + info pane on the right when
@@ -3187,15 +3179,21 @@ mod tests {
     #[test]
     fn six_apps_and_a_clipboard_row_still_show_the_clipboard_row() {
         // The exact shape that first produced a half-clipped row, and then
-        // (after fixing that) produced a dropped-entirely clipboard
-        // section: 6 apps plus 1 clipboard entry, against the fixed 320px
-        // content budget. The clipboard reservation means the app section
-        // gives up a row rather than the clipboard section losing its only
-        // one.
+        // (after fixing that) produced a dropped-entirely clipboard section:
+        // 6 apps plus 1 clipboard entry. The clipboard reservation means the
+        // app section gives up a row rather than the clipboard section
+        // losing its only one.
+        //
+        // **The budget is stated here rather than taken from
+        // `CONTENT_AREA_MIN_HEIGHT_PX`**: this is a test of the reservation
+        // algorithm, and pinning a row count against the panel's own height
+        // makes it fail for the wrong reason every time the panel is
+        // resized. 320px is the height that produces this shape.
+        const TIGHT_BUDGET: f32 = 320.0;
         let mut results: Vec<SearchItem> = (0..6).map(|_| item("app")).collect();
         results.push(item("clipboard"));
 
-        let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
+        let fitted = fit_within_budget(results, TIGHT_BUDGET);
 
         let apps_kept = fitted.iter().filter(|i| i.kind == "app").count();
         let clipboard_kept = fitted.iter().filter(|i| i.kind == "clipboard").count();
@@ -3232,11 +3230,14 @@ mod tests {
 
     #[test]
     fn a_pure_app_query_is_unaffected_by_the_clipboard_reservation() {
-        // No clipboard entries at all -> no reservation taken -> same
-        // count a pure app-only search produced before clipboard existed
-        // (7 of 8 requested fit once the one header is charged).
+        // No clipboard entries at all -> no reservation taken -> same count
+        // a pure app-only search produced before clipboard existed (7 of 8
+        // requested fit once the one header is charged). Explicit budget for
+        // the same reason as the test above: the number is a property of the
+        // algorithm at this height, not of whatever the panel happens to be.
+        const TIGHT_BUDGET: f32 = 320.0;
         let results: Vec<SearchItem> = (0..RESULT_LIMIT).map(|_| item("app")).collect();
-        let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
+        let fitted = fit_within_budget(results, TIGHT_BUDGET);
         assert_eq!(fitted.len(), 7);
     }
 
@@ -3564,14 +3565,14 @@ mod tests {
     fn the_grid_is_two_rows_of_two_and_its_capacity_matches_that() {
         assert_eq!(
             AGENT_GRID_CAPACITY,
-            theme::AGENT_GRID_COLUMNS * 2,
-            "capacity and layout must agree, or the last tile is drawn outside the strip"
+            theme::AGENT_GRID_COLUMNS,
+            "one strip: capacity and columns must agree, or a tile wraps into a row that is clipped"
         );
         // Two tiles plus the gap between them must actually fit the width the
         // strip has, or they wrap into three rows and the third is clipped.
         let inset = theme::CONTENT_INSET_PX * 2.0;
         let used = theme::AGENT_TILE_WIDTH_PX * theme::AGENT_GRID_COLUMNS as f32
-            + theme::AGENT_GRID_GAP_PX;
+            + theme::AGENT_GRID_GAP_PX * (theme::AGENT_GRID_COLUMNS as f32 - 1.0);
         assert!(
             used <= theme::PANEL_WIDTH_WITH_DETAIL_PX - inset + 0.01,
             "a row of tiles ({used}) must fit the panel inset by {inset}"
@@ -3944,6 +3945,12 @@ mod tests {
 
         window
             .update(cx, |root, _window, cx| {
+                // A two-frame response only happens for a query at least
+                // `files::MIN_QUERY_LEN` long — below that nothing defers and
+                // the daemon answers in one frame. Set directly rather than
+                // through `set_content`, which would kick off a real search
+                // and clobber the generation this test is driving by hand.
+                root.results_are_for_empty_query = false;
                 root.generation = 1;
                 root.pending_search_generation = Some(1);
                 root.apply_search_results(partial.clone(), false, 1, cx);
@@ -4294,96 +4301,6 @@ mod tests {
         row
     }
 
-    #[gpui::test]
-    fn clicking_the_trigger_while_the_menu_is_open_does_not_reopen_it(cx: &mut TestAppContext) {
-        // The race `data/neko-comet-design/report.md` recommendation 1
-        // describes (comet's `popover.rs:67-180`, reimplemented here in
-        // neko's own terms — see `handle_actions_menu_trigger_click`'s doc
-        // comment for the full mechanism): the footer trigger sits outside
-        // the menu card, so a click on it while the menu is open fires the
-        // card's own outside-close handler (capture phase) on the very same
-        // physical mouse-down, strictly before the trigger's own click
-        // handler (bubble phase, on mouse-up) ever runs — `gpui` completes
-        // every capture-phase listener across the whole window before any
-        // bubble-phase listener starts (confirmed by reading
-        // `gpui-0.2.2/src/window.rs`'s `dispatch_mouse_event`). Exercised
-        // here by calling the three real handler methods directly, in
-        // exactly that dispatch order, rather than via a simulated window
-        // click — matching this suite's own established convention
-        // (`test_root`'s doc comment) of proving state-machine correctness
-        // headlessly, the same way comet's own equivalent test
-        // (`trigger_press_note_distinguishes_dismiss_from_open`) is a pure
-        // state test with no simulated mouse event either.
-        let window = test_root(cx);
-        cx.run_until_parked();
-        window
-            .update(cx, |root, _window, _cx| {
-                root.results = vec![clipboard_row_with_a_paste_action("hello")];
-                root.selected = 0;
-            })
-            .unwrap();
-        window
-            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
-            .unwrap();
-        window
-            .update(cx, |root, _window, _cx| assert!(root.actions_menu.is_some(), "setup: the menu must be open"))
-            .unwrap();
-
-        window
-            .update(cx, |root, window, cx| {
-                // Capture phase: the note fires before anything mutates
-                // `actions_menu` for this gesture.
-                root.note_actions_menu_mouse_down(&MouseDownEvent::default(), window, cx);
-                // Still capture phase: the card's own outside-close handler
-                // fires next (the trigger is outside the card), closing the
-                // menu.
-                root.close_actions_menu_from_outside_click(&MouseDownEvent::default(), window, cx);
-                // Bubble phase, on mouse-up: the trigger's own click.
-                root.handle_actions_menu_trigger_click(&ClickEvent::default(), window, cx);
-            })
-            .unwrap();
-
-        window
-            .update(cx, |root, _window, _cx| {
-                assert!(
-                    root.actions_menu.is_none(),
-                    "the trigger's own click must not reopen what the outside click in the same gesture just closed"
-                );
-            })
-            .unwrap();
-    }
-
-    #[gpui::test]
-    fn clicking_the_trigger_when_the_menu_is_already_closed_opens_it(cx: &mut TestAppContext) {
-        // The normal-path counterpart to the race test above — the guard
-        // must not suppress a genuine open when nothing closed it first.
-        let window = test_root(cx);
-        cx.run_until_parked();
-        window
-            .update(cx, |root, _window, _cx| {
-                root.results = vec![clipboard_row_with_a_paste_action("hello")];
-                root.selected = 0;
-            })
-            .unwrap();
-        window
-            .update(cx, |root, _window, _cx| assert!(root.actions_menu.is_none(), "setup: the menu must start closed"))
-            .unwrap();
-
-        window
-            .update(cx, |root, window, cx| {
-                root.note_actions_menu_mouse_down(&MouseDownEvent::default(), window, cx);
-                // No outside-close handler fires this time — the menu was
-                // already closed, so there was nothing for it to dismiss.
-                root.handle_actions_menu_trigger_click(&ClickEvent::default(), window, cx);
-            })
-            .unwrap();
-
-        window
-            .update(cx, |root, _window, _cx| {
-                assert!(root.actions_menu.is_some(), "a click on the trigger with the menu closed must open it");
-            })
-            .unwrap();
-    }
 
     #[gpui::test]
     fn escape_closes_the_actions_menu_before_exiting_an_active_mode(cx: &mut TestAppContext) {

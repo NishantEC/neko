@@ -3930,7 +3930,11 @@ double-panel shadow defect").
 **Two new palette tokens**, `snap_guide` and `snap_guide_muted` — the
 theme's own `text_primary` at `SNAP_GUIDE_ALPHA` and at exactly half it,
 derived in `build()` like every other dependent token, so a theme supplies a
-hue and can never decouple the two weights. `PALETTE_TOKEN_COUNT` is 22.
+hue and can never decouple the two weights. `PALETTE_TOKEN_COUNT` is 23 —
+`surface_tile` (the theme's foreground at `TILE_ALPHA`) joined them when the
+agent tiles had to stop being opaque: the panel paints glass now, so an
+opaque tile on top of it read as a block pasted on rather than part of the
+same pane.
 The guide is drawn with a `surface_panel` hairline outline so it reads over
 a wallpaper of either polarity. `SNAP_GUIDE_THICKNESS_PX` is geometry and
 stays `const`.
