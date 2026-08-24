@@ -2410,38 +2410,75 @@ the captain's own machine: 8 real project rows, each naming the tool actually
 used there. **Not verified**: anything on screen (no client launch, no
 screenshot), and the env-stripping fix above.
 
-## Usage: quota read from the provider's own API, and the meter card
+## Usage: quota read from each provider's own API, and the meter row
 
 `/usage` — the captain's own *"establish our own method to get the usages
 from the added model providers"*. `neko_core::usage` is the read;
-`neko_protocol::Meter` plus `panel::render_meter_card` is the render.
+`neko_protocol::Meter` plus `panel::render_meter` is the render. **Read that
+module's own doc comment before touching this area**; it is the normative
+statement of what follows.
 
-**The source is the provider's API, not Paseo.** Paseo's own WebSocket was
+**The source is each provider's API, not Paseo.** Paseo's own WebSocket was
 tried first and abandoned: the handshake needs an undocumented
 `protocolVersion` and `provider.usage.list.request` was never answered — the
 session routing it needs is not written down anywhere. Reading the vendor
-API directly is fewer moving parts and has no daemon to be running. The
-*method* is Paseo's, because it is simply how the provider works; every line
-here is neko's own, which matters more for that clone than any other in
+APIs directly is fewer moving parts and has no daemon to be running. The
+*method* is Paseo's, because it is simply how these providers work; every
+line is neko's own, which matters more for that clone than any other in
 `refs/` — it is **AGPL-3.0**.
 
-- **The credential is in the macOS Keychain** (`security find-generic-password
-  -s "Claude Code-credentials"`), **not** `~/.claude/.credentials.json` —
-  that path is Paseo's Linux case and does not exist on this machine.
-- **The token never touches `argv`.** It goes to `curl` on **stdin** via
-  `--config -`. `-H "Authorization: Bearer …"` would put an OAuth credential
-  in the process arguments, readable by any local process through `ps`. It
-  is never logged and never persisted.
-- **`CACHE_TTL` is 90s** because a mode re-searches on every keystroke —
-  without it, typing in the pane is one Keychain read and one network
-  round-trip per character.
-- **Only windows in `KNOWN_WINDOWS` are shown.** The response also carries
-  `nimbus_quill`/`amber_ladder`/`cinder_cove` — real numbers against
-  codenames whose meaning is not public. Rendering "amber_ladder 0%" is
-  noise dressed as information. Pinned by a test, including the case where a
-  codename does carry a value.
-- **Every failure is a row, never a blank pane**: signed out, no credential,
-  and the transport error each say what to do next.
+**Three vendors, one `Vendor` enum** — the same shape `agents::Backend` uses,
+and adding a fourth costs one variant plus one arm in each of `name`,
+`credential`, `request`, `parse`. Nothing else: not the provider, not the
+cache, not the fan-out, not the rendering. Each was verified against this
+machine's own live credential, not written from Paseo's source alone:
+
+| vendor | credential | endpoint | what it gives |
+| --- | --- | --- | --- |
+| Claude Code | Keychain `Claude Code-credentials` | `api.anthropic.com/api/oauth/usage` | percentage windows |
+| Codex | `~/.codex/auth.json` (+ `account_id`) | `chatgpt.com/backend-api/wham/usage` | percentage windows |
+| Grok | `~/.grok/auth.json` | `cli-chat-proxy.grok.com/v1/billing` | credits used/limit |
+
+- **A vendor with no credential here is omitted entirely**, not rendered as
+  a "not configured" row. Eight providers' worth of "you are not signed in"
+  would bury the two real answers. Only when *nothing* is signed in does the
+  pane say so, once.
+- **No token ever touches `argv`.** Every header goes to `curl` on **stdin**
+  via `--config -`; `-H "Authorization: Bearer …"` would put a live
+  credential where any local process can read it out of `ps`. Never logged,
+  never persisted.
+- **The three fetches run concurrently** (`thread::scope`, the same shape the
+  daemon uses to fan a search across providers). Sequentially, three
+  `REQUEST_TIMEOUT_SECS` stalls would put 30s behind a keystroke.
+- **`CACHE_TTL` is 90s** because a mode re-searches on every keystroke.
+  Enter on any row invalidates it, so the pane can be refreshed on demand.
+- **Codex windows are labelled by their own length, not their slot.** Paseo
+  names `primary_window` "Session" and `secondary_window` "Weekly"; this
+  machine's *primary* window is 604800 seconds, so slot naming would have
+  called a seven-day window a session. `limit_window_seconds` cannot go
+  stale that way.
+- **Only Claude windows in the known table are shown.** The response also
+  carries `nimbus_quill`/`amber_ladder`/`cinder_cove` — real numbers against
+  codenames whose meaning is not public. Pinned by a test, including the
+  case where a codename does carry a value.
+- **Grok bills credits, so the fraction is derived** — and an account with
+  `monthlyLimit: 0` (what this machine reports) gets a note, not a bar: zero
+  of zero is not "0% used", and an empty bar and a full one would both lie.
+- **Resets are durations, never an absolute clock.** "resets 13:59 UTC" reads
+  as *today* at 13:59, which for a weekly window is six days wrong, and
+  forces timezone arithmetic either way. `epoch_from_rfc3339` is hand-rolled
+  (Howard Hinnant's days-from-civil) rather than taking a date dependency for
+  one field — the same trade `clipboard` and `agents` already made — and is
+  tested against 1970, the 2000 leap-century case, and a real response.
+
+**Not built, and why**: Copilot's token here is a plain `gh` CLI one and
+`copilot_internal/user` answers it **401** — and that route returns a plan
+label with *no* windows anyway, so it could never produce a meter. Cursor,
+Kimi, MiniMax and Z.AI have no credential on this machine, so implementing
+them from Paseo's source alone would be unverifiable code. Each is 80–340
+lines there.
+
+### The meter row
 
 **`SearchItem::meter` is the render half, and it is a wire-vocabulary
 addition rather than a client-side special case.** A row carrying a `Meter`
@@ -2455,9 +2492,10 @@ gets the same treatment free. **The first stat is the headline, the rest
 qualify it** — a vocabulary rule, not knowledge of who produced the row.
 
 **No card.** A bordered, filled box around each reading turned a two-line
-fact into furniture and stacked two of them into a form. A meter is a
-different *shape* of row, not a different kind of surface: same `px_3` rail,
-same `surface_selected` pill, no border and no divider.
+fact into furniture and stacked several into a form. A meter is a different
+*shape* of row, not a different kind of surface: same `px_3` rail, same
+`surface_selected` pill, no border and no divider. Vendors separate with the
+mode list's existing `group_label` headers, which cost nothing new.
 
 **The colour ramp spans the track, not the fill, and it interpolates in
 HSL.** `state_success` at empty → `state_danger` at full, so a reading's
@@ -2474,10 +2512,9 @@ and the ramp lands exactly on the tokens at 0 and 1. Both endpoints are
 ordinary palette tokens, so **no palette token was added** —
 `PALETTE_TOKEN_COUNT` is still 23.
 
-**Still open**: the other providers' quota (codex, copilot, cursor, grok,
-kimi, minimax, zai — 80–340 lines each in Paseo's own fetchers, each a
-different auth story), and anything on screen (no window-scoped capture was
-taken; the wire response and the tests are the whole verification).
+**Still open**: Copilot and the four unverifiable vendors above, and anything
+on screen (no window-scoped capture was taken; the wire response and the
+tests are the whole verification).
 
 ## The shared pulse clock, and the repeating-animation rule
 
