@@ -3,6 +3,7 @@ mod assets;
 mod components;
 mod daemon_launcher;
 mod display_placement;
+mod dock_badge;
 mod edge_fade;
 mod evidence;
 mod hotkey_client;
@@ -412,6 +413,11 @@ fn main() {
         // moving it needs a Tab press — real OS input, which this repo does
         // not synthesise. This opens the window with the ring already parked
         // and never takes focus; see `evidence::preferences_focus`.
+        if let Some(count) = evidence::dock_badge_count() {
+            let shown = dock_badge::set_waiting_count(count);
+            eprintln!("neko: dock badge set to {count}, reads back {shown:?}");
+        }
+
         if evidence::preferences_focus().is_some() {
             let open = open_preferences_for_evidence;
             cx.spawn(async move |cx| {
@@ -595,6 +601,17 @@ fn main() {
                                     });
                                 });
                             }
+                        }
+                        // The panel is hidden almost all of the time, so a
+                        // search cannot be what tells you an agent went and
+                        // blocked. This is the one ambient surface neko has
+                        // — see `dock_badge`'s own doc comment for why not a
+                        // notification and why not the menu bar.
+                        Event::AttentionChanged { count } => {
+                            let shown = dock_badge::set_waiting_count(count);
+                            eprintln!(
+                                "neko: {count} waiting — dock badge reads back {shown:?}"
+                            );
                         }
                     }
                 }
