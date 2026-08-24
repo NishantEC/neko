@@ -168,7 +168,7 @@ impl TerminalsProvider {
 
     fn client(&self) -> Result<McpClient, ProviderError> {
         if !self.live {
-            return Err(ProviderError("Paseo isn't running".to_string()));
+            return Err(ProviderError(crate::mcp::McpError::NotRunning.to_string()));
         }
         McpClient::discover().map_err(|e| ProviderError(e.to_string()))
     }

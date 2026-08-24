@@ -475,7 +475,10 @@ impl AskProvider {
                 kind: "ask".to_string(),
                 title,
                 subtitle,
-                icon: Icon::Glyph(Glyph::AgentLive),
+                // `Agent` rather than `AgentLive`: this is neko acting as
+                // one, and the live variant's presence dot means a session
+                // is running, which nothing here is.
+                icon: Icon::Glyph(Glyph::Agent),
                 section_label: "Ask neko".to_string(),
                 action_label: format!("{verb}  \u{21b5}"),
                 badge: None,
@@ -517,8 +520,14 @@ impl Provider for AskProvider {
         if question.is_empty() {
             return vec![self.row(
                 "empty",
-                "Say what you want done".to_string(),
-                Some("e.g. \"stop the agent in triage-fe\" or \"pause the nightly sweep\"".to_string()),
+                // Deliberately not the placeholder's own words: the field
+                // already says "Say what you want done", and a row echoing
+                // it spends the only row on screen saying nothing new.
+                "neko will propose one tool call".to_string(),
+                Some(
+                    "It runs nothing until you confirm. Try \"stop the agent in triage-fe\"."
+                        .to_string(),
+                ),
                 "Type",
                 true,
                 Vec::new(),
