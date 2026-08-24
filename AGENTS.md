@@ -2771,7 +2771,16 @@ the panel is hidden almost all of the time. An agent that blocks while you
 are working elsewhere would wait until your next summon to be noticed.
 
 `server::run_attention_poll` (a `neko-daemon` thread, `ATTENTION_POLL_INTERVAL`
-= 5s) does two jobs:
+= **1.2s, deliberately shorter than `permissions::CACHE_TTL`'s 1.5s**) does
+two jobs. The relationship between those two numbers is the feature: at the
+5s it originally shipped with, the cache was warm for 1.5 seconds out of
+every 5, so `defers_for` found it cold most of the time and the inbox landed
+in the panel's *second* frame — L3 working one second in three. Caught by
+timing a root query on a freshly started daemon and getting two frames back;
+now **12 of 12 root queries answer in one frame**, where it was intermittent.
+The TTL bounds how stale an answer may be before it is refetched on demand;
+the poll interval bounds how long the cache may sit cold. Measured at the new
+cadence: **0.0–0.2% CPU, 14.3 MB RSS**, flat.
 
 - **Keeps the inbox cache warm**, which is what makes
   `PermissionsProvider::defers_for` answer `false` — deferring exists to keep
