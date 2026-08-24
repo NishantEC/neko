@@ -336,6 +336,13 @@ fn is_opaque_id(segment: &str) -> bool {
         && segment.chars().any(|c| c.is_ascii_alphabetic())
 }
 
+/// `/Users/x/Documents/neko` → `~/Documents/neko`. Public because
+/// `crate::terminals` shows the same paths and there should be one rule for
+/// how a home directory is written, not two that can drift.
+pub fn tildify_path(path: &str) -> String {
+    tildify(path)
+}
+
 fn tildify(path: &str) -> String {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         return path.to_string();
@@ -763,6 +770,7 @@ fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceN
         source: agent.provider_mark(),
         meter: None,
         keeps_open: false,
+        preview: None,
     }
 }
 

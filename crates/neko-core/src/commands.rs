@@ -127,6 +127,13 @@ const COMMANDS: &[CommandSpec] = &[
         glyph: Glyph::AgentLive,
     },
     CommandSpec {
+        id: "terminals",
+        title: "Terminals",
+        aliases: &["Terminals", "Shells", "Sessions", "Console"],
+        mode: "terminal",
+        glyph: Glyph::Text,
+    },
+    CommandSpec {
         id: "preferences",
         title: "Preferences",
         aliases: &["Preferences", "Settings", "neko Settings", "Options", "Configure"],
@@ -204,6 +211,7 @@ impl Provider for CommandsProvider {
                         source: None,
                         meter: None,
                         keeps_open: false,
+                        preview: None,
                     },
                 })
             })

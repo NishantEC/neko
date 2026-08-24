@@ -25,6 +25,7 @@ pub mod provider;
 pub mod schedules;
 pub mod search;
 pub mod settings;
+pub mod terminals;
 pub mod themes;
 pub mod usage;
 

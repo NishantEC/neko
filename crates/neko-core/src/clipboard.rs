@@ -349,6 +349,7 @@ impl Provider for ClipboardProvider {
                         source: entry.source_app.clone(),
                         meter: None,
                         keeps_open: false,
+                        preview: None,
                     },
                 })
             })

@@ -132,6 +132,15 @@ pub const MODES: &[ModeChrome] = &[
     // — see `neko_core::schedules` for why not "Run now".
     // Say what you want; neko proposes one tool call and runs nothing until
     // you confirm it. See `neko_core::ask`.
+    // Paseo's supervised shells. `has_detail` because the point is reading
+    // what one last said, which is what the pane is for.
+    ModeChrome {
+        id: "terminal",
+        provider_id: "terminal",
+        title: "Terminals",
+        placeholder: "Type to filter terminals\u{2026}",
+        has_detail: true,
+    },
     ModeChrome {
         id: "ask",
         provider_id: "ask",

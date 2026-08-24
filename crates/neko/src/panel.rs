@@ -2574,17 +2574,33 @@ impl Root {
             .border_color(theme::active().border_hairline)
             .text_size(px(13.))
             .text_color(theme::active().text_primary)
-            .child(SharedString::from(item.id.clone()));
+            // **`preview` when the provider offers one, `id` otherwise.**
+            // The clipboard mode predates the field and works only because a
+            // clipboard entry's id *is* its content; nothing else has that
+            // coincidence, so a provider with something to show now says so
+            // directly. See `SearchItem::preview`.
+            .child(SharedString::from(
+                item.preview.clone().unwrap_or_else(|| item.id.clone()),
+            ));
 
         let mut info = div().flex().flex_col().gap_2();
-        if let Some(source) = &item.source {
-            info = info.child(detail_info_row("Application", source.clone()));
-        }
-        if let Some(badge) = &item.badge {
-            info = info.child(detail_info_row("Content Type", title_case_badge(badge)));
-        }
-        if let Some(accessory) = &item.accessory {
-            info = info.child(detail_info_row("Copied", accessory.clone()));
+        // **The labels are the clipboard mode's, so only its own rows get
+        // them.** "Application" over a terminal's working directory would be
+        // a wrong label on a right value, which is worse than no label —
+        // and a mode whose fields differ is exactly the cost `modes.rs`
+        // already says a second detail view pays.
+        if item.kind == "clipboard" {
+            if let Some(source) = &item.source {
+                info = info.child(detail_info_row("Application", source.clone()));
+            }
+            if let Some(badge) = &item.badge {
+                info = info.child(detail_info_row("Content Type", title_case_badge(badge)));
+            }
+            if let Some(accessory) = &item.accessory {
+                info = info.child(detail_info_row("Copied", accessory.clone()));
+            }
+        } else if let Some(source) = &item.source {
+            info = info.child(detail_info_row("Directory", source.clone()));
         }
 
         col.child(preview).child(info)
@@ -3303,6 +3319,7 @@ mod tests {
             source: None,
             meter: None,
             keeps_open: false,
+            preview: None,
         }
     }
 
@@ -3707,6 +3724,7 @@ mod tests {
             source: None,
             meter: None,
             keeps_open: false,
+            preview: None,
         }
     }
 
@@ -3969,6 +3987,7 @@ mod tests {
             source: None,
             meter: None,
             keeps_open: false,
+            preview: None,
         }
     }
 
@@ -4063,6 +4082,7 @@ mod tests {
             source: None,
             meter: None,
             keeps_open: false,
+            preview: None,
         }
     }
 
