@@ -134,6 +134,13 @@ const COMMANDS: &[CommandSpec] = &[
         glyph: Glyph::Text,
     },
     CommandSpec {
+        id: "agents",
+        title: "Agents",
+        aliases: &["Agents", "Sessions", "Talk to an agent", "Send a prompt"],
+        mode: "agent",
+        glyph: Glyph::Agent,
+    },
+    CommandSpec {
         id: "preferences",
         title: "Preferences",
         aliases: &["Preferences", "Settings", "neko Settings", "Options", "Configure"],

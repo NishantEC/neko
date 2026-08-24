@@ -164,9 +164,18 @@ pub fn record_entry(
 }
 
 /// All stored entries, most recently copied first.
+/// How much of an entry is read for matching and rendering.
+///
+/// Generous next to what anything downstream uses — a row shows one line,
+/// the detail pane a paragraph, and `CLIPBOARD_TITLE_LIKE_CHARS` (60) is
+/// where a long entry's score starts collapsing anyway — and tiny next to
+/// what was being read: a 17 MB entry, in full, on every keystroke. See
+/// `Db::clipboard_entries`.
+pub const MAX_MATCHED_BYTES: usize = 8 * 1024;
+
 pub fn entries(db: &crate::Db) -> rusqlite::Result<Vec<ClipboardEntry>> {
     Ok(db
-        .clipboard_entries()?
+        .clipboard_entries(MAX_MATCHED_BYTES)?
         .into_iter()
         .map(|(content, kind, source_app, copied_at_unix_ms)| ClipboardEntry {
             content,

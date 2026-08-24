@@ -134,6 +134,16 @@ pub const MODES: &[ModeChrome] = &[
     // you confirm it. See `neko_core::ask`.
     // Paseo's supervised shells. `has_detail` because the point is reading
     // what one last said, which is what the pane is for.
+    // Every agent, with the keyboard pointed at the thing you came to do:
+    // say something else to it. The query is the prompt, not a filter —
+    // the same rule the New Agent mode follows.
+    ModeChrome {
+        id: "agent",
+        provider_id: "agent-control",
+        title: "Agents",
+        placeholder: "Say something to the selected agent\u{2026}",
+        has_detail: false,
+    },
     ModeChrome {
         id: "terminal",
         provider_id: "terminal",
