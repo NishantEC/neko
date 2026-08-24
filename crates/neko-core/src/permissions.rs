@@ -108,6 +108,44 @@ pub fn inbox(client: &McpClient) -> Inbox {
 /// Drops the cache so the next [`inbox`] really refetches — called the
 /// instant a response is sent, so the row disappears without waiting out the
 /// TTL.
+/// Whether [`inbox`] can answer right now without touching the network.
+///
+/// This is what makes a blocked agent appear in the panel's **first** frame
+/// rather than its second: `defers_for` exists to keep a socket round trip
+/// off the fast path, and a warm cache has no round trip to keep off it.
+/// With `neko-daemon`'s poller running the cache is warm essentially always,
+/// so the deferred path is really only the cold-start case.
+pub fn is_warm() -> bool {
+    CACHE.lock().unwrap().as_ref().is_some_and(|(at, _)| at.elapsed() < CACHE_TTL)
+}
+
+/// How many agents are waiting, without fetching. `None` when nothing is
+/// cached yet — distinct from `Some(0)`, which is a real, current "nobody".
+pub fn cached_count() -> Option<usize> {
+    CACHE.lock().unwrap().as_ref().and_then(|(at, inbox)| {
+        if at.elapsed() >= CACHE_TTL {
+            return None;
+        }
+        Some(match inbox {
+            Inbox::Pending(pending) => pending.len(),
+            Inbox::Clear | Inbox::Unavailable => 0,
+        })
+    })
+}
+
+/// Refetches unconditionally, ignoring the cache, and returns the new count.
+/// The poller's entry point — [`inbox`] would mostly return its own warm
+/// cache and never refresh anything.
+pub fn refresh(client: &McpClient) -> usize {
+    let fresh = fetch(client);
+    let count = match &fresh {
+        Inbox::Pending(pending) => pending.len(),
+        Inbox::Clear | Inbox::Unavailable => 0,
+    };
+    *CACHE.lock().unwrap() = Some((Instant::now(), fresh));
+    count
+}
+
 pub fn invalidate() {
     *CACHE.lock().unwrap() = None;
 }
@@ -245,13 +283,14 @@ impl Provider for PermissionsProvider {
     /// by `panel::merge_late_results` rather than reordering what is already
     /// on screen.
     fn defers_for(&self, _query: &str) -> bool {
-        // Gated on the daemon actually being reachable, not hard-coded
-        // `true`: a provider that will not make a request has nothing to
-        // defer *for*, and splitting a search into two frames to carry a
-        // guaranteed-empty result costs a wire frame and a second client
-        // render for nothing. Discovery is one small file read, which is
-        // free next to the `mdfind` this same search is about to run.
-        self.client().is_some()
+        // Gated twice, and both gates are about not paying for a frame
+        // that buys nothing. A provider that will not make a request has
+        // nothing to defer *for*; and a **warm cache** has no round trip to
+        // keep off the fast path, so with the daemon's poller running the
+        // rows land in the first frame — which is the whole point of L3.
+        // Discovery is one small file read, free next to the `mdfind` this
+        // same search is about to run.
+        !is_warm() && self.client().is_some()
     }
 
     fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {

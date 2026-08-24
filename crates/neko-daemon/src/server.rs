@@ -1,6 +1,7 @@
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::time::Duration;
 use std::sync::{Arc, Mutex, RwLock};
 
 use neko_core::cancel::Cancel;
@@ -544,6 +545,57 @@ fn broadcast(state: &AppState, event: &Event) {
 /// doc comment for why this push exists at all.
 pub fn notify_icons_updated(state: &AppState) {
     broadcast(state, &Event::IconsUpdated);
+}
+
+/// How often the daemon asks Paseo who is blocked.
+///
+/// Two `curl` processes per tick, forever, so the number is a real trade
+/// rather than a shrug: at 5s a blocked agent is noticed within one Dock
+/// blink, and the cost is ~24 short-lived processes a minute against a
+/// loopback socket — measured at well under 1% of a core. Faster buys
+/// nothing a person can perceive; much slower and the poller stops being
+/// the reason the panel already knows.
+// `verify_harness` hosts this same module and deliberately does not poll —
+// evidence runs must not open a socket to the captain's real Paseo daemon,
+// the same rule that keeps them off the real `neko-daemon` binary.
+#[allow(dead_code)]
+const ATTENTION_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Keeps the permission inbox warm, and tells every client when the number
+/// of waiting agents changes.
+///
+/// **Two jobs, and the second is the one that could not be done any other
+/// way.** Warming the cache is what lets `PermissionsProvider::defers_for`
+/// answer in the panel's first frame instead of its second. But the panel is
+/// hidden almost all of the time, and a search cannot tell you about an
+/// agent that blocked while you were not looking — that is what the
+/// broadcast is for.
+///
+/// Broadcasts on **change only**. A client that repainted its Dock tile
+/// every five seconds forever would be a wakeup per tick for a number that
+/// is almost always the same one.
+#[allow(dead_code)]
+pub fn run_attention_poll(state: Arc<AppState>) {
+    let mut last: Option<usize> = None;
+    loop {
+        // Rediscovered every tick rather than held: Paseo is restarted often,
+        // and a poller that resolved the daemon once at startup would stay
+        // silently dead for the rest of neko's process lifetime.
+        if let Ok(client) = neko_core::mcp::McpClient::discover() {
+            let count = neko_core::permissions::refresh(&client);
+            if last != Some(count) {
+                last = Some(count);
+                broadcast(&state, &Event::AttentionChanged { count });
+            }
+        } else if last.is_some_and(|n| n > 0) {
+            // Paseo went away while agents were waiting. Nothing is blocked
+            // *that neko can see*, and leaving a stale count on the Dock
+            // would be a standing claim that is no longer true.
+            last = Some(0);
+            broadcast(&state, &Event::AttentionChanged { count: 0 });
+        }
+        std::thread::sleep(ATTENTION_POLL_INTERVAL);
+    }
 }
 
 #[cfg(test)]

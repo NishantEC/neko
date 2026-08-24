@@ -106,6 +106,15 @@ fn main() {
         std::thread::spawn(move || neko_core::clipboard::run_capture_loop(&state.db));
     }
 
+    {
+        // Ambient awareness: keeps the permission inbox warm so the panel
+        // already knows when it opens, and pushes the count to every client
+        // so an agent that blocks while the panel is hidden still shows up —
+        // on the Dock tile. See `server::run_attention_poll`.
+        let state = state.clone();
+        std::thread::spawn(move || server::run_attention_poll(state));
+    }
+
     eprintln!("neko-daemon: listening on {}", socket_path.display());
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };

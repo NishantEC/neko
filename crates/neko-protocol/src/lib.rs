@@ -454,6 +454,15 @@ pub enum Event {
     /// repaints too — the committing one has already applied it locally (live
     /// preview means it was applied before the round-trip even started).
     ThemeChanged { id: String },
+    /// How many agents are stopped, waiting for a person — broadcast when
+    /// the number *changes*, not on every poll.
+    ///
+    /// The rows themselves already arrive through the ordinary search path,
+    /// so this exists for the case a search cannot serve: the panel is
+    /// hidden. neko is resident and invisible almost all of the time, and an
+    /// agent that blocks while it is hidden would otherwise wait until the
+    /// next summon to be noticed. The client puts this on the Dock tile.
+    AttentionChanged { count: usize },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

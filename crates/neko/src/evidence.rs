@@ -319,6 +319,18 @@ pub fn show_selection_requested() -> bool {
 /// who forgets a flag is exactly the failure mode the incident in this
 /// module's own doc comment came from, so forgetting must fail *safe*, not
 /// fail *loud-and-focus-stealing*.
+/// A Dock-badge count to paint at launch, for verifying L3's own ambient
+/// surface.
+///
+/// It exists because the badge cannot be *photographed*: it lives on the
+/// Dock, and this repo permits only `screencapture -l<windowid>` — a
+/// window-scoped capture of neko's own panel, which the Dock is not part of.
+/// So the proof is a native readback instead, printed next to the value that
+/// was set. Focus-neutral: it touches no window state at all.
+pub fn dock_badge_count() -> Option<usize> {
+    std::env::var("NEKO_DOCK_BADGE").ok()?.trim().parse().ok()
+}
+
 /// Which Preferences control to park the focus ring on, if any.
 pub fn preferences_focus() -> Option<usize> {
     std::env::var("NEKO_SHOW_PREFERENCES").ok()?.trim().parse().ok()
@@ -344,6 +356,7 @@ pub fn evidence_run_active() -> bool {
         || bench_iterations().is_some()
         || bench_real_iterations().is_some()
         || preferences_focus().is_some()
+        || dock_badge_count().is_some()
 }
 
 /// Reads back off the live `NSWindow` whether this evidence window is
