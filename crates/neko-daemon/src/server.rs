@@ -564,17 +564,25 @@ pub fn notify_icons_updated(state: &AppState) {
 
 /// How often the daemon asks Paseo who is blocked.
 ///
-/// Two `curl` processes per tick, forever, so the number is a real trade
-/// rather than a shrug: at 5s a blocked agent is noticed within one Dock
-/// blink, and the cost is ~24 short-lived processes a minute against a
-/// loopback socket — measured at well under 1% of a core. Faster buys
-/// nothing a person can perceive; much slower and the poller stops being
-/// the reason the panel already knows.
+/// **Deliberately shorter than `permissions::CACHE_TTL`, and that is the
+/// whole point.** At 5s against a 1.5s TTL the cache was warm for 1.5
+/// seconds out of every 5 — so `defers_for` found it cold most of the time
+/// and the inbox landed in the panel's *second* frame, which is exactly what
+/// L3 exists to prevent. Caught by timing a root query on a freshly started
+/// daemon and getting two frames back.
+///
+/// The two numbers answer different questions and both are needed: the TTL
+/// bounds how stale an answer may be before it is refetched on demand, and
+/// this bounds how long the cache may sit cold. Polling faster than the TTL
+/// is what keeps it continuously warm.
+///
+/// Two `curl` processes per tick, forever, so the cost is a real trade
+/// rather than a shrug — measured below 1% of a core at this cadence.
 // `verify_harness` hosts this same module and deliberately does not poll —
 // evidence runs must not open a socket to the captain's real Paseo daemon,
 // the same rule that keeps them off the real `neko-daemon` binary.
 #[allow(dead_code)]
-const ATTENTION_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const ATTENTION_POLL_INTERVAL: Duration = Duration::from_millis(1200);
 
 /// Keeps the permission inbox warm, and tells every client when the number
 /// of waiting agents changes.
