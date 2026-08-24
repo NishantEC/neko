@@ -203,8 +203,30 @@ impl PaseoAgent {
     /// `~/Documents/tcc/triage-fe` where Paseo itself says
     /// `Care-Connect-AI/triage-fe`, which is what the repository is called
     /// everywhere else a person sees it.
+    ///
+    /// **A line that repeats the title is spent on nothing.** Paseo names a
+    /// `kind: "directory"` workspace after its folder and gives it a
+    /// project of the same name — no branch, no repository slug — so two
+    /// agents in `~/Documents/hme` both resolved to `hme` over `hme` and
+    /// were indistinguishable from each other. The lookup succeeded; it
+    /// just had nothing to say. The prompt is the only field left that
+    /// differs between two sessions in one directory, so it takes the line
+    /// in exactly that case — and only that case, since where a repository
+    /// name is real it beats a prompt every time.
     fn subtitle(&self, names: &HashMap<String, WorkspaceName>) -> Option<String> {
-        self.names(names).project.or_else(|| self.cwd.as_deref().map(tildify))
+        let path = || self.cwd.as_deref().map(tildify);
+        match self.names(names).project {
+            Some(project) if project != self.display_title(names) => Some(project),
+            // The repository resolved and repeats the title, so it has
+            // nothing to add — but the path has nothing to add either,
+            // since the title is that directory's own name. Only the prompt
+            // is left.
+            Some(_) => self.prompt().or_else(path),
+            // Nothing resolved at all: the title is already the directory's
+            // name or the prompt, and where it is running beats repeating
+            // either.
+            None => path().or_else(|| self.prompt()),
+        }
     }
 
     fn names(&self, names: &HashMap<String, WorkspaceName>) -> WorkspaceName {
@@ -1140,6 +1162,73 @@ mod tests {
         let found = provider.search("testimonials", 0);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].item.title, "feat/doctors-maps");
+    }
+
+
+    #[test]
+    fn a_second_line_that_would_repeat_the_title_carries_the_prompt_instead() {
+        // Paseo names a `kind: "directory"` workspace after its folder and
+        // gives it a project of the same name, so both of this machine's
+        // `~/Documents/hme` agents resolved to "hme" over "hme" — the
+        // lookup succeeding and still saying nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        std::fs::write(
+            home.join("projects/projects.json"),
+            r#"[{"projectId":"/x/hme","displayName":"hme"}]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("projects/workspaces.json"),
+            r#"[{"workspaceId":"/x/hme","displayName":"hme","projectId":"/x/hme"}]"#,
+        )
+        .unwrap();
+        let root = home.join("agents");
+        write_agent(
+            &root,
+            "hme",
+            "a1",
+            r#"{"id":"a1","title":"https://github.com/HealthifyMe/athena/pull/4501",
+                "workspaceId":"/x/hme","cwd":"/x/hme","lastStatus":"running"}"#,
+        );
+        write_agent(
+            &root,
+            "hme",
+            "a2",
+            r#"{"id":"a2","title":"So we've been working on testimonials",
+                "workspaceId":"/x/hme","cwd":"/x/hme","lastStatus":"running"}"#,
+        );
+        let provider = AgentsProvider::with_root(root);
+        let mut seen: Vec<(String, String)> = provider
+            .search("", 0)
+            .into_iter()
+            .map(|c| (c.item.title, c.item.subtitle.unwrap_or_default()))
+            .collect();
+        seen.sort();
+        assert_eq!(seen, vec![
+            ("hme".to_string(), "So we've been working on testimonials".to_string()),
+            ("hme".to_string(), "github.com/\u{2026}/pull/4501".to_string()),
+        ]);
+    }
+
+    #[test]
+    fn a_real_repository_name_still_beats_the_prompt() {
+        // The fallback is scoped to the case that has nothing to say. Where
+        // Paseo knows the repository, that is what the line is for.
+        let dir = tempfile::tempdir().unwrap();
+        let root = write_paseo_home(dir.path());
+        write_agent(
+            &root,
+            "triage",
+            "a1",
+            r#"{"id":"a1","title":"fix the carousel","workspaceId":"wks_1",
+                "cwd":"/x/triage-fe","lastStatus":"running"}"#,
+        );
+        let provider = AgentsProvider::with_root(root);
+        let item = provider.search("", 0).remove(0).item;
+        assert_eq!(item.title, "feat/doctors-maps");
+        assert_eq!(item.subtitle.as_deref(), Some("Care-Connect-AI/triage-fe"));
     }
 
 }

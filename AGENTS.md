@@ -2300,6 +2300,20 @@ even though it does not identify a session on screen.
 (`workspaces.json`, `projects.json`); 215 of this machine's 229 agents
 resolve, and the rest fall back to the directory name, then the prompt.
 
+**A resolved name can still say nothing, and that is a separate case from a
+failed lookup.** Paseo names a `kind: "directory"` workspace after its
+folder and gives it a project of the same name — no branch, no repository
+slug — so both of this machine's `~/Documents/hme` agents came out `hme`
+over `hme` and were indistinguishable from each other. The lookup had
+succeeded. `subtitle` therefore branches three ways rather than falling
+through one chain: a project that differs from the title is the line; a
+project that *repeats* it hands the line to the prompt, the only field left
+that separates two sessions in one directory; and nothing resolved at all
+keeps the path, because the title is then already the directory's own name
+and the prompt would be the second thing on the tile saying nothing. Two
+pre-existing tests caught the first draft of this, which let the prompt win
+the no-project case too.
+
 **`projects/` is `agents/`'s sibling, not its child** — `~/.paseo/agents`
 and `~/.paseo/projects` — so `read_workspace_names` takes the agents root
 and steps up. Getting that wrong is silent: every lookup misses and every
