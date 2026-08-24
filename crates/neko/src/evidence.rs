@@ -46,6 +46,7 @@
 //! | `NEKO_SHOW_ACTIONS_MENU` | no | same — `open_actions_menu_for_evidence` |
 //! | `NEKO_SCROLL_MODE_LIST_TO_BOTTOM` | no | same — a `ScrollHandle` mutation |
 //! | `NEKO_SHOW_SELECTION` | no | same — `select_query_for_evidence` |
+//! | `NEKO_SHOW_PREFERENCES` | no | opens the Preferences window with `order_front_regardless` and parks the focus ring on one control, so the ring can be photographed without a keystroke |
 //! | `NEKO_SHOW_DRAG_GUIDES` | no | opens a second window with `focus: false` and `ignoresMouseEvents`; touches the panel's own focus not at all |
 //! | `NEKO_PROVE_TYPING` | no | types through GPUI's own key dispatch and reads the field back; no OS input, does not focus |
 //! | `NEKO_REAL_CYCLES_BEFORE_SHOW` | no | already `order_front_regardless`/`order_out` only, by its own deliberate design |
@@ -105,6 +106,17 @@
 //!   does not obviously say so.
 //!   See `run_bench_real`'s own doc comment for the exact stderr markers an
 //!   outside script samples `vmmap`/`footprint` against.
+//! - `NEKO_SHOW_PREFERENCES=<index>` opens the Preferences window and parks
+//!   its keyboard focus on control `<index>` of the current tab's own ring
+//!   (`preferences::view::Control`), then prints that window's number for
+//!   `screencapture -l`. It exists because the focus ring is only visible
+//!   once the keyboard has moved, and moving it needs a Tab press — real OS
+//!   input, which this repo does not synthesise. Unlike the ordinary
+//!   Preferences path it never calls `cx.activate`/`activate_window`, so the
+//!   evidence window cannot take the captain's keystrokes; the consequence,
+//!   stated rather than hidden, is that the "preferences window is key"
+//!   readback correctly reports `false` on such a run.
+//!
 //! - `NEKO_SHOW_DRAG_GUIDES=1` (only read alongside `NEKO_SHOW_ON_LAUNCH`)
 //!   opens the drag-guide overlay (`window_drag::demo_overlay`) for a snap
 //!   the panel is not actually being dragged into, and prints its window
@@ -307,6 +319,11 @@ pub fn show_selection_requested() -> bool {
 /// who forgets a flag is exactly the failure mode the incident in this
 /// module's own doc comment came from, so forgetting must fail *safe*, not
 /// fail *loud-and-focus-stealing*.
+/// Which Preferences control to park the focus ring on, if any.
+pub fn preferences_focus() -> Option<usize> {
+    std::env::var("NEKO_SHOW_PREFERENCES").ok()?.trim().parse().ok()
+}
+
 pub fn activation_opt_in() -> bool {
     std::env::var_os(ACTIVATE_ENV_VAR).is_some()
 }
@@ -323,7 +340,10 @@ pub fn activation_opt_in() -> bool {
 /// first, which is exactly the kind of remember-to-do-it mitigation that
 /// failed here. Suppressing it structurally cannot be forgotten.
 pub fn evidence_run_active() -> bool {
-    show_on_launch_requested() || bench_iterations().is_some() || bench_real_iterations().is_some()
+    show_on_launch_requested()
+        || bench_iterations().is_some()
+        || bench_real_iterations().is_some()
+        || preferences_focus().is_some()
 }
 
 /// Reads back off the live `NSWindow` whether this evidence window is
@@ -751,10 +771,16 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
     });
     cx.background_executor().timer(std::time::Duration::from_millis(200)).await;
     cx.update(|cx| {
-        let _ = window.update(cx, |_root, window, _cx| {
+        let _ = window.update(cx, |root, window, _cx| {
             if let Ok(number) = material::window_number(window) {
                 eprintln!("neko: window number {number}");
             }
+            // So a capture says which state it is showing rather than being
+            // read off the pixels it exists to prove.
+            eprintln!(
+                "neko: results truncated {}",
+                root.results_truncated_for_evidence()
+            );
             // Printed immediately before the capture signal below, so the
             // evidence for "this window was visible and painted but was not
             // key" is a live native readback taken at capture time, not an

@@ -2629,11 +2629,19 @@ this review claimed otherwise and was wrong.
 
 The rest, briefly:
 
-- **The root list now shows what it dropped.** It is budget-fit and simply
-  stops, so a truncated list and a short one rendered identically.
-  `Root::results_truncated` drives `edge_fade::bottom_edge_fade` — the same
-  gradient and band the scrolling mode list uses, painted only when
-  something was really left out.
+- **The root list now shows what it dropped** — as a count, not a fade.
+  `Root::hidden_rows` renders `"+3 more — keep typing to narrow"`. A
+  gradient was the first attempt and it was **wrong**, which only a real
+  capture showed (`docs/evidence/interface-pass-truncation-fade-invisible.png`):
+  a scroll fade works because content sits *behind* it, and here there is
+  none — the list stops, and the fade painted panel-colour over
+  panel-colour in whatever slack was left below the last row. Invisible, in
+  the exact case it existed for. A count also names the way out, which a
+  fade cannot: this list does not scroll, so "there is more" with no means
+  of reaching it is worse than silence. **The cue pays for itself** —
+  `run_search` refits against `budget - TRUNCATION_CUE_HEIGHT_PX` whenever
+  anything was dropped, or the cue would push out the last row that
+  `fit_within_budget` exists to protect.
 - **One string per idea.** `panel::NO_MATCHES` replaces `"No matching
   results"` / `"No matching entries."` (two nouns, one of them punctuated)
   and names the way out; `panel::DAEMON_UNREACHABLE` replaces `"Can't
@@ -2647,6 +2655,24 @@ The rest, briefly:
   150px, and since `agents::subtitle` began handing the line to the prompt,
   the hidden part is what tells two sessions apart. `panel::TextTooltip` is
   the smallest view that renders a string in the app's tokens.
+
+**Verified on screen, under the standing evidence discipline** (isolated
+`HOME`, `verify_harness` rather than the real daemon, no `neko-daemon`
+sibling on `PATH` so the spawn fails cleanly, `key window false` at every
+capture, `screencapture -l<windowid>` only): the focus ring on the hotkey
+keycaps and on the launch-at-login switch
+(`docs/evidence/interface-pass-focus-ring-{hotkey,toggle}.png` — the second
+is why the ring is an outline and not a fill; that switch is already
+filled), sentence-case labels live, and the truncation cue
+(`interface-pass-truncation-cue.png`, logged `results truncated true`
+beside the window number so the capture states its own state).
+`NEKO_SHOW_PREFERENCES=<index>` is the permanent hook that made the ring
+photographable: it parks the ring on one control and, unlike the ordinary
+Preferences path, never calls `cx.activate`/`activate_window` — moving the
+ring for real needs a Tab press, which this repo does not synthesise.
+**One environment note**: `cp` over a *running* binary leaves it unusable
+(the client exits instantly with an empty log); replace it with `rm` then
+`cp`.
 
 **Rejected, with the reason, so nobody re-runs them**: letter-spacing on the
 uppercase badges (**gpui exposes no letter-spacing API** — checked in

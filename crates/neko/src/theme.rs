@@ -848,6 +848,10 @@ pub const CHIP_RADIUS_PX: f32 = 5.0;
 pub const INPUT_ROW_HEIGHT_PX: f32 = 56.0;
 pub const RESULT_ROW_HEIGHT_PX: f32 = 40.0;
 pub const SECTION_HEADER_HEIGHT_PX: f32 = 28.0;
+/// The "+N more" line under a budget-truncated root list
+/// (`panel::render_content_area`). Shorter than a section header: it is a
+/// footnote about the list, not a division within it.
+pub const TRUNCATION_CUE_HEIGHT_PX: f32 = 22.0;
 pub const FOOTER_HEIGHT_PX: f32 = 44.0;
 /// The breathing space below the last row, where the panel footer used to be.
 /// Smaller than the footer it replaces — it is quiet space, not a reserved

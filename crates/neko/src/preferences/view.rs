@@ -103,9 +103,31 @@ pub fn open_window(
     // one within it. `window.focus` below is a third, separate thing — GPUI's
     // own internal focus, which routes actions and draws the caret but cannot
     // pull real OS keystrokes into a window the OS does not consider key.
-    cx.activate(true);
+    // **An evidence run never becomes key.** The ring exists to be
+    // photographed, and this repo's standing rule is that a throwaway
+    // window must never be able to take the captain's real keystrokes
+    // (`AGENTS.md`, "Standing safety rule"). The consequence is stated
+    // rather than hidden: the readback below correctly reports `false` on
+    // such a run, and no key press would reach the window if one were made.
+    let evidence_focus = crate::evidence::preferences_focus();
+    if evidence_focus.is_none() {
+        cx.activate(true);
+    }
     let _ = window.update(cx, |root, window, cx| {
-        window.activate_window();
+        match evidence_focus {
+            Some(index) => {
+                root.focused = index;
+                let _ = crate::material::order_front_regardless(window);
+                match crate::material::window_number(window) {
+                    Ok(number) => eprintln!(
+                        "neko: preferences window number {number} \u{2014} focus ring on control {index} ({:?})",
+                        root.focused_control()
+                    ),
+                    Err(e) => eprintln!("neko: preferences window number unavailable: {e}"),
+                }
+            }
+            None => window.activate_window(),
+        }
         window.focus(&root.focus_handle(cx), cx);
         root.reload(cx);
         // Verified, not trusted — the same discipline `material::verify_installed`

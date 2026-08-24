@@ -29,8 +29,7 @@
 
 use gpui::{
     AnyElement, App, Bounds, Element, GlobalElementId, Hsla, InspectorElementId, IntoElement,
-    LayoutId, Pixels, ScrollHandle, Window, div, fill, linear_color_stop, linear_gradient, point,
-    prelude::*, px, size,
+    LayoutId, Pixels, ScrollHandle, Window, fill, linear_color_stop, linear_gradient, point, px, size,
 };
 
 /// Wraps `child` (expected to already be `.overflow_y_scroll().track_scroll(scroll)`)
@@ -43,29 +42,6 @@ pub fn scroll_edge_fade(
     child: impl IntoElement,
 ) -> ScrollEdgeFade {
     ScrollEdgeFade { scroll, fade_color, band_px, child: child.into_any_element() }
-}
-
-/// A bottom-edge fade for a list that does **not** scroll.
-///
-/// `scroll_edge_fade` above needs a `ScrollHandle` to know where the
-/// overflow is; the root list has none — it is budget-fit, so it simply
-/// stops and the caller is the only thing that knows something was left
-/// out. This is the same gradient and the same band, as a plain absolutely
-/// positioned overlay, so the two cues look identical wherever they appear.
-/// The parent must be `.relative()`.
-pub fn bottom_edge_fade(fade_color: Hsla, band_px: f32) -> impl IntoElement {
-    let transparent = Hsla { a: 0.0, ..fade_color };
-    div()
-        .absolute()
-        .bottom_0()
-        .left_0()
-        .right_0()
-        .h(px(band_px))
-        .bg(linear_gradient(
-            180.0,
-            linear_color_stop(transparent, 0.0),
-            linear_color_stop(fade_color, 1.0),
-        ))
 }
 
 pub struct ScrollEdgeFade {
