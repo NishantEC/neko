@@ -164,6 +164,9 @@ fn main() {
         let preferences_slot: preferences::SharedPreferencesSlot = Rc::new(RefCell::new(None));
         let open_preferences =
             preferences::view::opener(client.clone(), rebinder.clone(), preferences_slot.clone());
+        // Kept for the evidence path below, which runs after the closure
+        // above has been moved into the panel.
+        let open_preferences_for_evidence = open_preferences.clone();
 
         // Always `PANEL_WIDTH_WITH_DETAIL_PX` — the real `NSWindow` never
         // resizes for a mode transition any more (see `AGENTS.md`, "Mode
@@ -403,6 +406,19 @@ fn main() {
             let client = client.clone();
             cx.spawn(async move |cx| evidence::show_once(&client, window, cx).await)
                 .detach();
+        }
+
+        // The focus ring is only visible once the keyboard has moved, and
+        // moving it needs a Tab press — real OS input, which this repo does
+        // not synthesise. This opens the window with the ring already parked
+        // and never takes focus; see `evidence::preferences_focus`.
+        if evidence::preferences_focus().is_some() {
+            let open = open_preferences_for_evidence;
+            cx.spawn(async move |cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(1200)).await;
+                let _ = window.update(cx, |_root, window, cx| open(window, cx));
+            })
+            .detach();
         }
 
         // The persisted theme, fetched in its own task rather than folded

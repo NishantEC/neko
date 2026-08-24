@@ -46,7 +46,7 @@ use neko_protocol::{Glyph, Icon, ItemAction, Meter, MeterStat, Request, Response
 
 use crate::accessibility::AccessibilityChecker;
 use crate::assets::{glyph_icon, icon};
-use crate::edge_fade::{bottom_edge_fade, scroll_edge_fade};
+use crate::edge_fade::scroll_edge_fade;
 use crate::menu_frost::sync_menu_frost;
 use crate::modes::{self, ModeChrome};
 use crate::motion;
@@ -251,9 +251,10 @@ pub struct Root {
     /// thing being measured — but only ever *read* when the hook is on, so
     /// normal operation prints nothing.
     search_dispatched_at: Option<(u64, std::time::Instant)>,
-    /// Whether the last response had more rows than the fixed content area
-    /// could show. Drives the bottom edge fade — see `run_search`.
-    results_truncated: bool,
+    /// How many rows the last response carried that the fixed content area
+    /// could not show. Drives the "+N more" cue — see `run_search`.
+    hidden_rows: usize,
+
     /// Tracks the mode list's own scroll position (`render_mode_list`) —
     /// the root list never scrolls (still budget-fit, `fit_within_budget`,
     /// per this module's "v1 simplification" doc comment above), so this is
@@ -419,7 +420,7 @@ impl Root {
             pending_search_generation: None,
             partial_generation: None,
             search_dispatched_at: None,
-            results_truncated: false,
+            hidden_rows: 0,
             mode_scroll: ScrollHandle::new(),
             applied_appearance: None,
             appearance_setter,
@@ -825,21 +826,33 @@ impl Root {
         // concern applies with nothing typed, since nothing defers on an
         // empty query so there is no second frame to reconcile.
         let offered = items.len();
+        // **Fitted twice when anything was dropped, and that is deliberate.**
+        // The cue takes real height, so a list fitted to the full budget and
+        // then given a cue would push its own last row out — the defect
+        // `fit_within_budget` exists to prevent, reintroduced one layer up.
+        // Fitting again against the smaller budget is the only way the count
+        // can be honest about itself. Both passes are pure `Vec` work on at
+        // most `RESULT_LIMIT` items.
+        let fit = |items: Vec<SearchItem>| {
+            let first = fit_within_budget(items.clone(), budget);
+            if first.len() < items.len() {
+                fit_within_budget(items, budget - theme::TRUNCATION_CUE_HEIGHT_PX)
+            } else {
+                first
+            }
+        };
         self.results = if self.active_mode().is_some() || self.results_are_for_empty_query {
             items
         } else if complete && self.partial_generation == Some(generation) {
             let anchor = std::mem::take(&mut self.results);
             merge_late_results(anchor, items, budget, self.selected)
         } else {
-            fit_within_budget(items, budget)
+            fit(items)
         };
-        // A mode's list scrolls and fades its own edge; the root list is
-        // budget-fit and simply stops, so this is the only signal that
-        // anything was left out. `merge_late_results` can legitimately end
-        // up with *more* rows than this response offered — it keeps what is
-        // already on screen — hence the saturating comparison rather than a
-        // difference.
-        self.results_truncated = self.results.len() < offered;
+        // `merge_late_results` can legitimately end up with *more* rows than
+        // this response offered — it keeps what is already on screen — hence
+        // the saturating subtraction rather than a difference.
+        self.hidden_rows = offered.saturating_sub(self.results.len());
 
         let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
         self.selected = resolve_selection(previous, &self.results);
@@ -2060,23 +2073,34 @@ impl Root {
             }
             container = container.child(self.render_row(idx, item, false, cx));
         }
-        // **The cue for what did not fit.** A mode's list scrolls and
-        // `edge_fade::scroll_edge_fade` shows exactly where there is more;
-        // the root list is budget-fit and just stops, so before this a
-        // dropped row and a genuinely short list looked identical. Same
-        // gradient, same band, painted only when something was really left
-        // out — the root list does not scroll, so this reads as "there is
-        // more" rather than promising a scroll that will not happen, and
-        // the way to reach it is to type more, which the empty state and
-        // the footer both already say.
-        container.when(self.results_truncated, |el| {
-            let fade = if self.translucent {
-                theme::active().surface_panel_translucent
-            } else {
-                theme::active().surface_panel
-            };
-            el.child(bottom_edge_fade(fade.into(), theme::EDGE_FADE_BAND_PX))
-        })
+        // **The cue for what did not fit.**
+        //
+        // A gradient was the first attempt and it was wrong, which only a
+        // real capture showed: a scroll fade works because content is
+        // *behind* it, and here there is nothing behind — the list stops,
+        // and the fade painted panel-colour over panel-colour in whatever
+        // slack was left below the last row. Invisible, in the exact case
+        // it existed for.
+        //
+        // A count says the thing instead. It also names the way out, which
+        // a fade cannot: this list does not scroll, so "there is more" with
+        // no means of reaching it would be worse than silence.
+        container.children(self.hidden_row_count().map(|n| {
+            div()
+                .flex_shrink_0()
+                .h(px(theme::TRUNCATION_CUE_HEIGHT_PX))
+                .flex()
+                .items_center()
+                .px_3()
+                .text_size(px(11.))
+                .text_color(theme::active().text_tertiary)
+                .child(SharedString::from(format!("+{n} more \u{2014} keep typing to narrow")))
+        }))
+    }
+
+    /// How many rows the budget had to drop, or `None` when everything fit.
+    fn hidden_row_count(&self) -> Option<usize> {
+        (self.hidden_rows > 0).then_some(self.hidden_rows)
     }
 
     /// Design report §3, step 08 — content/copy matches the mockup, but not
@@ -2173,6 +2197,13 @@ impl Root {
     /// (`render_mode_detail`).
     /// Whether row `idx` paints the selected pill. See `render_row` for why
     /// the grid's own focus is part of the answer.
+    /// Evidence-only: whether the bottom fade should be painted right now,
+    /// so a capture says which state it is showing instead of being read
+    /// off the pixels it is meant to prove.
+    pub fn results_truncated_for_evidence(&self) -> bool {
+        self.hidden_rows > 0
+    }
+
     fn row_is_highlighted(&self, idx: usize) -> bool {
         idx == self.selected && self.grid_selected.is_none()
     }
@@ -4901,11 +4932,18 @@ mod tests {
         // seven rendered identically.
         let few: Vec<SearchItem> = (0..2).map(|i| item_with_id("app", &format!("a{i}"))).collect();
         let fitted = fit_within_budget(few.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
-        assert!(fitted.len() >= few.len(), "two rows always fit");
+        assert_eq!(fitted.len(), few.len(), "two rows always fit");
 
         let many: Vec<SearchItem> = (0..40).map(|i| item_with_id("app", &format!("a{i}"))).collect();
         let fitted = fit_within_budget(many.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
         assert!(fitted.len() < many.len(), "forty rows cannot fit a fixed area");
+
+        // And the cue has to pay for itself: refitting against the smaller
+        // budget must never leave more rows than the full budget allowed,
+        // or the cue would push its own last row out.
+        let with_cue =
+            fit_within_budget(many.clone(), CONTENT_AREA_MIN_HEIGHT_PX - theme::TRUNCATION_CUE_HEIGHT_PX);
+        assert!(with_cue.len() <= fitted.len());
     }
 
     #[test]
