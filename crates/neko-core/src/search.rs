@@ -491,6 +491,7 @@ mod tests {
             actions: Vec::new(),
             source: None,
             meter: None,
+            keeps_open: false,
         }
     }
 

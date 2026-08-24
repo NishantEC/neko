@@ -341,6 +341,23 @@ pub fn split_status(raw: &str) -> (String, Option<u16>) {
 
 // ------------------------------------------------------------- credentials
 
+/// The live Claude Code OAuth token, or `None` when it has never signed in
+/// here.
+///
+/// Public because `crate::ask` needs the same credential for the Messages
+/// API — one reader rather than two, so there is exactly one place that
+/// knows where this token lives and exactly one to audit. The returned
+/// `String` is the secret; callers must not log it.
+pub fn claude_access_token() -> Option<String> {
+    let raw = run_capture("/usr/bin/security", &[
+        "find-generic-password",
+        "-w",
+        "-s",
+        "Claude Code-credentials",
+    ])?;
+    claude_token(&raw)
+}
+
 /// Pulls `claudeAiOauth.accessToken` out of the Keychain blob.
 pub fn claude_token(raw: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(raw.trim()).ok()?;
@@ -628,6 +645,7 @@ impl Provider for UsageProvider {
                     actions: Vec::new(),
                     source: None,
                     meter: row.meter,
+                    keeps_open: false,
                 },
             })
             .collect()

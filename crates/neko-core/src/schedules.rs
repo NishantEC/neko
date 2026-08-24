@@ -223,6 +223,7 @@ impl Provider for SchedulesProvider {
                         ],
                         source: None,
                         meter: None,
+                        keeps_open: false,
                     },
                 })
             })

@@ -120,6 +120,13 @@ const COMMANDS: &[CommandSpec] = &[
         glyph: Glyph::Sliders,
     },
     CommandSpec {
+        id: "ask",
+        title: "Ask neko",
+        aliases: &["Ask neko", "Do something", "Natural language", "Tell neko"],
+        mode: "ask",
+        glyph: Glyph::AgentLive,
+    },
+    CommandSpec {
         id: "preferences",
         title: "Preferences",
         aliases: &["Preferences", "Settings", "neko Settings", "Options", "Configure"],
@@ -196,6 +203,7 @@ impl Provider for CommandsProvider {
                         actions: Vec::new(),
                         source: None,
                         meter: None,
+                        keeps_open: false,
                     },
                 })
             })

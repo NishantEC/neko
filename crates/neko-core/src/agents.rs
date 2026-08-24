@@ -762,6 +762,7 @@ fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceN
         // field" slot; how it renders is the client's business.
         source: agent.provider_mark(),
         meter: None,
+        keeps_open: false,
     }
 }
 

@@ -6,6 +6,7 @@
 //! below, which work fine from a headless process.
 
 pub mod agents;
+pub mod ask;
 pub mod apps;
 pub mod cancel;
 pub mod clipboard;

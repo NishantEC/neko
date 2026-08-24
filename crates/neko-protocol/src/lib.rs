@@ -280,6 +280,18 @@ pub struct SearchItem {
     /// abstraction" section exists to forbid.
     #[serde(default)]
     pub meter: Option<Meter>,
+    /// Confirming this row performs a *step*, not a finish — so the panel
+    /// stays open and re-searches instead of getting out of the way.
+    ///
+    /// Every ordinary row means "do this and let me get on with it", which
+    /// is why hiding is the default. A row that proposes something (see
+    /// `neko_core::ask`: type a sentence, get a tool call, press Enter
+    /// again to run it) would be unusable if the first Enter dismissed the
+    /// panel it is asking you to look at. Reuses the path `⌘K` menu actions
+    /// already take — `panel::Root::perform_activation`'s
+    /// `hide_on_success: false` — rather than adding a second one.
+    #[serde(default)]
+    pub keeps_open: bool,
 }
 
 /// A 0..=1 reading plus the labelled values that explain it. See

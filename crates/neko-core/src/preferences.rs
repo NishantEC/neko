@@ -397,6 +397,7 @@ impl Provider for PreferencesProvider {
                         actions: Vec::new(),
                         source: None,
                         meter: None,
+                        keeps_open: false,
                     },
                 })
             })
@@ -501,6 +502,7 @@ impl Provider for FolderScopeProvider {
                         }],
                         source: None,
                         meter: None,
+                        keeps_open: false,
                     },
                 }
             })
