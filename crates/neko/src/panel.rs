@@ -46,7 +46,7 @@ use neko_protocol::{Glyph, Icon, ItemAction, Meter, MeterStat, Request, Response
 
 use crate::accessibility::AccessibilityChecker;
 use crate::assets::{glyph_icon, icon};
-use crate::edge_fade::scroll_edge_fade;
+use crate::edge_fade::{bottom_edge_fade, scroll_edge_fade};
 use crate::menu_frost::sync_menu_frost;
 use crate::modes::{self, ModeChrome};
 use crate::motion;
@@ -251,6 +251,9 @@ pub struct Root {
     /// thing being measured — but only ever *read* when the hook is on, so
     /// normal operation prints nothing.
     search_dispatched_at: Option<(u64, std::time::Instant)>,
+    /// Whether the last response had more rows than the fixed content area
+    /// could show. Drives the bottom edge fade — see `run_search`.
+    results_truncated: bool,
     /// Tracks the mode list's own scroll position (`render_mode_list`) —
     /// the root list never scrolls (still budget-fit, `fit_within_budget`,
     /// per this module's "v1 simplification" doc comment above), so this is
@@ -416,6 +419,7 @@ impl Root {
             pending_search_generation: None,
             partial_generation: None,
             search_dispatched_at: None,
+            results_truncated: false,
             mode_scroll: ScrollHandle::new(),
             applied_appearance: None,
             appearance_setter,
@@ -820,6 +824,7 @@ impl Root {
         // `fit_within_budget` and `merge_late_results` protect — and neither
         // concern applies with nothing typed, since nothing defers on an
         // empty query so there is no second frame to reconcile.
+        let offered = items.len();
         self.results = if self.active_mode().is_some() || self.results_are_for_empty_query {
             items
         } else if complete && self.partial_generation == Some(generation) {
@@ -828,6 +833,13 @@ impl Root {
         } else {
             fit_within_budget(items, budget)
         };
+        // A mode's list scrolls and fades its own edge; the root list is
+        // budget-fit and simply stops, so this is the only signal that
+        // anything was left out. `merge_late_results` can legitimately end
+        // up with *more* rows than this response offered — it keeps what is
+        // already on screen — hence the saturating comparison rather than a
+        // difference.
+        self.results_truncated = self.results.len() < offered;
 
         let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
         self.selected = resolve_selection(previous, &self.results);
@@ -1221,6 +1233,20 @@ impl Root {
             grid = grid.child(
                 div()
                     .id(SharedString::from(format!("agent-tile-{id}")))
+                    // **Truncation hides content, so the full value stays
+                    // reachable.** A tile is 150px and both its lines
+                    // ellipsize — and since `agents::subtitle` began handing
+                    // the line to the prompt for workspaces whose name
+                    // repeats their project, the hidden part is now the only
+                    // thing telling two sessions apart. Hover restores it.
+                    // Deliberately the whole tile rather than the text: the
+                    // text is not separately hoverable at this size.
+                    .tooltip({
+                        let full = agent_tile_tooltip(item);
+                        move |_window, cx| {
+                            cx.new(|_| TextTooltip { text: full.clone() }).into()
+                        }
+                    })
                     .relative()
                     .flex()
                     .items_center()
@@ -1979,6 +2005,8 @@ impl Root {
             .flex()
             .flex_col()
             .flex_1()
+            // Positioned ancestor for the truncation cue below.
+            .relative()
             .min_h(px(0.))
             .overflow_hidden()
             // Was `px_2()`, the same 8px — now read from the token the agent
@@ -2032,7 +2060,23 @@ impl Root {
             }
             container = container.child(self.render_row(idx, item, false, cx));
         }
-        container
+        // **The cue for what did not fit.** A mode's list scrolls and
+        // `edge_fade::scroll_edge_fade` shows exactly where there is more;
+        // the root list is budget-fit and just stops, so before this a
+        // dropped row and a genuinely short list looked identical. Same
+        // gradient, same band, painted only when something was really left
+        // out — the root list does not scroll, so this reads as "there is
+        // more" rather than promising a scroll that will not happen, and
+        // the way to reach it is to type more, which the empty state and
+        // the footer both already say.
+        container.when(self.results_truncated, |el| {
+            let fade = if self.translucent {
+                theme::active().surface_panel_translucent
+            } else {
+                theme::active().surface_panel
+            };
+            el.child(bottom_edge_fade(fade.into(), theme::EDGE_FADE_BAND_PX))
+        })
     }
 
     /// Design report §3, step 08 — content/copy matches the mockup, but not
@@ -2108,7 +2152,7 @@ impl Root {
                     .text_size(px(12.5))
                     .line_height(px(18.))
                     .text_color(theme::active().text_secondary)
-                    .child("Can't reach neko-daemon. Results may be out of date."),
+                    .child(DAEMON_UNREACHABLE),
             )
     }
 
@@ -2431,7 +2475,7 @@ impl Root {
             .track_scroll(&self.mode_scroll);
 
         if self.results.is_empty() {
-            container = container.child(render_empty_state_message("No matching entries."));
+            container = container.child(render_empty_state_message(NO_MATCHES));
         } else {
             let mut current_group: Option<&Option<String>> = None;
             for (idx, item) in self.results.iter().enumerate() {
@@ -2881,7 +2925,7 @@ fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
     let message: SharedString = if query_is_empty {
         "Type an app name, or paste history from your clipboard.".into()
     } else {
-        "No matching results".into()
+        NO_MATCHES.into()
     };
     render_empty_state_message(message)
 }
@@ -2890,6 +2934,51 @@ fn render_empty_state(query_is_empty: bool) -> impl IntoElement {
 /// the message — shared with the mode list's own empty state
 /// (`Root::render_mode_list`), which has different copy but the identical
 /// layout.
+/// Everything a tile had to truncate, on one line.
+fn agent_tile_tooltip(item: &SearchItem) -> SharedString {
+    match &item.subtitle {
+        Some(subtitle) => SharedString::from(format!("{} \u{2014} {subtitle}", item.title)),
+        None => SharedString::from(item.title.clone()),
+    }
+}
+
+/// gpui builds a tooltip from a view, so this is the smallest one that
+/// renders a string in the app's own tokens. Deliberately not a general
+/// component: nothing else in this app has a tooltip, and one that grew
+/// options before a second caller existed would be generality nobody asked
+/// for.
+struct TextTooltip {
+    text: SharedString,
+}
+
+impl Render for TextTooltip {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .rounded(px(theme::ROW_RADIUS_PX))
+            .bg(theme::active().surface_raised)
+            .border_1()
+            .border_color(theme::active().border_hairline_strong)
+            .text_size(px(12.))
+            .text_color(theme::active().text_primary)
+            .child(self.text.clone())
+    }
+}
+
+/// One string for "the daemon did not answer", wherever that surfaces.
+/// The panel said `"Can't reach"` and Preferences said `"Couldn't reach"`
+/// — the same failure, the same subject, two tenses.
+pub const DAEMON_UNREACHABLE: &str = "Can't reach neko-daemon. Results may be out of date.";
+
+/// One string for "your query matched nothing", wherever that happens.
+///
+/// The root list said `"No matching results"` and a mode's list said
+/// `"No matching entries."` — the same idea, two nouns, and only one of
+/// them punctuated. It also names the way out, because an empty state that
+/// only shrugs leaves a person holding a query with nothing to do about it.
+pub const NO_MATCHES: &str = "No matches \u{2014} try fewer characters, or \u{232b} to start over";
+
 fn render_empty_state_message(message: impl Into<SharedString>) -> impl IntoElement {
     div()
         .flex()
@@ -4803,4 +4892,33 @@ mod tests {
         window.update(cx, |root, window, cx| root.reset_for_summon(window, cx)).unwrap();
         assert!(log.calls.borrow().is_empty());
     }
+
+    #[test]
+    fn the_panel_can_tell_a_short_list_from_a_truncated_one() {
+        // The mode list scrolls and fades its own edge; the root list is
+        // budget-fit and simply stops, so this is the only signal that
+        // anything was left out. Before it, two rows and forty-that-became-
+        // seven rendered identically.
+        let few: Vec<SearchItem> = (0..2).map(|i| item_with_id("app", &format!("a{i}"))).collect();
+        let fitted = fit_within_budget(few.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
+        assert!(fitted.len() >= few.len(), "two rows always fit");
+
+        let many: Vec<SearchItem> = (0..40).map(|i| item_with_id("app", &format!("a{i}"))).collect();
+        let fitted = fit_within_budget(many.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
+        assert!(fitted.len() < many.len(), "forty rows cannot fit a fixed area");
+    }
+
+    #[test]
+    fn a_tile_tooltip_carries_both_lines_it_truncated() {
+        let mut row = item_with_id("agent", "a1");
+        row.title = "feat/doctors-maps".to_string();
+        row.subtitle = Some("Care-Connect-AI/triage-fe".to_string());
+        assert_eq!(
+            agent_tile_tooltip(&row).to_string(),
+            "feat/doctors-maps \u{2014} Care-Connect-AI/triage-fe"
+        );
+        row.subtitle = None;
+        assert_eq!(agent_tile_tooltip(&row).to_string(), "feat/doctors-maps");
+    }
+
 }

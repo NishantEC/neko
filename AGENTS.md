@@ -2589,6 +2589,73 @@ replaced would fail that same bound.
 on screen (no window-scoped capture was taken; the wire response and the
 tests are the whole verification).
 
+## The better-* interface pass
+
+A `better-interface`-orchestrated review of every surface (`better-accessibility`,
+`better-layout`, `better-writing`, `better-typography`, `better-colors`,
+`better-ui`), then all eight findings fixed. The two that matter:
+
+**The WCAG gate was measuring a surface that never renders.**
+`themes_all_pass_wcag_aa` checks text against the opaque `surface_panel`,
+but the panel paints `surface_panel_translucent` over a live
+`NSGlassEffectView` — so what is actually read is the fill composited
+against the desktop. Neutral measured **15.86:1** in that test and
+**2.18:1** on a white wallpaper. `every_theme_stays_legible_over_the_worst_wallpaper_it_can_sit_on`
+composites each theme's fill over whichever extreme is further from it
+(white for a dark panel, black for a light one) and gates `text_primary` at
+AA; `neutral`'s `panel_alpha` went 0.40 → **0.64**, and it was the only
+theme below its own floor — the other sixteen already sit at 0.84–0.90.
+**Gated on `text_primary` only**: every theme's `text_secondary` would need
+0.62–0.91 to clear AA the same way, which would crush the translucency the
+app is built on across all seventeen palettes; that limit is recorded in
+the test rather than enforced.
+
+**The Preferences window had no keyboard path at all.** `on_key_down`
+returned early unless the hotkey recorder was listening, so four tabs, three
+switches and every folder's Remove answered only the mouse — in an app whose
+panel is otherwise keyboard-first. `preferences::view::Control` is now an
+ordered ring per tab with Tab/Shift-Tab, Left/Right across the tab bar (the
+ARIA tabs pattern, wrapping), Enter/Space to activate, and **Escape to
+close** — the window has no menu bar, so that was the only key that could.
+A hand-rolled `focused: usize` rather than gpui's `tab_stop`/`focus_next`,
+for the same reason `panel::Root::selected` is: the control list genuinely
+changes under it (adding a folder adds a stop) and it is testable without a
+live window, which matters because a real keypress into this window cannot
+be synthesised under this repo's own rules. The focus ring is a 2px
+`text_primary` outline, never a fill — several of these controls already use
+fill to mean *selected* or *on*. **Onboarding was already keyboard-complete**
+(`enter`→`Primary`, `escape`→`Secondary`, `main.rs:132`); the first draft of
+this review claimed otherwise and was wrong.
+
+The rest, briefly:
+
+- **The root list now shows what it dropped.** It is budget-fit and simply
+  stops, so a truncated list and a short one rendered identically.
+  `Root::results_truncated` drives `edge_fade::bottom_edge_fade` — the same
+  gradient and band the scrolling mode list uses, painted only when
+  something was really left out.
+- **One string per idea.** `panel::NO_MATCHES` replaces `"No matching
+  results"` / `"No matching entries."` (two nouns, one of them punctuated)
+  and names the way out; `panel::DAEMON_UNREACHABLE` replaces `"Can't
+  reach"` / `"Couldn't reach"`.
+- **Sentence case on settings rows and onboarding buttons**; command names
+  and section headers stay Title Case, which is a different element type
+  applied consistently. Onboarding's three ways to decline became one —
+  `"Skip setup"` stays, because skipping the whole flow is not declining one
+  permission.
+- **An agent tile's truncation is reachable.** Both its lines ellipsize at
+  150px, and since `agents::subtitle` began handing the line to the prompt,
+  the hidden part is what tells two sessions apart. `panel::TextTooltip` is
+  the smallest view that renders a string in the app's tokens.
+
+**Rejected, with the reason, so nobody re-runs them**: letter-spacing on the
+uppercase badges (**gpui exposes no letter-spacing API** — checked in
+`styled.rs`, `style.rs`, `text_system.rs`); colour-alone status on the meter
+and the LIVE badge (both carry redundant text); raising
+`RESULT_ROW_HEIGHT_PX` (40px already clears WCAG 2.5.8's 24px baseline and
+hits the 40px desktop target); a reduced-motion guard (`motion.rs` already
+reads `NSWorkspace.accessibilityDisplayShouldReduceMotion` live).
+
 ## The shared pulse clock, and the repeating-animation rule
 
 `motion::PulseClock` — the seam `motion.rs`'s own doc comment reserved, now

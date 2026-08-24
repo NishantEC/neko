@@ -376,7 +376,7 @@ pub const THEMES: &[Theme] = &[
         name: "Neko Neutral",
         appearance: Appearance::Dark,
         surface_panel: 0x0d0d0d,
-        panel_alpha: 0.40,
+        panel_alpha: 0.64,
         surface_raised: 0x161616,
         menu_tint_alpha: 0.62,
         surface_input: 0x070707,
@@ -1368,6 +1368,49 @@ mod tests {
                     assert!((x - y).abs() < 0.01, "{}: ramp({f}).{channel} {x} != {y}", t.id);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn every_theme_stays_legible_over_the_worst_wallpaper_it_can_sit_on() {
+        // `themes_all_pass_wcag_aa` measures text against the **opaque**
+        // `surface_panel`, and that surface never renders: the panel paints
+        // `surface_panel_translucent` over a live `NSGlassEffectView`, so
+        // what a person actually reads is the fill composited against their
+        // desktop. The gate could not see its own failure — the shipped
+        // neutral theme measured 15.86:1 in that test and **2.18:1** on a
+        // white wallpaper, well under AA.
+        //
+        // The worst backdrop for a dark panel is white and for a light one
+        // black, so each theme is checked against whichever is further from
+        // its own fill. That is a bound, not a simulation: a real wallpaper
+        // is rarely either extreme, and the material adds its own blur and
+        // tint on top, both of which only help.
+        //
+        // **Gated on `text_primary` only.** Every theme's `text_secondary`
+        // would need `panel_alpha` between 0.62 and 0.91 to clear AA the
+        // same way — crushing the translucency this app is built on across
+        // all seventeen palettes to protect subtitles. The primary reading
+        // path is the one that must hold; the secondary limit is recorded
+        // here rather than enforced.
+        for t in THEMES {
+            let panel = t.palette.surface_panel;
+            let backdrop =
+                if relative_luminance(panel) < 0.5 { rgb_const(0xffffff) } else { rgb_const(0) };
+            let alpha = t.palette.surface_panel_translucent.a;
+            let composited = Rgba {
+                r: panel.r * alpha + backdrop.r * (1.0 - alpha),
+                g: panel.g * alpha + backdrop.g * (1.0 - alpha),
+                b: panel.b * alpha + backdrop.b * (1.0 - alpha),
+                a: 1.0,
+            };
+            let ratio = contrast(t.palette.text_primary, composited);
+            assert!(
+                ratio >= 4.5,
+                "{}: text_primary reads {ratio:.2}:1 once the panel is composited over its \
+                 worst backdrop; raise panel_alpha",
+                t.id
+            );
         }
     }
 

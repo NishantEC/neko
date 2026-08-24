@@ -566,7 +566,7 @@ impl OnboardingRoot {
     fn render_accessibility_ask(&self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
         vec![
             icon_badge().into_any_element(),
-            title("Enable Accessibility").into_any_element(),
+            title("Enable accessibility").into_any_element(),
             body("neko listens for ⌥Space in the background, even when another app is focused — macOS calls that Accessibility access. It's what lets the hotkey work from anywhere.")
                 .into_any_element(),
             div()
@@ -602,7 +602,7 @@ impl OnboardingRoot {
                 .into_any_element(),
             link_button(
                 "onboarding-continue-without",
-                "Continue without it",
+                "Not now",
                 cx.listener(|this, _: &ClickEvent, _window, cx| this.secondary_action(cx)),
             )
             .into_any_element(),
@@ -638,7 +638,7 @@ impl OnboardingRoot {
                 .mt_2()
                 .child(primary_button(
                     "onboarding-primary",
-                    "Enable Clipboard History",
+                    "Enable clipboard history",
                     cx.listener(|this, _: &ClickEvent, window, cx| this.primary_action(window, cx)),
                 ))
                 .child(link_button(
@@ -724,7 +724,7 @@ impl OnboardingRoot {
     fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let phase = self.setup_phase();
         let (label, show_kbd): (SharedString, bool) = match self.flow.step {
-            Step::Welcome => ("Get Started".into(), true),
+            Step::Welcome => ("Get started".into(), true),
             Step::WhatNekoNeeds => ("Continue".into(), true),
             Step::AccessibilityAsk => ("Open System Settings".into(), true),
             Step::AccessibilityWaiting => ("Watching for permission…".into(), false),
