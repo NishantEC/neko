@@ -145,11 +145,19 @@ impl Provider for CommandsProvider {
         COMMANDS
             .iter()
             .filter_map(|cmd| {
-                let score = cmd
-                    .aliases
-                    .iter()
-                    .filter_map(|alias| fuzzy_score(query, alias))
-                    .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?;
+                // An empty query lists every command — the state the slash
+                // palette opens in (`/` with nothing after it). `fuzzy_score`
+                // would answer this too, but only incidentally; saying it
+                // here means the palette cannot be emptied by a future change
+                // to how an empty pattern scores.
+                let score = if query.trim().is_empty() {
+                    1.0
+                } else {
+                    cmd.aliases
+                        .iter()
+                        .filter_map(|alias| fuzzy_score(query, alias))
+                        .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?
+                };
                 Some(Candidate {
                     score,
                     item: SearchItem {
@@ -305,5 +313,29 @@ mod tests {
     fn activate_is_never_a_real_action() {
         let provider = CommandsProvider::new();
         assert!(provider.activate("clipboard-history").is_err());
+    }
+}
+
+#[cfg(test)]
+mod slash_palette_tests {
+    use super::*;
+    use crate::provider::Provider;
+
+    /// `/` with nothing after it is a scoped search with an empty query, so
+    /// the palette's opening state is exactly this call.
+    #[test]
+    fn an_empty_query_lists_every_command() {
+        let found = CommandsProvider::new().search("", 0);
+        assert_eq!(found.len(), COMMANDS.len(), "the slash palette opens on the full list");
+    }
+
+    #[test]
+    fn a_partial_name_narrows_the_palette() {
+        let found = CommandsProvider::new().search("the", 0);
+        let top = found
+            .iter()
+            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
+            .expect("\"the\" must match at least Themes");
+        assert_eq!(top.item.title, "Themes");
     }
 }

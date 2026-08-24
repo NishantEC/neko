@@ -54,6 +54,11 @@ use crate::window_drag::PanelDrag;
 
 actions!(panel, [SelectNext, SelectPrevious, Confirm, OpenActionsMenu]);
 
+/// `neko_core::commands::CommandsProvider::id()`. Named here because the
+/// slash palette scopes to it by name, the one place the client has to know
+/// a provider id — the same way `crate::preferences` names its own.
+const COMMAND_PROVIDER_ID: &str = "command";
+
 const RESULT_LIMIT: usize = 8;
 /// How many rows an **empty** root query asks for.
 ///
@@ -656,10 +661,24 @@ impl Root {
         // (`fit_within_budget`) doesn't apply at all here; the mode list
         // renders every returned item and scrolls instead (`render_mode_list`,
         // `edge_fade::scroll_edge_fade`).
-        let mode_provider = self.active_mode().map(|m| m.chrome.provider_id.to_string());
-        let query = self.text_field.read(cx).content().to_string();
-        self.results_are_for_empty_query = query.trim().is_empty();
-        let limit = match (&mode_provider, query.trim().is_empty()) {
+        let raw = self.text_field.read(cx).content().to_string();
+        // **A leading `/` is a command palette**, and it costs no protocol
+        // change at all: it scopes the search to the `command` provider,
+        // which is the same `Request::Search { provider: Some(..) }` a mode
+        // already uses. `/` alone lists every command; `/the` filters to
+        // Themes. Inside a mode the slash is ordinary text — a mode is
+        // already scoped, and a person typing a path or a query there means
+        // the character.
+        let slash = self.active_mode().is_none() && raw.starts_with('/');
+        let (mode_provider, query) = if slash {
+            (Some(COMMAND_PROVIDER_ID.to_string()), raw[1..].to_string())
+        } else {
+            (self.active_mode().map(|m| m.chrome.provider_id.to_string()), raw)
+        };
+        // A slash palette is a scoped list like a mode's, so it is never
+        // budget-fit and never treated as the empty root query.
+        self.results_are_for_empty_query = !slash && query.trim().is_empty();
+        let limit = match (&mode_provider, self.results_are_for_empty_query) {
             (Some(_), _) => MODE_RESULT_LIMIT,
             (None, true) => SUGGESTED_LIMIT,
             (None, false) => RESULT_LIMIT,
@@ -3340,6 +3359,46 @@ mod tests {
     // --- Preferences: it is a window, so the panel's only job is to open
     // one. Everything the window itself does is tested in
     // `crate::preferences::state` (pure) or is real I/O this cannot reach.
+
+    #[gpui::test]
+    fn a_leading_slash_scopes_the_search_to_commands(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        // Two updates, not one: `set_content` emits `ContentChanged`, and the
+        // subscription that turns it into a search does not run until the
+        // effect queue flushes at the end of this block.
+        window
+            .update(cx, |root, _window, cx| {
+                root.text_field.update(cx, |field, cx| field.set_content("/the", cx));
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |root, _window, _cx| {
+                // The palette is a scoped list, so it must not be treated as
+                // the empty root query — that path keeps every row and
+                // scrolls, and would also mislabel a typed palette query.
+                assert!(!root.results_are_for_empty_query);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_slash_inside_a_mode_is_ordinary_text(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.enter_mode("clipboard", window, cx);
+                // A mode is already scoped, and somebody typing a path there
+                // means the character.
+                root.text_field.update(cx, |field, cx| field.set_content("/Users", cx));
+                assert_eq!(
+                    root.active_mode().map(|m| m.chrome.provider_id),
+                    Some("clipboard"),
+                    "the slash must not re-scope a mode's own list"
+                );
+            })
+            .unwrap();
+    }
 
     #[gpui::test]
     fn confirming_the_preferences_command_opens_the_window_instead_of_entering_a_mode(
