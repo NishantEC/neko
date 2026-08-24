@@ -77,7 +77,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use gpui::Rgba;
+use gpui::{Hsla, Rgba, hsla};
 
 /// `gpui::rgb()` isn't `const fn` (it goes through `u32::to_be_bytes().map(..)`),
 /// so the token table below needs its own const-evaluable version.
@@ -90,22 +90,32 @@ const fn rgb_const(hex: u32) -> Rgba {
     }
 }
 
-/// Blends two live palette colours, `t` of the way from `a` to `b`.
+/// A point on a continuous ramp between two live palette colours,
+/// interpolated in **HSL** rather than RGB.
 ///
-/// Not a token and deliberately not one: this is for a *continuous* ramp
-/// between two tokens a theme already supplies (`state_success` →
-/// `state_danger` across a meter's track), where the endpoints are the
-/// theme's business and every value between them is the renderer's. A
-/// token per step would be a table nobody could keep in sync with 17
-/// palettes.
-pub fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
+/// The space is the whole point. `state_success` → `state_danger` mixed
+/// channel-wise in RGB passes through a muddy olive at the halfway mark —
+/// a bar at 50% looked dirty rather than cautionary. Interpolating hue
+/// instead sweeps green → yellow → amber → red, which is the ramp people
+/// already read on a gauge, and it costs nothing but taking the shorter
+/// way around the wheel.
+///
+/// Not a token, deliberately: the two endpoints are the theme's business
+/// and every value between them is the renderer's. A token per step would
+/// be a table nobody could keep in sync with seventeen palettes.
+pub fn ramp(from: Rgba, to: Rgba, t: f32) -> Hsla {
     let t = t.clamp(0.0, 1.0);
-    Rgba {
-        r: a.r + (b.r - a.r) * t,
-        g: a.g + (b.g - a.g) * t,
-        b: a.b + (b.b - a.b) * t,
-        a: a.a + (b.a - a.a) * t,
+    let (a, b): (Hsla, Hsla) = (from.into(), to.into());
+    // Hue is a circle, so the plain difference can describe the long way
+    // round — green to red the wrong way is a trip through cyan and blue.
+    let mut dh = b.h - a.h;
+    if dh > 0.5 {
+        dh -= 1.0;
+    } else if dh < -0.5 {
+        dh += 1.0;
     }
+    let lerp = |x: f32, y: f32| x + (y - x) * t;
+    hsla((a.h + dh * t).rem_euclid(1.0), lerp(a.s, b.s), lerp(a.l, b.l), lerp(a.a, b.a))
 }
 
 const fn rgba_const(hex: u32, a: f32) -> Rgba {
@@ -869,10 +879,10 @@ pub const AGENT_TILE_WIDTH_PX: f32 = (PANEL_WIDTH_WITH_DETAIL_PX
     - AGENT_GRID_GAP_PX * (AGENT_GRID_COLUMNS as f32 - 1.0))
     / AGENT_GRID_COLUMNS as f32;
 
-/// The bar in a `SearchItem::meter` card (`panel::render_meter_card`).
-/// Chunky enough that its colour reads at a glance, which is the only job
-/// it has — the exact value is spelled out underneath it.
-pub const METER_TRACK_HEIGHT_PX: f32 = 10.0;
+/// The bar in a `SearchItem::meter` reading (`panel::render_meter`).
+/// Thin: the headline number is what gets read, and the bar is there to
+/// be glanced at rather than measured.
+pub const METER_TRACK_HEIGHT_PX: f32 = 6.0;
 
 pub const ROW_ICON_PX: f32 = 22.0;
 pub const ROW_ICON_RADIUS_PX: f32 = 6.0;
@@ -1225,6 +1235,48 @@ mod tests {
     /// against the *translucent* panel fill composited over a live desktop:
     /// that depends on the wallpaper, and this app's own worst case was
     /// measured separately in `data/neko-native-material/report.md` §6.
+    #[test]
+    fn every_theme_ramps_through_amber_instead_of_desaturating_to_mud() {
+        // The reason `ramp` interpolates in HSL. Blending two saturated
+        // hues channel-wise in RGB passes through grey: the neutral
+        // theme's own success → danger mixed that way is #a5965c at half
+        // full, which reads as dirty rather than cautionary. Interpolating
+        // hue keeps the chroma up the whole way, and this is the property
+        // that catches a revert to the cheaper arithmetic.
+        for t in THEMES {
+            let (a, b) = (t.palette.state_success, t.palette.state_danger);
+            let floor = f32::min(Hsla::from(a).s, Hsla::from(b).s);
+            for step in 0..=10 {
+                let f = step as f32 / 10.0;
+                let mid = ramp(a, b, f);
+                assert!(
+                    mid.s >= floor - f32::EPSILON,
+                    "{}: ramp at {f} desaturates to {}, below both endpoints ({floor})",
+                    t.id,
+                    mid.s
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_meter_ramp_starts_and_ends_exactly_on_the_theme_tokens() {
+        // A ramp that only approximates its endpoints would mean a bar at
+        // zero is not quite `state_success` — an off-palette colour nobody
+        // chose, in every theme at once.
+        for t in THEMES {
+            let (a, b) = (t.palette.state_success, t.palette.state_danger);
+            for (f, expected) in [(0.0, a), (1.0, b)] {
+                let got = Rgba::from(ramp(a, b, f));
+                for (channel, x, y) in
+                    [("r", got.r, expected.r), ("g", got.g, expected.g), ("b", got.b, expected.b)]
+                {
+                    assert!((x - y).abs() < 0.01, "{}: ramp({f}).{channel} {x} != {y}", t.id);
+                }
+            }
+        }
+    }
+
     #[test]
     fn themes_all_pass_wcag_aa() {
         const AA: f32 = 4.5;
