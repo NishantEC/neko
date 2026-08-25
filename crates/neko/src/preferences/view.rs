@@ -394,6 +394,24 @@ impl PreferencesRoot {
         self.controls().get(self.focused).cloned()
     }
 
+    /// Move the focus ring onto `control`.
+    ///
+    /// **Called from every `on_click`, not just from Tab.** The ring is this
+    /// window's only statement of where the keyboard is, and a click that
+    /// activates one control while the ring sits on another leaves the next
+    /// Enter or Space acting somewhere the eye is not — which is worse than
+    /// no ring, because it is a confident wrong answer. Pointer and keyboard
+    /// share one cursor; they do not each keep their own.
+    ///
+    /// A control that has vanished from the list (the Remove button of a
+    /// folder that was just removed) leaves the ring where it was rather than
+    /// clearing it — `focus_next` clamps, so the next Tab lands somewhere real.
+    fn focus_control(&mut self, control: &Control) {
+        if let Some(index) = self.controls().iter().position(|c| c == control) {
+            self.focused = index;
+        }
+    }
+
     fn is_focused(&self, control: &Control) -> bool {
         self.focused_control().as_ref() == Some(control)
     }
@@ -719,6 +737,12 @@ impl PreferencesRoot {
                         theme::active().text_secondary
                     })
                     .cursor_pointer()
+                    // A hover tint distinctly weaker than the selected tab's
+                    // own fill, so hovering reads as the pointer being
+                    // somewhere rather than as a second selection.
+                    .when(!selected, |el| {
+                        el.hover(|el| el.bg(theme::active().row_icon_socket_bg))
+                    })
                     .map(|el| focus_ring(el, self.is_focused(&Control::Tab(tab))))
                     .on_click(cx.listener(move |root, _event, _window, cx| {
                         root.select_tab(tab, cx);
@@ -819,7 +843,13 @@ impl PreferencesRoot {
                         }
                     })
                     .cursor_pointer()
-                    .on_click(cx.listener(|root, _event, window, cx| root.start_recording(window, cx)))
+                    .when(!listening, |el| {
+                        el.hover(|el| el.bg(theme::active().row_icon_socket_bg))
+                    })
+                    .on_click(cx.listener(|root, _event, window, cx| {
+                        root.focus_control(&Control::RecordHotkey);
+                        root.start_recording(window, cx)
+                    }))
                     .child(body),
             )
             .child(
@@ -882,8 +912,13 @@ impl PreferencesRoot {
             })
             .relative()
             .cursor_pointer()
+            // The switch is already a fill, so hover moves the *border*
+            // instead — a second fill on top of the first is unreadable, the
+            // same reason `focus_ring` is an outline here and not a fill.
+            .hover(|el| el.border_color(theme::active().text_secondary))
             .map(|el| focus_ring(el, self.is_focused(&Control::Toggle(row_id))))
             .on_click(cx.listener(move |root, _event, _window, cx| {
+                root.focus_control(&Control::Toggle(row_id));
                 root.toggle_row(row_id, cx);
             }))
             .child(
@@ -980,17 +1015,27 @@ impl PreferencesRoot {
                         div()
                             .id(SharedString::from(format!("remove-{path}")))
                             .px(px(9.))
-                            .py(px(3.))
+                            // **5, not 3.** At 3 this chip measured ~21pt tall
+                            // against WCAG 2.5.8's 24pt floor — the only
+                            // control in this window under it, and the one
+                            // that destroys something. The label stays 11pt;
+                            // the padding does the work, so nothing reflows
+                            // around it.
+                            .py(px(5.))
                             .rounded(px(theme::CHIP_RADIUS_PX))
                             .border_1()
                             .border_color(theme::active().state_danger_border)
                             .text_size(px(11.))
                             .text_color(theme::active().state_danger)
                             .cursor_pointer()
+                            .hover(|el| el.bg(theme::active().banner_danger_bg))
                             .map(|el| {
                                 focus_ring(el, self.is_focused(&Control::RemoveFolder(path.clone())))
                             })
                             .on_click(cx.listener(move |root, _event, _window, cx| {
+                                root.focus_control(&Control::RemoveFolder(
+                                    path_for_remove.clone(),
+                                ));
                                 root.remove_folder(path_for_remove.clone(), cx)
                             }))
                             .child("Remove"),

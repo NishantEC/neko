@@ -2129,19 +2129,68 @@ impl Root {
                     .child(SharedString::from(message))
             }))
             .when(self.activation_error.is_none(), |row| {
-                row.child(
-                    div()
-                        .text_size(px(12.))
-                        .text_color(theme::active().text_tertiary)
-                        // The one keyboard hint with nowhere else to live.
-                        // `⌘K` joins it, because the actions menu has no
-                        // on-screen affordance at all since the footer went
-                        // — and behind that unlabelled keystroke sit Kill
-                        // terminal, Delete schedule, Archive and every
-                        // session mode.
-                        .child(if self.selected_row_has_actions() { "\u{2318}K   esc" } else { "esc" }),
-                )
+                row
+                    // **A hint is not an affordance.** `⌘K` was rendered as
+                    // static text, so the actions menu — Kill terminal,
+                    // Delete schedule, Archive, every session mode — could
+                    // only ever be opened from the keyboard. It is a real
+                    // control now, sized past WCAG 2.5.8's 24pt floor by its
+                    // padding rather than by its 12pt label.
+                    .when(self.selected_row_has_actions(), |row| {
+                        row.child(
+                            div()
+                                .id("actions-menu-trigger")
+                                .flex_shrink_0()
+                                .px(px(7.))
+                                .py(px(4.))
+                                .rounded(px(theme::CHIP_RADIUS_PX))
+                                .text_size(px(12.))
+                                .text_color(theme::active().text_tertiary)
+                                .cursor_pointer()
+                                .hover(|el| {
+                                    el.bg(theme::active().row_icon_socket_bg)
+                                        .text_color(theme::active().text_secondary)
+                                })
+                                .on_click(cx.listener(Self::handle_actions_menu_trigger_click))
+                                .child("\u{2318}K"),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_size(px(12.))
+                            .text_color(theme::active().text_tertiary)
+                            // The one keyboard hint with nowhere else to live.
+                            .child("esc"),
+                    )
             })
+    }
+
+    /// The `⌘K` trigger's own click, and the race it exists to survive.
+    ///
+    /// The trigger sits outside the menu card, so clicking it while the menu
+    /// is open fires the card's `on_mouse_down_out` (capture phase, on
+    /// mouse-*down*) **and** this handler (bubble phase, on mouse-*up*) from
+    /// one physical press. A naive toggle reads `actions_menu` after the
+    /// outside-close already ran, finds `None`, and reopens — so the press
+    /// that was meant to dismiss the menu reopens it instead.
+    ///
+    /// `menu_open_before_this_press` is a snapshot taken by a capture-phase
+    /// listener on the outer panel div, before any of that. This reads that,
+    /// never the current state.
+    fn handle_actions_menu_trigger_click(
+        &mut self,
+        _event: &ClickEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let was_open = self.menu_open_before_this_press;
+        self.menu_open_before_this_press = false;
+        if was_open {
+            // The press already dismissed it. Leave it dismissed.
+            return;
+        }
+        self.open_actions_menu_for_selected_row(cx);
     }
 
     /// Whether the row Enter would act on has anything in its `⌘K` menu.
@@ -4404,6 +4453,51 @@ mod tests {
                 );
                 root.open_actions_menu_for_selected_row(cx);
                 assert!(root.actions_menu.is_none(), "and the menu must agree");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn clicking_the_trigger_while_the_menu_is_open_dismisses_it_rather_than_reopening(
+        cx: &mut TestAppContext,
+    ) {
+        // One physical press fires the card's capture-phase `on_mouse_down_out`
+        // and then this bubble-phase click. Reading the current state here
+        // would find `None` and reopen, so the press meant to dismiss would
+        // reopen instead.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![clipboard_row_with_a_paste_action("row")];
+                root.selected = 0;
+                root.open_actions_menu_for_selected_row(cx);
+                assert!(root.actions_menu.is_some());
+
+                // What the capture-phase snapshot would have recorded, then
+                // what `on_mouse_down_out` does to the menu.
+                root.menu_open_before_this_press = true;
+                root.close_actions_menu(window);
+
+                root.handle_actions_menu_trigger_click(&ClickEvent::default(), window, cx);
+                assert!(root.actions_menu.is_none(), "the dismiss click stays a dismiss");
+                assert!(!root.menu_open_before_this_press, "and the snapshot is consumed");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn clicking_the_trigger_with_the_menu_closed_opens_it(cx: &mut TestAppContext) {
+        // The guard must not suppress a genuine open.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![clipboard_row_with_a_paste_action("row")];
+                root.selected = 0;
+                root.handle_actions_menu_trigger_click(&ClickEvent::default(), window, cx);
+                assert_eq!(
+                    root.actions_menu.as_ref().map(|m| m.id.as_str()),
+                    Some("row")
+                );
             })
             .unwrap();
     }
