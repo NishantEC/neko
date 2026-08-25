@@ -2010,7 +2010,22 @@ impl Root {
                 // rather than duplicating its logic.
                 Some(_) => div()
                     .id("mode-back")
+                    // **Padding, because the glyph is 15pt and WCAG 2.5.8
+                    // wants 24.** This is the only pointer way out of a
+                    // mode; missing it costs a person the whole surface.
+                    .p(px(5.))
+                    .rounded(px(theme::ROW_RADIUS_PX))
+                    .hover(|el| el.bg(theme::active().row_icon_socket_bg))
                     .cursor(CursorStyle::PointingHand)
+                    // **And it has to swallow mouse-*down*.** The input row
+                    // starts a window drag on mouse-down; `on_click` is
+                    // mouse-*up*, so the drag had already begun before this
+                    // control saw anything. The comment on that drag handler
+                    // claimed this button "stops propagation on click" — it
+                    // does now.
+                    .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation()
+                    })
                     .on_click(cx.listener(|root, _: &ClickEvent, window, cx| root.exit_mode(window, cx)))
                     .child(back_glyph())
                     .into_any_element(),
@@ -2018,12 +2033,50 @@ impl Root {
             })
             .child(div().flex_1().child(self.text_field.clone()))
             .children(self.render_searching_tell())
-            .child(
+            // **Every failure in the app was silent, and this is where it
+            // stops being.** `activation_error` has been set on every failed
+            // Enter for a long time and was rendered only by the footer,
+            // which was deleted — so "that schedule is gone", "type what to
+            // send first", "that plan is stale", the `paseo` CLI's own
+            // errors and a 20-second timeout all produced *no visible change
+            // whatsoever*. The panel does not hide on failure, so pressing
+            // Enter looked exactly like pressing nothing.
+            //
+            // The input row is the only chrome left, so it carries this.
+            // `state_danger`, and it takes the place of the `esc` hint
+            // rather than sitting beside it: an error is worth more than a
+            // reminder of a key that still works either way.
+            .children(self.activation_error.clone().map(|message| {
                 div()
+                    .flex_shrink_0()
+                    .max_w(px(360.))
+                    .truncate()
                     .text_size(px(12.))
-                    .text_color(theme::active().text_tertiary)
-                    .child("esc"),
-            )
+                    .text_color(theme::active().state_danger)
+                    .child(SharedString::from(message))
+            }))
+            .when(self.activation_error.is_none(), |row| {
+                row.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme::active().text_tertiary)
+                        // The one keyboard hint with nowhere else to live.
+                        // `⌘K` joins it, because the actions menu has no
+                        // on-screen affordance at all since the footer went
+                        // — and behind that unlabelled keystroke sit Kill
+                        // terminal, Delete schedule, Archive and every
+                        // session mode.
+                        .child(if self.selected_row_has_actions() { "\u{2318}K   esc" } else { "esc" }),
+                )
+            })
+    }
+
+    /// Whether the row Enter would act on has anything in its `⌘K` menu.
+    ///
+    /// Gates the hint so it only appears where the keystroke does something
+    /// — a menu hint on a row with no menu is worse than no hint.
+    fn selected_row_has_actions(&self) -> bool {
+        self.results.get(self.selected).is_some_and(|item| !item.actions.is_empty())
     }
 
     /// The "still searching" tell for a query that hasn't returned yet —
@@ -2296,7 +2349,13 @@ impl Root {
     /// takes the ramp colour and leads; the others follow in the tertiary
     /// weight. That is a vocabulary rule, not knowledge of who produced the
     /// row — a provider orders `stats` by what it wants read first.
-    fn render_meter(&self, idx: usize, item: &SearchItem, meter: &Meter) -> AnyElement {
+    fn render_meter(
+        &self,
+        idx: usize,
+        item: &SearchItem,
+        meter: &Meter,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let selected = self.row_is_highlighted(idx);
         let fraction = meter.fraction.clamp(0.0, 1.0);
         let (empty, full) = (theme::active().state_success, theme::active().state_danger);
@@ -2334,6 +2393,20 @@ impl Root {
             .rounded(px(theme::ROW_RADIUS_PX))
             .when(selected, |el| el.bg(theme::active().surface_selected))
             .when(!selected, |el| el.hover(|el| el.bg(theme::active().row_icon_socket_bg)))
+            // The same handler `render_row` carries. A meter is a different
+            // *shape* of row, not a different kind of thing, and it lit up
+            // under the mouse while doing nothing — the exact affordance lie
+            // that made "clicking doesn't work" the report it was.
+            .cursor_pointer()
+            .on_click(cx.listener(move |root, _event: &ClickEvent, window, cx| {
+                if root.menu_open_before_this_press {
+                    root.menu_open_before_this_press = false;
+                    return;
+                }
+                root.selected = idx;
+                root.grid_selected = None;
+                root.confirm(&Confirm, window, cx);
+            }))
             .child(
                 div()
                     .flex_1()
@@ -2417,6 +2490,19 @@ impl Root {
             // complement.
             .cursor_pointer()
             .on_click(cx.listener(move |root, _event: &ClickEvent, window, cx| {
+                // **A click that dismissed the menu must not also fire the
+                // row underneath it.** `on_mouse_down_out` closes the menu in
+                // the *capture* phase, so by the time this bubble-phase
+                // handler runs `actions_menu` is already `None` and there is
+                // nothing left to tell "dismiss" from "activate" — you open
+                // ⌘K, change your mind, click away, and an app launches.
+                // `menu_open_before_this_press` is the snapshot taken before
+                // any of that ran. It existed for exactly this and nothing
+                // read it.
+                if root.menu_open_before_this_press {
+                    root.menu_open_before_this_press = false;
+                    return;
+                }
                 root.selected = idx;
                 // A click is unambiguous about what it meant, so it takes
                 // the selection away from a focused tile as well.
@@ -2631,7 +2717,7 @@ impl Root {
                     current_group = Some(&item.group_label);
                 }
                 container = container.child(match &item.meter {
-                    Some(meter) => self.render_meter(idx, item, meter),
+                    Some(meter) => self.render_meter(idx, item, meter, cx),
                     None => self.render_row(idx, item, has_detail, cx).into_any_element(),
                 });
             }

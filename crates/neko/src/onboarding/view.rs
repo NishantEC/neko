@@ -533,8 +533,9 @@ impl OnboardingRoot {
             eyebrow("Welcome").into_any_element(),
             title("This is neko.").into_any_element(),
             body(
-                "A fast way to find apps and search what you've copied. Two quick \
-                 permissions to set up — about 30 seconds, and you won't see this again.",
+                "A fast way to find apps, search what you've copied, and keep an eye \
+                 on the coding agents running on this Mac. Two quick permissions to \
+                 set up — about 30 seconds, and you won't see this again.",
             )
             .into_any_element(),
         ]
@@ -544,7 +545,16 @@ impl OnboardingRoot {
         vec![
             eyebrow("Two permissions").into_any_element(),
             title("Here's everything neko will ask for.").into_any_element(),
-            body("Both up front, so nothing surprises you later. Nothing you copy or open ever leaves this Mac.")
+            // **Scoped, because the unscoped version stopped being true.**
+            // It used to read "Nothing you copy or open ever leaves this
+            // Mac", written when neko only searched apps and the clipboard.
+            // `ask.rs` now sends what you type to Anthropic, `usage.rs`
+            // reads three vendors' quota APIs, and everything under Agents
+            // talks to Paseo. Those are opt-in and none of them is
+            // searching — but a promise that covers them by omission is a
+            // false one, and this screen is titled "everything neko will
+            // ask for".
+            body("Both up front, so nothing surprises you later. What you search and what you copy stay on this Mac.")
                 .into_any_element(),
             div()
                 .flex()
@@ -654,7 +664,12 @@ impl OnboardingRoot {
         vec![
             status_pill("Clipboard History is on", PillTone::Success).into_any_element(),
             title("Unlimited history, by default.").into_any_element(),
-            body("No 3-month cutoff, no subscription. Change retention anytime in Settings.")
+            // Was "Change retention anytime in Settings." There is no
+            // retention setting — `clipboard::HISTORY_LIMIT` is a hard 200
+            // and Preferences has five rows, none of them this. Promising a
+            // control that does not exist sends somebody looking for it
+            // forever.
+            body("No 3-month cutoff, no subscription. The last 200 copies, kept locally.")
                 .into_any_element(),
             div()
                 .flex()

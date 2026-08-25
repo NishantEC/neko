@@ -645,7 +645,12 @@ impl Provider for UsageProvider {
                     actions: Vec::new(),
                     source: None,
                     meter: row.meter,
-                    keeps_open: false,
+                    // **"Refresh" that closes the panel refreshes nothing a
+                    // person can see.** `activate` only invalidates the
+                    // cache; the refetch is the re-search, and
+                    // `perform_activation` only re-searches when the panel
+                    // stays. It hid instead.
+                    keeps_open: true,
                     preview: None,
                 },
             })
