@@ -25,6 +25,15 @@
 //!   Accessibility and therefore has no working hotkey (`AGENTS.md`,
 //!   "Onboarding"). Clicking the menu bar item now does the same thing.
 //!
+//! ## The right-click menu
+//!
+//! Summon, Preferences…, Quit. The last one is load-bearing: an accessory app
+//! has no Dock icon and no ⌘Tab entry, so before this menu existed the only
+//! ways to stop neko were `kill` or logging out. Left click keeps the
+//! one-click summon; right or ctrl click opens the menu — decided per event in
+//! the action handler, because `NSStatusItem.menu` is all-or-nothing (setting
+//! it makes every click open the menu and the action never fire).
+//!
 //! ## How the click reaches gpui
 //!
 //! It does not, directly, and that is deliberate. An AppKit action fires
@@ -46,10 +55,30 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// loop where gpui's `App` is not reachable — see the module comment.
 static CLICKED: AtomicBool = AtomicBool::new(false);
 
+/// Set by the menu's "Preferences…" item. Same flag discipline as [`CLICKED`].
+static PREFERENCES_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Set by the menu's "Quit neko" item. Same flag discipline as [`CLICKED`].
+///
+/// **This item is load-bearing, not convenience.** An accessory app has no
+/// Dock icon and no ⌘Tab entry, and the panel quits nothing — before this
+/// menu existed, the only ways to stop neko were `kill` or logging out.
+static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+
 /// Whether the menu bar item has been clicked since this was last called.
 /// Clears the flag, so two consecutive calls cannot summon twice.
 pub fn take_click() -> bool {
     CLICKED.swap(false, Ordering::Relaxed)
+}
+
+/// Whether the menu's Preferences item was chosen since this was last called.
+pub fn take_preferences_request() -> bool {
+    PREFERENCES_REQUESTED.swap(false, Ordering::Relaxed)
+}
+
+/// Whether the menu's Quit item was chosen since this was last called.
+pub fn take_quit_request() -> bool {
+    QUIT_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
 /// The title beside the icon: the number of agents waiting, or nothing.
@@ -85,7 +114,7 @@ pub use macos::*;
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::{CLICKED, count_label};
+    use super::{CLICKED, PREFERENCES_REQUESTED, QUIT_REQUESTED, count_label};
     use std::sync::atomic::Ordering;
 
     use std::cell::RefCell;
@@ -94,7 +123,8 @@ mod macos {
     use objc2::runtime::{AnyObject, Sel};
     use objc2::{MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::{
-        NSApplication, NSApplicationActivationPolicy, NSImage, NSStatusBar, NSStatusItem,
+        NSApplication, NSApplicationActivationPolicy, NSEventMask, NSEventModifierFlags,
+        NSEventType, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem,
         NSVariableStatusItemLength,
     };
     use objc2_foundation::{MainThreadMarker, NSObject, NSString};
@@ -122,10 +152,63 @@ mod macos {
         impl Target {
             #[unsafe(method(nekoMenuBarClicked:))]
             fn clicked(&self, _sender: Option<&AnyObject>) {
+                // **One button, two gestures.** A left click summons — the
+                // documented "never a dead end" path for somebody with no
+                // hotkey — and a right or ctrl click opens the menu. Decided
+                // here, from the event that fired the action, because
+                // `NSStatusItem.menu` is all-or-nothing: setting it makes
+                // *every* click open the menu and the action never fire, which
+                // would take the one-click summon away to gain the menu.
+                let mtm = MainThreadMarker::from(self);
+                let event = NSApplication::sharedApplication(mtm).currentEvent();
+                let wants_menu = event.as_ref().is_some_and(|event| {
+                    matches!(
+                        event.r#type(),
+                        NSEventType::RightMouseUp | NSEventType::RightMouseDown
+                    ) || event.modifierFlags().contains(NSEventModifierFlags::Control)
+                });
+                if !wants_menu {
+                    CLICKED.store(true, Ordering::Relaxed);
+                    return;
+                }
+                if let Some(event) = event {
+                    show_menu(mtm, &event);
+                }
+            }
+
+            #[unsafe(method(nekoMenuSummon:))]
+            fn menu_summon(&self, _sender: Option<&AnyObject>) {
                 CLICKED.store(true, Ordering::Relaxed);
+            }
+
+            #[unsafe(method(nekoMenuPreferences:))]
+            fn menu_preferences(&self, _sender: Option<&AnyObject>) {
+                PREFERENCES_REQUESTED.store(true, Ordering::Relaxed);
+            }
+
+            #[unsafe(method(nekoMenuQuit:))]
+            fn menu_quit(&self, _sender: Option<&AnyObject>) {
+                QUIT_REQUESTED.store(true, Ordering::Relaxed);
             }
         }
     );
+
+    /// Pops the item's menu at the cursor.
+    ///
+    /// `popUpContextMenu:withEvent:forView:` rather than assigning
+    /// `NSStatusItem.menu` — see `clicked` above for why the assignment is
+    /// all-or-nothing. This runs AppKit's menu-tracking loop synchronously;
+    /// the chosen item's own action fires before this returns, setting its
+    /// flag for the 20ms poll exactly like a plain click does.
+    fn show_menu(mtm: MainThreadMarker, event: &objc2_app_kit::NSEvent) {
+        ITEM.with(|slot| {
+            if let Some(held) = slot.borrow().as_ref()
+                && let Some(button) = held.item.button(mtm)
+            {
+                NSMenu::popUpContextMenu_withEvent_forView(&held.menu, event, &button);
+            }
+        });
+    }
 
     impl Target {
         fn new(mtm: MainThreadMarker) -> Retained<Self> {
@@ -144,6 +227,9 @@ mod macos {
     /// leaves the button firing a selector at freed memory.
     struct MenuBarItem {
         item: Retained<NSStatusItem>,
+        /// Held for the same reason the target is: nothing else retains it,
+        /// and `popUpContextMenu` borrows it per click rather than owning it.
+        menu: Retained<NSMenu>,
         _target: Retained<Target>,
     }
 
@@ -182,9 +268,17 @@ mod macos {
                 unsafe {
                     button.setTarget(Some(&*target as &AnyObject));
                     button.setAction(Some(action_selector()));
+                    // The action fires on left mouse-up by default; the menu
+                    // needs the right button to reach it too.
+                    button.sendActionOn(
+                        NSEventMask::LeftMouseUp
+                            | NSEventMask::RightMouseUp
+                            | NSEventMask::RightMouseDown,
+                    );
                 }
             }
-            let held = MenuBarItem { item, _target: target };
+            let menu = build_menu(mtm, &target);
+            let held = MenuBarItem { item, menu, _target: target };
             let state = held.readback();
             ITEM.with(|slot| *slot.borrow_mut() = Some(held));
             state
@@ -206,6 +300,46 @@ mod macos {
         sel!(nekoMenuBarClicked:)
     }
 
+    /// The right-click menu: Summon, Preferences…, Quit.
+    ///
+    /// **`setAutoenablesItems(false)`, then every item enabled explicitly.**
+    /// Auto-enabling asks the responder chain to validate each item, and this
+    /// target deliberately lives outside any responder chain — under
+    /// auto-enable the whole menu renders greyed out, which looks exactly like
+    /// a permissions problem and is really a wiring one.
+    fn build_menu(mtm: MainThreadMarker, target: &Target) -> Retained<NSMenu> {
+        let menu = NSMenu::new(mtm);
+        menu.setAutoenablesItems(false);
+        let add = |title: &str, action: Sel| {
+            let item = unsafe {
+                NSMenuItem::initWithTitle_action_keyEquivalent(
+                    NSMenuItem::alloc(mtm),
+                    &NSString::from_str(title),
+                    Some(action),
+                    &NSString::from_str(""),
+                )
+            };
+            unsafe { item.setTarget(Some(target as &AnyObject)) };
+            item.setEnabled(true);
+            menu.addItem(&item);
+        };
+        add("Summon neko", sel!(nekoMenuSummon:));
+        add("Preferences\u{2026}", sel!(nekoMenuPreferences:));
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        let quit = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str("Quit neko"),
+                Some(sel!(nekoMenuQuit:)),
+                &NSString::from_str(""),
+            )
+        };
+        unsafe { quit.setTarget(Some(target as &AnyObject)) };
+        quit.setEnabled(true);
+        menu.addItem(&quit);
+        menu
+    }
+
     impl MenuBarItem {
         fn set_waiting_count(&self, count: usize) {
             let Some(mtm) = MainThreadMarker::new() else { return };
@@ -219,15 +353,33 @@ mod macos {
             });
         }
 
-        /// What the button reads back as — the same "verified, not trusted"
-        /// discipline `material::verify_installed` follows.
+        /// What the button and menu read back as — the same "verified, not
+        /// trusted" discipline `material::verify_installed` follows. The menu
+        /// is listed item by item because a real right-click cannot be
+        /// synthesised under this repo's rules: this line in the launch log is
+        /// the whole proof the menu exists and holds what it should.
         fn readback(&self) -> Option<String> {
             let mtm = MainThreadMarker::new()?;
             let button = self.item.button(mtm)?;
+            let items: Vec<String> = (0..self.menu.numberOfItems())
+                .filter_map(|i| self.menu.itemAtIndex(i))
+                .map(|item| {
+                    if item.isSeparatorItem() {
+                        "—".to_string()
+                    } else {
+                        format!(
+                            "{}{}",
+                            item.title(),
+                            if item.isEnabled() { "" } else { " (DISABLED)" }
+                        )
+                    }
+                })
+                .collect();
             Some(format!(
-                "title {:?}, image {}",
+                "title {:?}, image {}, menu [{}]",
                 button.title().to_string(),
-                if button.image().is_some() { "set" } else { "MISSING" }
+                if button.image().is_some() { "set" } else { "MISSING" },
+                items.join(", ")
             ))
         }
     }
@@ -269,6 +421,18 @@ mod tests {
         // circle. This is not, so there is nothing to protect.
         assert_eq!(count_label(1).as_deref(), Some("1"));
         assert_eq!(count_label(250).as_deref(), Some("250"));
+    }
+
+    #[test]
+    fn each_menu_flag_is_consumed_exactly_once() {
+        // All three ride the same 20ms poll; a flag that stayed set would
+        // reopen Preferences (or quit!) on every tick forever.
+        PREFERENCES_REQUESTED.store(true, Ordering::Relaxed);
+        assert!(take_preferences_request());
+        assert!(!take_preferences_request());
+        QUIT_REQUESTED.store(true, Ordering::Relaxed);
+        assert!(take_quit_request());
+        assert!(!take_quit_request());
     }
 
     #[test]

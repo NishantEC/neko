@@ -685,6 +685,18 @@ fn summon_from_outside(cx: &mut App) {
                 if menu_bar::take_click() {
                     cx.update(summon_from_outside);
                 }
+                // The other two menu items, same flag discipline as the click.
+                if menu_bar::take_preferences_request() {
+                    cx.update(|cx| {
+                        let _ = window.update(cx, |root, window, cx| {
+                            root.open_preferences_from_menu_bar(window, cx);
+                        });
+                    });
+                }
+                if menu_bar::take_quit_request() {
+                    cx.update(|cx| cx.quit());
+                    return;
+                }
 
                 let is_connected = client.is_connected();
                 if is_connected != last_connected {
