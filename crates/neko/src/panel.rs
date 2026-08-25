@@ -3066,30 +3066,31 @@ impl Root {
             .border_1()
             .border_color(theme::active().border_hairline)
             .text_color(theme::active().text_primary)
-            // **A real preview is monospace; the clipboard's is not.**
-            // `terminals::capture_text` goes to the trouble of substituting
-            // rather than deleting a glyph so that column alignment
-            // survives — and then rendering it in a proportional font would
-            // throw that away at the last step, turning every table and
-            // tree view back into ragged text. Gated on the field rather
-            // than applied to the pane, because a clipboard entry is prose
-            // and reads worse in monospace.
+            // **Three formats, each the provider's own statement.**
+            // `preview_markdown` renders through `crate::markdown` — an
+            // agent's prose, headings and fences drawn instead of their raw
+            // markers. A plain `preview` is monospace: `terminals::
+            // capture_text` substitutes rather than deletes glyphs so column
+            // alignment survives, and a proportional face would throw that
+            // away at the last step. No preview at all falls back to `id`
+            // (the clipboard's prose, where id *is* content) in the
+            // proportional face it reads best in. The scroll is here rather
+            // than on the pane so a long reply is readable to its end.
+            .id("mode-detail-preview")
+            .overflow_y_scroll()
             .map(|el| {
-                if item.preview.is_some() {
+                let markdown = crate::evidence::force_preview_markdown() || item.preview_markdown;
+                let text = item.preview.clone().unwrap_or_else(|| item.id.clone());
+                if markdown {
+                    el.text_size(px(12.)).child(crate::markdown::render(&text))
+                } else if item.preview.is_some() {
                     el.font_family(theme::MONOSPACE_FAMILY)
                         .text_size(px(theme::PREVIEW_MONOSPACE_SIZE_PX))
+                        .child(SharedString::from(text))
                 } else {
-                    el.text_size(px(13.))
+                    el.text_size(px(13.)).child(SharedString::from(text))
                 }
-            })
-            // **`preview` when the provider offers one, `id` otherwise.**
-            // The clipboard mode predates the field and works only because a
-            // clipboard entry's id *is* its content; nothing else has that
-            // coincidence, so a provider with something to show now says so
-            // directly. See `SearchItem::preview`.
-            .child(SharedString::from(
-                item.preview.clone().unwrap_or_else(|| item.id.clone()),
-            ));
+            });
 
         let mut info = div().flex().flex_col().gap_2();
         // **The labels are the clipboard mode's, so only its own rows get
@@ -4010,6 +4011,7 @@ mod tests {
             source: None,
             meter: None,
             keeps_open: false,
+            preview_markdown: false,
             preview: None,
         }
     }
@@ -4415,6 +4417,7 @@ mod tests {
             source: None,
             meter: None,
             keeps_open: false,
+            preview_markdown: false,
             preview: None,
         }
     }
@@ -4818,6 +4821,7 @@ mod tests {
             source: None,
             meter: None,
             keeps_open: false,
+            preview_markdown: false,
             preview: None,
         }
     }
@@ -4913,6 +4917,7 @@ mod tests {
             source: None,
             meter: None,
             keeps_open: false,
+            preview_markdown: false,
             preview: None,
         }
     }

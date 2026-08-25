@@ -214,6 +214,13 @@ impl Provider for ConversationProvider {
                         source: None,
                         meter: None,
                         keeps_open: true,
+                        // **An agent writes markdown**, and until the client
+                        // could render it every heading, fence and bullet
+                        // showed its raw markers. The one non-markdown shape
+                        // here — a `[Tool] argument` headline — survives a
+                        // markdown pass unchanged, since a bracketed span with
+                        // no `(` after it is not link syntax.
+                        preview_markdown: true,
                         // The full text, for the detail pane, so a long reply
                         // is readable rather than truncated into a row.
                         preview: Some(match &entry.body {

@@ -218,6 +218,7 @@ impl Provider for CommandsProvider {
                         source: None,
                         meter: None,
                         keeps_open: false,
+                        preview_markdown: false,
                         preview: None,
                     },
                 })

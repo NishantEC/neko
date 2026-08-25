@@ -398,6 +398,7 @@ impl Provider for PreferencesProvider {
                         source: None,
                         meter: None,
                         keeps_open: false,
+                        preview_markdown: false,
                         preview: None,
                     },
                 })
@@ -504,6 +505,7 @@ impl Provider for FolderScopeProvider {
                         source: None,
                         meter: None,
                         keeps_open: false,
+                        preview_markdown: false,
                         preview: None,
                     },
                 }

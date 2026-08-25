@@ -45,6 +45,7 @@ futures = "0.3"
 # `global-hotkey` -> `keyboard-types`) at this exact version, so this adds
 # zero new crate versions to the tree. MIT OR Apache-2.0.
 unicode-segmentation = "1.13"
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 accessibility-sys = "0.1"

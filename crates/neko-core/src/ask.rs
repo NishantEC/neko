@@ -489,6 +489,7 @@ impl AskProvider {
                 source: None,
                 meter: None,
                 keeps_open,
+                preview_markdown: false,
                 preview: None,
             },
         }

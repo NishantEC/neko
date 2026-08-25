@@ -44,6 +44,7 @@
 //! | `NEKO_SHOW_CONFIRM` | no | same — drives `confirm_for_evidence` in-process |
 //! | `NEKO_CYCLE_MODE_ONCE` | no | same — `dismiss_for_evidence`/`confirm_for_evidence` |
 //! | `NEKO_SHOW_ACTIONS_MENU` | no | same — `open_actions_menu_for_evidence` |
+//! | `NEKO_FORCE_PREVIEW_MARKDOWN` | no | renders the detail preview as markdown — the real `conversation` rows need a live Paseo daemon an isolated `HOME` cannot have |
 //! | `NEKO_SCROLL_MODE_LIST_TO_BOTTOM` | no | same — a `ScrollHandle` mutation |
 //! | `NEKO_SHOW_SELECTION` | no | same — `select_query_for_evidence` |
 //! | `NEKO_SELECT_DOWN` | no | drives the real `SelectNext` handler N times, so keyboard scrolling can be photographed without synthesising a key press |
@@ -346,6 +347,19 @@ pub fn mode_query() -> Option<String> {
 /// Whether to press Enter again on whatever `NEKO_MODE_QUERY` produced.
 pub fn mode_confirm_requested() -> bool {
     std::env::var("NEKO_MODE_CONFIRM").is_ok()
+}
+
+/// Whether to render the detail pane's preview as markdown regardless of the
+/// row's own `preview_markdown` flag.
+///
+/// Evidence-only, because the one provider that sets the flag for real
+/// (`conversation`) needs a live Paseo daemon and a real agent id — neither
+/// exists in an isolated evidence `HOME`, and pointing a client at the
+/// captain's real daemon would put his actual transcripts in a screenshot.
+/// This drives the identical `markdown::render` path over a seeded clipboard
+/// fixture instead. Rendering-only override; takes no input, changes no state.
+pub fn force_preview_markdown() -> bool {
+    std::env::var_os("NEKO_FORCE_PREVIEW_MARKDOWN").is_some()
 }
 
 /// Which Preferences control to park the focus ring on, if any.

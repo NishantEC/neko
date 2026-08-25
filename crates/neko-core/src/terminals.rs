@@ -298,6 +298,7 @@ impl Provider for TerminalsProvider {
                         meter: None,
                         keeps_open: false,
                         preview,
+                        preview_markdown: false,
                     },
                 })
             })
