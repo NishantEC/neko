@@ -46,6 +46,7 @@
 //! | `NEKO_SHOW_ACTIONS_MENU` | no | same — `open_actions_menu_for_evidence` |
 //! | `NEKO_SCROLL_MODE_LIST_TO_BOTTOM` | no | same — a `ScrollHandle` mutation |
 //! | `NEKO_SHOW_SELECTION` | no | same — `select_query_for_evidence` |
+//! | `NEKO_SELECT_DOWN` | no | drives the real `SelectNext` handler N times, so keyboard scrolling can be photographed without synthesising a key press |
 //! | `NEKO_MODE_QUERY` / `NEKO_MODE_CONFIRM` | no | a modifier on `NEKO_SHOW_CONFIRM`; types inside an already-open mode and optionally confirms again, through the same real edit and confirm paths |
 //! | `NEKO_SHOW_PREFERENCES` | no | opens the Preferences window with `order_front_regardless` and parks the focus ring on one control, so the ring can be photographed without a keystroke |
 //! | `NEKO_SHOW_DRAG_GUIDES` | no | opens a second window with `focus: false` and `ignoresMouseEvents`; touches the panel's own focus not at all |
@@ -330,6 +331,11 @@ pub fn show_selection_requested() -> bool {
 /// was set. Focus-neutral: it touches no window state at all.
 pub fn menu_bar_count() -> Option<usize> {
     std::env::var("NEKO_MENU_BAR_COUNT").ok()?.trim().parse().ok()
+}
+
+/// How many times to press Down before capturing. See `show_once`.
+pub fn select_down_steps() -> Option<usize> {
+    std::env::var("NEKO_SELECT_DOWN").ok()?.trim().parse().ok()
 }
 
 /// Text to type once a mode is already open. See `show_once`.
@@ -756,6 +762,19 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
     }
     if let Some(bench_query) = bench_search_query() {
         run_search_bench(&bench_query, window, cx).await;
+    }
+    if let Some(steps) = select_down_steps() {
+        for _ in 0..steps {
+            cx.update(|cx| {
+                let _ = window.update(cx, |root, window, cx| {
+                    root.select_next_for_evidence(window, cx);
+                });
+            });
+            cx.background_executor().timer(std::time::Duration::from_millis(40)).await;
+        }
+        // One settle frame: `scroll_to_item` takes effect on the next paint,
+        // which is the frame the capture has to be after.
+        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
     }
     if show_actions_menu_requested() {
         cx.update(|cx| {
