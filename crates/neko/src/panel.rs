@@ -47,6 +47,7 @@ use neko_protocol::{Glyph, Icon, ItemAction, Meter, MeterStat, Request, Response
 use crate::accessibility::AccessibilityChecker;
 use crate::assets::{glyph_icon, icon};
 use crate::edge_fade::scroll_edge_fade;
+use crate::components::scroll::with_scrollbar;
 use crate::menu_frost::sync_menu_frost;
 use crate::modes::{self, ModeChrome};
 use crate::motion;
@@ -2249,11 +2250,19 @@ impl Root {
         } else {
             theme::active().surface_panel
         };
-        scroll_edge_fade(
-            self.root_scroll.clone(),
-            fade.into(),
-            theme::EDGE_FADE_BAND_PX,
-            container,
+        // The fade says "there is more"; the bar says "how much more, and
+        // where you are in it". They answer different questions, so both are
+        // mounted — the fade over the list's own bottom edge, the bar in its
+        // own lane outside the content.
+        with_scrollbar(
+            &self.root_scroll,
+            "root-list-scrollbar",
+            scroll_edge_fade(
+                self.root_scroll.clone(),
+                fade.into(),
+                theme::EDGE_FADE_BAND_PX,
+                container,
+            ),
         )
         .into_any_element()
     }
@@ -2768,7 +2777,16 @@ impl Root {
         }
 
         let fade_color = if self.translucent { theme::active().surface_panel_translucent } else { theme::active().surface_panel };
-        scroll_edge_fade(self.mode_scroll.clone(), fade_color.into(), theme::EDGE_FADE_BAND_PX, container)
+        with_scrollbar(
+            &self.mode_scroll,
+            "mode-list-scrollbar",
+            scroll_edge_fade(
+                self.mode_scroll.clone(),
+                fade_color.into(),
+                theme::EDGE_FADE_BAND_PX,
+                container,
+            ),
+        )
     }
 
     /// The mode's own preview + info pane — deliberately *not* a generic

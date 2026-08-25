@@ -17,18 +17,36 @@ upstream churn on every `cargo update`.
 
 Evaluated source: [`gpui-component`](https://crates.io/crates/gpui-component) 0.5.1, Apache-2.0
 (`THIRD_PARTY_LICENSES/gpui-component-APACHE-2.0.txt`, verified from its own `LICENSE-APACHE` file,
-not a badge). Its own `Cargo.lock` was checked directly for the GPUI GPL hazard described in
-`AGENTS.md`: no `ztracing`/`zlog` anywhere in its 757-package resolved graph — it depends on the
-same published, GPL-free `gpui ^0.2.2` this repo uses, not git-`main`. So it is licence-clean, but
-adopting it as a Cargo dependency (the option evaluated first) was rejected: 757 resolved packages
-for three mechanics, a second Objective-C bridging stack (`cocoa`/`cocoa-foundation`) running
-alongside the `objc2` stack `gpui` and `neko-core` already use, and 60+ components' worth of
-styling assumptions to fight against our exact frozen geometry. Vendoring only the pieces that are
-genuinely self-contained avoids all three costs.
+not a badge). It is licence-clean — no `ztracing`/`zlog` anywhere in its 757-package resolved graph. It was
+rejected as a Cargo dependency twice, for two different reasons, and the second one is now the
+binding one:
+
+* **When this repo still used the published `gpui`** the objection was cost: 757 resolved packages
+  for three mechanics, a second Objective-C bridging stack (`cocoa`/`cocoa-foundation`) beside the
+  `objc2` one `gpui` and `neko-core` already use, and 60+ components' worth of styling assumptions
+  to fight against a frozen bespoke geometry.
+* **Since the fork migration it simply does not compile.** gpui-component targets the crates.io
+  `gpui`; this repo targets `wingleeio/zed` at a pinned rev. Added as-is you get
+  *"there are multiple different versions of crate `gpui` in the dependency graph"*; forced onto one
+  gpui with `[patch.crates-io]` you get **81 errors** of genuine API drift, re-measured 2026-08-25:
+  44 × `E0061` (arity — `focus(window)` became `focus(window, cx)`), 13 × `E0432` (`gpui::Corner`
+  and `gpui::Timer` do not exist in the fork), 8 × `E0599`, 7 × `E0308` (`ScrollHandle::max_offset`
+  is `Point` here and `Size` there), 4 × `E0063` (`BoxShadow` gained `inset`), 1 × `E0433`.
+
+  **A plain `cargo check` passes in the multiple-versions state and is a false positive** — it only
+  fails once something actually calls a component. So the dependency route is closed until either
+  gpui-component targets the fork or this repo leaves it, and leaving it would cost
+  `paint_backdrop_blur`, `EdgeFade`, native window drag, the `windowDidBecomeKey:` deadlock fix and
+  the inactive-window summon-latency patch.
+
+Vendoring per file, repairing the drift once each, is therefore the only route — and it was already
+the preferred one on cost grounds.
 
 | Our name | Category | Upstream file (gpui-component 0.5.1) | Status |
 |---|---|---|---|
 | `blink_cursor::CursorBlink` | Text input mechanics | `src/input/blink_cursor.rs` | **Vendored**, adapted in `blink_cursor.rs` |
+| `scrollbar::Scrollbar` | Scroll affordance | `src/scroll/scrollbar.rs` | **Vendored**, repaired in `scrollbar.rs` |
+| `shim` (`ActiveTheme`, `StyledExt`, `Sizable`, `AxisExt`) | Substrate | `src/{styled,theme/*}.rs` | **Reimplemented**, not copied — see below |
 | — (list virtualization) | Result list | `src/list/{list,cache,delegate,list_item}.rs` | **Declined** — see below |
 | — (rich text input engine) | Text input | `src/input/{state,element,movement,rope_ext,text_wrapper}.rs` | **Declined** — see below |
 | — (`icon.rs` / the `IconName` set) | Icons | `src/icon.rs`, `src/icons/*.svg` | **Declined as code, replaced by assets** — see "Icons" below |
@@ -146,3 +164,49 @@ for the full note, and revisit it before neko is ever distributed.
 Unlike Lucide's stroke-only icons these are **filled**, which is correct here:
 gpui renders an SVG to an alpha mask, so a filled path becomes the silhouette
 in one tint — which is what a brand mark is.
+
+
+## The scrollbar, and the shim under it
+
+**`scrollbar.rs` is the one piece of this library with mechanics worth importing.** Neko's root
+list and mode list both genuinely scroll (`overflow_y_scroll` + `track_scroll`) and drew no thumb
+at all — `grep -c scrollbar` over `crates/neko/src` returned **0** before this. What a rewrite
+would have had to reproduce is not the drawing but the bookkeeping: thumb length and position from
+viewport-over-content, drag tracking with a grab offset, the wheel/hover state machine, and the
+idle fade-out.
+
+Repairs from upstream, all forced by the fork and all listed in the file's own header: the four
+`Bounds::from_corner_and_size(Corner::…)` calls became explicit origin arithmetic, the one
+`Timer::after` became `cx.background_executor().timer(..)`, `content_size` composes `Point` and
+`Size` by hand, and `ScrollbarShow` lost its `serde`/`schemars` derives because neko persists no
+scrollbar setting. The mechanics are untouched.
+
+**`shim.rs` is reimplemented rather than vendored**, and the distinction matters for the licence
+position: no gpui-component source is copied into it. Every vendored component reaches for the same
+few library-private traits — `ActiveTheme`, `StyledExt`, `Sizable`, `AxisExt` — so those are
+supplied once, backed by `theme::active()`, instead of being patched out of each file. That is what
+makes a vendored component theme-reactive for free: it asks `cx.theme()` for a colour exactly as it
+did upstream and gets neko's live palette, across all seventeen themes, with no per-theme asset and
+no `if themed` branch.
+
+Roles gpui-component's theme has and neko's palette does not are **derived, never added as
+tokens** — `warning` is the midpoint of the success→danger ramp neko already computes in OKLCH, the
+two scrollbar thumb alphas come off `text_primary`. Adding palette tokens to match a vendored
+library's vocabulary would let the library dictate what a neko theme means, which is the opposite
+of the arrangement.
+
+Two mappings are deliberate refusals rather than translations. `shadow` is always fully transparent:
+neko draws no box shadows, because both of the ones it used to draw were measured spilling into the
+panel's own margin and removed (`AGENTS.md`, "The panel shadow tent"). The scrollbar `track` is
+likewise transparent — the panel is translucent over a live native material, and a filled track
+would be an opaque stripe through it.
+
+### Declined from this library even under a mandate to overwrite neko's own components
+
+`skeleton.rs` and `spinner.rs` are each under 70 lines and both were rejected on the same measured
+ground: their entire mechanic is `Animation::new(..).repeat()`, which this project forbids after
+comet's own recorded incident (one repeating element pinned a window at 120Hz, measured 36% CPU).
+Neko already has the sanctioned alternative — `motion::PulseClock`, a shared 12.5Hz clock that
+stops when nothing is using it — so vendoring these would mean importing the bug and then removing
+the only thing they contain. `tooltip.rs` and `kbd.rs` remain declined as duplicates of
+`panel::TextTooltip` and `components/keycap.rs`.
