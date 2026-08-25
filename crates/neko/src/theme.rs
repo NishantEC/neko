@@ -839,6 +839,14 @@ pub fn set_active(id: &str) -> bool {
 /// is colour and surface only (this module's own doc comment).
 pub const SNAP_GUIDE_THICKNESS_PX: f32 = 4.0;
 
+/// Fully transparent — the resting end of every hover wash.
+///
+/// A wash fades *from* nothing, and `motion::mix` premultiplies specifically so
+/// that "nothing" carries no hue of its own into the blend. Named here rather
+/// than written out at each call site so there is one thing to point at when
+/// somebody asks what a wash starts from.
+pub const TRANSPARENT: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+
 pub const PANEL_RADIUS_PX: f32 = 16.0;
 pub const ROW_RADIUS_PX: f32 = 8.0;
 pub const DIALOG_RADIUS_PX: f32 = 14.0;
