@@ -328,8 +328,8 @@ pub fn show_selection_requested() -> bool {
 /// window-scoped capture of neko's own panel, which the Dock is not part of.
 /// So the proof is a native readback instead, printed next to the value that
 /// was set. Focus-neutral: it touches no window state at all.
-pub fn dock_badge_count() -> Option<usize> {
-    std::env::var("NEKO_DOCK_BADGE").ok()?.trim().parse().ok()
+pub fn menu_bar_count() -> Option<usize> {
+    std::env::var("NEKO_MENU_BAR_COUNT").ok()?.trim().parse().ok()
 }
 
 /// Text to type once a mode is already open. See `show_once`.
@@ -367,7 +367,7 @@ pub fn evidence_run_active() -> bool {
         || bench_iterations().is_some()
         || bench_real_iterations().is_some()
         || preferences_focus().is_some()
-        || dock_badge_count().is_some()
+        || menu_bar_count().is_some()
 }
 
 /// Reads back off the live `NSWindow` whether this evidence window is
