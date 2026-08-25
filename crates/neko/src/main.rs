@@ -3,7 +3,7 @@ mod assets;
 mod components;
 mod daemon_launcher;
 mod display_placement;
-mod dock_badge;
+mod menu_bar;
 mod edge_fade;
 mod evidence;
 mod hotkey_client;
@@ -70,31 +70,45 @@ fn main() {
     // the builder, before `run`, and not from inside it. Without it every
     // `svg()` in this app would resolve to nothing and paint nothing —
     // silently, since an unresolvable asset path is not an error anywhere.
+/// Bring neko forward from something that is not the hotkey.
+///
+/// **Two callers, and they must not drift.** `App::on_reopen` fires on a
+/// Dock-icon click; `crate::menu_bar` records a click on the menu bar item
+/// and the summon loop polls for it. Both mean the same thing — "I want
+/// neko, and I might not have a working hotkey" — so they run the same code
+/// rather than two summon paths that could diverge. Since
+/// `menu_bar::hide_from_dock` there is no Dock icon, which makes the second
+/// caller the one that actually runs; the first is kept because it costs
+/// nothing and would come back to life the day neko ships as a bundle.
+fn summon_from_outside(cx: &mut App) {
+    let Some((window, active_onboarding)) = cx
+        .try_global::<ReopenTargets>()
+        .map(|t| (t.window, t.active_onboarding.clone()))
+    else {
+        return;
+    };
+    if let Some(onboarding_window) = *active_onboarding.borrow() {
+        let _ = onboarding_window.update(cx, |_root, window, _cx| {
+            window.activate_window();
+        });
+        return;
+    }
+    // Works whether or not the global hotkey is live, so declining
+    // Accessibility never leaves neko unreachable.
+    let _ = window.update(cx, |root, window, cx| {
+        root.reset_for_summon(window, cx);
+        reposition_to_cursor_display(window);
+        window.activate_window();
+        window.focus(&root.focus_handle(cx), cx);
+    });
+    cx.activate(true);
+}
+
     // See `assets.rs`.
     let app = gpui_platform::application().with_assets(assets::NekoAssets);
-    app.on_reopen(|cx| {
-        let Some((window, active_onboarding)) = cx
-            .try_global::<ReopenTargets>()
-            .map(|t| (t.window, t.active_onboarding.clone()))
-        else {
-            return;
-        };
-        if let Some(onboarding_window) = *active_onboarding.borrow() {
-            let _ = onboarding_window.update(cx, |_root, window, _cx| {
-                window.activate_window();
-            });
-            return;
-        }
-        // Works whether or not the global hotkey is live, so declining
-        // Accessibility never leaves neko unreachable.
-        let _ = window.update(cx, |root, window, cx| {
-            root.reset_for_summon(window, cx);
-            reposition_to_cursor_display(window);
-            window.activate_window();
-            window.focus(&root.focus_handle(cx), cx);
-        });
-        cx.activate(true);
-    });
+    app.on_reopen(summon_from_outside);
+
+
 
     app.run(|cx: &mut App| {
         cx.bind_keys([
@@ -240,6 +254,24 @@ fn main() {
                         // flipped back to `Opaque` explicitly or the panel
                         // would render over whatever is genuinely behind it
                         // on screen instead of a solid fill.
+                        // **Out of the Dock, into the menu bar.** gpui sets
+                        // `NSApplicationActivationPolicyRegular` on every app
+                        // it starts, which is the only reason a command
+                        // palette had a Dock tile; the last call wins, so
+                        // this happens after gpui has had its say. See
+                        // `crate::menu_bar` for the two jobs the Dock icon
+                        // was doing and where both of them went.
+                        match menu_bar::hide_from_dock() {
+                            Ok(()) => eprintln!(
+                                "neko: activation policy Accessory (verified) \u{2014} no Dock icon, no \u{2318}Tab entry"
+                            ),
+                            Err(e) => eprintln!("neko: couldn't leave the Dock: {e}"),
+                        }
+                        match menu_bar::install() {
+                            Some(state) => eprintln!("neko: menu bar item installed \u{2014} {state}"),
+                            None => eprintln!("neko: menu bar item FAILED to install"),
+                        }
+
                         let translucent = match material::install(window) {
                             Ok(installed) => {
                                 eprintln!("neko: window material installed: {installed:?}");
@@ -413,9 +445,9 @@ fn main() {
         // moving it needs a Tab press — real OS input, which this repo does
         // not synthesise. This opens the window with the ring already parked
         // and never takes focus; see `evidence::preferences_focus`.
-        if let Some(count) = evidence::dock_badge_count() {
-            let shown = dock_badge::set_waiting_count(count);
-            eprintln!("neko: dock badge set to {count}, reads back {shown:?}");
+        if let Some(count) = evidence::menu_bar_count() {
+            menu_bar::set_waiting_count(count);
+            eprintln!("neko: menu bar count set to {count}");
         }
 
         if evidence::preferences_focus().is_some() {
@@ -603,17 +635,23 @@ fn main() {
                             }
                         }
                         // The panel is hidden almost all of the time, so a
-                        // search cannot be what tells you an agent went and
-                        // blocked. This is the one ambient surface neko has
-                        // — see `dock_badge`'s own doc comment for why not a
-                        // notification and why not the menu bar.
+                        // search cannot be what tells you an agent has
+                        // blocked. The menu bar item is that surface — see
+                        // `crate::menu_bar` for why not the Dock.
                         Event::AttentionChanged { count } => {
-                            let shown = dock_badge::set_waiting_count(count);
-                            eprintln!(
-                                "neko: {count} waiting — dock badge reads back {shown:?}"
-                            );
+                            menu_bar::set_waiting_count(count);
                         }
                     }
+                }
+
+                // **The menu bar item's click, collected here.** An AppKit
+                // action fires inside the run loop with no `&mut App` in
+                // reach, so `menu_bar` records it and this — the poll that
+                // already runs every 20ms for daemon events and connection
+                // state — acts on it. No new thread, no second summon path,
+                // and 20ms is well under what a person can perceive.
+                if menu_bar::take_click() {
+                    cx.update(summon_from_outside);
                 }
 
                 let is_connected = client.is_connected();
