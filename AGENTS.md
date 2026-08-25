@@ -3218,13 +3218,39 @@ below the fold. The `"+N more"` cue stays for the *typed*-query case, which is
 still fitted rather than scrolled: there is nothing to scroll to there, and a
 fade would promise a gesture that does not work.
 
+**It scrolls to the row *past* the selection, never to the selection.**
+`scroll_to_item` moves the minimum distance to reveal its target, so aiming
+it at the selected row parks that row flush against the edge you are
+travelling toward — you arrow down and the thing you just selected is the
+last thing visible, with no sight of what is next. `ScrollBias` aims one row
+further in the direction of travel, leaving exactly one row of lookahead;
+vim calls the same idea `scrolloff`. Both ends clamp, and that is the
+behaviour rather than defensiveness: at the last row there is nothing beyond
+it to reveal.
+
+**`sync_mode_scroll_to_selection` is gone**, and finding it was the point of
+doing this properly. It already existed, already scrolled the mode list to
+the selection, had no lookahead, and ran *after* the new call — so it
+silently overwrote it. Two functions for one job is how a fix gets undone by
+the code next to it.
+
 **`NEKO_SELECT_DOWN=<n>` is the hook that made this provable.** The thing
 worth showing is a keyboard behaviour and this repo does not synthesise OS
 input, so it drives the real `SelectNext` handler N times — without it the
 only evidence would be the index test, which says nothing about whether the
-call is wired to the key at all. `docs/evidence/root-list-bottom-fade.png`
-(the fade over a row below the fold) and `root-list-keyboard-scroll.png`
-(after nine Downs: the view has moved and the selection is on `New Agent`).
+call is wired to the key at all.
+
+**That hook needed a settle wait, and the reason generalises.** With no
+query hook set there is no wait above it, so the first presses landed while
+the initial search was still in flight — and a response arriving mid-loop
+re-resolves the selection by identity, silently swallowing however many
+presses had already happened. The same command produced two different
+captures before that was found. **An evidence hook that drives input has to
+wait for the thing it is driving to exist**, or it measures the race instead
+of the behaviour. `docs/evidence/root-list-bottom-fade.png` (the fade over a
+row below the fold) and `root-list-scroll-lookahead.png` (after nine Downs:
+the view has moved, the selection is on `Preferences`, and `Schedules` is
+visible beneath it).
 
 ## The shared pulse clock, and the repeating-animation rule
 

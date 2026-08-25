@@ -764,6 +764,14 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         run_search_bench(&bench_query, window, cx).await;
     }
     if let Some(steps) = select_down_steps() {
+        // **Wait for the list to exist first.** Without a query hook set
+        // there is no settle above this, so the first presses can land while
+        // the initial search is still in flight — and a response arriving
+        // mid-loop re-resolves the selection by identity, which silently
+        // swallows however many presses had already happened. That is a
+        // harness race, not a product one, and it produced two different
+        // capture results from the same command before it was found.
+        cx.background_executor().timer(std::time::Duration::from_millis(2500)).await;
         for _ in 0..steps {
             cx.update(|cx| {
                 let _ = window.update(cx, |root, window, cx| {

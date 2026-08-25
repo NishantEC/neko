@@ -870,7 +870,7 @@ impl Root {
         self.selected = resolve_selection(previous, &self.results);
         // A re-search can move the selection by identity; the view has to
         // follow it there too, not only on an arrow key.
-        self.scroll_selection_into_view();
+        self.scroll_selection_into_view(ScrollBias::None);
         // **No tile is selected to begin with.** The grid sits directly above
         // the rows now, so Up from the first row lands on the last tile — the
         // move that is spatially correct — and the selection can start where
@@ -901,7 +901,6 @@ impl Root {
         // previews too — `preview_selected_theme` is a no-op outside the
         // theme mode and when the selected row is already the live palette.
         self.preview_selected_theme();
-        self.sync_mode_scroll_to_selection();
         self.report_search_latency(complete, generation, cx);
         cx.notify();
     }
@@ -959,13 +958,22 @@ impl Root {
     /// sat still. From the outside that reads as "this list does not scroll",
     /// which is exactly what it was reported as.
     ///
+    /// **It scrolls to the row *past* the selection, not to the selection.**
+    /// `scroll_to_item` moves the minimum distance to bring its target into
+    /// view, so aiming it at the selected row parks that row flush against
+    /// the edge you are travelling toward — you arrow down and the thing you
+    /// just selected is the last thing visible, with no sight of what comes
+    /// next. Aiming one row further leaves exactly one row of lookahead,
+    /// which is what every list worth using does (vim calls it `scrolloff`).
+    ///
     /// Called from every place `selected` moves, rather than from `render`:
     /// a render-time scroll would fight a wheel gesture, dragging the view
     /// back to the selection every frame while somebody is trying to look
     /// somewhere else.
-    fn scroll_selection_into_view(&self) {
+    fn scroll_selection_into_view(&self, bias: ScrollBias) {
+        let target = bias.target(self.selected, self.results.len());
         if self.active_mode().is_some() {
-            self.mode_scroll.scroll_to_item(mode_list_child_index(&self.results, self.selected));
+            self.mode_scroll.scroll_to_item(mode_list_child_index(&self.results, target));
             return;
         }
         // A focused tile is above the list, not in it, and the grid is not
@@ -975,7 +983,7 @@ impl Root {
         }
         self.root_scroll.scroll_to_item(root_list_child_index(
             &self.results,
-            self.selected,
+            target,
             self.leading_banner_count(),
         ));
     }
@@ -1003,14 +1011,17 @@ impl Root {
             } else {
                 self.grid_selected = None;
                 self.selected = 0;
+                // Stepping down out of the grid lands on the first row, and
+                // the view has to come back with it — the list may be
+                // scrolled anywhere from a previous pass.
+                self.scroll_selection_into_view(ScrollBias::Down);
             }
             cx.notify();
             return;
         }
         if !self.results.is_empty() {
             self.selected = (self.selected + 1).min(self.results.len() - 1);
-            self.scroll_selection_into_view();
-            self.sync_mode_scroll_to_selection();
+            self.scroll_selection_into_view(ScrollBias::Down);
             if self.preview_selected_theme() {
                 // A palette swap touches surfaces outside `Root`'s own
                 // subtree (`TextField`'s custom element, the `⌘K` menu's
@@ -1046,37 +1057,11 @@ impl Root {
             return;
         }
         self.selected = self.selected.saturating_sub(1);
-        self.scroll_selection_into_view();
-        self.sync_mode_scroll_to_selection();
+        self.scroll_selection_into_view(ScrollBias::Up);
         if self.preview_selected_theme() {
             _window.refresh();
         }
         cx.notify();
-    }
-
-    /// Keeps the mode list's own scroll position following keyboard
-    /// selection — called after every `self.selected` change while a mode
-    /// is active (`select_next`/`select_previous`, and `run_search`'s
-    /// mode-scoped response handler). A no-op for the root list, which
-    /// never scrolls at all (`fit_within_budget` still guarantees it always
-    /// fits — see this module's own "v1 simplification" doc comment).
-    ///
-    /// `ScrollHandle::scroll_to_item` takes an index into the tracked
-    /// container's own DIRECT children, which is `self.results`' index
-    /// *plus* one slot for every day-bucket header (`SearchItem::group_label`)
-    /// rendered ahead of it (`render_mode_list` interleaves header divs with
-    /// row divs) — `mode_list_child_index` below computes that offset. Its
-    /// `FirstVisible` scroll strategy only moves the offset if the target
-    /// isn't already visible, so this is safe to call on every selection
-    /// change without fighting a manual scroll the captain did in between
-    /// (nothing here runs on a bare scroll-wheel tick — only on an actual
-    /// `self.selected` change, which mouse-wheel scrolling alone never
-    /// causes).
-    fn sync_mode_scroll_to_selection(&self) {
-        if self.active_mode().is_none() {
-            return;
-        }
-        self.mode_scroll.scroll_to_item(mode_list_child_index(&self.results, self.selected));
     }
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
@@ -3059,6 +3044,33 @@ fn fit_section(items: &[SearchItem], budget_px: f32) -> (usize, f32) {
 fn tabular_numerals() -> FontFeatures {
     static TABULAR: OnceLock<FontFeatures> = OnceLock::new();
     TABULAR.get_or_init(|| FontFeatures(Arc::new(vec![("tnum".to_string(), 1)]))).clone()
+}
+
+/// Which way the selection just moved, so the view can leave a row of
+/// lookahead on that side.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ScrollBias {
+    Down,
+    Up,
+    /// The selection was resolved rather than moved — a re-search keeping the
+    /// highlight on the same item. There is no direction to look ahead in.
+    None,
+}
+
+impl ScrollBias {
+    /// The row to actually scroll to.
+    ///
+    /// Clamped at both ends, and that clamp is the behaviour rather than
+    /// defensiveness: at the last row there is nothing beyond it to reveal,
+    /// so it lands flush against the bottom, which is correct — the lookahead
+    /// exists to show what is coming, and nothing is.
+    fn target(self, selected: usize, len: usize) -> usize {
+        match self {
+            ScrollBias::Down => (selected + 1).min(len.saturating_sub(1)),
+            ScrollBias::Up => selected.saturating_sub(1),
+            ScrollBias::None => selected,
+        }
+    }
 }
 
 /// Maps a `results` index to its position among `render_content_area`'s own
@@ -5170,6 +5182,30 @@ mod tests {
         let results = vec![item_with_id("app", "a")];
         assert_eq!(root_list_child_index(&results, 99, 0), 2);
         assert_eq!(root_list_child_index(&[], 0, 0), 0);
+    }
+
+
+    #[test]
+    fn scrolling_leaves_one_row_of_lookahead_in_the_direction_of_travel() {
+        // `scroll_to_item` moves the minimum distance to reveal its target,
+        // so aiming at the selected row parks it flush against the edge you
+        // are travelling toward and you never see what is next. Aiming one
+        // row further is the whole fix.
+        assert_eq!(ScrollBias::Down.target(3, 10), 4);
+        assert_eq!(ScrollBias::Up.target(3, 10), 2);
+        // A re-search that kept the highlight has no direction to look in.
+        assert_eq!(ScrollBias::None.target(3, 10), 3);
+    }
+
+    #[test]
+    fn the_ends_land_flush_because_there_is_nothing_beyond_them_to_show() {
+        // Not defensiveness — the lookahead exists to show what is coming,
+        // and at the last row nothing is.
+        assert_eq!(ScrollBias::Down.target(9, 10), 9);
+        assert_eq!(ScrollBias::Up.target(0, 10), 0);
+        // An empty list must not underflow on the way to being empty.
+        assert_eq!(ScrollBias::Down.target(0, 0), 0);
+        assert_eq!(ScrollBias::Up.target(0, 0), 0);
     }
 
 }
