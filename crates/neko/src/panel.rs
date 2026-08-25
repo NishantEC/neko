@@ -1773,6 +1773,12 @@ impl Root {
         }
     }
 
+    /// The menu bar menu's "Preferences…" item — same injected opener the
+    /// Preferences command row uses, so the two paths cannot drift.
+    pub fn open_preferences_from_menu_bar(&mut self, window: &Window, cx: &mut Context<Self>) {
+        (self.open_preferences)(window, cx);
+    }
+
     fn open_actions_menu_for_selected_row(&mut self, cx: &mut Context<Self>) {
         let Some(item) = self.highlighted_item() else {
             return;

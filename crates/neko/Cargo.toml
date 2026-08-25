@@ -64,6 +64,12 @@ objc2-app-kit = { version = "0.3", features = [
     "NSStatusBar",
     "NSStatusItem",
     "NSStatusBarButton",
+    # Its right-click menu (Summon / Preferences / Quit) — an accessory app
+    # has no Dock icon and no ⌘Tab entry, so without this there is no
+    # discoverable way to quit or reach Preferences with the panel hidden.
+    "NSMenu",
+    "NSMenuItem",
+    "NSEvent",
     "NSButton",
     "NSControl",
     "NSImage",
