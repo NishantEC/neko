@@ -2030,13 +2030,13 @@ impl Root {
             .items_center()
             .flex_shrink_0()
             // The panel has no title bar, so the input row is the top strip
-            // and the natural place to pick it up from. Safe today because
-            // click-drag inside the search field does nothing — mouse
-            // selection is a documented gap (`AGENTS.md`, "Text field
-            // editing shortcuts") — but if mouse selection is ever added,
-            // this handler and it will be fighting over the same gesture.
-            // Bubble phase, so the mode's own back-arrow button (which stops
-            // propagation on click) is never turned into a drag handle.
+            // and the natural place to pick it up from. Bubble phase, so a
+            // descendant that wants the gesture gets it first — which is how
+            // both the mode's back arrow and, since mouse selection landed,
+            // the search field itself keep a press that belongs to them.
+            // `TextField`'s own mouse-down calls `stop_propagation`, so
+            // dragging to select text no longer drags the whole panel across
+            // the screen.
             .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::begin_window_drag))
             .h(px(theme::INPUT_ROW_HEIGHT_PX))
             .px_5()

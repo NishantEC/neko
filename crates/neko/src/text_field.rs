@@ -72,6 +72,12 @@ pub struct TextField {
     selection_anchor: Option<usize>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
+    /// True between a mouse-down inside the field and the release that ends
+    /// it. While set, the element registers *window*-level move/up listeners
+    /// rather than relying on the field's own hover, so a drag that leaves the
+    /// row — which is most of them, since the row is one line tall — keeps
+    /// extending the selection instead of stopping at the boundary.
+    mouse_selecting: bool,
     blink: Entity<CursorBlink>,
 }
 
@@ -98,6 +104,7 @@ impl TextField {
                 selection_anchor: None,
                 last_layout: None,
                 last_bounds: None,
+                mouse_selecting: false,
                 blink,
             }
         })
@@ -437,6 +444,105 @@ impl TextField {
     /// `char::is_whitespace` on bytes), matching macOS's own ⌥← convention:
     /// from mid-word, jumps to that word's start; from trailing punctuation
     /// or whitespace, skips back over it to the previous word's start.
+    /// The byte offset in `content` nearest a point on screen.
+    ///
+    /// **Clamped rather than optional at the edges.** `ShapedLine::index_for_x`
+    /// answers `None` outside the shaped run, which is exactly where a drag
+    /// spends most of its time — past the last character, or left of the first.
+    /// Returning `None` there would freeze the selection at whatever it was
+    /// when the pointer left the text, so out-of-range resolves to the nearest
+    /// end instead, which is what every other text field on this platform does.
+    fn byte_index_for_x(&self, x: Pixels) -> Option<usize> {
+        let bounds = self.last_bounds?;
+        let layout = self.last_layout.as_ref()?;
+        let local = x - bounds.left();
+        if local <= px(0.) {
+            return Some(0);
+        }
+        if local >= layout.width {
+            return Some(self.content.len());
+        }
+        layout.index_for_x(local).or(Some(self.content.len()))
+    }
+
+    /// What a press at `index` should select, given how many clicks it is.
+    ///
+    /// Pure and separate from the press handler so the rule is testable without
+    /// a live `Window` — `byte_index_for_x` needs a `ShapedLine`, which only
+    /// exists after a real paint, and this is the half worth pinning.
+    fn selection_for_click(&self, index: usize, click_count: usize) -> (Option<usize>, usize) {
+        match click_count {
+            // Triple-click takes the line, which in a single-line field is
+            // everything — the same result as ⌘A, reached with the mouse.
+            n if n >= 3 => (Some(0), self.content.len()),
+            2 => {
+                let start = self.word_start_before(index.min(self.content.len()));
+                let end = self.word_end_after(start);
+                // A double-click past the last word has nothing to take; leave
+                // a caret rather than an empty selection that renders as a
+                // one-pixel highlight nobody asked for.
+                if start == end { (None, start) } else { (Some(start), end) }
+            }
+            _ => (None, index),
+        }
+    }
+
+    /// Mouse-down inside the field: place the caret, or select a word or the
+    /// whole field on a repeat click.
+    ///
+    /// Returns whether the press was actually handled, so the caller only
+    /// swallows the event when it was — a press arriving before the field has
+    /// ever been laid out has nothing to place a caret against, and silently
+    /// eating it would leave the press doing nothing at all.
+    pub fn on_mouse_down(
+        &mut self,
+        position: Point<Pixels>,
+        click_count: usize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(index) = self.byte_index_for_x(position.x) else { return false };
+        let (anchor, cursor) = self.selection_for_click(index, click_count);
+        self.selection_anchor = anchor;
+        self.cursor = cursor;
+        // Only a single click starts a drag. Extending a word or line
+        // selection by dragging is a real behaviour on this platform and a
+        // materially bigger one — it snaps by whole words rather than by
+        // character — so it is left out rather than half-built.
+        self.mouse_selecting = click_count <= 1;
+        self.touch_cursor(cx);
+        cx.notify();
+        true
+    }
+
+    /// Drag: move the caret, leaving the anchor where the press landed.
+    pub fn on_mouse_drag(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        if !self.mouse_selecting {
+            return;
+        }
+        let Some(index) = self.byte_index_for_x(position.x) else { return };
+        if index == self.cursor {
+            return;
+        }
+        self.extend_selection_to(index, cx);
+    }
+
+    /// Release. Also collapses a selection that never went anywhere, so a
+    /// plain click leaves a caret rather than a zero-width selection.
+    pub fn on_mouse_up(&mut self, cx: &mut Context<Self>) {
+        if !self.mouse_selecting {
+            return;
+        }
+        self.mouse_selecting = false;
+        if self.selection_range().is_none() {
+            self.selection_anchor = None;
+        }
+        cx.notify();
+    }
+
+    pub fn is_mouse_selecting(&self) -> bool {
+        self.mouse_selecting
+    }
+
     fn word_start_before(&self, byte_offset: usize) -> usize {
         self.content[..byte_offset]
             .unicode_word_indices()
@@ -725,6 +831,31 @@ impl gpui::Element for TextFieldElement {
             field.last_layout = Some(prepaint.line.clone());
             field.last_bounds = Some(bounds);
         });
+
+        // **Window-level, and only while a drag is actually live.** A `div`'s
+        // own `on_mouse_move` is gated on its hitbox being hovered, and this
+        // field is one line tall — a selection drag leaves it almost
+        // immediately, which would strand the selection at the row's edge.
+        // Registering here rather than in `render` also means these exist for
+        // exactly the frames they are needed: gpui clears window mouse
+        // listeners every frame, so there is nothing to unregister and no way
+        // for one to outlive the gesture.
+        if self.field.read(cx).is_mouse_selecting() {
+            let field = self.field.clone();
+            window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, _window, cx| {
+                if phase == gpui::DispatchPhase::Bubble
+                    && event.pressed_button == Some(gpui::MouseButton::Left)
+                {
+                    field.update(cx, |field, cx| field.on_mouse_drag(event.position, cx));
+                }
+            });
+            let field = self.field.clone();
+            window.on_mouse_event(move |_: &gpui::MouseUpEvent, phase, _window, cx| {
+                if phase == gpui::DispatchPhase::Bubble {
+                    field.update(cx, |field, cx| field.on_mouse_up(cx));
+                }
+            });
+        }
     }
 }
 
@@ -756,6 +887,21 @@ impl Render for TextField {
             .on_action(cx.listener(Self::on_cut))
             .on_action(cx.listener(Self::on_paste))
             .w_full()
+            // **This is also what stops the panel dragging out from under a
+            // press in the field.** `panel::render_input_row` begins a window
+            // drag on mouse-down in the bubble phase; the field is a descendant,
+            // so its own bubble handler runs first and `stop_propagation` keeps
+            // the gesture here. Only when the press was genuinely handled —
+            // before the first layout there is nothing to place a caret
+            // against, and swallowing it then would make the press do nothing.
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|field, event: &gpui::MouseDownEvent, _window, cx| {
+                    if field.on_mouse_down(event.position, event.click_count, cx) {
+                        cx.stop_propagation();
+                    }
+                }),
+            )
             .child(TextFieldElement { field: cx.entity() })
     }
 }
@@ -1333,6 +1479,100 @@ mod tests {
             let range = field.edit_target_range();
             field.commit_edit(range, &text, cx);
             assert_eq!(field.content, "roundtrip-neko-textinput-fixture-b83a");
+        });
+    }
+
+    #[gpui::test]
+    fn a_single_click_places_a_caret_and_selects_nothing(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("café 東京 test", cx);
+            let (anchor, cursor) = field.selection_for_click(6, 1);
+            assert_eq!(anchor, None, "a plain click must not leave a selection");
+            assert_eq!(cursor, 6);
+        });
+    }
+
+    #[gpui::test]
+    fn a_double_click_takes_the_word_under_it(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("hello brave world", cx);
+            // Anywhere inside "brave" — the middle, not just the first byte.
+            let (anchor, cursor) = field.selection_for_click(8, 2);
+            assert_eq!(anchor, Some(6));
+            assert_eq!(cursor, 11);
+            assert_eq!(&field.content()[6..11], "brave");
+        });
+    }
+
+    #[gpui::test]
+    fn a_double_click_in_trailing_space_takes_the_word_before_it(cx: &mut TestAppContext) {
+        // Not an empty selection, and not nothing: the nearest word behind the
+        // press, which is what this platform's own fields do.
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("hi ", cx);
+            let (anchor, cursor) = field.selection_for_click(3, 2);
+            assert_eq!((anchor, cursor), (Some(0), 2));
+        });
+    }
+
+    #[gpui::test]
+    fn a_double_click_on_an_empty_field_leaves_a_caret(cx: &mut TestAppContext) {
+        // The `start == end` branch. It turns out to be reachable only on an
+        // empty field: a run of spaces selects the run, the same as this
+        // platform. An empty selection would render as a one-pixel highlight —
+        // a rendering glitch rather than "nothing is selected".
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("   ", cx);
+            assert_eq!(field.selection_for_click(2, 2), (Some(0), 3), "spaces select the run");
+            field.set_content("", cx);
+            assert_eq!(field.selection_for_click(0, 2), (None, 0));
+        });
+    }
+
+    #[gpui::test]
+    fn a_triple_click_takes_everything_wherever_it_lands(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("hello world", cx);
+            for index in [0, 5, 11] {
+                let (anchor, cursor) = field.selection_for_click(index, 3);
+                assert_eq!(anchor, Some(0), "index {index}");
+                assert_eq!(cursor, 11, "index {index}");
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn only_a_single_click_arms_a_drag(cx: &mut TestAppContext) {
+        // Dragging out of a double-click should extend by whole words on this
+        // platform. That is a materially bigger behaviour, so it is left out
+        // rather than half-built — and the flag is what makes "left out" true
+        // instead of "extends by character, which is wrong".
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("hello world", cx);
+            assert!(!field.is_mouse_selecting());
+            field.mouse_selecting = true;
+            field.on_mouse_up(cx);
+            assert!(!field.is_mouse_selecting(), "release always ends the drag");
+        });
+    }
+
+    #[gpui::test]
+    fn a_drag_that_never_moved_leaves_a_caret(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("hello", cx);
+            field.cursor = 3;
+            field.selection_anchor = Some(3);
+            field.mouse_selecting = true;
+            field.on_mouse_up(cx);
+            assert_eq!(field.selection_range(), None);
+            assert_eq!(field.selection_anchor, None, "a zero-width anchor is cleared");
         });
     }
 }
