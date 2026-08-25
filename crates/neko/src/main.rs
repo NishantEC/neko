@@ -11,6 +11,7 @@ mod material;
 mod menu_frost;
 mod modes;
 mod motion;
+mod sound;
 mod onboarding;
 mod preferences;
 mod panel;
@@ -577,6 +578,7 @@ fn summon_from_outside(cx: &mut App) {
             // own optimistic default, so a launch where the daemon is
             // already connected by the first tick (the common case) never
             // pushes a spurious no-op transition.
+            let mut last_attention_count: usize = 0;
             let mut last_connected = true;
 
             if !onboarding_state.completed {
@@ -672,6 +674,14 @@ fn summon_from_outside(cx: &mut App) {
                         // `crate::menu_bar` for why not the Dock.
                         Event::AttentionChanged { count } => {
                             menu_bar::set_waiting_count(count);
+                            // A rise means an agent just blocked; the count in
+                            // the menu bar requires looking, and this is the
+                            // one surface that does not — see `sound.rs` for
+                            // the rule and its edges.
+                            if sound::should_chime(last_attention_count, count) {
+                                sound::play_attention_chime();
+                            }
+                            last_attention_count = count;
                         }
                     }
                 }
