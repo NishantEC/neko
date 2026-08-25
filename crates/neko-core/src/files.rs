@@ -454,7 +454,7 @@ fn build_candidate(score: f32, path: PathBuf, name: String) -> Candidate {
             accessory: None,
             enters_mode: None,
             group_label: None,
-            actions: Vec::new(),
+            actions: crate::provider::path_actions(),
             source: None,
             meter: None,
             keeps_open: false,
@@ -571,6 +571,11 @@ impl Provider for FileProvider {
 
     fn activate(&self, id: &str) -> Result<(), ProviderError> {
         crate::launch::launch_app(Path::new(id)).map_err(|e| ProviderError(e.to_string()))
+    }
+
+    /// The file's own path is its id, so both actions are direct.
+    fn perform_action(&self, id: &str, action: &str) -> Result<(), ProviderError> {
+        crate::provider::perform_path_action(Path::new(id), action)
     }
 }
 

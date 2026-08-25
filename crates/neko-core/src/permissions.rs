@@ -360,7 +360,7 @@ impl Provider for PermissionsProvider {
     fn perform_action(&self, id: &str, action: &str) -> Result<(), ProviderError> {
         match action {
             "deny" => self.respond(id, json!({ "behavior": "deny" })),
-            other => Err(ProviderError(format!("no such action: {other}"))),
+            other => Err(ProviderError(format!("no action '{other}' on this row"))),
         }
     }
 }

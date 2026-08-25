@@ -238,7 +238,7 @@ impl Provider for ConversationProvider {
                 let agent_id = id.split('#').next().unwrap_or(id);
                 crate::agents::open_agent_in_paseo(agent_id)
             }
-            other => Err(ProviderError(format!("no such action: {other}"))),
+            other => Err(ProviderError(format!("no action '{other}' on this row"))),
         }
     }
 }

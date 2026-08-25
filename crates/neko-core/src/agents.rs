@@ -644,7 +644,7 @@ impl Provider for AgentsProvider {
         let tool = match action {
             "cancel" => "cancel_agent",
             "archive" => "archive_agent",
-            other => return Err(ProviderError(format!("no such action: {other}"))),
+            other => return Err(ProviderError(format!("no action '{other}' on this row"))),
         };
         let client =
             crate::mcp::McpClient::discover().map_err(|e| ProviderError(e.to_string()))?;
@@ -1065,7 +1065,7 @@ impl Provider for AgentControlProvider {
         let tool = match action {
             "cancel" => "cancel_agent",
             "archive" => "archive_agent",
-            other => return Err(ProviderError(format!("no such action: {other}"))),
+            other => return Err(ProviderError(format!("no action '{other}' on this row"))),
         };
         self.client()?
             .call(tool, serde_json::json!({ "agentId": id }))
