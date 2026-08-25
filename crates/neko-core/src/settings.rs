@@ -230,6 +230,7 @@ fn build_candidate(score: f32, pane: &SettingsPane, icon: Icon) -> Candidate {
             source: None,
             meter: None,
             keeps_open: false,
+            preview_markdown: false,
             preview: None,
         },
     }

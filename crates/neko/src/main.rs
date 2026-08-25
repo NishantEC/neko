@@ -10,6 +10,7 @@ mod hotkey_client;
 mod material;
 mod menu_frost;
 mod modes;
+mod markdown;
 mod motion;
 mod sound;
 mod onboarding;

@@ -302,6 +302,16 @@ pub struct SearchItem {
     /// through an identifier.
     #[serde(default)]
     pub preview: Option<String>,
+    /// Whether `preview` is markdown the client should render as such, rather
+    /// than plain text.
+    ///
+    /// Same bounded-vocabulary rule as `Icon`/`Meter`: the provider states the
+    /// *format*, the client owns entirely what rendering it looks like — never
+    /// `if kind == "conversation"` in the panel, which is what the provider
+    /// abstraction exists to forbid. `false` (the wire default) is plain text,
+    /// which every pre-existing provider already meant.
+    #[serde(default)]
+    pub preview_markdown: bool,
 }
 
 /// A 0..=1 reading plus the labelled values that explain it. See

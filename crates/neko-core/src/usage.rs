@@ -651,6 +651,7 @@ impl Provider for UsageProvider {
                     // `perform_activation` only re-searches when the panel
                     // stays. It hid instead.
                     keeps_open: true,
+                    preview_markdown: false,
                     preview: None,
                 },
             })

@@ -90,6 +90,24 @@ fn main() {
         }
     }
 
+    // `NEKO_VERIFY_SEED_MARKDOWN=1` — a fixture whose content is markdown,
+    // for photographing the client's markdown renderer
+    // (`crates/neko/src/markdown.rs`, driven by `NEKO_FORCE_PREVIEW_MARKDOWN`
+    // on the client side). The real markdown rows (`conversation`) need a
+    // live Paseo daemon an isolated `HOME` cannot have; a clipboard fixture
+    // through the same render path is the photographable stand-in. Newest
+    // fixture wins the mode's top slot, so this seeds with a fresher
+    // timestamp than the default fixture above.
+    if std::env::var_os("NEKO_VERIFY_SEED_MARKDOWN").is_some() {
+        let _ = db.record_clipboard_entry(
+            "## What changed\n\nAll **60 documents** now written, and the `node:` field is wired in. See [the plan](https://example.com/plan).\n\n- fixed the ingest script\n- re-ran `pnpm ingest-drive`\n  - twice, the first hit a stale cache\n\n```sh\npnpm ingest-drive --limit 0 | tail -3\n```\n\n> Not yet done: the granth UI.\n\n1. verify the drive KB\n2. ship it",
+            "text",
+            Some("Terminal"),
+            server::now_unix_ms() + 5_000,
+            200,
+        );
+    }
+
     eprintln!("verify-harness: scanning installed applications…");
     let apps = neko_core::apps::scan_applications();
     eprintln!("verify-harness: indexed {} applications", apps.len());

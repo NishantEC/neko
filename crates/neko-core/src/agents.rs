@@ -797,6 +797,7 @@ fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceN
         source: agent.provider_mark(),
         meter: None,
         keeps_open: false,
+        preview_markdown: false,
         preview: None,
     }
 }
@@ -1017,6 +1018,7 @@ impl Provider for AgentControlProvider {
                         source: agent.provider_mark(),
                         meter: None,
                         keeps_open: false,
+                        preview_markdown: false,
                         preview: None,
                     },
                 }

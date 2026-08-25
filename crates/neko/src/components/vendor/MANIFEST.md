@@ -227,7 +227,9 @@ all, where every gpui-component file needs four kinds.
 | `motion::PulseClock` | same | Independently written earlier from comet's recorded 36%-CPU finding |
 | `loaders.rs` (the zeron mark, gradient spinner) | `crates/ui/src/loaders.rs` | **Declined** — the shapes are comet's own identity, not a general mechanic |
 | `frost.rs`, `edge_fade.rs`, `popover.rs` | same | Already reimplemented natively in earlier work |
-| `markdown/*`, `notify.rs`, `sound.rs` | same | **Not yet** — real gaps, sized in `AGENTS.md` |
+| `markdown/*` | `crates/ui/src/markdown/` | **Approach adapted** — pulldown-cmark parse, own renderer; the streaming reparse declined (this pane shows finished text) |
+| `sound.rs` | `crates/ui/src/sound.rs` | **Approach adapted** — platform audio CLI; system sound instead of embedded WAVs |
+| `notify.rs` | `crates/ui/src/notify.rs` | **Declined by probe** — `NSUserNotificationCenter` is nil for a bundle-less process, and neko has no installed bundle to adopt the way comet adopts Zeron's |
 
 **What was actually taken is the hover-fade mechanic**, and it is a mechanic
 rather than a component: gpui's `.hover()` applies its style on the frame the

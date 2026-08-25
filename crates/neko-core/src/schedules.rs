@@ -228,6 +228,7 @@ impl Provider for SchedulesProvider {
                         // toggle that hides the panel makes you re-summon and
                         // re-enter the mode to find out what it did.
                         keeps_open: true,
+                        preview_markdown: false,
                         preview: None,
                     },
                 })
