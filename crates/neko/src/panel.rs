@@ -557,6 +557,18 @@ impl Root {
         self.confirm(&Confirm, window, cx);
     }
 
+    /// Evidence/verification-only — drives the real `SelectNext` handler,
+    /// which is what moves the selection *and* scrolls it into view.
+    ///
+    /// It exists because the thing worth proving is a keyboard behaviour and
+    /// this repo does not synthesise OS input: without it the only evidence
+    /// for "arrowing down now drags the view" would be the unit test on the
+    /// index arithmetic, which says nothing about whether the call is wired
+    /// to the key at all.
+    pub fn select_next_for_evidence(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.select_next(&SelectNext, window, cx);
+    }
+
     /// Evidence/verification-only — drives the same `Escape`/back-arrow
     /// path a real dismiss takes (`handle_dismiss`, exiting the active mode
     /// if one is open), for verification hooks that need to cycle a mode
@@ -856,6 +868,9 @@ impl Root {
 
         let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
         self.selected = resolve_selection(previous, &self.results);
+        // A re-search can move the selection by identity; the view has to
+        // follow it there too, not only on an arrow key.
+        self.scroll_selection_into_view();
         // **No tile is selected to begin with.** The grid sits directly above
         // the rows now, so Up from the first row lands on the last tile — the
         // move that is spatially correct — and the selection can start where
@@ -935,6 +950,42 @@ impl Root {
         }
     }
 
+    /// Drags the view to wherever the keyboard just went.
+    ///
+    /// **The root list has always scrolled and the keyboard never moved it.**
+    /// `overflow_y_scroll` and `track_scroll` were both wired up, so a mouse
+    /// wheel worked — but nothing called `scroll_to_item`, so arrowing down
+    /// walked the selection straight off the bottom of the panel and the view
+    /// sat still. From the outside that reads as "this list does not scroll",
+    /// which is exactly what it was reported as.
+    ///
+    /// Called from every place `selected` moves, rather than from `render`:
+    /// a render-time scroll would fight a wheel gesture, dragging the view
+    /// back to the selection every frame while somebody is trying to look
+    /// somewhere else.
+    fn scroll_selection_into_view(&self) {
+        if self.active_mode().is_some() {
+            self.mode_scroll.scroll_to_item(mode_list_child_index(&self.results, self.selected));
+            return;
+        }
+        // A focused tile is above the list, not in it, and the grid is not
+        // inside the scroll container at all.
+        if self.grid_selected.is_some() {
+            return;
+        }
+        self.root_scroll.scroll_to_item(root_list_child_index(
+            &self.results,
+            self.selected,
+            self.leading_banner_count(),
+        ));
+    }
+
+    /// How many banner children sit above the first section header — the
+    /// offset `root_list_child_index` starts counting from.
+    fn leading_banner_count(&self) -> usize {
+        usize::from(!self.connected) + usize::from(self.show_accessibility_banner())
+    }
+
     fn select_next(&mut self, _: &SelectNext, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(menu) = &mut self.actions_menu {
             if !menu.actions.is_empty() {
@@ -958,6 +1009,7 @@ impl Root {
         }
         if !self.results.is_empty() {
             self.selected = (self.selected + 1).min(self.results.len() - 1);
+            self.scroll_selection_into_view();
             self.sync_mode_scroll_to_selection();
             if self.preview_selected_theme() {
                 // A palette swap touches surfaces outside `Root`'s own
@@ -994,6 +1046,7 @@ impl Root {
             return;
         }
         self.selected = self.selected.saturating_sub(1);
+        self.scroll_selection_into_view();
         self.sync_mode_scroll_to_selection();
         if self.preview_selected_theme() {
             _window.refresh();
@@ -2009,7 +2062,7 @@ impl Root {
         Some(motion::fade_in("searching-tell-fade", reduced, tell))
     }
 
-    fn render_content_area(&self, cx: &mut Context<Self>, query_is_empty: bool) -> impl IntoElement {
+    fn render_content_area(&self, cx: &mut Context<Self>, query_is_empty: bool) -> AnyElement {
         // Horizontal only, deliberately: `design.css`'s `.panel-list` also
         // takes `padding-top`/`padding-bottom`, but this container's
         // available height is a tuned, tested budget (`fit_within_budget`
@@ -2062,7 +2115,7 @@ impl Root {
         }
 
         if self.results.is_empty() {
-            return container.child(render_empty_state(query_is_empty));
+            return container.child(render_empty_state(query_is_empty)).into_any_element();
         }
 
         // A header per contiguous run of the same `kind` — every provider's
@@ -2090,10 +2143,12 @@ impl Root {
         // slack was left below the last row. Invisible, in the exact case
         // it existed for.
         //
-        // A count says the thing instead. It also names the way out, which
-        // a fade cannot: this list does not scroll, so "there is more" with
-        // no means of reaching it would be worse than silence.
-        container.children(self.hidden_row_count().map(|n| {
+        // A count for the rows the budget genuinely dropped — a typed query
+        // is still fitted rather than scrolled, so for those there is nothing
+        // to scroll *to* and a fade would promise a gesture that does not
+        // work. The fade below is the cue for the rows that are merely below
+        // the fold.
+        let container = container.children(self.hidden_row_count().map(|n| {
             div()
                 .flex_shrink_0()
                 .h(px(theme::TRUNCATION_CUE_HEIGHT_PX))
@@ -2103,7 +2158,27 @@ impl Root {
                 .text_size(px(11.))
                 .text_color(theme::active().text_tertiary)
                 .child(SharedString::from(format!("+{n} more \u{2014} keep typing to narrow")))
-        }))
+        }));
+
+        // **The bottom fade, which needs real content behind it to work.**
+        // An earlier attempt put a gradient on this list while it was purely
+        // budget-fit, and it was invisible — a fade over blank space is
+        // panel-colour on panel-colour. `scroll_edge_fade` is gated on the
+        // scroll handle's own offset each frame, so it appears exactly when
+        // there is something below the fold and nowhere else, and it is the
+        // same band and gradient the mode list has always used.
+        let fade = if self.translucent {
+            theme::active().surface_panel_translucent
+        } else {
+            theme::active().surface_panel
+        };
+        scroll_edge_fade(
+            self.root_scroll.clone(),
+            fade.into(),
+            theme::EDGE_FADE_BAND_PX,
+            container,
+        )
+        .into_any_element()
     }
 
     /// How many rows the budget had to drop, or `None` when everything fit.
@@ -2984,6 +3059,33 @@ fn fit_section(items: &[SearchItem], budget_px: f32) -> (usize, f32) {
 fn tabular_numerals() -> FontFeatures {
     static TABULAR: OnceLock<FontFeatures> = OnceLock::new();
     TABULAR.get_or_init(|| FontFeatures(Arc::new(vec![("tnum".to_string(), 1)]))).clone()
+}
+
+/// Maps a `results` index to its position among `render_content_area`'s own
+/// DIRECT children — the index space `ScrollHandle::scroll_to_item` works in.
+///
+/// The root list's children are not one-per-result: a connection banner, an
+/// accessibility banner and a section header for each new `kind` are all
+/// interleaved ahead of the rows. Counting them is the whole job, and it is a
+/// pure function so the arithmetic is testable without a live `Window`.
+fn root_list_child_index(
+    results: &[SearchItem],
+    target: usize,
+    leading_banners: usize,
+) -> usize {
+    let mut child_index = leading_banners;
+    let mut current_section: Option<&str> = None;
+    for (idx, item) in results.iter().enumerate() {
+        if current_section != Some(item.kind.as_str()) {
+            child_index += 1;
+            current_section = Some(item.kind.as_str());
+        }
+        if idx == target {
+            return child_index;
+        }
+        child_index += 1;
+    }
+    child_index
 }
 
 /// Maps a `results` index to its position among `render_mode_list`'s own
@@ -5029,6 +5131,45 @@ mod tests {
         );
         row.subtitle = None;
         assert_eq!(agent_tile_tooltip(&row).to_string(), "feat/doctors-maps");
+    }
+
+
+    #[test]
+    fn the_scroll_target_counts_the_headers_and_banners_above_a_row() {
+        // `scroll_to_item` works in the container's own child index, and the
+        // root list's children are not one-per-result: banners and a section
+        // header per new `kind` sit between them. Getting this wrong scrolls
+        // to the wrong row, which is worse than not scrolling at all.
+        let results = vec![
+            item_with_id("app", "a"),
+            item_with_id("app", "b"),
+            item_with_id("command", "c"),
+        ];
+        // No banners: header, a, b, header, c.
+        assert_eq!(root_list_child_index(&results, 0, 0), 1);
+        assert_eq!(root_list_child_index(&results, 1, 0), 2);
+        assert_eq!(root_list_child_index(&results, 2, 0), 4);
+        // Two banners shift everything down by two.
+        assert_eq!(root_list_child_index(&results, 0, 2), 3);
+        assert_eq!(root_list_child_index(&results, 2, 2), 6);
+    }
+
+    #[test]
+    fn a_single_section_needs_exactly_one_header_counted() {
+        let results: Vec<SearchItem> =
+            (0..5).map(|i| item_with_id("app", &format!("a{i}"))).collect();
+        for (row, expected) in (0..5).zip(1..=5) {
+            assert_eq!(root_list_child_index(&results, row, 0), expected);
+        }
+    }
+
+    #[test]
+    fn an_out_of_range_target_lands_past_the_end_rather_than_panicking() {
+        // `selected` and `results` are updated in separate steps, so a stale
+        // index reaching here is a real possibility and must not be fatal.
+        let results = vec![item_with_id("app", "a")];
+        assert_eq!(root_list_child_index(&results, 99, 0), 2);
+        assert_eq!(root_list_child_index(&[], 0, 0), 0);
     }
 
 }
