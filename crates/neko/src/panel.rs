@@ -244,6 +244,17 @@ pub struct Root {
     /// Cleared at the top of every `run_search`, so it can never describe
     /// a generation other than the current one.
     partial_generation: Option<u64>,
+    /// Set while a `Request::Activate` is in flight, and rendered as a tell.
+    ///
+    /// **Enter can take seconds and used to show nothing at all.** Starting an
+    /// agent shells out to a CLI whose Electron boot alone is ~1s (one measured
+    /// end-to-end run took 2.88s, bounded at 20s), and every schedule, terminal
+    /// and agent action is an MCP round trip. The panel deliberately does not
+    /// hide until the outcome is known — that is what makes an inline failure
+    /// possible — so for that whole window pressing Enter looked exactly like
+    /// pressing nothing, which is the same defect `activation_error` was added
+    /// to fix, one step earlier in the same path.
+    activating: bool,
     /// Verification-only (`evidence::bench_search_query`,
     /// `NEKO_BENCH_SEARCH`): when the current generation's request was
     /// dispatched, so `apply_search_results` can report keystroke-to-render
@@ -433,6 +444,7 @@ impl Root {
             searching: false,
             pending_search_generation: None,
             partial_generation: None,
+            activating: false,
             search_dispatched_at: None,
             hidden_rows: 0,
             mode_scroll: ScrollHandle::new(),
@@ -495,6 +507,9 @@ impl Root {
         self.cancel_window_drag(window, cx);
         // Per-summon state, exactly like the mode and the menu above it: a
         // tile focused in one session must not still be focused in the next.
+        // Per-summon state, like everything else here: a panel dismissed
+        // mid-activation must not come back still claiming to be working.
+        self.activating = false;
         self.grid_selected = None;
         if self.active_mode.take().is_some() {
             self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
@@ -1207,6 +1222,8 @@ impl Root {
     /// own deliberate, stated design choice, not a frozen spec's.
     fn perform_activation(&mut self, request: Request, hide_on_success: bool, cx: &mut Context<Self>) {
         let client = self.client.clone();
+        self.activating = true;
+        cx.notify();
         cx.spawn(async move |this, cx| {
             // `Request::Activate` really can come back `Response::Error`
             // (the underlying app/file moved or was deleted since it was
@@ -1226,6 +1243,7 @@ impl Root {
             };
             let failed = error_message.is_some();
             let _ = this.update(cx, |root, cx| {
+                root.activating = false;
                 root.activation_error = error_message;
                 // A menu action that changed the underlying data (delete,
                 // ...) and isn't about to hide the panel needs the current
@@ -2214,11 +2232,25 @@ impl Root {
     /// case needed a real signal instead of leaving the captain looking at
     /// stale results with no indication a new answer is coming.
     fn render_searching_tell(&self) -> Option<AnyElement> {
-        if !self.searching {
+        // **Two waits, one slot, and they cannot both be true in a way that
+        // matters.** A search is "the list is about to change"; an activation
+        // is "the thing you pressed is happening". Activation wins when both
+        // are set, because it is the one the captain is actually waiting on —
+        // and it needs no delay before appearing, unlike a search, which is
+        // usually answered in microseconds and would flicker.
+        let label = if self.activating {
+            "Working…"
+        } else if self.searching {
+            "Searching…"
+        } else {
             return None;
-        }
+        };
         let reduced = motion::system_reduce_motion();
-        let tell = div().text_size(px(11.)).text_color(theme::active().text_tertiary).child("Searching…");
+        let tell = div()
+            .flex_shrink_0()
+            .text_size(px(11.))
+            .text_color(theme::active().text_tertiary)
+            .child(label);
         Some(motion::fade_in("searching-tell-fade", reduced, tell))
     }
 
@@ -4498,6 +4530,42 @@ mod tests {
                     root.actions_menu.as_ref().map(|m| m.id.as_str()),
                     Some("row")
                 );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn an_activation_in_flight_says_so_and_outranks_the_search_tell(
+        cx: &mut TestAppContext,
+    ) {
+        // Enter on a New Agent row shells out to a CLI whose Electron boot
+        // alone is ~1s. For that whole window the panel deliberately stays
+        // open — that is what makes an inline failure possible — and used to
+        // show nothing, so pressing Enter looked exactly like pressing nothing.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.render_searching_tell().is_none(), "quiet at rest");
+                root.searching = true;
+                root.activating = true;
+                // Both set: the one being waited on wins.
+                assert!(root.render_searching_tell().is_some());
+                assert!(root.activating);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn summoning_afresh_clears_a_stranded_activation(cx: &mut TestAppContext) {
+        // Dismissing mid-activation must not bring the panel back still
+        // claiming to be working — the same rule every other per-summon field
+        // follows.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.activating = true;
+                root.reset_for_summon(window, cx);
+                assert!(!root.activating);
             })
             .unwrap();
     }
