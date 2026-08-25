@@ -1672,8 +1672,24 @@ impl Root {
     /// label is always shown rather than conditionally hidden — matching
     /// Raycast's own convention of a menu that's simply empty (here: inert)
     /// rather than a control that disappears depending on selection.
+    /// Whatever is highlighted right now — which is not always a row.
+    ///
+    /// While the keyboard is up in the agent grid, `selected` keeps its old
+    /// value on purpose (`row_is_highlighted` folds `grid_selected.is_none()`
+    /// in, so only one thing ever paints as selected). Anything asking "what
+    /// would Enter or ⌘K act on" has to ask here rather than indexing
+    /// `results` directly — two callers doing that arithmetic separately is
+    /// how the ⌘K menu came to open for a row nobody could see was chosen
+    /// while the hint above it described a different one.
+    fn highlighted_item(&self) -> Option<&SearchItem> {
+        match self.grid_selected {
+            Some(tile) => self.agent_tiles.get(tile),
+            None => self.results.get(self.selected),
+        }
+    }
+
     fn open_actions_menu_for_selected_row(&mut self, cx: &mut Context<Self>) {
-        let Some(item) = self.results.get(self.selected) else {
+        let Some(item) = self.highlighted_item() else {
             return;
         };
         if item.actions.is_empty() {
@@ -2071,6 +2087,23 @@ impl Root {
                     .into_any_element(),
                 None => search_glyph().into_any_element(),
             })
+            // **`ModeChrome::title` was live data nothing rendered**, so
+            // nothing on screen named the surface you were in: a mode
+            // announced itself only by its placeholder, which disappears the
+            // moment anybody types. A chip beside the field is the shape a
+            // launcher uses for this, and it is the one place with room that
+            // the query cannot overwrite.
+            .children(self.active_mode().map(|mode| {
+                div()
+                    .flex_shrink_0()
+                    .px(px(8.))
+                    .py(px(3.))
+                    .rounded(px(theme::CHIP_RADIUS_PX))
+                    .bg(theme::active().surface_selected)
+                    .text_size(px(12.))
+                    .text_color(theme::active().text_secondary)
+                    .child(mode.chrome.title)
+            }))
             .child(div().flex_1().child(self.text_field.clone()))
             .children(self.render_searching_tell())
             // **Every failure in the app was silent, and this is where it
@@ -2116,7 +2149,7 @@ impl Root {
     /// Gates the hint so it only appears where the keystroke does something
     /// — a menu hint on a row with no menu is worse than no hint.
     fn selected_row_has_actions(&self) -> bool {
-        self.results.get(self.selected).is_some_and(|item| !item.actions.is_empty())
+        self.highlighted_item().is_some_and(|item| !item.actions.is_empty())
     }
 
     /// The "still searching" tell for a query that hasn't returned yet —
@@ -2576,6 +2609,21 @@ impl Root {
                 row.hover(|row| row.bg(theme::active().row_icon_socket_bg))
             })
             .child(icon)
+            // **Truncation hides content, so the hidden part stays
+            // reachable** — the same rule an agent tile has followed since it
+            // started handing its second line to the prompt. gpui cannot
+            // report whether a given `truncate()` actually clipped, so the
+            // trigger is an estimate rather than a measurement: a compact row
+            // is the 264px mode column, where clipping is the norm, and a
+            // full-width row qualifies once its text passes what that row can
+            // hold. Erring toward showing it costs a tooltip nobody needed;
+            // erring the other way costs content nobody can reach.
+            .when(row_text_may_be_clipped(item, compact), |row| {
+                let full = row_tooltip_text(item);
+                row.tooltip(move |_window, cx| {
+                    cx.new(|_| TextTooltip { text: full.clone() }).into()
+                })
+            })
             .child(
                 div()
                     .flex_1()
@@ -2872,7 +2920,26 @@ impl Root {
             info = info.child(detail_info_row("Directory", source.clone()));
         }
 
-        col.child(preview).child(info)
+        // **The verb, for the one place a row cannot carry it.** `render_row`
+        // draws `action_label` on the selected row, and drops it on `compact`
+        // rows because the 264px mode column has no space — which leaves it
+        // missing exactly where Enter is least guessable ("Paste" on a
+        // clipboard entry, "Open folder" on a terminal). A compact row always
+        // implies a detail pane (`render_mode_list` takes the same
+        // `has_detail` flag for both), so this pane is guaranteed to exist
+        // wherever the row gave the verb up, and it has room.
+        let verb = (!item.action_label.is_empty()).then(|| {
+            div()
+                .mt(px(12.))
+                .pt(px(10.))
+                .border_t_1()
+                .border_color(theme::active().border_hairline)
+                .text_size(px(11.))
+                .text_color(theme::active().text_secondary)
+                .child(SharedString::from(item.action_label.clone()))
+        });
+
+        col.child(preview).child(info).children(verb)
     }
 
     /// `⌘K`'s own popup — no mockup exists for this (the launch brief's own
@@ -3412,6 +3479,39 @@ fn section_header(label: impl Into<SharedString>) -> impl IntoElement {
 /// (bars for text, rings for a link, ...) — this socket will very shortly
 /// hold a real per-app icon, unlike a clipboard or file row's, which never
 /// will in this slice.
+/// Roughly how many characters a full-width result row's text column holds.
+///
+/// An estimate, and openly so: the column is what is left of
+/// `PANEL_WIDTH_WITH_DETAIL_PX` after the icon, the gaps, an optional badge and
+/// an optional accessory, and the font is proportional, so no constant is
+/// correct for every string. This is deliberately generous — a tooltip that
+/// occasionally appears on a row that fits is a smaller failure than a row
+/// whose hidden half cannot be read at all.
+const ROW_TEXT_BUDGET_CHARS: usize = 72;
+
+/// The same, for the 264px mode column, which also drops subtitle and accessory.
+const COMPACT_ROW_TEXT_BUDGET_CHARS: usize = 30;
+
+/// Whether a row's text is long enough that `truncate()` has probably clipped it.
+fn row_text_may_be_clipped(item: &SearchItem, compact: bool) -> bool {
+    let budget = if compact { COMPACT_ROW_TEXT_BUDGET_CHARS } else { ROW_TEXT_BUDGET_CHARS };
+    let mut used = item.title.chars().count();
+    if !compact {
+        // The subtitle shares the same flex line, so it spends the same budget.
+        used += item.subtitle.as_ref().map_or(0, |s| s.chars().count() + 2);
+    }
+    used > budget
+}
+
+/// What that row's tooltip says: the title, and the subtitle under it when
+/// there is one the row itself would have shown.
+fn row_tooltip_text(item: &SearchItem) -> SharedString {
+    match &item.subtitle {
+        Some(subtitle) => SharedString::from(format!("{}\n{subtitle}", item.title)),
+        None => SharedString::from(item.title.clone()),
+    }
+}
+
 fn app_icon_placeholder_glyph() -> AnyElement {
     div()
         .w(px(theme::ROW_ICON_PX))
@@ -3644,6 +3744,55 @@ fn title_case_badge(badge: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    fn item_with_text(title: &str, subtitle: Option<&str>) -> SearchItem {
+        SearchItem {
+            title: title.into(),
+            subtitle: subtitle.map(str::to_string),
+            ..item_with_id("app", "fixture")
+        }
+    }
+
+    #[test]
+    fn a_short_row_gets_no_tooltip_and_a_long_one_does() {
+        // The trigger is an estimate — gpui cannot report whether a given
+        // `truncate()` actually clipped — so what is pinned here is the
+        // direction of the error, not a pixel: short rows stay quiet.
+        let short = item_with_text("Safari", None);
+        assert!(!row_text_may_be_clipped(&short, false));
+        let long = item_with_text(&"x".repeat(120), None);
+        assert!(row_text_may_be_clipped(&long, false));
+    }
+
+    #[test]
+    fn a_subtitle_spends_the_same_budget_the_title_does() {
+        // They share one flex line, so a title that fits alone can still be
+        // clipped once its subtitle is beside it.
+        let title = "x".repeat(50);
+        let bare = item_with_text(&title, None);
+        assert!(!row_text_may_be_clipped(&bare, false));
+        let with_subtitle = item_with_text(&title, Some(&"y".repeat(40)));
+        assert!(row_text_may_be_clipped(&with_subtitle, false));
+    }
+
+    #[test]
+    fn the_narrow_mode_column_clips_far_sooner() {
+        // 264px, and it drops the subtitle entirely — so the same title that
+        // is comfortable in the root list is clipped here.
+        let item = item_with_text("Copied from Arc a little while ago", Some("ignored"));
+        assert!(!row_text_may_be_clipped(&item, false));
+        assert!(row_text_may_be_clipped(&item, true));
+    }
+
+    #[test]
+    fn the_tooltip_carries_the_subtitle_only_when_there_is_one() {
+        let with = item_with_text("Title", Some("Subtitle"));
+        assert_eq!(row_tooltip_text(&with).as_ref(), "Title\nSubtitle");
+        let without = item_with_text("Title", None);
+        assert_eq!(row_tooltip_text(&without).as_ref(), "Title");
+    }
+
 
     fn item(kind: &str) -> SearchItem {
         item_with_id(kind, "x")
@@ -4206,6 +4355,65 @@ mod tests {
 
     fn tile(id: &str) -> SearchItem {
         SearchItem { badge: Some("LIVE".to_string()), ..agent_row(id) }
+    }
+
+    #[gpui::test]
+    fn command_k_follows_the_focused_tile_not_the_list_s_remembered_row(
+        cx: &mut TestAppContext,
+    ) {
+        // `selected` deliberately keeps its value while the keyboard is up in
+        // the grid, so reading `results[selected]` opened the menu for a row
+        // nobody could see was chosen — on the surface where ⌘K's actions
+        // differ most between rows.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, cx| {
+                root.results = vec![clipboard_row_with_a_paste_action("a-row")];
+                root.selected = 0;
+                root.agent_tiles = vec![SearchItem {
+                    actions: agent_tile_actions(),
+                    ..tile("the-tile")
+                }];
+                root.grid_selected = Some(0);
+
+                root.open_actions_menu_for_selected_row(cx);
+                let menu = root.actions_menu.as_ref().expect("the tile has actions");
+                assert_eq!(menu.id, "the-tile");
+                assert_eq!(menu.kind, "agent");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn the_command_k_hint_describes_the_same_thing_the_menu_would_open(
+        cx: &mut TestAppContext,
+    ) {
+        // Two callers doing this lookup separately is how they came apart in
+        // the first place; both go through `highlighted_item` now.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, cx| {
+                root.results = vec![clipboard_row_with_a_paste_action("a-row")];
+                root.selected = 0;
+                root.agent_tiles = vec![tile("no-actions")];
+                root.grid_selected = Some(0);
+
+                assert!(
+                    !root.selected_row_has_actions(),
+                    "the focused tile has none, so the hint must not promise any"
+                );
+                root.open_actions_menu_for_selected_row(cx);
+                assert!(root.actions_menu.is_none(), "and the menu must agree");
+            })
+            .unwrap();
+    }
+
+    fn agent_tile_actions() -> Vec<neko_protocol::ItemAction> {
+        vec![neko_protocol::ItemAction {
+            id: "cancel".into(),
+            label: "Cancel run".into(),
+            destructive: false,
+        }]
     }
 
     #[test]
