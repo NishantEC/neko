@@ -210,3 +210,38 @@ Neko already has the sanctioned alternative — `motion::PulseClock`, a shared 1
 stops when nothing is using it — so vendoring these would mean importing the bug and then removing
 the only thing they contain. `tooltip.rs` and `kbd.rs` remain declined as duplicates of
 `panel::TextTooltip` and `components/keycap.rs`.
+
+
+## comet — adapted, not copied
+
+**Source: [`zeronsh/comet`](https://github.com/zeronsh/comet), MIT**, vendored
+read-only at `refs/comet` (gitignored; see `refs/README.md`). It pins the
+*identical* `gpui` rev this workspace does, which is why it is the preferred
+source for anything either library could supply: its code needs no API repair at
+all, where every gpui-component file needs four kinds.
+
+| Our name | Upstream | Status |
+|---|---|---|
+| `motion::HoverFades` + `mix` | `crates/ui/src/motion.rs` | **Adapted** — the store, its frame-counter staleness rule, and the premultiplied blend |
+| `motion::CubicBezier`, `MotionSpec` | same | Independently written earlier; comet's curve values are the reference |
+| `motion::PulseClock` | same | Independently written earlier from comet's recorded 36%-CPU finding |
+| `loaders.rs` (the zeron mark, gradient spinner) | `crates/ui/src/loaders.rs` | **Declined** — the shapes are comet's own identity, not a general mechanic |
+| `frost.rs`, `edge_fade.rs`, `popover.rs` | same | Already reimplemented natively in earlier work |
+| `markdown/*`, `notify.rs`, `sound.rs` | same | **Not yet** — real gaps, sized in `AGENTS.md` |
+
+**What was actually taken is the hover-fade mechanic**, and it is a mechanic
+rather than a component: gpui's `.hover()` applies its style on the frame the
+pointer enters and offers no hook to interpolate, so a wash that fades has to be
+driven by hand from wall time. comet solved that once; reproducing it from
+scratch would have meant rediscovering the same three non-obvious parts — the
+re-anchor on direction reversal, the premultiplied blend, and the frame-counter
+liveness stamp that prunes an element which unmounted while hovered and will
+never receive its leave event.
+
+Two things were changed rather than carried over. The store's frame counter is
+**rate-limited** here (`MIN_TICK_INTERVAL`), because this app has two windows
+that render independently and two advances inside one real frame would let each
+prune the other's live entries — comet drives a single shell. And `set_target_at`
+is new: comet only ever drives this from hover events, while the Preferences tab
+selection is state re-derived on every render, which the event form would
+re-anchor every frame.

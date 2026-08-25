@@ -26,6 +26,7 @@ use neko_protocol::{HotkeyCombo, Request, Response};
 use super::SharedPreferencesSlot;
 use super::state::{Recording, Tab, candidate_from_press};
 use crate::components::keycap;
+use crate::motion::HoverWash as _;
 use crate::hotkey_client::SharedRebinder;
 use crate::text_field::TextField;
 use crate::theme;
@@ -675,7 +676,14 @@ impl Focusable for PreferencesRoot {
 }
 
 impl Render for PreferencesRoot {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // This window's hover washes are driven from wall time, so it has to
+        // ask for the next frame while one is still moving — the same tail
+        // `panel::Root::render` carries, and the reason `HoverFades::tick_at`
+        // rate-limits its own counter rather than assuming one caller.
+        if crate::motion::hover_fades_active() {
+            window.request_animation_frame();
+        }
         // A window that has been closed leaves its slot behind; clearing it
         // here would need a close observer. `open_window` re-checks liveness
         // by updating the handle, which fails for a closed window, so a stale
@@ -729,7 +737,18 @@ impl PreferencesRoot {
                     .px(px(14.))
                     .py(px(6.))
                     .rounded(px(theme::BTN_RADIUS_PX))
-                    .when(selected, |el| el.bg(theme::active().surface_selected))
+                    // **The fill crossfades between tabs rather than jumping.**
+                    // Selection is state re-derived every frame, not an event,
+                    // so it goes through `state_blend` — which records the
+                    // target and reads the blend in one call, precisely so the
+                    // two cannot drift.
+                    .bg(crate::motion::state_blend(
+                        &format!("pref-tab-sel:{}", tab.title()),
+                        selected,
+                        cx.reduce_motion(),
+                        theme::TRANSPARENT,
+                        theme::active().surface_selected,
+                    ))
                     .text_size(px(12.5))
                     .text_color(if selected {
                         theme::active().text_primary
@@ -741,7 +760,11 @@ impl PreferencesRoot {
                     // own fill, so hovering reads as the pointer being
                     // somewhere rather than as a second selection.
                     .when(!selected, |el| {
-                        el.hover(|el| el.bg(theme::active().row_icon_socket_bg))
+                        el.hover_bg(
+                            SharedString::from(format!("pref-tab:{}", tab.title())),
+                            theme::TRANSPARENT,
+                            theme::active().row_icon_socket_bg,
+                        )
                     })
                     .map(|el| focus_ring(el, self.is_focused(&Control::Tab(tab))))
                     .on_click(cx.listener(move |root, _event, _window, cx| {
@@ -844,7 +867,11 @@ impl PreferencesRoot {
                     })
                     .cursor_pointer()
                     .when(!listening, |el| {
-                        el.hover(|el| el.bg(theme::active().row_icon_socket_bg))
+                        el.hover_bg(
+                            "pref-record-hotkey",
+                            theme::TRANSPARENT,
+                            theme::active().row_icon_socket_bg,
+                        )
                     })
                     .on_click(cx.listener(|root, _event, window, cx| {
                         root.focus_control(&Control::RecordHotkey);
@@ -915,7 +942,15 @@ impl PreferencesRoot {
             // The switch is already a fill, so hover moves the *border*
             // instead — a second fill on top of the first is unreadable, the
             // same reason `focus_ring` is an outline here and not a fill.
-            .hover(|el| el.border_color(theme::active().text_secondary))
+            .hover_border(
+                SharedString::from(format!("pref-toggle:{row_id}")),
+                if on {
+                    theme::active().state_success_border
+                } else {
+                    theme::active().border_hairline_strong
+                },
+                theme::active().text_secondary,
+            )
             .map(|el| focus_ring(el, self.is_focused(&Control::Toggle(row_id))))
             .on_click(cx.listener(move |root, _event, _window, cx| {
                 root.focus_control(&Control::Toggle(row_id));
@@ -1028,7 +1063,11 @@ impl PreferencesRoot {
                             .text_size(px(11.))
                             .text_color(theme::active().state_danger)
                             .cursor_pointer()
-                            .hover(|el| el.bg(theme::active().banner_danger_bg))
+                            .hover_bg(
+                                SharedString::from(format!("pref-remove:{path}")),
+                                theme::TRANSPARENT,
+                                theme::active().banner_danger_bg,
+                            )
                             .map(|el| {
                                 focus_ring(el, self.is_focused(&Control::RemoveFolder(path.clone())))
                             })

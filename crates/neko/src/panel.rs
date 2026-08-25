@@ -48,6 +48,7 @@ use crate::accessibility::AccessibilityChecker;
 use crate::assets::{glyph_icon, icon};
 use crate::edge_fade::scroll_edge_fade;
 use crate::components::scroll::with_scrollbar;
+use crate::motion::HoverWash as _;
 use crate::menu_frost::sync_menu_frost;
 use crate::modes::{self, ModeChrome};
 use crate::motion;
@@ -244,6 +245,14 @@ pub struct Root {
     /// Cleared at the top of every `run_search`, so it can never describe
     /// a generation other than the current one.
     partial_generation: Option<u64>,
+    /// A keyboard-driven scroll in flight, and which handle it is moving.
+    ///
+    /// **Arrowing used to teleport the viewport.** `ScrollHandle::scroll_to_item`
+    /// takes effect with no travel, which is fine for one row and reads as the
+    /// list flinching once the jump is longer — and it got much more visible
+    /// once the list grew a thumb, because the thumb jumps too. See
+    /// `motion::ScrollGlide`.
+    scroll_glide: Option<(ScrollHandle, motion::ScrollGlide)>,
     /// Set while a `Request::Activate` is in flight, and rendered as a tell.
     ///
     /// **Enter can take seconds and used to show nothing at all.** Starting an
@@ -444,6 +453,7 @@ impl Root {
             searching: false,
             pending_search_generation: None,
             partial_generation: None,
+            scroll_glide: None,
             activating: false,
             search_dispatched_at: None,
             hidden_rows: 0,
@@ -1012,10 +1022,12 @@ impl Root {
     /// a render-time scroll would fight a wheel gesture, dragging the view
     /// back to the selection every frame while somebody is trying to look
     /// somewhere else.
-    fn scroll_selection_into_view(&self, bias: ScrollBias) {
+    fn scroll_selection_into_view(&mut self, bias: ScrollBias) {
         let target = bias.target(self.selected, self.results.len());
         if self.active_mode().is_some() {
-            self.mode_scroll.scroll_to_item(mode_list_child_index(&self.results, target));
+            let handle = self.mode_scroll.clone();
+            let index = mode_list_child_index(&self.results, target);
+            self.glide_to_item(handle, index);
             return;
         }
         // A focused tile is above the list, not in it, and the grid is not
@@ -1023,11 +1035,62 @@ impl Root {
         if self.grid_selected.is_some() {
             return;
         }
-        self.root_scroll.scroll_to_item(root_list_child_index(
-            &self.results,
-            target,
-            self.leading_banner_count(),
-        ));
+        let handle = self.root_scroll.clone();
+        let index =
+            root_list_child_index(&self.results, target, self.leading_banner_count());
+        self.glide_to_item(handle, index);
+    }
+
+    /// Start a glide toward `index` on `handle`.
+    ///
+    /// **The destination comes from `scroll_to_item` itself, not from
+    /// arithmetic here.** It already knows the child bounds, the container
+    /// bounds and the minimum distance that reveals a row; reimplementing that
+    /// to get a number to animate toward would be a second copy of geometry
+    /// this app does not own. So it is asked to land, read back, and put back —
+    /// all before paint, so nothing renders at the interim position.
+    fn glide_to_item(&mut self, handle: ScrollHandle, index: usize) {
+        let from = handle.offset();
+        handle.scroll_to_item(index);
+        let to = handle.offset();
+        if to == from {
+            self.scroll_glide = None;
+            return;
+        }
+        // Reduce motion: it already landed, so leave it there.
+        if motion::system_reduce_motion() {
+            self.scroll_glide = None;
+            return;
+        }
+        handle.set_offset(from);
+        let mut glide = motion::ScrollGlide::new(from, to, std::time::Instant::now());
+        glide.record_write(from);
+        self.scroll_glide = Some((handle, glide));
+    }
+
+    /// Advances a glide by one frame. Returns whether another frame is needed.
+    ///
+    /// Called from `render`, like the hover washes and the pulse clock, because
+    /// that is the one place that runs exactly once per frame and only while
+    /// the panel is actually on screen.
+    fn advance_scroll_glide(&mut self) -> bool {
+        let Some((handle, glide)) = &mut self.scroll_glide else { return false };
+        // **Overtaken.** A wheel gesture or a fresh search moved the handle out
+        // from under this glide, and continuing would drag the view back to a
+        // destination nobody wants any more — the same rule that makes a
+        // superseded search abandon rather than finish.
+        if !glide.still_owns(handle.offset()) {
+            self.scroll_glide = None;
+            return false;
+        }
+        let (at, done) = glide.sample(std::time::Instant::now());
+        handle.set_offset(at);
+        glide.record_write(at);
+        if done {
+            self.scroll_glide = None;
+            return false;
+        }
+        true
     }
 
     /// How many banner children sit above the first section header — the
@@ -1398,7 +1461,11 @@ impl Root {
                         ))
                     })
                     .when(!focused, |tile| {
-                        tile.hover(|tile| tile.bg(theme::active().row_icon_socket_bg))
+                        tile.hover_bg(
+                            SharedString::from(format!("tile:{id}")),
+                            theme::TRANSPARENT,
+                            theme::active().row_icon_socket_bg,
+                        )
                     })
                     .cursor_pointer()
                     .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| cx.stop_propagation())
@@ -1864,6 +1931,24 @@ impl Render for Root {
             // occupies no space, it exists to reach paint phase. See its own
             // doc comment for why the listeners cannot live on a `div`.
             .child(self.sync_window_drag_listeners(cx))
+            // **The hover washes' clock.** They are driven from wall time
+            // rather than by `with_animation` (see `motion::HoverFades` for
+            // why), so somebody has to ask for the next frame while one is
+            // still moving — and somebody has to prune the entry of a row that
+            // unmounted mid-hover, which happens on every keystroke. Both are
+            // the same once-per-frame call, made here because `render` is the
+            // one place guaranteed to run exactly once per frame and only
+            // while the panel is actually on screen.
+            .map(|el| {
+                // Two wall-time tweens, one frame request. Both are driven from
+                // here rather than by `with_animation` — see their own doc
+                // comments for why neither could be.
+                let gliding = self.advance_scroll_glide();
+                if motion::hover_fades_active() || gliding {
+                    window.request_animation_frame();
+                }
+                el
+            })
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::confirm))
@@ -2089,7 +2174,7 @@ impl Root {
                     // mode; missing it costs a person the whole surface.
                     .p(px(5.))
                     .rounded(px(theme::ROW_RADIUS_PX))
-                    .hover(|el| el.bg(theme::active().row_icon_socket_bg))
+                    .hover_bg("mode-back", theme::TRANSPARENT, theme::active().row_icon_socket_bg)
                     .cursor(CursorStyle::PointingHand)
                     // **And it has to swallow mouse-*down*.** The input row
                     // starts a window drag on mouse-down; `on_click` is
@@ -2165,10 +2250,11 @@ impl Root {
                                 .text_size(px(12.))
                                 .text_color(theme::active().text_tertiary)
                                 .cursor_pointer()
-                                .hover(|el| {
-                                    el.bg(theme::active().row_icon_socket_bg)
-                                        .text_color(theme::active().text_secondary)
-                                })
+                                .hover_bg(
+                                    "actions-menu-trigger",
+                                    theme::TRANSPARENT,
+                                    theme::active().row_icon_socket_bg,
+                                )
                                 .on_click(cx.listener(Self::handle_actions_menu_trigger_click))
                                 .child("\u{2318}K"),
                         )
@@ -2419,7 +2505,11 @@ impl Root {
                     .text_size(px(12.))
                     .text_color(theme::active().text_secondary)
                     .cursor(CursorStyle::PointingHand)
-                    .hover(|s| s.text_color(theme::active().text_primary))
+                    .hover_text(
+                        "banner-open-settings",
+                        theme::active().text_secondary,
+                        theme::active().text_primary,
+                    )
                     .on_click(cx.listener(Self::open_accessibility_settings))
                     .child("Open System Settings"),
             )
@@ -2430,7 +2520,11 @@ impl Root {
                     .text_size(px(12.))
                     .text_color(theme::active().text_tertiary)
                     .cursor(CursorStyle::PointingHand)
-                    .hover(|s| s.text_color(theme::active().text_primary))
+                    .hover_text(
+                        "banner-dismiss",
+                        theme::active().text_tertiary,
+                        theme::active().text_primary,
+                    )
                     .on_click(cx.listener(Self::dismiss_accessibility_banner))
                     .child("Dismiss"),
             )
@@ -2554,7 +2648,13 @@ impl Root {
             .py_2p5()
             .rounded(px(theme::ROW_RADIUS_PX))
             .when(selected, |el| el.bg(theme::active().surface_selected))
-            .when(!selected, |el| el.hover(|el| el.bg(theme::active().row_icon_socket_bg)))
+            .when(!selected, |el| {
+                el.hover_bg(
+                    SharedString::from(format!("meter:{}:{}", item.kind, item.id)),
+                    theme::TRANSPARENT,
+                    theme::active().row_icon_socket_bg,
+                )
+            })
             // The same handler `render_row` carries. A meter is a different
             // *shape* of row, not a different kind of thing, and it lit up
             // under the mouse while doing nothing — the exact affordance lie
@@ -2687,7 +2787,11 @@ impl Root {
             // Deliberately not applied to the selected row: brightening what
             // is already selected on mouse-over says nothing.
             .when(!selected, |row| {
-                row.hover(|row| row.bg(theme::active().row_icon_socket_bg))
+                row.hover_bg(
+                    SharedString::from(format!("row:{}:{}", item.kind, item.id)),
+                    theme::TRANSPARENT,
+                    theme::active().row_icon_socket_bg,
+                )
             })
             .child(icon)
             // **Truncation hides content, so the hidden part stays
@@ -3105,7 +3209,11 @@ impl Root {
                     // a list of labels. Weaker than the selected fill, the
                     // same relationship `render_row` uses.
                     .when(!selected, |el| {
-                        el.hover(|el| el.bg(theme::active().row_icon_socket_bg))
+                        el.hover_bg(
+                            SharedString::from(format!("menu-action:{}", action.id)),
+                            theme::TRANSPARENT,
+                            theme::active().row_icon_socket_bg,
+                        )
                     })
                     .cursor_pointer()
                     // **Clicking a menu row runs it — and a destructive one

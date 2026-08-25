@@ -60,7 +60,11 @@
 //! neko's catalog needs this today, so no clock exists yet; this paragraph
 //! is the seam for the day one does.
 
-use gpui::{AnimationExt, Div, IntoElement, Styled, px};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+use gpui::{AnimationExt, Div, IntoElement, Rgba, SharedString, Styled, Window, px};
 use gpui::{App, AppContext as _, Context, Entity, Global};
 
 /// A CSS `cubic-bezier(x1, y1, x2, y2)` timing function (endpoints fixed at
@@ -157,22 +161,43 @@ pub const EASE_OUT: CubicBezier = CubicBezier::new(0.0, 0.0, 0.2, 1.0);
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionSpec {
     duration_ms: u64,
+    /// **Added when the catalog grew past reveals.** The paragraph above still
+    /// holds for everything that *is* a reveal — they all take [`EASE_OUT`] and
+    /// [`new`](Self::new) still gives it to them for free. But a hover wash and
+    /// a scroll glide are not reveals: a wash is a symmetric colour transition
+    /// that has to feel identical entering and leaving, and a glide is a
+    /// journey with a start and a landing. Those needed their own curves, and
+    /// a spec that could not name one would have meant hard-coding the curve
+    /// at each call site instead — which is exactly the drift a catalog exists
+    /// to prevent.
+    curve: CubicBezier,
 }
 
 impl MotionSpec {
     const fn new(duration_ms: u64) -> Self {
-        Self { duration_ms }
+        Self { duration_ms, curve: EASE_OUT }
+    }
+
+    const fn with_curve(duration_ms: u64, curve: CubicBezier) -> Self {
+        Self { duration_ms, curve }
     }
 
     fn duration(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.duration_ms)
     }
 
+    /// Eased progress for a raw `0..1` delta. Pure, so a caller driving its own
+    /// tween from wall time (the hover fades, the scroll glide) rides the same
+    /// curve a `with_animation` element would.
+    pub fn progress(&self, raw: f32) -> f32 {
+        self.curve.eval(raw.clamp(0.0, 1.0))
+    }
+
     /// A one-shot `gpui::Animation` for this spec — never `.repeat()`, see
     /// this module's own doc comment on why nothing here loops.
     fn animation(&self) -> gpui::Animation {
-        let curve = EASE_OUT;
-        gpui::Animation::new(self.duration()).with_easing(move |d| curve.eval(d))
+        let spec = *self;
+        gpui::Animation::new(self.duration()).with_easing(move |d| spec.progress(d))
     }
 }
 
@@ -192,6 +217,49 @@ pub const MENU_FADE: MotionSpec = MotionSpec::new(120);
 /// ~150ms window past which a UI transition starts to read as sluggish
 /// rather than immediate.
 pub const CONTENT_FADE: MotionSpec = MotionSpec::new(150);
+
+/// CSS `cubic-bezier(0.4, 0, 0.2, 1)` — Tailwind's default transition curve,
+/// and therefore what `transition-colors` rides on nearly every web interface
+/// anybody has built a sense of "normal" against. Used only by [`HOVER_FADE`].
+///
+/// **Symmetric on purpose**, unlike [`EASE_OUT`]: a wash has to feel the same
+/// arriving and leaving, because the pointer crosses the same boundary in both
+/// directions and an asymmetric curve makes leaving feel like a different
+/// gesture from entering.
+pub const EASE_TAILWIND: CubicBezier = CubicBezier::new(0.4, 0.0, 0.2, 1.0);
+
+/// CSS `ease-in-out` — a gentle start, a cruise, a gentle landing. The shape a
+/// browser's own smooth scroll uses, which is what [`SCROLL_GLIDE`] is imitating.
+pub const EASE_IN_OUT: CubicBezier = CubicBezier::new(0.42, 0.0, 0.58, 1.0);
+
+/// Every interactive hover wash: 150ms over [`EASE_TAILWIND`].
+///
+/// **gpui's `.hover()` snaps by construction** — the style applies on the frame
+/// the pointer enters — so this is not reachable through `with_animation` at
+/// all. See [`HoverFades`] for the tween that drives it.
+pub const HOVER_FADE: MotionSpec = MotionSpec::with_curve(150, EASE_TAILWIND);
+
+/// Keyboard-driven scrolling: 250ms over the whole distance.
+///
+/// **Fixed duration over the whole distance, never percent-of-remaining.** A
+/// proportional glide accelerates when the jump is long and crawls at the end,
+/// which reads as the list resisting; a fixed span means one Down and ten Downs
+/// both land in the same beat, which is what makes a held arrow key feel like
+/// one continuous movement instead of a stutter.
+///
+/// Shorter than comet's own 500ms: that one glides a transcript somebody is
+/// reading, this one keeps up with a key being held down, and 500ms of travel
+/// per keypress would fall behind immediately.
+pub const SCROLL_GLIDE: MotionSpec = MotionSpec::with_curve(250, EASE_IN_OUT);
+
+/// A selection moving between fixed positions — the Preferences tab bar.
+///
+/// **A crossfade, not a slide, and the name says so.** comet's own equivalent
+/// is `TAB_SLIDE`, and sliding would mean one indicator element positioned by a
+/// measured x — which means measuring every tab's width, which this app has no
+/// way to do before layout. Fading the old fill out while the new one comes up
+/// reads as the fill moving without pretending to geometry nobody has.
+pub const SELECTION_FADE: MotionSpec = MotionSpec::new(150);
 
 /// The actions menu's entrance: opacity 0→1 plus a small upward drift (4px),
 /// the same "settling into place" shape comet's `menu_in` uses (translateY
@@ -223,6 +291,361 @@ pub fn fade_in(id: &'static str, reduced: bool, element: Div) -> gpui::AnyElemen
         .into_any_element()
 }
 
+/// A keyboard-driven scroll in flight.
+///
+/// **`ScrollHandle` moves instantly and has no animated variant** — the whole
+/// public surface is `scroll_to_item` and `set_offset`, both of which take
+/// effect on the next paint with no travel. So a glide is a tween this app
+/// drives itself: ask the handle where it *would* land, put it back, and walk
+/// it there over [`SCROLL_GLIDE`].
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollGlide {
+    from: gpui::Point<gpui::Pixels>,
+    to: gpui::Point<gpui::Pixels>,
+    /// What this glide last wrote to the handle. If the handle no longer reads
+    /// back as this, something else moved it — a wheel gesture, a fresh search
+    /// resetting the list — and the glide has been overtaken and should stop
+    /// rather than drag the view back to a destination nobody wants any more.
+    last_written: gpui::Point<gpui::Pixels>,
+    started: Instant,
+}
+
+impl ScrollGlide {
+    pub fn new(from: gpui::Point<gpui::Pixels>, to: gpui::Point<gpui::Pixels>, now: Instant) -> Self {
+        Self { from, to, last_written: from, started: now }
+    }
+
+    /// Where the view should sit at `now`, and whether the glide is finished.
+    pub fn sample(&self, now: Instant) -> (gpui::Point<gpui::Pixels>, bool) {
+        let duration = SCROLL_GLIDE.duration();
+        let elapsed = now.saturating_duration_since(self.started);
+        if duration.is_zero() || elapsed >= duration {
+            return (self.to, true);
+        }
+        let t = SCROLL_GLIDE.progress(elapsed.as_secs_f32() / duration.as_secs_f32());
+        let at = gpui::point(
+            gpui::px(lerp(self.from.x.to_f64() as f32, self.to.x.to_f64() as f32, t)),
+            gpui::px(lerp(self.from.y.to_f64() as f32, self.to.y.to_f64() as f32, t)),
+        );
+        (at, false)
+    }
+
+    /// Whether `current` is still where this glide left the handle.
+    pub fn still_owns(&self, current: gpui::Point<gpui::Pixels>) -> bool {
+        // Exact equality: this compares a value the glide itself wrote against
+        // what the handle reports, with no arithmetic in between, so any
+        // difference at all is somebody else's write rather than rounding.
+        current == self.last_written
+    }
+
+    pub fn record_write(&mut self, at: gpui::Point<gpui::Pixels>) {
+        self.last_written = at;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hover washes
+//
+// Adapted from `comet`'s own `crates/ui/src/motion.rs` (MIT, `refs/comet`) —
+// the `HoverFades` store, its frame-counter staleness rule, and the
+// premultiplied `mix`. Reimplemented against this crate's own types and
+// re-tested here; see `components/vendor/MANIFEST.md`.
+// ---------------------------------------------------------------------------
+
+/// Linear interpolation. Named because the alternative is writing it out at
+/// four call sites and getting one of them backwards.
+pub fn lerp(from: f32, to: f32, t: f32) -> f32 {
+    from + (to - from) * t
+}
+
+/// Blend two colours the way a browser transitions them: component
+/// interpolation in sRGB with **premultiplied** alpha.
+///
+/// Premultiplied is the whole point rather than a detail. Every hover wash in
+/// this app fades in from fully transparent, and a straight component mix from
+/// `rgba(r,g,b,0)` interpolates the *hidden* colour channels too — so a wash
+/// rising out of transparent black passes visibly through grey on its way to
+/// its real hue. Premultiplying makes it simply brighten.
+pub fn mix(from: Rgba, to: Rgba, t: f32) -> Rgba {
+    let t = t.clamp(0.0, 1.0);
+    if t <= 0.0 {
+        return from;
+    }
+    if t >= 1.0 {
+        return to;
+    }
+    let a = lerp(from.a, to.a, t);
+    if a <= f32::EPSILON {
+        // Both endpoints effectively transparent: carry the target's hue so a
+        // subsequent fade *out of* this state starts from the right colour.
+        return Rgba { a: 0.0, ..to };
+    }
+    Rgba {
+        r: lerp(from.r * from.a, to.r * to.a, t) / a,
+        g: lerp(from.g * from.a, to.g * to.a, t) / a,
+        b: lerp(from.b * from.a, to.b * to.a, t) / a,
+        a,
+    }
+}
+
+/// The shortest gap between two frame-counter advances. Below one frame at
+/// 120Hz, so a real frame is never merged into its predecessor.
+const MIN_TICK_INTERVAL: Duration = Duration::from_millis(4);
+
+/// One element's hover progress.
+#[derive(Debug, Clone, Copy)]
+struct FadeEntry {
+    /// Where this fade started from — **not always 0 or 1.** A pointer that
+    /// leaves mid-fade re-anchors here at whatever the wash had actually
+    /// reached, so reversing direction is continuous rather than a jump back
+    /// to the far end.
+    origin: f32,
+    target: f32,
+    started: Instant,
+    /// Frame counter at the last read. See [`HoverFades::tick_at`].
+    seen: u64,
+}
+
+impl FadeEntry {
+    fn value(&self, now: Instant, duration: Duration) -> f32 {
+        let elapsed = now.saturating_duration_since(self.started);
+        if duration.is_zero() || elapsed >= duration {
+            return self.target;
+        }
+        let raw = elapsed.as_secs_f32() / duration.as_secs_f32();
+        lerp(self.origin, self.target, HOVER_FADE.progress(raw))
+    }
+
+    fn settled(&self, now: Instant, duration: Duration) -> bool {
+        self.origin == self.target || now.saturating_duration_since(self.started) >= duration
+    }
+}
+
+/// Hover progress per element key.
+///
+/// **This exists because `gpui`'s `.hover()` cannot fade.** It applies its
+/// style on the frame the pointer enters and removes it on the frame the
+/// pointer leaves — there is no interpolation and no hook to add one, so a
+/// wash that fades has to be driven by hand from wall time.
+///
+/// Deliberately **not** `with_animation`: that keys its clock on an element id
+/// and restarts from zero whenever the element remounts, which for a result row
+/// is every single keystroke — the wash would replay under a stationary pointer
+/// on every character typed.
+///
+/// The core takes `now` explicitly so the whole state machine is testable
+/// without a window or a clock.
+#[derive(Default)]
+pub struct HoverFades {
+    entries: HashMap<String, FadeEntry>,
+    frame: u64,
+    /// When the frame counter last advanced. See [`tick_at`](Self::tick_at).
+    last_tick: Option<Instant>,
+}
+
+impl HoverFades {
+    /// One duration for the whole store.
+    ///
+    /// [`HOVER_FADE`] and [`SELECTION_FADE`] are both 150ms, which is not a
+    /// coincidence worth relying on silently: a wash and a selection crossfade
+    /// are the same kind of event to a person — "this thing is now the one" —
+    /// and giving them different lengths would make a tab bar feel unlike every
+    /// row above it. If they ever need to differ, this becomes a per-entry
+    /// field rather than two stores.
+    fn duration() -> Duration {
+        debug_assert_eq!(HOVER_FADE.duration_ms, SELECTION_FADE.duration_ms);
+        HOVER_FADE.duration()
+    }
+
+    /// The pointer entered or left the element behind `key`.
+    ///
+    /// `reduced` snaps to the endpoint rather than skipping the entry, so a
+    /// reduce-motion user still gets the hover *state* — only the travel is
+    /// removed. Colour is the feedback here; motion is the garnish.
+    pub fn set_at(&mut self, key: &str, hovered: bool, reduced: bool, now: Instant) {
+        let target = if hovered { 1.0 } else { 0.0 };
+        let duration = Self::duration();
+        let current =
+            self.entries.get(key).map(|e| e.value(now, duration)).unwrap_or(0.0);
+        if target == 0.0 && !self.entries.contains_key(key) {
+            // A never-hovered element reporting a leave. Recording it would
+            // create an entry whose only purpose is to be pruned.
+            return;
+        }
+        let origin = if reduced { target } else { current };
+        let seen = self.frame;
+        self.entries
+            .insert(key.to_string(), FadeEntry { origin, target, started: now, seen });
+    }
+
+    /// Like [`set_at`](Self::set_at), but a no-op when the fade is already
+    /// heading where it is being told to go.
+    ///
+    /// **This is what makes the store usable from `render`.** A hover arrives
+    /// as an event, so `set_at` runs once per flip; a *selection* is state
+    /// re-derived on every frame, and calling `set_at` with it would re-anchor
+    /// the fade every frame and freeze it at its first step forever.
+    pub fn set_target_at(&mut self, key: &str, on: bool, reduced: bool, now: Instant) {
+        let target = if on { 1.0 } else { 0.0 };
+        if self.entries.get(key).is_some_and(|e| e.target == target) {
+            return;
+        }
+        self.set_at(key, on, reduced, now);
+    }
+
+    /// Progress for `key`, stamping it as still alive.
+    pub fn value_at(&mut self, key: &str, now: Instant) -> f32 {
+        let frame = self.frame;
+        match self.entries.get_mut(key) {
+            Some(entry) => {
+                entry.seen = frame;
+                entry.value(now, Self::duration())
+            }
+            None => 0.0,
+        }
+    }
+
+    /// Once-per-frame bookkeeping. Returns whether any fade is still moving,
+    /// which is what tells the caller to keep asking for frames.
+    ///
+    /// **The frame counter is a liveness stamp, and it is load-bearing.** An
+    /// element that unmounts while hovered never receives its leave event — a
+    /// result row does exactly this on every keystroke — so without pruning,
+    /// the next element to reuse that key would inherit a stale full-strength
+    /// wash and appear hovered when nothing is under the pointer. Going a whole
+    /// frame unread is the only available proof that an element is gone.
+    pub fn tick_at(&mut self, now: Instant) -> bool {
+        // **At most one advance per real frame, however many surfaces call.**
+        // The store is one process-wide map but this app has two windows that
+        // render independently, and the counter is what decides liveness — so
+        // two ticks inside one frame would advance it twice while each surface
+        // had only stamped its own entries once, and each window would prune
+        // the other's live hovers. Rate-limiting the advance makes the rule
+        // hold for any number of surfaces without any of them knowing about
+        // the others. The threshold is below one frame at 120Hz, so a genuine
+        // frame is never skipped.
+        let advance = self.last_tick.is_none_or(|last| {
+            now.saturating_duration_since(last) >= MIN_TICK_INTERVAL
+        });
+        if advance {
+            self.frame += 1;
+            self.last_tick = Some(now);
+        }
+        let frame = self.frame;
+        let duration = Self::duration();
+        let mut active = false;
+        self.entries.retain(|_, entry| {
+            if entry.seen + 1 < frame {
+                return false;
+            }
+            let settled = entry.settled(now, duration);
+            if !settled {
+                active = true;
+            }
+            // Settled at rest is indistinguishable from absent, so drop it and
+            // keep the map the size of what is actually hovered.
+            !(settled && entry.target == 0.0)
+        });
+        active
+    }
+}
+
+thread_local! {
+    /// Main-thread only, and a `thread_local` rather than a gpui `Global` so a
+    /// free-standing element builder can blend a colour without a `cx` — every
+    /// reader here is an element builder, a mouse listener, or the render tail,
+    /// all of which run on the UI thread.
+    static HOVER_FADES: RefCell<HoverFades> = RefCell::new(HoverFades::default());
+}
+
+/// Hover progress for `key` this frame.
+pub fn hover_t(key: &str) -> f32 {
+    HOVER_FADES.with(|fades| fades.borrow_mut().value_at(key, Instant::now()))
+}
+
+/// Record a hover flip for `key`.
+pub fn set_hover(key: &str, hovered: bool, reduced: bool) {
+    HOVER_FADES.with(|fades| fades.borrow_mut().set_at(key, hovered, reduced, Instant::now()));
+}
+
+/// The `.on_hover` listener for `key` — pair it with [`hover_blend`] on the
+/// same key in the same element.
+///
+/// `window.refresh()` rather than `request_animation_frame`: this runs in
+/// event-dispatch context, where the latter resolves against the current view
+/// and is draw-phase-only. Refresh marks the window dirty, the render pass
+/// re-evaluates the blend, and its tail keeps frames coming while anything is
+/// still moving.
+pub fn hover_listener(key: impl Into<SharedString>) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
+    let key = key.into();
+    move |hovered, window, cx| {
+        set_hover(&key, *hovered, cx.reduce_motion());
+        window.refresh();
+    }
+}
+
+/// Call **once per window frame**, from the render tail. True while any wash is
+/// mid-flight, which is the signal to request another frame.
+pub fn hover_fades_active() -> bool {
+    HOVER_FADES.with(|fades| fades.borrow_mut().tick_at(Instant::now()))
+}
+
+/// Record a *state* for `key` — see [`HoverFades::set_target_at`].
+pub fn set_state(key: &str, on: bool, reduced: bool) {
+    HOVER_FADES.with(|fades| fades.borrow_mut().set_target_at(key, on, reduced, Instant::now()));
+}
+
+/// `off` → `on` at `key`'s current progress, for a state re-derived every
+/// frame rather than delivered as an event. Records the target and blends in
+/// one call, because the two must not drift apart.
+pub fn state_blend(key: &str, on: bool, reduced: bool, off_color: Rgba, on_color: Rgba) -> Rgba {
+    set_state(key, on, reduced);
+    mix(off_color, on_color, hover_t(key))
+}
+
+/// `rest` → `hover` at `key`'s current progress. The one call an element makes.
+pub fn hover_blend(key: &str, rest: Rgba, hover: Rgba) -> Rgba {
+    mix(rest, hover, hover_t(key))
+}
+
+/// The one-line form every call site uses: a wash that fades.
+///
+/// **Replaces `gpui`'s own `.hover(..)` rather than sitting beside it**, because
+/// the two cannot be combined — `.hover()` applies a style on the frame the
+/// pointer enters, so an element carrying both would snap to the end colour and
+/// then fade a second, invisible one underneath it.
+///
+/// `key` must be stable across re-renders and unique across the window. A row's
+/// own identity works; its list index does not, since the row under a stationary
+/// pointer changes index whenever the list above it does.
+pub trait HoverWash: gpui::StatefulInteractiveElement + Styled + Sized {
+    /// Fade the background from `rest` to `hovered`.
+    fn hover_bg(self, key: impl Into<SharedString>, rest: Rgba, hovered: Rgba) -> Self {
+        let key = key.into();
+        let blended = hover_blend(&key, rest, hovered);
+        self.bg(blended).on_hover(hover_listener(key))
+    }
+
+    /// Fade the text colour from `rest` to `hovered` — for a control whose
+    /// affordance is the label itself, where a background wash would read as a
+    /// button appearing where there was none.
+    fn hover_text(self, key: impl Into<SharedString>, rest: Rgba, hovered: Rgba) -> Self {
+        let key = key.into();
+        let blended = hover_blend(&key, rest, hovered);
+        self.text_color(blended).on_hover(hover_listener(key))
+    }
+
+    /// Fade the border colour — for a control already using its fill to mean
+    /// something (a switch), where a second fill on top is unreadable.
+    fn hover_border(self, key: impl Into<SharedString>, rest: Rgba, hovered: Rgba) -> Self {
+        let key = key.into();
+        let blended = hover_blend(&key, rest, hovered);
+        self.border_color(blended).on_hover(hover_listener(key))
+    }
+}
+
+impl<E: gpui::StatefulInteractiveElement + Styled> HoverWash for E {}
+
 /// Reads the real, live OS "reduce motion" accessibility setting — see this
 /// module's own doc comment for why this exists instead of a `gpui`-provided
 /// global. Read fresh at each call site rather than cached: every call site
@@ -245,6 +668,217 @@ pub fn system_reduce_motion() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_state_re_derived_every_frame_does_not_restart_its_own_fade() {
+        // A hover arrives as an event; a selection is recomputed on every
+        // render. Calling the event form with it would re-anchor the fade every
+        // frame and freeze it one step from the start, forever.
+        let mut fades = HoverFades::default();
+        let t0 = Instant::now();
+        fades.set_target_at("tab", true, false, t0);
+        let quarter = t0 + HOVER_FADE.duration() / 4;
+        fades.set_target_at("tab", true, false, quarter);
+        fades.set_target_at("tab", true, false, quarter);
+        let half = t0 + HOVER_FADE.duration() / 2;
+        fades.set_target_at("tab", true, false, half);
+
+        let done = t0 + HOVER_FADE.duration();
+        assert_eq!(
+            fades.value_at("tab", done),
+            1.0,
+            "the fade kept its original start and finished on time"
+        );
+    }
+
+    #[test]
+    fn a_state_flip_still_reverses() {
+        let mut fades = HoverFades::default();
+        let t0 = Instant::now();
+        fades.set_target_at("tab", true, false, t0);
+        assert_eq!(fades.value_at("tab", t0 + HOVER_FADE.duration()), 1.0);
+        fades.set_target_at("tab", false, false, t0 + HOVER_FADE.duration());
+        assert_eq!(fades.value_at("tab", t0 + HOVER_FADE.duration() * 2), 0.0);
+    }
+
+    #[test]
+    fn a_glide_starts_where_it_was_and_lands_where_it_was_told() {
+        let t0 = Instant::now();
+        let from = gpui::point(gpui::px(0.), gpui::px(0.));
+        let to = gpui::point(gpui::px(0.), gpui::px(-120.));
+        let glide = ScrollGlide::new(from, to, t0);
+
+        let (at, done) = glide.sample(t0);
+        assert_eq!(at, from);
+        assert!(!done);
+
+        let (at, done) = glide.sample(t0 + SCROLL_GLIDE.duration());
+        assert_eq!(at, to, "and lands exactly, not near");
+        assert!(done);
+    }
+
+    #[test]
+    fn a_glide_that_something_else_overtook_gives_up_its_claim() {
+        // A wheel gesture or a fresh search moves the handle out from under a
+        // glide. Continuing would drag the view back to a destination nobody
+        // wants any more — the same rule that makes a superseded search abandon
+        // rather than finish.
+        let t0 = Instant::now();
+        let from = gpui::point(gpui::px(0.), gpui::px(0.));
+        let mut glide = ScrollGlide::new(from, gpui::point(gpui::px(0.), gpui::px(-120.)), t0);
+        assert!(glide.still_owns(from));
+
+        glide.record_write(gpui::point(gpui::px(0.), gpui::px(-40.)));
+        assert!(glide.still_owns(gpui::point(gpui::px(0.), gpui::px(-40.))));
+        assert!(
+            !glide.still_owns(gpui::point(gpui::px(0.), gpui::px(-300.))),
+            "somebody else wrote to the handle"
+        );
+    }
+
+    #[test]
+    fn a_glide_is_monotonic_so_the_view_never_backs_up_mid_travel() {
+        let t0 = Instant::now();
+        let glide = ScrollGlide::new(
+            gpui::point(gpui::px(0.), gpui::px(0.)),
+            gpui::point(gpui::px(0.), gpui::px(-200.)),
+            t0,
+        );
+        let mut previous = f32::MAX;
+        for step in 0..=20 {
+            let at = glide.sample(t0 + SCROLL_GLIDE.duration().mul_f32(step as f32 / 20.0)).0;
+            let y = at.y.to_f64() as f32;
+            assert!(y <= previous + 1e-3, "step {step}: went back from {previous} to {y}");
+            previous = y;
+        }
+    }
+
+
+    #[test]
+    fn a_wash_starts_at_rest_and_arrives_at_full() {
+        let mut fades = HoverFades::default();
+        let t0 = Instant::now();
+        assert_eq!(fades.value_at("k", t0), 0.0, "never hovered is rest");
+        fades.set_at("k", true, false, t0);
+        assert_eq!(fades.value_at("k", t0), 0.0, "and it starts there");
+        let done = t0 + HOVER_FADE.duration();
+        assert_eq!(fades.value_at("k", done), 1.0);
+    }
+
+    #[test]
+    fn reversing_mid_fade_is_continuous_rather_than_a_jump() {
+        // A pointer that leaves halfway must fade back from where the wash
+        // actually got to. Re-anchoring at the endpoint instead would snap the
+        // colour to full and then fade down, which reads as a flash.
+        let mut fades = HoverFades::default();
+        let t0 = Instant::now();
+        fades.set_at("k", true, false, t0);
+        let half = t0 + HOVER_FADE.duration() / 2;
+        let mid = fades.value_at("k", half);
+        assert!(mid > 0.0 && mid < 1.0, "mid-flight, got {mid}");
+
+        fades.set_at("k", false, false, half);
+        let after = fades.value_at("k", half);
+        assert!(
+            (after - mid).abs() < 1e-3,
+            "the reversal starts from {mid}, not from an endpoint (got {after})"
+        );
+    }
+
+    #[test]
+    fn reduced_motion_keeps_the_state_and_drops_only_the_travel() {
+        // Colour is the feedback; movement is the garnish. A reduce-motion user
+        // still needs to know what the pointer is on.
+        let mut fades = HoverFades::default();
+        let t0 = Instant::now();
+        fades.set_at("k", true, true, t0);
+        assert_eq!(fades.value_at("k", t0), 1.0);
+    }
+
+    #[test]
+    fn an_element_that_unmounts_mid_hover_does_not_leave_its_wash_behind() {
+        // A result row unmounts on every keystroke and never receives its leave
+        // event. Without pruning, the next element to take that key would paint
+        // as hovered with nothing under the pointer.
+        let mut fades = HoverFades::default();
+        let t0 = Instant::now();
+        fades.set_at("row", true, false, t0);
+        let settled = t0 + HOVER_FADE.duration();
+
+        // One frame where it still renders: read, then tick.
+        fades.value_at("row", settled);
+        fades.tick_at(settled + MIN_TICK_INTERVAL);
+        assert_eq!(fades.value_at("row", settled), 1.0, "still mounted, still hovered");
+
+        // A frame where it does not render at all.
+        fades.tick_at(settled + MIN_TICK_INTERVAL * 2);
+        fades.tick_at(settled + MIN_TICK_INTERVAL * 3);
+        assert_eq!(fades.value_at("row", settled), 0.0, "gone, and its wash with it");
+    }
+
+    #[test]
+    fn two_surfaces_ticking_in_one_frame_do_not_prune_each_other() {
+        // One process-wide store, two windows rendering independently. Two
+        // advances inside one frame would let each window prune the other's
+        // live hovers, so the counter is rate-limited rather than each surface
+        // being told about the others.
+        let mut fades = HoverFades::default();
+        let t0 = Instant::now();
+        fades.set_at("panel-row", true, false, t0);
+        fades.value_at("panel-row", t0);
+
+        // Both surfaces tick within the same real frame.
+        fades.tick_at(t0);
+        fades.tick_at(t0);
+        fades.tick_at(t0);
+
+        assert_eq!(
+            fades.value_at("panel-row", t0 + HOVER_FADE.duration()),
+            1.0,
+            "the panel's own live hover survived the other window's tick"
+        );
+    }
+
+    #[test]
+    fn a_settled_wash_stops_asking_for_frames() {
+        // The tail requests another frame whenever this is true, so a wash that
+        // never reported settled would hold the window at frame rate forever —
+        // the exact failure `PulseClock` exists to avoid, arriving by a
+        // different road.
+        let mut fades = HoverFades::default();
+        let t0 = Instant::now();
+        fades.set_at("k", true, false, t0);
+        fades.value_at("k", t0);
+        assert!(fades.tick_at(t0 + MIN_TICK_INTERVAL), "mid-flight keeps frames coming");
+
+        let done = t0 + HOVER_FADE.duration() + MIN_TICK_INTERVAL;
+        fades.value_at("k", done);
+        assert!(!fades.tick_at(done), "settled asks for nothing");
+    }
+
+    #[test]
+    fn a_wash_rising_out_of_transparent_never_passes_through_grey() {
+        // The premultiplied blend is the whole reason `mix` is not a plain
+        // component lerp: a straight mix interpolates the hidden channels of a
+        // fully transparent colour too, so a light wash fading in over a dark
+        // panel visibly darkens on its way up.
+        let from = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+        let to = Rgba { r: 1.0, g: 1.0, b: 1.0, a: 0.06 };
+        let mid = mix(from, to, 0.5);
+        assert!((mid.r - 1.0).abs() < 1e-4, "hue is the target's throughout, got {}", mid.r);
+        assert!((mid.a - 0.03).abs() < 1e-4, "only the alpha travels, got {}", mid.a);
+    }
+
+    #[test]
+    fn mix_returns_its_endpoints_exactly() {
+        let a = Rgba { r: 0.1, g: 0.2, b: 0.3, a: 1.0 };
+        let b = Rgba { r: 0.9, g: 0.8, b: 0.7, a: 1.0 };
+        assert_eq!(mix(a, b, 0.0).r, a.r);
+        assert_eq!(mix(a, b, 1.0).r, b.r);
+        assert_eq!(mix(a, b, -5.0).r, a.r, "clamped");
+        assert_eq!(mix(a, b, 5.0).r, b.r, "clamped");
+    }
+
 
     fn assert_close(actual: f32, expected: f32, tol: f32, ctx: &str) {
         assert!((actual - expected).abs() <= tol, "{ctx}: got {actual}, expected {expected} ±{tol}");

@@ -111,6 +111,16 @@ fn summon_from_outside(cx: &mut App) {
 
 
     app.run(|cx: &mut App| {
+        // **Tell gpui once, rather than every call site.** `AnimationElement`
+        // already checks `App::reduce_motion` and renders a single static frame
+        // when it is set (`gpui/src/elements/animation.rs`), but nothing in gpui
+        // populates it from the OS — it defaults to `false`. Reading the real
+        // setting here makes every `with_animation` in this app honour it
+        // structurally, including any added later by somebody who never reads
+        // `motion.rs`. The hand-threaded `reduced` flags stay for the helpers
+        // that skip `with_animation` entirely, which is a stronger guarantee
+        // than snapping: a skipped animation schedules no frames at all.
+        cx.set_reduce_motion(motion::system_reduce_motion());
         cx.bind_keys([
             KeyBinding::new("backspace", text_field::Backspace, Some("TextField")),
             KeyBinding::new("left", text_field::Left, Some("TextField")),
