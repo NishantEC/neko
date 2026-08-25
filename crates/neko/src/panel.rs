@@ -2377,7 +2377,13 @@ impl Root {
             .into_any_element()
     }
 
-    fn render_row(&self, idx: usize, item: &SearchItem, compact: bool, cx: &App) -> impl IntoElement {
+    fn render_row(
+        &self,
+        idx: usize,
+        item: &SearchItem,
+        compact: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         // **Only one thing is selected at a time.** `self.selected` is where
         // the list's own cursor is parked, and it keeps its value while the
         // keyboard is up in the agent grid — so without this the grid's
@@ -2402,6 +2408,21 @@ impl Root {
 
         div()
             .id(("result-row", idx))
+            // **Rows were never clickable.** They had an id, a hover tint
+            // and a pointer-shaped affordance's worth of styling, and no
+            // handler at all — so a click did nothing, silently, on the
+            // primary surface of the app. One click selects *and* confirms,
+            // which is what every launcher does: a row you had to click
+            // twice would be slower than the keyboard it is meant to
+            // complement.
+            .cursor_pointer()
+            .on_click(cx.listener(move |root, _event: &ClickEvent, window, cx| {
+                root.selected = idx;
+                // A click is unambiguous about what it meant, so it takes
+                // the selection away from a focused tile as well.
+                root.grid_selected = None;
+                root.confirm(&Confirm, window, cx);
+            }))
             .flex()
             .items_center()
             .flex_shrink_0()
@@ -2522,7 +2543,7 @@ impl Root {
     /// where `render_content_area` sits for the root list; same content-area
     /// height budget (`CONTENT_AREA_MIN_HEIGHT_PX`), only ever a width
     /// change between the two.
-    fn render_mode_content(&self, mode: &ActiveMode, cx: &App) -> AnyElement {
+    fn render_mode_content(&self, mode: &ActiveMode, cx: &mut Context<Self>) -> AnyElement {
         let content = div()
             .flex()
             .flex_1()
@@ -2575,7 +2596,7 @@ impl Root {
     /// neighbour to divide from and no reason to leave 496px empty, so the
     /// list takes the full panel and its rows render in full. Same rows, same
     /// renderer, same geometry tokens — only which of them apply.
-    fn render_mode_list(&self, has_detail: bool, cx: &App) -> impl IntoElement {
+    fn render_mode_list(&self, has_detail: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let mut container = div()
             .flex()
             .flex_col()
@@ -2784,6 +2805,30 @@ impl Root {
                     .px_2()
                     .rounded(px(theme::ROW_RADIUS_PX))
                     .when(selected, |el| el.bg(theme::active().surface_selected))
+                    // A hover tint, so the menu reads as a menu rather than
+                    // a list of labels. Weaker than the selected fill, the
+                    // same relationship `render_row` uses.
+                    .when(!selected, |el| {
+                        el.hover(|el| el.bg(theme::active().row_icon_socket_bg))
+                    })
+                    .cursor_pointer()
+                    // **Clicking a menu row runs it — and a destructive one
+                    // still needs two clicks.** Moving the selection is what
+                    // disarms a pending confirm, so a click that *lands on a
+                    // different row* disarms exactly as arrowing to it would;
+                    // a second click on the same row is the second Enter.
+                    // Without that, clicking Delete once would delete, while
+                    // pressing Enter once would not — the same control
+                    // behaving differently by input device.
+                    .on_click(cx.listener(move |root, _event: &ClickEvent, window, cx| {
+                        if let Some(menu) = &mut root.actions_menu
+                            && menu.selected != idx
+                        {
+                            menu.selected = idx;
+                            menu.confirm_armed = false;
+                        }
+                        root.confirm_menu_action(window, cx);
+                    }))
                     .text_size(px(12.5))
                     .text_color(color)
                     .child(label)
