@@ -265,7 +265,7 @@ impl Provider for SchedulesProvider {
         match action {
             "run" => self.call("run_schedule_once", id),
             "delete" => self.call("delete_schedule", id),
-            other => Err(ProviderError(format!("no such action: {other}"))),
+            other => Err(ProviderError(format!("no action '{other}' on this row"))),
         }
     }
 }

@@ -630,7 +630,7 @@ impl Provider for AskProvider {
                 forget();
                 Ok(())
             }
-            other => Err(ProviderError(format!("no such action: {other}"))),
+            other => Err(ProviderError(format!("no action '{other}' on this row"))),
         }
     }
 }

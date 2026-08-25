@@ -153,7 +153,7 @@ impl Provider for AppsProvider {
                         accessory: None,
                         enters_mode: None,
                         group_label: None,
-                        actions: Vec::new(),
+                        actions: crate::provider::path_actions(),
                         source: None,
                         meter: None,
                         keeps_open: false,
@@ -188,6 +188,19 @@ impl Provider for AppsProvider {
         crate::launch::launch_app(&app_path).map_err(|e| ProviderError(e.to_string()))?;
         let _ = self.db.lock().unwrap().record_launch(id, crate::now_unix_ms());
         Ok(())
+    }
+
+    /// An app's id is its bundle id, not its path, so this has to look the
+    /// bundle up the same way `activate` does before it can reveal it.
+    fn perform_action(&self, id: &str, action: &str) -> Result<(), ProviderError> {
+        let app_path = {
+            let apps = self.apps.read().unwrap();
+            apps.iter().find(|a| a.id == id).map(|a| a.path.clone())
+        };
+        let Some(app_path) = app_path else {
+            return Err(ProviderError(format!("no such app: {id}")));
+        };
+        crate::provider::perform_path_action(&app_path, action)
     }
 }
 

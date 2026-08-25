@@ -387,7 +387,7 @@ impl Provider for ClipboardProvider {
                 let db = self.db.lock().unwrap();
                 db.delete_clipboard_entry(id).map_err(|e| ProviderError(e.to_string()))
             }
-            other => Err(ProviderError(format!("clipboard has no action '{other}'"))),
+            other => Err(ProviderError(format!("no action '{other}' on this row"))),
         }
     }
 }

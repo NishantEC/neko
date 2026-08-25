@@ -327,7 +327,7 @@ impl Provider for TerminalsProvider {
                 *CAPTURES.lock().unwrap() = None;
                 result
             }
-            other => Err(ProviderError(format!("no such action: {other}"))),
+            other => Err(ProviderError(format!("no action '{other}' on this row"))),
         }
     }
 }

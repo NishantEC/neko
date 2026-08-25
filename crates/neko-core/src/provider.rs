@@ -158,6 +158,53 @@ pub trait Provider: Send + Sync {
     }
 }
 
+/// The `⌘K` actions every row that names a real path should offer.
+///
+/// **Before this, `⌘K` was dead on almost everything.** Only agent and
+/// clipboard rows carried actions, so pressing it on an application, a file,
+/// a settings pane or a theme — which is most of what a root query returns,
+/// and always what the default selection is — set no state and painted
+/// nothing. The menu existed and could not be reached from the rows people
+/// actually use.
+///
+/// Reveal and Copy path are the two that generalise: `Open` on an
+/// application *runs* it and on a file hands it to whatever owns the
+/// extension, and neither is what somebody wants when they are trying to
+/// find where a thing lives or paste its location somewhere else.
+/// `AGENTS.md` recorded "reveal in Finder" as a real secondary action
+/// deferred only because no secondary-action affordance existed yet. It does.
+pub fn path_actions() -> Vec<neko_protocol::ItemAction> {
+    vec![
+        neko_protocol::ItemAction {
+            id: "reveal".to_string(),
+            label: "Reveal in Finder".to_string(),
+            destructive: false,
+        },
+        neko_protocol::ItemAction {
+            id: "copy-path".to_string(),
+            label: "Copy path".to_string(),
+            destructive: false,
+        },
+    ]
+}
+
+/// Performs [`path_actions`] against a real path.
+pub fn perform_path_action(path: &std::path::Path, action: &str) -> Result<(), ProviderError> {
+    match action {
+        "reveal" => {
+            crate::launch::reveal_in_finder(path).map_err(|e| ProviderError(e.to_string()))
+        }
+        "copy-path" => {
+            if crate::clipboard::write_to_pasteboard(&path.to_string_lossy()) {
+                Ok(())
+            } else {
+                Err(ProviderError("couldn't write to the clipboard".to_string()))
+            }
+        }
+        other => Err(ProviderError(format!("no action '{other}' on this row"))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -527,7 +527,7 @@ impl Provider for FolderScopeProvider {
             // rather than silently adding a folder that is not there.
             "add" => add_search_folder(&self.db.lock().unwrap(), id).map(|_| ()).map_err(ProviderError),
             "remove" => self.activate(id),
-            other => Err(ProviderError(format!("no such action: {other}"))),
+            other => Err(ProviderError(format!("no action '{other}' on this row"))),
         }
     }
 }

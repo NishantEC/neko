@@ -39,6 +39,26 @@ pub fn launch_app(app_path: &Path) -> Result<(), LaunchError> {
 /// just bringing the app to the front. `open` treats a URL-scheme argument
 /// and a filesystem path identically, so this is the same call, just typed
 /// on `&str` since a `systempreferences:` URL is never a valid `Path`.
+/// Selects a path in Finder rather than opening it.
+///
+/// `open -R`, the same `/usr/bin/open` every other launch here goes through.
+/// The distinction matters for both kinds of row it serves: `Open` on an
+/// application *runs* it and on a file hands it to whatever owns the
+/// extension, and neither is what somebody wants when they are trying to
+/// find where the thing lives.
+pub fn reveal_in_finder(path: &Path) -> Result<(), LaunchError> {
+    let status = std::process::Command::new("/usr/bin/open")
+        .arg("-R")
+        .arg(path)
+        .status()
+        .map_err(|e| LaunchError(format!("couldn't run open: {e}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(LaunchError(format!("couldn't reveal {}", path.display())))
+    }
+}
+
 pub fn open_url(url: &str) -> Result<(), LaunchError> {
     let status = Command::new("/usr/bin/open")
         .arg(url)
