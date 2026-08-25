@@ -921,8 +921,14 @@ impl Provider for AgentControlProvider {
     /// filter. Filtering on it would make the list shrink as you described
     /// the task, and the row you were aiming at would move out from under
     /// the selection mid-sentence. Same rule `new_agent` follows.
-    fn search(&self, _query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+    fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
         let Some(root) = &self.root else { return Vec::new() };
+        // **The verb has to know whether there is a prompt yet.** Entering
+        // this mode clears the field, so the first thing anybody presses is
+        // Enter on a row labelled "Send ↵" — and `activate_with_query`
+        // rejects an empty prompt. `new_agent` already solved this by
+        // labelling the row for what it needs next; this does the same.
+        let has_prompt = !query.trim().is_empty();
         let names = read_workspace_names(root);
         let modes = self.client().map(|c| provider_modes(&c)).unwrap_or_default();
 
@@ -972,7 +978,11 @@ impl Provider for AgentControlProvider {
                         subtitle,
                         icon: Icon::Glyph(if running { Glyph::AgentLive } else { Glyph::Agent }),
                         section_label: "Agents".to_string(),
-                        action_label: "Send  \u{21b5}".to_string(),
+                        action_label: if has_prompt {
+                            "Send  \u{21b5}".to_string()
+                        } else {
+                            "Type the task first".to_string()
+                        },
                         badge: running.then(|| "LIVE".to_string()),
                         accessory: None,
                         enters_mode: None,

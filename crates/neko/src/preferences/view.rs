@@ -477,9 +477,25 @@ impl PreferencesRoot {
                 _ => return,
             },
             "enter" | "space" => {
-                // Enter belongs to the folder field whenever there is no
-                // control under the ring to activate — "Press ↵ to add".
-                if self.focused_control().is_none() {
+                // **The guard this replaces was dead, and it broke the one
+                // thing the Search tab is for.** It read
+                // `if self.focused_control().is_none() { return; }`, meaning
+                // "Enter belongs to the folder field when the ring is on
+                // nothing" — but `controls()` always begins with the four
+                // tabs, so the ring is never on nothing. Arriving at the
+                // Search tab always parks it on `Tab(Search)`, so typing a
+                // path and pressing Enter re-selected the already-selected
+                // tab and `stop_propagation`'d in the capture phase, and the
+                // keystroke never reached the field. "Press ↵ to add" could
+                // not add, ever, and on a fresh install there are no folder
+                // rows to Tab onto to escape it.
+                //
+                // The real question is not "is the ring on something" but
+                // "is the ring on something *other than a tab*" — a tab is
+                // already switched by Left/Right, so Enter on one does
+                // nothing a person wanted, and the field is the only other
+                // thing on that screen that Enter means anything to.
+                if matches!(self.focused_control(), None | Some(Control::Tab(_))) {
                     return;
                 }
                 self.activate_focused(window, cx);
@@ -1041,8 +1057,9 @@ impl PreferencesRoot {
                     .text_color(theme::active().text_tertiary)
                     .max_w(px(420.))
                     .child(
-                        "A hotkey-summoned launcher for macOS, written from scratch in Rust on GPUI. \
-                         Local-only: nothing it indexes leaves this machine.",
+                        "A hotkey-summoned launcher and agent control plane for macOS, written \
+                         from scratch in Rust on GPUI. Searching is local; Usage, Ask neko and \
+                         the agent features reach the services you are already signed in to.",
                     ),
             )
     }

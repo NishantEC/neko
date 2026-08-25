@@ -223,7 +223,11 @@ impl Provider for SchedulesProvider {
                         ],
                         source: None,
                         meter: None,
-                        keeps_open: false,
+                        // Enter flips ACTIVE↔PAUSED, and the badge saying
+                        // which it now is only exists on this screen — a
+                        // toggle that hides the panel makes you re-summon and
+                        // re-enter the mode to find out what it did.
+                        keeps_open: true,
                         preview: None,
                     },
                 })
