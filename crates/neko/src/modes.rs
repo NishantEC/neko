@@ -74,6 +74,15 @@ pub struct ModeChrome {
     pub title: &'static str,
     /// The search field's placeholder while this mode is active.
     pub placeholder: &'static str,
+    /// What to say when this mode has no rows.
+    ///
+    /// Every mode used to render `panel::NO_MATCHES` — "No matches, try
+    /// fewer characters" — including the ones where nothing had been typed
+    /// and there was nothing to shorten. Terminals and Schedules are empty
+    /// on a machine with none, and a mode whose provider swallows a
+    /// transport error is empty when Paseo is simply down; all of them told
+    /// you to delete characters you never typed.
+    pub empty_line: &'static str,
     /// Whether this mode widens the panel and shows a second (preview)
     /// column — see this module's doc comment.
     pub has_detail: bool,
@@ -85,6 +94,7 @@ pub const MODES: &[ModeChrome] = &[
         provider_id: "clipboard",
         title: "Clipboard History",
         placeholder: "Type to filter entries…",
+        empty_line: "Nothing copied yet \u{2014} anything you copy shows up here.",
         has_detail: true,
     },
     // The second mode, and the one that proved the accounting above: it cost
@@ -103,6 +113,7 @@ pub const MODES: &[ModeChrome] = &[
         provider_id: "theme",
         title: "Themes",
         placeholder: "Type to filter themes…",
+        empty_line: "No theme matches that.",
         has_detail: false,
     },
     // The third mode, and the first where **the query is not a filter**: what
@@ -123,6 +134,7 @@ pub const MODES: &[ModeChrome] = &[
         provider_id: "new-agent",
         title: "New Agent",
         placeholder: "Describe the task, then pick where to run it…",
+        empty_line: "No projects \u{2014} start an agent from Paseo once and this fills in.",
         has_detail: false,
     },
     // Reads the model provider's own quota API — see
@@ -137,11 +149,22 @@ pub const MODES: &[ModeChrome] = &[
     // Every agent, with the keyboard pointed at the thing you came to do:
     // say something else to it. The query is the prompt, not a filter —
     // the same rule the New Agent mode follows.
+    // What one agent has been doing, read here. `has_detail` because a long
+    // reply is worth a pane rather than a truncated row.
+    ModeChrome {
+        id: "conversation",
+        provider_id: "conversation",
+        title: "Conversation",
+        placeholder: "Reading the conversation\u{2026}",
+        empty_line: "This agent has not done anything yet.",
+        has_detail: true,
+    },
     ModeChrome {
         id: "agent",
         provider_id: "agent-control",
         title: "Agents",
         placeholder: "Say something to the selected agent\u{2026}",
+        empty_line: "No agents running.",
         has_detail: false,
     },
     ModeChrome {
@@ -149,6 +172,7 @@ pub const MODES: &[ModeChrome] = &[
         provider_id: "terminal",
         title: "Terminals",
         placeholder: "Type to filter terminals\u{2026}",
+        empty_line: "No terminals open \u{2014} start one in Paseo and it appears here.",
         has_detail: true,
     },
     ModeChrome {
@@ -156,6 +180,7 @@ pub const MODES: &[ModeChrome] = &[
         provider_id: "ask",
         title: "Ask neko",
         placeholder: "Say what you want done\u{2026}",
+        empty_line: "Nothing to show yet.",
         has_detail: false,
     },
     ModeChrome {
@@ -163,6 +188,7 @@ pub const MODES: &[ModeChrome] = &[
         provider_id: "schedule",
         title: "Schedules",
         placeholder: "Type to filter schedules\u{2026}",
+        empty_line: "No schedules \u{2014} create one in Paseo and it appears here.",
         has_detail: false,
     },
     ModeChrome {
@@ -170,6 +196,7 @@ pub const MODES: &[ModeChrome] = &[
         provider_id: "usage",
         title: "Usage",
         placeholder: "Claude Code usage",
+        empty_line: "No quota to show \u{2014} sign in with `claude`, `codex` or `grok`.",
         has_detail: false,
     },
 ];

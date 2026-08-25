@@ -142,6 +142,10 @@ impl AppState {
             // Enter meaning "send this prompt" rather than "open it in
             // Paseo". One provider cannot have two primary actions.
             Box::new(neko_core::agents::AgentControlProvider::new()),
+            // The eighth: one agent's conversation, read in neko rather than
+            // by switching to Paseo. Its scoped query is an agent id, not
+            // typing — see `conversation.rs`.
+            Box::new(neko_core::conversation::ConversationProvider::new()),
         ];
         Self {
             db,

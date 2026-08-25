@@ -315,6 +315,19 @@ pub type AppearanceSetter = Rc<dyn Fn(&Window, theme::Appearance) -> Result<(), 
 struct ActiveMode {
     chrome: &'static ModeChrome,
     saved_query: String,
+    /// **Which thing this mode is about**, when it is about one — the agent
+    /// id for the conversation view.
+    ///
+    /// Every mode until now was a *list* of one provider's rows, so scoping
+    /// to the provider was the whole of "which mode am I in". A conversation
+    /// is a list about one agent, and the provider has no way to know which
+    /// unless it is told: `run_search` sends this as the scoped query, so
+    /// `ConversationProvider::search` receives the agent id where a filtering
+    /// provider would receive what was typed.
+    ///
+    /// `None` for every mode that is a plain list, which is all of the
+    /// others.
+    subject: Option<String>,
     /// The theme that was active when this mode was entered, so leaving can
     /// put it back. **This is what makes live preview safe to be live**: the
     /// panel really does become each theme as the selection moves, and
@@ -692,7 +705,20 @@ impl Root {
         let (mode_provider, query) = if slash {
             (Some(COMMAND_PROVIDER_ID.to_string()), raw[1..].to_string())
         } else {
-            (self.active_mode().map(|m| m.chrome.provider_id.to_string()), raw)
+            match self.active_mode() {
+                // **A mode with a subject sends the subject, not the
+                // typing.** The conversation view is a list about one agent,
+                // and its provider has no other way to learn which — see
+                // `ActiveMode::subject`. Typing in it still filters, because
+                // the provider filters its own rows against nothing here;
+                // that is a deliberate limit noted in `conversation.rs`.
+                Some(mode) if mode.subject.is_some() => (
+                    Some(mode.chrome.provider_id.to_string()),
+                    mode.subject.clone().unwrap_or_default(),
+                ),
+                Some(mode) => (Some(mode.chrome.provider_id.to_string()), raw),
+                None => (None, raw),
+            }
         };
         // A slash palette is a scoped list like a mode's, so it is never
         // budget-fit and never treated as the empty root query.
@@ -1107,7 +1133,11 @@ impl Root {
                 (self.open_preferences)(window, cx);
                 return;
             }
-            self.enter_mode(&mode_id, window, cx);
+            // **A conversation is about the row that opened it**, so the
+            // row's own id travels into the mode as its subject. Every other
+            // mode is a plain list and takes none — see `ActiveMode::subject`.
+            let subject = (mode_id == "conversation").then(|| item.id.clone());
+            self.enter_mode_about(&mode_id, subject, window, cx);
             return;
         }
         // A single generic action, routed by `kind` back to whichever
@@ -1486,7 +1516,15 @@ impl Root {
         self.active_mode.as_mut()
     }
 
-    fn enter_mode(&mut self, mode_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    /// [`enter_mode`], for a mode that is *about* one row — see
+    /// [`ActiveMode::subject`].
+    fn enter_mode_about(
+        &mut self,
+        mode_id: &str,
+        subject: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Entering a mode from inside one would capture the *mode's* query
         // as `saved_query`, so exiting would restore the wrong text. Not
         // reachable today (commands only appear in the root list), but the
@@ -1501,6 +1539,7 @@ impl Root {
         self.active_mode = Some(ActiveMode {
             chrome,
             saved_query,
+            subject,
             restore_theme: (chrome.provider_id == "theme").then(|| theme::active_theme().id),
         });
         self.selected = 0;
@@ -2706,7 +2745,12 @@ impl Root {
             .track_scroll(&self.mode_scroll);
 
         if self.results.is_empty() {
-            container = container.child(render_empty_state_message(NO_MATCHES));
+            // The mode's own line, not the root list's "try fewer
+            // characters" — see `ModeChrome::empty_line`.
+            let line = self
+                .active_mode()
+                .map_or(NO_MATCHES, |mode| mode.chrome.empty_line);
+            container = container.child(render_empty_state_message(line));
         } else {
             let mut current_group: Option<&Option<String>> = None;
             for (idx, item) in self.results.iter().enumerate() {
@@ -3937,7 +3981,7 @@ mod tests {
         let window = test_root(cx);
         window
             .update(cx, |root, window, cx| {
-                root.enter_mode("clipboard", window, cx);
+                root.enter_mode_about("clipboard", None, window, cx);
                 // A mode is already scoped, and somebody typing a path there
                 // means the character.
                 root.text_field.update(cx, |field, cx| field.set_content("/Users", cx));
