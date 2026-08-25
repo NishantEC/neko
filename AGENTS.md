@@ -3321,6 +3321,67 @@ dismiss the `⌘K` menu also fired the row underneath it — `on_mouse_down_out`
 closes in the capture phase, and by the time a bubble-phase click handler
 runs there is nothing left to tell "dismiss" from "activate".
 
+## Reading an agent's conversation inside neko
+
+An agent row's Enter used to open Paseo. That is right when you want to
+*work* with an agent and wrong when you only want to know what it has been
+doing — switching apps to read three lines is most of the cost of not having
+asked. Enter now reads it here; `⌘K` → "Open in Paseo" is the way to the real
+window, and `agents::open_agent_in_paseo` is one function so the two cannot
+drift.
+
+**`ActiveMode::subject` is the new idea, and it is small.** Every mode until
+now was one provider's own *list*, so scoping the search to the provider was
+the whole of "which mode am I in". A conversation is a list *about* one thing,
+and the provider cannot know which agent unless it is told — so the row's id
+travels into the mode and `run_search` sends it as the scoped query.
+`ConversationProvider::search` therefore receives an **agent id** where a
+filtering provider receives typing. The consequence is stated in that module
+rather than discovered later: **typing in this mode does nothing**, because
+the query slot is spoken for. Searching *within* a conversation would need a
+second query channel the protocol does not have.
+
+**Paseo's curated summary, not the raw transcript.** Claude Code writes its
+own to `~/.claude/projects/<cwd>/<session>.jsonl` and this machine's is
+**13 MB for one session**; `get_agent_activity` returns the same thing reduced
+to `[Write] path` plus the agent's own prose, over a channel neko already
+speaks. `parse_activity` drops the daemon's own "Showing 6 of 1046
+activities" header — that is about the fetch, not the agent — and keeps a line
+it cannot parse rather than dropping it, because a conversation view that
+silently omits what the agent said is worse than one showing a line it did not
+understand.
+
+**Every mode has its own empty line now** (`ModeChrome::empty_line`). They all
+rendered `NO_MATCHES` — "No matches, try fewer characters" — including the
+ones where nothing had been typed: Terminals and Schedules are empty on a
+machine with none, and a provider that swallows a transport error is empty
+when Paseo is simply down. All of them told you to delete characters you never
+typed.
+
+## Two evidence-safety defects, found by a capture that reported `key window true`
+
+Both were introduced by work earlier the same night, and both are the same
+shape: **an evidence process must not be able to take real input.**
+
+- **An evidence run installed a menu bar item.** `menu_bar::install` ran
+  unconditionally, so every throwaway client added a live, clickable ⌘ to the
+  captain's real menu bar — and clicking one calls `summon_from_outside`,
+  which activates the panel. Now skipped on any evidence run, beside the
+  hotkey guard that was already there for exactly this reason.
+- **The launch log claimed a hotkey registration that had just been skipped.**
+  It printed `registered hotkey ⌥Space -> id None` two lines after "evidence
+  run — skipping live hotkey registration". The `None` was the truth and the
+  sentence was not. It reports the outcome now. **A log that contradicts
+  itself costs more than one that says less** — it sent this investigation
+  after a hotkey that had never been registered.
+
+**And a capture had to be destroyed.** A macOS notification carrying a private
+code floated over the panel during a window-scoped `screencapture -l`, which
+is supposed to be immune to what is in front of it and is not, for anything
+in the notification layer. Deleted immediately, never committed. **A
+window-scoped capture is not automatically private** — check what is in the
+frame before saving one, the same way a region capture would demand.
+
 ## The shared pulse clock, and the repeating-animation rule
 
 `motion::PulseClock` — the seam `motion.rs`'s own doc comment reserved, now

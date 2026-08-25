@@ -638,6 +638,9 @@ impl Provider for AgentsProvider {
     /// why the read path was not rewritten onto MCP as well: seeing your
     /// agents should not stop working because a daemon restarted.
     fn perform_action(&self, id: &str, action: &str) -> Result<(), ProviderError> {
+        if action == "open-in-paseo" {
+            return open_agent_in_paseo(id);
+        }
         let tool = match action {
             "cancel" => "cancel_agent",
             "archive" => "archive_agent",
@@ -652,13 +655,22 @@ impl Provider for AgentsProvider {
     }
 
     fn activate(&self, id: &str) -> Result<(), ProviderError> {
-        let Some(server) = server_id() else {
-            return Err(ProviderError(
-                "couldn't find ~/.paseo/server-id — is Paseo running?".to_string(),
-            ));
-        };
-        crate::launch::open_url(&deep_link(&server, id)).map_err(|e| ProviderError(e.to_string()))
+        open_agent_in_paseo(id)
     }
+}
+
+/// Opens an agent in Paseo's own UI.
+///
+/// Public because the conversation view offers the same thing — reading in
+/// neko is the fast path, and there has to be one way to get to the real
+/// window when reading is not enough. One function, so the two cannot drift.
+pub fn open_agent_in_paseo(id: &str) -> Result<(), ProviderError> {
+    let Some(server) = server_id() else {
+        return Err(ProviderError(
+            "couldn't find ~/.paseo/server-id — is Paseo running?".to_string(),
+        ));
+    };
+    crate::launch::open_url(&deep_link(&server, id)).map_err(|e| ProviderError(e.to_string()))
 }
 
 /// Paseo's own deep-link shape: `paseo://h/<serverId>/agent/<agentId>`.
@@ -725,13 +737,23 @@ fn host_icon() -> Option<&'static PathBuf> {
 /// offered neither: a menu that lists what it cannot do is worse than a
 /// shorter menu.
 fn agent_actions(running: bool) -> Vec<ItemAction> {
+    let mut actions = vec![ItemAction {
+        id: "open-in-paseo".to_string(),
+        // **Enter reads the conversation in neko; this is how you get to the
+        // real window.** Switching apps to read three lines is most of the
+        // cost of not having asked — but reading is not working, and when it
+        // is not enough there has to be one keystroke to the full UI.
+        label: "Open in Paseo".to_string(),
+        destructive: false,
+    }];
     if !running {
-        return Vec::new();
+        return actions;
     }
-    vec![
+    actions.extend([
         ItemAction { id: "cancel".to_string(), label: "Cancel run".to_string(), destructive: false },
         ItemAction { id: "archive".to_string(), label: "Archive".to_string(), destructive: true },
-    ]
+    ]);
+    actions
 }
 
 fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceName>) -> SearchItem {
@@ -749,7 +771,7 @@ fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceN
             |path| Icon::Image(path.display().to_string()),
         ),
         section_label: "Agents".to_string(),
-        action_label: "Open in Paseo  ↵".to_string(),
+        action_label: "Read  \u{21b5}".to_string(),
         // The badge is what the client keys its live treatment off — the row
         // says what it is, the client decides how that looks, the same
         // "provider describes it" rule every other field follows.
@@ -758,7 +780,11 @@ fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceN
             .requires_attention
             .then(|| "Needs you".to_string())
             .or_else(|| agent.activity_at().map(short_time)),
-        enters_mode: None,
+        // **Enter opens the conversation inside neko.** It used to launch
+        // Paseo, which is right when you want to *work* with an agent and
+        // wrong when you only want to know what it has been doing.
+        // `\u{2318}K` \u{2192} "Open in Paseo" is the way to the real window.
+        enters_mode: Some("conversation".to_string()),
         group_label: None,
         // **L1 of `docs/plan-agent-control-plane.md`.** A running agent can
         // be stopped or thrown away without leaving the panel — the two
@@ -1032,6 +1058,9 @@ impl Provider for AgentControlProvider {
                 .call("set_agent_mode", serde_json::json!({ "agentId": id, "modeId": mode_id }))
                 .map(|_| ())
                 .map_err(|e| ProviderError(e.to_string()));
+        }
+        if action == "open-in-paseo" {
+            return open_agent_in_paseo(id);
         }
         let tool = match action {
             "cancel" => "cancel_agent",

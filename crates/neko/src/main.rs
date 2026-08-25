@@ -267,9 +267,24 @@ fn summon_from_outside(cx: &mut App) {
                             ),
                             Err(e) => eprintln!("neko: couldn't leave the Dock: {e}"),
                         }
-                        match menu_bar::install() {
-                            Some(state) => eprintln!("neko: menu bar item installed \u{2014} {state}"),
-                            None => eprintln!("neko: menu bar item FAILED to install"),
+                        // **Not on an evidence run.** A throwaway client has
+                        // no business putting a live, clickable item in the
+                        // captain's real menu bar — every run would add
+                        // another, and clicking one calls
+                        // `summon_from_outside`, which activates the panel.
+                        // That is the same hazard as the hotkey guard above:
+                        // an evidence process must not be able to take real
+                        // input. Caught by a capture that reported
+                        // `key window true` with no explanation.
+                        if evidence::evidence_run_active() {
+                            eprintln!("neko: evidence run — skipping the menu bar item");
+                        } else {
+                            match menu_bar::install() {
+                                Some(state) => {
+                                    eprintln!("neko: menu bar item installed \u{2014} {state}")
+                                }
+                                None => eprintln!("neko: menu bar item FAILED to install"),
+                            }
                         }
 
                         let translucent = match material::install(window) {
@@ -531,11 +546,18 @@ fn summon_from_outside(cx: &mut App) {
                     config.combo.display()
                 );
             }
-            eprintln!(
-                "neko: registered hotkey {} -> id {:?}",
-                config.combo.display(),
-                controller.borrow().current_hotkey_id()
-            );
+            // Prints the *outcome*, not an assumption. It used to read
+            // "registered hotkey ⌥Space" unconditionally — including on an
+            // evidence run that had just skipped registration two lines
+            // above, where it said `id None` in the same breath. A log that
+            // contradicts itself costs more than one that says less.
+            match controller.borrow().current_hotkey_id() {
+                Some(id) => eprintln!(
+                    "neko: summon hotkey {} is live (id {id:?})",
+                    config.combo.display()
+                ),
+                None => eprintln!("neko: no summon hotkey is registered"),
+            }
 
             // `NekoClient::is_connected()` is a plain poll, not a push
             // channel (see that method's own doc comment) — this loop
