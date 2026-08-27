@@ -490,6 +490,7 @@ impl AskProvider {
                 meter: None,
                 keeps_open,
                 preview_markdown: false,
+                speaker: None,
                 preview: None,
             },
         }

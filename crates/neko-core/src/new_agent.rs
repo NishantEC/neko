@@ -701,6 +701,7 @@ fn to_item(project: &Project, prompt: &str, provider: Option<&str>) -> SearchIte
         meter: None,
         keeps_open: false,
         preview_markdown: false,
+        speaker: None,
         preview: None,
     }
 }
