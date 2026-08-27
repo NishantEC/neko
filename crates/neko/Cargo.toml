@@ -91,6 +91,14 @@ objc2-app-kit = { version = "0.3", features = [
     # so this adds zero new crate versions to the tree, same reasoning as
     # the rest of this block.
     "NSPasteboard",
+    # Drawing the mark for the status item — see `menu_bar::mark_image`.
+    # `NSBitmapImageRep` + `NSGraphicsContext` rather than `lockFocus`,
+    # which is deprecated *because* it cannot draw resolution-independently
+    # — the same reason `neko_core::icons` avoids it.
+    "NSColor",
+    "NSBitmapImageRep",
+    "NSImageRep",
+    "NSGraphicsContext",
 ] }
 # Window-under-cursor multi-display placement (`src/display_placement.rs`)
 # needs `NSPoint`/`NSRect` directly to build the `setFrameTopLeftPoint:`

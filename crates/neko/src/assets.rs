@@ -94,6 +94,7 @@ const ICONS: &[(&str, &[u8])] = &[
     (icon::TEXT_LINES, include_bytes!("../assets/icons/lucide/text-align-start.svg")),
     (icon::TOOL_CLAUDE, include_bytes!("../assets/icons/simple-icons/claude.svg")),
     (icon::TOOL_GEMINI, include_bytes!("../assets/icons/simple-icons/googlegemini.svg")),
+    (icon::MARK, include_bytes!("../assets/icons/neko/mark.svg")),
 ];
 
 /// The asset paths this app draws with, named for what they *mean* here
@@ -119,6 +120,15 @@ pub mod icon {
     // would be the wrong thing to draw at 10px anyway.
     pub const TOOL_CLAUDE: &str = "icons/simple-icons/claude.svg";
     pub const TOOL_GEMINI: &str = "icons/simple-icons/googlegemini.svg";
+
+    // neko's own mark — the only icon here this project drew rather than
+    // vendored, so there is no upstream to diff against. It is pinned by
+    // length anyway, which guards an accidental edit instead of upstream
+    // drift. Filled for the same reason the brand marks above are: gpui
+    // renders an SVG to an alpha mask, so the fill *is* the shape, and one
+    // tint carries it. Built on a module grid, which is why it survives
+    // 16pt without a simplified second drawing.
+    pub const MARK: &str = "icons/neko/mark.svg";
 }
 
 /// The mark for a tool name, or `None` when there is no vendored logo for it.
@@ -279,6 +289,9 @@ mod tests {
             // Named by `tool_icon`, which is keyed on a tool name off the
             // wire rather than on a closed enum.
             .chain([icon::TOOL_CLAUDE, icon::TOOL_GEMINI])
+            // Named by the menu bar and the onboarding header, neither of
+            // which routes through a `Glyph`.
+            .chain([icon::MARK])
             .collect();
         for (path, _) in ICONS {
             assert!(named.contains(path), "{path} is vendored but nothing names it");
@@ -315,6 +328,7 @@ mod tests {
             (icon::TEXT_LINES, 279),
             (icon::TOOL_CLAUDE, 1921),
             (icon::TOOL_GEMINI, 401),
+            (icon::MARK, 1455),
         ];
         assert_eq!(pinned.len(), ICONS.len(), "an icon was vendored without pinning its length");
 
@@ -340,7 +354,7 @@ mod tests {
                 .find(|(p, _)| p == path)
                 .map(|(_, len)| *len)
                 .unwrap_or_else(|| panic!("{path} has no pinned length"));
-            assert_eq!(bytes.len(), expected, "{path} differs from the pinned upstream file");
+            assert_eq!(bytes.len(), expected, "{path} differs from its pinned length");
         }
     }
 
@@ -388,8 +402,14 @@ mod tests {
     fn list_filters_by_prefix() {
         let lucide = NekoAssets.list("icons/lucide/").unwrap().len();
         let brands = NekoAssets.list("icons/simple-icons/").unwrap().len();
-        assert_eq!(lucide + brands, ICONS.len(), "every vendored file must sit under one of the two prefixes");
+        let own = NekoAssets.list("icons/neko/").unwrap().len();
+        assert_eq!(
+            lucide + brands + own,
+            ICONS.len(),
+            "every file must sit under one of the three prefixes"
+        );
         assert!(brands > 0, "the brand marks are a separate set on purpose");
+        assert!(own > 0, "neko's own mark is a third set: drawn here, not vendored");
         assert!(NekoAssets.list("fonts/").unwrap().is_empty());
     }
 

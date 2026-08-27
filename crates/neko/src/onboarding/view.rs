@@ -481,7 +481,13 @@ impl OnboardingRoot {
                     window.titlebar_double_click();
                 }
             })
-            .child(crate::components::glyphs::neko_wordmark_glyph(px(18.), theme::active().text_primary))
+            .child(
+                gpui::svg()
+                    .path(crate::assets::icon::MARK)
+                    .w(px(18.))
+                    .h(px(18.))
+                    .text_color(theme::active().text_primary),
+            )
             .child(
                 div()
                     .text_size(px(15.))

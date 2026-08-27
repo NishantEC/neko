@@ -1179,22 +1179,28 @@ impl Root {
         if let Some(tile) = self.grid_selected
             && let Some(item) = self.agent_tiles.get(tile).cloned()
         {
-            // Identical to the tile's own click handler, deliberately: two
-            // paths to the same action that build the request differently
-            // are a keyboard-versus-mouse divergence waiting to be found.
-            // `query` is ignored by the agent provider — it is the New Agent
-            // mode's mechanism — but it is passed the same way regardless.
-            let query = self.query(cx);
-            self.perform_activation(
-                Request::Activate { kind: item.kind, id: item.id, action: None, query },
-                true,
-                cx,
-            );
+            self.act_on_item(item, window, cx);
             return;
         }
         let Some(item) = self.results.get(self.selected).cloned() else {
             return;
         };
+        self.act_on_item(item, window, cx);
+    }
+
+    /// Everything Enter means once the item is known — shared by the list's
+    /// rows, the agent grid's tiles, and both of their click handlers.
+    ///
+    /// **This exists because the tile path skipped `enters_mode`.** The grid's
+    /// Enter and click both built a bare `Request::Activate`, so an agent tile
+    /// opened Paseo while the identical agent as a *row* read its conversation
+    /// here — and at rest `split_agent_tiles` moves every live and recent
+    /// agent out of the rows and into the grid, which made the tiles the only
+    /// agent surface most summons ever show. The conversation feature worked
+    /// and was unreachable from exactly the place agents are visible. Four
+    /// call sites doing this arithmetic separately is the same shape that
+    /// split `⌘K` from its hint; one method is the fix both times.
+    fn act_on_item(&mut self, item: SearchItem, window: &mut Window, cx: &mut Context<Self>) {
         // A command row never reaches `Request::Activate` at all —
         // confirming it is a client-side UI transition, not a daemon
         // action (see `crate::modes`'s module doc comment).
@@ -1397,8 +1403,8 @@ impl Root {
         for (index, item) in self.agent_tiles.iter().enumerate() {
             let focused = self.grid_selected == Some(index);
             let live = item.badge.as_deref() == Some("LIVE");
-            let kind = item.kind.clone();
             let id = item.id.clone();
+            let tile_item = item.clone();
             let mut dot = theme::active().state_success;
             dot.a = 0.45 + 0.55 * intensity;
             grid = grid.child(
@@ -1469,13 +1475,10 @@ impl Root {
                     })
                     .cursor_pointer()
                     .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |root, _event, _window, cx| {
-                        let query = root.query(cx);
-                        root.perform_activation(
-                            Request::Activate { kind: kind.clone(), id: id.clone(), action: None, query },
-                            true,
-                            cx,
-                        );
+                    .on_click(cx.listener(move |root, _event, window, cx| {
+                        // The same shared path Enter takes — see `act_on_item`
+                        // for the divergence this closes.
+                        root.act_on_item(tile_item.clone(), window, cx);
                     }))
                     // The host app's own icon, in the same socket treatment
                     // every row icon gets — real artwork carries wildly
@@ -3901,7 +3904,7 @@ fn search_glyph() -> impl IntoElement {
 /// `components::glyphs` still traces the ⌥ mark: `div()` cannot draw a
 /// diagonal. An SVG can, so the whole `canvas`/`PathBuilder`/manual-scale
 /// closure is gone in favour of naming a file. `components::glyphs`'
-/// `opt_glyph`/`neko_wordmark_glyph` deliberately stay traced — the ⌥
+/// `opt_glyph` deliberately stays traced — the ⌥
 /// modifier symbol is not in any general-purpose icon set, and the wordmark
 /// is neko's own identity rather than an icon.
 fn back_glyph() -> impl IntoElement {
@@ -4553,6 +4556,49 @@ mod tests {
 
     fn tile(id: &str) -> SearchItem {
         SearchItem { badge: Some("LIVE".to_string()), ..agent_row(id) }
+    }
+
+    #[gpui::test]
+    fn enter_on_an_agent_tile_reads_its_conversation_not_paseo(cx: &mut TestAppContext) {
+        // At rest `split_agent_tiles` moves every live and recent agent out of
+        // the rows and into the grid, so tiles are the only agent surface most
+        // summons show — and the tile path built a bare `Request::Activate`,
+        // which for an agent means "open Paseo". The conversation view worked
+        // and was unreachable from exactly the place agents are visible.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.agent_tiles = vec![SearchItem {
+                    enters_mode: Some("conversation".to_string()),
+                    ..tile("05475348-2409-4eca-aa5f-3446f369ee66")
+                }];
+                root.grid_selected = Some(0);
+                root.confirm(&Confirm, window, cx);
+                let mode = root.active_mode().expect("the tile entered the mode");
+                assert_eq!(mode.chrome.id, "conversation");
+                assert_eq!(
+                    mode.subject.as_deref(),
+                    Some("05475348-2409-4eca-aa5f-3446f369ee66"),
+                    "the agent id travels in as the mode's subject"
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_tile_without_a_mode_still_activates(cx: &mut TestAppContext) {
+        // The shared path must not break the other direction: a tile whose row
+        // carries no `enters_mode` still routes to `Request::Activate`.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.agent_tiles = vec![tile("plain")];
+                root.grid_selected = Some(0);
+                root.confirm(&Confirm, window, cx);
+                assert!(root.active_mode().is_none(), "no mode to enter");
+                assert!(root.activating, "so it went to the daemon instead");
+            })
+            .unwrap();
     }
 
     #[gpui::test]
