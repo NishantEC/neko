@@ -121,22 +121,129 @@ mod macos {
 
     use objc2::rc::{Retained, autoreleasepool};
     use objc2::runtime::{AnyObject, Sel};
-    use objc2::{MainThreadOnly, define_class, msg_send, sel};
+    use objc2::{AnyThread, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::{
-        NSApplication, NSApplicationActivationPolicy, NSEventMask, NSEventModifierFlags,
-        NSEventType, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem,
+        NSApplication, NSApplicationActivationPolicy, NSBitmapImageRep, NSColor,
+        NSDeviceRGBColorSpace, NSEventMask, NSEventModifierFlags, NSEventType, NSGraphicsContext,
+        NSImage, NSMenu, NSMenuItem, NSRectFill, NSStatusBar, NSStatusItem,
         NSVariableStatusItemLength,
     };
-    use objc2_foundation::{MainThreadMarker, NSObject, NSString};
+    use objc2_foundation::{MainThreadMarker, NSObject, NSPoint, NSRect, NSSize, NSString};
 
-    /// The SF Symbol the item draws.
+    /// The SF Symbol the item falls back to.
     ///
-    /// `command` rather than something cat-shaped: it is what this app *is*,
-    /// it exists on every macOS this can run on, and as a symbol it inherits
-    /// the menu bar's own tint in light and dark automatically — which a
-    /// vendored asset would not, and which matters more in the menu bar than
-    /// anywhere else in the app.
+    /// This used to be what the item drew, on the reasoning that a symbol
+    /// inherits the menu bar's tint automatically and an asset would not.
+    /// That second half turned out to be avoidable: [`mark_image`] builds
+    /// neko's own mark as a **template** image, which AppKit tints exactly
+    /// the same way. The symbol stays as the fallback only.
     const SYMBOL: &str = "command";
+
+    /// The mark, as the cells of its module grid.
+    ///
+    /// **This is a second copy of geometry that also lives in
+    /// `assets/icons/neko/mark.svg`, and that is deliberate.** The status
+    /// item is not a gpui surface: it wants a real `NSImage`, and the SVG
+    /// pipeline (`AssetSource` + `gpui::svg()`) never reaches it. Rather than
+    /// rasterise the file and plumb bitmap planes through AppKit, the mark is
+    /// nothing but squares, so it is cheaper to fill them directly.
+    ///
+    /// Duplication is made safe by test rather than by discipline:
+    /// `mark_cells_match_the_shipped_svg` reproduces the file's path data
+    /// from this table and fails if the two ever drift.
+    const MARK_ROWS: &[&[u8]] = &[
+        &[1, 7],
+        &[1, 2, 6, 7],
+        &[1, 2, 3, 5, 6, 7],
+        &[1, 2, 3, 4, 5, 6, 7],
+        &[1, 3, 4, 5, 7],
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8],
+        &[2, 3, 4, 5, 6],
+        &[3, 4, 5],
+    ];
+    /// The grid the rows above are laid out on — matches the exported SVG.
+    const MARK_BOX: f64 = 24.0;
+    const MARK_COLS: f64 = 9.0;
+    const MARK_MARGIN: f64 = 1.8;
+    const MARK_GAP: f64 = 0.16;
+    /// Point size of the status-item image. The menu bar is ~22pt tall.
+    const MARK_POINTS: f64 = 17.0;
+
+    /// Every filled cell as `(x, y, side)` on the [`MARK_BOX`] grid, with `y`
+    /// measured **from the top** — the SVG's convention, not AppKit's.
+    pub(super) fn mark_cells() -> Vec<(f64, f64, f64)> {
+        let cell = (MARK_BOX - 2.0 * MARK_MARGIN) / MARK_COLS;
+        let rows = MARK_ROWS.len() as f64;
+        let oy = (MARK_BOX - cell * rows) / 2.0;
+        let gap = cell * MARK_GAP;
+        let side = cell - gap;
+        let mut out = Vec::new();
+        for (r, cols) in MARK_ROWS.iter().enumerate() {
+            for &c in *cols {
+                let x = MARK_MARGIN + f64::from(c) * cell + gap / 2.0;
+                let y = oy + r as f64 * cell + gap / 2.0;
+                out.push((x, y, side));
+            }
+        }
+        out
+    }
+
+    /// The mark as a **template** image, so the menu bar tints it itself in
+    /// light and dark exactly as it does an SF Symbol.
+    ///
+    /// `NSRectFill` rather than `NSBezierPath`: the mark is only rectangles,
+    /// and `NSGraphics` is already a feature this crate enables. The image is
+    /// built in points; AppKit handles the backing scale, so this needs no
+    /// retina branch.
+    pub(super) fn mark_image() -> Option<Retained<NSImage>> {
+        // Drawn at 2x and handed back as a rep sized in points, so the menu
+        // bar gets real pixels on a retina display. `lockFocus` would have
+        // been shorter and is deprecated for exactly this reason: it cannot
+        // draw resolution-independently.
+        const SCALE: usize = 2;
+        let px = (MARK_POINTS as usize) * SCALE;
+        let scale = (MARK_POINTS * SCALE as f64) / MARK_BOX;
+        unsafe {
+            let bitmap = NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+                NSBitmapImageRep::alloc(),
+                std::ptr::null_mut(),
+                px as isize,
+                px as isize,
+                8,
+                4,
+                true,
+                false,
+                NSDeviceRGBColorSpace,
+                0,
+                0,
+            )?;
+            bitmap.setSize(NSSize { width: MARK_POINTS, height: MARK_POINTS });
+
+            let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&bitmap)?;
+            NSGraphicsContext::saveGraphicsState_class();
+            NSGraphicsContext::setCurrentContext(Some(&context));
+            NSColor::blackColor().setFill();
+            for (x, y, side) in mark_cells() {
+                // AppKit's origin is bottom-left; the grid's is top-left.
+                let flipped = MARK_BOX - y - side;
+                NSRectFill(NSRect {
+                    origin: NSPoint { x: x * scale, y: flipped * scale },
+                    size: NSSize { width: side * scale, height: side * scale },
+                });
+            }
+            NSGraphicsContext::restoreGraphicsState_class();
+
+            let image = NSImage::initWithSize(
+                NSImage::alloc(),
+                NSSize { width: MARK_POINTS, height: MARK_POINTS },
+            );
+            image.addRepresentation(&bitmap);
+            // A template image is tinted by the menu bar rather than drawn as
+            // authored, which is the whole reason the SF Symbol looked right.
+            image.setTemplate(true);
+            Some(image)
+        }
+    }
 
     // The action target. Exists only to own one selector: `NSControl`'s
     // target/action pair needs a real Objective-C object with a real method,
@@ -249,21 +356,33 @@ mod macos {
                 NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
             let target = Target::new(mtm);
             if let Some(button) = item.button(mtm) {
-                let symbol = NSString::from_str(SYMBOL);
                 let description = NSString::from_str("neko");
-                let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-                    &symbol,
-                    Some(&description),
-                );
-                // **A missing symbol must not produce an invisible item.**
-                // `imageWithSystemSymbolName` returns `nil` for a name the
-                // running OS does not have, and a status item with neither
-                // image nor title is a live, clickable, completely blank gap
-                // in the menu bar — the worst possible failure, because
-                // nothing looks wrong.
-                match &image {
-                    Some(image) => button.setImage(Some(image)),
-                    None => button.setTitle(&NSString::from_str("neko")),
+                // neko's own mark, drawn here rather than loaded: the status
+                // item wants an `NSImage` and never touches the SVG pipeline.
+                let mark = mark_image();
+                if let Some(mark) = &mark {
+                    mark.setAccessibilityDescription(Some(&description));
+                }
+                // **The item must never be an invisible gap.** A status item
+                // with neither image nor title is live, clickable and
+                // completely blank — the worst failure available, because
+                // nothing looks wrong. So the drawn mark is checked for real
+                // extent, then the SF Symbol, then a plain title.
+                let drawn = mark
+                    .as_ref()
+                    .filter(|m| m.size().width > 0.0 && m.size().height > 0.0);
+                if let Some(mark) = drawn {
+                    button.setImage(Some(mark));
+                } else {
+                    let symbol = NSString::from_str(SYMBOL);
+                    let fallback = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+                        &symbol,
+                        Some(&description),
+                    );
+                    match &fallback {
+                        Some(image) => button.setImage(Some(image)),
+                        None => button.setTitle(&NSString::from_str("neko")),
+                    }
                 }
                 unsafe {
                     button.setTarget(Some(&*target as &AnyObject));
@@ -406,6 +525,70 @@ mod macos {
 
 #[cfg(test)]
 mod tests {
+
+    /// Geometry sanity, independent of AppKit: every cell must be a real
+    /// square that lands inside the grid. A zero-side or out-of-bounds cell
+    /// would fill nothing and the item would be a blank gap.
+    #[test]
+    fn every_mark_cell_is_a_real_square_inside_the_grid() {
+        let cells = super::macos::mark_cells();
+        assert_eq!(cells.len(), 41, "the mark is 41 filled cells");
+        for (x, y, side) in &cells {
+            assert!(*side > 0.0, "a cell with no side fills nothing");
+            assert!(*x >= 0.0 && *y >= 0.0, "cell starts outside the grid");
+            assert!(x + side <= 24.0, "cell runs past the right edge");
+            assert!(y + side <= 24.0, "cell runs past the bottom edge");
+        }
+    }
+
+    /// The item is drawn, not loaded, so this is the only place that proves
+    /// the AppKit path produces a real image rather than silently nothing.
+    #[test]
+    fn the_status_item_mark_is_a_template_image_with_real_extent() {
+        let image = super::macos::mark_image().expect("the mark failed to draw");
+        assert_eq!(image.size().width, 17.0);
+        assert_eq!(image.size().height, 17.0);
+        assert!(image.isTemplate(), "not a template - the menu bar would not tint it");
+        assert!(
+            image.representations().count() > 0,
+            "no representation attached, the item would be blank"
+        );
+    }
+
+    /// The status item draws the mark from [`MARK_ROWS`], while every other
+    /// surface renders `assets/icons/neko/mark.svg`. Two copies of one
+    /// geometry is a drift hazard, so this reproduces the file's path data
+    /// from the table and fails the moment they disagree.
+    #[test]
+    fn mark_cells_match_the_shipped_svg() {
+        let svg = include_str!("../assets/icons/neko/mark.svg");
+
+        fn trim(v: f64) -> String {
+            let s = format!("{v:.3}");
+            let s = s.trim_end_matches('0').trim_end_matches('.');
+            s.to_string()
+        }
+
+        let rebuilt: String = super::macos::mark_cells()
+            .into_iter()
+            .map(|(x, y, side)| {
+                format!(
+                    "M{} {}h{}v{}h-{}z",
+                    trim(x),
+                    trim(y),
+                    trim(side),
+                    trim(side),
+                    trim(side)
+                )
+            })
+            .collect();
+
+        assert!(
+            svg.contains(&rebuilt),
+            "MARK_ROWS no longer reproduces mark.svg - the drawn mark and the \
+             rendered one have drifted apart"
+        );
+    }
     use super::*;
 
     #[test]

@@ -467,7 +467,7 @@ fonts — matches `panel.rs`'s own pre-existing choice, GPUI's default system
 font throughout, sized to the mockup's values (report §6: fonts are real
 packaging work, orthogonal to onboarding); permission-row/status icons are
 tinted squares, not traced paths (only the ⌥ glyph is traced —
-`components::glyphs::opt_glyph`/`neko_wordmark_glyph`, the one the report
+`components::glyphs::opt_glyph`, the one the report
 specifically flags as unreliable as font text, both via GPUI's
 `PathBuilder`/`window.paint_path`, no SVG asset needed); step 08's banner
 renders as a strip inside the existing fixed 680px upper-third panel rather
@@ -3133,6 +3133,63 @@ photographable: every hook before them stopped at the moment a mode opened,
 which is enough for a list and not for a mode whose whole behaviour is a
 second step.
 
+## The mark
+
+neko has its own mark: a cat's head on a module grid — pointed ears, whiskers
+breaking the outline, eyes knocked out as missing cells. Chosen from a long
+exploration (`/tmp/neko-logos` boards, not committed); the reasoning that
+settled it is worth keeping because two of the findings were counterintuitive.
+
+**It is one file, `crates/neko/assets/icons/neko/mark.svg`, used everywhere.**
+24x24 grid and filled, which is what `every_vendored_icon_is_pinned_and_on_the_24px_grid`
+requires of anything outside `icons/lucide/`. It is the **third** asset prefix
+(`icons/neko/`) and the only one this project drew rather than vendored — so
+its pinned length guards an accidental edit, not upstream drift, and the
+assertion message says so.
+
+**A grid mark reads as a robot unless three things are true**, found by
+building it wrong first: square block eyes scan as status LEDs, blunt
+two-cell ear tops are not ears, and nothing in a machine vocabulary breaks
+its own outline the way whiskers do. Ears now step 1-2-3 to a point with a
+notch between them. Separately, straight side columns read as an arcade
+invader; the head has to taper toward the chin.
+
+**There is no simplified small variant, and the reason is measured.** A
+second eyeless drawing was exported on the assumption that knocked-out eye
+cells close up below 24px. Diffing the two renders at 16px says otherwise:
+8 of 256 pixels differ, max delta 191/255, ink coverage 27.8% vs 29.3% — and
+that is at 1x, where this machine renders the menu bar at 2x. The variant was
+deleted. If a genuinely non-retina display ever matters, 16 device pixels is
+where it would start to.
+
+**The app icon is a different drawing, and that is deliberate.**
+`packaging/icon/neko.icns` is a black cat peeking over a ledge on a cream
+ground — full colour, gradients, gloss. It shares no artwork with `mark.svg`
+and should not: `gpui::svg()` renders an **alpha mask**, so anything drawn
+inside the app is single-tone by construction, while a `.icns` is a real
+image file with no such limit. Colourful icon, template glyph in the menu
+bar, is ordinary macOS practice.
+
+**Nothing consumes it yet.** neko is a bare Mach-O, so there is no
+`Contents/Resources` to put it in — the same fact that puts `SMAppService`
+and notification banners out of reach. It is committed so that packaging day
+is a one-line change. Two traps are recorded in that directory's own README
+rather than here: `qlmanage` flattens SVG onto an **opaque** canvas, so the
+squircle `clipPath` in the source buys nothing and the corners must be masked
+separately or the Dock shows a hard white square; and the icon is **seven
+drawings, not one scaled** — the slit pupil collapses to a single dark pixel
+column below 64px, so the small slots use solid eyes.
+
+**The status item draws the mark rather than loading it, and keeps a second
+copy of the geometry.** `NSStatusItem` wants an `NSImage` and never touches
+`AssetSource`/`gpui::svg()`, so `menu_bar::MARK_ROWS` restates the grid and
+`mark_image` fills it with `NSRectFill`. Duplication is made safe by
+`mark_cells_match_the_shipped_svg`, which rebuilds the file's path data from
+the table and fails on drift — not by remembering to update both. Drawing
+goes through `NSBitmapImageRep` + `NSGraphicsContext` at 2x rather than
+`lockFocus`, which is deprecated precisely because it cannot draw
+resolution-independently — the same reason `neko_core::icons` avoids it.
+
 ## Out of the Dock: the activation policy and the menu bar item
 
 **A command palette does not belong in the Dock**, and neko was in it for one
@@ -3172,9 +3229,11 @@ new thread, no second summon path, and 20ms is well under what a person can
 perceive. `menu_bar::take_click` swaps rather than reads, so a flag left set
 cannot summon on every tick forever.
 
-**The icon is an SF Symbol (`command`), not a vendored asset**, because a
-symbol inherits the menu bar's own tint in light and dark automatically —
-which matters more there than anywhere else in the app. A name the running OS
+**The icon is neko's own mark, drawn as a template image.** It was an SF
+Symbol (`command`) first, on the reasoning that a symbol auto-tints and an
+asset would not. Only the second half was true: a **template** `NSImage`
+tints identically, so `menu_bar::mark_image` draws the mark and the symbol
+stays as the fallback. See "The mark" below. A name the running OS
 does not have returns `nil`, and a status item with neither image nor title
 is a live, clickable, completely blank gap in the menu bar — the worst
 failure available, because nothing looks wrong. `install` falls back to a text
@@ -3322,6 +3381,20 @@ closes in the capture phase, and by the time a bubble-phase click handler
 runs there is nothing left to tell "dismiss" from "activate".
 
 ## Reading an agent's conversation inside neko
+
+**The tiles bypassed this for a day, and the shape of the bug is the part
+worth keeping.** `confirm`'s agent-*tile* branch (and the tile's click
+handler, separately) built a bare `Request::Activate`, never checking
+`enters_mode` — while at rest `split_agent_tiles` moves every live and recent
+agent out of the rows and into the grid, making tiles the only agent surface
+most summons ever show. So the conversation view worked, was fully wired on
+the wire, and was unreachable from exactly the place agents are visible:
+Enter on a tile opened Paseo. Four call sites doing Enter's arithmetic
+separately is the same shape that split `⌘K` from its hint; everything Enter
+means once the item is known now lives in one `act_on_item`, shared by rows,
+tiles, and both click handlers, with both directions pinned (a tile with
+`enters_mode` enters the mode carrying its subject; one without still
+activates).
 
 An agent row's Enter used to open Paseo. That is right when you want to
 *work* with an agent and wrong when you only want to know what it has been
@@ -3879,8 +3952,9 @@ vendored, and gpui-component's `icon.rs` was read and declined on evidence
 does not already have three lines of).
 
 **What stays painted, deliberately, besides `Glyph::Palette`**:
-`components::glyphs::opt_glyph`/`neko_wordmark_glyph` (⌥ is in no
-general-purpose icon set; the wordmark is neko's own identity) and
+`components::glyphs::opt_glyph` (⌥ is in no general-purpose icon set;
+`neko_wordmark_glyph` is **gone** — the onboarding header renders the real
+mark now, see "The mark" below) and
 `panel::app_icon_placeholder_glyph` (its whole job is reading as a *different*
 kind of mark — "a real per-app raster is still warming", not "this row has no
 artwork").
