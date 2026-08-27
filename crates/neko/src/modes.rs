@@ -86,6 +86,11 @@ pub struct ModeChrome {
     /// Whether this mode widens the panel and shows a second (preview)
     /// column — see this module's doc comment.
     pub has_detail: bool,
+    /// Renders as one scrolling chat transcript — user bubbles, agent prose,
+    /// tool chips — instead of the list (or list+detail) every other mode
+    /// uses. The panel branches on this, never on the provider's id: chrome
+    /// is the client's own layout vocabulary, exactly like `has_detail`.
+    pub transcript: bool,
 }
 
 pub const MODES: &[ModeChrome] = &[
@@ -96,6 +101,7 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Type to filter entries…",
         empty_line: "Nothing copied yet \u{2014} anything you copy shows up here.",
         has_detail: true,
+        transcript: false,
     },
     // The second mode, and the one that proved the accounting above: it cost
     // this entry, one `CommandSpec` in `neko_core::commands`, and one
@@ -115,6 +121,7 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Type to filter themes…",
         empty_line: "No theme matches that.",
         has_detail: false,
+        transcript: false,
     },
     // The third mode, and the first where **the query is not a filter**: what
     // is typed here is the task the agent is given, and the rows are the
@@ -136,6 +143,7 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Describe the task, then pick where to run it…",
         empty_line: "No projects \u{2014} start an agent from Paseo once and this fills in.",
         has_detail: false,
+        transcript: false,
     },
     // Reads the model provider's own quota API — see
     // `neko_core::usage`. A status pane rather than a list, so the typed
@@ -156,8 +164,13 @@ pub const MODES: &[ModeChrome] = &[
         provider_id: "conversation",
         title: "Conversation",
         placeholder: "Reading the conversation\u{2026}",
-        empty_line: "This agent has not done anything yet.",
-        has_detail: true,
+        empty_line: "This agent has not said anything yet.",
+        // The chat layout, not list+detail: a conversation is read as one
+        // scrolling exchange, the way Paseo's own agent view and every
+        // messaging surface draw it — not as rows about a transcript with
+        // the transcript in a side pane.
+        has_detail: false,
+        transcript: true,
     },
     ModeChrome {
         id: "agent",
@@ -166,6 +179,7 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Say something to the selected agent\u{2026}",
         empty_line: "No agents running.",
         has_detail: false,
+        transcript: false,
     },
     ModeChrome {
         id: "terminal",
@@ -174,6 +188,7 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Type to filter terminals\u{2026}",
         empty_line: "No terminals open \u{2014} start one in Paseo and it appears here.",
         has_detail: true,
+        transcript: false,
     },
     ModeChrome {
         id: "ask",
@@ -182,6 +197,7 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Say what you want done\u{2026}",
         empty_line: "Nothing to show yet.",
         has_detail: false,
+        transcript: false,
     },
     ModeChrome {
         id: "schedule",
@@ -190,6 +206,7 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Type to filter schedules\u{2026}",
         empty_line: "No schedules \u{2014} create one in Paseo and it appears here.",
         has_detail: false,
+        transcript: false,
     },
     ModeChrome {
         id: "usage",
@@ -198,6 +215,7 @@ pub const MODES: &[ModeChrome] = &[
         placeholder: "Claude Code usage",
         empty_line: "No quota to show \u{2014} sign in with `claude`, `codex` or `grok`.",
         has_detail: false,
+        transcript: false,
     },
 ];
 

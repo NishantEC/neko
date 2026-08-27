@@ -3396,6 +3396,54 @@ tiles, and both click handlers, with both directions pinned (a tile with
 `enters_mode` enters the mode carrying its subject; one without still
 activates).
 
+**It is a chat now, and the data source reversed to make that possible.**
+The first conversation view read Paseo's `get_agent_activity` and rendered its
+entries as a list with a detail pane. That source was right about size and
+wrong about shape: **the activity feed has no user turns** (verified live —
+659 activities on a real agent, all of them the agent's own voice), and a
+conversation with one speaker is not a conversation. Both speakers exist on
+disk: a claude agent's Paseo document carries `persistence.sessionId` and
+`cwd`, which together address Claude Code's own session transcript —
+`~/.claude/projects/<munged-cwd>/<sessionId>.jsonl`, chronological, with real
+roles. `conversation.rs` reads the **tail** (`TAIL_BYTES`, sized by
+measurement: 3 MB of a real 32 MB session held only 3 user turns, because
+tool results and pasted images make single lines enormous) and keeps the last
+`TURN_LIMIT` turns. The extraction rules are the load-bearing part and are
+pinned: a `user` line carrying a `tool_result` block is a tool answer, not
+the captain speaking; sidechain and meta lines belong to subagents and the
+harness; an image block leaves an `[image]` marker rather than vanishing; the
+cwd munge (`[^A-Za-z0-9]` → `-`) is verified against the real directory
+listing, not inferred. The activity feed stays as the fallback for non-claude
+agents — one voice is still better than an empty pane.
+
+**The layout is `ModeChrome::transcript`** — a third layout after plain-list
+and list+detail, and the panel branches on chrome, never on the provider id.
+User turns are right-aligned bubbles (max 480px — full-width bubbles read as
+banners), agent turns are full-width markdown, tool calls are one-line chips
+(badge + monospace argument). `SearchItem::speaker` (`"user"`/`"agent"`/
+`"tool"`, `#[serde(default)]`) is the wire vocabulary; rows arrive oldest
+first and the mode **enters at the bottom**, selection on the newest turn,
+gated exactly like the theme mode's landing so a later frame of the same
+conversation never fights a captain who scrolled up to reread (pinned).
+Selection stays a subtle wash — a transcript is read far more than driven —
+and `⌘K`'s "Open in Paseo" still needs to know which turn is meant.
+
+**One layout bug worth keeping: everything overflowed the right edge on the
+first capture.** The transcript sits in `render_mode_content`'s flex *row*,
+where flexbox's `min-width: auto` sizes a child by its content — and a
+paragraph's content width is the unwrapped line. `min_w(0)` on the wrapper is
+what makes text wrap instead of escape; parse tests could never have seen it.
+
+**Verification is seeded files, not hooks**: the isolated evidence `HOME`
+carries a real-shaped agent document plus a real-shaped session jsonl, so the
+entire pipeline — doc resolution, munge, tail read, turn extraction,
+rendering — runs for real on fixture data
+(`docs/evidence/conversation-chat-transcript.png`). Two environment facts
+from getting that capture: a typed query excludes *idle* agents unless the
+`agents-include-idle` preference is on (flipped over the wire in the evidence
+run), and a *running* fixture agent gets lifted into the grid during a search,
+where `NEKO_SHOW_CONFIRM`'s Enter cannot reach it.
+
 An agent row's Enter used to open Paseo. That is right when you want to
 *work* with an agent and wrong when you only want to know what it has been
 doing — switching apps to read three lines is most of the cost of not having

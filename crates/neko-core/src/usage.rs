@@ -652,6 +652,7 @@ impl Provider for UsageProvider {
                     // stays. It hid instead.
                     keeps_open: true,
                     preview_markdown: false,
+                    speaker: None,
                     preview: None,
                 },
             })

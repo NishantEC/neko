@@ -949,6 +949,19 @@ impl Root {
                 self.selected = index;
             }
         }
+        // A transcript is entered at the *bottom* — the newest turn is the
+        // reason you opened it, and every messaging surface agrees. Gated the
+        // same way the theme landing is: the previous highlight not being a
+        // turn is exactly the entering case, so scrolling back up to reread
+        // is never fought by a later frame of the same conversation.
+        let entering_the_transcript = previous.is_none_or(|(kind, _)| kind != "conversation");
+        if entering_the_transcript
+            && self.active_mode().is_some_and(|m| m.chrome.transcript)
+            && !self.results.is_empty()
+        {
+            self.selected = self.results.len() - 1;
+            self.mode_scroll.scroll_to_bottom();
+        }
         // Typing to filter moves the selection just as arrowing does, so it
         // previews too — `preview_selected_theme` is a no-op outside the
         // theme mode and when the selected row is already the live palette.
@@ -2925,8 +2938,18 @@ impl Root {
             .flex_1()
             .min_h(px(0.))
             .overflow_hidden()
-            .child(self.render_mode_list(mode.chrome.has_detail, cx))
-            .when(mode.chrome.has_detail, |el| el.child(self.render_mode_detail()));
+            .map(|el| {
+                // The chat layout replaces the list (and any detail split)
+                // wholesale — a conversation is one scrolling exchange, not
+                // rows about a transcript. Branching on chrome, never on the
+                // provider's id, exactly like `has_detail` below.
+                if mode.chrome.transcript {
+                    el.child(self.render_transcript(mode, cx))
+                } else {
+                    el.child(self.render_mode_list(mode.chrome.has_detail, cx))
+                        .when(mode.chrome.has_detail, |el| el.child(self.render_mode_detail()))
+                }
+            });
         // A one-shot opacity reveal on entry, not a width/geometry
         // transition — the real `NSWindow` still never resizes at runtime
         // (`AGENTS.md`, "Mode view resize seam" — "cost two days"), and
@@ -2943,6 +2966,142 @@ impl Root {
         // entry rather than only the first.
         let reduced = motion::system_reduce_motion();
         motion::fade_in("mode-content-fade", reduced, content)
+    }
+
+    /// The chat transcript — the conversation mode's whole content area.
+    ///
+    /// The shape is Paseo's own agent view (and every messaging surface):
+    /// the captain's turns as right-aligned bubbles, the agent's prose as
+    /// full-width markdown, tool calls as one-line chips between them,
+    /// oldest at the top, entered at the bottom. Rows are still rows — the
+    /// selection, `⌘K` and the scroll machinery are untouched — they just
+    /// paint as turns.
+    fn render_transcript(&self, mode: &ActiveMode, cx: &mut Context<Self>) -> AnyElement {
+        let mut column = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.))
+            .gap(px(10.))
+            .px(px(16.))
+            .py(px(12.))
+            .id("transcript-scroll")
+            .overflow_y_scroll()
+            .track_scroll(&self.mode_scroll);
+
+        if self.results.is_empty() {
+            column = column.child(render_empty_state_message(mode.chrome.empty_line));
+        } else {
+            for (idx, item) in self.results.iter().enumerate() {
+                column = column.child(self.render_turn(idx, item, cx));
+            }
+        }
+
+        let fade_color = if self.translucent {
+            theme::active().surface_panel_translucent
+        } else {
+            theme::active().surface_panel
+        };
+        with_scrollbar(
+            &self.mode_scroll,
+            "transcript-scrollbar",
+            scroll_edge_fade(
+                self.mode_scroll.clone(),
+                fade_color.into(),
+                theme::EDGE_FADE_BAND_PX,
+                column,
+            ),
+        )
+        // **Without this every turn overflows the right edge.** The wrapper
+        // sits in `render_mode_content`'s flex *row*, where flexbox's
+        // `min-width: auto` sizes a child by its content — and a paragraph's
+        // content width is the unwrapped line. Seen in the first capture as
+        // bubbles running past the window; `min_w(0)` is what makes the
+        // column's width the container's, so text wraps instead of escaping.
+        .min_w(px(0.))
+        .into_any_element()
+    }
+
+    /// One turn. The voice comes off `SearchItem::speaker`, the words off
+    /// `preview` — never off which provider produced the row.
+    fn render_turn(&self, idx: usize, item: &SearchItem, cx: &mut Context<Self>) -> AnyElement {
+        let selected = self.row_is_highlighted(idx);
+        let text = item.preview.clone().unwrap_or_else(|| item.title.clone());
+        let body: AnyElement = match item.speaker.as_deref() {
+            Some("user") => div()
+                .flex()
+                .justify_end()
+                .child(
+                    div()
+                        // Two-thirds of the pane, the messaging convention —
+                        // full-width bubbles read as banners, not speech.
+                        .max_w(px(480.))
+                        .min_w(px(0.))
+                        .overflow_hidden()
+                        .px(px(12.))
+                        .py(px(8.))
+                        .rounded(px(10.))
+                        .bg(theme::active().surface_input)
+                        .text_size(px(12.))
+                        .text_color(theme::active().text_primary)
+                        .child(crate::markdown::render(&text)),
+                )
+                .into_any_element(),
+            Some("tool") => div()
+                .flex()
+                .items_center()
+                .gap(px(7.))
+                .pl(px(2.))
+                .text_size(px(11.))
+                .text_color(theme::active().text_tertiary)
+                .children(item.badge.clone().map(|badge| {
+                    div()
+                        .flex_shrink_0()
+                        .px(px(5.))
+                        .py(px(1.))
+                        .rounded(px(4.))
+                        .bg(theme::active().row_icon_socket_bg)
+                        .text_size(px(9.5))
+                        .child(SharedString::from(badge))
+                }))
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .truncate()
+                        .font_family(theme::MONOSPACE_FAMILY)
+                        .text_size(px(10.5))
+                        .child(SharedString::from(text)),
+                )
+                .into_any_element(),
+            // The agent (and anything speakerless): plain prose, full width.
+            _ => div()
+                .text_size(px(12.))
+                .text_color(theme::active().text_primary)
+                .map(|el| {
+                    if item.preview_markdown {
+                        el.child(crate::markdown::render(&text))
+                    } else {
+                        el.child(SharedString::from(text))
+                    }
+                })
+                .into_any_element(),
+        };
+        div()
+            .id(SharedString::from(format!("turn-{idx}")))
+            .rounded(px(theme::ROW_RADIUS_PX))
+            .px(px(6.))
+            .py(px(3.))
+            // The selection is how `⌘K` knows which turn "Open in Paseo"
+            // means; a wash rather than the full selected pill, because a
+            // transcript is read far more than it is driven.
+            .when(selected, |el| el.bg(theme::active().row_icon_socket_bg))
+            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
+                root.selected = idx;
+                root.grid_selected = None;
+                cx.notify();
+            }))
+            .child(body)
+            .into_any_element()
     }
 
     /// The mode's own filtered, time-grouped list — reuses `render_row`
@@ -4015,6 +4174,7 @@ mod tests {
             meter: None,
             keeps_open: false,
             preview_markdown: false,
+            speaker: None,
             preview: None,
         }
     }
@@ -4421,6 +4581,7 @@ mod tests {
             meter: None,
             keeps_open: false,
             preview_markdown: false,
+            speaker: None,
             preview: None,
         }
     }
@@ -4556,6 +4717,57 @@ mod tests {
 
     fn tile(id: &str) -> SearchItem {
         SearchItem { badge: Some("LIVE".to_string()), ..agent_row(id) }
+    }
+
+    #[gpui::test]
+    fn a_transcript_enters_at_its_newest_turn(cx: &mut TestAppContext) {
+        // The newest turn is the reason you opened it — every messaging
+        // surface agrees. The previous highlight (the agent row that was
+        // confirmed to get here) is not a conversation row, which is exactly
+        // what marks the entering case.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![agent_row("the-agent")];
+                root.selected = 0;
+                root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
+                let turns: Vec<SearchItem> = (0..5)
+                    .map(|i| SearchItem {
+                        speaker: Some(if i % 2 == 0 { "user" } else { "agent" }.into()),
+                        ..item_with_id("conversation", &format!("the-agent#{i}"))
+                    })
+                    .collect();
+                root.apply_search_results(turns, true, root.generation, cx);
+                assert_eq!(root.selected, 4, "landed on the newest turn");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn rereading_older_turns_is_not_fought_by_a_refresh(cx: &mut TestAppContext) {
+        // Arrow up to an older turn, then a fresh frame of the same
+        // conversation lands — the selection must follow the turn by
+        // identity, not jump back to the bottom.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![agent_row("the-agent")];
+                root.selected = 0;
+                root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
+                let turns = |n: usize| -> Vec<SearchItem> {
+                    (0..n)
+                        .map(|i| SearchItem {
+                            speaker: Some("agent".into()),
+                            ..item_with_id("conversation", &format!("the-agent#{i}"))
+                        })
+                        .collect()
+                };
+                root.apply_search_results(turns(5), true, root.generation, cx);
+                root.selected = 1; // reread something older
+                root.apply_search_results(turns(5), true, root.generation, cx);
+                assert_eq!(root.selected, 1, "still on the turn being read");
+            })
+            .unwrap();
     }
 
     #[gpui::test]
@@ -4868,6 +5080,7 @@ mod tests {
             meter: None,
             keeps_open: false,
             preview_markdown: false,
+            speaker: None,
             preview: None,
         }
     }
@@ -4964,6 +5177,7 @@ mod tests {
             meter: None,
             keeps_open: false,
             preview_markdown: false,
+            speaker: None,
             preview: None,
         }
     }

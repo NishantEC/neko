@@ -459,6 +459,7 @@ fn build_candidate(score: f32, path: PathBuf, name: String) -> Candidate {
             meter: None,
             keeps_open: false,
             preview_markdown: false,
+            speaker: None,
             preview: None,
         },
     }

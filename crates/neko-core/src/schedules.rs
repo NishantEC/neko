@@ -229,6 +229,7 @@ impl Provider for SchedulesProvider {
                         // re-enter the mode to find out what it did.
                         keeps_open: true,
                         preview_markdown: false,
+                        speaker: None,
                         preview: None,
                     },
                 })

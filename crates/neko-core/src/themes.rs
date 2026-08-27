@@ -139,6 +139,7 @@ impl Provider for ThemesProvider {
                         meter: None,
                         keeps_open: false,
                         preview_markdown: false,
+                        speaker: None,
                         preview: None,
                     },
                 })

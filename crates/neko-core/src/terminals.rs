@@ -299,6 +299,7 @@ impl Provider for TerminalsProvider {
                         keeps_open: false,
                         preview,
                         preview_markdown: false,
+                        speaker: None,
                     },
                 })
             })

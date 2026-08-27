@@ -20,14 +20,29 @@
 //! searching *within* a conversation would need a second query channel the
 //! protocol does not have.
 //!
-//! ## Why the daemon's summary rather than the raw transcript
+//! ## The transcript, not the activity feed — a reversal, and why
 //!
-//! Claude Code writes its own transcript to
-//! `~/.claude/projects/<cwd>/<session>.jsonl`, and this machine's is **13 MB**
-//! for one session. Paseo's `get_agent_activity` returns a curated summary of
-//! the same thing — tool calls reduced to `[Write] path`, the agent's own
-//! prose kept — which is what a person reading a panel actually wants, and it
-//! arrives over a channel neko already speaks.
+//! The first version of this read Paseo's `get_agent_activity`, reasoning
+//! that a curated summary beats a 13 MB raw transcript. That was right about
+//! the size and wrong about the shape: **the activity feed has no user
+//! turns** (verified against a live agent — 659 activities, all of them the
+//! agent's own prose and tool calls), and a conversation with one voice is
+//! not a conversation. The captain asked for a chat like Paseo's own agent
+//! view, and a chat needs both speakers.
+//!
+//! Both speakers exist on disk. A claude agent's Paseo document carries
+//! `persistence.sessionId` and `cwd`, which is exactly the address of Claude
+//! Code's own session transcript —
+//! `~/.claude/projects/<munged-cwd>/<sessionId>.jsonl` — chronological, with
+//! real roles. The 13 MB problem is answered by reading the **tail**: the
+//! last [`TAIL_BYTES`] of the file, parsed forward, keeping the last
+//! [`TURN_LIMIT`] turns. No subprocess, no MCP round trip, no daemon that
+//! has to be running.
+//!
+//! The activity feed stays as the **fallback** — a non-claude agent, or a
+//! transcript file that is not where the document says — because one voice
+//! is still better than an empty pane, and the fallback marks itself by
+//! having no user turns rather than by an error.
 
 use neko_protocol::{Glyph, Icon, ItemAction, SearchItem};
 use serde_json::{Value, json};
@@ -62,7 +77,292 @@ pub struct Entry {
     pub body: Option<String>,
 }
 
-static CACHE: Mutex<Option<(Instant, String, Vec<Entry>)>> = Mutex::new(None);
+/// How many turns of the transcript to show.
+///
+/// A chat pane, not a log viewer — the recent exchange is what you came to
+/// read, and `updateCount` on a real agent here is four digits.
+const TURN_LIMIT: usize = 40;
+
+/// How much of the transcript's tail to read.
+///
+/// Sized by measurement, not taste: 3 MB of a real 32 MB session held 3 user
+/// turns and 19 agent messages, because tool results and pasted images make
+/// single lines enormous. 4 MB comfortably covers [`TURN_LIMIT`] turns of
+/// real traffic while keeping the read trivial.
+const TAIL_BYTES: u64 = 4 * 1024 * 1024;
+
+static CACHE: Mutex<Option<(Instant, String, Vec<Turn>)>> = Mutex::new(None);
+
+/// One voice's turn in the conversation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Turn {
+    pub speaker: Speaker,
+    pub text: String,
+    /// The tool's name, for `Speaker::Tool` turns; the badge on the row.
+    pub tool: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Speaker {
+    User,
+    Agent,
+    Tool,
+}
+
+impl Speaker {
+    /// The wire value `SearchItem::speaker` carries.
+    pub fn wire(self) -> &'static str {
+        match self {
+            Speaker::User => "user",
+            Speaker::Agent => "agent",
+            Speaker::Tool => "tool",
+        }
+    }
+}
+
+/// Where a claude agent's real transcript lives, resolved from its Paseo
+/// document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SessionRef {
+    provider: String,
+    session_id: String,
+    cwd: String,
+}
+
+/// The one agent document, found by filename under `~/.paseo/agents/*/`.
+fn session_ref(agent_id: &str) -> Option<SessionRef> {
+    let home = std::env::var_os("HOME")?;
+    let root = std::path::PathBuf::from(home).join(".paseo/agents");
+    let workspaces = std::fs::read_dir(root).ok()?;
+    for workspace in workspaces.flatten() {
+        let doc_path = workspace.path().join(format!("{agent_id}.json"));
+        let Ok(raw) = std::fs::read_to_string(&doc_path) else { continue };
+        let Ok(doc) = serde_json::from_str::<Value>(&raw) else { continue };
+        let provider = doc.get("provider").and_then(Value::as_str)?.to_string();
+        let cwd = doc.get("cwd").and_then(Value::as_str)?.to_string();
+        let session_id = doc
+            .get("persistence")
+            .and_then(|p| p.get("sessionId"))
+            .and_then(Value::as_str)?
+            .to_string();
+        return Some(SessionRef { provider, session_id, cwd });
+    }
+    None
+}
+
+/// Claude Code's project-directory encoding of a working directory: every
+/// character outside `[A-Za-z0-9]` becomes `-`, leading slash included —
+/// `/Users/nish/Documents/neko` → `-Users-nish-Documents-neko`, and a dotted
+/// path like `/Users/nish/.openclaw/workspace` →
+/// `-Users-nish--openclaw-workspace` (both verified against the real
+/// directory listing, not inferred).
+pub fn munge_cwd(cwd: &str) -> String {
+    cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+}
+
+fn transcript_path(session: &SessionRef) -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(
+        std::path::PathBuf::from(home)
+            .join(".claude/projects")
+            .join(munge_cwd(&session.cwd))
+            .join(format!("{}.jsonl", session.session_id)),
+    )
+}
+
+/// The last `TAIL_BYTES` of the transcript, as a string starting at a line
+/// boundary.
+fn read_tail(path: &std::path::Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(TAIL_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).ok()?;
+    if start > 0 {
+        // Sought into the middle of a line; drop the partial one.
+        if let Some(nl) = buf.find('\n') {
+            buf.drain(..=nl);
+        }
+    }
+    Some(buf)
+}
+
+/// Whether a user line's text is harness noise rather than something the
+/// captain typed — command caveats, slash-command echoes, injected reminders.
+fn is_user_noise(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with("<local-command")
+        || t.starts_with("<command-name")
+        || t.starts_with("<system-reminder")
+        || t.starts_with("Caveat:")
+}
+
+/// One line describing a tool call: the name, then the most human of its
+/// arguments. The argument keys are Claude Code's own tool vocabulary,
+/// probed in preference order — a `description` reads better than a raw
+/// command, a `command` better than nothing.
+fn tool_line(input: &Value) -> Option<String> {
+    for key in ["description", "command", "file_path", "prompt", "pattern", "query", "url"] {
+        if let Some(v) = input.get(key).and_then(Value::as_str) {
+            let mut line = v.trim().replace('\n', " ");
+            if line.chars().count() > 90 {
+                line = line.chars().take(90).collect::<String>() + "\u{2026}";
+            }
+            return Some(line);
+        }
+    }
+    None
+}
+
+/// Parses the transcript tail into turns, keeping the last [`TURN_LIMIT`].
+///
+/// Pure over the string, so the extraction rules — the ones that decide what
+/// counts as the captain speaking — are pinned without a 32 MB fixture:
+/// a `user` line whose content carries a `tool_result` block is a tool
+/// answer, not a human turn; sidechain and meta lines belong to subagents
+/// and the harness; an image block becomes an `[image]` marker rather than
+/// vanishing.
+pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
+    let mut turns = Vec::new();
+    for line in tail.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(doc) = serde_json::from_str::<Value>(line) else { continue };
+        if doc.get("isSidechain").and_then(Value::as_bool).unwrap_or(false)
+            || doc.get("isMeta").and_then(Value::as_bool).unwrap_or(false)
+        {
+            continue;
+        }
+        let Some(message) = doc.get("message") else { continue };
+        match doc.get("type").and_then(Value::as_str) {
+            Some("user") => {
+                let text = match message.get("content") {
+                    Some(Value::String(text)) => text.clone(),
+                    Some(Value::Array(blocks)) => {
+                        if blocks.iter().any(|b| {
+                            b.get("type").and_then(Value::as_str) == Some("tool_result")
+                        }) {
+                            continue;
+                        }
+                        let mut text = String::new();
+                        for block in blocks {
+                            match block.get("type").and_then(Value::as_str) {
+                                Some("text") => {
+                                    if let Some(t) = block.get("text").and_then(Value::as_str) {
+                                        if !text.is_empty() {
+                                            text.push('\n');
+                                        }
+                                        text.push_str(t);
+                                    }
+                                }
+                                Some("image") => {
+                                    if !text.is_empty() {
+                                        text.push('\n');
+                                    }
+                                    text.push_str("[image]");
+                                }
+                                _ => {}
+                            }
+                        }
+                        text
+                    }
+                    _ => continue,
+                };
+                let text = text.trim().to_string();
+                if text.is_empty() || is_user_noise(&text) {
+                    continue;
+                }
+                turns.push(Turn { speaker: Speaker::User, text, tool: None });
+            }
+            Some("assistant") => {
+                let Some(Value::Array(blocks)) = message.get("content") else { continue };
+                for block in blocks {
+                    match block.get("type").and_then(Value::as_str) {
+                        Some("text") => {
+                            let text = block
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string();
+                            if !text.is_empty() {
+                                turns.push(Turn { speaker: Speaker::Agent, text, tool: None });
+                            }
+                        }
+                        Some("tool_use") => {
+                            let name = block
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or("tool")
+                                .to_string();
+                            let text = block
+                                .get("input")
+                                .and_then(tool_line)
+                                .unwrap_or_default();
+                            turns.push(Turn {
+                                speaker: Speaker::Tool,
+                                text,
+                                tool: Some(name),
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if turns.len() > TURN_LIMIT {
+        turns.drain(..turns.len() - TURN_LIMIT);
+    }
+    turns
+}
+
+/// The activity-feed fallback's entries, as one-voice turns.
+fn turns_from_entries(entries: Vec<Entry>) -> Vec<Turn> {
+    entries
+        .into_iter()
+        // The feed arrives newest-first; a chat reads oldest-first.
+        .rev()
+        .map(|entry| match split_tool(&entry.headline) {
+            Some((tool, argument)) => Turn {
+                speaker: Speaker::Tool,
+                text: argument.to_string(),
+                tool: Some(tool.to_string()),
+            },
+            None => Turn {
+                speaker: Speaker::Agent,
+                text: match &entry.body {
+                    Some(body) => format!("{}\n\n{body}", entry.headline),
+                    None => entry.headline.clone(),
+                },
+                tool: None,
+            },
+        })
+        .collect()
+}
+
+/// Every turn for `agent_id`: the real transcript when the agent is claude
+/// and the file is where its document says, the activity feed otherwise.
+fn fetch_turns(agent_id: &str) -> Vec<Turn> {
+    if let Some(session) = session_ref(agent_id)
+        && session.provider == "claude"
+        && let Some(path) = transcript_path(&session)
+        && let Some(tail) = read_tail(&path)
+    {
+        let turns = parse_transcript_tail(&tail);
+        if !turns.is_empty() {
+            return turns;
+        }
+    }
+    let Ok(client) = McpClient::discover() else { return Vec::new() };
+    turns_from_entries(fetch(&client, agent_id).unwrap_or_default())
+}
+
 
 /// Splits the daemon's `content` blob into readable entries.
 ///
@@ -148,18 +448,17 @@ impl Provider for ConversationProvider {
         if agent_id.is_empty() || !self.live {
             return Vec::new();
         }
-        let entries = {
+        let turns = {
             let cached = CACHE
                 .lock()
                 .unwrap()
                 .as_ref()
                 .filter(|(at, id, _)| at.elapsed() < CACHE_TTL && id == agent_id)
-                .map(|(_, _, entries)| entries.clone());
+                .map(|(_, _, turns)| turns.clone());
             match cached {
-                Some(entries) => entries,
+                Some(turns) => turns,
                 None => {
-                    let Ok(client) = McpClient::discover() else { return Vec::new() };
-                    let fresh = fetch(&client, agent_id).unwrap_or_default();
+                    let fresh = fetch_turns(agent_id);
                     *CACHE.lock().unwrap() =
                         Some((Instant::now(), agent_id.to_string(), fresh.clone()));
                     fresh
@@ -167,42 +466,37 @@ impl Provider for ConversationProvider {
             }
         };
 
-        let count = entries.len();
-        entries
+        let count = turns.len();
+        turns
             .iter()
             .enumerate()
-            .map(|(rank, entry)| {
-                let (title, subtitle, badge) = match split_tool(&entry.headline) {
-                    Some((tool, argument)) => (
-                        argument.to_string(),
-                        entry.body.clone(),
-                        Some(tool.to_uppercase()),
-                    ),
-                    // Prose: the agent's own words lead, and the rest of the
-                    // paragraph follows.
-                    None => (entry.headline.clone(), entry.body.clone(), None),
-                };
+            .map(|(rank, turn)| {
+                let first_line =
+                    turn.text.lines().next().unwrap_or_default().trim().to_string();
                 Candidate {
-                    // Newest first, preserved as descending scores because
-                    // `allocate` ranks by score and has no reason to know
-                    // this arrived in order.
+                    // **Chronological, oldest first** — a chat reads downward
+                    // into the present. The daemon's scoped branch sorts by
+                    // score descending, so the oldest turn takes the highest.
                     score: (count - rank) as f32,
                     item: SearchItem {
                         // The index, because two identical shell commands are
-                        // genuinely two different entries and
+                        // genuinely two different turns and
                         // `resolve_selection` follows `(kind, id)`.
                         id: format!("{agent_id}#{rank}"),
                         kind: "conversation".to_string(),
-                        title: if title.is_empty() { entry.headline.clone() } else { title },
-                        subtitle,
+                        title: if first_line.is_empty() {
+                            turn.tool.clone().unwrap_or_else(|| "\u{2026}".to_string())
+                        } else {
+                            first_line
+                        },
+                        subtitle: None,
                         icon: Icon::Glyph(Glyph::Text),
                         section_label: "Conversation".to_string(),
-                        // Nothing here is an action. Enter on a line of a
-                        // transcript has no meaning, and inventing one — jump
-                        // to the file, re-run the command — would be guessing
-                        // at intent on a read-only surface.
+                        // Nothing here is an action. Enter on a turn of a
+                        // transcript has no meaning, and inventing one would
+                        // be guessing at intent on a read-only surface.
                         action_label: "Reading".to_string(),
-                        badge,
+                        badge: turn.tool.as_ref().map(|t| t.to_uppercase()),
                         accessory: None,
                         enters_mode: None,
                         group_label: None,
@@ -214,19 +508,11 @@ impl Provider for ConversationProvider {
                         source: None,
                         meter: None,
                         keeps_open: true,
-                        // **An agent writes markdown**, and until the client
-                        // could render it every heading, fence and bullet
-                        // showed its raw markers. The one non-markdown shape
-                        // here — a `[Tool] argument` headline — survives a
-                        // markdown pass unchanged, since a bracketed span with
-                        // no `(` after it is not link syntax.
-                        preview_markdown: true,
-                        // The full text, for the detail pane, so a long reply
-                        // is readable rather than truncated into a row.
-                        preview: Some(match &entry.body {
-                            Some(body) => format!("{}\n\n{body}", entry.headline),
-                            None => entry.headline.clone(),
-                        }),
+                        // A turn's own words render as markdown; a tool call
+                        // is a typed line, not prose.
+                        preview_markdown: turn.speaker != Speaker::Tool,
+                        speaker: Some(turn.speaker.wire().to_string()),
+                        preview: Some(turn.text.clone()),
                     },
                 }
             })
@@ -253,6 +539,108 @@ impl Provider for ConversationProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Real line shapes from a live session file, values swapped for fixtures.
+    fn jsonl(lines: &[&str]) -> String {
+        lines.join("\n")
+    }
+
+    #[test]
+    fn a_transcript_becomes_both_voices_in_order() {
+        let tail = jsonl(&[
+            r#"{"type":"user","message":{"role":"user","content":"make the logo bigger"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done - it is **2x** now."},{"type":"tool_use","name":"Bash","input":{"command":"cargo test"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"ship it"}]}}"#,
+        ]);
+        let turns = parse_transcript_tail(&tail);
+        let shape: Vec<(Speaker, &str)> =
+            turns.iter().map(|t| (t.speaker, t.text.as_str())).collect();
+        assert_eq!(
+            shape,
+            vec![
+                (Speaker::User, "make the logo bigger"),
+                (Speaker::Agent, "Done - it is **2x** now."),
+                (Speaker::Tool, "cargo test"),
+                (Speaker::User, "ship it"),
+            ]
+        );
+        assert_eq!(turns[2].tool.as_deref(), Some("Bash"));
+    }
+
+    #[test]
+    fn a_tool_result_is_not_the_captain_speaking() {
+        // Claude Code files tool results as `user` lines; rendering one as a
+        // user bubble would put the output of `ls` in the captain's mouth.
+        let tail = jsonl(&[
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","content":"src lib.rs"}]}}"#,
+        ]);
+        assert!(parse_transcript_tail(&tail).is_empty());
+    }
+
+    #[test]
+    fn sidechain_meta_and_harness_noise_stay_out_of_the_chat() {
+        let tail = jsonl(&[
+            r#"{"type":"user","isSidechain":true,"message":{"content":"subagent chatter"}}"#,
+            r#"{"type":"user","isMeta":true,"message":{"content":"meta line"}}"#,
+            r#"{"type":"user","message":{"content":"<local-command-caveat>...</local-command-caveat>"}}"#,
+            r#"{"type":"user","message":{"content":"Caveat: the messages below were generated..."}}"#,
+            r#"{"type":"user","message":{"content":"a real question"}}"#,
+        ]);
+        let turns = parse_transcript_tail(&tail);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].text, "a real question");
+    }
+
+    #[test]
+    fn an_image_leaves_a_marker_rather_than_vanishing() {
+        // "look at this [image]" with the image dropped silently would read
+        // as the captain pointing at nothing.
+        let tail = jsonl(&[
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"look at this"},{"type":"image","source":{}}]}}"#,
+        ]);
+        let turns = parse_transcript_tail(&tail);
+        assert_eq!(turns[0].text, "look at this\n[image]");
+    }
+
+    #[test]
+    fn only_the_last_turn_limit_turns_survive() {
+        let lines: Vec<String> = (0..60)
+            .map(|i| format!(r#"{{"type":"user","message":{{"content":"turn {i}"}}}}"#))
+            .collect();
+        let tail = lines.join("\n");
+        let turns = parse_transcript_tail(&tail);
+        assert_eq!(turns.len(), TURN_LIMIT);
+        assert_eq!(turns.last().unwrap().text, "turn 59", "the newest survive");
+    }
+
+    #[test]
+    fn the_cwd_munge_matches_claude_codes_own_directory_names() {
+        // Both verified against the real ~/.claude/projects listing.
+        assert_eq!(munge_cwd("/Users/nish/Documents/neko"), "-Users-nish-Documents-neko");
+        assert_eq!(munge_cwd("/Users/nish/.openclaw/workspace"), "-Users-nish--openclaw-workspace");
+    }
+
+    #[test]
+    fn a_tool_call_line_prefers_the_most_human_argument() {
+        let input = serde_json::json!({"command": "cargo test -p neko", "description": "Run the tests"});
+        assert_eq!(tool_line(&input).as_deref(), Some("Run the tests"));
+        let bare = serde_json::json!({"file_path": "/a/b.rs"});
+        assert_eq!(tool_line(&bare).as_deref(), Some("/a/b.rs"));
+    }
+
+    #[test]
+    fn the_activity_fallback_reads_oldest_first_like_the_transcript() {
+        // The feed arrives newest-first; the chat reads downward into the
+        // present, so the fallback must flip it.
+        let entries = vec![
+            Entry { headline: "newest prose".into(), body: None },
+            Entry { headline: "[Shell] older command".into(), body: None },
+        ];
+        let turns = turns_from_entries(entries);
+        assert_eq!(turns[0].speaker, Speaker::Tool);
+        assert_eq!(turns[1].text, "newest prose");
+    }
+
 
     /// Verbatim from a live `get_agent_activity` on this machine, trimmed.
     const REAL: &str = "Showing 6 of 1046 activities (limited to 6)\n\n\

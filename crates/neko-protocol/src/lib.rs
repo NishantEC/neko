@@ -312,6 +312,14 @@ pub struct SearchItem {
     /// which every pre-existing provider already meant.
     #[serde(default)]
     pub preview_markdown: bool,
+    /// Who a conversation turn belongs to — `"user"`, `"agent"`, or `"tool"`.
+    ///
+    /// Read only by the transcript layout (`ModeChrome::transcript`); `None`
+    /// everywhere else. Same bounded-vocabulary rule as `Icon`/`Meter`/
+    /// `preview_markdown`: the provider states which voice a row speaks in,
+    /// the client owns entirely what a voice looks like.
+    #[serde(default)]
+    pub speaker: Option<String>,
 }
 
 /// A 0..=1 reading plus the labelled values that explain it. See
