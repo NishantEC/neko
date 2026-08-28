@@ -848,6 +848,11 @@ impl Root {
         // captain may have pressed Down, so "what is highlighted right now"
         // is the only correct thing for `resolve_selection` to follow.
         let previously_selected = self.results.get(self.selected).map(|item| (item.kind.clone(), item.id.clone()));
+        // For the transcript's stick-to-bottom rule below: whether the
+        // highlight sat on the newest turn *before* this frame replaced the
+        // list. Computed here because afterwards there is no "before".
+        let previously_selected_was_last =
+            !self.results.is_empty() && self.selected == self.results.len() - 1;
 
         // The mode list scrolls (`edge_fade::scroll_edge_fade` in
         // `render_mode_list`) rather than being budget-fit like the root
@@ -955,12 +960,18 @@ impl Root {
         // turn is exactly the entering case, so scrolling back up to reread
         // is never fought by a later frame of the same conversation.
         let entering_the_transcript = previous.is_none_or(|(kind, _)| kind != "conversation");
-        if entering_the_transcript
-            && self.active_mode().is_some_and(|m| m.chrome.transcript)
-            && !self.results.is_empty()
-        {
-            self.selected = self.results.len() - 1;
-            self.mode_scroll.scroll_to_bottom();
+        let was_on_newest_turn = previously_selected_was_last;
+        if self.active_mode().is_some_and(|m| m.chrome.transcript) && !self.results.is_empty() {
+            // Entering lands at the bottom; and **being at the bottom is
+            // sticky**, the way every chat is: reading the newest turn when a
+            // newer one arrives means following it down. Reading an *older*
+            // turn is the one state a refresh must not disturb — that case
+            // falls through to `resolve_selection`'s ordinary follow-the-row
+            // rule above, pinned by its own test.
+            if entering_the_transcript || was_on_newest_turn {
+                self.selected = self.results.len() - 1;
+                self.mode_scroll.scroll_to_bottom();
+            }
         }
         // Typing to filter moves the selection just as arrowing does, so it
         // previews too — `preview_selected_theme` is a no-op outside the
@@ -1187,6 +1198,24 @@ impl Root {
             self.confirm_menu_action(window, cx);
             return;
         }
+        // **In a transcript mode, Enter is the composer's send** — never the
+        // selected turn's own action. The draft goes to the mode's subject
+        // (the agent), the field clears immediately the way every messaging
+        // surface clears it, and the panel stays open: the reply is the
+        // point. An empty draft swallows the keystroke rather than acting on
+        // a turn, because acting on a turn is not a thing (`activate` is a
+        // read-only no-op) and "Enter did something invisible" is worse than
+        // "Enter did nothing".
+        if let Some(mode) = self.active_mode()
+            && mode.chrome.transcript
+        {
+            let Some(request) = self.transcript_send_request(cx) else {
+                return;
+            };
+            self.text_field.update(cx, |field, cx| field.set_content("", cx));
+            self.perform_activation(request, false, cx);
+            return;
+        }
         // A focused tile owns Enter — the grid is part of the same
         // selection run, so the row underneath must not act instead.
         if let Some(tile) = self.grid_selected
@@ -1268,6 +1297,26 @@ impl Root {
         // already take, which also re-runs the search — exactly what makes
         // the proposal appear where the invitation was.
         self.perform_activation(request, !item.keeps_open, cx);
+    }
+
+    /// The composer's send, or `None` when there is nothing to send.
+    ///
+    /// Its own method for the same reason `primary_activation_request` is:
+    /// a test can assert exactly what goes on the wire — the *subject* as the
+    /// id, never the selected turn — without a daemon to answer it.
+    fn transcript_send_request(&self, cx: &Context<Self>) -> Option<Request> {
+        let mode = self.active_mode().filter(|m| m.chrome.transcript)?;
+        let subject = mode.subject.clone()?;
+        let draft = self.query(cx);
+        if draft.trim().is_empty() {
+            return None;
+        }
+        Some(Request::Activate {
+            kind: mode.chrome.provider_id.to_string(),
+            id: subject,
+            action: None,
+            query: draft,
+        })
     }
 
     /// The `Request::Activate` a row's primary action sends.
@@ -1655,6 +1704,40 @@ impl Root {
             // takes the mode branch immediately, not the root-list one.
             field.set_content("", cx);
         });
+        // **A transcript refreshes itself while it is open.** The agent is
+        // usually still typing when you are reading — that is the whole
+        // reason to open it — and a chat that only updates when you press a
+        // key is a page, not a chat. The loop dies with the mode: it checks
+        // on every tick that this exact mode and subject are still active,
+        // so exiting, switching agents, or dismissing the panel all end it
+        // without a cancellation channel. 2.5s, deliberately just above the
+        // provider's own 2s cache so most ticks are answered from a fresh
+        // read rather than piling tail-reads on the daemon.
+        if chrome.transcript {
+            let subject_now = self.active_mode.as_ref().and_then(|m| m.subject.clone());
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(2500))
+                        .await;
+                    let still_reading = this
+                        .update(cx, |root, cx| {
+                            let live = root.active_mode().is_some_and(|m| {
+                                m.chrome.transcript && m.subject == subject_now
+                            });
+                            if live {
+                                root.run_search(cx);
+                            }
+                            live
+                        })
+                        .unwrap_or(false);
+                    if !still_reading {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
         cx.notify();
     }
 
@@ -2011,11 +2094,23 @@ impl Render for Root {
             // keeps its `.border_1()` above for edge definition.
             // See `docs/evidence/panel-shadow-tent-fix-report.md`.
             .overflow_hidden()
-            .child(self.render_input_row(cx))
-            // A hairline between the field and everything it produces, so
-            // the query reads as the thing driving the list rather than the
-            // first item in it.
-            .child(div().h(px(1.)).flex_shrink_0().bg(theme::active().border_hairline))
+            // **A transcript mode inverts the panel: exchange on top,
+            // composer at the bottom** — where every messaging surface puts
+            // it, and where a field whose Enter *sends* belongs. Everywhere
+            // else the field stays on top, because there it is a query and
+            // the list is its result. Same entity either way; only the child
+            // order changes, so focus, editing and the caret carry over.
+            .map(|el| {
+                let composer_at_bottom =
+                    self.active_mode().is_some_and(|m| m.chrome.transcript);
+                let hairline =
+                    div().h(px(1.)).flex_shrink_0().bg(theme::active().border_hairline);
+                if composer_at_bottom {
+                    el
+                } else {
+                    el.child(self.render_input_row(cx)).child(hairline)
+                }
+            })
             // **The `⌘K` menu's anchor.** It used to hang off the footer's
             // "Actions ⌘K" trigger; with the footer gone it needs a pin of
             // its own, or `open_actions_menu` would set state that nothing
@@ -2041,6 +2136,18 @@ impl Render for Root {
             .child(match self.active_mode() {
                 Some(mode) => self.render_mode_content(mode, cx),
                 None => self.render_content_area(cx, query_is_empty).into_any_element(),
+            })
+            // The transcript mode's composer — the same input row, below the
+            // exchange. See the top of this chain for the inversion rule.
+            .map(|el| {
+                if self.active_mode().is_some_and(|m| m.chrome.transcript) {
+                    el.child(
+                        div().h(px(1.)).flex_shrink_0().bg(theme::active().border_hairline),
+                    )
+                    .child(self.render_input_row(cx))
+                } else {
+                    el
+                }
             })
     }
 }
@@ -2255,6 +2362,22 @@ impl Root {
             }))
             .when(self.activation_error.is_none(), |row| {
                 row
+                    // The composer's own verb. Shown only when Enter would
+                    // genuinely send — an empty draft's Enter is swallowed,
+                    // and a hint for a swallowed keystroke would be a lie.
+                    .when(
+                        self.active_mode().is_some_and(|m| m.chrome.transcript)
+                            && !self.text_field.read(cx).content().trim().is_empty(),
+                        |row| {
+                            row.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_size(px(12.))
+                                    .text_color(theme::active().text_secondary)
+                                    .child("Send  \u{21b5}"),
+                            )
+                        },
+                    )
                     // **A hint is not an affordance.** `⌘K` was rendered as
                     // static text, so the actions menu — Kill terminal,
                     // Delete schedule, Archive, every session mode — could
@@ -4717,6 +4840,93 @@ mod tests {
 
     fn tile(id: &str) -> SearchItem {
         SearchItem { badge: Some("LIVE".to_string()), ..agent_row(id) }
+    }
+
+    #[gpui::test]
+    fn enter_in_a_transcript_sends_the_draft_to_the_subject_not_the_turn(
+        cx: &mut TestAppContext,
+    ) {
+        // The selected row is whatever turn happens to be highlighted; the
+        // message goes to the *agent*. Building the request off the row would
+        // send the prompt to "agent#7", which the daemon would refuse — or
+        // worse, quietly no-op, since a turn row's activate is Ok(()).
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![agent_row("the-agent")];
+                root.selected = 0;
+                root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
+                root.text_field.update(cx, |field, cx| field.set_content("run the tests", cx));
+                let request = root.transcript_send_request(cx).expect("a draft to send");
+                match request {
+                    Request::Activate { kind, id, action, query } => {
+                        assert_eq!(kind, "conversation");
+                        assert_eq!(id, "the-agent", "the subject, never the selected turn");
+                        assert_eq!(action, None);
+                        assert_eq!(query, "run the tests");
+                    }
+                    other => panic!("not an activation: {other:?}"),
+                }
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn an_empty_draft_swallows_enter_rather_than_acting_on_a_turn(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![agent_row("the-agent")];
+                root.selected = 0;
+                root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
+                assert!(root.transcript_send_request(cx).is_none());
+                root.confirm(&Confirm, window, cx);
+                assert!(!root.activating, "nothing was sent and nothing was activated");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn sending_clears_the_field_like_every_messaging_surface(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![agent_row("the-agent")];
+                root.selected = 0;
+                root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
+                root.text_field.update(cx, |field, cx| field.set_content("hello there", cx));
+                root.confirm(&Confirm, window, cx);
+                assert_eq!(root.text_field.read(cx).content(), "", "cleared on send");
+                assert!(root.activating, "and the send is in flight");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn reading_the_newest_turn_follows_new_turns_down(cx: &mut TestAppContext) {
+        // Being at the bottom is sticky, the way every chat is. Reading an
+        // older turn is the one state a refresh must not disturb — that case
+        // is pinned by `rereading_older_turns_is_not_fought_by_a_refresh`.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![agent_row("the-agent")];
+                root.selected = 0;
+                root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
+                let turns = |n: usize| -> Vec<SearchItem> {
+                    (0..n)
+                        .map(|i| SearchItem {
+                            speaker: Some("agent".into()),
+                            ..item_with_id("conversation", &format!("the-agent#{i}"))
+                        })
+                        .collect()
+                };
+                root.apply_search_results(turns(3), true, root.generation, cx);
+                assert_eq!(root.selected, 2, "entered at the bottom");
+                root.apply_search_results(turns(5), true, root.generation, cx);
+                assert_eq!(root.selected, 4, "followed the new turns down");
+            })
+            .unwrap();
     }
 
     #[gpui::test]

@@ -62,11 +62,13 @@ const ACTIVITY_LIMIT: usize = 12;
 
 /// How long a fetched conversation stays good.
 ///
-/// Longer than the terminal capture's two seconds: a terminal is a live
-/// screen, a conversation is a record, and an agent that says something new
-/// while you are reading has not invalidated what you were reading. Short
-/// enough that re-entering the mode shows a fresh answer.
-const CACHE_TTL: Duration = Duration::from_secs(10);
+/// Two seconds now, down from ten: the moment the mode grew a composer this
+/// stopped being a record and became a live exchange — the client polls
+/// while the mode is open so replies stream in, and ten seconds of staleness
+/// reads as the agent ignoring you. The cost is bounded by what this
+/// protects: one ~4 MB tail read per expiry, only while a conversation is
+/// actually on screen.
+const CACHE_TTL: Duration = Duration::from_secs(2);
 
 /// One thing the agent did or said.
 #[derive(Debug, Clone, PartialEq)]
@@ -522,6 +524,33 @@ impl Provider for ConversationProvider {
     /// Enter does nothing, deliberately — a transcript line is something to
     /// read, not something to run.
     fn activate(&self, _id: &str) -> Result<(), ProviderError> {
+        Ok(())
+    }
+
+    /// The composer's send: `id` is the **agent** (the mode's subject, no
+    /// `#rank`), `query` is what was typed.
+    ///
+    /// A turn row's own Enter still arrives here too — with its `agent#rank`
+    /// id — and stays a no-op, because a transcript line is something to
+    /// read. The two are distinguished by the id's shape, which is the same
+    /// convention `perform_action` already reads it by.
+    fn activate_with_query(&self, id: &str, query: &str) -> Result<(), ProviderError> {
+        if id.contains('#') {
+            return Ok(());
+        }
+        let prompt = query.trim();
+        if prompt.is_empty() {
+            return Err(ProviderError("type a message first".to_string()));
+        }
+        let client = McpClient::discover()
+            .map_err(|e| ProviderError(e.to_string()))?;
+        client
+            .call("send_agent_prompt", crate::agents::send_prompt_arguments(id, prompt))
+            .map_err(|e| ProviderError(e.to_string()))?;
+        // The sent message lands in the transcript the moment the harness
+        // writes it; a cache serving the pre-send read for another two
+        // seconds would make the send look swallowed.
+        *CACHE.lock().unwrap() = None;
         Ok(())
     }
 

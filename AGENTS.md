@@ -3434,6 +3434,27 @@ where flexbox's `min-width: auto` sizes a child by its content — and a
 paragraph's content width is the unwrapped line. `min_w(0)` on the wrapper is
 what makes text wrap instead of escape; parse tests could never have seen it.
 
+**The composer — the mode is a chat you can talk in now, not just read.**
+The panel *inverts* for a transcript mode: exchange on top, the same input
+row at the bottom, where a field whose Enter sends belongs — same `TextField`
+entity either way, so focus and editing carry over; only child order changes.
+Typing drafts (the scoped search still sends the subject, so keystrokes never
+touch the list); Enter sends the draft to the **subject** via
+`Request::Activate { kind: "conversation", id: subject, query }` —
+`transcript_send_request` is its own method so the test asserts the id is the
+agent and never the selected turn, which would quietly no-op. The field
+clears on send like every messaging surface; an empty draft swallows Enter
+rather than acting on a turn. `ConversationProvider::activate_with_query`
+routes by id shape (`agent#rank` stays a read-only no-op) and **invalidates
+the cache on send**, so the sent bubble appears on the next frame.
+`CACHE_TTL` dropped 10s → 2s, and `enter_mode_about` spawns a 2.5s poll loop
+that dies with the mode (checked per tick against the exact mode+subject —
+no cancellation channel needed), so replies stream in. **Being at the bottom
+is sticky** (reading the newest turn follows new turns down, pinned) while
+reading an older turn is never disturbed (also pinned).
+`docs/evidence/conversation-composer.png` — bubbles, GREP/TASK chips, and
+the composer carrying a typed draft with its `Send ↵` hint.
+
 **Verification is seeded files, not hooks**: the isolated evidence `HOME`
 carries a real-shaped agent document plus a real-shaped session jsonl, so the
 entire pipeline — doc resolution, munge, tail read, turn extraction,
