@@ -163,7 +163,7 @@ pub const MODES: &[ModeChrome] = &[
         id: "conversation",
         provider_id: "conversation",
         title: "Conversation",
-        placeholder: "Reading the conversation\u{2026}",
+        placeholder: "Message this agent\u{2026}",
         empty_line: "This agent has not said anything yet.",
         // The chat layout, not list+detail: a conversation is read as one
         // scrolling exchange, the way Paseo's own agent view and every

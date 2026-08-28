@@ -1,6 +1,10 @@
 # neko.icns
 
 The app icon: a black cat peeking over a ledge, on a cream ground.
+**Plain face — eyes only, no nose or mouth.** A nose-and-mouth version was
+built and rejected: at 32px and below those marks collapse into a smudge
+under the eyes, and they buy nothing at large sizes that the eyes do not
+already carry.
 
 **Nothing consumes this yet, and that is expected.** neko builds as a bare
 Mach-O rather than a `.app` bundle — the same fact that puts `SMAppService`
@@ -21,6 +25,25 @@ When bundling, it goes in `Neko.app/Contents/Resources/` with
 Both are the same animal; they are deliberately not the same drawing. That
 split is ordinary macOS practice: a colourful app icon, a template glyph in
 the menu bar.
+
+## The vector masters
+
+| file | filters | use |
+| --- | --- | --- |
+| `neko-icon.svg` | 4 blurs | **the master.** Renders pixel-identical to the 512 slot of the `.icns` — verified by diff, max delta 0 |
+| `neko-icon-flat.svg` | none | for tools that rasterise filtered groups on import |
+
+Both are self-contained: no external references, no embedded rasters, every
+`url(#…)` target defined in the same file.
+
+**The flat variant is not, and cannot be, a match for the master.** Three
+elements exist *only* because they are blurred — the cast shadow, the contact
+shadow, and the rim light — and unblurred they become hard edges that look
+like drawing errors rather than lighting. They are therefore **removed**
+rather than flattened, and the gloss is dropped from .22 to .13 because it
+was tuned to sit underneath a rim that is no longer there. The result is
+deliberately flatter and crisper: the same cat, without the atmosphere.
+Use the master unless your tool cannot handle `feGaussianBlur`.
 
 ## Regenerating
 
