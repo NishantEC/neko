@@ -93,7 +93,23 @@ const TURN_LIMIT: usize = 40;
 /// real traffic while keeping the read trivial.
 const TAIL_BYTES: u64 = 4 * 1024 * 1024;
 
-static CACHE: Mutex<Option<(Instant, String, Vec<Turn>)>> = Mutex::new(None);
+/// How much of a tool's output survives into the chat.
+///
+/// Enough to answer "what did that command actually say", far short of a
+/// build log — the transcript window itself is the bound on how much anyone
+/// is reading here.
+const RESULT_LIMIT_CHARS: usize = 1500;
+
+/// One fetched conversation: when, whose, its turns, and whether the agent
+/// was running at read time.
+struct CachedConversation {
+    at: Instant,
+    agent_id: String,
+    turns: Vec<Turn>,
+    running: bool,
+}
+
+static CACHE: Mutex<Option<CachedConversation>> = Mutex::new(None);
 
 /// One voice's turn in the conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +118,11 @@ pub struct Turn {
     pub text: String,
     /// The tool's name, for `Speaker::Tool` turns; the badge on the row.
     pub tool: Option<String>,
+    /// What the tool answered, when the window held its `tool_result` —
+    /// joined by `tool_use_id`, truncated at [`RESULT_LIMIT_CHARS`]. Rides
+    /// the row's `preview`; the client renders it on demand, because a chat
+    /// where every `ls` prints its output is a terminal, not a chat.
+    pub result: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +150,10 @@ struct SessionRef {
     provider: String,
     session_id: String,
     cwd: String,
+    /// `lastStatus == "running"` at read time — what drives the typing
+    /// indicator. Read from the same document, so it can never be fresher
+    /// than the turns beside it, which is the correct kind of stale.
+    running: bool,
 }
 
 /// The one agent document, found by filename under `~/.paseo/agents/*/`.
@@ -147,7 +172,8 @@ fn session_ref(agent_id: &str) -> Option<SessionRef> {
             .and_then(|p| p.get("sessionId"))
             .and_then(Value::as_str)?
             .to_string();
-        return Some(SessionRef { provider, session_id, cwd });
+        let running = doc.get("lastStatus").and_then(Value::as_str) == Some("running");
+        return Some(SessionRef { provider, session_id, cwd, running });
     }
     None
 }
@@ -227,16 +253,76 @@ fn tool_line(input: &Value) -> Option<String> {
 /// and the harness; an image block becomes an `[image]` marker rather than
 /// vanishing.
 pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
+    // **First pass: the answers.** Tool results arrive as later `user` lines
+    // joined by `tool_use_id`, so attaching them to their calls needs the
+    // whole window before any turn is built.
+    let mut results: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for line in tail.lines() {
+        let Ok(doc) = serde_json::from_str::<Value>(line.trim()) else { continue };
+        let Some(Value::Array(blocks)) = doc.get("message").and_then(|m| m.get("content")) else {
+            continue;
+        };
+        for block in blocks {
+            if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+                continue;
+            }
+            let Some(id) = block.get("tool_use_id").and_then(Value::as_str) else { continue };
+            let text = match block.get("content") {
+                Some(Value::String(text)) => text.clone(),
+                Some(Value::Array(parts)) => parts
+                    .iter()
+                    .filter_map(|p| p.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                _ => continue,
+            };
+            let mut text = text.trim().to_string();
+            if text.chars().count() > RESULT_LIMIT_CHARS {
+                text = text.chars().take(RESULT_LIMIT_CHARS).collect::<String>() + "\u{2026}";
+            }
+            if !text.is_empty() {
+                results.insert(id.to_string(), text);
+            }
+        }
+    }
+
     let mut turns = Vec::new();
+    // Contiguous sidechain traffic — a Task subagent working — collapses to
+    // one chip counting its steps. The uuid chains that would attribute each
+    // step to its exact Task call are real further work; a count in the right
+    // *place* (sidechain lines sit next to the Task call that spawned them)
+    // is honest without it, where a wrong attribution would not be.
+    let mut sidechain_steps: usize = 0;
+    let flush_sidechain = |turns: &mut Vec<Turn>, steps: &mut usize| {
+        if *steps > 0 {
+            turns.push(Turn {
+                speaker: Speaker::Tool,
+                text: format!(
+                    "{} step{}",
+                    steps,
+                    if *steps == 1 { "" } else { "s" }
+                ),
+                tool: Some("Subagent".to_string()),
+                result: None,
+            });
+            *steps = 0;
+        }
+    };
     for line in tail.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
         let Ok(doc) = serde_json::from_str::<Value>(line) else { continue };
-        if doc.get("isSidechain").and_then(Value::as_bool).unwrap_or(false)
-            || doc.get("isMeta").and_then(Value::as_bool).unwrap_or(false)
-        {
+        if doc.get("isSidechain").and_then(Value::as_bool).unwrap_or(false) {
+            // Only the subagent's own moves count as steps; its incoming
+            // tool results would double every one.
+            if doc.get("type").and_then(Value::as_str) == Some("assistant") {
+                sidechain_steps += 1;
+            }
+            continue;
+        }
+        if doc.get("isMeta").and_then(Value::as_bool).unwrap_or(false) {
             continue;
         }
         let Some(message) = doc.get("message") else { continue };
@@ -278,7 +364,8 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                 if text.is_empty() || is_user_noise(&text) {
                     continue;
                 }
-                turns.push(Turn { speaker: Speaker::User, text, tool: None });
+                flush_sidechain(&mut turns, &mut sidechain_steps);
+                turns.push(Turn { speaker: Speaker::User, text, tool: None, result: None });
             }
             Some("assistant") => {
                 let Some(Value::Array(blocks)) = message.get("content") else { continue };
@@ -292,10 +379,17 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                                 .trim()
                                 .to_string();
                             if !text.is_empty() {
-                                turns.push(Turn { speaker: Speaker::Agent, text, tool: None });
+                                flush_sidechain(&mut turns, &mut sidechain_steps);
+                                turns.push(Turn {
+                                    speaker: Speaker::Agent,
+                                    text,
+                                    tool: None,
+                                    result: None,
+                                });
                             }
                         }
                         Some("tool_use") => {
+                            flush_sidechain(&mut turns, &mut sidechain_steps);
                             let name = block
                                 .get("name")
                                 .and_then(Value::as_str)
@@ -305,10 +399,15 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                                 .get("input")
                                 .and_then(tool_line)
                                 .unwrap_or_default();
+                            let result = block
+                                .get("id")
+                                .and_then(Value::as_str)
+                                .and_then(|id| results.get(id).cloned());
                             turns.push(Turn {
                                 speaker: Speaker::Tool,
                                 text,
                                 tool: Some(name),
+                                result,
                             });
                         }
                         _ => {}
@@ -318,6 +417,7 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
             _ => {}
         }
     }
+    flush_sidechain(&mut turns, &mut sidechain_steps);
     if turns.len() > TURN_LIMIT {
         turns.drain(..turns.len() - TURN_LIMIT);
     }
@@ -335,6 +435,7 @@ fn turns_from_entries(entries: Vec<Entry>) -> Vec<Turn> {
                 speaker: Speaker::Tool,
                 text: argument.to_string(),
                 tool: Some(tool.to_string()),
+                result: None,
             },
             None => Turn {
                 speaker: Speaker::Agent,
@@ -343,6 +444,7 @@ fn turns_from_entries(entries: Vec<Entry>) -> Vec<Turn> {
                     None => entry.headline.clone(),
                 },
                 tool: None,
+                result: None,
             },
         })
         .collect()
@@ -350,19 +452,21 @@ fn turns_from_entries(entries: Vec<Entry>) -> Vec<Turn> {
 
 /// Every turn for `agent_id`: the real transcript when the agent is claude
 /// and the file is where its document says, the activity feed otherwise.
-fn fetch_turns(agent_id: &str) -> Vec<Turn> {
-    if let Some(session) = session_ref(agent_id)
+fn fetch_turns(agent_id: &str) -> (Vec<Turn>, bool) {
+    let session = session_ref(agent_id);
+    let running = session.as_ref().is_some_and(|s| s.running);
+    if let Some(session) = &session
         && session.provider == "claude"
-        && let Some(path) = transcript_path(&session)
+        && let Some(path) = transcript_path(session)
         && let Some(tail) = read_tail(&path)
     {
         let turns = parse_transcript_tail(&tail);
         if !turns.is_empty() {
-            return turns;
+            return (turns, running);
         }
     }
-    let Ok(client) = McpClient::discover() else { return Vec::new() };
-    turns_from_entries(fetch(&client, agent_id).unwrap_or_default())
+    let Ok(client) = McpClient::discover() else { return (Vec::new(), running) };
+    (turns_from_entries(fetch(&client, agent_id).unwrap_or_default()), running)
 }
 
 
@@ -450,20 +554,24 @@ impl Provider for ConversationProvider {
         if agent_id.is_empty() || !self.live {
             return Vec::new();
         }
-        let turns = {
+        let (turns, running) = {
             let cached = CACHE
                 .lock()
                 .unwrap()
                 .as_ref()
-                .filter(|(at, id, _)| at.elapsed() < CACHE_TTL && id == agent_id)
-                .map(|(_, _, turns)| turns.clone());
+                .filter(|c| c.at.elapsed() < CACHE_TTL && c.agent_id == agent_id)
+                .map(|c| (c.turns.clone(), c.running));
             match cached {
-                Some(turns) => turns,
+                Some(hit) => hit,
                 None => {
-                    let fresh = fetch_turns(agent_id);
-                    *CACHE.lock().unwrap() =
-                        Some((Instant::now(), agent_id.to_string(), fresh.clone()));
-                    fresh
+                    let (fresh, running) = fetch_turns(agent_id);
+                    *CACHE.lock().unwrap() = Some(CachedConversation {
+                        at: Instant::now(),
+                        agent_id: agent_id.to_string(),
+                        turns: fresh.clone(),
+                        running,
+                    });
+                    (fresh, running)
                 }
             }
         };
@@ -514,10 +622,48 @@ impl Provider for ConversationProvider {
                         // is a typed line, not prose.
                         preview_markdown: turn.speaker != Speaker::Tool,
                         speaker: Some(turn.speaker.wire().to_string()),
-                        preview: Some(turn.text.clone()),
+                        // A tool turn's preview is what the tool *answered* —
+                        // shown on demand — never its argument, which the
+                        // title already carries. `None` marks a chip with
+                        // nothing to expand.
+                        preview: match turn.speaker {
+                            Speaker::Tool => turn.result.clone(),
+                            _ => Some(turn.text.clone()),
+                        },
                     },
                 }
             })
+            .chain(running.then(|| {
+                // **The typing indicator, as a row.** The provider states
+                // "the agent is composing" through the same vocabulary every
+                // other fact travels in; what a composing agent looks like is
+                // entirely the client's. Scored below every real turn so it
+                // is always last, exactly where a typing bubble sits.
+                Candidate {
+                    score: 0.5,
+                    item: SearchItem {
+                        id: format!("{agent_id}#working"),
+                        kind: "conversation".to_string(),
+                        title: "\u{2026}".to_string(),
+                        subtitle: None,
+                        icon: Icon::Glyph(Glyph::Text),
+                        section_label: "Conversation".to_string(),
+                        action_label: "Reading".to_string(),
+                        badge: None,
+                        accessory: None,
+                        enters_mode: None,
+                        group_label: None,
+                        // Nothing to do to a typing bubble.
+                        actions: Vec::new(),
+                        source: None,
+                        meter: None,
+                        keeps_open: true,
+                        preview_markdown: false,
+                        speaker: Some("working".to_string()),
+                        preview: None,
+                    },
+                }
+            }))
             .collect()
     }
 
@@ -568,6 +714,57 @@ impl Provider for ConversationProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tools_answer_is_joined_to_its_call_by_id() {
+        let tail = jsonl(&[
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"call-1","name":"Bash","input":{"command":"ls"}}]}}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"src\nlib.rs"}]}}"#,
+        ]);
+        let turns = parse_transcript_tail(&tail);
+        assert_eq!(turns.len(), 1, "the result attaches, it does not add a turn");
+        assert_eq!(turns[0].result.as_deref(), Some("src\nlib.rs"));
+    }
+
+    #[test]
+    fn a_huge_tool_answer_is_truncated_not_carried_whole() {
+        let big = "x".repeat(RESULT_LIMIT_CHARS * 3);
+        let tail = jsonl(&[
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"c","name":"Bash","input":{"command":"cat log"}}]}}"#,
+            &format!(r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"c","content":"{big}"}}]}}}}"#),
+        ]);
+        let turns = parse_transcript_tail(&tail);
+        let result = turns[0].result.as_ref().unwrap();
+        assert!(result.chars().count() <= RESULT_LIMIT_CHARS + 1, "bounded, ellipsis included");
+    }
+
+    #[test]
+    fn a_sidechain_run_collapses_to_one_counted_chip_in_its_place() {
+        // A Task subagent's own traffic sits between the Task call and the
+        // agent's next words. One chip counting its moves is honest; per-step
+        // attribution needs the uuid chains and is deliberately not guessed.
+        let tail = jsonl(&[
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"Task","input":{"description":"audit the call sites"}}]}}"#,
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"step"}]}}"#,
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"step"}]}}"#,
+            r#"{"type":"user","isSidechain":true,"message":{"content":[{"type":"tool_result","tool_use_id":"x","content":"noise"}]}}"#,
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"step"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}"#,
+        ]);
+        let turns = parse_transcript_tail(&tail);
+        let shape: Vec<(&str, Option<&str>)> =
+            turns.iter().map(|t| (t.text.as_str(), t.tool.as_deref())).collect();
+        assert_eq!(
+            shape,
+            vec![
+                ("audit the call sites", Some("Task")),
+                ("3 steps", Some("Subagent")),
+                ("done", None),
+            ],
+            "the subagent's incoming results are not counted as its steps"
+        );
+    }
+
 
     /// Real line shapes from a live session file, values swapped for fixtures.
     fn jsonl(lines: &[&str]) -> String {

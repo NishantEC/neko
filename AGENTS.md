@@ -3455,6 +3455,37 @@ reading an older turn is never disturbed (also pinned).
 `docs/evidence/conversation-composer.png` — bubbles, GREP/TASK chips, and
 the composer carrying a typed draft with its `Send ↵` hint.
 
+**The header, the typing bubble, tool output on demand, and subagent runs —
+the "everything out" pass.** The transcript owns a session header now: back
+arrow, the agent's name and workspace **from the row that opened the mode**
+(`ActiveMode::subject_item` — the provider already composed those; deriving
+them client-side would be a second copy of `agents.rs`'s naming rules), and a
+working/idle dot on the right. Liveness is a **row**: the provider appends a
+`speaker: "working"` row while the doc's `lastStatus` is running, so the
+header dot, the typing bubble (three dots breathing on the shared
+`PulseClock` — never their own animation) and the poll can never disagree
+about whether the agent is busy. Verified live: the fixture doc was flipped
+to running *after* the mode was entered, and the header and bubble appeared
+on the next poll tick (`docs/evidence/conversation-header-working.png`).
+
+Tool chips fold open on click: `parse_transcript_tail` joins each
+`tool_result` back to its call by `tool_use_id` (bounded at
+`RESULT_LIMIT_CHARS` — a chat where every `ls` prints unasked is a
+terminal), the row's `preview` carries it, and a `show output` hint appears
+only where there is genuinely something to disclose. Contiguous **sidechain**
+traffic collapses to one `SUBAGENT · N steps` chip in its place — only the
+subagent's own assistant events count (its incoming tool results would
+double every step), and per-step attribution via the uuid chains is
+deliberately not guessed at.
+
+**Deferred from the same list, each with its reason**: inline images (the
+jsonl carries them as base64, so rendering means a decode-and-cache pipeline
+with size bounds — real separate work, the `[image]` marker stays honest);
+Codex transcripts (`~/.codex/sessions` exists and its rollout format is
+readable, but **no Paseo codex agent exists on this machine**, so the
+`persistence.sessionId` → rollout-file join would be unverifiable code — the
+exact bar `usage` applied to Cursor/Kimi/MiniMax/Z.AI).
+
 **Verification is seeded files, not hooks**: the isolated evidence `HOME`
 carries a real-shaped agent document plus a real-shaped session jsonl, so the
 entire pipeline — doc resolution, munge, tail read, turn extraction,

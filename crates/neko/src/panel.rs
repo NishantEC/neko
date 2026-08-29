@@ -253,6 +253,11 @@ pub struct Root {
     /// once the list grew a thumb, because the thumb jumps too. See
     /// `motion::ScrollGlide`.
     scroll_glide: Option<(ScrollHandle, motion::ScrollGlide)>,
+    /// Tool chips whose captured output is currently unfolded, by row id.
+    /// Per-summon like every other transient view state; cleared with the
+    /// mode, since a turn id (`agent#rank`) only means anything inside the
+    /// conversation that minted it.
+    expanded_tool_output: std::collections::HashSet<String>,
     /// Set while a `Request::Activate` is in flight, and rendered as a tell.
     ///
     /// **Enter can take seconds and used to show nothing at all.** Starting an
@@ -349,6 +354,11 @@ struct ActiveMode {
     /// `None` for every mode that is a plain list, which is all of the
     /// others.
     subject: Option<String>,
+    /// The row that opened this mode, kept for the transcript's header —
+    /// the agent's name, workspace and badge are already composed on it by
+    /// the provider that knows them, and re-deriving any of that client-side
+    /// would be a second copy of `agents.rs`'s naming rules.
+    subject_item: Option<SearchItem>,
     /// The theme that was active when this mode was entered, so leaving can
     /// put it back. **This is what makes live preview safe to be live**: the
     /// panel really does become each theme as the selection moves, and
@@ -454,6 +464,7 @@ impl Root {
             pending_search_generation: None,
             partial_generation: None,
             scroll_glide: None,
+            expanded_tool_output: std::collections::HashSet::new(),
             activating: false,
             search_dispatched_at: None,
             hidden_rows: 0,
@@ -520,6 +531,7 @@ impl Root {
         // Per-summon state, like everything else here: a panel dismissed
         // mid-activation must not come back still claiming to be working.
         self.activating = false;
+        self.expanded_tool_output.clear();
         self.grid_selected = None;
         if self.active_mode.take().is_some() {
             self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
@@ -1246,7 +1258,7 @@ impl Root {
         // A command row never reaches `Request::Activate` at all —
         // confirming it is a client-side UI transition, not a daemon
         // action (see `crate::modes`'s module doc comment).
-        if let Some(mode_id) = item.enters_mode {
+        if let Some(mode_id) = item.enters_mode.clone() {
             // Preferences is a real window, not a mode — the one
             // `enters_mode` value that opens one. Everything else names a
             // mode; an unknown value resolves to nothing and is ignored.
@@ -1264,7 +1276,11 @@ impl Root {
             // row's own id travels into the mode as its subject. Every other
             // mode is a plain list and takes none — see `ActiveMode::subject`.
             let subject = (mode_id == "conversation").then(|| item.id.clone());
+            let entered_about = subject.is_some();
             self.enter_mode_about(&mode_id, subject, window, cx);
+            if entered_about && let Some(mode) = self.active_mode.as_mut() {
+                mode.subject_item = Some(item);
+            }
             return;
         }
         // A single generic action, routed by `kind` back to whichever
@@ -1420,7 +1436,10 @@ impl Root {
     /// nothing.
     fn sync_pulse(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let wanted = window.is_window_active()
-            && self.results.iter().any(|item| item.badge.as_deref() == Some("LIVE"));
+            && self.results.iter().any(|item| {
+                item.badge.as_deref() == Some("LIVE")
+                    || item.speaker.as_deref() == Some("working")
+            });
         self.pulse.update(cx, |clock, cx| clock.set_running(wanted, cx));
         gpui::Empty
     }
@@ -1691,11 +1710,13 @@ impl Root {
             chrome,
             saved_query,
             subject,
+            subject_item: None,
             restore_theme: (chrome.provider_id == "theme").then(|| theme::active_theme().id),
         });
         self.selected = 0;
         self.mode_scroll.set_offset(point(px(0.), px(0.)));
         self.close_actions_menu(window);
+        self.expanded_tool_output.clear();
         self.text_field.update(cx, |field, cx| {
             field.set_placeholder(chrome.placeholder, cx);
             // A real edit (emits `ContentChanged`), which is what actually
@@ -2292,6 +2313,12 @@ impl Root {
             .text_color(theme::active().text_primary)
             .text_size(px(18.))
             .child(match self.active_mode() {
+                // In a transcript mode the header carries the back arrow and
+                // the session's own name, so the composer stays a composer —
+                // a bar that is half navigation chrome is neither.
+                Some(mode) if mode.chrome.transcript => {
+                    div().w(px(2.)).into_any_element()
+                }
                 // The back affordance the launch brief asks for: "a back
                 // arrow in place of the search glyph." Clickable — exits
                 // the mode the same way Escape does, sharing `exit_mode`
@@ -2325,7 +2352,7 @@ impl Root {
             // moment anybody types. A chip beside the field is the shape a
             // launcher uses for this, and it is the one place with room that
             // the query cannot overwrite.
-            .children(self.active_mode().map(|mode| {
+            .children(self.active_mode().filter(|m| !m.chrome.transcript).map(|mode| {
                 div()
                     .flex_shrink_0()
                     .px(px(8.))
@@ -3100,6 +3127,7 @@ impl Root {
     /// selection, `⌘K` and the scroll machinery are untouched — they just
     /// paint as turns.
     fn render_transcript(&self, mode: &ActiveMode, cx: &mut Context<Self>) -> AnyElement {
+        let header = self.render_transcript_header(mode, cx);
         let mut column = div()
             .flex()
             .flex_col()
@@ -3125,24 +3153,123 @@ impl Root {
         } else {
             theme::active().surface_panel
         };
-        with_scrollbar(
-            &self.mode_scroll,
-            "transcript-scrollbar",
-            scroll_edge_fade(
-                self.mode_scroll.clone(),
-                fade_color.into(),
-                theme::EDGE_FADE_BAND_PX,
-                column,
-            ),
-        )
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .child(header)
+            .child(with_scrollbar(
+                &self.mode_scroll,
+                "transcript-scrollbar",
+                scroll_edge_fade(
+                    self.mode_scroll.clone(),
+                    fade_color.into(),
+                    theme::EDGE_FADE_BAND_PX,
+                    column,
+                ),
+            ))
         // **Without this every turn overflows the right edge.** The wrapper
         // sits in `render_mode_content`'s flex *row*, where flexbox's
         // `min-width: auto` sizes a child by its content — and a paragraph's
         // content width is the unwrapped line. Seen in the first capture as
         // bubbles running past the window; `min_w(0)` is what makes the
         // column's width the container's, so text wraps instead of escaping.
-        .min_w(px(0.))
-        .into_any_element()
+            .min_w(px(0.))
+            .into_any_element()
+    }
+
+    /// The session, named — who this chat is with, where it is working, and
+    /// whether it is working *right now*.
+    ///
+    /// The identity comes off the row that opened the mode (the provider
+    /// already composed name/workspace/badge there); the *liveness* comes off
+    /// the transcript itself — the provider appends a `working` row while the
+    /// agent runs, so the dot here and the typing bubble below can never
+    /// disagree about whether the agent is busy.
+    fn render_transcript_header(&self, mode: &ActiveMode, cx: &mut Context<Self>) -> AnyElement {
+        let working = self.transcript_agent_is_working();
+        let (title, subtitle) = match &mode.subject_item {
+            Some(item) => (item.title.clone(), item.subtitle.clone()),
+            None => (mode.chrome.title.to_string(), None),
+        };
+        let mut dot = theme::active().state_success;
+        if working {
+            dot.a = 0.45 + 0.55 * self.pulse.read(cx).intensity();
+        }
+        div()
+            .flex()
+            .items_center()
+            .flex_shrink_0()
+            .gap(px(10.))
+            .h(px(44.))
+            .px(px(14.))
+            .border_b_1()
+            .border_color(theme::active().border_hairline)
+            .child(
+                div()
+                    .id("transcript-back")
+                    .p(px(5.))
+                    .rounded(px(theme::ROW_RADIUS_PX))
+                    .hover_bg("transcript-back", theme::TRANSPARENT, theme::active().row_icon_socket_bg)
+                    .cursor(CursorStyle::PointingHand)
+                    .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation()
+                    })
+                    .on_click(cx.listener(|root, _: &ClickEvent, window, cx| root.exit_mode(window, cx)))
+                    .child(back_glyph()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w(px(0.))
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .text_color(theme::active().text_primary)
+                            .truncate()
+                            .child(SharedString::from(title)),
+                    )
+                    .children(subtitle.map(|subtitle| {
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme::active().text_tertiary)
+                            .truncate()
+                            .child(SharedString::from(subtitle))
+                    })),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_size(px(11.))
+                    .map(|el| {
+                        if working {
+                            el.text_color(theme::active().text_secondary)
+                                .child(div().size(px(7.)).rounded_full().bg(dot))
+                                .child("working")
+                        } else {
+                            el.text_color(theme::active().text_tertiary).child("idle")
+                        }
+                    }),
+            )
+            .into_any_element()
+    }
+
+    /// Folds a tool chip's captured output open, or closed again.
+    fn toggle_tool_output(&mut self, id: &str) {
+        if !self.expanded_tool_output.remove(id) {
+            self.expanded_tool_output.insert(id.to_string());
+        }
+    }
+
+    /// Whether the transcript currently ends in the provider's `working` row.
+    fn transcript_agent_is_working(&self) -> bool {
+        self.results
+            .last()
+            .is_some_and(|item| item.speaker.as_deref() == Some("working"))
     }
 
     /// One turn. The voice comes off `SearchItem::speaker`, the words off
@@ -3151,6 +3278,35 @@ impl Root {
         let selected = self.row_is_highlighted(idx);
         let text = item.preview.clone().unwrap_or_else(|| item.title.clone());
         let body: AnyElement = match item.speaker.as_deref() {
+            // **The typing bubble.** An agent-side bubble of three dots
+            // breathing on the shared clock — never its own animation, per
+            // this app's one repeating-motion rule (`motion::PulseClock`).
+            Some("working") => {
+                let intensity = self.pulse.read(cx).intensity();
+                div()
+                    .flex()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .px(px(12.))
+                            .py(px(9.))
+                            .rounded(px(10.))
+                            .bg(theme::active().surface_input)
+                            .children((0..3).map(|i| {
+                                // One waveform, three phases — the classic
+                                // travelling ripple, driven off the single
+                                // 12.5Hz clock.
+                                let phase =
+                                    (intensity + i as f32 * 0.33).rem_euclid(1.0);
+                                let mut dot = theme::active().text_secondary;
+                                dot.a = 0.25 + 0.6 * (1.0 - (phase - 0.5).abs() * 2.0);
+                                div().size(px(6.)).rounded_full().bg(dot)
+                            })),
+                    )
+                    .into_any_element()
+            }
             Some("user") => div()
                 .flex()
                 .justify_end()
@@ -3170,32 +3326,76 @@ impl Root {
                         .child(crate::markdown::render(&text)),
                 )
                 .into_any_element(),
-            Some("tool") => div()
-                .flex()
-                .items_center()
-                .gap(px(7.))
-                .pl(px(2.))
-                .text_size(px(11.))
-                .text_color(theme::active().text_tertiary)
-                .children(item.badge.clone().map(|badge| {
-                    div()
-                        .flex_shrink_0()
-                        .px(px(5.))
-                        .py(px(1.))
-                        .rounded(px(4.))
-                        .bg(theme::active().row_icon_socket_bg)
-                        .text_size(px(9.5))
-                        .child(SharedString::from(badge))
-                }))
-                .child(
-                    div()
-                        .min_w(px(0.))
-                        .truncate()
-                        .font_family(theme::MONOSPACE_FAMILY)
-                        .text_size(px(10.5))
-                        .child(SharedString::from(text)),
-                )
-                .into_any_element(),
+            Some("tool") => {
+                // A chip whose call has a captured answer expands on click —
+                // `preview` carries the output (the provider bounds it), and
+                // a chat where every `ls` printed its output unasked would be
+                // a terminal. The disclosure hint only appears where there is
+                // genuinely something to disclose.
+                let expandable = item.preview.is_some();
+                let expanded = expandable && self.expanded_tool_output.contains(&item.id);
+                let title = item.title.clone();
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(5.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(7.))
+                            .pl(px(2.))
+                            .text_size(px(11.))
+                            .text_color(theme::active().text_tertiary)
+                            .children(item.badge.clone().map(|badge| {
+                                div()
+                                    .flex_shrink_0()
+                                    .px(px(5.))
+                                    .py(px(1.))
+                                    .rounded(px(4.))
+                                    .bg(theme::active().row_icon_socket_bg)
+                                    .text_size(px(9.5))
+                                    .child(SharedString::from(badge))
+                            }))
+                            .child(
+                                div()
+                                    .min_w(px(0.))
+                                    .truncate()
+                                    .font_family(theme::MONOSPACE_FAMILY)
+                                    .text_size(px(10.5))
+                                    .child(SharedString::from(title)),
+                            )
+                            .when(expandable, |el| {
+                                el.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .text_size(px(10.))
+                                        .text_color(theme::active().text_tertiary)
+                                        .child(if expanded {
+                                            "hide output"
+                                        } else {
+                                            "show output"
+                                        }),
+                                )
+                            }),
+                    )
+                    .when(expanded, |el| {
+                        el.child(
+                            div()
+                                .px(px(9.))
+                                .py(px(7.))
+                                .rounded(px(theme::CHIP_RADIUS_PX))
+                                .bg(theme::active().surface_input)
+                                .font_family(theme::MONOSPACE_FAMILY)
+                                .text_size(px(theme::PREVIEW_MONOSPACE_SIZE_PX))
+                                .text_color(theme::active().text_primary)
+                                .child(SharedString::from(
+                                    item.preview.clone().unwrap_or_default(),
+                                )),
+                        )
+                    })
+                    .into_any_element()
+            }
             // The agent (and anything speakerless): plain prose, full width.
             _ => div()
                 .text_size(px(12.))
@@ -3218,10 +3418,17 @@ impl Root {
             // means; a wash rather than the full selected pill, because a
             // transcript is read far more than it is driven.
             .when(selected, |el| el.bg(theme::active().row_icon_socket_bg))
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                root.selected = idx;
-                root.grid_selected = None;
-                cx.notify();
+            .on_click(cx.listener({
+                let id = item.id.clone();
+                let toggles_output = item.speaker.as_deref() == Some("tool") && item.preview.is_some();
+                move |root, _: &ClickEvent, _window, cx| {
+                    root.selected = idx;
+                    root.grid_selected = None;
+                    if toggles_output {
+                        root.toggle_tool_output(&id);
+                    }
+                    cx.notify();
+                }
             }))
             .child(body)
             .into_any_element()
@@ -4840,6 +5047,60 @@ mod tests {
 
     fn tile(id: &str) -> SearchItem {
         SearchItem { badge: Some("LIVE".to_string()), ..agent_row(id) }
+    }
+
+    #[gpui::test]
+    fn the_mode_keeps_the_row_that_opened_it_for_the_header(cx: &mut TestAppContext) {
+        // The header renders the agent's name/workspace/badge exactly as the
+        // provider composed them on the row — re-deriving any of it would be
+        // a second copy of agents.rs's naming rules.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                let row = SearchItem {
+                    title: "feat/doctors-maps".into(),
+                    subtitle: Some("Care-Connect-AI/triage-fe".into()),
+                    enters_mode: Some("conversation".into()),
+                    ..agent_row("the-agent")
+                };
+                root.results = vec![row];
+                root.selected = 0;
+                root.confirm(&Confirm, window, cx);
+                let mode = root.active_mode().expect("entered");
+                let kept = mode.subject_item.as_ref().expect("the row travelled in");
+                assert_eq!(kept.title, "feat/doctors-maps");
+                assert_eq!(kept.subtitle.as_deref(), Some("Care-Connect-AI/triage-fe"));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_tool_chips_output_folds_open_and_closed(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, _cx| {
+                root.toggle_tool_output("a#3");
+                assert!(root.expanded_tool_output.contains("a#3"));
+                root.toggle_tool_output("a#3");
+                assert!(!root.expanded_tool_output.contains("a#3"), "a second click folds it back");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn the_working_row_is_what_says_the_agent_is_busy(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results = vec![item_with_id("conversation", "a#0")];
+                assert!(!root.transcript_agent_is_working());
+                root.results.push(SearchItem {
+                    speaker: Some("working".into()),
+                    ..item_with_id("conversation", "a#working")
+                });
+                assert!(root.transcript_agent_is_working());
+            })
+            .unwrap();
     }
 
     #[gpui::test]
