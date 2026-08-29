@@ -154,6 +154,10 @@ fn summon_from_outside(cx: &mut App) {
             KeyBinding::new("down", panel::SelectNext, Some("Panel")),
             KeyBinding::new("up", panel::SelectPrevious, Some("Panel")),
             KeyBinding::new("enter", panel::Confirm, Some("Panel")),
+            // The row's secondary action — the jump to Paseo, from an agent
+            // row, a tile, or inside a conversation. Raycast's own ⌘↵
+            // convention, which this repo had already named for exactly this.
+            KeyBinding::new("cmd-enter", panel::OpenInPaseo, Some("Panel")),
             KeyBinding::new("cmd-k", panel::OpenActionsMenu, Some("Panel")),
             KeyBinding::new("escape", DismissWindow, Some("Panel")),
             KeyBinding::new("enter", onboarding::view::Primary, Some("Onboarding")),
