@@ -1327,6 +1327,12 @@ impl Root {
     /// selection happens to sit on.
     fn open_in_paseo(&mut self, _: &OpenInPaseo, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(request) = self.open_in_paseo_request() else {
+            // **The likeliest press is the silent one**: a fresh summon, the
+            // agents visibly sitting in the grid, the selection on the top
+            // *row* — an app. Doing nothing here reads as the key being
+            // broken; saying what it needs reads as the key working.
+            self.activation_error = Some("select an agent to open in Paseo".to_string());
+            cx.notify();
             return;
         };
         // Hide on success: the whole point of the keystroke is that the
@@ -5111,6 +5117,66 @@ mod tests {
 
     fn tile(id: &str) -> SearchItem {
         SearchItem { badge: Some("LIVE".to_string()), ..agent_row(id) }
+    }
+
+    #[gpui::test]
+    fn cmd_enter_dispatches_through_the_real_binding_to_the_handler(cx: &mut TestAppContext) {
+        // Drives gpui's own keystroke → binding → action dispatch, in
+        // process, because "does ⌘↵ reach the handler while the field has
+        // focus" is not answerable by calling the handler directly. Two
+        // harness rules this test learned the hard way, kept as its own
+        // comments: **dispatch reads the rendered frame's tree**, so the
+        // window must draw between mutating the view and simulating; and
+        // **`simulate_keystrokes` runs the executor until parked**, so the
+        // activation has already *completed* (against this harness's dead
+        // socket) by the time an assertion runs — the proof of dispatch is
+        // the failed request's own error, never the in-flight flag.
+        cx.update(|cx| {
+            cx.bind_keys([
+                gpui::KeyBinding::new("cmd-enter", OpenInPaseo, Some("Panel")),
+                gpui::KeyBinding::new("enter", Confirm, Some("Panel")),
+            ]);
+        });
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![agent_row("the-agent")];
+                root.selected = 0;
+                root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
+                let handle = root.focus_handle(cx);
+                window.focus(&handle, cx);
+            })
+            .unwrap();
+        cx.refresh().unwrap();
+        cx.run_until_parked();
+
+        // Control: plain enter (the composer's send) through the same tree.
+        window
+            .update(cx, |root, _window, cx| {
+                root.text_field.update(cx, |field, cx| field.set_content("control draft", cx));
+            })
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "enter");
+        window
+            .update(cx, |root, _window, cx| {
+                assert!(
+                    root.activation_error.is_some(),
+                    "CONTROL: enter never dispatched — the send would have errored on the dead socket"
+                );
+                assert_eq!(root.text_field.read(cx).content(), "", "and the draft was consumed");
+                root.activation_error = None;
+            })
+            .unwrap();
+
+        cx.simulate_keystrokes(window.into(), "cmd-enter");
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(
+                    root.activation_error.is_some(),
+                    "cmd-enter never reached open_in_paseo through dispatch"
+                );
+            })
+            .unwrap();
     }
 
     #[gpui::test]
