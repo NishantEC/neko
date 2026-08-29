@@ -3497,6 +3497,31 @@ clickable form, labelled with its key
 whole point of the keystroke is that the interaction continues in Paseo's
 window.
 
+**"⌘↵ doesn't work" was two things, and neither was the binding.** Diagnosed
+by driving gpui's own keystroke→binding→action dispatch **in process**
+(`cmd_enter_dispatches_through_the_real_binding_to_the_handler` — the first
+real dispatch test in this repo; `TestAppContext::simulate_keystrokes` is
+in-process machinery, not the synthetic OS input this repo forbids). Two
+harness rules it learned the hard way, kept in its own comments: **dispatch
+reads the rendered frame's tree**, so the window must draw between mutating
+the view and simulating (`cx.refresh()` + `run_until_parked`); and
+**`simulate_keystrokes` runs the executor until parked**, so by assertion
+time the activation has already *completed* against the harness's dead
+socket — the proof of dispatch is the failed request's own
+`activation_error`, never the in-flight `activating` flag, which a first
+version asserted on and wrongly concluded dispatch was broken. The
+re-entrancy trap on the same road: dispatching from inside
+`window.update(cx, |root, ..|)` panics ("already being updated") because the
+listener updates `Root` — but that panic *is* proof the handler ran.
+
+What was actually wrong for the captain: **the likeliest press is the silent
+one** — a fresh summon shows agents in the grid while the selection starts
+on the top *row*, so ⌘↵ resolved no target and did nothing, which reads as
+the key being broken. It answers inline now ("select an agent to open in
+Paseo"). The daemon half was proven separately over the live wire
+(`Activate {kind:"conversation", action:"open-in-paseo"}` → `Activated`,
+Paseo genuinely opened).
+
 **Verification is seeded files, not hooks**: the isolated evidence `HOME`
 carries a real-shaped agent document plus a real-shaped session jsonl, so the
 entire pipeline — doc resolution, munge, tail read, turn extraction,
