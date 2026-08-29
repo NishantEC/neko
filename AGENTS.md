@@ -3486,6 +3486,17 @@ readable, but **no Paseo codex agent exists on this machine**, so the
 `persistence.sessionId` → rollout-file join would be unverifiable code — the
 exact bar `usage` applied to Cursor/Kimi/MiniMax/Z.AI).
 
+**`⌘↵` is the jump to Paseo — the old Enter, one keystroke away.** Bound at
+the `"Panel"` context, resolved by **data, never by provider id**: whatever
+is highlighted must actually carry an `open-in-paseo` action (an agent row or
+tile does, an app row does not, and ⌘↵ on the latter means nothing rather
+than guessing), and inside a transcript the target is the mode's *subject*,
+whatever turn the selection sits on — both pinned. The header carries the
+clickable form, labelled with its key
+(`docs/evidence/conversation-open-in-paseo.png`), and hides on success: the
+whole point of the keystroke is that the interaction continues in Paseo's
+window.
+
 **Verification is seeded files, not hooks**: the isolated evidence `HOME`
 carries a real-shaped agent document plus a real-shaped session jsonl, so the
 entire pipeline — doc resolution, munge, tail read, turn extraction,

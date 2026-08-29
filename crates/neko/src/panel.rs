@@ -56,7 +56,7 @@ use crate::text_field::{ContentChanged, DEFAULT_PLACEHOLDER, TextField};
 use crate::theme;
 use crate::window_drag::PanelDrag;
 
-actions!(panel, [SelectNext, SelectPrevious, Confirm, OpenActionsMenu]);
+actions!(panel, [SelectNext, SelectPrevious, Confirm, OpenActionsMenu, OpenInPaseo]);
 
 /// `neko_core::commands::CommandsProvider::id()`. Named here because the
 /// slash palette scopes to it by name, the one place the client has to know
@@ -1315,6 +1315,46 @@ impl Root {
         self.perform_activation(request, !item.keeps_open, cx);
     }
 
+    /// `⌘↵` — the jump to Paseo, from anywhere an agent is in front of you.
+    ///
+    /// Enter took over reading the conversation here, and this is the old
+    /// behaviour given back one keystroke away — Raycast's own convention for
+    /// a row's secondary action, and the convention this repo had already
+    /// named for exactly this shape. Resolved by **data, never by provider
+    /// id**: whatever is highlighted (a row, a tile, a conversation turn)
+    /// must actually carry an `open-in-paseo` action, and inside a transcript
+    /// the target is the mode's *subject* — the agent — whatever turn the
+    /// selection happens to sit on.
+    fn open_in_paseo(&mut self, _: &OpenInPaseo, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(request) = self.open_in_paseo_request() else {
+            return;
+        };
+        // Hide on success: the whole point of the keystroke is that the
+        // interaction continues in Paseo's window, not this one.
+        self.perform_activation(request, true, cx);
+    }
+
+    /// What `⌘↵` would send, or `None` where it means nothing.
+    fn open_in_paseo_request(&self) -> Option<Request> {
+        const OPEN_IN_PASEO: &str = "open-in-paseo";
+        if let Some(mode) = self.active_mode().filter(|m| m.chrome.transcript) {
+            let subject = mode.subject.clone()?;
+            return Some(Request::Activate {
+                kind: mode.chrome.provider_id.to_string(),
+                id: subject,
+                action: Some(OPEN_IN_PASEO.to_string()),
+                query: String::new(),
+            });
+        }
+        let item = self.highlighted_item()?;
+        item.actions.iter().any(|a| a.id == OPEN_IN_PASEO).then(|| Request::Activate {
+            kind: item.kind.clone(),
+            id: item.id.clone(),
+            action: Some(OPEN_IN_PASEO.to_string()),
+            query: String::new(),
+        })
+    }
+
     /// The composer's send, or `None` when there is nothing to send.
     ///
     /// Its own method for the same reason `primary_activation_request` is:
@@ -2079,6 +2119,7 @@ impl Render for Root {
             .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::open_actions_menu))
+            .on_action(cx.listener(Self::open_in_paseo))
             .on_action(cx.listener(Self::handle_dismiss))
             // Capture phase, not bubble — see `note_actions_menu_mouse_down`'s
             // own doc comment for why this has to run before any
@@ -3254,6 +3295,29 @@ impl Root {
                             el.text_color(theme::active().text_tertiary).child("idle")
                         }
                     }),
+            )
+            // The way back to the real window, one keystroke or one click —
+            // Enter used to do this and reads the conversation now, so the
+            // old behaviour lives here, labelled with its key.
+            .child(
+                div()
+                    .id("transcript-open-in-paseo")
+                    .flex_shrink_0()
+                    .px(px(8.))
+                    .py(px(4.))
+                    .rounded(px(theme::CHIP_RADIUS_PX))
+                    .text_size(px(11.))
+                    .text_color(theme::active().text_secondary)
+                    .cursor_pointer()
+                    .hover_bg(
+                        "transcript-open-in-paseo",
+                        theme::TRANSPARENT,
+                        theme::active().row_icon_socket_bg,
+                    )
+                    .on_click(cx.listener(|root, _: &ClickEvent, window, cx| {
+                        root.open_in_paseo(&OpenInPaseo, window, cx);
+                    }))
+                    .child("Open in Paseo  \u{2318}\u{21b5}"),
             )
             .into_any_element()
     }
@@ -5047,6 +5111,60 @@ mod tests {
 
     fn tile(id: &str) -> SearchItem {
         SearchItem { badge: Some("LIVE".to_string()), ..agent_row(id) }
+    }
+
+    #[gpui::test]
+    fn cmd_enter_in_a_transcript_targets_the_subject_not_the_selected_turn(
+        cx: &mut TestAppContext,
+    ) {
+        // The selection sits on some turn (`agent#7`); the jump goes to the
+        // *agent*. The provider strips a `#rank` defensively, but the client
+        // must not lean on that.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![agent_row("the-agent")];
+                root.selected = 0;
+                root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
+                let request = root.open_in_paseo_request().expect("a subject to open");
+                match request {
+                    Request::Activate { kind, id, action, .. } => {
+                        assert_eq!(kind, "conversation");
+                        assert_eq!(id, "the-agent");
+                        assert_eq!(action.as_deref(), Some("open-in-paseo"));
+                    }
+                    other => panic!("not an activation: {other:?}"),
+                }
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn cmd_enter_on_a_row_requires_the_action_to_actually_exist(cx: &mut TestAppContext) {
+        // Resolved by data, never by provider id: an agent row carries
+        // `open-in-paseo`, an app row does not, and ⌘↵ on the app row must
+        // mean nothing rather than guess.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, _cx| {
+                let mut agent = agent_row("the-agent");
+                agent.actions = vec![neko_protocol::ItemAction {
+                    id: "open-in-paseo".into(),
+                    label: "Open in Paseo".into(),
+                    destructive: false,
+                }];
+                root.results = vec![agent, item("app")];
+                root.selected = 0;
+                let request = root.open_in_paseo_request().expect("the agent row has it");
+                assert!(matches!(
+                    request,
+                    Request::Activate { ref kind, ref action, .. }
+                        if kind == "agent" && action.as_deref() == Some("open-in-paseo")
+                ));
+                root.selected = 1;
+                assert!(root.open_in_paseo_request().is_none(), "an app row means nothing");
+            })
+            .unwrap();
     }
 
     #[gpui::test]
