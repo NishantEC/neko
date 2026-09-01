@@ -72,7 +72,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use neko_protocol::{Glyph, Icon, SearchItem};
+use neko_protocol::{Glyph, Icon, ItemAction, SearchItem};
 use serde::Deserialize;
 
 use crate::agents;
@@ -513,6 +513,46 @@ fn provider_for(usage: &[agents::ProviderUse], root: &Path) -> Option<String> {
         .map(|used| used.provider.clone())
 }
 
+/// The `⌘K` menu for a project row: start it with a *different* tool.
+///
+/// **Because running out of tokens is why anybody switches.** The row's own
+/// Enter uses whatever the last real agent in that directory used, which is
+/// right almost always and useless in the one moment it matters — a five-hour
+/// window is spent and the work has to continue somewhere else. So each
+/// vendor neko can read a quota for gets an entry, and the entry *carries the
+/// headroom*, because the whole decision is "which of these has room left".
+///
+/// `current` is greyed out of the list rather than shown as a no-op: it is
+/// already what Enter does.
+///
+/// Numbers come from [`usage::cached`] and never from a fetch — this runs on
+/// every keystroke of the prompt. A cold cache shows plain names and
+/// [`usage::warm_in_background`] fills them in a keystroke or two later,
+/// which is the honest trade: a stalled first character would be worse than a
+/// number that arrives second.
+fn provider_actions(current: Option<&str>) -> Vec<ItemAction> {
+    crate::usage::warm_in_background();
+    let cached = crate::usage::cached();
+    crate::usage::Vendor::ALL
+        .iter()
+        .filter(|vendor| Some(vendor.id()) != current)
+        .map(|vendor| {
+            let headroom = cached.as_ref().and_then(|all| {
+                all.iter()
+                    .find(|u| u.vendor == *vendor)
+                    .and_then(|u| u.headroom_percent())
+            });
+            let label = match headroom {
+                // Rounded down, deliberately: a quota reported as 3% left
+                // when it is 3.7% is the safe direction to be wrong in.
+                Some(left) => format!("Start with {} — {}% left", vendor.name(), left.floor()),
+                None => format!("Start with {}", vendor.name()),
+            };
+            ItemAction { id: format!("provider:{}", vendor.id()), label, destructive: false }
+        })
+        .collect()
+}
+
 fn tildify(path: &Path) -> String {
     let raw = path.to_string_lossy().to_string();
     let Some(home) = std::env::var("HOME").ok().filter(|home| !home.is_empty()) else {
@@ -660,7 +700,42 @@ impl Provider for NewAgentProvider {
                     .to_string(),
             )
         })?;
-        self.spawner.spawn(&cwd, prompt, &provider).map(|_| ()).map_err(ProviderError)
+        self.spawn_with(&cwd, prompt, &provider)
+    }
+
+    /// `⌘K` → "Start with Codex" — the same spawn, with the tool overridden.
+    ///
+    /// The prompt arrives here because `perform_action_with_query` passes it
+    /// on; without that the action would know *where* to start an agent and
+    /// not *what to ask it*, which is most of the point.
+    fn perform_action_with_query(
+        &self,
+        id: &str,
+        action_id: &str,
+        query: &str,
+    ) -> Result<(), ProviderError> {
+        let Some(provider) = action_id.strip_prefix("provider:") else {
+            return Err(ProviderError(format!("no action '{action_id}' on this row")));
+        };
+        let prompt = query.trim();
+        if prompt.is_empty() {
+            return Err(ProviderError("type the task for the agent first".to_string()));
+        }
+        let cwd = PathBuf::from(id);
+        if !cwd.is_dir() {
+            return Err(ProviderError(format!("no longer a folder: {id}")));
+        }
+        // **No history check on this path, unlike Enter's.** Enter has to
+        // infer a tool and refuses when it cannot; this one was *told*, which
+        // is exactly what makes it the way out of a fresh machine as well as
+        // the way out of a spent quota.
+        self.spawn_with(&cwd, prompt, provider)
+    }
+}
+
+impl NewAgentProvider {
+    fn spawn_with(&self, cwd: &Path, prompt: &str, provider: &str) -> Result<(), ProviderError> {
+        self.spawner.spawn(cwd, prompt, provider).map(|_| ()).map_err(ProviderError)
     }
 }
 
@@ -696,7 +771,7 @@ fn to_item(project: &Project, prompt: &str, provider: Option<&str>) -> SearchIte
         accessory: None,
         enters_mode: None,
         group_label: None,
-        actions: Vec::new(),
+        actions: provider_actions(provider),
         source: Some(project.root.to_string_lossy().to_string()),
         meter: None,
         keeps_open: false,
@@ -709,6 +784,38 @@ fn to_item(project: &Project, prompt: &str, provider: Option<&str>) -> SearchIte
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_current_provider_is_not_offered_as_a_switch() {
+        // Enter already does that one; listing it would be a menu entry whose
+        // only effect is to be indistinguishable from pressing Enter.
+        let actions = provider_actions(Some("claude"));
+        let ids: Vec<&str> = actions.iter().map(|a| a.id.as_str()).collect();
+        assert!(!ids.contains(&"provider:claude"));
+        assert!(ids.contains(&"provider:codex"));
+        assert!(ids.contains(&"provider:grok"));
+    }
+
+    #[test]
+    fn a_machine_with_no_history_still_gets_every_choice() {
+        // Enter refuses without history because it has to infer a tool. This
+        // path was told which one, so it is the way out of that state.
+        assert_eq!(provider_actions(None).len(), crate::usage::Vendor::ALL.len());
+    }
+
+    #[test]
+    fn a_switch_action_names_the_vendor_it_switches_to() {
+        for action in provider_actions(Some("claude")) {
+            let vendor = action.id.strip_prefix("provider:").expect("a provider action");
+            assert!(
+                action.label.to_lowercase().contains(vendor),
+                "{:?} does not name {vendor}",
+                action.label
+            );
+            assert!(!action.destructive, "starting an agent is not destructive");
+        }
+    }
+
     use std::sync::Mutex;
 
     /// Records what it was asked to start, and starts nothing. The only spawner
@@ -826,6 +933,21 @@ mod tests {
             fixture.agents_root.clone(),
             spawner,
         )
+    }
+
+    #[test]
+    fn an_unknown_action_is_refused_rather_than_guessed() {
+        let fixture = fixture();
+        let (provider, spawner) = recording(&fixture);
+        let err = provider
+            .perform_action_with_query(
+                &fixture.neko.to_string_lossy(),
+                "archive",
+                "do the thing",
+            )
+            .expect_err("not a provider action");
+        assert!(err.0.contains("no action"), "{}", err.0);
+        assert!(spawner.calls().is_empty(), "and nothing was started");
     }
 
     fn recording(fixture: &Fixture) -> (NewAgentProvider, Arc<RecordingSpawner>) {

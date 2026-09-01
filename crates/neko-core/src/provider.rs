@@ -156,6 +156,26 @@ pub trait Provider: Send + Sync {
     fn perform_action(&self, _id: &str, action_id: &str) -> Result<(), ProviderError> {
         Err(ProviderError(format!("provider '{}' has no action '{action_id}'", self.id())))
     }
+
+    /// A `⌘K` action that also needs what was typed.
+    ///
+    /// Defaulted to discard the query and delegate, exactly as
+    /// `activate_with_query` does for the primary action — so every provider
+    /// whose actions are self-contained implements nothing. `new_agent` is
+    /// the one that needs it: its rows are working directories and its query
+    /// is the *prompt*, so "start this one with Codex instead" cannot be
+    /// answered from the row's id alone.
+    ///
+    /// The query is already on the wire (`Request::Activate::query`); before
+    /// this it simply stopped at the daemon for the action path.
+    fn perform_action_with_query(
+        &self,
+        id: &str,
+        action_id: &str,
+        _query: &str,
+    ) -> Result<(), ProviderError> {
+        self.perform_action(id, action_id)
+    }
 }
 
 /// The `⌘K` actions every row that names a real path should offer.

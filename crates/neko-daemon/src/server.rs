@@ -432,7 +432,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
                     // way `new_agent` ever learns what was typed. Same
                     // arrangement as `search_cancellable` above.
                     None => provider.activate_with_query(&id, &query),
-                    Some(action_id) => provider.perform_action(&id, &action_id),
+                    Some(action_id) => provider.perform_action_with_query(&id, &action_id, &query),
                 };
                 match result {
                     Ok(()) => {

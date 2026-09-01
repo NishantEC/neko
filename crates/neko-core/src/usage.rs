@@ -243,6 +243,68 @@ pub fn usage() -> Vec<VendorUsage> {
     fresh
 }
 
+/// Whatever quota is already known, without ever making a request.
+///
+/// **The blocking [`usage`] cannot be called from a search path.** A search
+/// runs on every keystroke, and a cold call fans out to three HTTPS requests
+/// bounded at `REQUEST_TIMEOUT` each — so a row that wanted to show headroom
+/// would stall the first character typed. This returns only what is already
+/// in hand; pair it with [`warm_in_background`] so the numbers arrive a
+/// keystroke or two later rather than never.
+pub fn cached() -> Option<Vec<VendorUsage>> {
+    CACHE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|(at, _)| at.elapsed() < CACHE_TTL)
+        .map(|(_, cached)| cached.clone())
+}
+
+/// Starts a refresh if one is due, and returns immediately.
+///
+/// At most one in flight: a search path calls this per keystroke, and without
+/// the guard a fast typist would launch a fan-out per character against three
+/// vendors that are all rate-limited.
+pub fn warm_in_background() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+    if cached().is_some() {
+        return;
+    }
+    if IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let fresh = fetch_all();
+        *CACHE.lock().unwrap() = Some((Instant::now(), fresh));
+        IN_FLIGHT.store(false, Ordering::SeqCst);
+    });
+}
+
+impl VendorUsage {
+    /// How much of this vendor's quota is left, as a percentage.
+    ///
+    /// **The most-used window governs**, not an average: a vendor with a
+    /// five-hour window at 95% and a weekly at 10% has 5% of headroom for the
+    /// next few hours, and averaging to 47% would be a comfortable-looking
+    /// lie at exactly the moment the number matters.
+    ///
+    /// `None` when there is no number to give — signed out, a plan with no
+    /// metered window, or a failed read. A caller showing this must say
+    /// nothing rather than guess, since "unknown" and "plenty" are the two
+    /// answers a person would act on most differently.
+    pub fn headroom_percent(&self) -> Option<f32> {
+        match &self.reading {
+            Reading::Windows(windows) if !windows.is_empty() => {
+                let worst = windows.iter().map(|w| w.utilization).fold(f32::MIN, f32::max);
+                Some((100.0 - worst).clamp(0.0, 100.0))
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Drops the cache so the next [`usage`] call really refetches.
 pub fn invalidate() {
     *CACHE.lock().unwrap() = None;
