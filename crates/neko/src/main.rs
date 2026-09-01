@@ -12,6 +12,7 @@ mod menu_frost;
 mod modes;
 mod markdown;
 mod motion;
+mod singleton;
 mod sound;
 mod onboarding;
 mod preferences;
@@ -58,6 +59,12 @@ struct ReopenTargets {
 impl gpui::Global for ReopenTargets {}
 
 fn main() {
+    // **Before anything opens a window.** A second client must take over
+    // rather than run beside the first: two panels both attempt the summon
+    // hotkey, exactly one registration receives it, and which one is not
+    // observable — so ⌥Space can be showing a build from yesterday while
+    // today's sits behind it. See `crate::singleton`.
+    let holds_singleton = singleton::take_over();
     daemon_launcher::ensure_daemon_running();
 
     // `gpui::Application::new()` no longer exists on the `wingleeio/zed`
@@ -112,7 +119,11 @@ fn summon_from_outside(cx: &mut App) {
 
 
 
-    app.run(|cx: &mut App| {
+    app.run(move |cx: &mut App| {
+        eprintln!(
+            "neko: single-client socket {}",
+            if holds_singleton { "held" } else { "not held (evidence run, or unavailable)" }
+        );
         // **Tell gpui once, rather than every call site.** `AnimationElement`
         // already checks `App::reduce_motion` and renders a single static frame
         // when it is set (`gpui/src/elements/animation.rs`), but nothing in gpui
@@ -709,6 +720,15 @@ fn summon_from_outside(cx: &mut App) {
                     });
                 }
                 if menu_bar::take_quit_request() {
+                    cx.update(|cx| cx.quit());
+                    return;
+                }
+                // A newer client has started and taken the socket. Standing
+                // down is what keeps ⌥Space pointing at the build somebody
+                // just launched — see `crate::singleton`.
+                if singleton::take_quit_request() {
+                    eprintln!("neko: a newer client started — standing down");
+                    singleton::release();
                     cx.update(|cx| cx.quit());
                     return;
                 }

@@ -919,10 +919,27 @@ mod macos {
                 if (radius - CORNER_RADIUS_PT).abs() > 0.01 {
                     return Err(format!("expected cornerRadius {CORNER_RADIUS_PT}, readback {radius}"));
                 }
+                // **The frame, not just the radius.** A rounded view whose
+                // bottom sits below the window's own content has its rounded
+                // corners off-screen, and reads on screen as a square cut —
+                // indistinguishable from "the radius was never applied", and
+                // invisible to a window-scoped capture, which cannot show a
+                // material with no backdrop to blur. So the geometry gets read
+                // back beside the property, or the next person debugging this
+                // is back to guessing.
+                let frame = glass.frame();
+                let host = content_view.bounds();
                 Ok(format!(
                     "NSGlassEffectView at contentView.subviews()[0] (below GPUI's rendering \
-                     view, {} total subviews) — readback style={style:?} cornerRadius={radius}",
-                    subviews.len()
+                     view, {} total subviews) — readback style={style:?} cornerRadius={radius} \
+                     frame={}x{} at ({},{}) hostBounds={}x{}",
+                    subviews.len(),
+                    frame.size.width,
+                    frame.size.height,
+                    frame.origin.x,
+                    frame.origin.y,
+                    host.size.width,
+                    host.size.height,
                 ))
             }
             Installed::Popover => {
