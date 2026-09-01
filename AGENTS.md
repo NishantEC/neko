@@ -3907,21 +3907,43 @@ corner's transparency should have been — not the native material, not the
 window shadow, not a clipping bug. Colour sampling settled in one probe what
 eyeballing would have argued about.
 
-**The fix is `PaintQuad::corner_radii`**, which the fade never set: the
-bottom quad now takes the panel's own `PANEL_RADIUS_PX` on its bottom pair
-only (the top of the band sits mid-list, where a radius reads as a bite out
-of it), clamped to the band height since a radius taller than the quad it
-rounds is not a shape. **Opt-in via `with_bottom_radius`, not automatic** — a
-fade does not always end at the panel: in a transcript mode the composer sits
-below it, and rounding there would carve a notch out of the middle.
+**Rounding the quad was the first fix and it was only half of it.** Giving
+the bottom quad the panel's own radius took the corner alpha from 155 to 0
+and fixed the *shape* — but the corner still read fuller than the two at the
+top, by about 4px at the last two rows. A radius sweep from 1.0x to 1.75x
+moved it **not at all**, which is what ruled the shape out as the remaining
+cause.
 
-Before/after on the same probe: corner alpha **155 → 0**, and the bottom arc
-now matches the top's first-opaque-column at every inset (22/17/11/7/5/3).
-The fade itself is unchanged — the gradient up the middle reads identically
-(18→21) in both. `docs/evidence/edge-fade-{square-corner-before,rounded-corner-after}.png`.
+**The real cause is alpha, and it explains a second complaint at the same
+time.** The band is `surface_panel_translucent` painted *over*
+`surface_panel_translucent`, so at full strength the composite is
+`a + a(1-a)` — 0.64 becomes **0.87** for `neutral`. That costs two things,
+both of which were reported: the bottom band is measurably less transparent,
+so the material blurs visibly less there; and the extra coverage pushes the
+corner's antialiased edge outward, which reads as squarer.
 
-**The general rule**: a painted quad inside a rounded container has to carry
-its own radii. There is nothing above it that will do this.
+**There is no version of a panel-coloured fade that works on a translucent
+panel.** Ending the band above the corner only moves the 0.64→0.87 step into
+the middle of the panel, where it reads as a line rather than a fade. This
+file already has the finding from the other side: an early attempt at a fade
+here was *invisible*, panel-colour on panel-colour. It is visible today
+precisely because it double-opaques.
+
+So the bottom fade comes off wherever a list meets the panel's own edge
+(`without_bottom_fade`), and the **scrollbar** — which did not exist when the
+fade was added — carries "there is more below" without touching a single
+pixel's alpha. The top fade stays (no corner, under a hairline), and so does
+the transcript's, where the composer sits below and there is no rounded edge.
+
+Measured on a scrolled list: all four corners identical at every inset
+(45/27/22/19/17/15/14/12), where the fade left the bottom pair 4px proud.
+`docs/evidence/edge-fade-{square-corner-before,corner-matched-after}.png`.
+
+**Two general rules.** A painted quad inside a rounded container carries its
+own radii — nothing above it will do that. And **a fade painted in the
+surface's own colour is a no-op on an opaque surface and an opacity change on
+a translucent one**; there is no third behaviour, so on glass it is the wrong
+tool no matter how it is shaped.
 
 ## The mouse, and the things the panel knew and never showed
 
