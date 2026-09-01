@@ -3850,6 +3850,42 @@ were the variance. With them gone the same measurement is 0.42% mean / 0.40%
 median, reproducibly. A benchmark that will not settle is worth one `pgrep`
 before it is worth another theory.
 
+## The bottom corners the scroll fade squared off
+
+Reported as "the corners aren't rounded at the bottom, I think it's the blur
+and the fade" — the second half of that was exactly right, and the
+measurement named it in one number.
+
+**gpui's content mask is a rectangle.** `overflow_hidden` on a rounded parent
+clips its children to the parent's *bounding box*, never to its rounded
+shape, so any child that paints into a corner paints square there. The bottom
+scroll fade (`edge_fade.rs`) is a full-width `paint_quad`, and the root list
+runs to the panel's own bottom edge — so it filled both bottom corners with
+its own colour.
+
+**The number that identified the layer**: the corner pixel measured alpha
+**163**, and `163/255 = 0.64`, which is precisely the `neutral` theme's
+`panel_alpha`. That is the fade's gradient at full strength sitting where the
+corner's transparency should have been — not the native material, not the
+window shadow, not a clipping bug. Colour sampling settled in one probe what
+eyeballing would have argued about.
+
+**The fix is `PaintQuad::corner_radii`**, which the fade never set: the
+bottom quad now takes the panel's own `PANEL_RADIUS_PX` on its bottom pair
+only (the top of the band sits mid-list, where a radius reads as a bite out
+of it), clamped to the band height since a radius taller than the quad it
+rounds is not a shape. **Opt-in via `with_bottom_radius`, not automatic** — a
+fade does not always end at the panel: in a transcript mode the composer sits
+below it, and rounding there would carve a notch out of the middle.
+
+Before/after on the same probe: corner alpha **155 → 0**, and the bottom arc
+now matches the top's first-opaque-column at every inset (22/17/11/7/5/3).
+The fade itself is unchanged — the gradient up the middle reads identically
+(18→21) in both. `docs/evidence/edge-fade-{square-corner-before,rounded-corner-after}.png`.
+
+**The general rule**: a painted quad inside a rounded container has to carry
+its own radii. There is nothing above it that will do this.
+
 ## The mouse, and the things the panel knew and never showed
 
 A pass over every finding three reviewers left open, plus what the scrollbar

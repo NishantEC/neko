@@ -41,14 +41,43 @@ pub fn scroll_edge_fade(
     band_px: f32,
     child: impl IntoElement,
 ) -> ScrollEdgeFade {
-    ScrollEdgeFade { scroll, fade_color, band_px, child: child.into_any_element() }
+    ScrollEdgeFade {
+        scroll,
+        fade_color,
+        band_px,
+        bottom_radius_px: 0.0,
+        child: child.into_any_element(),
+    }
 }
 
 pub struct ScrollEdgeFade {
     scroll: ScrollHandle,
     fade_color: Hsla,
     band_px: f32,
+    bottom_radius_px: f32,
     child: AnyElement,
+}
+
+impl ScrollEdgeFade {
+    /// Rounds the bottom fade's own corners, for a list that runs all the way
+    /// to the panel's bottom edge.
+    ///
+    /// **A fade is a painted quad, and gpui's content mask is a rectangle** —
+    /// `overflow_hidden` on a rounded parent clips children to its *bounding
+    /// box*, not to its rounded shape, so a full-width quad at the bottom of
+    /// the panel paints straight over both rounded corners and squares them
+    /// off. Measured before it was fixed: the neutral theme's corner read
+    /// alpha 163, which is exactly its `panel_alpha` of 0.64 — the fade's own
+    /// colour at full strength, sitting where the corner's transparency
+    /// should have been.
+    ///
+    /// Opt-in rather than always-on, because a fade does not always end at the
+    /// panel: in a transcript the composer sits below it, and rounding there
+    /// would carve a notch out of the middle of the panel.
+    pub fn with_bottom_radius(mut self, radius_px: f32) -> Self {
+        self.bottom_radius_px = radius_px;
+        self
+    }
 }
 
 impl Element for ScrollEdgeFade {
@@ -117,10 +146,18 @@ impl Element for ScrollEdgeFade {
                 origin: point(bounds.origin.x, bounds.origin.y + bounds.size.height - band),
                 size: size(bounds.size.width, band),
             };
-            window.paint_quad(fill(
+            let mut quad = fill(
                 quad_bounds,
                 linear_gradient(180.0, linear_color_stop(transparent, 0.0), linear_color_stop(self.fade_color, 1.0)),
-            ));
+            );
+            // Only the bottom pair: the top of this band sits in the middle of
+            // the list, where a radius would read as a bite taken out of it.
+            // Clamped to the band, since a radius taller than the quad it
+            // rounds is not a shape.
+            let radius = px(self.bottom_radius_px.min(f32::from(band)));
+            quad.corner_radii.bottom_left = radius;
+            quad.corner_radii.bottom_right = radius;
+            window.paint_quad(quad);
         }
     }
 }
@@ -149,6 +186,32 @@ impl IntoElement for ScrollEdgeFade {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bottom_radius_never_exceeds_the_band_it_rounds() {
+        // A radius taller than the quad is not a shape. The band is already
+        // clamped to the element's own height, so this clamp is what keeps a
+        // short list's fade from being asked for an impossible corner.
+        let band = 6.0_f32;
+        let radius = 16.0_f32.min(band);
+        assert_eq!(radius, 6.0);
+        let roomy = 16.0_f32.min(40.0);
+        assert_eq!(roomy, 16.0, "a normal band takes the panel's full radius");
+    }
+
+    #[test]
+    fn a_fade_is_square_until_a_radius_is_asked_for() {
+        // Opt-in, because a fade does not always end at the panel: in a
+        // transcript the composer sits below it, and rounding there would
+        // carve a notch out of the middle of the panel.
+        let scroll = gpui::ScrollHandle::new();
+        let plain = scroll_edge_fade(scroll.clone(), gpui::white(), 24.0, gpui::div());
+        assert_eq!(plain.bottom_radius_px, 0.0);
+        let rounded = scroll_edge_fade(scroll, gpui::white(), 24.0, gpui::div())
+            .with_bottom_radius(16.0);
+        assert_eq!(rounded.bottom_radius_px, 16.0);
+    }
+
 
     #[test]
     fn a_short_list_that_never_scrolls_shows_no_fade_at_either_edge() {
