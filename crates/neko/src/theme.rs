@@ -857,6 +857,13 @@ pub const TRANSPARENT: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
 pub const CHAT_IMAGE_MAX_WIDTH_PX: f32 = 420.0;
 pub const CHAT_IMAGE_MAX_HEIGHT_PX: f32 = 320.0;
 
+/// How far one arrow key moves a conversation.
+///
+/// About three lines of chat text — enough that a press is worth making, small
+/// enough that a held key reads as travelling rather than teleporting. A whole
+/// viewport belongs to Page Up/Down, which this panel does not bind.
+pub const TRANSCRIPT_SCROLL_STEP_PX: f32 = 60.0;
+
 pub const PANEL_RADIUS_PX: f32 = 16.0;
 pub const ROW_RADIUS_PX: f32 = 8.0;
 pub const DIALOG_RADIUS_PX: f32 = 14.0;

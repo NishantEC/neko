@@ -331,6 +331,27 @@ impl TextField {
     /// uses. A pasteboard with no string representation (e.g. an image-only
     /// copy) is a silent no-op, not an error — nothing to insert.
     fn on_paste(&mut self, _: &Paste, _window: &mut Window, cx: &mut Context<Self>) {
+        // **An image on the board beats text on it.** A screenshot copied from
+        // anywhere carries both a PNG *and* a text flavour on macOS, and the
+        // text one is usually a file URL or nothing useful — so checking text
+        // first would silently paste a path where a picture was meant. What
+        // lands in the field is the markdown reference an agent's harness
+        // actually resolves; see `crate::attachments` for why that, and not
+        // the bytes.
+        if let Some(bytes) = pasteboard::read_image()
+            && let Some(reference) = crate::attachments::save_pasted_image(&bytes)
+        {
+            let range = self.edit_target_range();
+            // Spaced off whatever is already typed, so "look at this" and the
+            // image do not run together into one unreadable token.
+            let insert = if self.content.is_empty() || range.start == 0 {
+                reference
+            } else {
+                format!(" {reference}")
+            };
+            self.commit_edit(range, &insert, cx);
+            return;
+        }
         let Some(text) = pasteboard::read_string() else {
             return;
         };

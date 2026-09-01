@@ -865,11 +865,11 @@ impl Root {
         // captain may have pressed Down, so "what is highlighted right now"
         // is the only correct thing for `resolve_selection` to follow.
         let previously_selected = self.results.get(self.selected).map(|item| (item.kind.clone(), item.id.clone()));
-        // For the transcript's stick-to-bottom rule below: whether the
-        // highlight sat on the newest turn *before* this frame replaced the
-        // list. Computed here because afterwards there is no "before".
-        let previously_selected_was_last =
-            !self.results.is_empty() && self.selected == self.results.len() - 1;
+        // For the transcript's stick-to-bottom rule below: whether the *view*
+        // was parked at the end before this frame replaced the list. Read
+        // from the scroll handle rather than from `selected`, which no longer
+        // means anything in a transcript now that the arrow keys scroll it.
+        let was_at_bottom = self.transcript_is_at_bottom();
 
         // The mode list scrolls (`edge_fade::scroll_edge_fade` in
         // `render_mode_list`) rather than being budget-fit like the root
@@ -977,15 +977,13 @@ impl Root {
         // turn is exactly the entering case, so scrolling back up to reread
         // is never fought by a later frame of the same conversation.
         let entering_the_transcript = previous.is_none_or(|(kind, _)| kind != "conversation");
-        let was_on_newest_turn = previously_selected_was_last;
         if self.active_mode().is_some_and(|m| m.chrome.transcript) && !self.results.is_empty() {
             // Entering lands at the bottom; and **being at the bottom is
-            // sticky**, the way every chat is: reading the newest turn when a
-            // newer one arrives means following it down. Reading an *older*
-            // turn is the one state a refresh must not disturb — that case
-            // falls through to `resolve_selection`'s ordinary follow-the-row
-            // rule above, pinned by its own test.
-            if entering_the_transcript || was_on_newest_turn {
+            // sticky**, the way every chat is: watching the newest turn when
+            // a newer one arrives means following it down. Having scrolled
+            // *up* to reread is the one state a refresh must not disturb, so
+            // anything short of the end leaves the view exactly where it was.
+            if entering_the_transcript || was_at_bottom {
                 self.selected = self.results.len() - 1;
                 self.mode_scroll.scroll_to_bottom();
             }
@@ -1082,6 +1080,51 @@ impl Root {
         self.glide_to_item(handle, index);
     }
 
+    /// Whether a transcript's view is parked at its end.
+    ///
+    /// A slack of one step, not exact equality: the glide lands on a
+    /// fractional offset and a chat that stops following the moment somebody
+    /// is one pixel short of the bottom is worse than one that follows a
+    /// pixel early.
+    fn transcript_is_at_bottom(&self) -> bool {
+        transcript_at_bottom(
+            -f32::from(self.mode_scroll.offset().y),
+            f32::from(self.mode_scroll.max_offset().y),
+        )
+    }
+
+    /// Moves a transcript's view by one step, in the direction the arrow key
+    /// pointed.
+    ///
+    /// Glides rather than jumps, through the same tween a selection move uses,
+    /// so a held key reads as continuous travel instead of a stutter — and
+    /// clamps at both ends, because a chat that bounces at the top is a chat
+    /// that feels broken.
+    fn scroll_transcript(&mut self, bias: ScrollBias) {
+        let step = match bias {
+            ScrollBias::Up => theme::TRANSCRIPT_SCROLL_STEP_PX,
+            _ => -theme::TRANSCRIPT_SCROLL_STEP_PX,
+        };
+        let handle = self.mode_scroll.clone();
+        let from = handle.offset();
+        // Offsets run negative as content scrolls up, so the reachable range
+        // is `-max_offset ..= 0`.
+        let max = handle.max_offset().y;
+        let target_y = (from.y + px(step)).clamp(-max, px(0.));
+        let to = point(from.x, target_y);
+        if to == from {
+            return;
+        }
+        if motion::system_reduce_motion() {
+            handle.set_offset(to);
+            self.scroll_glide = None;
+            return;
+        }
+        let mut glide = motion::ScrollGlide::new(from, to, std::time::Instant::now());
+        glide.record_write(from);
+        self.scroll_glide = Some((handle, glide));
+    }
+
     /// Start a glide toward `index` on `handle`.
     ///
     /// **The destination comes from `scroll_to_item` itself, not from
@@ -1141,6 +1184,18 @@ impl Root {
     }
 
     fn select_next(&mut self, _: &SelectNext, _window: &mut Window, cx: &mut Context<Self>) {
+        // **A chat is scrolled, not stepped through.** Every other surface
+        // here is a list where the arrow keys move a cursor and Enter acts on
+        // what it lands on; a transcript has no such cursor — Enter belongs to
+        // the composer, ⌘K targets the session rather than any one turn, and
+        // a tool chip folds on click. So the keys do the only thing left that
+        // means anything, which is what a person expects of a message view:
+        // they move the view.
+        if self.active_mode().is_some_and(|m| m.chrome.transcript) {
+            self.scroll_transcript(ScrollBias::Down);
+            cx.notify();
+            return;
+        }
         if let Some(menu) = &mut self.actions_menu {
             if !menu.actions.is_empty() {
                 menu.selected = (menu.selected + 1).min(menu.actions.len() - 1);
@@ -1180,6 +1235,18 @@ impl Root {
     }
 
     fn select_previous(&mut self, _: &SelectPrevious, _window: &mut Window, cx: &mut Context<Self>) {
+        // **A chat is scrolled, not stepped through.** Every other surface
+        // here is a list where the arrow keys move a cursor and Enter acts on
+        // what it lands on; a transcript has no such cursor — Enter belongs to
+        // the composer, ⌘K targets the session rather than any one turn, and
+        // a tool chip folds on click. So the keys do the only thing left that
+        // means anything, which is what a person expects of a message view:
+        // they move the view.
+        if self.active_mode().is_some_and(|m| m.chrome.transcript) {
+            self.scroll_transcript(ScrollBias::Up);
+            cx.notify();
+            return;
+        }
         if let Some(menu) = &mut self.actions_menu {
             menu.selected = menu.selected.saturating_sub(1);
             menu.confirm_armed = false;
@@ -3354,7 +3421,6 @@ impl Root {
     /// One turn. The voice comes off `SearchItem::speaker`, the words off
     /// `preview` — never off which provider produced the row.
     fn render_turn(&self, idx: usize, item: &SearchItem, cx: &mut Context<Self>) -> AnyElement {
-        let selected = self.row_is_highlighted(idx);
         let text = item.preview.clone().unwrap_or_else(|| item.title.clone());
         let body: AnyElement = match item.speaker.as_deref() {
             // **The typing bubble.** An agent-side bubble of three dots
@@ -3508,10 +3574,12 @@ impl Root {
             .rounded(px(theme::ROW_RADIUS_PX))
             .px(px(6.))
             .py(px(3.))
-            // The selection is how `⌘K` knows which turn "Open in Paseo"
-            // means; a wash rather than the full selected pill, because a
-            // transcript is read far more than it is driven.
-            .when(selected, |el| el.bg(theme::active().row_icon_socket_bg))
+            // **No selection wash: a chat has no cursor.** The arrow keys
+            // scroll here rather than stepping, ⌘K targets the session rather
+            // than a turn, and a tool chip folds on click — so a highlight
+            // would be a pointer to a thing nothing acts on. Hover still
+            // responds, because the pointer really can act (folding output).
+            .hover(|el| el.bg(theme::active().row_icon_socket_bg))
             .on_click(cx.listener({
                 let id = item.id.clone();
                 let toggles_output = item.speaker.as_deref() == Some("tool") && item.preview.is_some();
@@ -3885,6 +3953,27 @@ impl Root {
 /// normal case; this rule matters for the query-changes-but-the-top-match-
 /// is-still-there case, and for a keyboard adjustment made while the
 /// request for the *next* keystroke was still in flight.
+/// Whether a transcript's view is parked at its end.
+///
+/// Pure, and separate from the handle for the same reason
+/// `edge_fade::edge_fade_visibility` is: the decision is arithmetic, the
+/// arithmetic is what governs whether a new turn is followed, and a live
+/// `ScrollHandle` reports a `max_offset` of zero until something has actually
+/// been laid out — so a test driving it through the handle would be testing
+/// the harness.
+///
+/// Slack of one step rather than exact equality: a glide lands on a
+/// fractional offset, and a chat that stops following the moment somebody is
+/// one pixel short of the end is worse than one that follows a pixel early.
+fn transcript_at_bottom(scrolled: f32, max: f32) -> bool {
+    if max <= 0.0 {
+        // Nothing to scroll, so the end is where you already are. Getting
+        // this wrong would mean a short conversation never followed a reply.
+        return true;
+    }
+    scrolled >= max - theme::TRANSCRIPT_SCROLL_STEP_PX
+}
+
 fn resolve_selection(previous: Option<(&str, &str)>, results: &[SearchItem]) -> usize {
     previous
         .and_then(|(kind, id)| results.iter().position(|item| item.kind == kind && item.id == id))
@@ -5376,29 +5465,44 @@ mod tests {
     }
 
     #[gpui::test]
-    fn reading_the_newest_turn_follows_new_turns_down(cx: &mut TestAppContext) {
-        // Being at the bottom is sticky, the way every chat is. Reading an
-        // older turn is the one state a refresh must not disturb — that case
-        // is pinned by `rereading_older_turns_is_not_fought_by_a_refresh`.
+    fn a_transcript_scrolls_rather_than_stepping_a_cursor(cx: &mut TestAppContext) {
+        // Every other surface moves a selection on Up/Down. A chat has no
+        // cursor — Enter belongs to the composer, ⌘K targets the session, and
+        // a tool chip folds on click — so the keys move the view instead.
         let window = test_root(cx);
         window
             .update(cx, |root, window, cx| {
                 root.results = vec![agent_row("the-agent")];
                 root.selected = 0;
                 root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
-                let turns = |n: usize| -> Vec<SearchItem> {
-                    (0..n)
-                        .map(|i| SearchItem {
-                            speaker: Some("agent".into()),
-                            images: Vec::new(),
-                            ..item_with_id("conversation", &format!("the-agent#{i}"))
-                        })
-                        .collect()
-                };
-                root.apply_search_results(turns(3), true, root.generation, cx);
-                assert_eq!(root.selected, 2, "entered at the bottom");
-                root.apply_search_results(turns(5), true, root.generation, cx);
-                assert_eq!(root.selected, 4, "followed the new turns down");
+                let turns: Vec<SearchItem> = (0..12)
+                    .map(|i| SearchItem {
+                        speaker: Some("agent".into()),
+                        ..item_with_id("conversation", &format!("the-agent#{i}"))
+                    })
+                    .collect();
+                root.apply_search_results(turns, true, root.generation, cx);
+                let before = root.selected;
+                root.select_previous(&SelectPrevious, window, cx);
+                assert_eq!(
+                    root.selected, before,
+                    "Up moved the view, not a selection"
+                );
+                root.select_next(&SelectNext, window, cx);
+                assert_eq!(root.selected, before, "and Down likewise");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_transcript_with_nothing_to_scroll_counts_as_at_its_end(cx: &mut TestAppContext) {
+        // The stick-to-bottom rule reads the scroll handle now. A short
+        // conversation has `max_offset` zero, and "you cannot scroll" has to
+        // mean "you are at the end" or a new turn would never be followed.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.transcript_is_at_bottom());
             })
             .unwrap();
     }
@@ -5428,32 +5532,15 @@ mod tests {
             .unwrap();
     }
 
-    #[gpui::test]
-    fn rereading_older_turns_is_not_fought_by_a_refresh(cx: &mut TestAppContext) {
-        // Arrow up to an older turn, then a fresh frame of the same
-        // conversation lands — the selection must follow the turn by
-        // identity, not jump back to the bottom.
-        let window = test_root(cx);
-        window
-            .update(cx, |root, window, cx| {
-                root.results = vec![agent_row("the-agent")];
-                root.selected = 0;
-                root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
-                let turns = |n: usize| -> Vec<SearchItem> {
-                    (0..n)
-                        .map(|i| SearchItem {
-                            speaker: Some("agent".into()),
-                            images: Vec::new(),
-                            ..item_with_id("conversation", &format!("the-agent#{i}"))
-                        })
-                        .collect()
-                };
-                root.apply_search_results(turns(5), true, root.generation, cx);
-                root.selected = 1; // reread something older
-                root.apply_search_results(turns(5), true, root.generation, cx);
-                assert_eq!(root.selected, 1, "still on the turn being read");
-            })
-            .unwrap();
+    #[test]
+    fn a_view_scrolled_up_to_reread_does_not_follow_new_turns_down() {
+        let step = theme::TRANSCRIPT_SCROLL_STEP_PX;
+        // Parked at the end, within the glide's own landing slack.
+        assert!(transcript_at_bottom(900.0, 900.0));
+        assert!(transcript_at_bottom(900.0 - step + 1.0, 900.0));
+        // Scrolled up to reread: a refresh must leave this exactly alone.
+        assert!(!transcript_at_bottom(400.0, 900.0));
+        assert!(!transcript_at_bottom(0.0, 900.0));
     }
 
     #[gpui::test]

@@ -1,4 +1,5 @@
 mod accessibility;
+mod attachments;
 mod assets;
 mod components;
 mod daemon_launcher;
