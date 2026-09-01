@@ -2686,7 +2686,10 @@ impl Root {
                 fade.into(),
                 theme::EDGE_FADE_BAND_PX,
                 container,
-            ),
+            )
+            // This list runs to the panel's bottom edge, so its fade has to
+            // respect the same corner the panel is drawn with.
+            .with_bottom_radius(theme::PANEL_RADIUS_PX),
         )
         .into_any_element()
     }
@@ -3607,7 +3610,8 @@ impl Root {
                 fade_color.into(),
                 theme::EDGE_FADE_BAND_PX,
                 container,
-            ),
+            )
+            .with_bottom_radius(theme::PANEL_RADIUS_PX),
         )
     }
 
