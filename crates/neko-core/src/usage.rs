@@ -653,6 +653,7 @@ impl Provider for UsageProvider {
                     keeps_open: true,
                     preview_markdown: false,
                     speaker: None,
+                    images: Vec::new(),
                     preview: None,
                 },
             })

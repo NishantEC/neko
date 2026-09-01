@@ -300,6 +300,7 @@ impl Provider for TerminalsProvider {
                         preview,
                         preview_markdown: false,
                         speaker: None,
+                        images: Vec::new(),
                     },
                 })
             })

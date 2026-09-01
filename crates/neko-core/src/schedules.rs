@@ -230,6 +230,7 @@ impl Provider for SchedulesProvider {
                         keeps_open: true,
                         preview_markdown: false,
                         speaker: None,
+                        images: Vec::new(),
                         preview: None,
                     },
                 })

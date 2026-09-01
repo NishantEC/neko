@@ -491,6 +491,7 @@ impl AskProvider {
                 keeps_open,
                 preview_markdown: false,
                 speaker: None,
+                images: Vec::new(),
                 preview: None,
             },
         }

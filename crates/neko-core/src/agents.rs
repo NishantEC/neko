@@ -799,6 +799,7 @@ fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceN
         keeps_open: false,
         preview_markdown: false,
         speaker: None,
+        images: Vec::new(),
         preview: None,
     }
 }
@@ -1021,6 +1022,7 @@ impl Provider for AgentControlProvider {
                         keeps_open: false,
                         preview_markdown: false,
                         speaker: None,
+                        images: Vec::new(),
                         preview: None,
                     },
                 }

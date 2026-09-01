@@ -702,6 +702,7 @@ fn to_item(project: &Project, prompt: &str, provider: Option<&str>) -> SearchIte
         keeps_open: false,
         preview_markdown: false,
         speaker: None,
+        images: Vec::new(),
         preview: None,
     }
 }

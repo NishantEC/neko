@@ -360,6 +360,7 @@ impl Provider for ClipboardProvider {
                         keeps_open: false,
                         preview_markdown: false,
                         speaker: None,
+                        images: Vec::new(),
                         preview: None,
                     },
                 })

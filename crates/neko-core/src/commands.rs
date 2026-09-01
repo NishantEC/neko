@@ -220,6 +220,7 @@ impl Provider for CommandsProvider {
                         keeps_open: false,
                         preview_markdown: false,
                         speaker: None,
+                        images: Vec::new(),
                         preview: None,
                     },
                 })
