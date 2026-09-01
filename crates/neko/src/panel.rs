@@ -2687,9 +2687,9 @@ impl Root {
                 theme::EDGE_FADE_BAND_PX,
                 container,
             )
-            // This list runs to the panel's bottom edge, so its fade has to
-            // respect the same corner the panel is drawn with.
-            .with_bottom_radius(theme::PANEL_RADIUS_PX),
+            // Runs to the panel's own bottom edge — see
+            // `without_bottom_fade` for why a fade cannot live there.
+            .without_bottom_fade(),
         )
         .into_any_element()
     }
@@ -3611,7 +3611,7 @@ impl Root {
                 theme::EDGE_FADE_BAND_PX,
                 container,
             )
-            .with_bottom_radius(theme::PANEL_RADIUS_PX),
+            .without_bottom_fade(),
         )
     }
 
