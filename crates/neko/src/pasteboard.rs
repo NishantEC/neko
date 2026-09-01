@@ -16,7 +16,9 @@
 //! the same rule applies regardless of call frequency.
 
 #[cfg(target_os = "macos")]
-use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+use objc2::rc::autoreleasepool;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeString, NSPasteboardTypeTIFF};
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
 
@@ -62,6 +64,36 @@ pub fn read_string() -> Option<String> {
     })
 }
 
+#[cfg(target_os = "macos")]
+/// Reads an image off the pasteboard as PNG bytes, if one is there.
+///
+/// PNG first, then TIFF — macOS screenshots and most apps put PNG on the
+/// board, but `NSPasteboardTypeTIFF` is the older lingua franca that
+/// screen-capture and some editors still write, and reading only the first
+/// would silently miss half of what people paste.
+///
+/// Returns the bytes rather than a path: what to *do* with an image is the
+/// caller's decision, and the pasteboard is a systemwide resource this module
+/// exists to keep every AKit call to.
+pub fn read_image() -> Option<Vec<u8>> {
+    autoreleasepool(|_| {
+        let pb = NSPasteboard::generalPasteboard();
+        // SAFETY: both constants are plain (non-`safe`) statics, read here
+        // exactly as `NSPasteboardTypeString` is above.
+        // SAFETY: both are plain (non-`safe`) extern statics, read here
+        // exactly as `NSPasteboardTypeString` is above.
+        for kind in unsafe { [NSPasteboardTypePNG, NSPasteboardTypeTIFF] } {
+            if let Some(data) = pb.dataForType(kind) {
+                let bytes = data.to_vec();
+                if !bytes.is_empty() {
+                    return Some(bytes);
+                }
+            }
+        }
+        None
+    })
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn write_string(_text: &str) -> bool {
     false
@@ -71,3 +103,9 @@ pub fn write_string(_text: &str) -> bool {
 pub fn read_string() -> Option<String> {
     None
 }
+
+#[cfg(not(target_os = "macos"))]
+pub fn read_image() -> Option<Vec<u8>> {
+    None
+}
+
