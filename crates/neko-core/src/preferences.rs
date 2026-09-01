@@ -400,6 +400,7 @@ impl Provider for PreferencesProvider {
                         keeps_open: false,
                         preview_markdown: false,
                         speaker: None,
+                        images: Vec::new(),
                         preview: None,
                     },
                 })
@@ -508,6 +509,7 @@ impl Provider for FolderScopeProvider {
                         keeps_open: false,
                         preview_markdown: false,
                         speaker: None,
+                        images: Vec::new(),
                         preview: None,
                     },
                 }

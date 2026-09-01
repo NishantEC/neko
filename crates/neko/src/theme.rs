@@ -847,6 +847,16 @@ pub const SNAP_GUIDE_THICKNESS_PX: f32 = 4.0;
 /// somebody asks what a wash starts from.
 pub const TRANSPARENT: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
 
+/// How large a picture in a chat bubble may be drawn.
+///
+/// Capped rather than fixed, so proportion survives: a wide screenshot binds
+/// on width, a tall one on height, and neither is stretched. Sized to leave
+/// the bubble reading as a message rather than becoming a lightbox — the
+/// transcript is a conversation, and a full-bleed screenshot would push the
+/// words that came with it off screen.
+pub const CHAT_IMAGE_MAX_WIDTH_PX: f32 = 420.0;
+pub const CHAT_IMAGE_MAX_HEIGHT_PX: f32 = 320.0;
+
 pub const PANEL_RADIUS_PX: f32 = 16.0;
 pub const ROW_RADIUS_PX: f32 = 8.0;
 pub const DIALOG_RADIUS_PX: f32 = 14.0;

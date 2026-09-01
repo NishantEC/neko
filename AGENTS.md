@@ -3478,10 +3478,26 @@ subagent's own assistant events count (its incoming tool results would
 double every step), and per-step attribution via the uuid chains is
 deliberately not guessed at.
 
-**Deferred from the same list, each with its reason**: inline images (the
-jsonl carries them as base64, so rendering means a decode-and-cache pipeline
-with size bounds — real separate work, the `[image]` marker stays honest);
-Codex transcripts (`~/.codex/sessions` exists and its rollout format is
+**Inline images are built.** The jsonl carries them as base64 — one real
+screenshot is ~138 KB of it — so the daemon decodes once to
+`~/Library/Caches/neko/conversation-images/<generation>/<hash>.<ext>` and the
+wire carries a **path**, never the bytes: `SearchItem::images`, the same
+arrangement `Icon::Image` already uses for app artwork. Three properties are
+load-bearing and each is pinned. **Keyed by a hash of the payload and skipped
+when the file exists**, because the client re-parses the tail every 2.5s and
+would otherwise re-decode every image in the window several times a minute.
+**The `[image]` marker survives anything that does not decode** (a URL
+source, a full disk) — a turn pointing at nothing is worse than a marker.
+**A turn that is only a picture is still a turn**, since dropping it for
+having no words would delete the message. On disk the cache is bounded
+(`MAX_CACHED_IMAGES`, pruned oldest-first, and only when a genuinely new file
+is written); in memory it gets a **second** `RowIconCache` instance
+(`for_conversation`, capacity 24) rather than sharing the row cache — one
+chat image is hundreds of times a 22px icon's decoded area, and sharing would
+let a screenshot evict a screenful of row artwork or the reverse.
+`docs/evidence/conversation-image.png`.
+
+**Deferred, with its reason**: Codex transcripts (`~/.codex/sessions` exists and its rollout format is
 readable, but **no Paseo codex agent exists on this machine**, so the
 `persistence.sessionId` → rollout-file join would be unverifiable code — the
 exact bar `usage` applied to Cursor/Kimi/MiniMax/Z.AI).

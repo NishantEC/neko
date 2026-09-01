@@ -165,6 +165,9 @@ pub struct Root {
     /// (GPUI's sprite atlas never reclaims a tile without it) and why it's
     /// a bounded LRU rather than a full clear on every summon.
     row_icon_cache: Entity<crate::row_icon_cache::RowIconCache>,
+    /// The transcript's own bounded image cache — see
+    /// `RowIconCache::for_conversation` for why it is not the row cache.
+    conversation_image_cache: Entity<crate::row_icon_cache::RowIconCache>,
     /// `Some` while a command's mode is active (`SearchItem::enters_mode`) —
     /// see `crate::modes`'s module doc comment for the full concept. Empty
     /// is the ordinary root list.
@@ -429,6 +432,7 @@ impl Root {
         cx.observe(&pulse, |_root, _clock, cx| cx.notify()).detach();
         let text_field = TextField::new(cx);
         let row_icon_cache = crate::row_icon_cache::RowIconCache::new(cx);
+        let conversation_image_cache = crate::row_icon_cache::RowIconCache::for_conversation(cx);
         // Subscribed to `ContentChanged` specifically, not observed via
         // `cx.observe` — `TextField` also notifies on every cursor
         // blink (a render concern), and `cx.observe` cannot
@@ -451,6 +455,7 @@ impl Root {
             menu_frost,
             connected: true,
             row_icon_cache,
+            conversation_image_cache,
             active_mode: None,
             open_preferences,
             agent_tiles: Vec::new(),
@@ -3183,6 +3188,7 @@ impl Root {
             .gap(px(10.))
             .px(px(16.))
             .py(px(12.))
+            .image_cache(self.conversation_image_cache.clone())
             .id("transcript-scroll")
             .overflow_y_scroll()
             .track_scroll(&self.mode_scroll);
@@ -3393,7 +3399,22 @@ impl Root {
                         .bg(theme::active().surface_input)
                         .text_size(px(12.))
                         .text_color(theme::active().text_primary)
-                        .child(crate::markdown::render(&text)),
+                        .flex()
+                        .flex_col()
+                        .gap(px(7.))
+                        // A picture somebody sent, shown as a picture. Width
+                        // is capped rather than fixed and the height follows,
+                        // so a wide screenshot and a tall one both stay in
+                        // proportion inside the bubble.
+                        .children(item.images.iter().map(|path| {
+                            gpui::img(std::path::PathBuf::from(path))
+                                .max_w(px(theme::CHAT_IMAGE_MAX_WIDTH_PX))
+                                .max_h(px(theme::CHAT_IMAGE_MAX_HEIGHT_PX))
+                                .rounded(px(theme::CHIP_RADIUS_PX))
+                        }))
+                        .when(!text.is_empty(), |el| {
+                            el.child(crate::markdown::render(&text))
+                        }),
                 )
                 .into_any_element(),
             Some("tool") => {
@@ -4575,6 +4596,7 @@ mod tests {
             keeps_open: false,
             preview_markdown: false,
             speaker: None,
+            images: Vec::new(),
             preview: None,
         }
     }
@@ -4982,6 +5004,7 @@ mod tests {
             keeps_open: false,
             preview_markdown: false,
             speaker: None,
+            images: Vec::new(),
             preview: None,
         }
     }
@@ -5280,6 +5303,7 @@ mod tests {
                 assert!(!root.transcript_agent_is_working());
                 root.results.push(SearchItem {
                     speaker: Some("working".into()),
+                    images: Vec::new(),
                     ..item_with_id("conversation", "a#working")
                 });
                 assert!(root.transcript_agent_is_working());
@@ -5362,6 +5386,7 @@ mod tests {
                     (0..n)
                         .map(|i| SearchItem {
                             speaker: Some("agent".into()),
+                            images: Vec::new(),
                             ..item_with_id("conversation", &format!("the-agent#{i}"))
                         })
                         .collect()
@@ -5389,6 +5414,7 @@ mod tests {
                 let turns: Vec<SearchItem> = (0..5)
                     .map(|i| SearchItem {
                         speaker: Some(if i % 2 == 0 { "user" } else { "agent" }.into()),
+                        images: Vec::new(),
                         ..item_with_id("conversation", &format!("the-agent#{i}"))
                     })
                     .collect();
@@ -5413,6 +5439,7 @@ mod tests {
                     (0..n)
                         .map(|i| SearchItem {
                             speaker: Some("agent".into()),
+                            images: Vec::new(),
                             ..item_with_id("conversation", &format!("the-agent#{i}"))
                         })
                         .collect()
@@ -5736,6 +5763,7 @@ mod tests {
             keeps_open: false,
             preview_markdown: false,
             speaker: None,
+            images: Vec::new(),
             preview: None,
         }
     }
@@ -5833,6 +5861,7 @@ mod tests {
             keeps_open: false,
             preview_markdown: false,
             speaker: None,
+            images: Vec::new(),
             preview: None,
         }
     }

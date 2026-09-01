@@ -460,6 +460,7 @@ fn build_candidate(score: f32, path: PathBuf, name: String) -> Candidate {
             keeps_open: false,
             preview_markdown: false,
             speaker: None,
+            images: Vec::new(),
             preview: None,
         },
     }

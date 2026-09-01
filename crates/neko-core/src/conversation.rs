@@ -123,6 +123,9 @@ pub struct Turn {
     /// the row's `preview`; the client renders it on demand, because a chat
     /// where every `ls` prints its output is a terminal, not a chat.
     pub result: Option<String>,
+    /// Cached PNG paths for any images this turn carried — see
+    /// [`cache_image`] for why the bytes never travel over the wire.
+    pub images: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,6 +220,91 @@ fn read_tail(path: &std::path::Path) -> Option<String> {
     Some(buf)
 }
 
+/// Where decoded conversation images live.
+///
+/// Versioned like `icons.rs`'s own cache, and for the same reason: the only
+/// staleness check is "does a file exist at this path", so a future change to
+/// what gets written has to change the *directory* or it will keep serving
+/// whatever is already there.
+const IMAGE_CACHE_GENERATION: &str = "v1";
+
+/// How many decoded images to keep. Bounded because a transcript's images are
+/// unbounded in a way its turns are not — `TURN_LIMIT` caps what is read, but
+/// every conversation ever opened writes into the same directory.
+const MAX_CACHED_IMAGES: usize = 300;
+
+fn image_cache_dir() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(
+        std::path::PathBuf::from(home)
+            .join("Library/Caches/neko/conversation-images")
+            .join(IMAGE_CACHE_GENERATION),
+    )
+}
+
+/// Decodes one base64 image block to disk and returns its path.
+///
+/// **The bytes never go over the wire.** A single screenshot in a real
+/// transcript is ~138 KB of base64; putting that on a `SearchItem` would mean
+/// shipping it on every keystroke of a re-search, through a JSON frame, for a
+/// picture the client is about to load from disk anyway. The daemon decodes
+/// once, caches by content hash, and sends a path — the same arrangement
+/// `icons.rs` already uses for app artwork.
+///
+/// **Keyed by a hash of the payload, and skipped entirely when the file is
+/// already there.** The client polls a live conversation every 2.5s and each
+/// tick re-parses the tail, so without the existence check every image in the
+/// window would be decoded and rewritten several times a minute for nothing.
+fn cache_image(media_type: &str, data: &str) -> Option<String> {
+    use base64::Engine as _;
+    use std::hash::{Hash, Hasher};
+
+    let dir = image_cache_dir()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    data.hash(&mut hasher);
+    let extension = match media_type {
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        _ => "png",
+    };
+    // Not a security hash — a cache filename. The whole payload is hashed
+    // rather than a cheap prefix because a collision here shows the wrong
+    // picture in somebody's conversation.
+    let path = dir.join(format!("{:016x}.{extension}", hasher.finish()));
+    if path.exists() {
+        return Some(path.to_string_lossy().to_string());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).ok()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::write(&path, bytes).ok()?;
+    prune_image_cache(&dir);
+    Some(path.to_string_lossy().to_string())
+}
+
+/// Keeps the cache under [`MAX_CACHED_IMAGES`], oldest first.
+///
+/// Called only after a genuinely new file is written, so the common path — a
+/// poll tick over a conversation whose images are all cached — never reads the
+/// directory at all.
+fn prune_image_cache(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, entry.path()))
+        })
+        .collect();
+    if files.len() <= MAX_CACHED_IMAGES {
+        return;
+    }
+    files.sort_by_key(|(modified, _)| *modified);
+    for (_, path) in files.iter().take(files.len() - MAX_CACHED_IMAGES) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// Whether a user line's text is harness noise rather than something the
 /// captain typed — command caveats, slash-command echoes, injected reminders.
 fn is_user_noise(text: &str) -> bool {
@@ -304,6 +392,7 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                 ),
                 tool: Some("Subagent".to_string()),
                 result: None,
+                images: Vec::new(),
             });
             *steps = 0;
         }
@@ -328,6 +417,7 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
         let Some(message) = doc.get("message") else { continue };
         match doc.get("type").and_then(Value::as_str) {
             Some("user") => {
+                let mut images: Vec<String> = Vec::new();
                 let text = match message.get("content") {
                     Some(Value::String(text)) => text.clone(),
                     Some(Value::Array(blocks)) => {
@@ -348,10 +438,33 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                                     }
                                 }
                                 Some("image") => {
-                                    if !text.is_empty() {
-                                        text.push('\n');
+                                    let source = block.get("source");
+                                    let cached = source
+                                        .filter(|s| {
+                                            s.get("type").and_then(Value::as_str) == Some("base64")
+                                        })
+                                        .and_then(|s| {
+                                            let media = s
+                                                .get("media_type")
+                                                .and_then(Value::as_str)
+                                                .unwrap_or("image/png");
+                                            let data = s.get("data").and_then(Value::as_str)?;
+                                            cache_image(media, data)
+                                        });
+                                    match cached {
+                                        Some(path) => images.push(path),
+                                        // **The marker stays for anything that
+                                        // did not decode** — a URL source, a
+                                        // full disk, an unreadable payload.
+                                        // Dropping it silently would leave a
+                                        // turn that pointed at nothing.
+                                        None => {
+                                            if !text.is_empty() {
+                                                text.push('\n');
+                                            }
+                                            text.push_str("[image]");
+                                        }
                                     }
-                                    text.push_str("[image]");
                                 }
                                 _ => {}
                             }
@@ -361,11 +474,19 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                     _ => continue,
                 };
                 let text = text.trim().to_string();
-                if text.is_empty() || is_user_noise(&text) {
+                // A turn that is *only* an image is still a turn — dropping it
+                // for having no words would delete a screenshot somebody sent.
+                if (text.is_empty() && images.is_empty()) || is_user_noise(&text) {
                     continue;
                 }
                 flush_sidechain(&mut turns, &mut sidechain_steps);
-                turns.push(Turn { speaker: Speaker::User, text, tool: None, result: None });
+                turns.push(Turn {
+                    speaker: Speaker::User,
+                    text,
+                    tool: None,
+                    result: None,
+                    images: std::mem::take(&mut images),
+                });
             }
             Some("assistant") => {
                 let Some(Value::Array(blocks)) = message.get("content") else { continue };
@@ -385,6 +506,7 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                                     text,
                                     tool: None,
                                     result: None,
+                                    images: Vec::new(),
                                 });
                             }
                         }
@@ -408,6 +530,7 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                                 text,
                                 tool: Some(name),
                                 result,
+                                images: Vec::new(),
                             });
                         }
                         _ => {}
@@ -436,6 +559,7 @@ fn turns_from_entries(entries: Vec<Entry>) -> Vec<Turn> {
                 text: argument.to_string(),
                 tool: Some(tool.to_string()),
                 result: None,
+                images: Vec::new(),
             },
             None => Turn {
                 speaker: Speaker::Agent,
@@ -445,6 +569,7 @@ fn turns_from_entries(entries: Vec<Entry>) -> Vec<Turn> {
                 },
                 tool: None,
                 result: None,
+                images: Vec::new(),
             },
         })
         .collect()
@@ -622,6 +747,7 @@ impl Provider for ConversationProvider {
                         // is a typed line, not prose.
                         preview_markdown: turn.speaker != Speaker::Tool,
                         speaker: Some(turn.speaker.wire().to_string()),
+                        images: turn.images.clone(),
                         // A tool turn's preview is what the tool *answered* —
                         // shown on demand — never its argument, which the
                         // title already carries. `None` marks a chip with
@@ -660,6 +786,7 @@ impl Provider for ConversationProvider {
                         keeps_open: true,
                         preview_markdown: false,
                         speaker: Some("working".to_string()),
+                        images: Vec::new(),
                         preview: None,
                     },
                 }
@@ -714,6 +841,48 @@ impl Provider for ConversationProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_image_turn_survives_even_with_no_words() {
+        // A screenshot sent on its own is a turn. Dropping it for having no
+        // text would delete the message.
+        let tail = jsonl(&[
+            r#"{"type":"user","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1n"}}]}}"#,
+        ]);
+        let turns = parse_transcript_tail(&tail);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].speaker, Speaker::User);
+    }
+
+    #[test]
+    fn an_undecodable_image_keeps_its_marker_rather_than_vanishing() {
+        // A URL source, an unreadable payload, a full disk — the turn must
+        // still say a picture was there. Silence would leave a message
+        // pointing at nothing.
+        let tail = jsonl(&[
+            r#"{"type":"user","message":{"content":[{"type":"text","text":"look"},{"type":"image","source":{"type":"url","url":"https://example.com/a.png"}}]}}"#,
+        ]);
+        let turns = parse_transcript_tail(&tail);
+        assert_eq!(turns[0].text, "look\n[image]");
+        assert!(turns[0].images.is_empty());
+    }
+
+    #[test]
+    fn the_cache_filename_follows_the_payload_and_the_media_type() {
+        // Same bytes must resolve to the same file — that identity is what
+        // makes the 2.5s poll free rather than a re-decode every tick.
+        let png = cache_image("image/png", "aGVsbG8=");
+        let again = cache_image("image/png", "aGVsbG8=");
+        assert_eq!(png, again, "identical payloads share one cached file");
+        if let Some(path) = png {
+            assert!(path.ends_with(".png"));
+            let jpeg = cache_image("image/jpeg", "aGVsbG8=").unwrap();
+            assert!(jpeg.ends_with(".jpg"), "the extension follows the media type");
+            let _ = std::fs::remove_file(path);
+            let _ = std::fs::remove_file(jpeg);
+        }
+    }
+
 
     #[test]
     fn a_tools_answer_is_joined_to_its_call_by_id() {

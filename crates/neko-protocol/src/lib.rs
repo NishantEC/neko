@@ -320,6 +320,15 @@ pub struct SearchItem {
     /// the client owns entirely what a voice looks like.
     #[serde(default)]
     pub speaker: Option<String>,
+    /// Cached image files this row carries, as absolute paths.
+    ///
+    /// **Paths, never bytes.** One screenshot in a real transcript is ~138 KB
+    /// of base64; the daemon decodes it once to
+    /// `~/Library/Caches/neko/conversation-images/` and sends where it landed,
+    /// so a re-search does not ship the picture again on every keystroke.
+    /// Same arrangement `Icon::Image` already uses for app artwork.
+    #[serde(default)]
+    pub images: Vec<String>,
 }
 
 /// A 0..=1 reading plus the labelled values that explain it. See

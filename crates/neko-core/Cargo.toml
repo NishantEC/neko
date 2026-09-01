@@ -10,6 +10,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 plist = "1"
 serde.workspace = true
 serde_json.workspace = true
+base64 = "0.22"
 
 [dev-dependencies]
 # Already in the lock tree via gpui at this exact version, so this adds no

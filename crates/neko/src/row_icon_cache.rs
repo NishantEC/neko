@@ -67,6 +67,14 @@ use gpui::{
 /// instead of leaving it, as before this task, completely unbounded.
 pub(crate) const ROW_ICON_CACHE_CAPACITY: usize = 256;
 
+/// How many decoded conversation images to hold in GPU memory at once.
+///
+/// `TURN_LIMIT` is 40 turns and only user turns carry pictures, so a window
+/// that showed nothing but screenshots would still sit inside this — while
+/// keeping the bound far below the row cache's, because each entry here is a
+/// full-size image rather than a 128px icon.
+pub(crate) const CONVERSATION_IMAGE_CACHE_CAPACITY: usize = 24;
+
 /// Pure recency-order bookkeeping for a bounded cache, deliberately split
 /// out of `ImageCache::load` below. `ImageCache::load`'s own `window`
 /// parameter (specifically `window.current_view()`) is only valid to call
@@ -129,6 +137,18 @@ impl RowIconCache {
     /// a `Context<Root>` this module needs to know about.
     pub fn new(cx: &mut App) -> Entity<Self> {
         Self::with_capacity(ROW_ICON_CACHE_CAPACITY, cx)
+    }
+
+    /// A conversation's own image cache.
+    ///
+    /// **Deliberately a second instance rather than sharing the row cache**,
+    /// which is sized for ~150 distinct 22px app icons. A chat image is
+    /// hundreds of times the decoded area, and letting the two compete would
+    /// let one screenshot evict a screenful of row artwork — or, the other
+    /// way, let a scrolled list evict the picture somebody is looking at.
+    /// Small on purpose: only what a transcript window can actually show.
+    pub fn for_conversation(cx: &mut App) -> Entity<Self> {
+        Self::with_capacity(CONVERSATION_IMAGE_CACHE_CAPACITY, cx)
     }
 
     /// Only exposed so tests can use a tiny capacity rather than inserting
