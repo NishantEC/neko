@@ -14,6 +14,13 @@
 //!
 //! Delete this file once the investigation it was built for is closed.
 
+// **Dead code here is expected, not a smell.** This harness hosts the real
+// `server` module but starts none of its background threads — no clipboard
+// capture (the whole reason it exists) and no pollers, since an evidence run
+// must not reach the captain's pasteboard, Paseo, or three vendor APIs. The
+// poll functions are therefore genuinely uncalled *in this binary* and
+// perfectly live in the real daemon.
+#[allow(dead_code)]
 #[path = "../server.rs"]
 mod server;
 

@@ -115,6 +115,14 @@ fn main() {
         std::thread::spawn(move || server::run_attention_poll(state));
     }
 
+    {
+        // The other half of ambient awareness: what is left to spend. Its own
+        // thread and its own cadence — see `server::run_quota_poll` for why
+        // this cannot ride along with the attention poll above.
+        let state = state.clone();
+        std::thread::spawn(move || server::run_quota_poll(state));
+    }
+
     eprintln!("neko-daemon: listening on {}", socket_path.display());
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };

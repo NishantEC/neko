@@ -48,6 +48,7 @@
 //! and 20ms is well under the threshold at which a person could tell.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 /// Set by the menu bar item's click handler, cleared by whoever acts on it.
 ///
@@ -57,6 +58,55 @@ static CLICKED: AtomicBool = AtomicBool::new(false);
 
 /// Set by the menu's "Preferences…" item. Same flag discipline as [`CLICKED`].
 static PREFERENCES_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// The quota the menu last heard about, and the count beside it.
+///
+/// Held here rather than passed in per call because the two arrive on
+/// different schedules — a blocked agent within a second, a quota every two
+/// minutes — and the button carries **one** title. Keeping both lets whichever
+/// arrives compose a label from the current value of the other, instead of
+/// each clobbering the other's work.
+static STATE: Mutex<MenuBarState> = Mutex::new(MenuBarState::EMPTY);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuBarState {
+    pub waiting: usize,
+    pub quotas: Vec<neko_protocol::QuotaSummary>,
+}
+
+impl MenuBarState {
+    const EMPTY: Self = Self { waiting: 0, quotas: Vec::new() };
+}
+
+/// Below this, a quota is worth interrupting somebody about.
+///
+/// Ten percent of a five-hour window is roughly half an hour of real work —
+/// enough to finish a thought and switch deliberately, which is the whole
+/// point of being told early. Warning sooner would make the menu bar a
+/// permanent scold; later would mean the wall arrives mid-task, which is the
+/// thing this exists to prevent.
+pub const QUOTA_WARN_PERCENT: u8 = 10;
+
+/// What the button's title should read, given everything currently known.
+///
+/// **Blocked agents outrank a low quota**, because one is a thing waiting on
+/// you right now and the other is a thing that will matter shortly. Showing
+/// both would need two numbers in a space that has room for one and no way to
+/// say which is which.
+pub fn title_for(state: &MenuBarState) -> Option<String> {
+    // **Zero is no label, not a label reading zero** — the rule this replaced
+    // `count_label` to keep. A badge claims something needs doing, and the
+    // resting state of the world does not deserve a permanent mark in the
+    // menu bar. No `99+` cap: that existed for a Dock badge's fixed circle,
+    // and the menu bar grows to fit.
+    if state.waiting > 0 {
+        return Some(state.waiting.to_string());
+    }
+    // The tightest vendor governs, and only when it has actually crossed the
+    // line — an unknown reading is not a warning.
+    let lowest = state.quotas.iter().filter_map(|q| q.percent_left).min()?;
+    (lowest <= QUOTA_WARN_PERCENT).then(|| format!("{lowest}%"))
+}
 
 /// Set by the menu's "Quit neko" item. Same flag discipline as [`CLICKED`].
 ///
@@ -81,17 +131,20 @@ pub fn take_quit_request() -> bool {
     QUIT_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
-/// The title beside the icon: the number of agents waiting, or nothing.
+/// The quota lines the menu shows, newest reading first-come-first-served.
 ///
-/// Same rule the Dock badge followed — **zero is no label, not a label
-/// reading zero.** A count claims something needs doing, and the resting
-/// state of the world does not deserve a permanent mark in the menu bar.
-///
-/// No `99+` cap here, unlike the Dock badge: that cap existed because a Dock
-/// badge is a small fixed circle. The menu bar grows to fit its content, so
-/// an honest number costs nothing.
-pub fn count_label(count: usize) -> Option<String> {
-    (count > 0).then(|| count.to_string())
+/// A vendor with no number is still listed, saying so — "Grok — unknown"
+/// distinguishes "I could not read it" from "not configured", and only one of
+/// those is worth doing something about.
+pub fn quota_lines(state: &MenuBarState) -> Vec<String> {
+    state
+        .quotas
+        .iter()
+        .map(|q| match q.percent_left {
+            Some(left) => format!("{} — {left}% left", q.label),
+            None => format!("{} — no quota reading", q.label),
+        })
+        .collect()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -114,7 +167,7 @@ pub use macos::*;
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::{CLICKED, PREFERENCES_REQUESTED, QUIT_REQUESTED, count_label};
+    use super::{CLICKED, PREFERENCES_REQUESTED, QUIT_REQUESTED};
     use std::sync::atomic::Ordering;
 
     use std::cell::RefCell;
@@ -337,7 +390,10 @@ mod macos {
         /// Held for the same reason the target is: nothing else retains it,
         /// and `popUpContextMenu` borrows it per click rather than owning it.
         menu: Retained<NSMenu>,
-        _target: Retained<Target>,
+        /// Kept addressable, not just alive: rebuilding the menu when a quota
+        /// changes needs the same target the original items were wired to, or
+        /// the new ones would fire at nothing.
+        target: Retained<Target>,
     }
 
     thread_local! {
@@ -397,7 +453,7 @@ mod macos {
                 }
             }
             let menu = build_menu(mtm, &target);
-            let held = MenuBarItem { item, menu, _target: target };
+            let held = MenuBarItem { item, menu, target };
             let state = held.readback();
             ITEM.with(|slot| *slot.borrow_mut() = Some(held));
             state
@@ -408,9 +464,37 @@ mod macos {
     /// `install`, which is the state every test and every non-macOS build is
     /// in.
     pub fn set_waiting_count(count: usize) {
+        super::STATE.lock().unwrap().waiting = count;
+        refresh_title();
+    }
+
+    /// Records the latest quota reading and re-renders the item.
+    pub fn set_quotas(quotas: Vec<neko_protocol::QuotaSummary>) {
+        super::STATE.lock().unwrap().quotas = quotas;
+        refresh_title();
+        rebuild_menu();
+    }
+
+    /// Recomposes the one title from everything currently known.
+    fn refresh_title() {
+        let label = super::title_for(&super::STATE.lock().unwrap()).unwrap_or_default();
         ITEM.with(|slot| {
             if let Some(item) = slot.borrow().as_ref() {
-                item.set_waiting_count(count);
+                item.set_title(&label);
+            }
+        });
+    }
+
+    /// Rebuilds the menu so its quota lines match the latest reading.
+    ///
+    /// Whole-menu rather than mutating items in place: the number of vendors
+    /// signed in changes, so the *shape* changes, and rebuilding is both
+    /// simpler and impossible to leave half-updated.
+    fn rebuild_menu() {
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        ITEM.with(|slot| {
+            if let Some(item) = slot.borrow_mut().as_mut() {
+                item.menu = build_menu(mtm, &item.target);
             }
         });
     }
@@ -442,6 +526,27 @@ mod macos {
             item.setEnabled(true);
             menu.addItem(&item);
         };
+        // **Quota first, because it is the thing you came to check.** The
+        // lines are inert — no target, disabled — since there is nothing to
+        // *do* to a reading here; the Usage mode is where it can be acted on.
+        // A disabled item still reads clearly, which is exactly what a status
+        // line should be.
+        let quotas = super::quota_lines(&super::STATE.lock().unwrap());
+        if !quotas.is_empty() {
+            for line in quotas {
+                let item = unsafe {
+                    NSMenuItem::initWithTitle_action_keyEquivalent(
+                        NSMenuItem::alloc(mtm),
+                        &NSString::from_str(&line),
+                        None,
+                        &NSString::from_str(""),
+                    )
+                };
+                item.setEnabled(false);
+                menu.addItem(&item);
+            }
+            menu.addItem(&NSMenuItem::separatorItem(mtm));
+        }
         add("Summon neko", sel!(nekoMenuSummon:));
         add("Preferences\u{2026}", sel!(nekoMenuPreferences:));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
@@ -460,14 +565,13 @@ mod macos {
     }
 
     impl MenuBarItem {
-        fn set_waiting_count(&self, count: usize) {
+        fn set_title(&self, label: &str) {
             let Some(mtm) = MainThreadMarker::new() else { return };
             // Pooled like every other repeated AppKit call in this project —
             // `AGENTS.md`, "Clipboard capture memory".
             autoreleasepool(|_| {
                 if let Some(button) = self.item.button(mtm) {
-                    let label = count_label(count).unwrap_or_default();
-                    button.setTitle(&NSString::from_str(&label));
+                    button.setTitle(&NSString::from_str(label));
                 }
             });
         }
@@ -592,18 +696,77 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nothing_waiting_means_no_label_at_all() {
-        // A count claims something needs doing; the resting state of the
-        // world does not deserve a permanent mark in the menu bar.
-        assert_eq!(count_label(0), None);
+    fn a_quiet_world_earns_no_mark_at_all() {
+        // A badge claims something needs doing; the resting state of the
+        // world does not deserve a permanent one.
+        assert_eq!(title_for(&MenuBarState::EMPTY), None);
     }
 
     #[test]
     fn the_count_is_honest_because_the_menu_bar_grows_to_fit_it() {
         // The Dock badge capped at "99+" because a badge is a small fixed
         // circle. This is not, so there is nothing to protect.
-        assert_eq!(count_label(1).as_deref(), Some("1"));
-        assert_eq!(count_label(250).as_deref(), Some("250"));
+        let one = MenuBarState { waiting: 1, quotas: Vec::new() };
+        assert_eq!(title_for(&one).as_deref(), Some("1"));
+        let many = MenuBarState { waiting: 250, quotas: Vec::new() };
+        assert_eq!(title_for(&many).as_deref(), Some("250"));
+    }
+
+    fn summary(vendor: &str, left: Option<u8>) -> neko_protocol::QuotaSummary {
+        neko_protocol::QuotaSummary {
+            vendor: vendor.into(),
+            label: vendor.into(),
+            percent_left: left,
+        }
+    }
+
+    #[test]
+    fn a_blocked_agent_outranks_a_low_quota_for_the_one_title() {
+        // One is waiting on you now; the other will matter shortly. There is
+        // room for one number and no way to say which it is.
+        let state = MenuBarState {
+            waiting: 2,
+            quotas: vec![summary("claude", Some(3))],
+        };
+        assert_eq!(title_for(&state).as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn only_a_quota_past_the_line_is_worth_a_title() {
+        let plenty = MenuBarState { waiting: 0, quotas: vec![summary("claude", Some(60))] };
+        assert_eq!(title_for(&plenty), None, "comfortable is not news");
+        let low = MenuBarState { waiting: 0, quotas: vec![summary("claude", Some(4))] };
+        assert_eq!(title_for(&low).as_deref(), Some("4%"));
+        let edge = MenuBarState {
+            waiting: 0,
+            quotas: vec![summary("claude", Some(QUOTA_WARN_PERCENT))],
+        };
+        assert!(edge.quotas[0].percent_left.is_some());
+        assert_eq!(title_for(&edge).as_deref(), Some(format!("{QUOTA_WARN_PERCENT}%").as_str()));
+    }
+
+    #[test]
+    fn the_tightest_vendor_governs_and_an_unknown_one_never_warns() {
+        // An unreadable vendor is not a warning — "unknown" and "empty" are
+        // the two answers acted on most differently.
+        let state = MenuBarState {
+            waiting: 0,
+            quotas: vec![summary("claude", Some(70)), summary("grok", None), summary("codex", Some(5))],
+        };
+        assert_eq!(title_for(&state).as_deref(), Some("5%"));
+        let unreadable = MenuBarState { waiting: 0, quotas: vec![summary("grok", None)] };
+        assert_eq!(title_for(&unreadable), None);
+    }
+
+    #[test]
+    fn the_menu_lists_a_vendor_it_could_not_read_rather_than_hiding_it() {
+        let state = MenuBarState {
+            waiting: 0,
+            quotas: vec![summary("Claude Code", Some(34)), summary("Grok", None)],
+        };
+        let lines = quota_lines(&state);
+        assert_eq!(lines[0], "Claude Code — 34% left");
+        assert!(lines[1].contains("no quota reading"), "{}", lines[1]);
     }
 
     #[test]

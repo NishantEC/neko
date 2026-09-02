@@ -689,6 +689,13 @@ fn summon_from_outside(cx: &mut App) {
                         // search cannot be what tells you an agent has
                         // blocked. The menu bar item is that surface — see
                         // `crate::menu_bar` for why not the Dock.
+                        // What is left to spend, pushed on change — see
+                        // `server::run_quota_poll`. The client cannot read
+                        // this for itself: quota lives in `neko_core`, across
+                        // the crate boundary `neko` never crosses.
+                        Event::QuotaChanged { quotas } => {
+                            menu_bar::set_quotas(quotas);
+                        }
                         Event::AttentionChanged { count } => {
                             menu_bar::set_waiting_count(count);
                             // A rise means an agent just blocked; the count in
