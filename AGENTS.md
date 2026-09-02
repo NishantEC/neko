@@ -3918,6 +3918,16 @@ skeleton is often the *only* thing on screen, so it has to hold the clock up
 itself or the placeholder freezes at whatever phase it mounted on, which
 reads as stuck rather than loading.
 
+**The shape follows the mode, because a placeholder of the wrong shape is a
+different jump rather than a fix.** Usage renders *meters* — a title over a
+note on the left, a fixed `METER_COLUMN_WIDTH_PX` column of `METER_TICK_COUNT`
+ticks with numbers beneath on the right — so standing a generic two-bar row in
+front of one only moves the layout shift from "empty to full" to "wrong shape
+to right shape". `ModeChrome::skeleton` names it (`Row`, `Meter`, `Bubble`),
+the same way the chrome already names `has_detail` and `transcript`: layout
+vocabulary is the client's own, never the provider's. Pinned, so a mode that
+changes shape and forgets to say so fails a test rather than a screenshot.
+
 Two details that are the difference between a placeholder and a glitch: the
 shimmer travels a narrow band around the plate's resting alpha rather than
 across the whole range (a hard pulse between invisible and solid reads as
@@ -5370,6 +5380,22 @@ mutexes first and chased the resulting flake). Same discipline
 `NSPasteboard`.
 
 ## Standing safety rule: an evidence window must never become the key window
+
+**It recurred on 2026-09-02, and the guard caught it rather than a person
+doing.** A `NEKO_SHOW_SKELETON` capture logged `key window false (after show)`
+and then `key window true (at capture)` with the `SAFETY WARNING` line — the
+window took key status *between* being shown and being photographed, with no
+`NEKO_EVIDENCE_ACTIVATE` set and nothing in `show_once` asking for it. The
+client was killed immediately and the capture checked before being kept: it
+contains only placeholder plates, and the query field shows its own greyed
+placeholder rather than typed text, so nothing had landed in it. The cause
+was not established — the run also had a `caffeinate -u` user-activity
+assertion alive, which is the only unusual thing about it, and that is a
+hypothesis rather than a finding. **What is worth keeping: the readback is
+what made this observable at all.** A capture that silently took focus would
+have looked identical.
+
+
 
 Binding on every future task in this repo, alongside the no-synthetic-input
 rule and the window-scoped-capture-only rule (see "Window material" below).
