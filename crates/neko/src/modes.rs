@@ -91,6 +91,10 @@ pub struct ModeChrome {
     /// uses. The panel branches on this, never on the provider's id: chrome
     /// is the client's own layout vocabulary, exactly like `has_detail`.
     pub transcript: bool,
+    /// What this mode's rows look like, so a placeholder can be the right
+    /// shape rather than a generic one — see
+    /// `components::skeleton::SkeletonShape`.
+    pub skeleton: crate::components::skeleton::SkeletonShape,
 }
 
 pub const MODES: &[ModeChrome] = &[
@@ -102,6 +106,7 @@ pub const MODES: &[ModeChrome] = &[
         empty_line: "Nothing copied yet \u{2014} anything you copy shows up here.",
         has_detail: true,
         transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
     // The second mode, and the one that proved the accounting above: it cost
     // this entry, one `CommandSpec` in `neko_core::commands`, and one
@@ -122,6 +127,7 @@ pub const MODES: &[ModeChrome] = &[
         empty_line: "No theme matches that.",
         has_detail: false,
         transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
     // The third mode, and the first where **the query is not a filter**: what
     // is typed here is the task the agent is given, and the rows are the
@@ -144,6 +150,7 @@ pub const MODES: &[ModeChrome] = &[
         empty_line: "No projects \u{2014} start an agent from Paseo once and this fills in.",
         has_detail: false,
         transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
     // Reads the model provider's own quota API — see
     // `neko_core::usage`. A status pane rather than a list, so the typed
@@ -171,6 +178,7 @@ pub const MODES: &[ModeChrome] = &[
         // the transcript in a side pane.
         has_detail: false,
         transcript: true,
+        skeleton: crate::components::skeleton::SkeletonShape::Bubble,
     },
     ModeChrome {
         id: "agent",
@@ -180,6 +188,7 @@ pub const MODES: &[ModeChrome] = &[
         empty_line: "No agents running.",
         has_detail: false,
         transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
     ModeChrome {
         id: "terminal",
@@ -189,6 +198,7 @@ pub const MODES: &[ModeChrome] = &[
         empty_line: "No terminals open \u{2014} start one in Paseo and it appears here.",
         has_detail: true,
         transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
     ModeChrome {
         id: "ask",
@@ -198,6 +208,7 @@ pub const MODES: &[ModeChrome] = &[
         empty_line: "Nothing to show yet.",
         has_detail: false,
         transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
     ModeChrome {
         id: "schedule",
@@ -207,6 +218,7 @@ pub const MODES: &[ModeChrome] = &[
         empty_line: "No schedules \u{2014} create one in Paseo and it appears here.",
         has_detail: false,
         transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
     ModeChrome {
         id: "usage",
@@ -216,6 +228,10 @@ pub const MODES: &[ModeChrome] = &[
         empty_line: "No quota to show \u{2014} sign in with `claude`, `codex` or `grok`.",
         has_detail: false,
         transcript: false,
+        // Meters, not rows: a generic two-bar placeholder here would only
+        // move the layout shift from "empty to full" to "wrong shape to
+        // right shape".
+        skeleton: crate::components::skeleton::SkeletonShape::Meter,
     },
 ];
 

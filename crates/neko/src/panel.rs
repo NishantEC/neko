@@ -3299,8 +3299,10 @@ impl Root {
             .track_scroll(&self.mode_scroll);
 
         if self.results.is_empty() && self.awaiting_first_rows() {
-            column = column
-                .child(crate::components::skeleton::skeleton_list(self.pulse.read(cx).intensity()));
+            column = column.child(crate::components::skeleton::skeleton_list(
+                mode.chrome.skeleton,
+                self.pulse.read(cx).intensity(),
+            ));
         } else if self.results.is_empty() {
             column = column.child(render_empty_state_message(mode.chrome.empty_line));
         } else {
@@ -3686,8 +3688,15 @@ impl Root {
 
         if self.results.is_empty() && self.awaiting_first_rows() {
             // **Not "nothing", but "not yet".** See `awaiting_first_rows`.
-            container = container
-                .child(crate::components::skeleton::skeleton_list(self.pulse.read(cx).intensity()));
+            let shape = self
+                .active_mode()
+                .map_or(crate::components::skeleton::SkeletonShape::Row, |mode| {
+                    mode.chrome.skeleton
+                });
+            container = container.child(crate::components::skeleton::skeleton_list(
+                shape,
+                self.pulse.read(cx).intensity(),
+            ));
         } else if self.results.is_empty() {
             // The mode's own line, not the root list's "try fewer
             // characters" — see `ModeChrome::empty_line`.
