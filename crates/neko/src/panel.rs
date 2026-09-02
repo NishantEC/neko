@@ -1080,6 +1080,36 @@ impl Root {
         self.glide_to_item(handle, index);
     }
 
+    /// Puts the panel into the state a pending fetch produces, for a capture.
+    ///
+    /// Sets the same two fields a real in-flight search sets — nothing is
+    /// rendered that a real wait would not render. See
+    /// `evidence::hold_skeleton` for why this cannot be photographed without
+    /// a hook.
+    pub fn hold_skeleton_for_evidence(&mut self, cx: &mut Context<Self>) {
+        self.results.clear();
+        self.searching = true;
+        cx.notify();
+    }
+
+    /// Whether an empty list is empty because the answer has not arrived.
+    ///
+    /// **An empty list means two opposite things and the modes could not tell
+    /// them apart.** `ModeChrome::empty_line` is a statement of fact about a
+    /// *finished* search — "No agents running" — and during a fetch it is
+    /// simply false. The modes where the wait is real are exactly the ones
+    /// backed by a network round trip: Usage fans out to three vendor APIs,
+    /// Terminals and Schedules go over MCP. Each of those opened by asserting
+    /// there was nothing there and contradicting itself a moment later.
+    ///
+    /// Gated on `searching` rather than on the request being outstanding at
+    /// all, deliberately: that flag is already delayed by
+    /// `SEARCHING_TELL_DELAY_MS` precisely so a fast answer never flashes a
+    /// loading state, and a skeleton wants exactly the same threshold.
+    fn awaiting_first_rows(&self) -> bool {
+        self.searching
+    }
+
     /// Whether a transcript's view is parked at its end.
     ///
     /// A slack of one step, not exact equality: the glide lands on a
@@ -1554,10 +1584,15 @@ impl Root {
     /// nothing.
     fn sync_pulse(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let wanted = window.is_window_active()
-            && self.results.iter().any(|item| {
+            && (self.results.iter().any(|item| {
                 item.badge.as_deref() == Some("LIVE")
                     || item.speaker.as_deref() == Some("working")
-            });
+            })
+            // A skeleton breathes on this same clock, so it has to keep the
+            // clock alive while it is the only thing on screen — otherwise
+            // the placeholder freezes at whatever phase it happened to mount
+            // on, which reads as stuck rather than loading.
+            || (self.results.is_empty() && self.awaiting_first_rows()));
         self.pulse.update(cx, |clock, cx| clock.set_running(wanted, cx));
         gpui::Empty
     }
@@ -3263,7 +3298,10 @@ impl Root {
             .overflow_y_scroll()
             .track_scroll(&self.mode_scroll);
 
-        if self.results.is_empty() {
+        if self.results.is_empty() && self.awaiting_first_rows() {
+            column = column
+                .child(crate::components::skeleton::skeleton_list(self.pulse.read(cx).intensity()));
+        } else if self.results.is_empty() {
             column = column.child(render_empty_state_message(mode.chrome.empty_line));
         } else {
             for (idx, item) in self.results.iter().enumerate() {
@@ -3646,7 +3684,11 @@ impl Root {
             .overflow_y_scroll()
             .track_scroll(&self.mode_scroll);
 
-        if self.results.is_empty() {
+        if self.results.is_empty() && self.awaiting_first_rows() {
+            // **Not "nothing", but "not yet".** See `awaiting_first_rows`.
+            container = container
+                .child(crate::components::skeleton::skeleton_list(self.pulse.read(cx).intensity()));
+        } else if self.results.is_empty() {
             // The mode's own line, not the root list's "try fewer
             // characters" — see `ModeChrome::empty_line`.
             let line = self
@@ -5460,6 +5502,44 @@ mod tests {
                 root.confirm(&Confirm, window, cx);
                 assert_eq!(root.text_field.read(cx).content(), "", "cleared on send");
                 assert!(root.activating, "and the send is in flight");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn an_empty_list_says_nothing_until_the_search_has_actually_finished(
+        cx: &mut TestAppContext,
+    ) {
+        // "No providers signed in" is a statement about a *finished* search.
+        // Usage fans out to three vendor APIs, so asserting it during the
+        // fetch was a claim the panel then contradicted a moment later.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, _cx| {
+                root.results.clear();
+                root.searching = true;
+                assert!(root.awaiting_first_rows(), "mid-fetch: a skeleton, not a verdict");
+                root.searching = false;
+                assert!(!root.awaiting_first_rows(), "answered and empty: say so");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_skeleton_keeps_the_shared_clock_running(cx: &mut TestAppContext) {
+        // It breathes on `PulseClock` rather than owning a timer, so it has to
+        // hold the clock up while it is the only thing on screen — otherwise
+        // the placeholder freezes at whatever phase it mounted on, which reads
+        // as stuck rather than loading.
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results.clear();
+                root.searching = true;
+                let _ = root.sync_pulse(window, cx);
+                // The test window is not active, which is the other half of
+                // the gate — assert the skeleton's own contribution directly.
+                assert!(root.results.is_empty() && root.awaiting_first_rows());
             })
             .unwrap();
     }

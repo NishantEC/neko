@@ -44,6 +44,7 @@
 //! | `NEKO_SHOW_CONFIRM` | no | same — drives `confirm_for_evidence` in-process |
 //! | `NEKO_CYCLE_MODE_ONCE` | no | same — `dismiss_for_evidence`/`confirm_for_evidence` |
 //! | `NEKO_SHOW_ACTIONS_MENU` | no | same — `open_actions_menu_for_evidence` |
+//! | `NEKO_SHOW_SKELETON` | no | holds a mode in its loading state — the real wait needs credentials and a network an isolated `HOME` has neither of |
 //! | `NEKO_FORCE_PREVIEW_MARKDOWN` | no | renders the detail preview as markdown — the real `conversation` rows need a live Paseo daemon an isolated `HOME` cannot have |
 //! | `NEKO_SCROLL_MODE_LIST_TO_BOTTOM` | no | same — a `ScrollHandle` mutation |
 //! | `NEKO_SHOW_SELECTION` | no | same — `select_query_for_evidence` |
@@ -347,6 +348,19 @@ pub fn mode_query() -> Option<String> {
 /// Whether to press Enter again on whatever `NEKO_MODE_QUERY` produced.
 pub fn mode_confirm_requested() -> bool {
     std::env::var("NEKO_MODE_CONFIRM").is_ok()
+}
+
+/// Whether to hold a mode in its still-loading state for a capture.
+///
+/// The skeleton exists for a wait that only happens with real credentials and
+/// a real network — Usage fans out to three vendor APIs, Terminals and
+/// Schedules go over MCP — and an isolated evidence `HOME` has none of those,
+/// so every provider there answers instantly and the state being photographed
+/// never occurs. Same reason `files.rs` carries `NEKO_FILE_SEARCH_DELAY_MS`.
+///
+/// Drives the real fields a pending fetch sets, not a rendering shortcut.
+pub fn hold_skeleton() -> bool {
+    std::env::var_os("NEKO_SHOW_SKELETON").is_some()
 }
 
 /// Whether to render the detail pane's preview as markdown regardless of the
@@ -796,6 +810,14 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         }
         // One settle frame: `scroll_to_item` takes effect on the next paint,
         // which is the frame the capture has to be after.
+        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+    }
+    if hold_skeleton() {
+        cx.update(|cx| {
+            let _ = window.update(cx, |root, _window, cx| {
+                root.hold_skeleton_for_evidence(cx);
+            });
+        });
         cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
     }
     if show_actions_menu_requested() {
