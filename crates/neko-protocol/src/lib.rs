@@ -481,6 +481,25 @@ impl Response {
     }
 }
 
+/// One vendor's remaining headroom, for the menu bar.
+///
+/// Deliberately not the whole `usage::Reading`: the menu shows one line per
+/// vendor, and shipping windows, resets and detail strings for a surface that
+/// renders none of them would be inventing a second, richer channel beside
+/// the `usage` mode that already exists for exactly that.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuotaSummary {
+    /// `"claude"`, `"codex"`, `"grok"` — the same ids `--provider` takes.
+    pub vendor: String,
+    /// `"Claude Code"` — what a person calls it.
+    pub label: String,
+    /// Percent left on the vendor's *tightest* window. `None` when there is
+    /// no number to give: signed out, a failed read, or a plan with no
+    /// metered window. A caller must say nothing rather than guess, since
+    /// "unknown" and "plenty" are the two answers acted on most differently.
+    pub percent_left: Option<u8>,
+}
+
 /// Server-initiated messages, delivered on the same connection as request
 /// replies but not correlated to a request id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -499,6 +518,14 @@ pub enum Event {
     /// re-run a search (typing, or a fresh summon), which is not
     /// guaranteed to happen soon, or at all, in the same process lifetime.
     IconsUpdated,
+    /// What each signed-in vendor has left, pushed when it changes.
+    ///
+    /// **The client cannot read this for itself.** Quota lives in
+    /// `neko_core::usage`, behind the crate boundary `neko` is forbidden to
+    /// cross — and the menu bar is not a search surface, so there is no
+    /// request it could ride in on. Same shape as `AttentionChanged`: the
+    /// daemon watches, the client renders.
+    QuotaChanged { quotas: Vec<QuotaSummary> },
     /// A client committed a theme. Broadcast so every *other* connected client
     /// repaints too — the committing one has already applied it locally (live
     /// preview means it was applied before the round-trip even started).

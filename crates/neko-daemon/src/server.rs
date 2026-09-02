@@ -588,6 +588,18 @@ pub fn notify_icons_updated(state: &AppState) {
 #[allow(dead_code)]
 const ATTENTION_POLL_INTERVAL: Duration = Duration::from_millis(1200);
 
+/// How often to re-read every vendor's quota.
+///
+/// **Two orders of magnitude slower than the attention poll, because a tick
+/// costs three HTTPS round trips against rate-limited vendor APIs** — where
+/// an attention tick is one loopback call to a daemon on this machine. Two
+/// minutes also sits just above `usage::CACHE_TTL` (90s), so each tick does
+/// real work rather than returning the same cached answer the last one got.
+///
+/// A quota moves on the scale of hours; the only thing this cadence has to
+/// beat is a person's own next glance at the menu bar.
+const QUOTA_POLL_INTERVAL: Duration = Duration::from_secs(120);
+
 /// Keeps the permission inbox warm, and tells every client when the number
 /// of waiting agents changes.
 ///
@@ -623,6 +635,50 @@ pub fn run_attention_poll(state: Arc<AppState>) {
         }
         std::thread::sleep(ATTENTION_POLL_INTERVAL);
     }
+}
+
+/// Watches every signed-in vendor's remaining quota and pushes it out when it
+/// moves.
+///
+/// **Its own thread, not a branch of the attention poll.** They differ by a
+/// hundredfold in both cost and urgency: a blocked agent is news within a
+/// second and costs one loopback call, a quota moves over hours and costs
+/// three HTTPS requests. Folding them together would either make the cheap
+/// one expensive or the expensive one useless.
+///
+/// Broadcasts only on change, like the attention poll, so a quiet afternoon
+/// is a wakeup for the client roughly never rather than every two minutes.
+pub fn run_quota_poll(state: Arc<AppState>) {
+    let mut last: Option<Vec<neko_protocol::QuotaSummary>> = None;
+    loop {
+        let quotas = quota_summaries();
+        // An empty answer means nothing is signed in, which is a real state
+        // worth pushing once — it is what clears a stale reading after a
+        // sign-out — but not one worth repeating.
+        if last.as_ref() != Some(&quotas) {
+            last = Some(quotas.clone());
+            broadcast(&state, &Event::QuotaChanged { quotas });
+        }
+        std::thread::sleep(QUOTA_POLL_INTERVAL);
+    }
+}
+
+/// Every vendor's headroom, flattened for the wire.
+///
+/// A vendor with nothing to say — signed out, a failed read, a plan with no
+/// metered window — is carried with `percent_left: None` rather than dropped,
+/// so the menu can distinguish "I could not tell you" from "not configured".
+fn quota_summaries() -> Vec<neko_protocol::QuotaSummary> {
+    neko_core::usage::usage()
+        .into_iter()
+        .map(|reading| neko_protocol::QuotaSummary {
+            vendor: reading.vendor.id().to_string(),
+            label: reading.vendor.name().to_string(),
+            // Rounded down: a quota reported as 3% when it is 3.7% is the
+            // safe direction to be wrong in.
+            percent_left: reading.headroom_percent().map(|left| left.floor() as u8),
+        })
+        .collect()
 }
 
 #[cfg(test)]
