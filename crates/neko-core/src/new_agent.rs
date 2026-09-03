@@ -218,7 +218,7 @@ fn paseo_argv(cwd: &Path, prompt: &str, provider: &str) -> Vec<String> {
 ///
 /// Found during this module's own end-to-end verification: a run with an
 /// explicit `--cwd /tmp/neko-new-agent-verify-32104` produced an agent whose
-/// real `Cwd` (`paseo inspect`) was `/Users/nish/Documents/neko` — the
+/// real `Cwd` (`paseo inspect`) was `/Users/example/Documents/neko` — the
 /// inherited `PASEO_AGENT_CWD` of the session that ran the check. Exactly the
 /// "wrong repository, no error" outcome this whole module is arranged to
 /// prevent.
@@ -854,7 +854,7 @@ mod tests {
     ///
     /// - `neko` is the most recently used project, and `codex` is the tool last
     ///   used there *and* the most recent tool anywhere.
-    /// - `hushbacks` is older, and its own history says `claude` — so a row
+    /// - `notes_app` is older, and its own history says `claude` — so a row
     ///   naming the machine-wide winner instead of the per-project one fails.
     /// - `fresh` has no agent history at all, and exercises the fallback.
     struct Fixture {
@@ -862,7 +862,7 @@ mod tests {
         projects: PathBuf,
         agents_root: PathBuf,
         neko: PathBuf,
-        hushbacks: PathBuf,
+        notes_app: PathBuf,
         fresh: PathBuf,
         gone: PathBuf,
     }
@@ -884,10 +884,10 @@ mod tests {
     fn fixture() -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let neko = dir.path().join("neko");
-        let hushbacks = dir.path().join("hushbacks");
+        let notes_app = dir.path().join("notes_app");
         let fresh = dir.path().join("fresh");
         let gone = dir.path().join("deleted");
-        for real in [&neko, &hushbacks, &fresh] {
+        for real in [&neko, &notes_app, &fresh] {
             std::fs::create_dir_all(real).unwrap();
         }
 
@@ -896,20 +896,20 @@ mod tests {
             &projects,
             format!(
                 r#"[
-                  {{"projectId":"a","rootPath":"{hushbacks}","displayName":"NishantEC/hushbacks",
+                  {{"projectId":"a","rootPath":"{notes_app}","displayName":"acme-corp/notes-app",
                     "updatedAt":"2026-08-15T11:51:09.536Z","archivedAt":null}},
                   {{"projectId":"b","rootPath":"{neko}","displayName":"neko",
                     "updatedAt":"2026-08-21T16:00:21.343Z","archivedAt":null}},
                   {{"projectId":"c","rootPath":"{gone}","displayName":"deleted-worktree",
                     "updatedAt":"2026-08-22T00:00:00.000Z","archivedAt":null}},
-                  {{"projectId":"d","rootPath":"{hushbacks}","displayName":"same dir again",
+                  {{"projectId":"d","rootPath":"{notes_app}","displayName":"same dir again",
                     "updatedAt":"2026-08-01T00:00:00.000Z","archivedAt":null}},
                   {{"projectId":"e","rootPath":"{fresh}","displayName":"fresh",
                     "updatedAt":"2026-07-01T00:00:00.000Z","archivedAt":null}},
                   {{"projectId":"f","rootPath":"{archived}","displayName":"archived",
                     "updatedAt":"2026-08-23T00:00:00.000Z","archivedAt":"2026-08-23T00:00:00.000Z"}}
                 ]"#,
-                hushbacks = hushbacks.display(),
+                notes_app = notes_app.display(),
                 neko = neko.display(),
                 gone = gone.display(),
                 fresh = fresh.display(),
@@ -923,8 +923,8 @@ mod tests {
         // of 227 agent documents are, and a finished agent is the best evidence
         // of which tool is actually used somewhere.
         write_agent(&agents_root, "neko", "a1", "codex/gpt-5.4", &neko, "2026-08-22T09:00:00.000Z");
-        write_agent(&agents_root, "hush", "a2", "claude", &hushbacks, "2026-08-10T09:00:00.000Z");
-        Fixture { _dir: dir, projects, agents_root, neko, hushbacks, fresh, gone }
+        write_agent(&agents_root, "hush", "a2", "claude", &notes_app, "2026-08-10T09:00:00.000Z");
+        Fixture { _dir: dir, projects, agents_root, neko, notes_app, fresh, gone }
     }
 
     fn provider_for_fixture(fixture: &Fixture, spawner: Arc<RecordingSpawner>) -> NewAgentProvider {
@@ -965,7 +965,7 @@ mod tests {
             ids,
             vec![
                 fixture.neko.to_string_lossy().to_string(),
-                fixture.hushbacks.to_string_lossy().to_string(),
+                fixture.notes_app.to_string_lossy().to_string(),
                 fixture.fresh.to_string_lossy().to_string(),
             ],
             "recency order, and nothing else"
@@ -1026,7 +1026,7 @@ mod tests {
     #[test]
     fn each_row_names_the_tool_last_used_in_that_project_not_the_last_one_used_anywhere() {
         // `codex` is both the most recent tool overall and the one used in
-        // `neko`; `hushbacks` has its own history and must keep it, or a
+        // `neko`; `notes_app` has its own history and must keep it, or a
         // per-project answer degrades into a global one without anybody
         // noticing.
         let fixture = fixture();
@@ -1035,7 +1035,7 @@ mod tests {
         assert_eq!(found[0].item.subtitle.as_deref().unwrap().split(" · ").next(), Some("codex"));
         assert_eq!(found[1].item.subtitle.as_deref().unwrap().split(" · ").next(), Some("claude"));
         // …and the directory is still stated in full, never implied.
-        assert!(found[1].item.subtitle.as_deref().unwrap().ends_with(&fixture.hushbacks.to_string_lossy().to_string()));
+        assert!(found[1].item.subtitle.as_deref().unwrap().ends_with(&fixture.notes_app.to_string_lossy().to_string()));
     }
 
     #[test]
@@ -1083,10 +1083,10 @@ mod tests {
         let (provider, spawner) = recording(&fixture);
         // Deliberately the *second* row: a bug that always used the first
         // project would pass against the first one.
-        provider.activate_with_query(&fixture.hushbacks.to_string_lossy(), "  fix the parser  ").unwrap();
+        provider.activate_with_query(&fixture.notes_app.to_string_lossy(), "  fix the parser  ").unwrap();
         assert_eq!(
             spawner.calls(),
-            vec![(fixture.hushbacks.clone(), "fix the parser".to_string(), "claude".to_string())]
+            vec![(fixture.notes_app.clone(), "fix the parser".to_string(), "claude".to_string())]
         );
     }
 
@@ -1152,7 +1152,7 @@ mod tests {
     #[test]
     fn a_project_with_no_display_name_falls_back_to_its_directorys_own_name() {
         let fixture = fixture();
-        let root = fixture._dir.path().join("triage-fe");
+        let root = fixture._dir.path().join("web-app");
         std::fs::create_dir_all(&root).unwrap();
         let file = fixture._dir.path().join("unnamed.json");
         std::fs::write(
@@ -1165,7 +1165,7 @@ mod tests {
             fixture.agents_root.clone(),
             Arc::new(RecordingSpawner::default()),
         );
-        assert_eq!(provider.search("t", 0)[0].item.title, "triage-fe");
+        assert_eq!(provider.search("t", 0)[0].item.title, "web-app");
     }
 
     #[test]

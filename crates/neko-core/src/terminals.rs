@@ -343,7 +343,7 @@ mod tests {
     fn fixture() -> Value {
         json!({"terminals": [
             {"id": "ba524cae", "name": "Terminal 1", "cwd": "/tmp"},
-            {"id": "a638b877", "name": "Terminal 1", "cwd": "/Users/nish/Documents/neko"}
+            {"id": "a638b877", "name": "Terminal 1", "cwd": "/Users/example/Documents/neko"}
         ]})
     }
 

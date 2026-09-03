@@ -2417,7 +2417,7 @@ rather than hidden: there is no way to reach a directory Paseo has never seen.
 **`--cwd` is not authoritative when the CLI can see it was launched from
 inside another agent — found live, and it is a real production defect, not a
 test artifact.** The one verification spawn ran with `--cwd /tmp/…` and
-produced an agent whose real `Cwd` was `/Users/nish/Documents/neko`: the
+produced an agent whose real `Cwd` was `/Users/example/Documents/neko`: the
 inherited `PASEO_AGENT_CWD`. The CLI's own bundled source states the rule
 (`resolveRunWorkspace` in `app.asar`): workspace precedence is `--workspace`,
 then `$PASEO_AGENT_ID` ("daemon resolves the caller's workspace"), then

@@ -56,7 +56,7 @@ to it.
   columns.
 - **A private fixture corpus, never the captain's own files**: 28,800
   generated files across 480 nested directories under an isolated `HOME` at
-  `/Users/nish/neko-evidence-home`, indexed by Spotlight and queried by a
+  `/Users/example/neko-evidence-home`, indexed by Spotlight and queried by a
   real `mdfind`. Raw `mdfind` timings against it: 55–70 ms warm, 384 ms
   cold — real, and squarely in the range `files.rs`'s own module comment
   documents for a real corpus. **The evidence home had to sit outside the

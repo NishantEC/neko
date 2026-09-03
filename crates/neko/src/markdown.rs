@@ -465,8 +465,8 @@ mod tests {
         // `[Write] /path` is the one non-markdown shape the conversation
         // provider sends through this renderer; a bracketed span with no `(`
         // after it is not link syntax and must come through verbatim.
-        let blocks = parse("[Write] /Users/nish/a.md");
-        assert_eq!(plain(&blocks), vec!["[Write] /Users/nish/a.md"]);
+        let blocks = parse("[Write] /Users/example/a.md");
+        assert_eq!(plain(&blocks), vec!["[Write] /Users/example/a.md"]);
     }
 
     #[test]

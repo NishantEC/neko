@@ -201,8 +201,8 @@ impl PaseoAgent {
     /// **The project, not the model and no longer the raw path.** The model
     /// moved to its own mark in the corner of the tile
     /// (`SearchItem::source` carries it); the path said
-    /// `~/Documents/tcc/triage-fe` where Paseo itself says
-    /// `Care-Connect-AI/triage-fe`, which is what the repository is called
+    /// `~/Documents/work/web-app` where Paseo itself says
+    /// `acme-corp/web-app`, which is what the repository is called
     /// everywhere else a person sees it.
     ///
     /// **A line that repeats the title is spent on nothing.** Paseo names a
@@ -377,7 +377,7 @@ fn agents_root() -> Option<PathBuf> {
 /// session with 872 messages since. The **workspace** `displayName` is the
 /// branch or worktree the session runs in (`feat/doctors-maps`, `main`).
 /// The **project** `displayName` is the repository
-/// (`Care-Connect-AI/triage-fe`). Only the last two actually distinguish
+/// (`acme-corp/web-app`). Only the last two actually distinguish
 /// one session from another — three of this machine's agents share the
 /// prompt "what's the update on the agents tasks" — which is why the tile
 /// leads with them and the prompt stays searchable rather than shown.
@@ -1255,10 +1255,10 @@ mod tests {
             dir.path(),
             "w",
             "a",
-            r#"{"id":"a","provider":"claude","cwd":"/Users/someone/Documents/triage-fe","lastStatus":"running"}"#,
+            r#"{"id":"a","provider":"claude","cwd":"/Users/someone/Documents/web-app","lastStatus":"running"}"#,
         );
         let provider = AgentsProvider::with_root(dir.path().to_path_buf());
-        assert_eq!(provider.search("", 0)[0].item.title, "triage-fe");
+        assert_eq!(provider.search("", 0)[0].item.title, "web-app");
     }
 
     #[test]
@@ -1421,14 +1421,14 @@ mod tests {
         std::fs::create_dir_all(home.join("projects")).unwrap();
         std::fs::write(
             home.join("projects/projects.json"),
-            r#"[{"projectId":"remote:github.com/Care-Connect-AI/triage-fe",
-                 "displayName":"Care-Connect-AI/triage-fe"}]"#,
+            r#"[{"projectId":"remote:github.com/acme-corp/web-app",
+                 "displayName":"acme-corp/web-app"}]"#,
         )
         .unwrap();
         std::fs::write(
             home.join("projects/workspaces.json"),
             r#"[{"workspaceId":"wks_1","displayName":"feat/doctors-maps",
-                 "projectId":"remote:github.com/Care-Connect-AI/triage-fe"},
+                 "projectId":"remote:github.com/acme-corp/web-app"},
                 {"workspaceId":"wks_2","displayName":"main"}]"#,
         )
         .unwrap();
@@ -1446,13 +1446,13 @@ mod tests {
             "triage",
             "a1",
             r#"{"id":"a1","title":"https://www.figma.com/design/ihcBLzmf4sBM0KJCMo8ryO/Care",
-                "workspaceId":"wks_1","cwd":"/Users/x/Documents/tcc/triage-fe",
+                "workspaceId":"wks_1","cwd":"/Users/x/Documents/tcc/web-app",
                 "lastStatus":"running"}"#,
         );
         let provider = AgentsProvider::with_root(root);
         let items: Vec<_> = provider.search("", 0).into_iter().map(|c| c.item).collect();
         assert_eq!(items[0].title, "feat/doctors-maps");
-        assert_eq!(items[0].subtitle.as_deref(), Some("Care-Connect-AI/triage-fe"));
+        assert_eq!(items[0].subtitle.as_deref(), Some("acme-corp/web-app"));
     }
 
     #[test]
@@ -1504,7 +1504,7 @@ mod tests {
             "triage",
             "a1",
             r#"{"id":"a1","title":"testimonials carousel","workspaceId":"wks_1",
-                "cwd":"/Users/x/Documents/tcc/triage-fe","lastStatus":"running"}"#,
+                "cwd":"/Users/x/Documents/tcc/web-app","lastStatus":"running"}"#,
         );
         let provider = AgentsProvider::with_root(root);
         let found = provider.search("testimonials", 0);
@@ -1571,12 +1571,12 @@ mod tests {
             "triage",
             "a1",
             r#"{"id":"a1","title":"fix the carousel","workspaceId":"wks_1",
-                "cwd":"/x/triage-fe","lastStatus":"running"}"#,
+                "cwd":"/x/web-app","lastStatus":"running"}"#,
         );
         let provider = AgentsProvider::with_root(root);
         let item = provider.search("", 0).remove(0).item;
         assert_eq!(item.title, "feat/doctors-maps");
-        assert_eq!(item.subtitle.as_deref(), Some("Care-Connect-AI/triage-fe"));
+        assert_eq!(item.subtitle.as_deref(), Some("acme-corp/web-app"));
     }
 
 

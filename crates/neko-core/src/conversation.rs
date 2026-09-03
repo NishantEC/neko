@@ -183,9 +183,9 @@ fn session_ref(agent_id: &str) -> Option<SessionRef> {
 
 /// Claude Code's project-directory encoding of a working directory: every
 /// character outside `[A-Za-z0-9]` becomes `-`, leading slash included —
-/// `/Users/nish/Documents/neko` → `-Users-nish-Documents-neko`, and a dotted
-/// path like `/Users/nish/.openclaw/workspace` →
-/// `-Users-nish--openclaw-workspace` (both verified against the real
+/// `/Users/example/Documents/neko` → `-Users-example-Documents-neko`, and a dotted
+/// path like `/Users/example/.openclaw/workspace` →
+/// `-Users-example--openclaw-workspace` (both verified against the real
 /// directory listing, not inferred).
 pub fn munge_cwd(cwd: &str) -> String {
     cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
@@ -1011,8 +1011,8 @@ mod tests {
     #[test]
     fn the_cwd_munge_matches_claude_codes_own_directory_names() {
         // Both verified against the real ~/.claude/projects listing.
-        assert_eq!(munge_cwd("/Users/nish/Documents/neko"), "-Users-nish-Documents-neko");
-        assert_eq!(munge_cwd("/Users/nish/.openclaw/workspace"), "-Users-nish--openclaw-workspace");
+        assert_eq!(munge_cwd("/Users/example/Documents/neko"), "-Users-example-Documents-neko");
+        assert_eq!(munge_cwd("/Users/example/.openclaw/workspace"), "-Users-example--openclaw-workspace");
     }
 
     #[test]
@@ -1039,7 +1039,7 @@ mod tests {
 
     /// Verbatim from a live `get_agent_activity` on this machine, trimmed.
     const REAL: &str = "Showing 6 of 1046 activities (limited to 6)\n\n\
-        [Write] /Users/nish/Documents/hme/granth/data/drive/protab.md\n\
+        [Write] /Users/example/Documents/project/granth/data/drive/protab.md\n\
         All 60 documents now written. Verifying completion.\n\n\
         [Shell] pnpm ingest-drive --limit 0 2>&1 | tail -3\n\n\
         Drive KB ingestion is done: **60/60 documents**.\n\n\
@@ -1059,8 +1059,8 @@ mod tests {
         // The difference between a scannable list and a wall of bracketed
         // text: the path leads the row, the tool becomes a badge.
         assert_eq!(
-            split_tool("[Write] /Users/nish/a.md"),
-            Some(("Write", "/Users/nish/a.md"))
+            split_tool("[Write] /Users/example/a.md"),
+            Some(("Write", "/Users/example/a.md"))
         );
         assert_eq!(split_tool("[Shell] git status"), Some(("Shell", "git status")));
         // Prose is most of what is worth reading, and is not a tool call.
@@ -1071,7 +1071,7 @@ mod tests {
     #[test]
     fn a_multi_line_entry_keeps_its_body_for_the_detail_pane() {
         let entries = parse_activity(REAL);
-        assert_eq!(entries[0].headline, "[Write] /Users/nish/Documents/hme/granth/data/drive/protab.md");
+        assert_eq!(entries[0].headline, "[Write] /Users/example/Documents/project/granth/data/drive/protab.md");
         assert_eq!(entries[0].body.as_deref(), Some("All 60 documents now written. Verifying completion."));
         // A single-line entry has no body rather than an empty one.
         assert!(entries[1].body.is_none());

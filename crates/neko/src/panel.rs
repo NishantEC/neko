@@ -5410,7 +5410,7 @@ mod tests {
             .update(cx, |root, window, cx| {
                 let row = SearchItem {
                     title: "feat/doctors-maps".into(),
-                    subtitle: Some("Care-Connect-AI/triage-fe".into()),
+                    subtitle: Some("acme-corp/web-app".into()),
                     enters_mode: Some("conversation".into()),
                     ..agent_row("the-agent")
                 };
@@ -5420,7 +5420,7 @@ mod tests {
                 let mode = root.active_mode().expect("entered");
                 let kept = mode.subject_item.as_ref().expect("the row travelled in");
                 assert_eq!(kept.title, "feat/doctors-maps");
-                assert_eq!(kept.subtitle.as_deref(), Some("Care-Connect-AI/triage-fe"));
+                assert_eq!(kept.subtitle.as_deref(), Some("acme-corp/web-app"));
             })
             .unwrap();
     }
@@ -6942,10 +6942,10 @@ mod tests {
     fn a_tile_tooltip_carries_both_lines_it_truncated() {
         let mut row = item_with_id("agent", "a1");
         row.title = "feat/doctors-maps".to_string();
-        row.subtitle = Some("Care-Connect-AI/triage-fe".to_string());
+        row.subtitle = Some("acme-corp/web-app".to_string());
         assert_eq!(
             agent_tile_tooltip(&row).to_string(),
-            "feat/doctors-maps \u{2014} Care-Connect-AI/triage-fe"
+            "feat/doctors-maps \u{2014} acme-corp/web-app"
         );
         row.subtitle = None;
         assert_eq!(agent_tile_tooltip(&row).to_string(), "feat/doctors-maps");

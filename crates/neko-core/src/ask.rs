@@ -3,7 +3,7 @@
 //! **L6 of `docs/plan-agent-control-plane.md`, and the payoff.** Everything
 //! beneath it made a capability reachable by *name*: you find the schedule,
 //! then pause it. This layer lets you say what you want — "stop the agent in
-//! triage-fe" — and turns that into one of those same calls.
+//! web-app" — and turns that into one of those same calls.
 //!
 //! ## The two rules it ships with
 //!
@@ -528,7 +528,7 @@ impl Provider for AskProvider {
                 // it spends the only row on screen saying nothing new.
                 "neko will propose one tool call".to_string(),
                 Some(
-                    "It runs nothing until you confirm. Try \"stop the agent in triage-fe\"."
+                    "It runs nothing until you confirm. Try \"stop the agent in web-app\"."
                         .to_string(),
                 ),
                 "Type",
