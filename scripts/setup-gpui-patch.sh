@@ -6,7 +6,7 @@ set -euo pipefail
 # section points `gpui`/`gpui_platform` at. Run this once before the first
 # `cargo build`/`cargo test`/`cargo clippy` in a fresh checkout, and again
 # any time the pinned rev in `crates/neko/Cargo.toml` changes or
-# `~/Library/Caches/neko-dev/gpui-fork-patched` is deleted.
+# `.gpui-fork-patched/` (inside this repo, gitignored) is deleted.
 #
 # Why this exists at all, and what it fixes: `AGENTS.md`'s "Summon latency"
 # section and `patches/gpui-0001-*.patch`'s own header. Short version: the
@@ -25,7 +25,12 @@ if [ -z "$REV" ]; then
   exit 1
 fi
 
-DEST="$HOME/Library/Caches/neko-dev/gpui-fork-patched"
+# **Inside the repo, not under $HOME.** Cargo's `[patch]` section takes a
+# path but expands neither `~` nor environment variables, so an absolute
+# path there is one machine's path — it broke `cargo build` for every clone
+# but this author's. A path relative to the workspace root works for
+# everybody; the directory is gitignored.
+DEST="$REPO_ROOT/.gpui-fork-patched"
 REV_MARKER="$DEST/.neko-patched-rev"
 
 if [ -f "$REV_MARKER" ] && [ "$(cat "$REV_MARKER")" = "$REV" ]; then

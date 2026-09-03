@@ -84,8 +84,8 @@ cargo build --release
 
 The first step is not optional. neko depends on a pinned fork of gpui with one
 local patch applied on top, and the workspace `[patch]` section points at a
-checkout that this script populates under
-`~/Library/Caches/neko-dev/gpui-fork-patched`. Without it `cargo build` fails
+checkout that this script populates at `.gpui-fork-patched/` inside the repo
+(gitignored — it is a whole third-party monorepo). Without it `cargo build` fails
 with a missing-path error. Run it again whenever the pinned rev changes. The
 patch itself fixes a ~30ms warm-summon regression in the fork; see
 [docs/architecture.md](docs/architecture.md#the-gpui-dependency).
@@ -154,10 +154,21 @@ file is Apache-2.0 and attributed in `NOTICE`. Seventeen theme palettes vendor
 colour *values* from eight upstream projects, every one MIT and verified from
 its own source; the table is in `docs/evidence/themes-report.md`.
 
-**A built binary is a different matter.** `crates/neko` links the
-`wingleeio/zed` fork of gpui, which unconditionally pulls in GPL-3.0-or-later
-code through `gpui → sum_tree → ztracing`, with no feature that avoids it. That
-obligation triggers on distribution, not on local use, so building and running
-neko on your own machine carries nothing. Do not publish a release binary
-without resolving it first. The full record, including why the fork was adopted
-anyway, is in `AGENTS.md` under "The GPUI dependency decision".
+**A built binary is a different matter, and it is GPL, not MIT.**
+`crates/neko` links the `wingleeio/zed` fork of gpui, which unconditionally
+pulls in GPL-3.0-or-later code through `gpui → sum_tree → ztracing`, with no
+feature that avoids it. This is not particular to that fork — vanilla Zed's
+gpui carries the same chain (`zed-industries/zed#55470`, open).
+
+So, taking the cautious reading:
+
+- **Source**: redistribute freely. MIT is GPL-compatible; nothing conflicts.
+- **Binaries**: you may ship them, under **GPL-3.0-or-later** terms — complete
+  corresponding source to recipients, same freedoms, no added restrictions.
+- **Using it yourself**: nothing attaches. GPL obligations arrive on
+  conveyance, not on use.
+
+`NOTICE` states this in full, including the two questions that are genuinely
+unsettled rather than answered. None of it is legal advice; if you intend to
+ship this commercially, ask a lawyer. The record of why the fork was adopted
+with the exposure understood is in `AGENTS.md`, "The GPUI dependency decision".

@@ -7,6 +7,12 @@ members = [
     "crates/neko-client",
     "crates/neko",
 ]
+# **The patched fork checkout is not part of this workspace.** It lives inside
+# the repo so `[patch]` below can name it relatively, and without this Cargo
+# absorbs it — the fork's own crates use `workspace = true` dependencies that
+# then resolve against *our* workspace root instead of theirs, and the build
+# fails with a missing workspace dependency.
+exclude = [".gpui-fork-patched"]
 
 [workspace.package]
 version = "0.1.0"
@@ -39,6 +45,12 @@ opt-level = 0
 # `scripts/setup-gpui-patch.sh` once (or again after the pinned rev
 # changes) to populate it — `cargo build` fails with a missing-path error
 # until that has been run at least once.
+#
+# **Relative, because Cargo expands neither `~` nor environment variables
+# here.** An absolute path is one machine's path, and this section held one
+# for a long time — which meant a fresh clone could not build on anybody
+# else's computer. `.gpui-fork-patched/` sits beside this file and is
+# gitignored.
 [patch."https://github.com/wingleeio/zed"]
-gpui = { path = "/Users/nish/Library/Caches/neko-dev/gpui-fork-patched/crates/gpui" }
-gpui_platform = { path = "/Users/nish/Library/Caches/neko-dev/gpui-fork-patched/crates/gpui_platform" }
+gpui = { path = ".gpui-fork-patched/crates/gpui" }
+gpui_platform = { path = ".gpui-fork-patched/crates/gpui_platform" }
