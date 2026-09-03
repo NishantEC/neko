@@ -24,12 +24,37 @@ adapted source file, and one set of icon assets, from third parties:
 See crates/neko/src/components/vendor/MANIFEST.md for what was vendored, what was
 deliberately not vendored, and why.
 
-IMPORTANT — this no longer describes a distributable binary. As of
-2026-08-20, `crates/neko` depends on the `wingleeio/zed` fork of gpui,
-which unconditionally links GPL-3.0-or-later code (`gpui -> sum_tree ->
-ztracing`, no feature gate that avoids it). A built `neko` binary is not
-MIT-shippable — see `AGENTS.md`'s "The GPUI dependency decision" for the
-full record, including why this obligation is dormant (triggers on
-distribution, not on local build/use) as long as neko stays a local-only
-tool built and run on one machine. Do not publish a release binary of
-this repo without resolving that first.
+REDISTRIBUTION — read this before shipping a binary.
+
+neko's own source is MIT (see LICENSE): copy it, fork it, redistribute it
+freely.
+
+A *built binary* is a different question, and the honest answer is that it
+carries GPL-3.0 obligations rather than MIT ones. As of 2026-08-20
+`crates/neko` depends on the `wingleeio/zed` fork of gpui, which
+unconditionally links GPL-3.0-or-later code (`gpui -> sum_tree -> ztracing`,
+with no feature gate that avoids it — verified by `cargo license`, and not
+specific to that fork: vanilla Zed's gpui carries the identical chain,
+tracked upstream as zed-industries/zed#55470, still open).
+
+What that means in practice, taking the conservative reading:
+
+  * Distributing neko's *source* is unrestricted. MIT is GPL-compatible, so
+    nothing here conflicts.
+  * Distributing a compiled neko binary is permitted, and must be done under
+    GPL-3.0-or-later terms: recipients get the complete corresponding source
+    and the same freedoms, and no further restrictions may be added. That is
+    an ordinary, well-trodden arrangement — it is simply not MIT.
+  * Building and running it yourself triggers nothing at all. GPL obligations
+    attach on conveyance, not on use.
+
+Two questions genuinely are unsettled and are noted rather than resolved:
+whether linking functionally-inert GPL code creates a derivative work at all,
+and the precise effect of `-or-later`. This file takes the cautious position
+on both because that is the one that is safe for anyone redistributing. If
+you intend to sell or ship this commercially, talk to a lawyer — nothing here
+is legal advice.
+
+`AGENTS.md`'s "The GPUI dependency decision" has the full record: what the
+fork buys, what was measured, and why the dependency was accepted with the
+exposure understood.
