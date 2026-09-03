@@ -8,7 +8,7 @@ copied into a `.rs` file, and the upstream is pinned so a drift stays visible.
 Palette values already live in that category (`theme.rs`, seventeen themes);
 icons joined it here.
 
-Mirrors the pattern used in the captain's hushbacks repo (`packages/ui`): external
+Mirrors a pattern used in another of this author's repositories: external
 component collections are vendored as adapted source under `src/components/vendor/<collection>/`,
 listed here, rather than pulled in as a runtime dependency. Rationale for neko specifically: our
 visual system (`data/neko-design/report.md`) is frozen and bespoke, so we want the underlying

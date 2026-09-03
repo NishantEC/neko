@@ -2294,7 +2294,7 @@ session with 872 messages since, and three of this machine's agents share
 `"what's the update on the agents tasks"`. The **workspace** `displayName`
 is the branch or worktree the session runs in (`feat/doctors-maps`, `main`).
 The **project** `displayName` is the repository
-(`Care-Connect-AI/triage-fe`). Only the last two distinguish one session
+(a private client repository). Only the last two distinguish one session
 from another, so a tile is **branch over repository**, and the prompt stays
 in the search haystack — it is how a person remembers what they asked for,
 even though it does not identify a session on screen.

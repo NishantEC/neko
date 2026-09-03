@@ -1,7 +1,7 @@
 # Confirming the neko client memory-leak hypothesis — live results, and a different bug found in the process
 
 **Method statement.** This task started from
-`/Users/nish/Documents/hme/firstmate-hme/data/neko-leak-audit/report.md`
+`<the firstmate home>/data/neko-leak-audit/report.md`
 (source-only investigation, `main` at `8da1238`), which traced the real summon
 path to gpui-0.2.2's `windowDidBecomeKey:` handler and named one static
 question and one bounded live measurement as the way to settle it. Both were

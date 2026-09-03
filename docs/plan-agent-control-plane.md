@@ -109,7 +109,7 @@ drives `api.anthropic.com/v1/messages` with tools, which was the make-or-break
 unknown for this layer and was tested before a line was written.
 
 **The example this section originally used no longer applies**: it said
-"restart triage-fe's dev server" resolving to `start_workspace_script`, and
+"restart the dev server" resolving to `start_workspace_script`, and
 workspace scripts were not built (see L5). What it really does, verified:
 *"stop whatever the neko agent is doing"* → `cancel_agent(agentId: 05475348-…)`,
 rendered as a row, run only on a second Enter.
