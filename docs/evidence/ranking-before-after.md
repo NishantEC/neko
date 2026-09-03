@@ -214,8 +214,8 @@ Resolved against the real machine:
 ```
 $ mdfind -onlyin ~/Documents -onlyin ~/Desktop -onlyin ~/Downloads \
     "kMDItemFSName == 'finders.py*'cd"
-/Users/example/Documents/work/acme-app/Acme App/env/lib/python3.8/site-packages/django/contrib/staticfiles/finders.py
-/Users/example/Documents/work/acme-app/Acme App/env/lib/python3.8/site-packages/djangobower/finders.py
+/Users/example/Documents/project/App/env/lib/python3.8/site-packages/django/contrib/staticfiles/finders.py
+/Users/example/Documents/project/App/env/lib/python3.8/site-packages/djangobower/finders.py
 ```
 
 **Two genuinely different files, not a duplicate-emission bug.** Two separate

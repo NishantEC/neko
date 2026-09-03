@@ -6,3 +6,10 @@
 # may be used.
 /refs/*
 !/refs/README.md
+
+# Verification captures. They are window-scoped screenshots of a real machine
+# and repeatedly caught real client repository names, branch names naming
+# unreleased features, and fragments of real prompts — see `AGENTS.md`'s
+# standing capture-safety rules. The written reports beside them are the
+# durable record and stay; the images are local-only.
+/docs/evidence/*.png
