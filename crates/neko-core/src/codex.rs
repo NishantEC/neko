@@ -3,14 +3,17 @@
 //! The daemon actor owns transport and polling. This module only reduces its
 //! JSON results and notifications into stable, displayable state.
 
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use neko_protocol::{Glyph, Icon, ItemAction, SearchItem};
 use serde_json::Value;
 
 use crate::{
     provider::{Provider, ProviderError},
-    search::{fuzzy_score, Candidate},
+    search::{Candidate, fuzzy_score},
 };
 
 /// A task state deliberately reduced to the distinctions the UI presents.
@@ -49,6 +52,16 @@ pub struct Task {
     pub status: TaskStatus,
 }
 
+/// A deliberately compact, read-only turn summary. This is not a transcript:
+/// the daemon stores only the app-server's visible summary and status for the
+/// task the person explicitly opened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Activity {
+    pub id: String,
+    pub summary: String,
+    pub status: Option<String>,
+}
+
 /// The category of request that needs the person's approval.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApprovalKind {
@@ -85,6 +98,10 @@ pub trait CodexControl: Send + Sync {
         request_id: &Value,
         approve: bool,
     ) -> Result<(), ProviderError>;
+
+    /// Fetches the bounded recent activity for one task the person explicitly
+    /// selected. Search never calls this path.
+    fn open_task(&self, thread_id: &str) -> Result<(), ProviderError>;
 }
 
 /// The UI-relevant state reduced from Codex app-server messages.
@@ -95,6 +112,11 @@ pub struct Snapshot {
     pub generation: u64,
     pub refreshed_at_unix_ms: i64,
     pub available: bool,
+    /// True only when the app-server accepted the experimental capability
+    /// negotiation needed for `thread/turns/list`.
+    pub history_available: bool,
+    /// Recent summaries, keyed by their exact Codex thread id.
+    pub activity: HashMap<String, Vec<Activity>>,
 }
 
 impl Snapshot {
@@ -121,6 +143,32 @@ impl Snapshot {
 
         self.replace_tasks(tasks);
         self.refreshed_at_unix_ms = crate::now_unix_ms();
+    }
+
+    pub fn set_history_available(&mut self, available: bool) {
+        if self.history_available != available {
+            self.history_available = available;
+            self.generation = self.generation.saturating_add(1);
+        }
+    }
+
+    /// Replaces only one explicitly selected task's bounded activity. Entries
+    /// without an id or visible summary are ignored; raw turn content never
+    /// enters this projection.
+    pub fn apply_turn_list(&mut self, thread_id: &str, value: &Value) {
+        let Some(entries) = value.get("data").and_then(Value::as_array) else {
+            return;
+        };
+        let activity = entries
+            .iter()
+            .take(40)
+            .filter_map(parse_activity)
+            .collect::<Vec<_>>();
+        if self.activity.get(thread_id) != Some(&activity) {
+            self.activity.insert(thread_id.to_owned(), activity);
+            self.generation = self.generation.saturating_add(1);
+            self.refreshed_at_unix_ms = crate::now_unix_ms();
+        }
     }
 
     /// Creates one pending approval for focused reducer tests and callers that
@@ -395,11 +443,163 @@ fn parse_task(entry: &Value) -> Option<Task> {
     })
 }
 
+fn parse_activity(entry: &Value) -> Option<Activity> {
+    let id = entry.get("id")?.as_str()?.trim();
+    let summary = entry
+        .get("summary")
+        .and_then(Value::as_str)
+        .or_else(|| entry.get("title").and_then(Value::as_str))?
+        .trim();
+    if id.is_empty() || summary.is_empty() {
+        return None;
+    }
+    let status = entry
+        .get("status")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            entry
+                .get("status")
+                .and_then(|status| status.get("type"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_owned);
+    Some(Activity {
+        id: id.to_owned(),
+        summary: summary.to_owned(),
+        status,
+    })
+}
+
 /// Searchable task rows backed exclusively by the daemon-owned app-server
 /// projection. The app-server actor is the only writer; a palette keystroke
 /// only takes this short read lock and never starts a process or reads disk.
 pub struct CodexTasksProvider {
     snapshot: Arc<RwLock<Snapshot>>,
+}
+
+/// Mode-only, read-only activity for one exact selected Codex task. Its
+/// search path takes the snapshot lock and performs no process or transport
+/// work; explicit activation above is the sole refresh trigger.
+pub struct CodexTaskProvider {
+    snapshot: Arc<RwLock<Snapshot>>,
+    control: Arc<dyn CodexControl>,
+}
+
+impl CodexTaskProvider {
+    pub fn with_snapshot_and_control(
+        snapshot: Arc<RwLock<Snapshot>>,
+        control: Arc<dyn CodexControl>,
+    ) -> Self {
+        Self { snapshot, control }
+    }
+}
+
+impl Provider for CodexTaskProvider {
+    fn id(&self) -> &'static str {
+        "codex-task"
+    }
+
+    fn section_label(&self) -> &'static str {
+        "Recent activity"
+    }
+
+    fn search(&self, thread_id: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+        let snapshot = self.snapshot.read().unwrap().clone();
+        let Some(task) = snapshot.tasks.iter().find(|task| task.id == thread_id) else {
+            return Vec::new();
+        };
+        let items = match snapshot.activity.get(thread_id) {
+            Some(activity) if !activity.is_empty() => activity
+                .iter()
+                .enumerate()
+                .map(|(index, activity)| {
+                    SearchItem {
+                        id: format!("{thread_id}:{}", activity.id),
+                        kind: self.id().to_string(),
+                        title: activity.summary.clone(),
+                        subtitle: activity.status.clone(),
+                        icon: Icon::Glyph(Glyph::Agent),
+                        section_label: self.section_label().to_string(),
+                        action_label: "Read-only".to_string(),
+                        badge: None,
+                        accessory: None,
+                        enters_mode: None,
+                        group_label: None,
+                        actions: Vec::new(),
+                        source: Some("Codex".to_string()),
+                        meter: None,
+                        keeps_open: true,
+                        preview_markdown: false,
+                        speaker: None,
+                        images: Vec::new(),
+                        preview: None,
+                    }
+                    .into_candidate((40 - index) as f32)
+                })
+                .collect(),
+            _ => vec![
+                SearchItem {
+                    id: thread_id.to_owned(),
+                    kind: self.id().to_string(),
+                    title: task.title.clone(),
+                    subtitle: Some(if snapshot.history_available {
+                        "No recent visible activity.".to_string()
+                    } else {
+                        "History is available in Codex".to_string()
+                    }),
+                    icon: Icon::Glyph(Glyph::Agent),
+                    section_label: self.section_label().to_string(),
+                    action_label: "Read-only".to_string(),
+                    badge: None,
+                    accessory: None,
+                    enters_mode: None,
+                    group_label: None,
+                    actions: Vec::new(),
+                    source: Some("Codex".to_string()),
+                    meter: None,
+                    keeps_open: true,
+                    preview_markdown: false,
+                    speaker: None,
+                    images: Vec::new(),
+                    preview: None,
+                }
+                .into_candidate(1.0),
+            ],
+        };
+        items
+    }
+
+    fn activate(&self, thread_id: &str) -> Result<(), ProviderError> {
+        let snapshot = self.snapshot.read().unwrap();
+        if snapshot.tasks.iter().any(|task| task.id == thread_id) {
+            drop(snapshot);
+            self.control.open_task(thread_id)
+        } else {
+            Err(ProviderError(
+                "Codex task is no longer available".to_string(),
+            ))
+        }
+    }
+
+    fn perform_action(&self, thread_id: &str, action_id: &str) -> Result<(), ProviderError> {
+        if action_id == "review" {
+            self.activate(thread_id)
+        } else {
+            Err(ProviderError(format!(
+                "no action '{action_id}' on this Codex task"
+            )))
+        }
+    }
+}
+
+trait IntoCandidate {
+    fn into_candidate(self, score: f32) -> Candidate;
+}
+
+impl IntoCandidate for SearchItem {
+    fn into_candidate(self, score: f32) -> Candidate {
+        Candidate { score, item: self }
+    }
 }
 
 /// Urgent, explicit decisions from the same daemon-owned Codex projection.
@@ -505,7 +705,7 @@ impl Provider for CodexApprovalsProvider {
             _ => {
                 return Err(ProviderError(format!(
                     "no action '{action_id}' on this Codex approval"
-                )))
+                )));
             }
         };
         let request_id = request_id_from_row_id(request_id)
@@ -532,7 +732,7 @@ impl CodexTasksProvider {
 
 impl Provider for CodexTasksProvider {
     fn id(&self) -> &'static str {
-        "codex-task"
+        "codex-tasks"
     }
 
     fn section_label(&self) -> &'static str {
@@ -702,13 +902,14 @@ fn task_item(task: &Task, available: bool) -> SearchItem {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use std::sync::{Arc, Mutex, RwLock};
 
     use crate::provider::Provider;
 
     use super::{
-        CodexApprovalsProvider, CodexControl, CodexTasksProvider, Snapshot, Task, TaskStatus,
+        CodexApprovalsProvider, CodexControl, CodexTaskProvider, CodexTasksProvider, Snapshot,
+        Task, TaskStatus,
     };
 
     fn snapshot_with_approval(thread_id: &str, request_id: &str) -> Snapshot {
@@ -729,6 +930,29 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((thread_id.to_string(), request_id.clone(), approve));
+            Ok(())
+        }
+
+        fn open_task(&self, _thread_id: &str) -> Result<(), crate::provider::ProviderError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct TaskControl(Mutex<Vec<String>>);
+
+    impl CodexControl for TaskControl {
+        fn resolve_approval(
+            &self,
+            _thread_id: &str,
+            _request_id: &Value,
+            _approve: bool,
+        ) -> Result<(), crate::provider::ProviderError> {
+            Ok(())
+        }
+
+        fn open_task(&self, thread_id: &str) -> Result<(), crate::provider::ProviderError> {
+            self.0.lock().unwrap().push(thread_id.to_owned());
             Ok(())
         }
     }
@@ -787,6 +1011,43 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["waiting", "working", "idle"]
         );
+    }
+
+    #[test]
+    fn task_mode_provider_reads_only_the_selected_tasks_cached_summaries() {
+        let mut snapshot = Snapshot::default();
+        snapshot.replace_tasks(vec![
+            task("thr-1", "One", None, None, 0, TaskStatus::Idle),
+            task("thr-2", "Two", None, None, 0, TaskStatus::Idle),
+        ]);
+        snapshot.apply_turn_list(
+            "thr-1",
+            &json!({"data":[
+                {"id":"one","summary":"Ran the focused test","status":"completed"},
+            ]}),
+        );
+        snapshot.apply_turn_list(
+            "thr-2",
+            &json!({"data":[
+                {"id":"two","summary":"Must stay scoped away","status":"working"},
+            ]}),
+        );
+        let control = Arc::new(TaskControl::default());
+        let provider = CodexTaskProvider::with_snapshot_and_control(
+            Arc::new(RwLock::new(snapshot)),
+            control.clone(),
+        );
+
+        let rows = provider.search("thr-1", 0);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].item.title, "Ran the focused test");
+        assert!(provider.search("unknown", 0).is_empty());
+        assert!(
+            control.0.lock().unwrap().is_empty(),
+            "search must not trigger a task read"
+        );
+        provider.activate("thr-1").unwrap();
+        assert_eq!(&*control.0.lock().unwrap(), &["thr-1"]);
     }
 
     #[test]

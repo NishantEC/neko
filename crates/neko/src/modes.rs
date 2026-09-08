@@ -97,6 +97,26 @@ pub struct ModeChrome {
     pub skeleton: crate::components::skeleton::SkeletonShape,
 }
 
+/// The backend-qualified thing an item-scoped mode is allowed to read.
+///
+/// IDs from Codex and Paseo deliberately never share a routing path: the
+/// backend selects the provider before the opaque id is sent anywhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskRef {
+    pub backend: String,
+    pub id: String,
+}
+
+impl TaskRef {
+    pub fn provider_id(&self) -> &'static str {
+        match self.backend.as_str() {
+            "codex" => "codex-task",
+            "paseo" => "conversation",
+            _ => "",
+        }
+    }
+}
+
 pub const MODES: &[ModeChrome] = &[
     ModeChrome {
         id: "clipboard",
@@ -137,8 +157,8 @@ pub const MODES: &[ModeChrome] = &[
         provider_id: "codex-task",
         title: "Codex Tasks",
         placeholder: "Type to filter Codex tasks…",
-        empty_line: "No Codex tasks available.",
-        has_detail: false,
+        empty_line: "History is available in Codex.",
+        has_detail: true,
         transcript: false,
         skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
@@ -260,6 +280,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn codex_task_mode_never_routes_a_paseo_id() {
+        let task = TaskRef {
+            backend: "codex".into(),
+            id: "thr-1".into(),
+        };
+        assert_eq!(task.provider_id(), "codex-task");
+        assert_eq!(task.id, "thr-1");
+    }
+
+    #[test]
     fn the_clipboard_mode_is_registered_and_scopes_to_the_clipboard_provider() {
         let chrome = chrome_for("clipboard").expect("the clipboard mode must be registered");
         assert_eq!(chrome.provider_id, "clipboard");
@@ -282,7 +312,10 @@ mod tests {
     fn the_codex_task_mode_is_registered_and_scopes_to_codex_tasks() {
         let chrome = chrome_for("codex-task").expect("the Codex task mode must be registered");
         assert_eq!(chrome.provider_id, "codex-task");
-        assert!(!chrome.has_detail, "Task 5 owns the task detail experience");
+        assert!(
+            chrome.has_detail,
+            "a task view keeps its activity scoped in the detail pane"
+        );
     }
 
     #[test]

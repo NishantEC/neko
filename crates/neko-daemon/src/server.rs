@@ -8,7 +8,7 @@ use neko_core::cancel::Cancel;
 use neko_core::provider::Provider;
 use neko_core::search::Candidate;
 use neko_core::{AppEntry, Db};
-use neko_protocol::{read_frame, write_frame, Event, Frame, Request, Response};
+use neko_protocol::{Event, Frame, Request, Response, read_frame, write_frame};
 
 /// One Dock badge count, assembled by the daemon instead of exposing each
 /// backend's raw attention state to clients.
@@ -194,6 +194,16 @@ impl AppState {
             // by switching to Paseo. Its scoped query is an agent id, not
             // typing — see `conversation.rs`.
             Box::new(neko_core::conversation::ConversationProvider::new()),
+            // A Codex task detail is intentionally mode-only: opening a
+            // task activates this provider once, which asks the actor for
+            // at most 40 visible summaries; its subsequent searches read
+            // only the in-memory projection.
+            Box::new(
+                neko_core::codex::CodexTaskProvider::with_snapshot_and_control(
+                    codex.clone(),
+                    codex_control.clone(),
+                ),
+            ),
         ];
         Self {
             db,
@@ -1374,7 +1384,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_task_review_activation_is_recognized_without_starting_codex() {
+    fn codex_task_review_activation_is_honest_without_an_actor() {
         let db = Db::open_in_memory().unwrap();
         let state = test_state(db, Vec::new());
         state
@@ -1401,8 +1411,7 @@ mod tests {
         );
 
         assert!(
-            matches!(response, Response::Activated),
-            "expected Activated, got {response:?}"
+            matches!(response, Response::Error { ref message } if message == "Codex is unavailable")
         );
     }
 
@@ -1443,11 +1452,13 @@ mod tests {
             panic!("expected an unavailable error");
         };
         assert_eq!(message, "Codex is unavailable");
-        assert!(state
-            .codex
-            .read()
-            .unwrap()
-            .can_resolve("thr-1", "request-1"));
+        assert!(
+            state
+                .codex
+                .read()
+                .unwrap()
+                .can_resolve("thr-1", "request-1")
+        );
     }
 
     #[test]
