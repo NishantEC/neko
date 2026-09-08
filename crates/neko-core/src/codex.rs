@@ -272,6 +272,18 @@ impl Provider for CodexTasksProvider {
         // action back to the daemon. Task 5 owns that mode's implementation.
         Err(ProviderError("Codex task mode is not available yet".to_string()))
     }
+
+    fn perform_action(&self, id: &str, action_id: &str) -> Result<(), ProviderError> {
+        if action_id != "review" {
+            return Err(ProviderError(format!("no action '{action_id}' on this Codex task")));
+        }
+        let snapshot = self.snapshot.read().unwrap();
+        match snapshot.tasks.iter().find(|task| task.id == id) {
+            Some(task) if task.status == TaskStatus::Waiting => Ok(()),
+            Some(_) => Err(ProviderError("this Codex task no longer needs review".to_string())),
+            None => Err(ProviderError("Codex task is no longer available".to_string())),
+        }
+    }
 }
 
 fn task_status_priority(status: &TaskStatus) -> u8 {
@@ -292,6 +304,17 @@ fn task_item(task: &Task, available: bool) -> SearchItem {
         (Some(provider), None) => Some(provider.clone()),
         (None, Some(cwd)) => Some(cwd.clone()),
         (None, None) => None,
+    };
+    // Tiles only render title and subtitle, not a row's trailing accessory.
+    // Keep the unavailable state in both places so a promoted task cannot
+    // look current merely because it moved out of the result list.
+    let subtitle = if available {
+        subtitle
+    } else {
+        Some(match subtitle {
+            Some(subtitle) => format!("{subtitle} · Codex unavailable"),
+            None => "Codex unavailable".to_string(),
+        })
     };
     let (icon, badge) = match task.status {
         TaskStatus::Working => (Glyph::AgentLive, Some("LIVE".to_string())),
@@ -392,6 +415,28 @@ mod tests {
         for query in ["launcher", "neko", "openai"] {
             assert_eq!(provider.search(query, 0).len(), 1, "{query} should find the task");
         }
+    }
+
+    #[test]
+    fn unavailable_codex_tasks_put_their_status_in_tile_visible_subtitle() {
+        let snapshot = Snapshot {
+            available: false,
+            tasks: vec![task(
+                "thr-1",
+                "Repair launcher ranking",
+                Some("/work/neko"),
+                Some("openai"),
+                10,
+                TaskStatus::Idle,
+            )],
+            ..Snapshot::default()
+        };
+        let provider = CodexTasksProvider::with_snapshot(Arc::new(RwLock::new(snapshot)));
+
+        let item = provider.search("", 0).pop().expect("the task is retained").item;
+
+        assert_eq!(item.subtitle.as_deref(), Some("openai · /work/neko · Codex unavailable"));
+        assert_eq!(item.accessory.as_deref(), Some("Codex unavailable"));
     }
 
     #[test]

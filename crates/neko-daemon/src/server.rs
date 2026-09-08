@@ -1094,6 +1094,32 @@ mod tests {
     }
 
     #[test]
+    fn codex_task_review_activation_is_recognized_without_starting_codex() {
+        let db = Db::open_in_memory().unwrap();
+        let state = test_state(db, Vec::new());
+        state.codex.write().unwrap().replace_tasks(vec![neko_core::codex::Task {
+            id: "thr-1".into(),
+            title: "Review this change".into(),
+            cwd: None,
+            provider: None,
+            updated_at: 1,
+            status: neko_core::codex::TaskStatus::Waiting,
+        }]);
+
+        let response = handle_request_for_test(
+            &state,
+            Request::Activate {
+                kind: "codex-task".into(),
+                id: "thr-1".into(),
+                action: Some("review".into()),
+                query: String::new(),
+            },
+        );
+
+        assert!(matches!(response, Response::Activated), "expected Activated, got {response:?}");
+    }
+
+    #[test]
     fn activate_with_an_unknown_action_on_a_known_provider_errors() {
         let db = Db::open_in_memory().unwrap();
         let state = test_state(db, vec![app("Console")]);
