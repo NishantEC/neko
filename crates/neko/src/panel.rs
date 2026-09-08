@@ -1327,7 +1327,7 @@ impl Root {
                 return;
             };
             self.text_field.update(cx, |field, cx| field.set_content("", cx));
-            self.perform_activation(request, false, cx);
+            self.perform_activation(request, false, None, cx);
             return;
         }
         // A focused tile owns Enter — the grid is part of the same
@@ -1414,7 +1414,7 @@ impl Root {
         // asking you to look at. This takes the path `⌘K` menu actions
         // already take, which also re-runs the search — exactly what makes
         // the proposal appear where the invitation was.
-        self.perform_activation(request, !item.keeps_open, cx);
+        self.perform_activation(request, !item.keeps_open, None, cx);
     }
 
     /// `⌘↵` — the jump to Paseo, from anywhere an agent is in front of you.
@@ -1439,7 +1439,7 @@ impl Root {
         };
         // Hide on success: the whole point of the keystroke is that the
         // interaction continues in Paseo's window, not this one.
-        self.perform_activation(request, true, cx);
+        self.perform_activation(request, true, None, cx);
     }
 
     /// What `⌘↵` would send, or `None` where it means nothing.
@@ -1515,7 +1515,13 @@ impl Root {
     /// has no mockup at all (the launch brief's own note), so "the menu
     /// never closes the panel, Enter on a row always can" is this task's
     /// own deliberate, stated design choice, not a frozen spec's.
-    fn perform_activation(&mut self, request: Request, hide_on_success: bool, cx: &mut Context<Self>) {
+    fn perform_activation(
+        &mut self,
+        request: Request,
+        hide_on_success: bool,
+        enter_mode_on_success: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) {
         let client = self.client.clone();
         self.activating = true;
         cx.notify();
@@ -1538,23 +1544,38 @@ impl Root {
             };
             let failed = error_message.is_some();
             let _ = this.update(cx, |root, cx| {
-                root.activating = false;
-                root.activation_error = error_message;
-                // A menu action that changed the underlying data (delete,
-                // ...) and isn't about to hide the panel needs the current
-                // list re-fetched to reflect it — a deleted row must not
-                // keep rendering until the next keystroke happens to
-                // re-search.
-                if !failed && !hide_on_success {
-                    root.run_search(cx);
-                }
-                cx.notify();
+                root.finish_activation(error_message, hide_on_success, enter_mode_on_success, cx);
             });
             if !failed && hide_on_success {
                 cx.update(|cx| cx.hide());
             }
         })
         .detach();
+    }
+
+    fn finish_activation(
+        &mut self,
+        error_message: Option<String>,
+        hide_on_success: bool,
+        enter_mode_on_success: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) {
+        let succeeded = error_message.is_none();
+        self.activating = false;
+        self.activation_error = error_message;
+        // A menu action that changed the underlying data (delete, ...) and
+        // isn't about to hide the panel needs the current list re-fetched to
+        // reflect it. Review is different: the successful response is the
+        // authorization to enter its scoped task list, so that mode's own
+        // initial search replaces the root-list refresh.
+        if succeeded {
+            if let Some(mode_id) = enter_mode_on_success {
+                self.enter_mode_after_activation(mode_id, cx);
+            } else if !hide_on_success {
+                self.run_search(cx);
+            }
+        }
+        cx.notify();
     }
 
     /// Enters `mode_id`'s mode: saves the current query so `exit_mode` can
@@ -1637,6 +1658,7 @@ impl Root {
         for (index, item) in self.agent_tiles.iter().enumerate() {
             let focused = self.grid_selected == Some(index);
             let live = item.badge.as_deref() == Some("LIVE");
+            let status_label = agent_tile_status_label(item);
             let id = item.id.clone();
             let tile_item = item.clone();
             let mut dot = theme::active().state_success;
@@ -1815,6 +1837,17 @@ impl Root {
                                             .child(SharedString::from(item.title.clone())),
                                     ),
                             )
+                            .children(status_label.map(|label| {
+                                div()
+                                    .flex_shrink_0()
+                                    .px(px(4.))
+                                    .py(px(1.))
+                                    .rounded(px(3.))
+                                    .bg(theme::active().row_icon_socket_bg)
+                                    .text_size(px(8.5))
+                                    .text_color(theme::active().state_danger)
+                                    .child(SharedString::from(label))
+                            }))
                             .children(item.subtitle.clone().map(|subtitle| {
                                 div()
                                     .h(px(15.))
@@ -1848,6 +1881,23 @@ impl Root {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.close_actions_menu(window);
+        self.enter_mode_about_menu_closed(mode_id, subject, cx);
+    }
+
+    /// [`enter_mode_about`] after any transient menu has already closed.
+    /// Activation responses run without a `Window`, so successful actions
+    /// that continue into a mode use this shared state transition.
+    fn enter_mode_after_activation(&mut self, mode_id: &str, cx: &mut Context<Self>) {
+        self.enter_mode_about_menu_closed(mode_id, None, cx);
+    }
+
+    fn enter_mode_about_menu_closed(
+        &mut self,
+        mode_id: &str,
+        subject: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         // Entering a mode from inside one would capture the *mode's* query
         // as `saved_query`, so exiting would restore the wrong text. Not
         // reachable today (commands only appear in the root list), but the
@@ -1868,7 +1918,6 @@ impl Root {
         });
         self.selected = 0;
         self.mode_scroll.set_offset(point(px(0.), px(0.)));
-        self.close_actions_menu(window);
         self.expanded_tool_output.clear();
         self.text_field.update(cx, |field, cx| {
             field.set_placeholder(chrome.placeholder, cx);
@@ -2124,18 +2173,12 @@ impl Root {
         }
         let kind = menu.kind.clone();
         let id = menu.id.clone();
-        if kind == "codex-task" && action.id == "review" {
-            // `ItemAction` is intentionally a daemon-routed wire shape, not
-            // a second mode-transition vocabulary. Review is the one action
-            // that means "continue looking here", so keep that transition on
-            // the client beside every other `enters_mode` transition.
-            self.enter_mode_about("codex-task", None, window, cx);
-            return;
-        }
+        let enter_mode_on_success =
+            (kind == "codex-task" && action.id == "review").then_some("codex-task");
         self.close_actions_menu(window);
         cx.notify();
         let request = Request::Activate { kind, id, action: Some(action.id), query: self.query(cx) };
-        self.perform_activation(request, false, cx);
+        self.perform_activation(request, false, enter_mode_on_success, cx);
     }
 
     /// Closes the `⌘K` actions menu, if one is open — the single place that
@@ -4342,6 +4385,13 @@ fn agent_tile_tooltip(item: &SearchItem) -> SharedString {
     }
 }
 
+/// A tile's title and subtitle deliberately ellipsize. State that changes
+/// whether its data is trustworthy therefore needs its own fixed-width label.
+fn agent_tile_status_label(item: &SearchItem) -> Option<&'static str> {
+    (item.kind == "codex-task" && item.accessory.as_deref() == Some("Codex unavailable"))
+        .then_some("UNAVAILABLE")
+}
+
 /// gpui builds a tooltip from a view, so this is the smallest one that
 /// renders a string in the app's own tokens. Deliberately not a general
 /// component: nothing else in this app has a tooltip, and one that grew
@@ -5926,22 +5976,20 @@ mod tests {
         let unavailable = SearchItem {
             kind: "codex-task".to_string(),
             badge: Some("WAITING".to_string()),
-            subtitle: Some("openai · /work/neko · Codex unavailable".to_string()),
+            subtitle: Some(format!("openai · /{}", "work/very-long-directory-name/".repeat(16))),
+            accessory: Some("Codex unavailable".to_string()),
             ..agent_row("codex-task")
         };
 
         let (tiles, rows) = split_agent_tiles(vec![unavailable], false);
 
         assert!(rows.is_empty());
-        assert_eq!(tiles[0].subtitle.as_deref(), Some("openai · /work/neko · Codex unavailable"));
-        assert_eq!(
-            agent_tile_tooltip(&tiles[0]).to_string(),
-            "codex-task — openai · /work/neko · Codex unavailable"
-        );
+        assert!(tiles[0].subtitle.as_ref().is_some_and(|subtitle| subtitle.len() > 150));
+        assert_eq!(agent_tile_status_label(&tiles[0]), Some("UNAVAILABLE"));
     }
 
     #[gpui::test]
-    fn reviewing_a_codex_task_enters_its_scoped_mode(cx: &mut TestAppContext) {
+    fn reviewing_a_codex_task_waits_for_daemon_success_before_entering_its_scoped_mode(cx: &mut TestAppContext) {
         let window = test_root(cx);
         window
             .update(cx, |root, window, cx| {
@@ -5957,7 +6005,18 @@ mod tests {
                 }];
                 root.open_actions_menu_for_selected_row(cx);
                 root.confirm_menu_action(window, cx);
+                assert!(root.active_mode().is_none(), "the mode waits for daemon validation");
+                assert!(root.activating, "the Review click dispatches Request::Activate before it can enter");
+            })
+            .unwrap();
+    }
 
+    #[gpui::test]
+    fn a_successful_review_activation_enters_the_codex_task_mode(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, cx| {
+                root.finish_activation(None, false, Some("codex-task"), cx);
                 assert_eq!(root.active_mode().map(|mode| mode.chrome.id), Some("codex-task"));
             })
             .unwrap();
