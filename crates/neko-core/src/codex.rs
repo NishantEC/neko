@@ -164,10 +164,24 @@ impl Snapshot {
             .take(40)
             .filter_map(parse_activity)
             .collect::<Vec<_>>();
-        if self.activity.get(thread_id) != Some(&activity) {
+        if self.activity.get(thread_id) != Some(&activity) || self.activity.len() != 1 {
+            // The panel can show one task detail at a time. Retaining one
+            // cache entry gives a selected task a stable refresh without
+            // turning a long browsing session into an unbounded transcript
+            // cache.
+            self.activity.clear();
             self.activity.insert(thread_id.to_owned(), activity);
             self.generation = self.generation.saturating_add(1);
             self.refreshed_at_unix_ms = crate::now_unix_ms();
+        }
+    }
+
+    fn prune_activity_for_current_tasks(&mut self) {
+        let before = self.activity.len();
+        self.activity
+            .retain(|thread_id, _| self.tasks.iter().any(|task| task.id == *thread_id));
+        if self.activity.len() != before {
+            self.generation = self.generation.saturating_add(1);
         }
     }
 
@@ -213,6 +227,7 @@ impl Snapshot {
             self.tasks = tasks;
             self.generation = self.generation.saturating_add(1);
         }
+        self.prune_activity_for_current_tasks();
     }
 
     /// Applies the subset of app-server notifications that changes this
@@ -508,7 +523,7 @@ impl Provider for CodexTaskProvider {
         let Some(task) = snapshot.tasks.iter().find(|task| task.id == thread_id) else {
             return Vec::new();
         };
-        let items = match snapshot.activity.get(thread_id) {
+        match snapshot.activity.get(thread_id) {
             Some(activity) if !activity.is_empty() => activity
                 .iter()
                 .enumerate()
@@ -565,15 +580,23 @@ impl Provider for CodexTaskProvider {
                 }
                 .into_candidate(1.0),
             ],
-        };
-        items
+        }
     }
 
-    fn activate(&self, thread_id: &str) -> Result<(), ProviderError> {
+    fn activate(&self, id: &str) -> Result<(), ProviderError> {
         let snapshot = self.snapshot.read().unwrap();
-        if snapshot.tasks.iter().any(|task| task.id == thread_id) {
+        if snapshot.activity.iter().any(|(thread_id, activity)| {
+            activity
+                .iter()
+                .any(|activity| id == format!("{thread_id}:{}", activity.id))
+        }) {
+            // A summary is deliberately read-only. Enter is a harmless
+            // no-op, not an activation error or a second actor request.
+            return Ok(());
+        }
+        if snapshot.tasks.iter().any(|task| task.id == id) {
             drop(snapshot);
-            self.control.open_task(thread_id)
+            self.control.open_task(id)
         } else {
             Err(ProviderError(
                 "Codex task is no longer available".to_string(),
@@ -1021,15 +1044,15 @@ mod tests {
             task("thr-2", "Two", None, None, 0, TaskStatus::Idle),
         ]);
         snapshot.apply_turn_list(
-            "thr-1",
-            &json!({"data":[
-                {"id":"one","summary":"Ran the focused test","status":"completed"},
-            ]}),
-        );
-        snapshot.apply_turn_list(
             "thr-2",
             &json!({"data":[
                 {"id":"two","summary":"Must stay scoped away","status":"working"},
+            ]}),
+        );
+        snapshot.apply_turn_list(
+            "thr-1",
+            &json!({"data":[
+                {"id":"one","summary":"Ran the focused test","status":"completed"},
             ]}),
         );
         let control = Arc::new(TaskControl::default());
@@ -1046,8 +1069,36 @@ mod tests {
             control.0.lock().unwrap().is_empty(),
             "search must not trigger a task read"
         );
+        provider.activate(&rows[0].item.id).unwrap();
+        assert!(
+            control.0.lock().unwrap().is_empty(),
+            "a read-only summary must not trigger a second task read"
+        );
         provider.activate("thr-1").unwrap();
         assert_eq!(&*control.0.lock().unwrap(), &["thr-1"]);
+    }
+
+    #[test]
+    fn task_activity_cache_keeps_one_selection_and_prunes_disappeared_tasks() {
+        let mut snapshot = Snapshot::default();
+        snapshot.replace_tasks(vec![
+            task("thr-1", "One", None, None, 0, TaskStatus::Idle),
+            task("thr-2", "Two", None, None, 0, TaskStatus::Idle),
+        ]);
+        snapshot.apply_turn_list("thr-1", &json!({"data":[{"id":"one","summary":"One"}]}));
+        snapshot.apply_turn_list("thr-2", &json!({"data":[{"id":"two","summary":"Two"}]}));
+        assert_eq!(
+            snapshot.activity.len(),
+            1,
+            "only the selected task stays cached"
+        );
+        assert!(snapshot.activity.contains_key("thr-2"));
+
+        snapshot.apply_thread_list(&json!({"data":[{"id":"thr-1","name":"One"}]}));
+        assert!(
+            snapshot.activity.is_empty(),
+            "a disappeared task cannot retain cached activity"
+        );
     }
 
     #[test]
