@@ -63,10 +63,9 @@ pub enum ApprovalKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Approval {
     pub thread_id: String,
-    pub request_id: String,
-    /// The JSON-RPC id is preserved with its original string/number type so
-    /// the daemon can answer this exact app-server request.
-    pub response_id: Value,
+    /// The exact JSON-RPC id. A numeric `42` and string `"42"` are separate
+    /// requests, so this stays a typed JSON value all the way to the response.
+    pub request_id: Value,
     pub title: String,
     pub detail: Option<String>,
     pub kind: ApprovalKind,
@@ -83,7 +82,7 @@ pub trait CodexControl: Send + Sync {
     fn resolve_approval(
         &self,
         thread_id: &str,
-        request_id: &str,
+        request_id: &Value,
         approve: bool,
     ) -> Result<(), ProviderError>;
 }
@@ -135,8 +134,7 @@ impl Snapshot {
         };
         snapshot.approvals.push(Approval {
             thread_id: thread_id.into(),
-            response_id: Value::String(request_id.clone()),
-            request_id,
+            request_id: Value::String(request_id),
             title: "Approval required".into(),
             detail: None,
             kind: ApprovalKind::Unknown,
@@ -150,9 +148,14 @@ impl Snapshot {
     /// receive another request after an older one was resolved, so checking
     /// the thread alone would authorize the wrong decision.
     pub fn can_resolve(&self, thread_id: &str, request_id: &str) -> bool {
+        self.can_resolve_id(thread_id, &Value::String(request_id.to_owned()))
+    }
+
+    /// Whether this exact typed JSON-RPC id is still outstanding.
+    pub fn can_resolve_id(&self, thread_id: &str, request_id: &Value) -> bool {
         self.approvals
             .iter()
-            .any(|approval| approval.thread_id == thread_id && approval.request_id == request_id)
+            .any(|approval| approval.thread_id == thread_id && approval.request_id == *request_id)
     }
 
     /// Replaces task rows and advances the UI generation only for a visible
@@ -184,13 +187,13 @@ impl Snapshot {
         let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
             return;
         };
-        let Some(request_id) = params.get("requestId").and_then(response_id_to_string) else {
+        let Some(request_id) = params.get("requestId").filter(|id| is_request_id(id)) else {
             return;
         };
 
         let previous_len = self.approvals.len();
         self.approvals.retain(|approval| {
-            approval.thread_id != thread_id || approval.request_id != request_id
+            approval.thread_id != thread_id || approval.request_id != *request_id
         });
         if self.approvals.len() != previous_len {
             self.generation = self.generation.saturating_add(1);
@@ -202,9 +205,14 @@ impl Snapshot {
     /// the app-server. The same pair is checked once more at the actor edge,
     /// so a stale UI action cannot consume a later request in the same thread.
     pub fn resolve(&mut self, thread_id: &str, request_id: &str) -> bool {
+        self.resolve_id(thread_id, &Value::String(request_id.to_owned()))
+    }
+
+    /// Removes only the outstanding request carrying this exact typed id.
+    pub fn resolve_id(&mut self, thread_id: &str, request_id: &Value) -> bool {
         let previous_len = self.approvals.len();
         self.approvals.retain(|approval| {
-            approval.thread_id != thread_id || approval.request_id != request_id
+            approval.thread_id != thread_id || approval.request_id != *request_id
         });
         let changed = self.approvals.len() != previous_len;
         if changed {
@@ -227,10 +235,11 @@ impl Snapshot {
     }
 
     fn add_approval(&mut self, notification: &Value) {
-        let Some(response_id) = notification.get("id").cloned() else {
-            return;
-        };
-        let Some(request_id) = response_id_to_string(&response_id) else {
+        let Some(request_id) = notification
+            .get("id")
+            .filter(|id| is_request_id(id))
+            .cloned()
+        else {
             return;
         };
         let Some(params) = notification.get("params") else {
@@ -239,7 +248,7 @@ impl Snapshot {
         let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
             return;
         };
-        if self.can_resolve(thread_id, &request_id) {
+        if self.can_resolve_id(thread_id, &request_id) {
             return;
         }
         let method = notification
@@ -253,16 +262,15 @@ impl Snapshot {
                     .and_then(Value::as_str)
                     .map(|command| format!("Allow command: {command}"))
                     .unwrap_or_else(|| "Allow command execution".to_string()),
-                params
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-                    .or_else(|| {
+                approval_detail(
+                    approval_reason(params),
+                    network_detail(params).or_else(|| {
                         params
                             .get("cwd")
                             .and_then(Value::as_str)
                             .map(|cwd| format!("In {cwd}"))
                     }),
+                ),
                 if params
                     .get("networkApprovalContext")
                     .is_some_and(|value| !value.is_null())
@@ -275,10 +283,7 @@ impl Snapshot {
             ),
             "item/fileChange/requestApproval" => (
                 "Allow file changes".to_string(),
-                params
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
+                approval_detail(approval_reason(params), file_change_detail(params)),
                 ApprovalKind::FileChange,
                 None,
             ),
@@ -288,10 +293,7 @@ impl Snapshot {
                 };
                 (
                     "Allow additional permissions".to_string(),
-                    params
-                        .get("reason")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
+                    approval_detail(approval_reason(params), permission_detail(&permissions)),
                     ApprovalKind::Permissions,
                     Some(permissions),
                 )
@@ -301,7 +303,6 @@ impl Snapshot {
         self.approvals.push(Approval {
             thread_id: thread_id.to_owned(),
             request_id,
-            response_id,
             title,
             detail,
             kind,
@@ -312,12 +313,66 @@ impl Snapshot {
     }
 }
 
-fn response_id_to_string(response_id: &Value) -> Option<String> {
-    match response_id {
-        Value::String(id) => Some(id.clone()),
-        Value::Number(id) => Some(id.to_string()),
-        _ => None,
+fn is_request_id(value: &Value) -> bool {
+    matches!(value, Value::String(_) | Value::Number(_))
+}
+
+fn approval_reason(params: &Value) -> Option<String> {
+    params
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+fn approval_detail(reason: Option<String>, context: Option<String>) -> Option<String> {
+    match (reason, context) {
+        (Some(reason), Some(context)) => Some(format!("{reason} · {context}")),
+        (Some(reason), None) => Some(reason),
+        (None, Some(context)) => Some(context),
+        (None, None) => None,
     }
+}
+
+fn network_detail(params: &Value) -> Option<String> {
+    let context = params.get("networkApprovalContext")?;
+    let host = context.get("host")?.as_str()?;
+    let protocol = context.get("protocol")?.as_str()?;
+    Some(format!("Allow {protocol} access to {host}"))
+}
+
+fn file_change_detail(params: &Value) -> Option<String> {
+    if let Some(root) = params.get("grantRoot").and_then(Value::as_str) {
+        return Some(format!("Allow writes under {root}"));
+    }
+    params
+        .get("itemId")
+        .and_then(Value::as_str)
+        .map(|item| format!("File changes requested for {item}"))
+}
+
+fn permission_detail(permissions: &Value) -> Option<String> {
+    let mut grants = Vec::new();
+    if permissions.get("network").is_some() {
+        grants.push("network access".to_string());
+    }
+    if let Some(filesystem) = permissions.get("filesystem") {
+        grants.push(format!("file access ({filesystem})"));
+    }
+    if grants.is_empty() {
+        grants.push(format!("permission profile {permissions}"));
+    }
+    Some(format!("Grant for this turn: {}", grants.join(", ")))
+}
+
+fn request_id_row_id(request_id: &Value) -> String {
+    // JSON encoding is opaque and reversible, keeping `42` distinct from
+    // `"42"` rather than making a lossy provider-row key.
+    serde_json::to_string(request_id).expect("JSON-RPC request ids are JSON values")
+}
+
+fn request_id_from_row_id(id: &str) -> Option<Value> {
+    let request_id: Value = serde_json::from_str(id).ok()?;
+    is_request_id(&request_id).then_some(request_id)
 }
 
 fn parse_task(entry: &Value) -> Option<Task> {
@@ -399,10 +454,9 @@ impl Provider for CodexApprovalsProvider {
                 Some(Candidate {
                     score,
                     item: SearchItem {
-                        // The raw app-server request id is the provider id;
-                        // `perform_action` recovers the matching thread from
-                        // the same current snapshot before calling control.
-                        id: approval.request_id.clone(),
+                        // The opaque JSON encoding preserves the JSON-RPC id
+                        // type. `42` and `"42"` must never become one row.
+                        id: request_id_row_id(&approval.request_id),
                         kind: self.id().to_string(),
                         title: approval.title.clone(),
                         subtitle: approval.detail.clone(),
@@ -454,6 +508,8 @@ impl Provider for CodexApprovalsProvider {
                 )))
             }
         };
+        let request_id = request_id_from_row_id(request_id)
+            .ok_or_else(|| ProviderError("approval was already resolved".to_string()))?;
         let snapshot = self.snapshot.read().unwrap();
         let matching: Vec<_> = snapshot
             .approvals
@@ -646,7 +702,7 @@ fn task_item(task: &Task, available: bool) -> SearchItem {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::sync::{Arc, Mutex, RwLock};
 
     use crate::provider::Provider;
@@ -660,19 +716,19 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct RecordingControl(Mutex<Vec<(String, String, bool)>>);
+    struct RecordingControl(Mutex<Vec<(String, Value, bool)>>);
 
     impl CodexControl for RecordingControl {
         fn resolve_approval(
             &self,
             thread_id: &str,
-            request_id: &str,
+            request_id: &Value,
             approve: bool,
         ) -> Result<(), crate::provider::ProviderError> {
             self.0
                 .lock()
                 .unwrap()
-                .push((thread_id.to_string(), request_id.to_string(), approve));
+                .push((thread_id.to_string(), request_id.clone(), approve));
             Ok(())
         }
     }
@@ -839,7 +895,7 @@ mod tests {
 
         assert!(!snapshot.available);
         assert_eq!(snapshot.approvals.len(), 1);
-        assert_eq!(snapshot.approvals[0].request_id, "request-1");
+        assert_eq!(snapshot.approvals[0].request_id, json!("request-1"));
     }
 
     #[test]
@@ -864,8 +920,7 @@ mod tests {
         let mut snapshot = Snapshot::with_approval("thr-1", "request-1");
         snapshot.approvals.push(super::Approval {
             thread_id: "thr-2".into(),
-            request_id: "request-2".into(),
-            response_id: json!("request-2"),
+            request_id: json!("request-2"),
             title: "Other approval".into(),
             detail: None,
             kind: super::ApprovalKind::Unknown,
@@ -879,12 +934,17 @@ mod tests {
 
         assert_eq!(snapshot.approvals.len(), 1);
         assert_eq!(snapshot.approvals[0].thread_id, "thr-2");
-        assert_eq!(snapshot.approvals[0].request_id, "request-2");
+        assert_eq!(snapshot.approvals[0].request_id, json!("request-2"));
     }
 
     #[test]
     fn numeric_resolved_notification_removes_the_matching_approval() {
-        let mut snapshot = Snapshot::with_approval("thr-1", "42");
+        let mut snapshot = Snapshot::default();
+        snapshot.apply_notification(&json!({
+            "id": 42,
+            "method": "item/fileChange/requestApproval",
+            "params": {"threadId": "thr-1", "itemId": "item", "turnId": "turn", "startedAtMs": 1}
+        }));
 
         snapshot.apply_notification(&json!({
             "method": "serverRequest/resolved",
@@ -892,6 +952,107 @@ mod tests {
         }));
 
         assert!(snapshot.approvals.is_empty());
+    }
+
+    #[test]
+    fn numeric_and_string_request_ids_coexist_and_resolve_only_the_exact_id() {
+        let mut snapshot = Snapshot::default();
+        for id in [json!(42), json!("42")] {
+            snapshot.apply_notification(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "item/fileChange/requestApproval",
+                "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1}
+            }));
+        }
+
+        assert_eq!(snapshot.approvals.len(), 2);
+        snapshot.apply_notification(&json!({
+            "method": "serverRequest/resolved",
+            "params": {"threadId": "thr", "requestId": 42}
+        }));
+        assert_eq!(snapshot.approvals.len(), 1);
+        assert_eq!(snapshot.approvals[0].request_id, json!("42"));
+    }
+
+    #[test]
+    fn approval_rows_and_actions_keep_numeric_and_string_ids_distinct() {
+        let snapshot = Arc::new(RwLock::new(Snapshot::default()));
+        for id in [json!(42), json!("42")] {
+            snapshot.write().unwrap().apply_notification(&json!({
+                "id": id,
+                "method": "item/fileChange/requestApproval",
+                "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1}
+            }));
+        }
+        let control = Arc::new(RecordingControl::default());
+        let provider = CodexApprovalsProvider::with_snapshot_and_control(snapshot, control.clone());
+        let rows = provider.search("", 0);
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|row| row.item.id == "42"));
+        assert!(rows.iter().any(|row| row.item.id == r#""42""#));
+        provider.perform_action(r#""42""#, "approve").unwrap();
+        assert_eq!(control.0.lock().unwrap()[0].1, json!("42"));
+    }
+
+    #[test]
+    fn approval_context_is_actionable_without_a_reason() {
+        let mut snapshot = Snapshot::default();
+        snapshot.apply_notification(&json!({
+            "id": "network",
+            "method": "item/commandExecution/requestApproval",
+            "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1,
+                "command": "curl", "networkApprovalContext": {"host": "api.example.com", "protocol": "https"}}
+        }));
+        snapshot.apply_notification(&json!({
+            "id": "file",
+            "method": "item/fileChange/requestApproval",
+            "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1,
+                "grantRoot": "/work/neko"}
+        }));
+        snapshot.apply_notification(&json!({
+            "id": "permissions",
+            "method": "item/permissions/requestApproval",
+            "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1,
+                "cwd": "/work/neko", "permissions": {"network": {"enabled": true}}}
+        }));
+        snapshot.apply_notification(&json!({
+            "id": "permissions-with-reason",
+            "method": "item/permissions/requestApproval",
+            "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1,
+                "cwd": "/work/neko", "reason": "Needed to fetch the dependency", "permissions": {"network": {"enabled": true}}}
+        }));
+
+        let detail = |id: &str| {
+            snapshot
+                .approvals
+                .iter()
+                .find(|approval| approval.request_id == json!(id))
+                .and_then(|approval| approval.detail.as_deref())
+                .unwrap_or_default()
+        };
+        assert!(detail("network").contains("https access to api.example.com"));
+        assert!(detail("file").contains("/work/neko"));
+        assert!(detail("permissions").contains("network access"));
+        assert!(detail("permissions").contains("this turn"));
+        assert!(detail("permissions-with-reason").contains("network access"));
+        assert!(detail("permissions-with-reason").contains("Needed to fetch the dependency"));
+
+        let provider = CodexApprovalsProvider::with_snapshot_and_control(
+            Arc::new(RwLock::new(snapshot)),
+            Arc::new(RecordingControl::default()),
+        );
+        let rows = provider.search("", 0);
+        let row_detail = |title: &str| {
+            rows.iter()
+                .find(|row| row.item.title == title)
+                .and_then(|row| row.item.subtitle.as_deref())
+                .unwrap_or_default()
+        };
+        assert!(row_detail("Allow command: curl").contains("api.example.com"));
+        assert!(row_detail("Allow file changes").contains("/work/neko"));
+        assert!(row_detail("Allow additional permissions").contains("network access"));
     }
 
     #[test]
@@ -921,7 +1082,7 @@ mod tests {
 
         assert_eq!(
             *control.0.lock().unwrap(),
-            vec![("thr".to_string(), "request".to_string(), true)]
+            vec![("thr".to_string(), json!("request"), true)]
         );
     }
 
