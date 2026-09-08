@@ -360,8 +360,8 @@ not already possible by hand.
 ## Codex quick attention loop
 
 `neko-daemon/src/codex.rs` supervises exactly one `codex app-server --stdio`
-child. It owns the JSON-RPC conversation, including startup, task-list refresh,
-notifications, task start, and approval responses. Providers in
+child. It owns the JSON-RPC conversation, including startup's initial task-list
+request, notifications, task start, and approval responses. Providers in
 `neko_core::codex` do not speak to a process: palette search takes a short read
 lock on the warmed `Snapshot` and turns that data into tiles or rows. That
 keeps a keystroke local and prevents a second child, a transport round trip, or
@@ -373,13 +373,14 @@ person explicitly opened, and only for at most 40 visible summaries. The
 snapshot retains at most one selected task's activity; it is a compact,
 read-only quick view, not a transcript cache.
 
-Codex approval notifications become **Needs you** rows with a readable reason
-and `Approve`/`Decline` actions. The exact request id and current thread are
-checked again at the actor edge before a response is written, so a stale row
-cannot decide a newer request. Decline is marked destructive and therefore
-requires the panel's second, explicit confirmation. Permission-profile grants
-use the app-server's permission response shape; command and file decisions use
-their own response shape.
+Codex approval notifications become **Needs you** rows with `Approve`/`Decline`
+actions and a reason or other readable detail when the app-server supplies one.
+The exact request id and current thread are checked again at the actor edge
+before a response is written, so a stale row cannot decide a newer request.
+Decline is marked destructive and therefore requires the panel's second,
+explicit confirmation. Permission-profile grants use the app-server's
+permission response shape; command and file decisions use their own response
+shape.
 
 The child is optional. A missing executable, a signed-out app-server, failed
 bootstrap, EOF, or control write marks the snapshot unavailable and retries
