@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -19,6 +19,7 @@ type SharedSnapshot = Arc<RwLock<neko_core::codex::Snapshot>>;
 
 const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const MAX_BACKOFF: Duration = Duration::from_secs(5);
+const STABLE_SESSION: Duration = Duration::from_secs(30);
 
 /// A newline-delimited JSON transport. Tests provide a fake; the process
 /// implementation below owns no protocol behavior beyond the lines it moves.
@@ -37,26 +38,31 @@ pub fn spawn(snapshot: SharedSnapshot, _state: Arc<AppState>) {
 fn supervise(snapshot: SharedSnapshot) {
     let mut backoff = INITIAL_BACKOFF;
     loop {
-        let (bootstrapped, outcome) = start_session(snapshot.clone());
+        let (active_for, outcome) = start_session(snapshot.clone());
         if let Err(error) = outcome {
             eprintln!("neko-daemon: Codex app-server unavailable: {error}");
         }
         mark_unavailable(&snapshot);
-        let retry_delay = if bootstrapped {
-            INITIAL_BACKOFF
-        } else {
-            backoff
-        };
+        let (retry_delay, next_backoff) = restart_plan(backoff, active_for);
         std::thread::sleep(retry_delay);
-        backoff = if bootstrapped {
-            INITIAL_BACKOFF
-        } else {
-            backoff.saturating_mul(2).min(MAX_BACKOFF)
-        };
+        backoff = next_backoff;
     }
 }
 
-fn start_session(snapshot: SharedSnapshot) -> (bool, io::Result<()>) {
+/// Chooses the current retry delay and the delay after the next failed
+/// session. A server gets a fresh retry budget only after it stayed healthy
+/// long enough to be useful; a child that bootstraps then immediately exits
+/// therefore still progresses from 250ms to the 5s cap.
+fn restart_plan(backoff: Duration, active_for: Duration) -> (Duration, Duration) {
+    let retry_delay = if active_for >= STABLE_SESSION {
+        INITIAL_BACKOFF
+    } else {
+        backoff
+    };
+    (retry_delay, retry_delay.saturating_mul(2).min(MAX_BACKOFF))
+}
+
+fn start_session(snapshot: SharedSnapshot) -> (Duration, io::Result<()>) {
     let child = Command::new(resolved_codex())
         .args(["app-server", "--stdio"])
         .stdin(Stdio::piped())
@@ -65,7 +71,7 @@ fn start_session(snapshot: SharedSnapshot) -> (bool, io::Result<()>) {
         .spawn();
     let mut child = match child {
         Ok(child) => child,
-        Err(error) => return (false, Err(error)),
+        Err(error) => return (Duration::ZERO, Err(error)),
     };
 
     let stdin = match child
@@ -77,7 +83,7 @@ fn start_session(snapshot: SharedSnapshot) -> (bool, io::Result<()>) {
         Err(error) => {
             let _ = child.kill();
             let _ = child.wait();
-            return (false, Err(error));
+            return (Duration::ZERO, Err(error));
         }
     };
     let stdout = match child
@@ -89,19 +95,24 @@ fn start_session(snapshot: SharedSnapshot) -> (bool, io::Result<()>) {
         Err(error) => {
             let _ = child.kill();
             let _ = child.wait();
-            return (false, Err(error));
+            return (Duration::ZERO, Err(error));
         }
     };
     let mut transport = ProcessTransport::new(stdin, stdout);
-    let bootstrap = bootstrap(&mut transport, &snapshot);
-    let bootstrapped = bootstrap.is_ok();
-    let result = bootstrap.and_then(|()| read_notifications(&mut transport, &snapshot));
+    let (active_for, result) = match bootstrap(&mut transport, &snapshot) {
+        Ok(()) => {
+            let active_since = Instant::now();
+            let result = read_notifications(&mut transport, &snapshot);
+            (active_since.elapsed(), result)
+        }
+        Err(error) => (Duration::ZERO, Err(error)),
+    };
 
     // An EOF is normally paired with an exited child. Kill still makes a
     // bootstrap failure bounded rather than leaving a faulty child behind.
     let _ = child.kill();
     let _ = child.wait();
-    (bootstrapped, result)
+    (active_for, result)
 }
 
 /// Resolves the user-visible Codex CLI once per child launch. This avoids a
@@ -416,6 +427,25 @@ mod tests {
         assert!(!snapshot.available);
         assert_eq!(snapshot.tasks.len(), 1);
         assert_eq!(snapshot.tasks[0].title, "Keep me");
+    }
+
+    #[test]
+    fn consecutive_post_bootstrap_eofs_back_off() {
+        let (first_delay, after_first) = restart_plan(INITIAL_BACKOFF, Duration::ZERO);
+        let (second_delay, after_second) = restart_plan(after_first, Duration::ZERO);
+        let (third_delay, _) = restart_plan(after_second, Duration::ZERO);
+
+        assert_eq!(first_delay, Duration::from_millis(250));
+        assert_eq!(second_delay, Duration::from_millis(500));
+        assert_eq!(third_delay, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn sustained_healthy_session_resets_the_retry_budget() {
+        let (delay, next_backoff) = restart_plan(MAX_BACKOFF, STABLE_SESSION);
+
+        assert_eq!(delay, INITIAL_BACKOFF);
+        assert_eq!(next_backoff, Duration::from_millis(500));
     }
 
     #[test]
