@@ -32,7 +32,7 @@ with `grep neko-core crates/neko/Cargo.toml` — no hit.
 │  panel + text field │   Support/neko/neko.sock  │  app index (Spotlight)   │
 │  live OS hotkey     │                           │  clipboard capture loop  │
 │  themes, onboarding │                           │  icon extraction thread  │
-└─────────────────────┘                           │  6 Providers             │
+└─────────────────────┘                           │  providers + local Codex │
                                                   └──────────────────────────┘
 ```
 
@@ -126,7 +126,7 @@ holds a plain `Vec<Box<dyn Provider>>`.
 
 ```rust
 pub trait Provider: Send + Sync {
-    fn id(&self) -> &'static str;             // SearchItem::kind, and the Activate route
+    fn id(&self) -> &'static str;             // its usual SearchItem::kind and Activate route
     fn section_label(&self) -> &'static str;  // "Applications", "Clipboard", …
     fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate>;
     fn activate(&self, id: &str) -> Result<(), ProviderError>;
@@ -138,7 +138,7 @@ pub trait Provider: Send + Sync {
 }
 ```
 
-Nine are registered in the root list, in `AppState::with_test_providers`
+Eleven are registered in the root list, in `AppState::with_test_providers`
 (`crates/neko-daemon/src/server.rs`):
 
 | id | Source of truth | File |
@@ -150,13 +150,17 @@ Nine are registered in the root list, in `AppState::with_test_providers`
 | `command` | A compiled-in table | `crates/neko-core/src/commands.rs` |
 | `theme` | `neko_protocol::BUILTIN_THEMES` | `crates/neko-core/src/themes.rs` |
 | `preference` | neko's own settings, in the same SQLite KV table | `crates/neko-core/src/preferences.rs` |
+| `codex-tasks` | warmed projection from the supervised local Codex app-server | `crates/neko-core/src/codex.rs` |
+| `codex-approval` | pending approvals from that same projection | `crates/neko-core/src/codex.rs` |
 | `agent` | Paseo's own agent documents on disk | `crates/neko-core/src/agents.rs` |
 | `permission` | Paseo's daemon over MCP — agents blocked waiting for you | `crates/neko-core/src/permissions.rs` |
 
-Seven more are **mode-only** (reachable by a scoped search or an activation,
+Ten more are **mode-only** (reachable by a scoped search or an activation,
 never by a root-list query): `folder-scope` (`preferences.rs`), `new-agent`
 (`new_agent.rs`), `usage` (`usage.rs`), `schedule` (`schedules.rs`), `ask`
-(`ask.rs`), `terminal` (`terminals.rs`) and `agent-control` (`agents.rs`).
+(`ask.rs`), `terminal` (`terminals.rs`), `agent-control` (`agents.rs`),
+`conversation` (`conversation.rs`), `codex-task` and `new-codex-task`
+(`codex.rs`).
 
 **The panel knows nothing about any of them.** `crates/neko/src/panel.rs` has
 no `match` on provider identity anywhere. Everything a row needs to render —
@@ -164,6 +168,12 @@ section header, action verb, icon, badge, subtitle, secondary actions, whether
 confirming it enters a mode — is data the provider set on the `SearchItem`.
 That is what makes adding another one cheap; see
 [adding-a-provider.md](adding-a-provider.md).
+
+Most rows use their producing provider's id as `SearchItem::kind`. The Codex
+task-discovery provider is the intentional exception: its registered id is
+`codex-tasks`, but its tile rows are kind `codex-task` so their mode/detail
+route reaches the scoped provider that owns those actions. The panel still
+receives only ordinary row data.
 
 Two source-of-truth notes that repeatedly surprise people:
 
@@ -256,12 +266,12 @@ typed before entering, verbatim.
 
 **Modes do not nest**, and `panel::Root::active_mode` is a single `Option`.
 
-Eight exist: Clipboard History and Terminals (both with a detail pane, list
+Eleven exist: Clipboard History and Terminals (both with a detail pane, list
 column 264pt), Themes (no detail pane — the preview *is* the panel, so a second
-column would take 496pt away from the thing being previewed), New Agent,
-Agents, Schedules, Usage, and Ask neko.
+column would take 496pt away from the thing being previewed), Conversation,
+Codex Tasks, New Agent, New Codex task, Agents, Schedules, Usage, and Ask neko.
 
-**Two modes treat the query as a payload rather than a filter**: New Agent,
+**Three modes treat the query as a payload rather than a filter**: New Agent,
 where what is typed is the task and the rows are directories to start it in;
 and Agents, where it is the prompt to send to the selected session. Filtering
 in either would shrink the list as you described the task and move the row out
@@ -273,6 +283,13 @@ when ranking. It did need one additive wire field, `Request::Activate`'s
 id must stay stable across keystrokes or the highlight (`resolve_selection`,
 keyed on `(kind, id)`) resets and Enter starts the agent in the wrong
 repository.
+
+New Codex task has the same payload shape: the rows are only project paths
+already visible in the local Codex projection (plus the optional current
+project seam), while the query is the proposed task. The actor validates that
+the chosen path still exists and still belongs to those rows, then sends the
+explicit path to Codex. It never inherits the daemon's directory and never
+creates a workspace or worktree.
 
 **Preferences is a window, not a mode** — `crates/neko/src/preferences/`, split
 `state.rs` (pure) / `view.rs` (GPUI and I/O) the same way onboarding is. The
@@ -339,6 +356,43 @@ keystrokes with the exact call rendered between them — which is what
 `SearchItem::keeps_open` exists for — and the model may only choose from a
 fixed catalog of eight verbs, so nothing becomes possible through it that was
 not already possible by hand.
+
+## Codex quick attention loop
+
+`neko-daemon/src/codex.rs` supervises exactly one `codex app-server --stdio`
+child. It owns the JSON-RPC conversation, including startup, task-list refresh,
+notifications, task start, and approval responses. Providers in
+`neko_core::codex` do not speak to a process: palette search takes a short read
+lock on the warmed `Snapshot` and turns that data into tiles or rows. That
+keeps a keystroke local and prevents a second child, a transport round trip, or
+session-file parsing from entering the search path.
+
+The bootstrap handshake requests the app-server's experimental capability.
+`thread/turns/list` is used only after it was accepted, only for the task a
+person explicitly opened, and only for at most 40 visible summaries. The
+snapshot retains at most one selected task's activity; it is a compact,
+read-only quick view, not a transcript cache.
+
+Codex approval notifications become **Needs you** rows with a readable reason
+and `Approve`/`Decline` actions. The exact request id and current thread are
+checked again at the actor edge before a response is written, so a stale row
+cannot decide a newer request. Decline is marked destructive and therefore
+requires the panel's second, explicit confirmation. Permission-profile grants
+use the app-server's permission response shape; command and file decisions use
+their own response shape.
+
+The child is optional. A missing executable, a signed-out app-server, failed
+bootstrap, EOF, or control write marks the snapshot unavailable and retries
+with bounded backoff. Existing task rows remain visibly unavailable rather
+than being passed off as current; approval actions return an inline unavailable
+error. This state has no bearing on the daemon's SQLite/index providers or on
+the launcher window.
+
+This is intentionally not a persistent Neko workspace and not a third-party
+work inbox. Those are separate parent-product decisions. The delivered surface
+only reflects local Codex tasks and explicit approvals through Codex's own
+local app-server contract. See
+`docs/evidence/codex-quick-attention-loop-report.md`.
 
 ## Agents on disk
 
