@@ -29,6 +29,20 @@ pub enum TaskStatus {
 
 impl TaskStatus {
     fn from_json(value: Option<&Value>) -> Self {
+        let waiting_on_input = value
+            .and_then(|status| status.get("activeFlags"))
+            .and_then(Value::as_array)
+            .is_some_and(|flags| {
+                flags.iter().any(|flag| {
+                    matches!(
+                        flag.as_str(),
+                        Some("waitingOnApproval") | Some("waitingOnUserInput")
+                    )
+                })
+            });
+        if waiting_on_input {
+            return Self::Waiting;
+        }
         let status = value.and_then(|status| {
             status
                 .as_str()
@@ -487,15 +501,7 @@ fn parse_task(entry: &Value) -> Option<Task> {
         .map(str::trim)
         .filter(|title| !title.is_empty())
         .unwrap_or("Untitled task");
-    let status = if entry
-        .get("waitingOnApproval")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        TaskStatus::Waiting
-    } else {
-        TaskStatus::from_json(entry.get("status"))
-    };
+    let status = TaskStatus::from_json(entry.get("status"));
 
     Some(Task {
         id: id.to_owned(),
@@ -1597,28 +1603,32 @@ mod tests {
     }
 
     #[test]
-    fn thread_list_uses_the_current_codex_task_shape_including_nullable_name_and_approval_waiting()
-    {
+    fn thread_list_uses_the_current_codex_task_shape_including_nested_active_flags() {
         let snapshot = Snapshot::from_thread_list(&json!({"data": [
             {
                 "id": "active",
                 "name": null,
                 "preview": "Repair task ranking",
                 "cwd": "/work/neko",
-                "status": "active",
-                "waitingOnApproval": true
+                "status": {"type": "active", "activeFlags": ["waitingOnApproval"]}
+            },
+            {
+                "id": "input",
+                "name": "Answer the question",
+                "status": {"type": "active", "activeFlags": ["waitingOnUserInput"]}
             },
             {"id": "broken", "name": "", "preview": "", "status": "systemError"},
             {"id": "cold", "name": null, "preview": null, "status": "notLoaded"}
         ]}));
 
-        assert_eq!(snapshot.tasks.len(), 3);
+        assert_eq!(snapshot.tasks.len(), 4);
         assert_eq!(snapshot.tasks[0].title, "Repair task ranking");
         assert_eq!(snapshot.tasks[0].status, TaskStatus::Waiting);
-        assert_eq!(snapshot.tasks[1].title, "Untitled task");
-        assert_eq!(snapshot.tasks[1].status, TaskStatus::Failed);
+        assert_eq!(snapshot.tasks[1].status, TaskStatus::Waiting);
         assert_eq!(snapshot.tasks[2].title, "Untitled task");
-        assert_eq!(snapshot.tasks[2].status, TaskStatus::Unknown);
+        assert_eq!(snapshot.tasks[2].status, TaskStatus::Failed);
+        assert_eq!(snapshot.tasks[3].title, "Untitled task");
+        assert_eq!(snapshot.tasks[3].status, TaskStatus::Unknown);
     }
 
     #[test]
