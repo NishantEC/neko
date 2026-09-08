@@ -27,11 +27,17 @@ mod codex;
 #[path = "../server.rs"]
 mod server;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use neko_core::Db;
 
 fn main() {
+    if let Err(error) = verify_environment() {
+        eprintln!("verify-harness: refusing to start: {error}");
+        std::process::exit(2);
+    }
+
     let socket_path = neko_protocol::socket_path();
     let db_path = neko_protocol::database_path();
 
@@ -167,5 +173,71 @@ fn main() {
         let Ok(stream) = stream else { continue };
         let state = state.clone();
         std::thread::spawn(move || server::handle_connection(state, stream));
+    }
+}
+
+/// Refuse before resolving neko's HOME-derived paths or starting any actor.
+/// A verification run must explicitly contain both its isolated HOME and its
+/// synthetic Codex executable under one disposable fixture root; otherwise a
+/// cargo-discovered binary could silently touch the user's live daemon state.
+fn verify_environment() -> Result<(), String> {
+    let fixture_root = std::env::var_os("NEKO_VERIFY_FIXTURE_ROOT")
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            "set NEKO_VERIFY_FIXTURE_ROOT to a disposable fixture directory".to_string()
+        })?;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "HOME must point to an isolated fixture directory".to_string())?;
+    let codex_path = std::env::var_os("NEKO_CODEX_PATH")
+        .map(PathBuf::from)
+        .ok_or_else(|| "set NEKO_CODEX_PATH to the synthetic Codex fixture".to_string())?;
+    verify_environment_paths(&fixture_root, &home, &codex_path)
+}
+
+fn verify_environment_paths(
+    fixture_root: &Path,
+    home: &Path,
+    codex_path: &Path,
+) -> Result<(), String> {
+    let fixture_root = fixture_root
+        .canonicalize()
+        .map_err(|_| "NEKO_VERIFY_FIXTURE_ROOT must name an existing directory".to_string())?;
+    let home = home
+        .canonicalize()
+        .map_err(|_| "HOME must name an existing isolated fixture directory".to_string())?;
+    let codex_path = codex_path
+        .canonicalize()
+        .map_err(|_| "NEKO_CODEX_PATH must name the synthetic Codex fixture".to_string())?;
+
+    if home == fixture_root || !home.starts_with(&fixture_root) {
+        return Err(
+            "HOME must be a dedicated directory inside NEKO_VERIFY_FIXTURE_ROOT".to_string(),
+        );
+    }
+    if !codex_path.starts_with(&fixture_root) || !codex_path.is_file() {
+        return Err(
+            "NEKO_CODEX_PATH must be a fixture executable inside NEKO_VERIFY_FIXTURE_ROOT"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refuses_a_home_outside_the_fixture_before_any_daemon_state_can_be_opened() {
+        let fixture_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let error = verify_environment_paths(
+            &fixture_root,
+            Path::new("/"),
+            &fixture_root.join("src/bin/verify_harness.rs"),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("HOME must be a dedicated directory"));
     }
 }
