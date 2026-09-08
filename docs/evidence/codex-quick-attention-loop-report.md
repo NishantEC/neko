@@ -31,7 +31,7 @@ supervision path without reading a session file or creating a real Codex task.
 | Check | Result |
 | --- | --- |
 | Initial warmed projection | 1 synthetic Codex task item and 1 approval row were returned by the live palette search. |
-| Approval content and controls | The row carried a nonempty reason and 2 actions. Decline was marked destructive, matching the panel's explicit second-confirmation contract. No approval response was sent. |
+| Approval content and controls | The synthetic row carried a nonempty detail and 2 actions. Decline was marked destructive, matching the panel's explicit second-confirmation contract. No approval response was sent. |
 | Child stop/degradation | After the exact synthetic app-server child stopped, 1 retained Codex task was marked unavailable, 0 approval rows remained, and application search still returned 5 rows while the launcher process remained alive. |
 
 The native development binary is not an accessibility-discoverable app in the
@@ -42,9 +42,64 @@ approval was declined. The existing headless panel test for destructive action
 confirmation passed in the workspace suite; that is evidence of the guard,
 not a substitute for the unavailable visual check.
 
-No prompts, task titles, project names, paths, screenshots, tokens, or task
-text were recorded. The disposable local test material was moved to Trash after
-the run.
+No real prompts, task titles, project names, paths, screenshots, tokens, or
+task text were recorded; the committed fixture uses only its literal synthetic
+values. The disposable local test material was moved to Trash after the run.
+
+## Reproducible, local-only recipe
+
+Run this only from a disposable checkout with the repository binaries already
+built. The committed
+`docs/evidence/codex-quick-attention-loop-fixture.py` is a synthetic
+`codex app-server --stdio`: it contains no real task, project, prompt, token,
+or session data and records method names only.
+
+```sh
+cargo build --bin neko --bin neko-daemon
+original_home="$HOME"
+fixture_root="$(mktemp -d /tmp/neko-codex.XXXXXX)"
+mkdir -p "$fixture_root/home" "$fixture_root/bin"
+ln -s "$PWD/docs/evidence/codex-quick-attention-loop-fixture.py" \
+  "$fixture_root/bin/codex"
+export HOME="$fixture_root/home"
+export NEKO_CODEX_PATH="$fixture_root/bin/codex"
+export NEKO_CODEX_FIXTURE_LOG="$fixture_root/methods.log"
+export NEKO_CODEX_FIXTURE_PID_FILE="$fixture_root/codex.pid"
+export NEKO_CODEX_FIXTURE_STOP_FILE="$fixture_root/stop"
+cleanup() {
+  kill "${neko_pid:-}" 2>/dev/null || true
+  mv "$fixture_root" "$original_home/.Trash/"
+}
+trap cleanup EXIT
+NEKO_SHOW_ON_LAUNCH=1 ./target/debug/neko &
+neko_pid=$!
+sleep 1
+socket="$HOME/Library/Application Support/neko/neko.sock"
+python3 docs/evidence/codex-quick-attention-loop-fixture.py \
+  --probe "$socket" --tasks 1 --approvals 1 --unavailable 0 --min-apps 1
+grep -Fx 'initialize' "$NEKO_CODEX_FIXTURE_LOG"
+grep -Fx 'initialized' "$NEKO_CODEX_FIXTURE_LOG"
+grep -Fx 'thread/list' "$NEKO_CODEX_FIXTURE_LOG"
+touch "$NEKO_CODEX_FIXTURE_STOP_FILE"
+kill "$(cat "$NEKO_CODEX_FIXTURE_PID_FILE")"
+sleep 1
+python3 docs/evidence/codex-quick-attention-loop-fixture.py \
+  --probe "$socket" --tasks 1 --approvals 0 --unavailable 1 --min-apps 1
+```
+
+The first probe asserts one synthetic task, one approval, no unavailable task,
+and at least one application row. The method log asserts the bootstrap order's
+three named methods without recording parameters. The second probe, after only
+the synthetic child is stopped, asserts that its retained task is visibly
+unavailable, its approval has cleared, and application search still works. Do
+not send an approval response during this check. The short `/tmp` home keeps
+the Unix-socket path below macOS's limit, and the exit trap moves the exact
+disposable directory to Trash.
+
+The committed recipe was rerun against the debug binaries for this record. Its
+sanitized outputs were `tasks=1 approvals=1 unavailable=0 apps=5`, the three
+expected bootstrap method names, then `tasks=1 approvals=0 unavailable=1
+apps=5` after stopping only the synthetic child.
 
 ## Safety boundary
 

@@ -6219,13 +6219,14 @@ only after the app-server's experimental capability negotiation succeeds, only
 when the person opens one task, and only for 40 visible summaries. The snapshot
 retains activity for one selected task, never a rolling transcript cache.
 
-Approval is intentionally more conservative than rendering. The row carries a
-reason and exact typed JSON-RPC request id; the actor rechecks that exact
-thread/request pair before writing. Approve is explicit. Decline is a
-destructive actions-menu choice and requires the panel's second confirmation.
-Permission approvals use the app-server's permissions response shape, not the
-command/file decision response shape. A stale row must report that it was
-already resolved rather than answer a later request.
+Approval is intentionally more conservative than rendering. The row carries an
+exact typed JSON-RPC request id plus a reason or other readable detail when the
+app-server supplies one; the actor rechecks that exact thread/request pair
+before writing. Approve is explicit. Decline is a destructive actions-menu
+choice and requires the panel's second confirmation. Permission approvals use
+the app-server's permissions response shape, not the command/file decision
+response shape. A stale row must report that it was already resolved rather
+than answer a later request.
 
 Failure is ordinary, not an outage: missing Codex, signed-out Codex, failed
 bootstrap, EOF, and failed control writes mark the projection unavailable and

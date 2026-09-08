@@ -50,6 +50,12 @@ impl Provider for BookmarksProvider {
                     group_label: None,
                     actions: Vec::new(),
                     source: None,
+                    meter: None,
+                    keeps_open: false,
+                    preview: None,
+                    preview_markdown: false,
+                    speaker: None,
+                    images: Vec::new(),
                 },
             }))
             .collect()
