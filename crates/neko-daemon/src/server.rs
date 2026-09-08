@@ -13,6 +13,9 @@ use neko_protocol::{Event, Frame, Request, Response, read_frame, write_frame};
 pub struct AppState {
     pub db: Arc<Mutex<Db>>,
     pub apps: Arc<RwLock<Vec<AppEntry>>>,
+    /// The daemon-owned projection of the local Codex app-server. The
+    /// process actor updates it independently of clients connecting to neko.
+    pub codex: Arc<RwLock<neko_core::codex::Snapshot>>,
     /// Every registered result-type provider, in section render order —
     /// see `neko_core::search::allocate`'s doc comment for what that order
     /// means for ranking. Registering a new provider (eight are registered
@@ -150,6 +153,7 @@ impl AppState {
         Self {
             db,
             apps,
+            codex: Arc::new(RwLock::new(neko_core::codex::Snapshot::default())),
             providers,
             mode_providers,
             broadcast: Mutex::new(Vec::new()),

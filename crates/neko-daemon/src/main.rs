@@ -1,3 +1,4 @@
+mod codex;
 mod server;
 
 use std::sync::Arc;
@@ -105,6 +106,8 @@ fn main() {
         let state = state.clone();
         std::thread::spawn(move || neko_core::clipboard::run_capture_loop(&state.db));
     }
+
+    codex::spawn(state.codex.clone(), state.clone());
 
     {
         // Ambient awareness: keeps the permission inbox warm so the panel
