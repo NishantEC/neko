@@ -507,13 +507,21 @@ fn read_notifications_with_controls(
     controls: &Receiver<ControlRequest>,
     state: &AppState,
 ) -> io::Result<()> {
+    // Bootstrap owns ids 1 and 2. Every later task view gets a fresh id, so
+    // a reply that arrives after a timed-out view cannot be mistaken for the
+    // next selected task's history.
+    let mut next_history_request_id = 3_u64;
     loop {
         while let Ok(request) = controls.try_recv() {
             if !request.completion.claim_write() {
                 continue;
             }
             let response = match &request.task_id {
-                Some(thread_id) => request_task_history(transport, snapshot, thread_id),
+                Some(thread_id) => {
+                    let request_id = next_history_request_id;
+                    next_history_request_id = next_history_request_id.saturating_add(1);
+                    request_task_history(transport, snapshot, thread_id, request_id)
+                }
                 None => respond_to_approval(transport, snapshot, &request),
             };
             match response {
@@ -568,6 +576,7 @@ fn request_task_history(
     transport: &mut impl LineTransport,
     snapshot: &SharedSnapshot,
     thread_id: &str,
+    request_id: u64,
 ) -> io::Result<Result<(), neko_core::provider::ProviderError>> {
     let snapshot_now = snapshot.read().unwrap();
     if !snapshot_now.tasks.iter().any(|task| task.id == thread_id) {
@@ -584,13 +593,13 @@ fn request_task_history(
         transport,
         json!({
             "jsonrpc": "2.0",
-            "id": 3,
+            "id": request_id,
             "method": "thread/turns/list",
             "params": {"threadId": thread_id, "limit": 40},
         }),
         deadline,
     )?;
-    let result = read_reply(transport, snapshot, 3, deadline)?;
+    let result = read_reply(transport, snapshot, request_id, deadline)?;
     if result.get("data").and_then(Value::as_array).is_none() {
         return Ok(Err(neko_core::provider::ProviderError(
             "Codex did not provide task history".to_string(),
@@ -665,10 +674,10 @@ fn apply_line(snapshot: &SharedSnapshot, line: &str) {
     };
     if message.get("method").is_some() {
         apply_notification(snapshot, &message);
-    } else if message.get("id").and_then(Value::as_u64) == Some(2) {
-        if let Some(result) = message.get("result") {
-            apply_thread_list(snapshot, result);
-        }
+    } else if message.get("id").and_then(Value::as_u64) == Some(2)
+        && let Some(result) = message.get("result")
+    {
+        apply_thread_list(snapshot, result);
     }
 }
 
@@ -908,7 +917,12 @@ mod tests {
             if self.stalled {
                 return Err(io::Error::from(io::ErrorKind::TimedOut));
             }
-            Ok(self.replies.pop_front())
+            match self.replies.pop_front() {
+                Some(reply) if reply == "__timeout__" => {
+                    Err(io::Error::from(io::ErrorKind::TimedOut))
+                }
+                reply => Ok(reply),
+            }
         }
     }
 
@@ -1057,7 +1071,7 @@ mod tests {
         ]);
 
         assert!(
-            request_task_history(&mut fake, &snapshot, "thr-1")
+            request_task_history(&mut fake, &snapshot, "thr-1", 3)
                 .unwrap()
                 .is_ok()
         );
@@ -1068,6 +1082,59 @@ mod tests {
             snapshot.read().unwrap().activity["thr-1"][0].summary,
             "Ran tests"
         );
+    }
+
+    #[test]
+    fn a_late_turn_reply_is_ignored_before_the_next_selected_tasks_reply() {
+        let snapshot = snapshot();
+        {
+            let mut state = snapshot.write().unwrap();
+            state.replace_tasks(vec![
+                neko_core::codex::Task {
+                    id: "thr-a".into(),
+                    title: "A".into(),
+                    cwd: None,
+                    provider: None,
+                    updated_at: 0,
+                    status: neko_core::codex::TaskStatus::Idle,
+                },
+                neko_core::codex::Task {
+                    id: "thr-b".into(),
+                    title: "B".into(),
+                    cwd: None,
+                    provider: None,
+                    updated_at: 0,
+                    status: neko_core::codex::TaskStatus::Idle,
+                },
+            ]);
+            state.set_history_available(true);
+        }
+        let mut fake = FakeTransport::replying([
+            "__timeout__",
+            r#"{"id":3,"result":{"data":[{"id":"late","summary":"A late reply"}]}}"#,
+            r#"{"id":4,"result":{"data":[{"id":"current","summary":"B current reply"}]}}"#,
+        ]);
+
+        assert!(request_task_history(&mut fake, &snapshot, "thr-a", 3).is_err());
+        assert!(
+            request_task_history(&mut fake, &snapshot, "thr-b", 4)
+                .unwrap()
+                .is_ok()
+        );
+        assert_eq!(
+            snapshot.read().unwrap().activity["thr-b"][0].summary,
+            "B current reply"
+        );
+        let ids: Vec<u64> = fake
+            .sent
+            .iter()
+            .map(|line| {
+                serde_json::from_str::<Value>(line).unwrap()["id"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(ids, [3, 4]);
     }
 
     #[test]
