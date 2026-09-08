@@ -7,9 +7,8 @@
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -38,10 +37,84 @@ struct ControlRequest {
     thread_id: String,
     request_id: Value,
     approve: bool,
-    /// A caller that stopped waiting must not leave a decision queued for a
-    /// later actor iteration to write to app-server stdin.
-    cancelled: Arc<AtomicBool>,
-    completed: Sender<Result<(), neko_core::provider::ProviderError>>,
+    completion: Arc<ControlCompletion>,
+}
+
+/// One exact decision moves from pending to actor-owned writing under this
+/// mutex. A timeout may cancel only pending work; once writing owns it, the
+/// caller waits for its confirmed outcome instead of returning a false timeout.
+struct ControlCompletion {
+    phase: Mutex<ControlPhase>,
+    changed: Condvar,
+}
+
+enum ControlPhase {
+    Pending,
+    Writing,
+    Finished(Result<(), String>),
+    Cancelled,
+}
+
+impl ControlCompletion {
+    fn new() -> Self {
+        Self {
+            phase: Mutex::new(ControlPhase::Pending),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn claim_write(&self) -> bool {
+        let mut phase = self.phase.lock().unwrap();
+        if matches!(*phase, ControlPhase::Pending) {
+            *phase = ControlPhase::Writing;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn finish(&self, result: Result<(), neko_core::provider::ProviderError>) {
+        let mut phase = self.phase.lock().unwrap();
+        if matches!(*phase, ControlPhase::Writing) {
+            *phase = ControlPhase::Finished(result.map_err(|error| error.0));
+            self.changed.notify_all();
+        }
+    }
+
+    fn wait_for_outcome(
+        &self,
+        timeout: Duration,
+    ) -> Result<(), neko_core::provider::ProviderError> {
+        let deadline = Instant::now() + timeout;
+        let mut phase = self.phase.lock().unwrap();
+        loop {
+            match &*phase {
+                ControlPhase::Finished(result) => {
+                    return result.clone().map_err(neko_core::provider::ProviderError)
+                }
+                ControlPhase::Cancelled => {
+                    return Err(neko_core::provider::ProviderError(
+                        "Codex did not accept the approval in time".to_string(),
+                    ));
+                }
+                ControlPhase::Writing => {
+                    phase = self.changed.wait(phase).unwrap();
+                }
+                ControlPhase::Pending => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    let (next, timed_out) = self.changed.wait_timeout(phase, remaining).unwrap();
+                    phase = next;
+                    if timed_out.timed_out() && matches!(*phase, ControlPhase::Pending) {
+                        *phase = ControlPhase::Cancelled;
+                        self.changed.notify_all();
+                        return Err(neko_core::provider::ProviderError(
+                            "Codex did not accept the approval in time".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl ControlHandle {
@@ -93,15 +166,13 @@ impl ControlHandle {
         let sender = self.sender.read().unwrap().clone().ok_or_else(|| {
             neko_core::provider::ProviderError("Codex is unavailable".to_string())
         })?;
-        let (completed, receipt) = mpsc::channel();
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let completion = Arc::new(ControlCompletion::new());
         sender
             .try_send(ControlRequest {
                 thread_id: thread_id.to_owned(),
                 request_id: request_id.clone(),
                 approve,
-                cancelled: cancelled.clone(),
-                completed,
+                completion: completion.clone(),
             })
             .map_err(|error| match error {
                 TrySendError::Full(_) => neko_core::provider::ProviderError(
@@ -111,17 +182,7 @@ impl ControlHandle {
                     neko_core::provider::ProviderError("Codex is unavailable".to_string())
                 }
             })?;
-        match receipt.recv_timeout(timeout) {
-            Ok(result) => result,
-            Err(error) => {
-                cancelled.store(true, Ordering::Release);
-                let message = match error {
-                    mpsc::RecvTimeoutError::Timeout => "Codex did not accept the approval in time",
-                    mpsc::RecvTimeoutError::Disconnected => "Codex is unavailable",
-                };
-                Err(neko_core::provider::ProviderError(message.to_string()))
-            }
-        }
+        completion.wait_for_outcome(timeout)
     }
 }
 
@@ -396,7 +457,7 @@ fn read_notifications_with_controls(
 ) -> io::Result<()> {
     loop {
         while let Ok(request) = controls.try_recv() {
-            if request.cancelled.load(Ordering::Acquire) {
+            if !request.completion.claim_write() {
                 continue;
             }
             match respond_to_approval(transport, snapshot, &request) {
@@ -404,7 +465,18 @@ fn read_notifications_with_controls(
                     if result.is_ok() {
                         state.set_codex_attention(snapshot.read().unwrap().approvals.len());
                     }
-                    let _ = request.completed.send(result);
+                    request.completion.finish(result);
+                }
+                Err(error) if error.kind() == io::ErrorKind::TimedOut => {
+                    // `send_to_writer` only returns this timeout after it
+                    // atomically canceled a still-pending writer entry, so
+                    // no bytes were sent and this approval remains safe to
+                    // retry on the same live session.
+                    request
+                        .completion
+                        .finish(Err(neko_core::provider::ProviderError(
+                            "Codex did not accept the approval in time".to_string(),
+                        )));
                 }
                 Err(error) => {
                     // A failed stdin write means this session cannot honestly
@@ -412,9 +484,9 @@ fn read_notifications_with_controls(
                     // error sends the supervisor through its restart path.
                     mark_unavailable(snapshot);
                     state.set_codex_attention(0);
-                    let _ = request
-                        .completed
-                        .send(Err(neko_core::provider::ProviderError(
+                    request
+                        .completion
+                        .finish(Err(neko_core::provider::ProviderError(
                             "Codex is unavailable".to_string(),
                         )));
                     return Err(error);
@@ -528,7 +600,46 @@ struct ProcessTransport {
 
 struct WriteRequest {
     line: String,
+    gate: Arc<WriteGate>,
     completed: Sender<io::Result<()>>,
+}
+
+/// Keeps a timed receipt from returning while its writer queue entry can
+/// still take ownership of stdin. Cancellation and writer ownership use the
+/// same mutex, so a timed-out entry is either removed before any bytes are
+/// written or waited through to its real completion.
+struct WriteGate(Mutex<WritePhase>);
+
+enum WritePhase {
+    Pending,
+    Writing,
+    Cancelled,
+}
+
+impl WriteGate {
+    fn new() -> Self {
+        Self(Mutex::new(WritePhase::Pending))
+    }
+
+    fn claim_write(&self) -> bool {
+        let mut phase = self.0.lock().unwrap();
+        if matches!(*phase, WritePhase::Pending) {
+            *phase = WritePhase::Writing;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn cancel_if_pending(&self) -> bool {
+        let mut phase = self.0.lock().unwrap();
+        if matches!(*phase, WritePhase::Pending) {
+            *phase = WritePhase::Cancelled;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl ProcessTransport {
@@ -543,6 +654,13 @@ impl ProcessTransport {
 
 fn write_lines(mut stdin: impl Write, requests: Receiver<WriteRequest>) {
     for request in requests {
+        if !request.gate.claim_write() {
+            let _ = request.completed.send(Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Codex stdin write was cancelled",
+            )));
+            continue;
+        }
         let result = stdin
             .write_all(request.line.as_bytes())
             .and_then(|()| stdin.write_all(b"\n"))
@@ -579,18 +697,27 @@ fn read_lines(stdout: std::process::ChildStdout, lines: Sender<io::Result<Option
 
 fn send_to_writer(writer: &Sender<WriteRequest>, line: &str, timeout: Duration) -> io::Result<()> {
     let (completed, receipt) = mpsc::channel();
+    let gate = Arc::new(WriteGate::new());
     writer
         .send(WriteRequest {
             line: line.to_owned(),
+            gate: gate.clone(),
             completed,
         })
         .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "Codex stdin writer stopped"))?;
-    receipt.recv_timeout(timeout).map_err(|error| match error {
-        mpsc::RecvTimeoutError::Timeout => io::Error::from(io::ErrorKind::TimedOut),
-        mpsc::RecvTimeoutError::Disconnected => {
-            io::Error::new(io::ErrorKind::BrokenPipe, "Codex stdin writer stopped")
+    match receipt.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) if gate.cancel_if_pending() => {
+            Err(io::Error::from(io::ErrorKind::TimedOut))
         }
-    })?
+        Err(mpsc::RecvTimeoutError::Timeout) => receipt
+            .recv()
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "Codex stdin writer stopped"))?,
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "Codex stdin writer stopped",
+        )),
+    }
 }
 
 impl LineTransport for ProcessTransport {
@@ -687,6 +814,25 @@ mod tests {
         }
     }
 
+    struct BlockingTransport {
+        entered_write: Sender<()>,
+        release_write: Receiver<()>,
+        sent: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl LineTransport for BlockingTransport {
+        fn send_line(&mut self, line: &str, _timeout: Duration) -> io::Result<()> {
+            self.entered_write.send(()).unwrap();
+            self.release_write.recv().unwrap();
+            self.sent.lock().unwrap().push(line.to_owned());
+            Ok(())
+        }
+
+        fn read_line(&mut self, _timeout: Option<Duration>) -> io::Result<Option<String>> {
+            Ok(None)
+        }
+    }
+
     struct FailingWriter;
 
     impl std::io::Write for FailingWriter {
@@ -696,6 +842,27 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        }
+    }
+
+    struct BlockingWriter {
+        entered_write: Option<Sender<()>>,
+        release_write: Receiver<()>,
+        bytes: Arc<std::sync::Mutex<Vec<u8>>>,
+    }
+
+    impl std::io::Write for BlockingWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if let Some(entered_write) = self.entered_write.take() {
+                entered_write.send(()).unwrap();
+                self.release_write.recv().unwrap();
+            }
+            self.bytes.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
         }
     }
 
@@ -847,6 +1014,40 @@ mod tests {
     }
 
     #[test]
+    fn a_timed_out_writer_request_never_flushes_later() {
+        let (writer, requests) = mpsc::channel();
+        let (entered_write, writer_entered) = mpsc::channel();
+        let (release_write, writer_release) = mpsc::channel();
+        let bytes = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let written = bytes.clone();
+        let writer_thread = std::thread::spawn(move || {
+            write_lines(
+                BlockingWriter {
+                    entered_write: Some(entered_write),
+                    release_write: writer_release,
+                    bytes: written,
+                },
+                requests,
+            )
+        });
+
+        let sender = writer.clone();
+        let requester = std::thread::spawn(move || {
+            send_to_writer(&sender, "approval", Duration::from_millis(10))
+        });
+        writer_entered.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(30));
+        release_write.send(()).unwrap();
+        let result = requester.join().unwrap();
+        drop(writer);
+        writer_thread.join().unwrap();
+        assert!(
+            result.is_ok() || bytes.lock().unwrap().is_empty(),
+            "a writer timeout must cancel before bytes are owned, or wait for the written result"
+        );
+    }
+
+    #[test]
     fn malformed_json_is_ignored() {
         let snapshot = snapshot();
         apply_line(&snapshot, "not json");
@@ -869,13 +1070,11 @@ mod tests {
                 "method": "item/commandExecution/requestApproval",
                 "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1, "command": "pwd"},
             }));
-        let (completed, _receipt) = mpsc::channel();
         let request = ControlRequest {
             thread_id: "thr".to_string(),
             request_id: json!("old-request"),
             approve: true,
-            cancelled: Arc::new(AtomicBool::new(false)),
-            completed,
+            completion: Arc::new(ControlCompletion::new()),
         };
         let mut fake = FakeTransport::replying([]);
 
@@ -924,6 +1123,60 @@ mod tests {
     }
 
     #[test]
+    fn actor_pickup_never_returns_timeout_then_writes_an_approval() {
+        let snapshot = Arc::new(RwLock::new(neko_core::codex::Snapshot::with_approval(
+            "thr", "request",
+        )));
+        let handle = Arc::new(ControlHandle::new(snapshot.clone()));
+        let (sender, pending) = mpsc::sync_channel(CONTROL_QUEUE_CAPACITY);
+        handle.attach(sender);
+        let (caller_result, caller_waiting) = mpsc::channel();
+        let caller = std::thread::spawn(move || {
+            caller_result
+                .send(handle.resolve_approval_with_timeout(
+                    "thr",
+                    &json!("request"),
+                    true,
+                    Duration::from_millis(10),
+                ))
+                .unwrap();
+        });
+
+        let request = pending.recv().unwrap();
+        let (entered_write, writer_entered) = mpsc::channel();
+        let (release_write, writer_release) = mpsc::channel();
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let actor_snapshot = snapshot.clone();
+        let actor_sent = sent.clone();
+        let actor = std::thread::spawn(move || {
+            let mut transport = BlockingTransport {
+                entered_write,
+                release_write: writer_release,
+                sent: actor_sent,
+            };
+            assert!(request.completion.claim_write());
+            let result = respond_to_approval(&mut transport, &actor_snapshot, &request).unwrap();
+            request.completion.finish(result);
+        });
+
+        writer_entered.recv().unwrap();
+        // Let the caller's short deadline elapse while the actor owns the
+        // blocked write. The fixed handoff must keep it waiting for an ack.
+        std::thread::sleep(Duration::from_millis(30));
+        release_write.send(()).unwrap();
+        let caller_result = caller_waiting.recv().unwrap();
+        actor.join().unwrap();
+        caller.join().unwrap();
+
+        assert!(
+            caller_result.is_ok()
+                || (sent.lock().unwrap().is_empty()
+                    && snapshot.read().unwrap().can_resolve("thr", "request")),
+            "a caller must not receive failure while the actor later writes its approval"
+        );
+    }
+
+    #[test]
     fn approval_write_failure_marks_the_session_unavailable_and_returns_for_restart() {
         let state = state();
         let snapshot = state.codex.clone();
@@ -933,14 +1186,13 @@ mod tests {
             "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1}
         }));
         let (sender, controls) = mpsc::channel();
-        let (completed, receipt) = mpsc::channel();
+        let completion = Arc::new(ControlCompletion::new());
         sender
             .send(ControlRequest {
                 thread_id: "thr".to_string(),
                 request_id: json!("request"),
                 approve: true,
-                cancelled: Arc::new(AtomicBool::new(false)),
-                completed,
+                completion: completion.clone(),
             })
             .unwrap();
 
@@ -956,8 +1208,50 @@ mod tests {
         assert!(!snapshot.read().unwrap().available);
         assert!(snapshot.read().unwrap().approvals.is_empty());
         assert_eq!(
-            receipt.recv().unwrap().unwrap_err().to_string(),
+            completion
+                .wait_for_outcome(Duration::ZERO)
+                .unwrap_err()
+                .to_string(),
             "Codex is unavailable"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_writer_timeout_keeps_the_approval_pending() {
+        let state = state();
+        let snapshot = state.codex.clone();
+        snapshot.write().unwrap().apply_notification(&json!({
+            "id": "request",
+            "method": "item/fileChange/requestApproval",
+            "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1}
+        }));
+        let (sender, controls) = mpsc::channel();
+        let completion = Arc::new(ControlCompletion::new());
+        sender
+            .send(ControlRequest {
+                thread_id: "thr".to_string(),
+                request_id: json!("request"),
+                approve: true,
+                completion: completion.clone(),
+            })
+            .unwrap();
+
+        let error = read_notifications_with_controls(
+            &mut FakeTransport::failing_writes(io::ErrorKind::TimedOut),
+            &snapshot,
+            &controls,
+            &state,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(snapshot.read().unwrap().can_resolve("thr", "request"));
+        assert_eq!(
+            completion
+                .wait_for_outcome(Duration::ZERO)
+                .unwrap_err()
+                .to_string(),
+            "Codex did not accept the approval in time"
         );
     }
 
@@ -979,13 +1273,11 @@ mod tests {
             "method": "item/fileChange/requestApproval",
             "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1},
         }));
-        let (completed, _receipt) = mpsc::channel();
         let request = ControlRequest {
             thread_id: "thr".to_string(),
             request_id: json!(42),
             approve: true,
-            cancelled: Arc::new(AtomicBool::new(false)),
-            completed,
+            completion: Arc::new(ControlCompletion::new()),
         };
         let mut fake = FakeTransport::replying([]);
 
@@ -1018,13 +1310,11 @@ mod tests {
                     "permissions": {"network": {"enabled": true}},
                 },
             }));
-            let (completed, _receipt) = mpsc::channel();
             let request = ControlRequest {
                 thread_id: "thr".to_string(),
                 request_id: json!(id),
                 approve,
-                cancelled: Arc::new(AtomicBool::new(false)),
-                completed,
+                completion: Arc::new(ControlCompletion::new()),
             };
             let mut fake = FakeTransport::replying([]);
             respond_to_approval(&mut fake, &snapshot, &request)
