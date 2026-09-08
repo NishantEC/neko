@@ -74,19 +74,26 @@ impl Snapshot {
     /// Reduces a successful `thread/list` result. Unknown fields are ignored,
     /// and entries without an id or title are not displayable so are skipped.
     pub fn from_thread_list(result: &Value) -> Self {
-        let tasks = result
-            .get("data")
-            .and_then(Value::as_array)
-            .map(|entries| entries.iter().filter_map(parse_task).collect())
-            .unwrap_or_default();
-
         let mut snapshot = Self {
             available: result.get("data").and_then(Value::as_array).is_some(),
             refreshed_at_unix_ms: crate::now_unix_ms(),
             ..Self::default()
         };
-        snapshot.replace_tasks(tasks);
+        snapshot.apply_thread_list(result);
         snapshot
+    }
+
+    /// Applies a successful `thread/list` result without replacing unrelated
+    /// state, such as pending approvals or the daemon-owned availability flag.
+    /// Malformed results leave the current task list intact.
+    pub fn apply_thread_list(&mut self, value: &Value) {
+        let Some(entries) = value.get("data").and_then(Value::as_array) else {
+            return;
+        };
+        let tasks = entries.iter().filter_map(parse_task).collect();
+
+        self.replace_tasks(tasks);
+        self.refreshed_at_unix_ms = crate::now_unix_ms();
     }
 
     /// Creates one pending approval for focused reducer tests and callers that
@@ -146,9 +153,15 @@ impl Snapshot {
 }
 
 fn parse_task(entry: &Value) -> Option<Task> {
+    let id = entry.get("id")?.as_str()?;
+    let title = entry.get("name")?.as_str()?;
+    if id.trim().is_empty() || title.trim().is_empty() {
+        return None;
+    }
+
     Some(Task {
-        id: entry.get("id")?.as_str()?.to_owned(),
-        title: entry.get("name")?.as_str()?.to_owned(),
+        id: id.to_owned(),
+        title: title.to_owned(),
         cwd: entry.get("cwd").and_then(Value::as_str).map(str::to_owned),
         provider: entry
             .get("modelProvider")
@@ -189,6 +202,52 @@ mod tests {
         assert_eq!(snapshot.tasks[0].provider.as_deref(), Some("openai"));
         assert_eq!(snapshot.tasks[0].updated_at, 42);
         assert_eq!(snapshot.tasks[0].status, TaskStatus::Working);
+    }
+
+    #[test]
+    fn thread_list_skips_entries_with_blank_ids_or_titles() {
+        let snapshot = Snapshot::from_thread_list(&json!({"data": [
+            {"id": "", "name": "Has no id"},
+            {"id": "   ", "name": "Has no id"},
+            {"id": "thr-2", "name": ""},
+            {"id": "thr-3", "name": "\t"},
+            {"id": "thr-4", "name": "Visible task"}
+        ]}));
+
+        assert_eq!(snapshot.tasks.len(), 1);
+        assert_eq!(snapshot.tasks[0].id, "thr-4");
+    }
+
+    #[test]
+    fn thread_list_refresh_keeps_pending_approvals() {
+        let mut snapshot = Snapshot::with_approval("thr-1", "request-1");
+        snapshot.available = false;
+
+        snapshot.apply_thread_list(&json!({"data": [{
+            "id": "thr-1",
+            "name": "Fix ranking"
+        }]}));
+
+        assert!(!snapshot.available);
+        assert_eq!(snapshot.approvals.len(), 1);
+        assert_eq!(snapshot.approvals[0].request_id, "request-1");
+    }
+
+    #[test]
+    fn changed_thread_list_refresh_advances_generation() {
+        let mut snapshot = Snapshot::from_thread_list(&json!({"data": [{
+            "id": "thr-1",
+            "name": "Fix ranking"
+        }]}));
+        let generation = snapshot.generation;
+
+        snapshot.apply_thread_list(&json!({"data": [{
+            "id": "thr-1",
+            "name": "Fix the ranking"
+        }]}));
+
+        assert_eq!(snapshot.generation, generation + 1);
+        assert_eq!(snapshot.tasks[0].title, "Fix the ranking");
     }
 
     #[test]
