@@ -121,8 +121,9 @@ to summon-on-hotkey. To replay onboarding:
 NEKO_RESET_ONBOARDING=1 ./target/release/neko
 ```
 
-If you decline Accessibility, the hotkey cannot register. neko stays usable —
-click its Dock icon to summon the panel instead.
+If you decline Accessibility, the hotkey cannot register. neko opens its panel
+on launch so it stays reachable; after dismissing it, use the menu-bar item to
+summon it again.
 
 `cargo run --release` works for development. The latency numbers in
 `AGENTS.md` are measured against the release binary run directly.

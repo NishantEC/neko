@@ -2921,7 +2921,7 @@ impl Root {
                     .text_size(px(12.5))
                     .line_height(px(18.))
                     .text_color(theme::active().text_secondary)
-                    .child("⌥Space is off. Accessibility access was skipped, so the hotkey won't open neko. Reopen neko from the Dock to search anytime."),
+                    .child("⌥Space is off. Neko opened so you can still search. After dismissing it, use the menu-bar item to summon it again."),
             )
             .child(
                 div()
