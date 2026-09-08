@@ -63,9 +63,25 @@ pub enum ApprovalKind {
 pub struct Approval {
     pub thread_id: String,
     pub request_id: String,
+    /// The JSON-RPC id is preserved with its original string/number type so
+    /// the daemon can answer this exact app-server request.
+    pub response_id: Value,
     pub title: String,
     pub detail: Option<String>,
     pub kind: ApprovalKind,
+}
+
+/// The daemon-owned control path for one explicit decision on a current
+/// Codex server request. The UI only ever reaches this through a provider;
+/// it cannot manufacture a decision without a row that came from the
+/// daemon's live snapshot.
+pub trait CodexControl: Send + Sync {
+    fn resolve_approval(
+        &self,
+        thread_id: &str,
+        request_id: &str,
+        approve: bool,
+    ) -> Result<(), ProviderError>;
 }
 
 /// The UI-relevant state reduced from Codex app-server messages.
@@ -107,6 +123,7 @@ impl Snapshot {
     /// Creates one pending approval for focused reducer tests and callers that
     /// receive an approval request before the full notification reducer grows.
     pub fn with_approval(thread_id: impl Into<String>, request_id: impl Into<String>) -> Self {
+        let request_id = request_id.into();
         let mut snapshot = Self {
             available: true,
             refreshed_at_unix_ms: crate::now_unix_ms(),
@@ -114,13 +131,23 @@ impl Snapshot {
         };
         snapshot.approvals.push(Approval {
             thread_id: thread_id.into(),
-            request_id: request_id.into(),
+            response_id: Value::String(request_id.clone()),
+            request_id,
             title: "Approval required".into(),
             detail: None,
             kind: ApprovalKind::Unknown,
         });
         snapshot.generation = 1;
         snapshot
+    }
+
+    /// Whether this exact server request is still outstanding. A thread can
+    /// receive another request after an older one was resolved, so checking
+    /// the thread alone would authorize the wrong decision.
+    pub fn can_resolve(&self, thread_id: &str, request_id: &str) -> bool {
+        self.approvals
+            .iter()
+            .any(|approval| approval.thread_id == thread_id && approval.request_id == request_id)
     }
 
     /// Replaces task rows and advances the UI generation only for a visible
@@ -135,8 +162,15 @@ impl Snapshot {
     /// Applies the subset of app-server notifications that changes this
     /// snapshot. Unknown notifications are deliberately harmless.
     pub fn apply_notification(&mut self, notification: &Value) {
-        if notification.get("method").and_then(Value::as_str) != Some("serverRequest/resolved") {
-            return;
+        match notification.get("method").and_then(Value::as_str) {
+            Some("item/commandExecution/requestApproval")
+            | Some("item/fileChange/requestApproval")
+            | Some("item/permissions/requestApproval") => {
+                self.add_approval(notification);
+                return;
+            }
+            Some("serverRequest/resolved") => {}
+            _ => return,
         }
 
         let Some(params) = notification.get("params") else {
@@ -157,6 +191,118 @@ impl Snapshot {
             self.generation = self.generation.saturating_add(1);
             self.refreshed_at_unix_ms = crate::now_unix_ms();
         }
+    }
+
+    /// Removes the exact current request after its response was written to
+    /// the app-server. The same pair is checked once more at the actor edge,
+    /// so a stale UI action cannot consume a later request in the same thread.
+    pub fn resolve(&mut self, thread_id: &str, request_id: &str) -> bool {
+        let previous_len = self.approvals.len();
+        self.approvals.retain(|approval| {
+            approval.thread_id != thread_id || approval.request_id != request_id
+        });
+        let changed = self.approvals.len() != previous_len;
+        if changed {
+            self.generation = self.generation.saturating_add(1);
+            self.refreshed_at_unix_ms = crate::now_unix_ms();
+        }
+        changed
+    }
+
+    /// An app-server request id is only valid for that actor session. When
+    /// its stdio connection goes away, retain task history but drop pending
+    /// decisions rather than offering a stale button that could target a
+    /// later request after reconnect.
+    pub fn clear_approvals(&mut self) {
+        if !self.approvals.is_empty() {
+            self.approvals.clear();
+            self.generation = self.generation.saturating_add(1);
+            self.refreshed_at_unix_ms = crate::now_unix_ms();
+        }
+    }
+
+    fn add_approval(&mut self, notification: &Value) {
+        let Some(response_id) = notification.get("id").cloned() else {
+            return;
+        };
+        let Some(request_id) = response_id_to_string(&response_id) else {
+            return;
+        };
+        let Some(params) = notification.get("params") else {
+            return;
+        };
+        let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
+            return;
+        };
+        if self.can_resolve(thread_id, &request_id) {
+            return;
+        }
+        let method = notification
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let (title, detail, kind) = match method {
+            "item/commandExecution/requestApproval" => (
+                params
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .map(|command| format!("Allow command: {command}"))
+                    .unwrap_or_else(|| "Allow command execution".to_string()),
+                params
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or_else(|| {
+                        params
+                            .get("cwd")
+                            .and_then(Value::as_str)
+                            .map(|cwd| format!("In {cwd}"))
+                    }),
+                if params
+                    .get("networkApprovalContext")
+                    .is_some_and(|value| !value.is_null())
+                {
+                    ApprovalKind::Network
+                } else {
+                    ApprovalKind::CommandExecution
+                },
+            ),
+            "item/fileChange/requestApproval" => (
+                "Allow file changes".to_string(),
+                params
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                ApprovalKind::FileChange,
+            ),
+            "item/permissions/requestApproval" => (
+                "Allow additional permissions".to_string(),
+                params
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                ApprovalKind::Unknown,
+            ),
+            _ => return,
+        };
+        self.approvals.push(Approval {
+            thread_id: thread_id.to_owned(),
+            request_id,
+            response_id,
+            title,
+            detail,
+            kind,
+        });
+        self.generation = self.generation.saturating_add(1);
+        self.refreshed_at_unix_ms = crate::now_unix_ms();
+    }
+}
+
+fn response_id_to_string(response_id: &Value) -> Option<String> {
+    match response_id {
+        Value::String(id) => Some(id.clone()),
+        Value::Number(id) => Some(id.to_string()),
+        _ => None,
     }
 }
 
@@ -185,6 +331,127 @@ fn parse_task(entry: &Value) -> Option<Task> {
 /// only takes this short read lock and never starts a process or reads disk.
 pub struct CodexTasksProvider {
     snapshot: Arc<RwLock<Snapshot>>,
+}
+
+/// Urgent, explicit decisions from the same daemon-owned Codex projection.
+/// Kept separate from task tiles so an approval remains a readable list row
+/// with its title/detail and explicit Actions-menu affordances.
+pub struct CodexApprovalsProvider {
+    snapshot: Arc<RwLock<Snapshot>>,
+    control: Arc<dyn CodexControl>,
+}
+
+impl CodexApprovalsProvider {
+    pub fn with_snapshot_and_control(
+        snapshot: Arc<RwLock<Snapshot>>,
+        control: Arc<dyn CodexControl>,
+    ) -> Self {
+        Self { snapshot, control }
+    }
+}
+
+impl Provider for CodexApprovalsProvider {
+    fn id(&self) -> &'static str {
+        "codex-approval"
+    }
+
+    fn section_label(&self) -> &'static str {
+        "Needs you"
+    }
+
+    fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+        let snapshot = self.snapshot.read().unwrap().clone();
+        let query = query.trim();
+        snapshot
+            .approvals
+            .iter()
+            .filter_map(|approval| {
+                let score = if query.is_empty() {
+                    // This is a live request for an explicit human decision,
+                    // so it leads an otherwise empty palette.
+                    1000.0
+                } else {
+                    [
+                        fuzzy_score(query, &approval.title),
+                        approval
+                            .detail
+                            .as_deref()
+                            .and_then(|detail| fuzzy_score(query, detail)),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .reduce(f32::max)?
+                };
+                Some(Candidate {
+                    score,
+                    item: SearchItem {
+                        // The raw app-server request id is the provider id;
+                        // `perform_action` recovers the matching thread from
+                        // the same current snapshot before calling control.
+                        id: approval.request_id.clone(),
+                        kind: self.id().to_string(),
+                        title: approval.title.clone(),
+                        subtitle: approval.detail.clone(),
+                        icon: Icon::Glyph(Glyph::AgentLive),
+                        section_label: self.section_label().to_string(),
+                        action_label: "Review approval  ⌘K".to_string(),
+                        badge: Some("APPROVAL".to_string()),
+                        accessory: None,
+                        enters_mode: None,
+                        group_label: None,
+                        actions: vec![
+                            ItemAction {
+                                id: "approve".to_string(),
+                                label: "Approve".to_string(),
+                                destructive: false,
+                            },
+                            ItemAction {
+                                id: "decline".to_string(),
+                                label: "Decline".to_string(),
+                                destructive: true,
+                            },
+                        ],
+                        source: Some("Codex".to_string()),
+                        meter: None,
+                        keeps_open: true,
+                        preview_markdown: false,
+                        speaker: None,
+                        images: Vec::new(),
+                        preview: None,
+                    },
+                })
+            })
+            .collect()
+    }
+
+    fn activate(&self, _id: &str) -> Result<(), ProviderError> {
+        Err(ProviderError(
+            "choose Approve or Decline from Actions".to_string(),
+        ))
+    }
+
+    fn perform_action(&self, request_id: &str, action_id: &str) -> Result<(), ProviderError> {
+        let approve = match action_id {
+            "approve" => true,
+            "decline" => false,
+            _ => {
+                return Err(ProviderError(format!(
+                    "no action '{action_id}' on this Codex approval"
+                )))
+            }
+        };
+        let snapshot = self.snapshot.read().unwrap();
+        let matching: Vec<_> = snapshot
+            .approvals
+            .iter()
+            .filter(|approval| approval.request_id == request_id)
+            .collect();
+        let [approval] = matching.as_slice() else {
+            return Err(ProviderError("approval was already resolved".to_string()));
+        };
+        self.control
+            .resolve_approval(&approval.thread_id, &approval.request_id, approve)
+    }
 }
 
 impl CodexTasksProvider {
@@ -270,18 +537,26 @@ impl Provider for CodexTasksProvider {
     fn activate(&self, _id: &str) -> Result<(), ProviderError> {
         // The client observes `enters_mode` and never routes this primary
         // action back to the daemon. Task 5 owns that mode's implementation.
-        Err(ProviderError("Codex task mode is not available yet".to_string()))
+        Err(ProviderError(
+            "Codex task mode is not available yet".to_string(),
+        ))
     }
 
     fn perform_action(&self, id: &str, action_id: &str) -> Result<(), ProviderError> {
         if action_id != "review" {
-            return Err(ProviderError(format!("no action '{action_id}' on this Codex task")));
+            return Err(ProviderError(format!(
+                "no action '{action_id}' on this Codex task"
+            )));
         }
         let snapshot = self.snapshot.read().unwrap();
         match snapshot.tasks.iter().find(|task| task.id == id) {
             Some(task) if task.status == TaskStatus::Waiting => Ok(()),
-            Some(_) => Err(ProviderError("this Codex task no longer needs review".to_string())),
-            None => Err(ProviderError("Codex task is no longer available".to_string())),
+            Some(_) => Err(ProviderError(
+                "this Codex task no longer needs review".to_string(),
+            )),
+            None => Err(ProviderError(
+                "Codex task is no longer available".to_string(),
+            )),
         }
     }
 }
@@ -358,13 +633,44 @@ fn task_item(task: &Task, available: bool) -> SearchItem {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use std::sync::{Arc, RwLock};
+    use std::sync::{Arc, Mutex, RwLock};
 
     use crate::provider::Provider;
 
-    use super::{CodexTasksProvider, Snapshot, Task, TaskStatus};
+    use super::{
+        CodexApprovalsProvider, CodexControl, CodexTasksProvider, Snapshot, Task, TaskStatus,
+    };
 
-    fn task(id: &str, title: &str, cwd: Option<&str>, provider: Option<&str>, updated_at: i64, status: TaskStatus) -> Task {
+    fn snapshot_with_approval(thread_id: &str, request_id: &str) -> Snapshot {
+        Snapshot::with_approval(thread_id, request_id)
+    }
+
+    #[derive(Default)]
+    struct RecordingControl(Mutex<Vec<(String, String, bool)>>);
+
+    impl CodexControl for RecordingControl {
+        fn resolve_approval(
+            &self,
+            thread_id: &str,
+            request_id: &str,
+            approve: bool,
+        ) -> Result<(), crate::provider::ProviderError> {
+            self.0
+                .lock()
+                .unwrap()
+                .push((thread_id.to_string(), request_id.to_string(), approve));
+            Ok(())
+        }
+    }
+
+    fn task(
+        id: &str,
+        title: &str,
+        cwd: Option<&str>,
+        provider: Option<&str>,
+        updated_at: i64,
+        status: TaskStatus,
+    ) -> Task {
         Task {
             id: id.into(),
             title: title.into(),
@@ -381,8 +687,22 @@ mod tests {
             available: true,
             tasks: vec![
                 task("idle", "Oldest priority", None, None, 30, TaskStatus::Idle),
-                task("working", "Middle priority", None, None, 20, TaskStatus::Working),
-                task("waiting", "Newest priority", None, None, 10, TaskStatus::Waiting),
+                task(
+                    "working",
+                    "Middle priority",
+                    None,
+                    None,
+                    20,
+                    TaskStatus::Working,
+                ),
+                task(
+                    "waiting",
+                    "Newest priority",
+                    None,
+                    None,
+                    10,
+                    TaskStatus::Waiting,
+                ),
             ],
             ..Snapshot::default()
         };
@@ -391,7 +711,10 @@ mod tests {
         let candidates = provider.search("", 0);
 
         assert_eq!(
-            candidates.iter().map(|candidate| candidate.item.id.as_str()).collect::<Vec<_>>(),
+            candidates
+                .iter()
+                .map(|candidate| candidate.item.id.as_str())
+                .collect::<Vec<_>>(),
             ["waiting", "working", "idle"]
         );
     }
@@ -413,7 +736,11 @@ mod tests {
         let provider = CodexTasksProvider::with_snapshot(Arc::new(RwLock::new(snapshot)));
 
         for query in ["launcher", "neko", "openai"] {
-            assert_eq!(provider.search(query, 0).len(), 1, "{query} should find the task");
+            assert_eq!(
+                provider.search(query, 0).len(),
+                1,
+                "{query} should find the task"
+            );
         }
     }
 
@@ -433,9 +760,16 @@ mod tests {
         };
         let provider = CodexTasksProvider::with_snapshot(Arc::new(RwLock::new(snapshot)));
 
-        let item = provider.search("", 0).pop().expect("the task is retained").item;
+        let item = provider
+            .search("", 0)
+            .pop()
+            .expect("the task is retained")
+            .item;
 
-        assert_eq!(item.subtitle.as_deref(), Some("openai · /work/neko · Codex unavailable"));
+        assert_eq!(
+            item.subtitle.as_deref(),
+            Some("openai · /work/neko · Codex unavailable")
+        );
         assert_eq!(item.accessory.as_deref(), Some("Codex unavailable"));
     }
 
@@ -517,6 +851,7 @@ mod tests {
         snapshot.approvals.push(super::Approval {
             thread_id: "thr-2".into(),
             request_id: "request-2".into(),
+            response_id: json!("request-2"),
             title: "Other approval".into(),
             detail: None,
             kind: super::ApprovalKind::Unknown,
@@ -530,6 +865,37 @@ mod tests {
         assert_eq!(snapshot.approvals.len(), 1);
         assert_eq!(snapshot.approvals[0].thread_id, "thr-2");
         assert_eq!(snapshot.approvals[0].request_id, "request-2");
+    }
+
+    #[test]
+    fn resolving_an_old_request_does_not_resolve_a_new_one() {
+        let snapshot = snapshot_with_approval("thr", "new-request");
+        assert!(snapshot.can_resolve("thr", "new-request"));
+        assert!(!snapshot.can_resolve("thr", "old-request"));
+    }
+
+    #[test]
+    fn approval_provider_exposes_detail_and_routes_only_the_visible_request() {
+        let snapshot = Arc::new(RwLock::new(snapshot_with_approval("thr", "request")));
+        snapshot.write().unwrap().approvals[0].title = "Allow file changes".to_string();
+        snapshot.write().unwrap().approvals[0].detail = Some("Update Cargo.toml".to_string());
+        let control = Arc::new(RecordingControl::default());
+        let provider = CodexApprovalsProvider::with_snapshot_and_control(snapshot, control.clone());
+
+        let approval = provider.search("", 0).pop().expect("one approval row").item;
+        assert_eq!(approval.title, "Allow file changes");
+        assert_eq!(approval.subtitle.as_deref(), Some("Update Cargo.toml"));
+        assert_eq!(approval.actions[0].id, "approve");
+        assert!(
+            approval.actions[1].destructive,
+            "Decline uses the panel's existing confirmation"
+        );
+        provider.perform_action(&approval.id, "approve").unwrap();
+
+        assert_eq!(
+            *control.0.lock().unwrap(),
+            vec![("thr".to_string(), "request".to_string(), true)]
+        );
     }
 
     #[test]
