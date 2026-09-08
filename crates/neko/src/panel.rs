@@ -2124,6 +2124,14 @@ impl Root {
         }
         let kind = menu.kind.clone();
         let id = menu.id.clone();
+        if kind == "codex-task" && action.id == "review" {
+            // `ItemAction` is intentionally a daemon-routed wire shape, not
+            // a second mode-transition vocabulary. Review is the one action
+            // that means "continue looking here", so keep that transition on
+            // the client beside every other `enters_mode` transition.
+            self.enter_mode_about("codex-task", None, window, cx);
+            return;
+        }
         self.close_actions_menu(window);
         cx.notify();
         let request = Request::Activate { kind, id, action: Some(action.id), query: self.query(cx) };
@@ -5911,6 +5919,48 @@ mod tests {
             assert_eq!(tiles.len(), 1, "{badge} Codex task belongs in the tile strip");
             assert!(rows.is_empty(), "a Codex task tile must not be duplicated as a row");
         }
+    }
+
+    #[test]
+    fn unavailable_codex_task_keeps_its_status_in_the_tile_rendering_data() {
+        let unavailable = SearchItem {
+            kind: "codex-task".to_string(),
+            badge: Some("WAITING".to_string()),
+            subtitle: Some("openai · /work/neko · Codex unavailable".to_string()),
+            ..agent_row("codex-task")
+        };
+
+        let (tiles, rows) = split_agent_tiles(vec![unavailable], false);
+
+        assert!(rows.is_empty());
+        assert_eq!(tiles[0].subtitle.as_deref(), Some("openai · /work/neko · Codex unavailable"));
+        assert_eq!(
+            agent_tile_tooltip(&tiles[0]).to_string(),
+            "codex-task — openai · /work/neko · Codex unavailable"
+        );
+    }
+
+    #[gpui::test]
+    fn reviewing_a_codex_task_enters_its_scoped_mode(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![SearchItem {
+                    kind: "codex-task".to_string(),
+                    enters_mode: Some("codex-task".to_string()),
+                    actions: vec![neko_protocol::ItemAction {
+                        id: "review".to_string(),
+                        label: "Review".to_string(),
+                        destructive: false,
+                    }],
+                    ..agent_row("codex-task")
+                }];
+                root.open_actions_menu_for_selected_row(cx);
+                root.confirm_menu_action(window, cx);
+
+                assert_eq!(root.active_mode().map(|mode| mode.chrome.id), Some("codex-task"));
+            })
+            .unwrap();
     }
 
     #[test]
