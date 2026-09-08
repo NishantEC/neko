@@ -652,7 +652,11 @@ fn start_task(
         }),
         deadline,
     )?;
-    let thread = read_reply(transport, snapshot, thread_request_id, deadline)?;
+    let thread = match read_start_reply(transport, snapshot, thread_request_id, deadline) {
+        Ok(thread) => thread,
+        Err(StartReplyError::Rpc(error)) => return Ok(Err(error)),
+        Err(StartReplyError::Transport(error)) => return Err(error),
+    };
     let Some(thread_id) = thread
         .get("thread")
         .and_then(|thread| thread.get("id"))
@@ -676,8 +680,62 @@ fn start_task(
         }),
         deadline,
     )?;
-    read_reply(transport, snapshot, turn_request_id, deadline)?;
+    match read_start_reply(transport, snapshot, turn_request_id, deadline) {
+        Ok(_) => {}
+        Err(StartReplyError::Rpc(error)) => return Ok(Err(error)),
+        Err(StartReplyError::Transport(error)) => return Err(error),
+    }
     Ok(Ok(()))
+}
+
+/// Start commands need a different error boundary from bootstrap: a valid
+/// JSON-RPC `error` is Codex rejecting this one task, not evidence the stdio
+/// session has died. Transport/parse failures remain `io::Error`s so the
+/// supervisor preserves its existing restart behavior.
+enum StartReplyError {
+    Rpc(neko_core::provider::ProviderError),
+    Transport(io::Error),
+}
+
+fn read_start_reply(
+    transport: &mut impl LineTransport,
+    snapshot: &SharedSnapshot,
+    expected_id: u64,
+    deadline: Instant,
+) -> Result<Value, StartReplyError> {
+    loop {
+        let line = transport
+            .read_line(Some(remaining(deadline).map_err(StartReplyError::Transport)?))
+            .map_err(StartReplyError::Transport)?
+            .ok_or_else(|| StartReplyError::Transport(io::Error::from(io::ErrorKind::UnexpectedEof)))?;
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if message.get("method").is_some() {
+            apply_notification(snapshot, &message);
+            continue;
+        }
+        if message.get("id").and_then(Value::as_u64) == Some(expected_id) {
+            if let Some(error) = message.get("error") {
+                let detail = error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown JSON-RPC error");
+                return Err(StartReplyError::Rpc(neko_core::provider::ProviderError(
+                    format!("Codex: {detail}"),
+                )));
+            }
+            return message
+                .get("result")
+                .cloned()
+                .ok_or_else(|| {
+                    StartReplyError::Transport(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Codex JSON-RPC reply has neither result nor error",
+                    ))
+                });
+        }
+    }
 }
 
 /// The only history request. It is called solely by a `CodexTaskProvider`
@@ -1183,6 +1241,41 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn start_command_json_rpc_errors_are_inline_and_never_send_an_unrelated_turn() {
+        let cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let start = neko_core::codex::StartTask::new("Fix ranking", Some(cwd))
+            .expect("the fixture directory exists");
+
+        for (replies, expected_sent, expected_error) in [
+            (
+                vec![r#"{"id":3,"error":{"message":"project is unavailable"}}"#],
+                1,
+                "Codex: project is unavailable",
+            ),
+            (
+                vec![
+                    r#"{"id":3,"result":{"thread":{"id":"thr-new"}}}"#,
+                    r#"{"id":4,"error":{"message":"turn was rejected"}}"#,
+                ],
+                2,
+                "Codex: turn was rejected",
+            ),
+        ] {
+            let snapshot = snapshot();
+            snapshot.write().unwrap().available = true;
+            let mut fake = FakeTransport::replying(replies);
+
+            let error = start_task(&mut fake, &snapshot, &start, 3, 4)
+                .expect("an application error is not a transport failure")
+                .unwrap_err();
+
+            assert_eq!(error.to_string(), expected_error);
+            assert_eq!(fake.sent.len(), expected_sent);
+            assert!(snapshot.read().unwrap().available, "the actor session stays live");
+        }
     }
 
     #[test]
