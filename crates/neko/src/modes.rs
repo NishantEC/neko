@@ -97,6 +97,26 @@ pub struct ModeChrome {
     pub skeleton: crate::components::skeleton::SkeletonShape,
 }
 
+/// The backend-qualified thing an item-scoped mode is allowed to read.
+///
+/// IDs from Codex and Paseo deliberately never share a routing path: the
+/// backend selects the provider before the opaque id is sent anywhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskRef {
+    pub backend: String,
+    pub id: String,
+}
+
+impl TaskRef {
+    pub fn provider_id(&self) -> &'static str {
+        match self.backend.as_str() {
+            "codex" => "codex-task",
+            "paseo" => "conversation",
+            _ => "",
+        }
+    }
+}
+
 pub const MODES: &[ModeChrome] = &[
     ModeChrome {
         id: "clipboard",
@@ -129,6 +149,19 @@ pub const MODES: &[ModeChrome] = &[
         transcript: false,
         skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
+    // A task row enters this plain scoped list. Task 5 will add its bounded
+    // activity history and task-specific detail semantics; until then the
+    // existing mode machinery gives Enter a real, searchable destination.
+    ModeChrome {
+        id: "codex-task",
+        provider_id: "codex-task",
+        title: "Codex Tasks",
+        placeholder: "Type to filter Codex tasks…",
+        empty_line: "History is available in Codex.",
+        has_detail: true,
+        transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
+    },
     // The third mode, and the first where **the query is not a filter**: what
     // is typed here is the task the agent is given, and the rows are the
     // directories it could work in (`neko_core::new_agent`). Nothing in this
@@ -148,6 +181,20 @@ pub const MODES: &[ModeChrome] = &[
         title: "New Agent",
         placeholder: "Describe the task, then pick where to run it…",
         empty_line: "No projects \u{2014} start an agent from Paseo once and this fills in.",
+        has_detail: false,
+        transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
+    },
+    // The search field composes a task, not a path filter. Its only rows are
+    // explicit project directories offered by the daemon's local Codex
+    // snapshot, so this mode deliberately has no worktree picker or detail
+    // pane that could imply a different start location.
+    ModeChrome {
+        id: "new-codex-task",
+        provider_id: "new-codex-task",
+        title: "New Codex task",
+        placeholder: "Describe the task, then pick a project…",
+        empty_line: "No local Codex projects yet — open a project in Codex first.",
         has_detail: false,
         transcript: false,
         skeleton: crate::components::skeleton::SkeletonShape::Row,
@@ -247,6 +294,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn codex_task_mode_never_routes_a_paseo_id() {
+        let task = TaskRef {
+            backend: "codex".into(),
+            id: "thr-1".into(),
+        };
+        assert_eq!(task.provider_id(), "codex-task");
+        assert_eq!(task.id, "thr-1");
+    }
+
+    #[test]
     fn the_clipboard_mode_is_registered_and_scopes_to_the_clipboard_provider() {
         let chrome = chrome_for("clipboard").expect("the clipboard mode must be registered");
         assert_eq!(chrome.provider_id, "clipboard");
@@ -262,6 +319,28 @@ mod tests {
         assert!(
             !chrome.has_detail,
             "the theme mode's preview is the whole panel; a detail column would cover it"
+        );
+    }
+
+    #[test]
+    fn new_codex_task_mode_keeps_the_typed_text_as_the_task_prompt() {
+        let chrome = chrome_for("new-codex-task").expect("the task mode must be registered");
+        assert_eq!(chrome.provider_id, "new-codex-task");
+        assert_eq!(chrome.title, "New Codex task");
+        assert_eq!(
+            chrome.placeholder,
+            "Describe the task, then pick a project…"
+        );
+        assert!(!chrome.has_detail);
+    }
+
+    #[test]
+    fn the_codex_task_mode_is_registered_and_scopes_to_codex_tasks() {
+        let chrome = chrome_for("codex-task").expect("the Codex task mode must be registered");
+        assert_eq!(chrome.provider_id, "codex-task");
+        assert!(
+            chrome.has_detail,
+            "a task view keeps its activity scoped in the detail pane"
         );
     }
 

@@ -10,6 +10,7 @@ pub mod ask;
 pub mod apps;
 pub mod cancel;
 pub mod clipboard;
+pub mod codex;
 pub mod commands;
 pub mod conversation;
 pub mod db;

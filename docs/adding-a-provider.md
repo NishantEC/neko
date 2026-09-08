@@ -1,11 +1,12 @@
 # Adding a provider
 
-A provider is one result type in the search list. Six exist. Adding a seventh
-is one `impl Provider` and one registration line, and this page is the
-walkthrough.
+A provider is one result type in the search list. The count intentionally
+changes as neko grows; adding another is one `impl Provider` and one
+registration line, and this page is the walkthrough.
 
-The cost is not a claim. Four providers have been added since the trait
-existed, and two of those tasks wrote down exactly what they touched:
+The cost is not a claim. Several providers have been added since the trait
+existed, including local Codex task/approval rows, and two earlier tasks wrote
+down exactly what they touched:
 `docs/evidence/settings-provider-report.md` ("The seam held") and
 `docs/evidence/themes-report.md`. Both landed inside the accounting below.
 
@@ -36,7 +37,7 @@ impl Provider for BookmarksProvider {
                 score,
                 item: SearchItem {
                     id: e.url.clone(),          // what activate() gets back
-                    kind: "bookmark".into(),    // must equal id()
+                    kind: "bookmark".into(),    // primary activation route
                     title: e.title.clone(),
                     subtitle: Some(e.host.clone()),
                     icon: Icon::Glyph(Glyph::Link),
@@ -49,6 +50,12 @@ impl Provider for BookmarksProvider {
                     group_label: None,
                     actions: Vec::new(),
                     source: None,
+                    meter: None,
+                    keeps_open: false,
+                    preview: None,
+                    preview_markdown: false,
+                    speaker: None,
+                    images: Vec::new(),
                 },
             }))
             .collect()
@@ -61,8 +68,8 @@ impl Provider for BookmarksProvider {
 ```
 
 `SearchItem` does not derive `Default`, so every field is written out. See
-`crates/neko-protocol/src/lib.rs` for what each one means; the six set to
-nothing above are all optional and all read as "this provider has nothing to
+`crates/neko-protocol/src/lib.rs` for what each one means; the optional fields
+set to nothing above all read as "this provider has nothing to
 say here".
 
 ### 2. The registration
@@ -95,8 +102,16 @@ The one exception is a genuinely new *visual*. `Icon::Glyph` is a closed enum �
 a bounded vocabulary of shapes the client knows how to paint, not a dispatch on
 who produced the row. If none of `Text`, `Link`, `File`, `Folder`, `Clipboard`,
 `Palette` fits, add one variant to `Glyph` and one arm to
-`panel::glyph_element`. That is a data addition and a paint function. There is
-no SVG asset pipeline in this codebase; glyphs are hand-painted from `div`s.
+`panel::glyph_element`. The standard path is a vendored SVG in
+`crates/neko/assets/icons/` wired through `assets.rs`; `Glyph::Palette` is the
+deliberate painted exception because its four live-theme swatches cannot be a
+one-colour SVG mask.
+
+For a normal provider, `SearchItem::kind` is the provider's `id()` and routes
+primary activation back to it. A row that enters a mode may deliberately name
+the mode provider instead: Codex task discovery has id `codex-tasks`, while its
+rows use `codex-task` so their detail and secondary action route to that scoped
+provider. This is still data, not panel-side knowledge of Codex.
 
 If your rows have real per-item artwork, use `Icon::Image(path)` pointing at a
 cached PNG and extract it in a background pass, the way
@@ -126,10 +141,12 @@ query nobody wants any more still competes for CPU with the one they do.
 takes *what was typed* as an argument, rather than being a thing to open. The
 daemon always calls this, never `activate` directly; the default drops the
 query and delegates, so a provider that does not care implements nothing.
-Three override it: `new_agent::NewAgentProvider` (its `id` is the working
+Four override it: `new_agent::NewAgentProvider` (its `id` is the working
 directory and the query is the prompt), `agents::AgentControlProvider` (the
 query is a follow-up prompt for an existing session), and `ask::AskProvider`
-(the query is the request being planned). Note the rule that forces
+(the query is the request being planned), and
+`codex::CodexStartTaskProvider` (the selected local project is the id and the
+query is the task). Note the rule that forces
 this — keep `id` **stable across keystrokes**, because `panel::resolve_selection`
 follows the highlight by `(kind, id)`; an id that folds in the query resets the
 selection on every character typed.
@@ -138,7 +155,7 @@ selection on every character typed.
 `SearchItem::actions` with secondary `⌘K` menu entries. Mark an action
 `destructive: true` and the client requires a second Enter before running it.
 
-Six providers do, and what belongs on Enter versus in the menu is the decision
+Several providers do, and what belongs on Enter versus in the menu is the decision
 worth thinking about rather than the code:
 
 - `schedules` puts **Run now** in the menu and *pause* on Enter, because Enter
@@ -149,6 +166,9 @@ worth thinking about rather than the code:
 - `permissions` puts **Deny** in the menu but does **not** mark it destructive:
   denying is a normal answer, not a mis-key to guard against, and arming it
   behind a second Enter would make the safer reply the slower one.
+- `codex-approval` puts **Approve** and **Decline** in the menu. Its decline
+  is destructive because it rejects a current, explicit external request, so
+  the panel asks for a second confirmation before the actor can send it.
 
 Whatever you choose, `SearchItem::action_label` has to name it — it renders on
 the selected row, and for a row whose Enter is not obvious it is the only thing
@@ -159,8 +179,9 @@ person cannot recover from misreading.
 **`answers_empty_root_query(&self) -> bool`** — return `false` when your whole
 list only means something once somebody has asked for it (themes, preferences).
 Return `true` only for something that is genuinely *news*: `agents` (what is
-running) and `permissions` (what is blocked waiting for you) are the two that
-earn it, and both are self-limiting — a machine has a handful, not hundreds.
+running), `codex-tasks` (the local Codex projection), and permission inboxes
+(what is blocked waiting for you) earn it, and all are self-limiting — a
+machine has a handful, not hundreds.
 It gates the *root list with nothing typed* only; a scoped search still gets
 your full list, which is how the Themes mode and the Preferences window load
 theirs.
@@ -224,7 +245,7 @@ Everything that acts on an agent, schedule or terminal goes through
 `neko_core::mcp` — one MCP-over-HTTP client against the local daemon. Do not
 add a second way to reach it.
 
-Four rules that came out of building six of these:
+Four rules that came out of the existing integrations:
 
 - **Give it a `disabled()` constructor.** `AppState::new` delegates to
   `with_test_providers`, which the whole daemon suite goes through, so an
@@ -241,7 +262,28 @@ Four rules that came out of building six of these:
   workspaces, which would have been forty-four subprocesses per keystroke.
   `send_agent_prompt` defaults to *waiting for the agent to finish* for a
   top-level caller like neko, which would hold a request thread for minutes.
-  Both were in the schema.
+Both were in the schema.
+
+## If your provider supervises a local tool
+
+Codex is the model: the provider is a pure projection over a warmed local
+snapshot, while one daemon-owned actor owns exactly one child process and its
+protocol. `codex-tasks` and `codex-approval` search that snapshot under a
+short read lock; they never start a child, read session files, or make a
+transport request from a palette keystroke.
+
+Keep control equally narrow. The Codex actor rechecks a visible task or exact
+approval request before writing, and an unavailable child returns an inline
+error rather than a guessed success. Capability-gated data belongs behind the
+explicit activation that needs it: Codex history is requested only when a
+person opens one task and only after the app-server accepted its experimental
+capability. Do not turn a quick view into a background transcript cache.
+
+Missing, stopped, or signed-out local tools are normal. Keep the rest of the
+launcher usable, retain only clearly labelled stale rows if that is useful,
+and make their actions honestly unavailable. A provider must never make a
+local integration required for application, file, clipboard, or settings
+search to work.
 
 ## Testing it
 
@@ -258,4 +300,6 @@ Daemon-level tests go against `handle_request` directly
 Do not launch the real `neko-daemon` to try something out. Its clipboard
 capture loop polls the systemwide pasteboard regardless of `HOME`. Use
 `crates/neko-daemon/src/bin/verify_harness.rs`, which hosts the real `server`
-module and every real provider without starting that loop.
+module and every real provider without starting that loop. It refuses to run
+unless `NEKO_VERIFY_FIXTURE_ROOT`, `HOME`, and `NEKO_CODEX_PATH` explicitly
+point inside one disposable fixture tree.
