@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::server::AppState;
 
@@ -34,6 +34,9 @@ pub struct ControlHandle {
 }
 
 struct ControlRequest {
+    /// `Some` means this is the one explicit task-view activation that may
+    /// ask Codex for bounded history. `None` is an approval response.
+    task_id: Option<String>,
     thread_id: String,
     request_id: Value,
     approve: bool,
@@ -90,7 +93,7 @@ impl ControlCompletion {
         loop {
             match &*phase {
                 ControlPhase::Finished(result) => {
-                    return result.clone().map_err(neko_core::provider::ProviderError)
+                    return result.clone().map_err(neko_core::provider::ProviderError);
                 }
                 ControlPhase::Cancelled => {
                     return Err(neko_core::provider::ProviderError(
@@ -143,6 +146,42 @@ impl neko_core::codex::CodexControl for ControlHandle {
     ) -> Result<(), neko_core::provider::ProviderError> {
         self.resolve_approval_with_timeout(thread_id, request_id, approve, CONTROL_TIMEOUT)
     }
+
+    fn open_task(&self, thread_id: &str) -> Result<(), neko_core::provider::ProviderError> {
+        if !self
+            .snapshot
+            .read()
+            .unwrap()
+            .tasks
+            .iter()
+            .any(|task| task.id == thread_id)
+        {
+            return Err(neko_core::provider::ProviderError(
+                "Codex task is no longer available".to_string(),
+            ));
+        }
+        let sender = self.sender.read().unwrap().clone().ok_or_else(|| {
+            neko_core::provider::ProviderError("Codex is unavailable".to_string())
+        })?;
+        let completion = Arc::new(ControlCompletion::new());
+        sender
+            .try_send(ControlRequest {
+                task_id: Some(thread_id.to_owned()),
+                thread_id: String::new(),
+                request_id: Value::Null,
+                approve: false,
+                completion: completion.clone(),
+            })
+            .map_err(|error| match error {
+                TrySendError::Full(_) => neko_core::provider::ProviderError(
+                    "Codex is busy processing another request".to_string(),
+                ),
+                TrySendError::Disconnected(_) => {
+                    neko_core::provider::ProviderError("Codex is unavailable".to_string())
+                }
+            })?;
+        completion.wait_for_outcome(CONTROL_TIMEOUT)
+    }
 }
 
 impl ControlHandle {
@@ -169,6 +208,7 @@ impl ControlHandle {
         let completion = Arc::new(ControlCompletion::new());
         sender
             .try_send(ControlRequest {
+                task_id: None,
                 thread_id: thread_id.to_owned(),
                 request_id: request_id.clone(),
                 approve,
@@ -352,7 +392,11 @@ fn bootstrap_inner(
         }),
         deadline,
     )?;
-    read_reply(transport, snapshot, 1, deadline)?;
+    let initialized = read_reply(transport, snapshot, 1, deadline)?;
+    snapshot
+        .write()
+        .unwrap()
+        .set_history_available(experimental_history_supported(&initialized));
 
     send_json(
         transport,
@@ -388,6 +432,14 @@ fn bootstrap_inner(
     }
     apply_thread_list(snapshot, &result);
     Ok(())
+}
+
+fn experimental_history_supported(result: &Value) -> bool {
+    result
+        .get("capabilities")
+        .and_then(|capabilities| capabilities.get("experimentalApi"))
+        .and_then(Value::as_bool)
+        == Some(true)
 }
 
 fn send_json(
@@ -460,7 +512,11 @@ fn read_notifications_with_controls(
             if !request.completion.claim_write() {
                 continue;
             }
-            match respond_to_approval(transport, snapshot, &request) {
+            let response = match &request.task_id {
+                Some(thread_id) => request_task_history(transport, snapshot, thread_id),
+                None => respond_to_approval(transport, snapshot, &request),
+            };
+            match response {
                 Ok(result) => {
                     if result.is_ok() {
                         state.set_codex_attention(snapshot.read().unwrap().approvals.len());
@@ -503,6 +559,48 @@ fn read_notifications_with_controls(
             Err(error) => return Err(error),
         }
     }
+}
+
+/// The only history request. It is called solely by a `CodexTaskProvider`
+/// activation after the task id was checked against the live snapshot; never
+/// from a root or scoped search.
+fn request_task_history(
+    transport: &mut impl LineTransport,
+    snapshot: &SharedSnapshot,
+    thread_id: &str,
+) -> io::Result<Result<(), neko_core::provider::ProviderError>> {
+    let snapshot_now = snapshot.read().unwrap();
+    if !snapshot_now.tasks.iter().any(|task| task.id == thread_id) {
+        return Ok(Err(neko_core::provider::ProviderError(
+            "Codex task is no longer available".to_string(),
+        )));
+    }
+    if !snapshot_now.history_available {
+        return Ok(Ok(()));
+    }
+    drop(snapshot_now);
+    let deadline = Instant::now() + CONTROL_TIMEOUT;
+    send_json(
+        transport,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "thread/turns/list",
+            "params": {"threadId": thread_id, "limit": 40},
+        }),
+        deadline,
+    )?;
+    let result = read_reply(transport, snapshot, 3, deadline)?;
+    if result.get("data").and_then(Value::as_array).is_none() {
+        return Ok(Err(neko_core::provider::ProviderError(
+            "Codex did not provide task history".to_string(),
+        )));
+    }
+    snapshot
+        .write()
+        .unwrap()
+        .apply_turn_list(thread_id, &result);
+    Ok(Ok(()))
 }
 
 fn respond_to_approval(
@@ -877,11 +975,13 @@ mod tests {
     #[test]
     fn bootstrap_initializes_before_listing_threads() {
         let mut fake = FakeTransport::replying([
-            r#"{"id":1,"result":{"codexHome":"/tmp/codex"}}"#,
+            r#"{"id":1,"result":{"codexHome":"/tmp/codex","capabilities":{"experimentalApi":true}}}"#,
             r#"{"id":2,"result":{"data":[]}}"#,
         ]);
 
-        bootstrap(&mut fake, &snapshot()).unwrap();
+        let snapshot = snapshot();
+        bootstrap(&mut fake, &snapshot).unwrap();
+        assert!(snapshot.read().unwrap().history_available);
 
         assert_eq!(
             fake.sent_methods(),
@@ -935,6 +1035,39 @@ mod tests {
         bootstrap(&mut fake, &snapshot).unwrap();
 
         assert_eq!(snapshot.read().unwrap().tasks[0].title, "Correlated");
+    }
+
+    #[test]
+    fn explicit_task_open_requests_only_that_tasks_bounded_turn_summaries() {
+        let snapshot = snapshot();
+        {
+            let mut state = snapshot.write().unwrap();
+            state.replace_tasks(vec![neko_core::codex::Task {
+                id: "thr-1".into(),
+                title: "Only this task".into(),
+                cwd: None,
+                provider: None,
+                updated_at: 0,
+                status: neko_core::codex::TaskStatus::Idle,
+            }]);
+            state.set_history_available(true);
+        }
+        let mut fake = FakeTransport::replying([
+            r#"{"id":3,"result":{"data":[{"id":"turn-1","summary":"Ran tests","status":"completed"}]}}"#,
+        ]);
+
+        assert!(
+            request_task_history(&mut fake, &snapshot, "thr-1")
+                .unwrap()
+                .is_ok()
+        );
+        let request: Value = serde_json::from_str(&fake.sent[0]).unwrap();
+        assert_eq!(request["method"], "thread/turns/list");
+        assert_eq!(request["params"], json!({"threadId":"thr-1","limit":40}));
+        assert_eq!(
+            snapshot.read().unwrap().activity["thr-1"][0].summary,
+            "Ran tests"
+        );
     }
 
     #[test]
@@ -1071,6 +1204,7 @@ mod tests {
                 "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1, "command": "pwd"},
             }));
         let request = ControlRequest {
+            task_id: None,
             thread_id: "thr".to_string(),
             request_id: json!("old-request"),
             approve: true,
@@ -1189,6 +1323,7 @@ mod tests {
         let completion = Arc::new(ControlCompletion::new());
         sender
             .send(ControlRequest {
+                task_id: None,
                 thread_id: "thr".to_string(),
                 request_id: json!("request"),
                 approve: true,
@@ -1229,6 +1364,7 @@ mod tests {
         let completion = Arc::new(ControlCompletion::new());
         sender
             .send(ControlRequest {
+                task_id: None,
                 thread_id: "thr".to_string(),
                 request_id: json!("request"),
                 approve: true,
@@ -1274,6 +1410,7 @@ mod tests {
             "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1},
         }));
         let request = ControlRequest {
+            task_id: None,
             thread_id: "thr".to_string(),
             request_id: json!(42),
             approve: true,
@@ -1311,6 +1448,7 @@ mod tests {
                 },
             }));
             let request = ControlRequest {
+                task_id: None,
                 thread_id: "thr".to_string(),
                 request_id: json!(id),
                 approve,
