@@ -185,6 +185,20 @@ pub const MODES: &[ModeChrome] = &[
         transcript: false,
         skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
+    // The search field composes a task, not a path filter. Its only rows are
+    // explicit project directories offered by the daemon's local Codex
+    // snapshot, so this mode deliberately has no worktree picker or detail
+    // pane that could imply a different start location.
+    ModeChrome {
+        id: "new-codex-task",
+        provider_id: "new-codex-task",
+        title: "New Codex task",
+        placeholder: "Describe the task, then pick a project…",
+        empty_line: "No local Codex projects yet — open a project in Codex first.",
+        has_detail: false,
+        transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
+    },
     // Reads the model provider's own quota API — see
     // `neko_core::usage`. A status pane rather than a list, so the typed
     // query is ignored and there is no detail column to fill.
@@ -306,6 +320,18 @@ mod tests {
             !chrome.has_detail,
             "the theme mode's preview is the whole panel; a detail column would cover it"
         );
+    }
+
+    #[test]
+    fn new_codex_task_mode_keeps_the_typed_text_as_the_task_prompt() {
+        let chrome = chrome_for("new-codex-task").expect("the task mode must be registered");
+        assert_eq!(chrome.provider_id, "new-codex-task");
+        assert_eq!(chrome.title, "New Codex task");
+        assert_eq!(
+            chrome.placeholder,
+            "Describe the task, then pick a project…"
+        );
+        assert!(!chrome.has_detail);
     }
 
     #[test]

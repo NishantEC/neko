@@ -98,6 +98,13 @@ const COMMANDS: &[CommandSpec] = &[
         mode: "new-agent",
         glyph: Glyph::Agent,
     },
+    CommandSpec {
+        id: "new-codex-task",
+        title: "New Codex task",
+        aliases: &["New Codex task", "Start Codex task", "New Codex", "Start Codex"],
+        mode: "new-codex-task",
+        glyph: Glyph::Agent,
+    },
     // The third command. "Settings" is listed as an alias rather than being
     // the title because `crate::settings` already owns the word on screen —
     // its section is "Settings" (macOS System Settings panes). Two sections
@@ -331,6 +338,20 @@ mod tests {
         assert_eq!(row.item.enters_mode.as_deref(), Some("new-agent"));
         assert_eq!(row.item.badge.as_deref(), Some("COMMAND"));
         assert_eq!(row.item.icon, Icon::Glyph(Glyph::Agent));
+    }
+
+    #[test]
+    fn new_codex_task_enters_the_explicit_project_mode() {
+        let provider = CommandsProvider::new();
+        let row = provider
+            .search("new codex task", 0)
+            .into_iter()
+            .find(|candidate| candidate.item.id == "new-codex-task")
+            .expect("New Codex task must match");
+
+        assert_eq!(row.item.title, "New Codex task");
+        assert_eq!(row.item.enters_mode.as_deref(), Some("new-codex-task"));
+        assert_eq!(row.item.badge.as_deref(), Some("COMMAND"));
     }
 
     #[test]

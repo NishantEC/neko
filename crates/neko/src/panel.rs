@@ -6585,6 +6585,33 @@ mod tests {
     }
 
     #[gpui::test]
+    fn confirming_new_codex_task_keeps_the_field_for_its_task_prompt(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("new codex task", cx));
+                root.results = vec![command_item("new-codex-task")];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                let mode = root.active_mode().expect("the command enters its mode");
+                assert_eq!(mode.chrome.provider_id, "new-codex-task");
+                assert_eq!(root.query(cx), "", "the prompt starts empty after finding the command");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     fn activating_a_row_carries_what_is_currently_typed_as_the_query(cx: &mut TestAppContext) {
         // The client half of starting an agent: `id` names the directory and
         // the query carries the prompt. Both halves matter — an id that moved

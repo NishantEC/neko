@@ -4,7 +4,8 @@
 //! JSON results and notifications into stable, displayable state.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    path::PathBuf,
     sync::{Arc, RwLock},
 };
 
@@ -50,6 +51,32 @@ pub struct Task {
     pub provider: Option<String>,
     pub updated_at: i64,
     pub status: TaskStatus,
+}
+
+/// One explicit request to create a Codex task. A task never inherits a
+/// daemon/client directory or creates a worktree: the selected local project
+/// path is the only working directory the actor is allowed to send.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartTask {
+    pub prompt: String,
+    pub cwd: PathBuf,
+}
+
+impl StartTask {
+    pub fn new(prompt: &str, cwd: Option<PathBuf>) -> Result<Self, &'static str> {
+        if prompt.trim().is_empty() {
+            return Err("type the task first");
+        }
+        let Some(cwd) = cwd else {
+            return Err("choose a project first");
+        };
+        cwd.is_dir()
+            .then_some(Self {
+                prompt: prompt.trim().to_string(),
+                cwd,
+            })
+            .ok_or("selected project is unavailable")
+    }
 }
 
 /// A deliberately compact, read-only turn summary. This is not a transcript:
@@ -102,6 +129,10 @@ pub trait CodexControl: Send + Sync {
     /// Fetches the bounded recent activity for one task the person explicitly
     /// selected. Search never calls this path.
     fn open_task(&self, thread_id: &str) -> Result<(), ProviderError>;
+
+    /// Starts a task in the explicitly selected local project. The daemon
+    /// actor owns the two app-server calls; providers only validate and route.
+    fn start_task(&self, start: StartTask) -> Result<(), ProviderError>;
 }
 
 /// The UI-relevant state reduced from Codex app-server messages.
@@ -490,6 +521,130 @@ fn parse_activity(entry: &Value) -> Option<Activity> {
 /// only takes this short read lock and never starts a process or reads disk.
 pub struct CodexTasksProvider {
     snapshot: Arc<RwLock<Snapshot>>,
+}
+
+/// Explicit places where a new Codex task may start. The query is always the
+/// task prompt, so every row remains visible while it is being composed.
+pub struct CodexStartTaskProvider {
+    snapshot: Arc<RwLock<Snapshot>>,
+    current_project: Option<PathBuf>,
+    control: Option<Arc<dyn CodexControl>>,
+}
+
+impl CodexStartTaskProvider {
+    pub fn with_snapshot_and_current_project(
+        snapshot: Arc<RwLock<Snapshot>>,
+        current_project: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            snapshot,
+            current_project,
+            control: None,
+        }
+    }
+
+    pub fn with_snapshot_current_project_and_control(
+        snapshot: Arc<RwLock<Snapshot>>,
+        current_project: Option<PathBuf>,
+        control: Arc<dyn CodexControl>,
+    ) -> Self {
+        Self {
+            snapshot,
+            current_project,
+            control: Some(control),
+        }
+    }
+
+    fn paths(&self) -> Vec<PathBuf> {
+        let snapshot = self.snapshot.read().unwrap().clone();
+        let mut seen = HashSet::new();
+        let mut paths = Vec::new();
+        for path in snapshot
+            .tasks
+            .iter()
+            .filter_map(|task| task.cwd.as_ref())
+            .map(PathBuf::from)
+            .chain(self.current_project.clone())
+        {
+            if path.is_dir() && seen.insert(path.clone()) {
+                paths.push(path);
+            }
+        }
+        paths
+    }
+}
+
+impl Provider for CodexStartTaskProvider {
+    fn id(&self) -> &'static str {
+        "new-codex-task"
+    }
+
+    fn section_label(&self) -> &'static str {
+        "New Codex task"
+    }
+
+    fn answers_empty_root_query(&self) -> bool {
+        false
+    }
+
+    fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+        let action_label = if query.trim().is_empty() {
+            "Type the task first"
+        } else {
+            "Start Codex task  ↵"
+        };
+        let paths = self.paths();
+        let len = paths.len();
+        paths
+            .into_iter()
+            .enumerate()
+            .map(|(index, path)| {
+                let path = path.to_string_lossy().to_string();
+                Candidate {
+                    score: (len - index) as f32,
+                    item: SearchItem {
+                        id: path.clone(),
+                        kind: self.id().to_string(),
+                        // This must stay the full path: directory names alone
+                        // make two similarly named projects indistinguishable.
+                        title: path,
+                        subtitle: None,
+                        icon: Icon::Glyph(Glyph::Agent),
+                        section_label: self.section_label().to_string(),
+                        action_label: action_label.to_string(),
+                        badge: Some("CODEX".to_string()),
+                        accessory: None,
+                        enters_mode: None,
+                        group_label: None,
+                        actions: Vec::new(),
+                        source: Some("Codex".to_string()),
+                        meter: None,
+                        keeps_open: false,
+                        preview_markdown: false,
+                        speaker: None,
+                        images: Vec::new(),
+                        preview: None,
+                    },
+                }
+            })
+            .collect()
+    }
+
+    fn activate(&self, _id: &str) -> Result<(), ProviderError> {
+        Err(ProviderError(
+            "starting a Codex task needs the task that was typed".to_string(),
+        ))
+    }
+
+    fn activate_with_query(&self, id: &str, query: &str) -> Result<(), ProviderError> {
+        let start = StartTask::new(query, Some(PathBuf::from(id)))
+            .map_err(|message| ProviderError(message.to_string()))?;
+        let control = self
+            .control
+            .as_ref()
+            .ok_or_else(|| ProviderError("Codex is unavailable".to_string()))?;
+        control.start_task(start)
+    }
 }
 
 /// Mode-only, read-only activity for one exact selected Codex task. Its
@@ -926,17 +1081,131 @@ fn task_item(task: &Task, available: bool) -> SearchItem {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
+    use std::path::PathBuf;
     use std::sync::{Arc, Mutex, RwLock};
 
     use crate::provider::Provider;
 
     use super::{
-        CodexApprovalsProvider, CodexControl, CodexTaskProvider, CodexTasksProvider, Snapshot,
-        Task, TaskStatus,
+        CodexApprovalsProvider, CodexControl, CodexStartTaskProvider, CodexTaskProvider,
+        CodexTasksProvider, Snapshot, StartTask, Task, TaskStatus,
     };
 
     fn snapshot_with_approval(thread_id: &str, request_id: &str) -> Snapshot {
         Snapshot::with_approval(thread_id, request_id)
+    }
+
+    #[test]
+    fn start_request_requires_a_visible_workspace_path() {
+        assert_eq!(
+            StartTask::new("Fix it", None).unwrap_err(),
+            "choose a project first"
+        );
+
+        let project = tempfile::tempdir().expect("temporary project directory");
+        assert_eq!(
+            StartTask::new("", Some(project.path().to_path_buf())).unwrap_err(),
+            "type the task first"
+        );
+    }
+
+    #[test]
+    fn start_request_uses_the_selected_path_verbatim() {
+        let project = tempfile::tempdir().expect("temporary project directory");
+        let selected = project.path().to_path_buf();
+        let request =
+            StartTask::new("Fix ranking", Some(selected.clone())).expect("valid start request");
+
+        assert_eq!(request.cwd, selected);
+    }
+
+    #[test]
+    fn start_request_rejects_a_project_that_is_no_longer_local() {
+        let missing = PathBuf::from("/tmp/neko-start-task-missing-project");
+        assert_eq!(
+            StartTask::new("Fix it", Some(missing)).unwrap_err(),
+            "selected project is unavailable"
+        );
+    }
+
+    #[test]
+    fn new_codex_task_lists_each_existing_snapshot_or_client_project_path_once() {
+        let first = tempfile::tempdir().expect("first project");
+        let second = tempfile::tempdir().expect("second project");
+        let missing = PathBuf::from("/tmp/neko-codex-task-missing-project");
+        let snapshot = Snapshot {
+            tasks: vec![
+                task(
+                    "one",
+                    "One",
+                    first.path().to_str(),
+                    None,
+                    0,
+                    TaskStatus::Idle,
+                ),
+                task(
+                    "duplicate",
+                    "Duplicate",
+                    first.path().to_str(),
+                    None,
+                    0,
+                    TaskStatus::Idle,
+                ),
+                task(
+                    "missing",
+                    "Missing",
+                    missing.to_str(),
+                    None,
+                    0,
+                    TaskStatus::Idle,
+                ),
+            ],
+            ..Snapshot::default()
+        };
+        let provider = CodexStartTaskProvider::with_snapshot_and_current_project(
+            Arc::new(RwLock::new(snapshot)),
+            Some(second.path().to_path_buf()),
+        );
+
+        let rows = provider.search("Fix ranking", 0);
+        let paths: Vec<_> = rows.iter().map(|row| row.item.id.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                first.path().to_str().unwrap(),
+                second.path().to_str().unwrap()
+            ]
+        );
+        assert!(rows.iter().all(|row| row.item.title == row.item.id));
+        assert!(
+            rows.iter()
+                .all(|row| row.item.action_label == "Start Codex task  ↵"),
+            "the prompt is a task, never a path filter"
+        );
+    }
+
+    #[test]
+    fn new_codex_task_activation_passes_the_selected_path_and_typed_prompt_to_control() {
+        let project = tempfile::tempdir().expect("project");
+        let selected = project.path().to_path_buf();
+        let control = Arc::new(StartControl::default());
+        let provider = CodexStartTaskProvider::with_snapshot_current_project_and_control(
+            Arc::new(RwLock::new(Snapshot::default())),
+            Some(selected.clone()),
+            control.clone(),
+        );
+
+        provider
+            .activate_with_query(selected.to_str().unwrap(), "  Fix ranking  ")
+            .expect("the control receives an explicit local start");
+
+        assert_eq!(
+            &*control.0.lock().unwrap(),
+            &[StartTask {
+                prompt: "Fix ranking".to_string(),
+                cwd: selected,
+            }]
+        );
     }
 
     #[derive(Default)]
@@ -959,6 +1228,10 @@ mod tests {
         fn open_task(&self, _thread_id: &str) -> Result<(), crate::provider::ProviderError> {
             Ok(())
         }
+
+        fn start_task(&self, _start: StartTask) -> Result<(), crate::provider::ProviderError> {
+            Ok(())
+        }
     }
 
     #[derive(Default)]
@@ -976,6 +1249,33 @@ mod tests {
 
         fn open_task(&self, thread_id: &str) -> Result<(), crate::provider::ProviderError> {
             self.0.lock().unwrap().push(thread_id.to_owned());
+            Ok(())
+        }
+
+        fn start_task(&self, _start: StartTask) -> Result<(), crate::provider::ProviderError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct StartControl(Mutex<Vec<StartTask>>);
+
+    impl CodexControl for StartControl {
+        fn resolve_approval(
+            &self,
+            _thread_id: &str,
+            _request_id: &Value,
+            _approve: bool,
+        ) -> Result<(), crate::provider::ProviderError> {
+            Ok(())
+        }
+
+        fn open_task(&self, _thread_id: &str) -> Result<(), crate::provider::ProviderError> {
+            Ok(())
+        }
+
+        fn start_task(&self, start: StartTask) -> Result<(), crate::provider::ProviderError> {
+            self.0.lock().unwrap().push(start);
             Ok(())
         }
     }

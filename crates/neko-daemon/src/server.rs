@@ -204,6 +204,16 @@ impl AppState {
                     codex_control.clone(),
                 ),
             ),
+            // Starting a task is deliberately mode-only. Its rows come from
+            // the local Codex snapshot and the optional client-project seam;
+            // no daemon cwd or worktree is inferred here.
+            Box::new(
+                neko_core::codex::CodexStartTaskProvider::with_snapshot_current_project_and_control(
+                    codex.clone(),
+                    None,
+                    codex_control.clone(),
+                ),
+            ),
         ];
         Self {
             db,
