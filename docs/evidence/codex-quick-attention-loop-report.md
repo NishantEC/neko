@@ -21,12 +21,15 @@ one selected task at a time.
 | `cargo test --workspace` | **Passed** (exit 0): 409 tests passed, 0 failed, 5 ignored. The harness emitted three existing dead-code warnings and Cargo reported two future-incompatibility warnings. |
 | `cargo clippy --all-targets -- -D warnings` | **Blocked by existing dead-code diagnostics** (exit 101): unused Codex reader helper; unused daemon snapshot field; and unused quota-poll constant/functions, including the verification-harness build. No lint was suppressed. |
 | Focused clippy: `cargo clippy -p neko-core -p neko-client -p neko-protocol -p neko --all-targets -- -D warnings` | **Passed** (exit 0). Cargo still reported the same two upstream future-incompatibility warnings. |
+| `rustfmt --edition 2024 --check crates/neko-daemon/src/bin/verify_harness.rs` | **Blocked by existing formatting drift** in the harness's included `crates/neko-daemon/src/codex.rs`; the harness edit itself was left untouched by the check and no formatter was run. |
 
 ## Live verification
 
-An isolated debug run used a synthetic local stdio server and an empty
-temporary home. It exercised the real Neko client, daemon, Unix socket, and
-supervision path without reading a session file or creating a real Codex task.
+An isolated run used the verification-only daemon harness, a staged Neko
+client, and a synthetic local stdio server under an empty temporary home. It
+exercised the real client, socket protocol, and Codex supervision path without
+starting the shipped daemon or its systemwide clipboard-capture loop, reading a
+session file, or creating a real Codex task.
 
 | Check | Result |
 | --- | --- |
@@ -49,29 +52,46 @@ values. The disposable local test material was moved to Trash after the run.
 ## Reproducible, local-only recipe
 
 Run this only from a disposable checkout with the repository binaries already
-built. The committed
+built. It uses `verify_harness`, whose source deliberately omits the real
+daemon's systemwide clipboard-capture loop while starting only the existing
+Codex actor against the synthetic fixture. The committed
 `docs/evidence/codex-quick-attention-loop-fixture.py` is a synthetic
 `codex app-server --stdio`: it contains no real task, project, prompt, token,
 or session data and records method names only.
 
 ```sh
-cargo build --bin neko --bin neko-daemon
+set -e
+cargo build --bin neko --bin verify_harness
 original_home="$HOME"
 fixture_root="$(mktemp -d /tmp/neko-codex.XXXXXX)"
-mkdir -p "$fixture_root/home" "$fixture_root/bin"
+mkdir -p "$fixture_root/home" "$fixture_root/bin" \
+  "$fixture_root/staged-neko" "$fixture_root/no-daemon-path"
 ln -s "$PWD/docs/evidence/codex-quick-attention-loop-fixture.py" \
   "$fixture_root/bin/codex"
+cp ./target/debug/neko "$fixture_root/staged-neko/neko"
 export HOME="$fixture_root/home"
 export NEKO_CODEX_PATH="$fixture_root/bin/codex"
 export NEKO_CODEX_FIXTURE_LOG="$fixture_root/methods.log"
 export NEKO_CODEX_FIXTURE_PID_FILE="$fixture_root/codex.pid"
 export NEKO_CODEX_FIXTURE_STOP_FILE="$fixture_root/stop"
 cleanup() {
-  kill "${neko_pid:-}" 2>/dev/null || true
+  if [ -f "$NEKO_CODEX_FIXTURE_PID_FILE" ]; then
+    fixture_pid="$(cat "$NEKO_CODEX_FIXTURE_PID_FILE")"
+    fixture_command="$(ps -p "$fixture_pid" -o command= 2>/dev/null || true)"
+    case "$fixture_command" in
+      *"$fixture_root/bin/codex app-server --stdio"*) kill "$fixture_pid" 2>/dev/null || true ;;
+    esac
+  fi
+  kill "${neko_pid:-}" "${harness_pid:-}" 2>/dev/null || true
+  wait "${neko_pid:-}" "${harness_pid:-}" 2>/dev/null || true
   mv "$fixture_root" "$original_home/.Trash/"
 }
 trap cleanup EXIT
-NEKO_SHOW_ON_LAUNCH=1 ./target/debug/neko &
+./target/debug/verify_harness >"$fixture_root/harness.out" 2>"$fixture_root/harness.err" &
+harness_pid=$!
+sleep 1
+PATH="$fixture_root/no-daemon-path" NEKO_SHOW_ON_LAUNCH=1 \
+  "$fixture_root/staged-neko/neko" >"$fixture_root/neko.out" 2>"$fixture_root/neko.err" &
 neko_pid=$!
 sleep 1
 socket="$HOME/Library/Application Support/neko/neko.sock"
@@ -80,6 +100,7 @@ python3 docs/evidence/codex-quick-attention-loop-fixture.py \
 grep -Fx 'initialize' "$NEKO_CODEX_FIXTURE_LOG"
 grep -Fx 'initialized' "$NEKO_CODEX_FIXTURE_LOG"
 grep -Fx 'thread/list' "$NEKO_CODEX_FIXTURE_LOG"
+grep -F 'failed to spawn neko-daemon' "$fixture_root/neko.err"
 touch "$NEKO_CODEX_FIXTURE_STOP_FILE"
 kill "$(cat "$NEKO_CODEX_FIXTURE_PID_FILE")"
 sleep 1
@@ -92,14 +113,20 @@ and at least one application row. The method log asserts the bootstrap order's
 three named methods without recording parameters. The second probe, after only
 the synthetic child is stopped, asserts that its retained task is visibly
 unavailable, its approval has cleared, and application search still works. Do
-not send an approval response during this check. The short `/tmp` home keeps
-the Unix-socket path below macOS's limit, and the exit trap moves the exact
-disposable directory to Trash.
+not send an approval response during this check. The staged client has no
+`neko-daemon` sibling and runs with a `PATH` containing no daemon binary; the
+required launch failure proves it cannot start the real daemon. The harness is
+the only process hosting the socket, and it omits clipboard capture. The short
+`/tmp` home keeps the Unix-socket path below macOS's limit. The exit trap stops
+only the recorded fixture child, staged client, and harness before moving the
+exact disposable directory to Trash.
 
-The committed recipe was rerun against the debug binaries for this record. Its
-sanitized outputs were `tasks=1 approvals=1 unavailable=0 apps=5`, the three
-expected bootstrap method names, then `tasks=1 approvals=0 unavailable=1
-apps=5` after stopping only the synthetic child.
+The committed recipe was rerun for this record with the debug verification
+harness and a staged copy of the debug client. Its sanitized outputs were
+`tasks=1 approvals=1 unavailable=0 apps=5`, the three expected bootstrap
+method names, then `tasks=1 approvals=0 unavailable=1 apps=5` after stopping
+only the synthetic child. The staged client reported the expected failure to
+resolve `neko-daemon`; no shipped daemon was launched.
 
 ## Safety boundary
 
