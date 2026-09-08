@@ -639,6 +639,12 @@ impl Provider for CodexStartTaskProvider {
     fn activate_with_query(&self, id: &str, query: &str) -> Result<(), ProviderError> {
         let start = StartTask::new(query, Some(PathBuf::from(id)))
             .map_err(|message| ProviderError(message.to_string()))?;
+        // A client cannot turn an arbitrary filesystem path into an approved
+        // task location by forging an Activate frame. The path must still be
+        // one of the current, visible snapshot/client-project rows.
+        if !self.paths().contains(&start.cwd) {
+            return Err(ProviderError("choose a project first".to_string()));
+        }
         let control = self
             .control
             .as_ref()
@@ -1206,6 +1212,36 @@ mod tests {
                 cwd: selected,
             }]
         );
+    }
+
+    #[test]
+    fn new_codex_task_rejects_an_existing_directory_that_was_not_visible_as_a_project() {
+        let visible = tempfile::tempdir().expect("visible project");
+        let arbitrary = tempfile::tempdir().expect("arbitrary directory");
+        let control = Arc::new(StartControl::default());
+        let snapshot = Snapshot {
+            tasks: vec![task(
+                "visible",
+                "Visible",
+                visible.path().to_str(),
+                None,
+                0,
+                TaskStatus::Idle,
+            )],
+            ..Snapshot::default()
+        };
+        let provider = CodexStartTaskProvider::with_snapshot_current_project_and_control(
+            Arc::new(RwLock::new(snapshot)),
+            None,
+            control.clone(),
+        );
+
+        let error = provider
+            .activate_with_query(arbitrary.path().to_str().unwrap(), "Fix ranking")
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "choose a project first");
+        assert!(control.0.lock().unwrap().is_empty(), "the unlisted path never reaches Codex");
     }
 
     #[derive(Default)]
