@@ -129,6 +129,19 @@ pub const MODES: &[ModeChrome] = &[
         transcript: false,
         skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
+    // A task row enters this plain scoped list. Task 5 will add its bounded
+    // activity history and task-specific detail semantics; until then the
+    // existing mode machinery gives Enter a real, searchable destination.
+    ModeChrome {
+        id: "codex-task",
+        provider_id: "codex-task",
+        title: "Codex Tasks",
+        placeholder: "Type to filter Codex tasks…",
+        empty_line: "No Codex tasks available.",
+        has_detail: false,
+        transcript: false,
+        skeleton: crate::components::skeleton::SkeletonShape::Row,
+    },
     // The third mode, and the first where **the query is not a filter**: what
     // is typed here is the task the agent is given, and the rows are the
     // directories it could work in (`neko_core::new_agent`). Nothing in this
@@ -263,6 +276,13 @@ mod tests {
             !chrome.has_detail,
             "the theme mode's preview is the whole panel; a detail column would cover it"
         );
+    }
+
+    #[test]
+    fn the_codex_task_mode_is_registered_and_scopes_to_codex_tasks() {
+        let chrome = chrome_for("codex-task").expect("the Codex task mode must be registered");
+        assert_eq!(chrome.provider_id, "codex-task");
+        assert!(!chrome.has_detail, "Task 5 owns the task detail experience");
     }
 
     #[test]
