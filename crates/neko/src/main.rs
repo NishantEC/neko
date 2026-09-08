@@ -560,13 +560,13 @@ fn summon_from_outside(cx: &mut App) {
             // to the isolated daemon first," and a remember-to-do-it
             // mitigation is precisely what failed in the key-window incident
             // this guard's sibling in `evidence.rs` was added for.
+            let initial_accessibility_trusted = accessibility.is_trusted();
             eprintln!(
-                "neko: accessibility trusted: {} — the summon hotkey is only registered when this is true",
-                accessibility.is_trusted()
+                "neko: accessibility trusted: {initial_accessibility_trusted} — the summon hotkey is only registered when this is true"
             );
             if evidence::evidence_run_active() {
                 eprintln!("neko: evidence run — skipping live hotkey registration");
-            } else if accessibility.is_trusted()
+            } else if initial_accessibility_trusted
                 && let Err(e) = controller.borrow_mut().apply_initial(&config)
             {
                 eprintln!(
@@ -597,6 +597,14 @@ fn summon_from_outside(cx: &mut App) {
             // pushes a spurious no-op transition.
             let mut last_attention_count: usize = 0;
             let mut last_connected = true;
+            // TCC changes happen out-of-process in System Settings. Poll at a
+            // human-scale cadence instead of the 20ms event-loop cadence:
+            // `AXIsProcessTrusted` is cheap, but no permission state needs a
+            // fifty-times-a-second read. A false-to-true edge is enough — a
+            // failed registration needs a deliberate Settings/hotkey change,
+            // not a noisy retry loop.
+            let mut last_accessibility_trusted = initial_accessibility_trusted;
+            let mut next_accessibility_check = Instant::now() + Duration::from_millis(500);
 
             if !onboarding_state.completed {
                 cx.update(|cx| {
@@ -763,6 +771,31 @@ fn summon_from_outside(cx: &mut App) {
                     });
                 }
 
+                if Instant::now() >= next_accessibility_check {
+                    let accessibility_trusted = accessibility.is_trusted();
+                    if should_register_hotkey_after_accessibility_grant(
+                        last_accessibility_trusted,
+                        accessibility_trusted,
+                        controller.borrow().current_hotkey_id().is_some(),
+                    ) && !evidence::evidence_run_active()
+                    {
+                        match controller.borrow_mut().apply_initial(&config) {
+                            Ok(()) => eprintln!("neko: Accessibility was granted — summon hotkey {} is now live", config.combo.display()),
+                            Err(e) => eprintln!("neko: Accessibility was granted but the summon hotkey {} could not register: {e}", config.combo.display()),
+                        }
+                    }
+                    if accessibility_trusted != last_accessibility_trusted {
+                        last_accessibility_trusted = accessibility_trusted;
+                        cx.update(|cx| {
+                            let _ = window.update(cx, |_root, window, cx| {
+                                window.refresh();
+                                cx.notify();
+                            });
+                        });
+                    }
+                    next_accessibility_check = Instant::now() + Duration::from_millis(500);
+                }
+
                 cx.background_executor().timer(Duration::from_millis(20)).await;
             }
         })
@@ -829,6 +862,18 @@ fn should_summon_without_hotkey(onboarding_completed: bool, summon_hotkey_is_liv
     onboarding_completed && !summon_hotkey_is_live
 }
 
+/// Register exactly once when System Settings grants Accessibility after the
+/// app has launched. `HotkeyController::apply_initial` owns the actual OS
+/// call; this predicate keeps the polling loop from repeatedly trying a
+/// conflicting user choice.
+fn should_register_hotkey_after_accessibility_grant(
+    was_accessibility_trusted: bool,
+    is_accessibility_trusted: bool,
+    summon_hotkey_is_live: bool,
+) -> bool {
+    !was_accessibility_trusted && is_accessibility_trusted && !summon_hotkey_is_live
+}
+
 async fn fetch_onboarding_state(client: &NekoClient, cx: &AsyncApp) -> OnboardingStateSnapshot {
     if std::env::var_os(RESET_ONBOARDING_ENV_VAR).is_some() {
         let _ = client.request(Request::SetOnboardingComplete { completed: false }).await;
@@ -848,7 +893,7 @@ async fn fetch_onboarding_state(client: &NekoClient, cx: &AsyncApp) -> Onboardin
 
 #[cfg(test)]
 mod startup_tests {
-    use super::should_summon_without_hotkey;
+    use super::{should_register_hotkey_after_accessibility_grant, should_summon_without_hotkey};
 
     #[test]
     fn completed_setup_without_a_live_hotkey_opens_a_reachable_panel() {
@@ -859,6 +904,18 @@ mod startup_tests {
     fn onboarding_or_a_live_hotkey_does_not_force_open_the_panel() {
         assert!(!should_summon_without_hotkey(false, false));
         assert!(!should_summon_without_hotkey(true, true));
+    }
+
+    #[test]
+    fn granting_accessibility_after_launch_retries_a_missing_hotkey() {
+        assert!(should_register_hotkey_after_accessibility_grant(false, true, false));
+    }
+
+    #[test]
+    fn a_stable_grant_or_existing_hotkey_does_not_repeat_registration() {
+        assert!(!should_register_hotkey_after_accessibility_grant(false, false, false));
+        assert!(!should_register_hotkey_after_accessibility_grant(true, true, false));
+        assert!(!should_register_hotkey_after_accessibility_grant(false, true, true));
     }
 }
 
