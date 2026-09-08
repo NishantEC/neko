@@ -29,14 +29,17 @@ pub enum TaskStatus {
 
 impl TaskStatus {
     fn from_json(value: Option<&Value>) -> Self {
-        match value
-            .and_then(|status| status.get("type"))
-            .and_then(Value::as_str)
-        {
-            Some("working") | Some("running") => Self::Working,
+        let status = value.and_then(|status| {
+            status
+                .as_str()
+                .or_else(|| status.get("type").and_then(Value::as_str))
+        });
+        match status {
+            Some("active") | Some("working") | Some("running") => Self::Working,
             Some("waiting") | Some("needsInput") => Self::Waiting,
             Some("idle") | Some("completed") => Self::Idle,
-            Some("failed") | Some("error") => Self::Failed,
+            Some("systemError") | Some("failed") | Some("error") => Self::Failed,
+            Some("notLoaded") => Self::Unknown,
             _ => Self::Unknown,
         }
     }
@@ -449,7 +452,10 @@ fn permission_detail(permissions: &Value) -> Option<String> {
     if permissions.get("network").is_some() {
         grants.push("network access".to_string());
     }
-    if let Some(filesystem) = permissions.get("filesystem") {
+    if let Some(filesystem) = permissions
+        .get("fileSystem")
+        .or_else(|| permissions.get("filesystem"))
+    {
         grants.push(format!("file access ({filesystem})"));
     }
     if grants.is_empty() {
@@ -471,31 +477,60 @@ fn request_id_from_row_id(id: &str) -> Option<Value> {
 
 fn parse_task(entry: &Value) -> Option<Task> {
     let id = entry.get("id")?.as_str()?;
-    let title = entry.get("name")?.as_str()?;
-    if id.trim().is_empty() || title.trim().is_empty() {
+    if id.trim().is_empty() {
         return None;
     }
+    let title = entry
+        .get("name")
+        .and_then(Value::as_str)
+        .or_else(|| entry.get("preview").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .unwrap_or("Untitled task");
+    let status = if entry
+        .get("waitingOnApproval")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        TaskStatus::Waiting
+    } else {
+        TaskStatus::from_json(entry.get("status"))
+    };
 
     Some(Task {
         id: id.to_owned(),
-        title: title.to_owned(),
+        title: title.to_string(),
         cwd: entry.get("cwd").and_then(Value::as_str).map(str::to_owned),
         provider: entry
             .get("modelProvider")
             .and_then(Value::as_str)
             .map(str::to_owned),
         updated_at: entry.get("updatedAt").and_then(Value::as_i64).unwrap_or(0),
-        status: TaskStatus::from_json(entry.get("status")),
+        status,
     })
 }
+
+const MAX_ACTIVITY_SUMMARY_CHARS: usize = 240;
 
 fn parse_activity(entry: &Value) -> Option<Activity> {
     let id = entry.get("id")?.as_str()?.trim();
     let summary = entry
-        .get("summary")
-        .and_then(Value::as_str)
-        .or_else(|| entry.get("title").and_then(Value::as_str))?
-        .trim();
+        .get("items")
+        .and_then(first_visible_text)
+        .or_else(|| entry.get("itemsView").and_then(first_visible_text))
+        .or_else(|| {
+            entry
+                .get("summary")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            entry
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })?;
+    let summary = summary.trim();
     if id.is_empty() || summary.is_empty() {
         return None;
     }
@@ -511,9 +546,48 @@ fn parse_activity(entry: &Value) -> Option<Activity> {
         .map(str::to_owned);
     Some(Activity {
         id: id.to_owned(),
-        summary: summary.to_owned(),
+        summary: summary.chars().take(MAX_ACTIVITY_SUMMARY_CHARS).collect(),
         status,
     })
+}
+
+/// Extracts only readable, bounded text from Codex's visible turn items. It
+/// deliberately does not stringify raw item JSON, which could expose large
+/// tool payloads or arbitrary command output in the compact quick view.
+fn first_visible_text(value: &Value) -> Option<String> {
+    match value {
+        Value::Array(values) => values.iter().find_map(first_visible_text),
+        Value::Object(object) => {
+            let readable_item = object
+                .get("type")
+                .and_then(Value::as_str)
+                .map(|kind| {
+                    matches!(
+                        kind,
+                        "userMessage" | "agentMessage" | "inputText" | "text" | "message"
+                    )
+                })
+                .unwrap_or(true);
+            if readable_item {
+                for key in ["text", "summary", "title"] {
+                    if let Some(text) = object.get(key).and_then(Value::as_str).map(str::trim)
+                        && !text.is_empty()
+                    {
+                        return Some(text.to_string());
+                    }
+                }
+            }
+            for key in ["content", "items", "itemsView"] {
+                if let Some(value) = object.get(key)
+                    && let Some(text) = first_visible_text(value)
+                {
+                    return Some(text);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 /// Searchable task rows backed exclusively by the daemon-owned app-server
@@ -1094,7 +1168,7 @@ mod tests {
 
     use super::{
         CodexApprovalsProvider, CodexControl, CodexStartTaskProvider, CodexTaskProvider,
-        CodexTasksProvider, Snapshot, StartTask, Task, TaskStatus,
+        CodexTasksProvider, MAX_ACTIVITY_SUMMARY_CHARS, Snapshot, StartTask, Task, TaskStatus,
     };
 
     fn snapshot_with_approval(thread_id: &str, request_id: &str) -> Snapshot {
@@ -1241,7 +1315,10 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.to_string(), "choose a project first");
-        assert!(control.0.lock().unwrap().is_empty(), "the unlisted path never reaches Codex");
+        assert!(
+            control.0.lock().unwrap().is_empty(),
+            "the unlisted path never reaches Codex"
+        );
     }
 
     #[derive(Default)]
@@ -1492,7 +1569,7 @@ mod tests {
     }
 
     #[test]
-    fn thread_list_retains_ui_relevant_task_fields_and_skips_malformed_entries() {
+    fn thread_list_retains_ui_relevant_task_fields_and_only_skips_entries_without_ids() {
         let snapshot = Snapshot::from_thread_list(&json!({"data": [
             {
                 "id": "thr-1",
@@ -1508,17 +1585,94 @@ mod tests {
             }
         ]}));
 
-        assert_eq!(snapshot.tasks.len(), 1);
+        assert_eq!(snapshot.tasks.len(), 2);
         assert_eq!(snapshot.tasks[0].id, "thr-1");
         assert_eq!(snapshot.tasks[0].title, "Fix ranking");
         assert_eq!(snapshot.tasks[0].cwd.as_deref(), Some("/work/neko"));
         assert_eq!(snapshot.tasks[0].provider.as_deref(), Some("openai"));
         assert_eq!(snapshot.tasks[0].updated_at, 42);
         assert_eq!(snapshot.tasks[0].status, TaskStatus::Working);
+        assert_eq!(snapshot.tasks[1].id, "missing-required-fields");
+        assert_eq!(snapshot.tasks[1].title, "Untitled task");
     }
 
     #[test]
-    fn thread_list_skips_entries_with_blank_ids_or_titles() {
+    fn thread_list_uses_the_current_codex_task_shape_including_nullable_name_and_approval_waiting()
+    {
+        let snapshot = Snapshot::from_thread_list(&json!({"data": [
+            {
+                "id": "active",
+                "name": null,
+                "preview": "Repair task ranking",
+                "cwd": "/work/neko",
+                "status": "active",
+                "waitingOnApproval": true
+            },
+            {"id": "broken", "name": "", "preview": "", "status": "systemError"},
+            {"id": "cold", "name": null, "preview": null, "status": "notLoaded"}
+        ]}));
+
+        assert_eq!(snapshot.tasks.len(), 3);
+        assert_eq!(snapshot.tasks[0].title, "Repair task ranking");
+        assert_eq!(snapshot.tasks[0].status, TaskStatus::Waiting);
+        assert_eq!(snapshot.tasks[1].title, "Untitled task");
+        assert_eq!(snapshot.tasks[1].status, TaskStatus::Failed);
+        assert_eq!(snapshot.tasks[2].title, "Untitled task");
+        assert_eq!(snapshot.tasks[2].status, TaskStatus::Unknown);
+    }
+
+    #[test]
+    fn turn_list_summarizes_visible_turn_items_not_a_legacy_top_level_summary() {
+        let mut snapshot = Snapshot::default();
+        snapshot.replace_tasks(vec![task("thr-1", "Task", None, None, 0, TaskStatus::Idle)]);
+        snapshot.apply_turn_list("thr-1", &json!({"data": [{
+            "id": "turn-1",
+            "status": "completed",
+            "items": [{"type": "userMessage", "content": [{"type": "inputText", "text": "Fix the ranking regression"}]}],
+            "itemsView": [{"type": "agentMessage", "text": "The focused test now passes"}]
+        }]}));
+
+        assert_eq!(
+            snapshot.activity["thr-1"][0].summary,
+            "Fix the ranking regression"
+        );
+        assert_eq!(
+            snapshot.activity["thr-1"][0].status.as_deref(),
+            Some("completed")
+        );
+
+        let provider = CodexTaskProvider::with_snapshot_and_control(
+            Arc::new(RwLock::new(snapshot)),
+            Arc::new(TaskControl::default()),
+        );
+        assert_eq!(
+            provider.search("thr-1", 0)[0].item.title,
+            "Fix the ranking regression",
+            "the compact task view renders the actual turn content"
+        );
+    }
+
+    #[test]
+    fn turn_list_falls_back_to_a_bounded_items_view_summary_without_stringifying_tool_payloads() {
+        let mut snapshot = Snapshot::default();
+        snapshot.replace_tasks(vec![task("thr-1", "Task", None, None, 0, TaskStatus::Idle)]);
+        let visible = "x".repeat(MAX_ACTIVITY_SUMMARY_CHARS + 20);
+        snapshot.apply_turn_list(
+            "thr-1",
+            &json!({"data": [{
+                "id": "turn-1",
+                "items": [{"type": "commandExecution", "text": "secret raw tool output"}],
+                "itemsView": [{"type": "agentMessage", "text": visible}]
+            }]}),
+        );
+
+        let summary = &snapshot.activity["thr-1"][0].summary;
+        assert_eq!(summary.chars().count(), MAX_ACTIVITY_SUMMARY_CHARS);
+        assert!(!summary.contains("secret raw tool output"));
+    }
+
+    #[test]
+    fn thread_list_uses_fallback_titles_for_blank_names_but_skips_blank_ids() {
         let snapshot = Snapshot::from_thread_list(&json!({"data": [
             {"id": "", "name": "Has no id"},
             {"id": "   ", "name": "Has no id"},
@@ -1527,8 +1681,12 @@ mod tests {
             {"id": "thr-4", "name": "Visible task"}
         ]}));
 
-        assert_eq!(snapshot.tasks.len(), 1);
-        assert_eq!(snapshot.tasks[0].id, "thr-4");
+        assert_eq!(snapshot.tasks.len(), 3);
+        assert_eq!(snapshot.tasks[0].id, "thr-2");
+        assert_eq!(snapshot.tasks[0].title, "Untitled task");
+        assert_eq!(snapshot.tasks[1].id, "thr-3");
+        assert_eq!(snapshot.tasks[1].title, "Untitled task");
+        assert_eq!(snapshot.tasks[2].id, "thr-4");
     }
 
     #[test]
@@ -1671,6 +1829,12 @@ mod tests {
             "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1,
                 "cwd": "/work/neko", "reason": "Needed to fetch the dependency", "permissions": {"network": {"enabled": true}}}
         }));
+        snapshot.apply_notification(&json!({
+            "id": "permissions-file-system",
+            "method": "item/permissions/requestApproval",
+            "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1,
+                "cwd": "/work/neko", "permissions": {"fileSystem": "workspace-write"}}
+        }));
 
         let detail = |id: &str| {
             snapshot
@@ -1686,6 +1850,7 @@ mod tests {
         assert!(detail("permissions").contains("this turn"));
         assert!(detail("permissions-with-reason").contains("network access"));
         assert!(detail("permissions-with-reason").contains("Needed to fetch the dependency"));
+        assert!(detail("permissions-file-system").contains("file access (\"workspace-write\")"));
 
         let provider = CodexApprovalsProvider::with_snapshot_and_control(
             Arc::new(RwLock::new(snapshot)),

@@ -655,6 +655,7 @@ fn start_task(
     let thread = match read_start_reply(transport, snapshot, thread_request_id, deadline) {
         Ok(thread) => thread,
         Err(StartReplyError::Rpc(error)) => return Ok(Err(error)),
+        Err(StartReplyError::OutcomeUnknown(error)) => return Ok(Err(error)),
         Err(StartReplyError::Transport(error)) => return Err(error),
     };
     let Some(thread_id) = thread
@@ -683,6 +684,7 @@ fn start_task(
     match read_start_reply(transport, snapshot, turn_request_id, deadline) {
         Ok(_) => {}
         Err(StartReplyError::Rpc(error)) => return Ok(Err(error)),
+        Err(StartReplyError::OutcomeUnknown(error)) => return Ok(Err(error)),
         Err(StartReplyError::Transport(error)) => return Err(error),
     }
     Ok(Ok(()))
@@ -690,11 +692,21 @@ fn start_task(
 
 /// Start commands need a different error boundary from bootstrap: a valid
 /// JSON-RPC `error` is Codex rejecting this one task, not evidence the stdio
-/// session has died. Transport/parse failures remain `io::Error`s so the
-/// supervisor preserves its existing restart behavior.
+/// session has died. Once a start command was successfully written, a timeout
+/// or EOF cannot prove whether Codex created the task, so it is deliberately
+/// surfaced as an inline unknown outcome rather than retried or restarted.
+/// Other transport/parse failures retain the bootstrap restart behavior.
 enum StartReplyError {
     Rpc(neko_core::provider::ProviderError),
+    OutcomeUnknown(neko_core::provider::ProviderError),
     Transport(io::Error),
+}
+
+fn unknown_start_outcome() -> StartReplyError {
+    StartReplyError::OutcomeUnknown(neko_core::provider::ProviderError(
+        "Codex task start outcome is unknown; it may have started. Check Codex before trying again."
+            .to_string(),
+    ))
 }
 
 fn read_start_reply(
@@ -704,10 +716,16 @@ fn read_start_reply(
     deadline: Instant,
 ) -> Result<Value, StartReplyError> {
     loop {
+        let timeout = remaining(deadline).map_err(|_| unknown_start_outcome())?;
         let line = transport
-            .read_line(Some(remaining(deadline).map_err(StartReplyError::Transport)?))
-            .map_err(StartReplyError::Transport)?
-            .ok_or_else(|| StartReplyError::Transport(io::Error::from(io::ErrorKind::UnexpectedEof)))?;
+            .read_line(Some(timeout))
+            .map_err(|error| match error.kind() {
+                io::ErrorKind::TimedOut
+                | io::ErrorKind::UnexpectedEof
+                | io::ErrorKind::BrokenPipe => unknown_start_outcome(),
+                _ => StartReplyError::Transport(error),
+            })?
+            .ok_or_else(unknown_start_outcome)?;
         let Ok(message) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
@@ -725,15 +743,12 @@ fn read_start_reply(
                     format!("Codex: {detail}"),
                 )));
             }
-            return message
-                .get("result")
-                .cloned()
-                .ok_or_else(|| {
-                    StartReplyError::Transport(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Codex JSON-RPC reply has neither result nor error",
-                    ))
-                });
+            return message.get("result").cloned().ok_or_else(|| {
+                StartReplyError::Transport(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Codex JSON-RPC reply has neither result nor error",
+                ))
+            });
         }
     }
 }
@@ -1274,7 +1289,40 @@ mod tests {
 
             assert_eq!(error.to_string(), expected_error);
             assert_eq!(fake.sent.len(), expected_sent);
-            assert!(snapshot.read().unwrap().available, "the actor session stays live");
+            assert!(
+                snapshot.read().unwrap().available,
+                "the actor session stays live"
+            );
+        }
+    }
+
+    #[test]
+    fn start_reply_loss_after_a_write_is_unknown_and_never_retries_the_non_idempotent_command() {
+        let cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let start = neko_core::codex::StartTask::new("Fix ranking", Some(cwd))
+            .expect("the fixture directory exists");
+
+        for (replies, expected_methods) in [
+            (vec!["__timeout__"], vec!["thread/start"]),
+            (
+                vec![
+                    r#"{"id":3,"result":{"thread":{"id":"thr-new"}}}"#,
+                    "__timeout__",
+                ],
+                vec!["thread/start", "turn/start"],
+            ),
+        ] {
+            let snapshot = snapshot();
+            snapshot.write().unwrap().available = true;
+            let mut fake = FakeTransport::replying(replies);
+
+            let error = start_task(&mut fake, &snapshot, &start, 3, 4)
+                .expect("a post-write unknown outcome keeps the session available")
+                .unwrap_err();
+
+            assert!(error.to_string().contains("outcome is unknown"));
+            assert_eq!(fake.sent_methods(), expected_methods);
+            assert!(snapshot.read().unwrap().available);
         }
     }
 

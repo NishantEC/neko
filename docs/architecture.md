@@ -273,9 +273,10 @@ Codex Tasks, New Agent, New Codex task, Agents, Schedules, Usage, and Ask neko.
 
 **Three modes treat the query as a payload rather than a filter**: New Agent,
 where what is typed is the task and the rows are directories to start it in;
+New Codex task, where it is the first task turn for the selected project path;
 and Agents, where it is the prompt to send to the selected session. Filtering
-in either would shrink the list as you described the task and move the row out
-from under the selection mid-sentence. That
+in any of them would shrink the list as you described the task and move the row
+out from under the selection mid-sentence. That
 needed no new mode machinery — a mode has always been "one provider's own list,
 scoped by `Request::Search { provider }`", and a provider may ignore the query
 when ranking. It did need one additive wire field, `Request::Activate`'s

@@ -66,10 +66,12 @@ original_home="$HOME"
 fixture_root="$(mktemp -d /tmp/neko-codex.XXXXXX)"
 mkdir -p "$fixture_root/home" "$fixture_root/bin" \
   "$fixture_root/staged-neko" "$fixture_root/no-daemon-path"
-ln -s "$PWD/docs/evidence/codex-quick-attention-loop-fixture.py" \
+cp "$PWD/docs/evidence/codex-quick-attention-loop-fixture.py" \
   "$fixture_root/bin/codex"
+chmod +x "$fixture_root/bin/codex"
 cp ./target/debug/neko "$fixture_root/staged-neko/neko"
 export HOME="$fixture_root/home"
+export NEKO_VERIFY_FIXTURE_ROOT="$fixture_root"
 export NEKO_CODEX_PATH="$fixture_root/bin/codex"
 export NEKO_CODEX_FIXTURE_LOG="$fixture_root/methods.log"
 export NEKO_CODEX_FIXTURE_PID_FILE="$fixture_root/codex.pid"
@@ -109,8 +111,9 @@ python3 docs/evidence/codex-quick-attention-loop-fixture.py \
 ```
 
 The first probe asserts one synthetic task, one approval, no unavailable task,
-and at least one application row. The method log asserts the bootstrap order's
-three named methods without recording parameters. The second probe, after only
+and at least one application row. The method log asserts membership of the
+three named bootstrap methods without recording parameters; the three `grep`
+checks do not assert their order. The second probe, after only
 the synthetic child is stopped, asserts that its retained task is visibly
 unavailable, its approval has cleared, and application search still works. Do
 not send an approval response during this check. The staged client has no

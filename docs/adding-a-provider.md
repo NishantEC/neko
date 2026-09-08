@@ -300,4 +300,6 @@ Daemon-level tests go against `handle_request` directly
 Do not launch the real `neko-daemon` to try something out. Its clipboard
 capture loop polls the systemwide pasteboard regardless of `HOME`. Use
 `crates/neko-daemon/src/bin/verify_harness.rs`, which hosts the real `server`
-module and every real provider without starting that loop.
+module and every real provider without starting that loop. It refuses to run
+unless `NEKO_VERIFY_FIXTURE_ROOT`, `HOME`, and `NEKO_CODEX_PATH` explicitly
+point inside one disposable fixture tree.
