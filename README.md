@@ -21,8 +21,13 @@ One query searches every source at once, each under its own section header:
   that pane.
 - **Agents** — the coding agents running on this machine right now, as tiles
   above the results.
-- **Needs you** — any agent stopped waiting for a permission. These lead the
-  list: Enter approves, ⌘K denies.
+- **Codex tasks** — recent local Codex tasks in that same tile strip. Their
+  data is a warmed local snapshot, so a palette keystroke never starts Codex
+  or reads a session file.
+- **Needs you** — blocked Paseo permissions lead the list: Enter approves and
+  ⌘K offers an ordinary Deny choice. Codex approval rows, when Codex supplies
+  them, use explicit Approve/Decline actions and require a second confirmation
+  for Decline.
 - **Commands** — rows that open a mode inside the panel instead of launching
   something: Clipboard History, Themes, Agents, Schedules, Terminals, Usage,
   New Agent, and Ask neko.
@@ -41,6 +46,11 @@ own MCP endpoint, so the things you would switch apps for are a keypress away:
   looking.
 - **Agents** lists every session; Enter sends a follow-up prompt, ⌘K changes
   its session mode or cancels the run.
+- **Codex tasks** share the agent tile strip, but keep a separate local
+  app-server control path. A task opens a compact, read-only activity view;
+  an approval presents a readable summary when Codex supplies one, plus
+  explicit Approve/Decline actions. A decline uses the same confirmation guard
+  as other destructive menu actions.
 - **Schedules** shows what runs on a cron and when it next fires. Enter pauses
   or resumes; running one now is behind ⌘K, because Enter is what a finger
   presses on the way past a list.
@@ -50,8 +60,16 @@ own MCP endpoint, so the things you would switch apps for are a keypress away:
 - **Ask neko** takes a sentence. It proposes exactly one tool call, shows you
   the call, and runs nothing until you press Enter again.
 
-All of it degrades to nothing if Paseo is not running; none of it is required
-for the launcher half to work.
+The Paseo-backed agent-control surface degrades to nothing if Paseo is not
+running; none of it is required for the launcher half to work.
+
+Codex is separately optional. neko supervises one local `codex app-server
+--stdio` child and renders only its compact in-memory projection. If Codex is
+missing, signed out, or stops, retained task tiles say they are unavailable and
+approvals are not actionable; applications, files, clipboard history and the
+rest of the launcher continue to work. Opening a task can request up to 40
+visible activity summaries only when Codex accepts its experimental history
+capability. neko never reads Codex session/rollout files.
 
 ## What it is not
 
@@ -66,7 +84,8 @@ for the launcher half to work.
   signed in, and none of them running unless you use it: **Usage** reads quota
   from Anthropic, OpenAI and xAI; **Ask neko** sends your sentence and the
   names of your agents to Anthropic's Messages API to plan a tool call; and
-  everything under **Agents** talks to Paseo's daemon on `127.0.0.1`.
+  everything under **Agents** talks to Paseo's daemon on `127.0.0.1`. The
+  optional Codex projection talks only to one local child over stdio.
   Credentials are read from the Keychain and from the CLIs' own config files,
   are never persisted by neko, and are passed to `curl` on stdin so they
   cannot appear in `ps` output.

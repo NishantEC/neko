@@ -50,7 +50,7 @@ use crate::edge_fade::scroll_edge_fade;
 use crate::components::scroll::with_scrollbar;
 use crate::motion::HoverWash as _;
 use crate::menu_frost::sync_menu_frost;
-use crate::modes::{self, ModeChrome};
+use crate::modes::{self, ModeChrome, TaskRef};
 use crate::motion;
 use crate::text_field::{ContentChanged, DEFAULT_PLACEHOLDER, TextField};
 use crate::theme;
@@ -175,6 +175,10 @@ pub struct Root {
     /// A single `Option`: no mode nests. Preferences is a real window
     /// (`crate::preferences`), not a mode, so nothing here ever needed to.
     active_mode: Option<ActiveMode>,
+    /// Set only while an explicit Codex task activation is in flight. The
+    /// backend travels with the opaque id so it can never become a Paseo
+    /// conversation subject on success.
+    pending_task_mode: Option<(TaskRef, SearchItem)>,
     /// Running agents, lifted out of `results` into the grid above the
     /// search field. They are moved rather than copied: the same agent in
     /// both places would be two rows for one thing, and Enter would have to
@@ -357,6 +361,9 @@ struct ActiveMode {
     /// `None` for every mode that is a plain list, which is all of the
     /// others.
     subject: Option<String>,
+    /// A Codex task's qualified backend/id, never a bare id routed through
+    /// the Paseo conversation path.
+    task_ref: Option<TaskRef>,
     /// The row that opened this mode, kept for the transcript's header —
     /// the agent's name, workspace and badge are already composed on it by
     /// the provider that knows them, and re-deriving any of that client-side
@@ -457,6 +464,7 @@ impl Root {
             row_icon_cache,
             conversation_image_cache,
             active_mode: None,
+            pending_task_mode: None,
             open_preferences,
             agent_tiles: Vec::new(),
             grid_selected: None,
@@ -749,6 +757,10 @@ impl Root {
             (Some(COMMAND_PROVIDER_ID.to_string()), raw[1..].to_string())
         } else {
             match self.active_mode() {
+                Some(mode) if mode.task_ref.is_some() => {
+                    let task = mode.task_ref.as_ref().expect("checked above");
+                    (Some(task.provider_id().to_string()), task.id.clone())
+                }
                 // **A mode with a subject sends the subject, not the
                 // typing.** The conversation view is a list about one agent,
                 // and its provider has no other way to learn which — see
@@ -1327,7 +1339,7 @@ impl Root {
                 return;
             };
             self.text_field.update(cx, |field, cx| field.set_content("", cx));
-            self.perform_activation(request, false, cx);
+            self.perform_activation(request, false, None, cx);
             return;
         }
         // A focused tile owns Enter — the grid is part of the same
@@ -1374,6 +1386,14 @@ impl Root {
                 (self.open_preferences)(window, cx);
                 return;
             }
+            if mode_id == "codex-task" {
+                self.pending_task_mode = Some((
+                    TaskRef { backend: "codex".to_string(), id: item.id.clone() },
+                    item.clone(),
+                ));
+                self.perform_activation(self.primary_activation_request(&item, cx), false, Some("codex-task"), cx);
+                return;
+            }
             // **A conversation is about the row that opened it**, so the
             // row's own id travels into the mode as its subject. Every other
             // mode is a plain list and takes none — see `ActiveMode::subject`.
@@ -1414,7 +1434,7 @@ impl Root {
         // asking you to look at. This takes the path `⌘K` menu actions
         // already take, which also re-runs the search — exactly what makes
         // the proposal appear where the invitation was.
-        self.perform_activation(request, !item.keeps_open, cx);
+        self.perform_activation(request, !item.keeps_open, None, cx);
     }
 
     /// `⌘↵` — the jump to Paseo, from anywhere an agent is in front of you.
@@ -1439,7 +1459,7 @@ impl Root {
         };
         // Hide on success: the whole point of the keystroke is that the
         // interaction continues in Paseo's window, not this one.
-        self.perform_activation(request, true, cx);
+        self.perform_activation(request, true, None, cx);
     }
 
     /// What `⌘↵` would send, or `None` where it means nothing.
@@ -1515,7 +1535,13 @@ impl Root {
     /// has no mockup at all (the launch brief's own note), so "the menu
     /// never closes the panel, Enter on a row always can" is this task's
     /// own deliberate, stated design choice, not a frozen spec's.
-    fn perform_activation(&mut self, request: Request, hide_on_success: bool, cx: &mut Context<Self>) {
+    fn perform_activation(
+        &mut self,
+        request: Request,
+        hide_on_success: bool,
+        enter_mode_on_success: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) {
         let client = self.client.clone();
         self.activating = true;
         cx.notify();
@@ -1538,23 +1564,41 @@ impl Root {
             };
             let failed = error_message.is_some();
             let _ = this.update(cx, |root, cx| {
-                root.activating = false;
-                root.activation_error = error_message;
-                // A menu action that changed the underlying data (delete,
-                // ...) and isn't about to hide the panel needs the current
-                // list re-fetched to reflect it — a deleted row must not
-                // keep rendering until the next keystroke happens to
-                // re-search.
-                if !failed && !hide_on_success {
-                    root.run_search(cx);
-                }
-                cx.notify();
+                root.finish_activation(error_message, hide_on_success, enter_mode_on_success, cx);
             });
             if !failed && hide_on_success {
                 cx.update(|cx| cx.hide());
             }
         })
         .detach();
+    }
+
+    fn finish_activation(
+        &mut self,
+        error_message: Option<String>,
+        hide_on_success: bool,
+        enter_mode_on_success: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) {
+        let succeeded = error_message.is_none();
+        self.activating = false;
+        self.activation_error = error_message;
+        if !succeeded {
+            self.pending_task_mode = None;
+        }
+        // A menu action that changed the underlying data (delete, ...) and
+        // isn't about to hide the panel needs the current list re-fetched to
+        // reflect it. Review is different: the successful response is the
+        // authorization to enter its scoped task list, so that mode's own
+        // initial search replaces the root-list refresh.
+        if succeeded {
+            if let Some(mode_id) = enter_mode_on_success {
+                self.enter_mode_after_activation(mode_id, cx);
+            } else if !hide_on_success {
+                self.run_search(cx);
+            }
+        }
+        cx.notify();
     }
 
     /// Enters `mode_id`'s mode: saves the current query so `exit_mode` can
@@ -1637,6 +1681,7 @@ impl Root {
         for (index, item) in self.agent_tiles.iter().enumerate() {
             let focused = self.grid_selected == Some(index);
             let live = item.badge.as_deref() == Some("LIVE");
+            let status_label = agent_tile_status_label(item);
             let id = item.id.clone();
             let tile_item = item.clone();
             let mut dot = theme::active().state_success;
@@ -1815,6 +1860,17 @@ impl Root {
                                             .child(SharedString::from(item.title.clone())),
                                     ),
                             )
+                            .children(status_label.map(|label| {
+                                div()
+                                    .flex_shrink_0()
+                                    .px(px(4.))
+                                    .py(px(1.))
+                                    .rounded(px(3.))
+                                    .bg(theme::active().row_icon_socket_bg)
+                                    .text_size(px(8.5))
+                                    .text_color(theme::active().state_danger)
+                                    .child(SharedString::from(label))
+                            }))
                             .children(item.subtitle.clone().map(|subtitle| {
                                 div()
                                     .h(px(15.))
@@ -1848,6 +1904,31 @@ impl Root {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.close_actions_menu(window);
+        self.enter_mode_about_menu_closed(mode_id, subject, cx);
+    }
+
+    /// [`enter_mode_about`] after any transient menu has already closed.
+    /// Activation responses run without a `Window`, so successful actions
+    /// that continue into a mode use this shared state transition.
+    fn enter_mode_after_activation(&mut self, mode_id: &str, cx: &mut Context<Self>) {
+        self.enter_mode_about_menu_closed(mode_id, None, cx);
+        if mode_id == "codex-task"
+            && let Some((task_ref, item)) = self.pending_task_mode.take()
+            && let Some(mode) = self.active_mode.as_mut()
+        {
+            mode.task_ref = Some(task_ref);
+            mode.subject_item = Some(item);
+            self.run_search(cx);
+        }
+    }
+
+    fn enter_mode_about_menu_closed(
+        &mut self,
+        mode_id: &str,
+        subject: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         // Entering a mode from inside one would capture the *mode's* query
         // as `saved_query`, so exiting would restore the wrong text. Not
         // reachable today (commands only appear in the root list), but the
@@ -1863,12 +1944,12 @@ impl Root {
             chrome,
             saved_query,
             subject,
+            task_ref: None,
             subject_item: None,
             restore_theme: (chrome.provider_id == "theme").then(|| theme::active_theme().id),
         });
         self.selected = 0;
         self.mode_scroll.set_offset(point(px(0.), px(0.)));
-        self.close_actions_menu(window);
         self.expanded_tool_output.clear();
         self.text_field.update(cx, |field, cx| {
             field.set_placeholder(chrome.placeholder, cx);
@@ -2124,10 +2205,25 @@ impl Root {
         }
         let kind = menu.kind.clone();
         let id = menu.id.clone();
+        let enter_mode_on_success =
+            (kind == "codex-task" && action.id == "review").then_some("codex-task");
+        if enter_mode_on_success.is_some()
+            && let Some(item) = self
+                .results
+                .iter()
+                .chain(self.agent_tiles.iter())
+                .find(|item| item.kind == kind && item.id == id)
+                .cloned()
+        {
+            self.pending_task_mode = Some((
+                TaskRef { backend: "codex".to_string(), id: id.clone() },
+                item,
+            ));
+        }
         self.close_actions_menu(window);
         cx.notify();
         let request = Request::Activate { kind, id, action: Some(action.id), query: self.query(cx) };
-        self.perform_activation(request, false, cx);
+        self.perform_activation(request, false, enter_mode_on_success, cx);
     }
 
     /// Closes the `⌘K` actions menu, if one is open — the single place that
@@ -3753,6 +3849,26 @@ impl Root {
     /// row had to compress.
     fn render_mode_detail(&self) -> impl IntoElement {
         let col = div().flex().flex_col().flex_1().min_w(px(0.)).min_h(px(0.)).gap_4().px_5().py_5();
+        if self.active_mode().is_some_and(|mode| mode.chrome.id == "codex-task") {
+            let task = self.active_mode().and_then(|mode| mode.subject_item.as_ref());
+            let title = task.map(|item| item.title.as_str()).unwrap_or("Codex task");
+            let metadata = task
+                .and_then(|item| item.subtitle.as_deref())
+                .unwrap_or("Read-only local task view");
+            let summary = self.results.get(self.selected)
+                .map(|item| item.title.as_str())
+                .unwrap_or("History is available in Codex");
+            return col
+                .child(div().text_size(px(15.)).text_color(theme::active().text_primary).child(SharedString::from(title.to_owned())))
+                .child(div().text_size(px(11.5)).text_color(theme::active().text_tertiary).child(SharedString::from(metadata.to_owned())))
+                .child(
+                    div().flex_1().min_h(px(0.)).overflow_hidden().p_3()
+                        .rounded(px(theme::ROW_RADIUS_PX)).bg(theme::active().surface_input)
+                        .border_1().border_color(theme::active().border_hairline)
+                        .text_size(px(13.)).text_color(theme::active().text_primary)
+                        .child(SharedString::from(summary.to_owned())),
+                );
+        }
         let Some(item) = self.results.get(self.selected) else {
             return col.child(
                 div()
@@ -4146,8 +4262,8 @@ fn split_agent_tiles(results: Vec<SearchItem>, query_is_empty: bool) -> (Vec<Sea
     let mut tiles = Vec::new();
     let mut rows = Vec::new();
     for item in results {
-        let is_agent = item.kind == "agent";
-        let live = item.badge.as_deref() == Some("LIVE");
+        let is_agent = matches!(item.kind.as_str(), "agent" | "codex-task");
+        let live = matches!(item.badge.as_deref(), Some("LIVE") | Some("WAITING"));
         if is_agent && (live || query_is_empty) && tiles.len() < AGENT_GRID_CAPACITY {
             tiles.push(item);
         } else {
@@ -4332,6 +4448,13 @@ fn agent_tile_tooltip(item: &SearchItem) -> SharedString {
         Some(subtitle) => SharedString::from(format!("{} \u{2014} {subtitle}", item.title)),
         None => SharedString::from(item.title.clone()),
     }
+}
+
+/// A tile's title and subtitle deliberately ellipsize. State that changes
+/// whether its data is trustworthy therefore needs its own fixed-width label.
+fn agent_tile_status_label(item: &SearchItem) -> Option<&'static str> {
+    (item.kind == "codex-task" && item.accessory.as_deref() == Some("Codex unavailable"))
+        .then_some("UNAVAILABLE")
 }
 
 /// gpui builds a tooltip from a view, so this is the smallest one that
@@ -5898,6 +6021,97 @@ mod tests {
     }
 
     #[test]
+    fn codex_task_is_a_tile() {
+        for badge in ["LIVE", "WAITING"] {
+            let codex_task = SearchItem {
+                kind: "codex-task".to_string(),
+                badge: Some(badge.to_string()),
+                ..agent_row("codex-task")
+            };
+
+            let (tiles, rows) = split_agent_tiles(vec![codex_task], false);
+
+            assert_eq!(tiles.len(), 1, "{badge} Codex task belongs in the tile strip");
+            assert!(rows.is_empty(), "a Codex task tile must not be duplicated as a row");
+        }
+    }
+
+    #[test]
+    fn unavailable_codex_task_keeps_its_status_in_the_tile_rendering_data() {
+        let unavailable = SearchItem {
+            kind: "codex-task".to_string(),
+            badge: Some("WAITING".to_string()),
+            subtitle: Some(format!("openai · /{}", "work/very-long-directory-name/".repeat(16))),
+            accessory: Some("Codex unavailable".to_string()),
+            ..agent_row("codex-task")
+        };
+
+        let (tiles, rows) = split_agent_tiles(vec![unavailable], false);
+
+        assert!(rows.is_empty());
+        assert!(tiles[0].subtitle.as_ref().is_some_and(|subtitle| subtitle.len() > 150));
+        assert_eq!(agent_tile_status_label(&tiles[0]), Some("UNAVAILABLE"));
+    }
+
+    #[gpui::test]
+    fn reviewing_a_codex_task_waits_for_daemon_success_before_entering_its_scoped_mode(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![SearchItem {
+                    kind: "codex-task".to_string(),
+                    enters_mode: Some("codex-task".to_string()),
+                    actions: vec![neko_protocol::ItemAction {
+                        id: "review".to_string(),
+                        label: "Review".to_string(),
+                        destructive: false,
+                    }],
+                    ..agent_row("codex-task")
+                }];
+                root.open_actions_menu_for_selected_row(cx);
+                root.confirm_menu_action(window, cx);
+                assert!(root.active_mode().is_none(), "the mode waits for daemon validation");
+                assert!(root.activating, "the Review click dispatches Request::Activate before it can enter");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_successful_review_activation_enters_the_codex_task_mode(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, cx| {
+                root.finish_activation(None, false, Some("codex-task"), cx);
+                assert_eq!(root.active_mode().map(|mode| mode.chrome.id), Some("codex-task"));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn codex_task_mode_keeps_a_backend_qualified_subject(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        window
+            .update(cx, |root, _window, cx| {
+                let task = SearchItem {
+                    id: "thr-1".into(),
+                    kind: "codex-task".into(),
+                    title: "Compile quick view".into(),
+                    enters_mode: Some("codex-task".into()),
+                    ..agent_row("thr-1")
+                };
+                root.pending_task_mode = Some((
+                    TaskRef { backend: "codex".into(), id: "thr-1".into() },
+                    task,
+                ));
+                root.finish_activation(None, false, Some("codex-task"), cx);
+                let task = root.active_mode().and_then(|mode| mode.task_ref.as_ref()).expect("qualified task subject");
+                assert_eq!(task.provider_id(), "codex-task");
+                assert_eq!(task.id, "thr-1");
+            })
+            .unwrap();
+    }
+
+    #[test]
     fn a_badge_that_is_not_live_on_a_non_agent_row_is_never_mistaken_for_a_tile() {
         // Clipboard rows carry TEXT/LINK badges; commands carry COMMAND.
         let clip = SearchItem {
@@ -6366,6 +6580,33 @@ mod tests {
                 assert_eq!(mode.chrome.provider_id, "new-agent");
                 assert_eq!(mode.saved_query, "new agent");
                 assert_eq!(root.query(cx), "", "the prompt starts blank, not with the command's own query");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn confirming_new_codex_task_keeps_the_field_for_its_task_prompt(cx: &mut TestAppContext) {
+        let window = test_root(cx);
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("new codex task", cx));
+                root.results = vec![command_item("new-codex-task")];
+                root.selected = 0;
+            })
+            .unwrap();
+        window
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        window
+            .update(cx, |root, _window, cx| {
+                let mode = root.active_mode().expect("the command enters its mode");
+                assert_eq!(mode.chrome.provider_id, "new-codex-task");
+                assert_eq!(root.query(cx), "", "the prompt starts empty after finding the command");
             })
             .unwrap();
     }
