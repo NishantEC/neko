@@ -3,7 +3,15 @@
 //! The daemon actor owns transport and polling. This module only reduces its
 //! JSON results and notifications into stable, displayable state.
 
+use std::sync::{Arc, RwLock};
+
+use neko_protocol::{Glyph, Icon, ItemAction, SearchItem};
 use serde_json::Value;
+
+use crate::{
+    provider::{Provider, ProviderError},
+    search::{fuzzy_score, Candidate},
+};
 
 /// A task state deliberately reduced to the distinctions the UI presents.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,11 +180,219 @@ fn parse_task(entry: &Value) -> Option<Task> {
     })
 }
 
+/// Searchable task rows backed exclusively by the daemon-owned app-server
+/// projection. The app-server actor is the only writer; a palette keystroke
+/// only takes this short read lock and never starts a process or reads disk.
+pub struct CodexTasksProvider {
+    snapshot: Arc<RwLock<Snapshot>>,
+}
+
+impl CodexTasksProvider {
+    pub fn with_snapshot(snapshot: Arc<RwLock<Snapshot>>) -> Self {
+        Self { snapshot }
+    }
+}
+
+impl Provider for CodexTasksProvider {
+    fn id(&self) -> &'static str {
+        "codex-task"
+    }
+
+    fn section_label(&self) -> &'static str {
+        "Agents"
+    }
+
+    fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+        // Clone while holding the lock, then match and construct wire rows
+        // after releasing it so an app-server refresh is never held behind a
+        // fuzzy search or allocation pass.
+        let snapshot = self.snapshot.read().unwrap().clone();
+        let query = query.trim();
+        let mut candidates: Vec<(u8, i64, Candidate)> = snapshot
+            .tasks
+            .iter()
+            .filter_map(|task| {
+                let score = if query.is_empty() {
+                    0.0
+                } else {
+                    [
+                        fuzzy_score(query, &task.title),
+                        task.cwd.as_deref().and_then(|cwd| fuzzy_score(query, cwd)),
+                        task.provider
+                            .as_deref()
+                            .and_then(|provider| fuzzy_score(query, provider)),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .reduce(f32::max)?
+                };
+                Some((
+                    task_status_priority(&task.status),
+                    task.updated_at,
+                    Candidate {
+                        score,
+                        item: task_item(task, snapshot.available),
+                    },
+                ))
+            })
+            .collect();
+
+        if query.is_empty() {
+            // An empty palette is an attention surface: a task blocked on a
+            // person precedes active work, which precedes context. Updated
+            // time deliberately breaks ties only *within* a status.
+            candidates.sort_by(|left, right| {
+                right
+                    .0
+                    .cmp(&left.0)
+                    .then_with(|| right.1.cmp(&left.1))
+                    .then_with(|| left.2.item.id.cmp(&right.2.item.id))
+            });
+            // `search::allocate` orders each provider by score. Encode this
+            // settled ordering in scores rather than relying on `Vec` order.
+            let len = candidates.len();
+            return candidates
+                .into_iter()
+                .enumerate()
+                .map(|(rank, (_, _, mut candidate))| {
+                    candidate.score = (len - rank) as f32;
+                    candidate
+                })
+                .collect();
+        }
+
+        candidates
+            .into_iter()
+            .map(|(_, _, candidate)| candidate)
+            .collect()
+    }
+
+    fn activate(&self, _id: &str) -> Result<(), ProviderError> {
+        // The client observes `enters_mode` and never routes this primary
+        // action back to the daemon. Task 5 owns that mode's implementation.
+        Err(ProviderError("Codex task mode is not available yet".to_string()))
+    }
+}
+
+fn task_status_priority(status: &TaskStatus) -> u8 {
+    match status {
+        TaskStatus::Waiting => 4,
+        TaskStatus::Working => 3,
+        TaskStatus::Idle => 2,
+        // A failed run is history rather than fresh work, but is still more
+        // useful than an unclassified task when the palette is at rest.
+        TaskStatus::Failed => 1,
+        TaskStatus::Unknown => 0,
+    }
+}
+
+fn task_item(task: &Task, available: bool) -> SearchItem {
+    let subtitle = match (&task.provider, &task.cwd) {
+        (Some(provider), Some(cwd)) => Some(format!("{provider} · {cwd}")),
+        (Some(provider), None) => Some(provider.clone()),
+        (None, Some(cwd)) => Some(cwd.clone()),
+        (None, None) => None,
+    };
+    let (icon, badge) = match task.status {
+        TaskStatus::Working => (Glyph::AgentLive, Some("LIVE".to_string())),
+        TaskStatus::Waiting => (Glyph::AgentLive, Some("WAITING".to_string())),
+        TaskStatus::Idle => (Glyph::Agent, None),
+        TaskStatus::Failed => (Glyph::Agent, Some("FAILED".to_string())),
+        TaskStatus::Unknown => (Glyph::Agent, Some("UNKNOWN".to_string())),
+    };
+    let actions = (task.status == TaskStatus::Waiting)
+        .then(|| ItemAction {
+            id: "review".to_string(),
+            label: "Review".to_string(),
+            destructive: false,
+        })
+        .into_iter()
+        .collect();
+
+    SearchItem {
+        id: task.id.clone(),
+        kind: "codex-task".to_string(),
+        title: task.title.clone(),
+        subtitle,
+        icon: Icon::Glyph(icon),
+        section_label: "Agents".to_string(),
+        action_label: "Open task  ↵".to_string(),
+        badge,
+        accessory: (!available).then(|| "Codex unavailable".to_string()),
+        enters_mode: Some("codex-task".to_string()),
+        group_label: None,
+        actions,
+        source: Some("Codex".to_string()),
+        meter: None,
+        keeps_open: false,
+        preview_markdown: false,
+        speaker: None,
+        images: Vec::new(),
+        preview: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use std::sync::{Arc, RwLock};
 
-    use super::{Snapshot, TaskStatus};
+    use crate::provider::Provider;
+
+    use super::{CodexTasksProvider, Snapshot, Task, TaskStatus};
+
+    fn task(id: &str, title: &str, cwd: Option<&str>, provider: Option<&str>, updated_at: i64, status: TaskStatus) -> Task {
+        Task {
+            id: id.into(),
+            title: title.into(),
+            cwd: cwd.map(str::to_owned),
+            provider: provider.map(str::to_owned),
+            updated_at,
+            status,
+        }
+    }
+
+    #[test]
+    fn codex_tasks_empty_query_prioritizes_waiting_then_working_then_idle_over_recency() {
+        let snapshot = Snapshot {
+            available: true,
+            tasks: vec![
+                task("idle", "Oldest priority", None, None, 30, TaskStatus::Idle),
+                task("working", "Middle priority", None, None, 20, TaskStatus::Working),
+                task("waiting", "Newest priority", None, None, 10, TaskStatus::Waiting),
+            ],
+            ..Snapshot::default()
+        };
+        let provider = CodexTasksProvider::with_snapshot(Arc::new(RwLock::new(snapshot)));
+
+        let candidates = provider.search("", 0);
+
+        assert_eq!(
+            candidates.iter().map(|candidate| candidate.item.id.as_str()).collect::<Vec<_>>(),
+            ["waiting", "working", "idle"]
+        );
+    }
+
+    #[test]
+    fn codex_tasks_fuzzy_match_title_working_directory_and_provider() {
+        let snapshot = Snapshot {
+            available: true,
+            tasks: vec![task(
+                "thr-1",
+                "Repair launcher ranking",
+                Some("/work/neko"),
+                Some("openai"),
+                10,
+                TaskStatus::Working,
+            )],
+            ..Snapshot::default()
+        };
+        let provider = CodexTasksProvider::with_snapshot(Arc::new(RwLock::new(snapshot)));
+
+        for query in ["launcher", "neko", "openai"] {
+            assert_eq!(provider.search(query, 0).len(), 1, "{query} should find the task");
+        }
+    }
 
     #[test]
     fn thread_list_retains_ui_relevant_task_fields_and_skips_malformed_entries() {

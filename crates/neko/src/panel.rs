@@ -4146,8 +4146,8 @@ fn split_agent_tiles(results: Vec<SearchItem>, query_is_empty: bool) -> (Vec<Sea
     let mut tiles = Vec::new();
     let mut rows = Vec::new();
     for item in results {
-        let is_agent = item.kind == "agent";
-        let live = item.badge.as_deref() == Some("LIVE");
+        let is_agent = matches!(item.kind.as_str(), "agent" | "codex-task");
+        let live = matches!(item.badge.as_deref(), Some("LIVE") | Some("WAITING"));
         if is_agent && (live || query_is_empty) && tiles.len() < AGENT_GRID_CAPACITY {
             tiles.push(item);
         } else {
@@ -5895,6 +5895,22 @@ mod tests {
         let (tiles, rows) = split_agent_tiles(vec![live], true);
         assert_eq!(tiles.len(), 1);
         assert!(rows.is_empty(), "a tile is a move, not a copy — two rows for one agent is two Enters");
+    }
+
+    #[test]
+    fn codex_task_is_a_tile() {
+        for badge in ["LIVE", "WAITING"] {
+            let codex_task = SearchItem {
+                kind: "codex-task".to_string(),
+                badge: Some(badge.to_string()),
+                ..agent_row("codex-task")
+            };
+
+            let (tiles, rows) = split_agent_tiles(vec![codex_task], false);
+
+            assert_eq!(tiles.len(), 1, "{badge} Codex task belongs in the tile strip");
+            assert!(rows.is_empty(), "a Codex task tile must not be duplicated as a row");
+        }
     }
 
     #[test]
