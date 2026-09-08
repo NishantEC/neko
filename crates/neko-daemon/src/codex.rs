@@ -389,7 +389,7 @@ fn respond_to_approval(
     snapshot: &SharedSnapshot,
     request: &ControlRequest,
 ) -> Result<(), neko_core::provider::ProviderError> {
-    let response_id = {
+    let (response_id, kind, permissions) = {
         let snapshot = snapshot.read().unwrap();
         let Some(approval) = snapshot.approvals.iter().find(|approval| {
             approval.thread_id == request.thread_id && approval.request_id == request.request_id
@@ -398,14 +398,37 @@ fn respond_to_approval(
                 "approval was already resolved".to_string(),
             ));
         };
-        approval.response_id.clone()
+        (
+            approval.response_id.clone(),
+            approval.kind.clone(),
+            approval.permissions.clone(),
+        )
+    };
+    let result = match kind {
+        neko_core::codex::ApprovalKind::Permissions => {
+            let permissions = if request.approve {
+                permissions.ok_or_else(|| {
+                    neko_core::provider::ProviderError(
+                        "Codex permission request is missing its permission profile".to_string(),
+                    )
+                })?
+            } else {
+                json!({})
+            };
+            // `item/permissions/requestApproval` does not accept the
+            // command/file-change `decision` enum. Accept grants exactly
+            // the profile the server requested for this turn; decline grants
+            // an empty profile, which is the documented no-permission reply.
+            json!({"permissions": permissions, "scope": "turn"})
+        }
+        _ => json!({"decision": if request.approve { "accept" } else { "decline" }}),
     };
     transport
         .send_line(
             &json!({
                 "jsonrpc": "2.0",
                 "id": response_id,
-                "result": {"decision": if request.approve { "accept" } else { "decline" }},
+                "result": result,
             })
             .to_string(),
             CONTROL_TIMEOUT,
@@ -843,6 +866,53 @@ mod tests {
             json!({"jsonrpc": "2.0", "id": 42, "result": {"decision": "accept"}})
         );
         assert!(!snapshot.read().unwrap().can_resolve("thr", "42"));
+    }
+
+    #[test]
+    fn permission_approval_responses_send_permissions_not_a_decision() {
+        let permission_request = |id: &str, approve: bool| {
+            let snapshot = snapshot();
+            snapshot.write().unwrap().apply_notification(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "item/permissions/requestApproval",
+                "params": {
+                    "threadId": "thr",
+                    "itemId": "item",
+                    "turnId": "turn",
+                    "startedAtMs": 1,
+                    "cwd": "/work/neko",
+                    "permissions": {"network": {"enabled": true}},
+                },
+            }));
+            let (completed, _receipt) = mpsc::channel();
+            let request = ControlRequest {
+                thread_id: "thr".to_string(),
+                request_id: id.to_string(),
+                approve,
+                completed,
+            };
+            let mut fake = FakeTransport::replying([]);
+            respond_to_approval(&mut fake, &snapshot, &request).unwrap();
+            serde_json::from_str::<Value>(&fake.sent[0]).unwrap()
+        };
+
+        assert_eq!(
+            permission_request("permission-accept", true),
+            json!({
+                "jsonrpc": "2.0",
+                "id": "permission-accept",
+                "result": {"permissions": {"network": {"enabled": true}}, "scope": "turn"},
+            })
+        );
+        assert_eq!(
+            permission_request("permission-decline", false),
+            json!({
+                "jsonrpc": "2.0",
+                "id": "permission-decline",
+                "result": {"permissions": {}, "scope": "turn"},
+            })
+        );
     }
 
     #[test]

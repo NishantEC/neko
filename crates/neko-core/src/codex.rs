@@ -54,6 +54,7 @@ pub struct Task {
 pub enum ApprovalKind {
     CommandExecution,
     FileChange,
+    Permissions,
     Network,
     Unknown,
 }
@@ -69,6 +70,9 @@ pub struct Approval {
     pub title: String,
     pub detail: Option<String>,
     pub kind: ApprovalKind,
+    /// The requested profile is needed to acknowledge a permissions request
+    /// with the app-server's distinct `result.permissions` shape.
+    pub permissions: Option<Value>,
 }
 
 /// The daemon-owned control path for one explicit decision on a current
@@ -136,6 +140,7 @@ impl Snapshot {
             title: "Approval required".into(),
             detail: None,
             kind: ApprovalKind::Unknown,
+            permissions: None,
         });
         snapshot.generation = 1;
         snapshot
@@ -176,10 +181,10 @@ impl Snapshot {
         let Some(params) = notification.get("params") else {
             return;
         };
-        let (Some(thread_id), Some(request_id)) = (
-            params.get("threadId").and_then(Value::as_str),
-            params.get("requestId").and_then(Value::as_str),
-        ) else {
+        let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(request_id) = params.get("requestId").and_then(response_id_to_string) else {
             return;
         };
 
@@ -241,7 +246,7 @@ impl Snapshot {
             .get("method")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let (title, detail, kind) = match method {
+        let (title, detail, kind, permissions) = match method {
             "item/commandExecution/requestApproval" => (
                 params
                     .get("command")
@@ -266,6 +271,7 @@ impl Snapshot {
                 } else {
                     ApprovalKind::CommandExecution
                 },
+                None,
             ),
             "item/fileChange/requestApproval" => (
                 "Allow file changes".to_string(),
@@ -274,15 +280,22 @@ impl Snapshot {
                     .and_then(Value::as_str)
                     .map(str::to_owned),
                 ApprovalKind::FileChange,
+                None,
             ),
-            "item/permissions/requestApproval" => (
-                "Allow additional permissions".to_string(),
-                params
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                ApprovalKind::Unknown,
-            ),
+            "item/permissions/requestApproval" => {
+                let Some(permissions) = params.get("permissions").cloned() else {
+                    return;
+                };
+                (
+                    "Allow additional permissions".to_string(),
+                    params
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    ApprovalKind::Permissions,
+                    Some(permissions),
+                )
+            }
             _ => return,
         };
         self.approvals.push(Approval {
@@ -292,6 +305,7 @@ impl Snapshot {
             title,
             detail,
             kind,
+            permissions,
         });
         self.generation = self.generation.saturating_add(1);
         self.refreshed_at_unix_ms = crate::now_unix_ms();
@@ -855,6 +869,7 @@ mod tests {
             title: "Other approval".into(),
             detail: None,
             kind: super::ApprovalKind::Unknown,
+            permissions: None,
         });
 
         snapshot.apply_notification(&json!({
@@ -865,6 +880,18 @@ mod tests {
         assert_eq!(snapshot.approvals.len(), 1);
         assert_eq!(snapshot.approvals[0].thread_id, "thr-2");
         assert_eq!(snapshot.approvals[0].request_id, "request-2");
+    }
+
+    #[test]
+    fn numeric_resolved_notification_removes_the_matching_approval() {
+        let mut snapshot = Snapshot::with_approval("thr-1", "42");
+
+        snapshot.apply_notification(&json!({
+            "method": "serverRequest/resolved",
+            "params": {"threadId": "thr-1", "requestId": 42}
+        }));
+
+        assert!(snapshot.approvals.is_empty());
     }
 
     #[test]
