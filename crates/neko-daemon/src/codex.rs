@@ -7,7 +7,7 @@
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -20,12 +20,13 @@ type SharedSnapshot = Arc<RwLock<neko_core::codex::Snapshot>>;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const MAX_BACKOFF: Duration = Duration::from_secs(5);
 const STABLE_SESSION: Duration = Duration::from_secs(30);
+const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A newline-delimited JSON transport. Tests provide a fake; the process
 /// implementation below owns no protocol behavior beyond the lines it moves.
 trait LineTransport {
-    fn send_line(&mut self, line: &str) -> io::Result<()>;
-    fn read_line(&mut self) -> io::Result<Option<String>>;
+    fn send_line(&mut self, line: &str, timeout: Duration) -> io::Result<()>;
+    fn read_line(&mut self, timeout: Option<Duration>) -> io::Result<Option<String>>;
 }
 
 /// Starts one resident supervisor. A failed spawn or an EOF never clears task
@@ -134,8 +135,30 @@ fn resolved_codex() -> PathBuf {
 /// Sends the protocol's required startup sequence and applies the correlated
 /// thread-list reply. A valid list is the one event that makes Codex available.
 fn bootstrap(transport: &mut impl LineTransport, snapshot: &SharedSnapshot) -> io::Result<()> {
-    transport.send_line(
-        &json!({
+    bootstrap_with_timeout(transport, snapshot, BOOTSTRAP_TIMEOUT)
+}
+
+fn bootstrap_with_timeout(
+    transport: &mut impl LineTransport,
+    snapshot: &SharedSnapshot,
+    timeout: Duration,
+) -> io::Result<()> {
+    let deadline = Instant::now() + timeout;
+    let result = bootstrap_inner(transport, snapshot, deadline);
+    if result.is_err() {
+        mark_unavailable(snapshot);
+    }
+    result
+}
+
+fn bootstrap_inner(
+    transport: &mut impl LineTransport,
+    snapshot: &SharedSnapshot,
+    deadline: Instant,
+) -> io::Result<()> {
+    send_json(
+        transport,
+        json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "initialize",
@@ -147,22 +170,24 @@ fn bootstrap(transport: &mut impl LineTransport, snapshot: &SharedSnapshot) -> i
                 },
                 "capabilities": {"experimentalApi": true},
             },
-        })
-        .to_string(),
+        }),
+        deadline,
     )?;
-    read_reply(transport, snapshot, 1)?;
+    read_reply(transport, snapshot, 1, deadline)?;
 
-    transport.send_line(
-        &json!({
+    send_json(
+        transport,
+        json!({
             "jsonrpc": "2.0",
             "method": "initialized",
             "params": {},
-        })
-        .to_string(),
+        }),
+        deadline,
     )?;
 
-    transport.send_line(
-        &json!({
+    send_json(
+        transport,
+        json!({
             "jsonrpc": "2.0",
             "id": 2,
             "method": "thread/list",
@@ -172,22 +197,43 @@ fn bootstrap(transport: &mut impl LineTransport, snapshot: &SharedSnapshot) -> i
                 "sortDirection": "desc",
                 "archived": false,
             },
-        })
-        .to_string(),
+        }),
+        deadline,
     )?;
-    let result = read_reply(transport, snapshot, 2)?;
+    let result = read_reply(transport, snapshot, 2, deadline)?;
+    if result.get("data").and_then(Value::as_array).is_none() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Codex thread/list result has no data array",
+        ));
+    }
     apply_thread_list(snapshot, &result);
     Ok(())
+}
+
+fn send_json(
+    transport: &mut impl LineTransport,
+    message: Value,
+    deadline: Instant,
+) -> io::Result<()> {
+    transport.send_line(&message.to_string(), remaining(deadline)?)
+}
+
+fn remaining(deadline: Instant) -> io::Result<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))
 }
 
 fn read_reply(
     transport: &mut impl LineTransport,
     snapshot: &SharedSnapshot,
     expected_id: u64,
+    deadline: Instant,
 ) -> io::Result<Value> {
     loop {
         let line = transport
-            .read_line()?
+            .read_line(Some(remaining(deadline)?))?
             .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
         let Ok(message) = serde_json::from_str::<Value>(&line) else {
             continue;
@@ -197,7 +243,19 @@ fn read_reply(
             continue;
         }
         if message.get("id").and_then(Value::as_u64) == Some(expected_id) {
-            return Ok(message.get("result").cloned().unwrap_or(Value::Null));
+            if let Some(error) = message.get("error") {
+                let detail = error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown JSON-RPC error");
+                return Err(io::Error::other(format!("Codex JSON-RPC error: {detail}")));
+            }
+            return message.get("result").cloned().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Codex JSON-RPC reply has neither result nor error",
+                )
+            });
         }
     }
 }
@@ -206,7 +264,7 @@ fn read_notifications(
     transport: &mut impl LineTransport,
     snapshot: &SharedSnapshot,
 ) -> io::Result<()> {
-    while let Some(line) = transport.read_line()? {
+    while let Some(line) = transport.read_line(None)? {
         apply_line(snapshot, &line);
     }
     Err(io::Error::from(io::ErrorKind::UnexpectedEof))
@@ -243,46 +301,96 @@ fn mark_unavailable(snapshot: &SharedSnapshot) {
 }
 
 struct ProcessTransport {
-    writer: Sender<String>,
-    stdout: BufReader<std::process::ChildStdout>,
+    writer: Sender<WriteRequest>,
+    reader: Receiver<io::Result<Option<String>>>,
+}
+
+struct WriteRequest {
+    line: String,
+    completed: Sender<io::Result<()>>,
 }
 
 impl ProcessTransport {
     fn new(stdin: ChildStdin, stdout: std::process::ChildStdout) -> Self {
-        let (writer, lines) = mpsc::channel::<String>();
-        std::thread::spawn(move || write_lines(stdin, lines));
-        Self {
-            writer,
-            stdout: BufReader::new(stdout),
-        }
+        let (writer, requests) = mpsc::channel();
+        std::thread::spawn(move || write_lines(stdin, requests));
+        let (lines, reader) = mpsc::channel();
+        std::thread::spawn(move || read_lines(stdout, lines));
+        Self { writer, reader }
     }
 }
 
-fn write_lines(mut stdin: ChildStdin, lines: mpsc::Receiver<String>) {
-    for line in lines {
-        if stdin
-            .write_all(line.as_bytes())
+fn write_lines(mut stdin: impl Write, requests: Receiver<WriteRequest>) {
+    for request in requests {
+        let result = stdin
+            .write_all(request.line.as_bytes())
             .and_then(|()| stdin.write_all(b"\n"))
-            .and_then(|()| stdin.flush())
-            .is_err()
-        {
+            .and_then(|()| stdin.flush());
+        let failed = result.is_err();
+        let _ = request.completed.send(result);
+        if failed {
             return;
         }
     }
 }
 
+fn read_lines(stdout: std::process::ChildStdout, lines: Sender<io::Result<Option<String>>>) {
+    let mut stdout = BufReader::new(stdout);
+    loop {
+        let mut line = String::new();
+        match stdout.read_line(&mut line) {
+            Ok(0) => {
+                let _ = lines.send(Ok(None));
+                return;
+            }
+            Ok(_) => {
+                if lines.send(Ok(Some(line))).is_err() {
+                    return;
+                }
+            }
+            Err(error) => {
+                let _ = lines.send(Err(error));
+                return;
+            }
+        }
+    }
+}
+
+fn send_to_writer(writer: &Sender<WriteRequest>, line: &str, timeout: Duration) -> io::Result<()> {
+    let (completed, receipt) = mpsc::channel();
+    writer
+        .send(WriteRequest {
+            line: line.to_owned(),
+            completed,
+        })
+        .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "Codex stdin writer stopped"))?;
+    receipt.recv_timeout(timeout).map_err(|error| match error {
+        mpsc::RecvTimeoutError::Timeout => io::Error::from(io::ErrorKind::TimedOut),
+        mpsc::RecvTimeoutError::Disconnected => {
+            io::Error::new(io::ErrorKind::BrokenPipe, "Codex stdin writer stopped")
+        }
+    })?
+}
+
 impl LineTransport for ProcessTransport {
-    fn send_line(&mut self, line: &str) -> io::Result<()> {
-        self.writer
-            .send(line.to_owned())
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "Codex stdin writer stopped"))
+    fn send_line(&mut self, line: &str, timeout: Duration) -> io::Result<()> {
+        send_to_writer(&self.writer, line, timeout)
     }
 
-    fn read_line(&mut self) -> io::Result<Option<String>> {
-        let mut line = String::new();
-        match self.stdout.read_line(&mut line)? {
-            0 => Ok(None),
-            _ => Ok(Some(line)),
+    fn read_line(&mut self, timeout: Option<Duration>) -> io::Result<Option<String>> {
+        match timeout {
+            Some(timeout) => self
+                .reader
+                .recv_timeout(timeout)
+                .map_err(|error| match error {
+                    mpsc::RecvTimeoutError::Timeout => io::Error::from(io::ErrorKind::TimedOut),
+                    mpsc::RecvTimeoutError::Disconnected => {
+                        io::Error::new(io::ErrorKind::BrokenPipe, "Codex stdout reader stopped")
+                    }
+                })?,
+            None => self.reader.recv().map_err(|_| {
+                io::Error::new(io::ErrorKind::BrokenPipe, "Codex stdout reader stopped")
+            })?,
         }
     }
 }
@@ -296,6 +404,8 @@ mod tests {
     struct FakeTransport {
         replies: VecDeque<String>,
         sent: Vec<String>,
+        write_failures: VecDeque<io::ErrorKind>,
+        stalled: bool,
     }
 
     impl FakeTransport {
@@ -303,6 +413,26 @@ mod tests {
             Self {
                 replies: replies.into_iter().map(str::to_owned).collect(),
                 sent: Vec::new(),
+                write_failures: VecDeque::new(),
+                stalled: false,
+            }
+        }
+
+        fn failing_writes(error: io::ErrorKind) -> Self {
+            Self {
+                replies: VecDeque::new(),
+                sent: Vec::new(),
+                write_failures: [error].into(),
+                stalled: false,
+            }
+        }
+
+        fn stalled() -> Self {
+            Self {
+                replies: VecDeque::new(),
+                sent: Vec::new(),
+                write_failures: VecDeque::new(),
+                stalled: true,
             }
         }
 
@@ -320,13 +450,31 @@ mod tests {
     }
 
     impl LineTransport for FakeTransport {
-        fn send_line(&mut self, line: &str) -> io::Result<()> {
+        fn send_line(&mut self, line: &str, _timeout: Duration) -> io::Result<()> {
+            if let Some(error) = self.write_failures.pop_front() {
+                return Err(io::Error::from(error));
+            }
             self.sent.push(line.to_owned());
             Ok(())
         }
 
-        fn read_line(&mut self) -> io::Result<Option<String>> {
+        fn read_line(&mut self, _timeout: Option<Duration>) -> io::Result<Option<String>> {
+            if self.stalled {
+                return Err(io::Error::from(io::ErrorKind::TimedOut));
+            }
             Ok(self.replies.pop_front())
+        }
+    }
+
+    struct FailingWriter;
+
+    impl std::io::Write for FailingWriter {
+        fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
         }
     }
 
@@ -395,6 +543,82 @@ mod tests {
         bootstrap(&mut fake, &snapshot).unwrap();
 
         assert_eq!(snapshot.read().unwrap().tasks[0].title, "Correlated");
+    }
+
+    #[test]
+    fn initialize_error_stops_bootstrap_and_marks_snapshot_unavailable() {
+        let snapshot = snapshot();
+        snapshot.write().unwrap().available = true;
+        let mut fake =
+            FakeTransport::replying([r#"{"id":1,"error":{"code":-32000,"message":"not ready"}}"#]);
+
+        assert!(bootstrap(&mut fake, &snapshot).is_err());
+
+        assert_eq!(fake.sent_methods(), ["initialize"]);
+        assert!(!snapshot.read().unwrap().available);
+    }
+
+    #[test]
+    fn thread_list_error_stops_bootstrap_and_marks_snapshot_unavailable() {
+        let snapshot = snapshot();
+        snapshot.write().unwrap().available = true;
+        let mut fake = FakeTransport::replying([
+            r#"{"id":1,"result":{"codexHome":"/tmp/codex"}}"#,
+            r#"{"id":2,"error":{"code":-32000,"message":"thread list failed"}}"#,
+        ]);
+
+        assert!(bootstrap(&mut fake, &snapshot).is_err());
+
+        assert!(!snapshot.read().unwrap().available);
+    }
+
+    #[test]
+    fn invalid_thread_list_stops_bootstrap_and_marks_snapshot_unavailable() {
+        let snapshot = snapshot();
+        snapshot.write().unwrap().available = true;
+        let mut fake = FakeTransport::replying([
+            r#"{"id":1,"result":{"codexHome":"/tmp/codex"}}"#,
+            r#"{"id":2,"result":{"data":{}}}"#,
+        ]);
+
+        assert!(bootstrap(&mut fake, &snapshot).is_err());
+
+        assert!(!snapshot.read().unwrap().available);
+    }
+
+    #[test]
+    fn failed_writer_completion_stops_bootstrap_and_marks_snapshot_unavailable() {
+        let snapshot = snapshot();
+        snapshot.write().unwrap().available = true;
+        let mut fake = FakeTransport::failing_writes(io::ErrorKind::BrokenPipe);
+
+        let error = bootstrap(&mut fake, &snapshot).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        assert!(!snapshot.read().unwrap().available);
+    }
+
+    #[test]
+    fn stalled_bootstrap_reply_times_out_without_sleeping() {
+        let snapshot = snapshot();
+        snapshot.write().unwrap().available = true;
+        let mut fake = FakeTransport::stalled();
+
+        let error =
+            bootstrap_with_timeout(&mut fake, &snapshot, Duration::from_secs(1)).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(!snapshot.read().unwrap().available);
+    }
+
+    #[test]
+    fn writer_acknowledges_its_io_failure_to_the_requester() {
+        let (writer, requests) = mpsc::channel();
+        std::thread::spawn(move || write_lines(FailingWriter, requests));
+
+        let error = send_to_writer(&writer, "{}", Duration::from_secs(1)).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
     }
 
     #[test]
