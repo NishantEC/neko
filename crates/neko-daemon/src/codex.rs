@@ -40,6 +40,10 @@ struct ControlRequest {
     thread_id: String,
     request_id: Value,
     approve: bool,
+    /// A new task is the only control operation that does not name an
+    /// existing thread or approval. It still carries an already-validated,
+    /// explicit directory — never an inherited daemon cwd.
+    start_task: Option<neko_core::codex::StartTask>,
     completion: Arc<ControlCompletion>,
 }
 
@@ -170,6 +174,7 @@ impl neko_core::codex::CodexControl for ControlHandle {
                 thread_id: String::new(),
                 request_id: Value::Null,
                 approve: false,
+                start_task: None,
                 completion: completion.clone(),
             })
             .map_err(|error| match error {
@@ -181,6 +186,13 @@ impl neko_core::codex::CodexControl for ControlHandle {
                 }
             })?;
         completion.wait_for_outcome(CONTROL_TIMEOUT)
+    }
+
+    fn start_task(
+        &self,
+        start: neko_core::codex::StartTask,
+    ) -> Result<(), neko_core::provider::ProviderError> {
+        self.start_task_with_timeout(start)
     }
 }
 
@@ -212,6 +224,7 @@ impl ControlHandle {
                 thread_id: thread_id.to_owned(),
                 request_id: request_id.clone(),
                 approve,
+                start_task: None,
                 completion: completion.clone(),
             })
             .map_err(|error| match error {
@@ -223,6 +236,39 @@ impl ControlHandle {
                 }
             })?;
         completion.wait_for_outcome(timeout)
+    }
+
+    fn start_task_with_timeout(
+        &self,
+        start: neko_core::codex::StartTask,
+    ) -> Result<(), neko_core::provider::ProviderError> {
+        // Re-validate at the actor boundary: the provider's row is a
+        // keystroke old and a directory can disappear between selection and
+        // the first JSON-RPC write. No request is sent until this passes.
+        let start = neko_core::codex::StartTask::new(&start.prompt, Some(start.cwd))
+            .map_err(|message| neko_core::provider::ProviderError(message.to_string()))?;
+        let sender = self.sender.read().unwrap().clone().ok_or_else(|| {
+            neko_core::provider::ProviderError("Codex is unavailable".to_string())
+        })?;
+        let completion = Arc::new(ControlCompletion::new());
+        sender
+            .try_send(ControlRequest {
+                task_id: None,
+                thread_id: String::new(),
+                request_id: Value::Null,
+                approve: false,
+                start_task: Some(start),
+                completion: completion.clone(),
+            })
+            .map_err(|error| match error {
+                TrySendError::Full(_) => neko_core::provider::ProviderError(
+                    "Codex is busy processing another request".to_string(),
+                ),
+                TrySendError::Disconnected(_) => {
+                    neko_core::provider::ProviderError("Codex is unavailable".to_string())
+                }
+            })?;
+        completion.wait_for_outcome(CONTROL_TIMEOUT)
     }
 }
 
@@ -510,19 +556,31 @@ fn read_notifications_with_controls(
     // Bootstrap owns ids 1 and 2. Every later task view gets a fresh id, so
     // a reply that arrives after a timed-out view cannot be mistaken for the
     // next selected task's history.
-    let mut next_history_request_id = 3_u64;
+    let mut next_request_id = 3_u64;
     loop {
         while let Ok(request) = controls.try_recv() {
             if !request.completion.claim_write() {
                 continue;
             }
-            let response = match &request.task_id {
-                Some(thread_id) => {
-                    let request_id = next_history_request_id;
-                    next_history_request_id = next_history_request_id.saturating_add(1);
+            let response = match (&request.start_task, &request.task_id) {
+                (Some(start), _) => {
+                    let thread_request_id = next_request_id;
+                    let turn_request_id = next_request_id.saturating_add(1);
+                    next_request_id = turn_request_id.saturating_add(1);
+                    start_task(
+                        transport,
+                        snapshot,
+                        start,
+                        thread_request_id,
+                        turn_request_id,
+                    )
+                }
+                (None, Some(thread_id)) => {
+                    let request_id = next_request_id;
+                    next_request_id = next_request_id.saturating_add(1);
                     request_task_history(transport, snapshot, thread_id, request_id)
                 }
-                None => respond_to_approval(transport, snapshot, &request),
+                (None, None) => respond_to_approval(transport, snapshot, &request),
             };
             match response {
                 Ok(result) => {
@@ -567,6 +625,59 @@ fn read_notifications_with_controls(
             Err(error) => return Err(error),
         }
     }
+}
+
+/// Creates the explicit Codex thread before sending its first text turn. The
+/// two calls are deliberately sequential: a turn cannot be associated with a
+/// guessed thread id, and neither call creates a worktree or chooses a cwd.
+fn start_task(
+    transport: &mut impl LineTransport,
+    snapshot: &SharedSnapshot,
+    start: &neko_core::codex::StartTask,
+    thread_request_id: u64,
+    turn_request_id: u64,
+) -> io::Result<Result<(), neko_core::provider::ProviderError>> {
+    let start = match neko_core::codex::StartTask::new(&start.prompt, Some(start.cwd.clone())) {
+        Ok(start) => start,
+        Err(message) => return Ok(Err(neko_core::provider::ProviderError(message.to_string()))),
+    };
+    let deadline = Instant::now() + CONTROL_TIMEOUT;
+    send_json(
+        transport,
+        json!({
+            "jsonrpc": "2.0",
+            "id": thread_request_id,
+            "method": "thread/start",
+            "params": {"cwd": start.cwd},
+        }),
+        deadline,
+    )?;
+    let thread = read_reply(transport, snapshot, thread_request_id, deadline)?;
+    let Some(thread_id) = thread
+        .get("thread")
+        .and_then(|thread| thread.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+    else {
+        return Ok(Err(neko_core::provider::ProviderError(
+            "Codex did not provide the new task id".to_string(),
+        )));
+    };
+    send_json(
+        transport,
+        json!({
+            "jsonrpc": "2.0",
+            "id": turn_request_id,
+            "method": "turn/start",
+            "params": {
+                "threadId": thread_id,
+                "input": [{"type": "text", "text": start.prompt}],
+            },
+        }),
+        deadline,
+    )?;
+    read_reply(transport, snapshot, turn_request_id, deadline)?;
+    Ok(Ok(()))
 }
 
 /// The only history request. It is called solely by a `CodexTaskProvider`
@@ -1038,6 +1149,43 @@ mod tests {
     }
 
     #[test]
+    fn starting_a_task_sends_the_selected_cwd_then_uses_its_thread_for_the_first_turn() {
+        let cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let start = neko_core::codex::StartTask::new("Fix ranking", Some(cwd.clone()))
+            .expect("the fixture directory exists");
+        let mut fake = FakeTransport::replying([
+            r#"{"id":3,"result":{"thread":{"id":"thr-new"}}}"#,
+            r#"{"id":4,"result":{}}"#,
+        ]);
+
+        start_task(&mut fake, &snapshot(), &start, 3, 4)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<Value>(&fake.sent[0]).unwrap(),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "thread/start",
+                "params": {"cwd": cwd},
+            })
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&fake.sent[1]).unwrap(),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "turn/start",
+                "params": {
+                    "threadId": "thr-new",
+                    "input": [{"type": "text", "text": "Fix ranking"}],
+                },
+            })
+        );
+    }
+
+    #[test]
     fn bootstrap_uses_the_thread_list_reply_id_not_an_unrelated_reply() {
         let snapshot = snapshot();
         let mut fake = FakeTransport::replying([
@@ -1275,6 +1423,7 @@ mod tests {
             thread_id: "thr".to_string(),
             request_id: json!("old-request"),
             approve: true,
+            start_task: None,
             completion: Arc::new(ControlCompletion::new()),
         };
         let mut fake = FakeTransport::replying([]);
@@ -1394,6 +1543,7 @@ mod tests {
                 thread_id: "thr".to_string(),
                 request_id: json!("request"),
                 approve: true,
+                start_task: None,
                 completion: completion.clone(),
             })
             .unwrap();
@@ -1435,6 +1585,7 @@ mod tests {
                 thread_id: "thr".to_string(),
                 request_id: json!("request"),
                 approve: true,
+                start_task: None,
                 completion: completion.clone(),
             })
             .unwrap();
@@ -1481,6 +1632,7 @@ mod tests {
             thread_id: "thr".to_string(),
             request_id: json!(42),
             approve: true,
+            start_task: None,
             completion: Arc::new(ControlCompletion::new()),
         };
         let mut fake = FakeTransport::replying([]);
@@ -1519,6 +1671,7 @@ mod tests {
                 thread_id: "thr".to_string(),
                 request_id: json!(id),
                 approve,
+                start_task: None,
                 completion: Arc::new(ControlCompletion::new()),
             };
             let mut fake = FakeTransport::replying([]);
