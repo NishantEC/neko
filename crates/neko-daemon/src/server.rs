@@ -78,6 +78,7 @@ impl AppState {
         let file_provider =
             file_provider.unwrap_or_else(|| neko_core::files::FileProvider::with_db(db.clone()));
         let apps = Arc::new(RwLock::new(apps));
+        let codex = Arc::new(RwLock::new(neko_core::codex::Snapshot::default()));
         let providers: Vec<Box<dyn Provider>> = vec![
             Box::new(neko_core::apps::AppsProvider::new(apps.clone(), db.clone())),
             Box::new(file_provider),
@@ -98,6 +99,10 @@ impl AppState {
             // finding directly from the root list — "hotkey" should reach
             // the setting, not just a container to open it from.
             Box::new(neko_core::preferences::PreferencesProvider::new(db.clone())),
+            // Codex's supervised app-server projection is in memory. Keep it
+            // next to the existing Paseo agents: both share the same visual
+            // section and tile strip, while retaining separate action paths.
+            Box::new(neko_core::codex::CodexTasksProvider::with_snapshot(codex.clone())),
             // Eighth. Reads Paseo's own on-disk agent documents — no index
             // to warm, no watcher, no subprocess; see `agents.rs`.
             Box::new(neko_core::agents::AgentsProvider::new(db.clone())),
@@ -153,7 +158,7 @@ impl AppState {
         Self {
             db,
             apps,
-            codex: Arc::new(RwLock::new(neko_core::codex::Snapshot::default())),
+            codex,
             providers,
             mode_providers,
             broadcast: Mutex::new(Vec::new()),
