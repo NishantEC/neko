@@ -1,14 +1,42 @@
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::time::Duration;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 
 use neko_core::cancel::Cancel;
 use neko_core::provider::Provider;
 use neko_core::search::Candidate;
 use neko_core::{AppEntry, Db};
-use neko_protocol::{Event, Frame, Request, Response, read_frame, write_frame};
+use neko_protocol::{read_frame, write_frame, Event, Frame, Request, Response};
+
+/// One Dock badge count, assembled by the daemon instead of exposing each
+/// backend's raw attention state to clients.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AttentionCounts {
+    pub paseo: usize,
+    pub codex: usize,
+}
+
+impl AttentionCounts {
+    pub fn total(self) -> usize {
+        self.paseo.saturating_add(self.codex)
+    }
+
+    fn set_paseo(&mut self, count: usize) -> Option<usize> {
+        self.set(|attention| attention.paseo = count)
+    }
+
+    fn set_codex(&mut self, count: usize) -> Option<usize> {
+        self.set(|attention| attention.codex = count)
+    }
+
+    fn set(&mut self, update: impl FnOnce(&mut Self)) -> Option<usize> {
+        let before = self.total();
+        update(self);
+        (before != self.total()).then_some(self.total())
+    }
+}
 
 pub struct AppState {
     pub db: Arc<Mutex<Db>>,
@@ -16,11 +44,13 @@ pub struct AppState {
     /// The daemon-owned projection of the local Codex app-server. The
     /// process actor updates it independently of clients connecting to neko.
     pub codex: Arc<RwLock<neko_core::codex::Snapshot>>,
+    /// The actor-owned writer handle behind explicit Codex approval actions.
+    /// It is empty while the supervised child is unavailable.
+    pub codex_control: Arc<crate::codex::ControlHandle>,
     /// Every registered result-type provider, in section render order —
     /// see `neko_core::search::allocate`'s doc comment for what that order
-    /// means for ranking. Registering a new provider (eight are registered
-    /// today: app, file, clipboard, settings, command, theme, preference,
-    /// agent) is exactly one more line here plus its own `impl Provider` —
+    /// means for ranking. Registering a new provider is exactly one more line
+    /// here plus its own `impl Provider` —
     /// nothing else in this file, the wire protocol, or the client needs to
     /// change. See `AGENTS.md`'s "Provider abstraction" and "Commands and
     /// modes" sections for the full accounting.
@@ -36,6 +66,7 @@ pub struct AppState {
     /// connection, whether a request's own response or a broadcast `Event`,
     /// has to go through the *same* lock.
     broadcast: Mutex<Vec<Arc<Mutex<UnixStream>>>>,
+    attention: Mutex<AttentionCounts>,
 }
 
 impl AppState {
@@ -79,6 +110,7 @@ impl AppState {
             file_provider.unwrap_or_else(|| neko_core::files::FileProvider::with_db(db.clone()));
         let apps = Arc::new(RwLock::new(apps));
         let codex = Arc::new(RwLock::new(neko_core::codex::Snapshot::default()));
+        let codex_control = Arc::new(crate::codex::ControlHandle::new(codex.clone()));
         let providers: Vec<Box<dyn Provider>> = vec![
             Box::new(neko_core::apps::AppsProvider::new(apps.clone(), db.clone())),
             Box::new(file_provider),
@@ -102,11 +134,19 @@ impl AppState {
             // Codex's supervised app-server projection is in memory. Keep it
             // next to the existing Paseo agents: both share the same visual
             // section and tile strip, while retaining separate action paths.
-            Box::new(neko_core::codex::CodexTasksProvider::with_snapshot(codex.clone())),
-            // Eighth. Reads Paseo's own on-disk agent documents — no index
+            Box::new(neko_core::codex::CodexTasksProvider::with_snapshot(
+                codex.clone(),
+            )),
+            Box::new(
+                neko_core::codex::CodexApprovalsProvider::with_snapshot_and_control(
+                    codex.clone(),
+                    codex_control.clone(),
+                ),
+            ),
+            // Tenth. Reads Paseo's own on-disk agent documents — no index
             // to warm, no watcher, no subprocess; see `agents.rs`.
             Box::new(neko_core::agents::AgentsProvider::new(db.clone())),
-            // Ninth, and appended rather than inserted at the front even
+            // Eleventh, and appended rather than inserted at the front even
             // though its rows always lead: `search::allocate` orders sections
             // by content strength and `permissions::ATTENTION_BONUS` settles
             // that outright, so registration order is only the tie-break —
@@ -159,20 +199,42 @@ impl AppState {
             db,
             apps,
             codex,
+            codex_control,
             providers,
             mode_providers,
             broadcast: Mutex::new(Vec::new()),
+            attention: Mutex::new(AttentionCounts::default()),
         }
     }
 }
 
 impl AppState {
+    /// Updates only Paseo's part of the single client-facing attention total.
+    /// A provider change that leaves the total unchanged needs no Dock redraw.
+    pub fn set_paseo_attention(&self, count: usize) {
+        let total = self.attention.lock().unwrap().set_paseo(count);
+        if let Some(total) = total {
+            broadcast(self, &Event::AttentionChanged { count: total });
+        }
+    }
+
+    /// Updates only Codex's part of the single client-facing attention total.
+    pub fn set_codex_attention(&self, count: usize) {
+        let total = self.attention.lock().unwrap().set_codex(count);
+        if let Some(total) = total {
+            broadcast(self, &Event::AttentionChanged { count: total });
+        }
+    }
+
     /// Every provider that an explicitly-scoped search or an activation can
     /// reach: the root-list ones first, then the mode-only ones. Root-list
     /// searches deliberately do **not** go through this — they iterate
     /// `providers` directly.
     fn all_providers(&self) -> impl Iterator<Item = &dyn Provider> {
-        self.providers.iter().chain(self.mode_providers.iter()).map(|p| p.as_ref())
+        self.providers
+            .iter()
+            .chain(self.mode_providers.iter())
+            .map(|p| p.as_ref())
     }
 }
 
@@ -209,9 +271,18 @@ pub fn bind_singleton(socket_path: &Path) -> io::Result<Option<UnixListener>> {
 }
 
 fn ping(stream: &mut UnixStream) -> io::Result<()> {
-    write_frame(&mut *stream, &Frame::Request { id: 0, request: Request::Ping })?;
+    write_frame(
+        &mut *stream,
+        &Frame::Request {
+            id: 0,
+            request: Request::Ping,
+        },
+    )?;
     match read_frame(&mut *stream)? {
-        Some(Frame::Response { response: Response::Pong, .. }) => Ok(()),
+        Some(Frame::Response {
+            response: Response::Pong,
+            ..
+        }) => Ok(()),
         _ => Err(io::Error::other("unexpected reply to ping")),
     }
 }
@@ -323,7 +394,10 @@ pub struct RequestContext {
 
 impl RequestContext {
     fn new(cancel: Cancel, send: impl Fn(Response) + Send + Sync + 'static) -> Self {
-        Self { cancel, send: Box::new(send) }
+        Self {
+            cancel,
+            send: Box::new(send),
+        }
     }
 
     /// A context that discards partial responses and is never cancelled —
@@ -352,7 +426,14 @@ fn search_concurrently<'a>(
     std::thread::scope(|scope| {
         let handles: Vec<_> = providers
             .iter()
-            .map(|&provider| scope.spawn(move || (provider.id(), provider.search_cancellable(query, now, cancel))))
+            .map(|&provider| {
+                scope.spawn(move || {
+                    (
+                        provider.id(),
+                        provider.search_cancellable(query, now, cancel),
+                    )
+                })
+            })
             .collect();
         handles.into_iter().map(|h| h.join().unwrap()).collect()
     })
@@ -362,7 +443,11 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
     match request {
         Request::Ping => Response::Pong,
 
-        Request::Search { query, limit, provider: Some(provider_id) } => {
+        Request::Search {
+            query,
+            limit,
+            provider: Some(provider_id),
+        } => {
             // The mode seam: scoped to exactly one provider, no cross-
             // provider `allocate()` — see `Request::Search`'s own doc
             // comment. A mode's own list wants "this provider's best
@@ -371,15 +456,28 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             let limit = limit.clamp(1, 50);
             let now = now_unix_ms();
             let Some(provider) = state.all_providers().find(|p| p.id() == provider_id) else {
-                return Response::Error { message: format!("no such provider: {provider_id}") };
+                return Response::Error {
+                    message: format!("no such provider: {provider_id}"),
+                };
             };
             let mut candidates = provider.search_cancellable(&query, now, &ctx.cancel);
-            candidates.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.item.title.cmp(&b.item.title)));
+            candidates.sort_by(|a, b| {
+                b.score
+                    .total_cmp(&a.score)
+                    .then_with(|| a.item.title.cmp(&b.item.title))
+            });
             candidates.truncate(limit);
-            Response::SearchResults { items: candidates.into_iter().map(|c| c.item).collect(), complete: true }
+            Response::SearchResults {
+                items: candidates.into_iter().map(|c| c.item).collect(),
+                complete: true,
+            }
         }
 
-        Request::Search { query, limit, provider: None } => {
+        Request::Search {
+            query,
+            limit,
+            provider: None,
+        } => {
             let limit = limit.clamp(1, 50);
             let now = now_unix_ms();
             let query = query.as_str();
@@ -419,7 +517,10 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
                 // `files::MIN_QUERY_LEN`, and for any build with no
                 // deferring provider registered.
                 let items = neko_core::search::allocate(candidates, limit, query);
-                return Response::SearchResults { items, complete: true };
+                return Response::SearchResults {
+                    items,
+                    complete: true,
+                };
             }
 
             ctx.send(Response::SearchResults {
@@ -429,10 +530,18 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
 
             candidates.extend(search_concurrently(&deferred, query, now, &ctx.cancel));
             let items = neko_core::search::allocate(candidates, limit, query);
-            Response::SearchResults { items, complete: true }
+            Response::SearchResults {
+                items,
+                complete: true,
+            }
         }
 
-        Request::Activate { kind, id, action, query } => match state.all_providers().find(|p| p.id() == kind) {
+        Request::Activate {
+            kind,
+            id,
+            action,
+            query,
+        } => match state.all_providers().find(|p| p.id() == kind) {
             Some(provider) => {
                 let result = match action {
                     // `activate_with_query`, never `activate` — it defaults to
@@ -486,7 +595,12 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             };
             match result {
                 Ok(config) => {
-                    broadcast(state, &Event::HotkeyChanged { config: config.clone() });
+                    broadcast(
+                        state,
+                        &Event::HotkeyChanged {
+                            config: config.clone(),
+                        },
+                    );
                     Response::Hotkey { config }
                 }
                 Err(e) => Response::Error {
@@ -633,14 +747,14 @@ pub fn run_attention_poll(state: Arc<AppState>) {
             let count = neko_core::permissions::refresh(&client);
             if last != Some(count) {
                 last = Some(count);
-                broadcast(&state, &Event::AttentionChanged { count });
+                state.set_paseo_attention(count);
             }
         } else if last.is_some_and(|n| n > 0) {
             // Paseo went away while agents were waiting. Nothing is blocked
             // *that neko can see*, and leaving a stale count on the Dock
             // would be a standing claim that is no longer true.
             last = Some(0);
-            broadcast(&state, &Event::AttentionChanged { count: 0 });
+            state.set_paseo_attention(0);
         }
         std::thread::sleep(ATTENTION_POLL_INTERVAL);
     }
@@ -696,6 +810,20 @@ mod tests {
     use neko_core::clipboard::ClipboardContentKind;
     use neko_protocol::SearchItem;
 
+    #[test]
+    fn combined_attention_counts_paseo_and_codex() {
+        let state = AttentionCounts { paseo: 2, codex: 3 };
+        assert_eq!(state.total(), 5);
+    }
+
+    #[test]
+    fn attention_only_changes_when_the_combined_total_changes() {
+        let mut state = AttentionCounts { paseo: 2, codex: 3 };
+        assert_eq!(state.set_paseo(2), None);
+        assert_eq!(state.set_codex(4), Some(6));
+        assert_eq!(state.set_paseo(1), Some(5));
+    }
+
     /// `handle_request` with no client behind it — partial responses are
     /// discarded and nothing is ever cancelled, so a test that only cares
     /// about the final answer reads exactly as it did before searches
@@ -711,7 +839,9 @@ mod tests {
     fn handle_request_capturing(state: &AppState, request: Request) -> Vec<Response> {
         let collected: Arc<Mutex<Vec<Response>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = collected.clone();
-        let ctx = RequestContext::new(Cancel::never(), move |response| sink.lock().unwrap().push(response));
+        let ctx = RequestContext::new(Cancel::never(), move |response| {
+            sink.lock().unwrap().push(response)
+        });
         let final_response = handle_request(state, request, &ctx);
         let mut frames = collected.lock().unwrap().clone();
         frames.push(final_response);
@@ -753,10 +883,16 @@ mod tests {
 
         let root = handle_request(
             &state,
-            Request::Search { query: String::new(), limit: 20, provider: None },
+            Request::Search {
+                query: String::new(),
+                limit: 20,
+                provider: None,
+            },
             &ctx,
         );
-        let Response::SearchResults { items, .. } = root else { panic!("expected results") };
+        let Response::SearchResults { items, .. } = root else {
+            panic!("expected results")
+        };
         for item in &items {
             assert!(
                 item.kind != "preference" && item.kind != "theme" && item.kind != "clipboard",
@@ -770,10 +906,16 @@ mod tests {
         // its values — it must still return every setting.
         let scoped = handle_request(
             &state,
-            Request::Search { query: String::new(), limit: 20, provider: Some("preference".into()) },
+            Request::Search {
+                query: String::new(),
+                limit: 20,
+                provider: Some("preference".into()),
+            },
             &ctx,
         );
-        let Response::SearchResults { items, .. } = scoped else { panic!("expected results") };
+        let Response::SearchResults { items, .. } = scoped else {
+            panic!("expected results")
+        };
         // Asserted by identity, not by count: settings get added over time,
         // and a count here would fail for the wrong reason every time one is.
         let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
@@ -788,7 +930,14 @@ mod tests {
     #[test]
     fn a_clipboard_match_is_never_crowded_out_of_the_response_by_many_app_matches() {
         let db = Db::open_in_memory().unwrap();
-        neko_core::clipboard::record_entry(&db, "co-worker-notes", ClipboardContentKind::Text, None, 1000).unwrap();
+        neko_core::clipboard::record_entry(
+            &db,
+            "co-worker-notes",
+            ClipboardContentKind::Text,
+            None,
+            1000,
+        )
+        .unwrap();
 
         // 10 apps that all fuzzy-match "cons" — comfortably more than the
         // server's own `limit`, the exact shape that used to leave 0 room
@@ -804,7 +953,11 @@ mod tests {
 
         let response = handle_request_for_test(
             &state,
-            Request::Search { query: "cons".into(), limit: 8, provider: None },
+            Request::Search {
+                query: "cons".into(),
+                limit: 8,
+                provider: None,
+            },
         );
         let Response::SearchResults { items, .. } = response else {
             panic!("expected SearchResults")
@@ -890,13 +1043,19 @@ mod tests {
 
         let partials: Arc<Mutex<Vec<Response>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = partials.clone();
-        let ctx = RequestContext::new(Cancel::never(), move |response| sink.lock().unwrap().push(response));
+        let ctx = RequestContext::new(Cancel::never(), move |response| {
+            sink.lock().unwrap().push(response)
+        });
 
         let request_state = state.clone();
         let handle = std::thread::spawn(move || {
             handle_request(
                 &request_state,
-                Request::Search { query: "cons".into(), limit: 8, provider: None },
+                Request::Search {
+                    query: "cons".into(),
+                    limit: 8,
+                    provider: None,
+                },
                 &ctx,
             )
         });
@@ -909,7 +1068,10 @@ mod tests {
             if !partials.lock().unwrap().is_empty() {
                 break;
             }
-            assert!(std::time::Instant::now() < deadline, "no partial frame arrived while the slow provider was blocked");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no partial frame arrived while the slow provider was blocked"
+            );
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
 
@@ -918,8 +1080,14 @@ mod tests {
             panic!("expected SearchResults")
         };
         assert!(!complete, "the first frame must announce itself as partial");
-        assert!(items.iter().any(|i| i.kind == "app"), "fast providers' real results are in the partial frame");
-        assert!(!items.iter().any(|i| i.kind == "file"), "the deferred provider has not answered yet");
+        assert!(
+            items.iter().any(|i| i.kind == "app"),
+            "fast providers' real results are in the partial frame"
+        );
+        assert!(
+            !items.iter().any(|i| i.kind == "file"),
+            "the deferred provider has not answered yet"
+        );
 
         // Now let the deferred provider finish; the final frame carries the
         // full, re-allocated set including its results.
@@ -928,9 +1096,18 @@ mod tests {
         let Response::SearchResults { items, complete } = final_response else {
             panic!("expected SearchResults")
         };
-        assert!(complete, "the second frame is the last one for this request id");
-        assert!(items.iter().any(|i| i.kind == "file"), "the deferred provider's results land in the final frame");
-        assert!(items.iter().any(|i| i.kind == "app"), "and the fast providers' results are still there");
+        assert!(
+            complete,
+            "the second frame is the last one for this request id"
+        );
+        assert!(
+            items.iter().any(|i| i.kind == "file"),
+            "the deferred provider's results land in the final frame"
+        );
+        assert!(
+            items.iter().any(|i| i.kind == "app"),
+            "and the fast providers' results are still there"
+        );
     }
 
     #[test]
@@ -941,10 +1118,22 @@ mod tests {
         let state = test_state(db, vec![app("Console")]);
         let frames = handle_request_capturing(
             &state,
-            Request::Search { query: "cons".into(), limit: 8, provider: None },
+            Request::Search {
+                query: "cons".into(),
+                limit: 8,
+                provider: None,
+            },
         );
-        assert_eq!(frames.len(), 1, "expected exactly one frame, got {}", frames.len());
-        assert!(matches!(frames[0], Response::SearchResults { complete: true, .. }));
+        assert_eq!(
+            frames.len(),
+            1,
+            "expected exactly one frame, got {}",
+            frames.len()
+        );
+        assert!(matches!(
+            frames[0],
+            Response::SearchResults { complete: true, .. }
+        ));
     }
 
     #[test]
@@ -954,27 +1143,51 @@ mod tests {
         // reservation that stops one provider crowding out another has to
         // hold in both, not just the merged case.
         let db = Db::open_in_memory().unwrap();
-        neko_core::clipboard::record_entry(&db, "co-worker-notes", ClipboardContentKind::Text, None, 1000).unwrap();
+        neko_core::clipboard::record_entry(
+            &db,
+            "co-worker-notes",
+            ClipboardContentKind::Text,
+            None,
+            1000,
+        )
+        .unwrap();
         let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
         let release = Arc::new(std::sync::Barrier::new(1));
         let state = state_with_deferred_provider(db, apps, release);
 
         let frames = handle_request_capturing(
             &state,
-            Request::Search { query: "cons".into(), limit: 8, provider: None },
+            Request::Search {
+                query: "cons".into(),
+                limit: 8,
+                provider: None,
+            },
         );
         assert_eq!(frames.len(), 2);
         for (i, frame) in frames.iter().enumerate() {
-            let Response::SearchResults { items, .. } = frame else { panic!("expected SearchResults") };
+            let Response::SearchResults { items, .. } = frame else {
+                panic!("expected SearchResults")
+            };
             assert!(
                 items.iter().any(|item| item.kind == "clipboard"),
                 "frame {i} dropped the clipboard reservation: {:?}",
-                items.iter().map(|item| item.kind.as_str()).collect::<Vec<_>>()
+                items
+                    .iter()
+                    .map(|item| item.kind.as_str())
+                    .collect::<Vec<_>>()
             );
-            assert!(items.len() <= 8, "frame {i} exceeded the request's own limit");
+            assert!(
+                items.len() <= 8,
+                "frame {i} exceeded the request's own limit"
+            );
         }
-        let Response::SearchResults { items, .. } = &frames[1] else { panic!() };
-        assert!(items.iter().any(|item| item.kind == "file"), "the final frame reserves the deferred section a slot too");
+        let Response::SearchResults { items, .. } = &frames[1] else {
+            panic!()
+        };
+        assert!(
+            items.iter().any(|item| item.kind == "file"),
+            "the final frame reserves the deferred section a slot too"
+        );
     }
 
     #[test]
@@ -985,7 +1198,11 @@ mod tests {
 
         let response = handle_request_for_test(
             &state,
-            Request::Search { query: "cons".into(), limit: 8, provider: None },
+            Request::Search {
+                query: "cons".into(),
+                limit: 8,
+                provider: None,
+            },
         );
         let Response::SearchResults { items, .. } = response else {
             panic!("expected SearchResults")
@@ -1000,14 +1217,32 @@ mod tests {
         // them, all containing "co") must come back as *only* clipboard
         // matches when scoped to "clipboard".
         let db = Db::open_in_memory().unwrap();
-        neko_core::clipboard::record_entry(&db, "co-worker-notes", ClipboardContentKind::Text, None, 1000).unwrap();
-        neko_core::clipboard::record_entry(&db, "unrelated", ClipboardContentKind::Text, None, 2000).unwrap();
+        neko_core::clipboard::record_entry(
+            &db,
+            "co-worker-notes",
+            ClipboardContentKind::Text,
+            None,
+            1000,
+        )
+        .unwrap();
+        neko_core::clipboard::record_entry(
+            &db,
+            "unrelated",
+            ClipboardContentKind::Text,
+            None,
+            2000,
+        )
+        .unwrap();
         let apps: Vec<AppEntry> = (0..10).map(|i| app(&format!("Console{i}"))).collect();
         let state = test_state(db, apps);
 
         let response = handle_request_for_test(
             &state,
-            Request::Search { query: "co".into(), limit: 50, provider: Some("clipboard".to_string()) },
+            Request::Search {
+                query: "co".into(),
+                limit: 50,
+                provider: Some("clipboard".to_string()),
+            },
         );
         let Response::SearchResults { items, .. } = response else {
             panic!("expected SearchResults")
@@ -1023,12 +1258,19 @@ mod tests {
         let state = test_state(db, Vec::new());
         let response = handle_request_for_test(
             &state,
-            Request::Search { query: "x".into(), limit: 8, provider: Some("nonexistent".to_string()) },
+            Request::Search {
+                query: "x".into(),
+                limit: 8,
+                provider: Some("nonexistent".to_string()),
+            },
         );
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
-        assert!(message.contains("no such provider"), "unexpected message: {message}");
+        assert!(
+            message.contains("no such provider"),
+            "unexpected message: {message}"
+        );
     }
 
     #[test]
@@ -1039,18 +1281,27 @@ mod tests {
         // most-recent-first via the recency boost — not the merged root
         // list's "empty query = every provider returns nothing" behavior.
         let db = Db::open_in_memory().unwrap();
-        neko_core::clipboard::record_entry(&db, "older", ClipboardContentKind::Text, None, 100).unwrap();
-        neko_core::clipboard::record_entry(&db, "newer", ClipboardContentKind::Text, None, 900).unwrap();
+        neko_core::clipboard::record_entry(&db, "older", ClipboardContentKind::Text, None, 100)
+            .unwrap();
+        neko_core::clipboard::record_entry(&db, "newer", ClipboardContentKind::Text, None, 900)
+            .unwrap();
         let state = test_state(db, Vec::new());
         let response = handle_request_for_test(
             &state,
-            Request::Search { query: "".into(), limit: 50, provider: Some("clipboard".to_string()) },
+            Request::Search {
+                query: "".into(),
+                limit: 50,
+                provider: Some("clipboard".to_string()),
+            },
         );
         let Response::SearchResults { items, .. } = response else {
             panic!("expected SearchResults")
         };
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].id, "newer", "more recently copied entries sort first");
+        assert_eq!(
+            items[0].id, "newer",
+            "more recently copied entries sort first"
+        );
     }
 
     #[test]
@@ -1061,50 +1312,83 @@ mod tests {
         // "app" provider, id that doesn't exist — proves routing landed on
         // the right provider (a real app-not-found error), not a generic
         // "no such provider" failure.
-        let response =
-            handle_request_for_test(&state, Request::Activate { kind: "app".into(), id: "does-not-exist".into(), action: None, query: String::new() });
+        let response = handle_request_for_test(
+            &state,
+            Request::Activate {
+                kind: "app".into(),
+                id: "does-not-exist".into(),
+                action: None,
+                query: String::new(),
+            },
+        );
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
-        assert!(message.contains("no such app"), "unexpected message: {message}");
+        assert!(
+            message.contains("no such app"),
+            "unexpected message: {message}"
+        );
     }
 
     #[test]
     fn activate_with_an_unknown_provider_kind_errors() {
         let db = Db::open_in_memory().unwrap();
         let state = test_state(db, Vec::new());
-        let response =
-            handle_request_for_test(&state, Request::Activate { kind: "nonexistent".into(), id: "x".into(), action: None, query: String::new() });
+        let response = handle_request_for_test(
+            &state,
+            Request::Activate {
+                kind: "nonexistent".into(),
+                id: "x".into(),
+                action: None,
+                query: String::new(),
+            },
+        );
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
-        assert!(message.contains("no such provider"), "unexpected message: {message}");
+        assert!(
+            message.contains("no such provider"),
+            "unexpected message: {message}"
+        );
     }
 
     #[test]
     fn activate_with_a_named_action_routes_to_perform_action() {
         let db = Db::open_in_memory().unwrap();
-        neko_core::clipboard::record_entry(&db, "delete me", ClipboardContentKind::Text, None, 100).unwrap();
+        neko_core::clipboard::record_entry(&db, "delete me", ClipboardContentKind::Text, None, 100)
+            .unwrap();
         let state = test_state(db, Vec::new());
         let response = handle_request_for_test(
             &state,
-            Request::Activate { kind: "clipboard".into(), id: "delete me".into(), action: Some("delete".into()), query: String::new() },
+            Request::Activate {
+                kind: "clipboard".into(),
+                id: "delete me".into(),
+                action: Some("delete".into()),
+                query: String::new(),
+            },
         );
-        assert!(matches!(response, Response::Activated), "expected Activated, got {response:?}");
+        assert!(
+            matches!(response, Response::Activated),
+            "expected Activated, got {response:?}"
+        );
     }
 
     #[test]
     fn codex_task_review_activation_is_recognized_without_starting_codex() {
         let db = Db::open_in_memory().unwrap();
         let state = test_state(db, Vec::new());
-        state.codex.write().unwrap().replace_tasks(vec![neko_core::codex::Task {
-            id: "thr-1".into(),
-            title: "Review this change".into(),
-            cwd: None,
-            provider: None,
-            updated_at: 1,
-            status: neko_core::codex::TaskStatus::Waiting,
-        }]);
+        state
+            .codex
+            .write()
+            .unwrap()
+            .replace_tasks(vec![neko_core::codex::Task {
+                id: "thr-1".into(),
+                title: "Review this change".into(),
+                cwd: None,
+                provider: None,
+                updated_at: 1,
+                status: neko_core::codex::TaskStatus::Waiting,
+            }]);
 
         let response = handle_request_for_test(
             &state,
@@ -1116,7 +1400,52 @@ mod tests {
             },
         );
 
-        assert!(matches!(response, Response::Activated), "expected Activated, got {response:?}");
+        assert!(
+            matches!(response, Response::Activated),
+            "expected Activated, got {response:?}"
+        );
+    }
+
+    #[test]
+    fn codex_approval_action_is_honest_when_no_actor_is_available() {
+        let db = Db::open_in_memory().unwrap();
+        let state = test_state(db, Vec::new());
+        state
+            .codex
+            .write()
+            .unwrap()
+            .apply_notification(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": "request-1",
+                "method": "item/fileChange/requestApproval",
+                "params": {
+                    "threadId": "thr-1",
+                    "itemId": "item",
+                    "turnId": "turn",
+                    "startedAtMs": 1,
+                    "reason": "update settings",
+                },
+            }));
+
+        let response = handle_request_for_test(
+            &state,
+            Request::Activate {
+                kind: "codex-approval".into(),
+                id: "request-1".into(),
+                action: Some("approve".into()),
+                query: String::new(),
+            },
+        );
+
+        let Response::Error { message } = response else {
+            panic!("expected an unavailable error");
+        };
+        assert_eq!(message, "Codex is unavailable");
+        assert!(state
+            .codex
+            .read()
+            .unwrap()
+            .can_resolve("thr-1", "request-1"));
     }
 
     #[test]
@@ -1125,11 +1454,19 @@ mod tests {
         let state = test_state(db, vec![app("Console")]);
         let response = handle_request_for_test(
             &state,
-            Request::Activate { kind: "app".into(), id: "Console".into(), action: Some("teleport".into()), query: String::new() },
+            Request::Activate {
+                kind: "app".into(),
+                id: "Console".into(),
+                action: Some("teleport".into()),
+                query: String::new(),
+            },
         );
         let Response::Error { message } = response else {
             panic!("expected an Error response")
         };
-        assert!(message.contains("no action"), "unexpected message: {message}");
+        assert!(
+            message.contains("no action"),
+            "unexpected message: {message}"
+        );
     }
 }

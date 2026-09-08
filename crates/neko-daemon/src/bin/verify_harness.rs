@@ -21,6 +21,8 @@
 // poll functions are therefore genuinely uncalled *in this binary* and
 // perfectly live in the real daemon.
 #[allow(dead_code)]
+#[path = "../codex.rs"]
+mod codex;
 #[path = "../server.rs"]
 mod server;
 
@@ -39,13 +41,19 @@ fn main() {
             return;
         }
         Err(e) => {
-            eprintln!("verify-harness: failed to bind {}: {e}", socket_path.display());
+            eprintln!(
+                "verify-harness: failed to bind {}: {e}",
+                socket_path.display()
+            );
             std::process::exit(1);
         }
     };
 
     let db = Db::open(&db_path).unwrap_or_else(|e| {
-        eprintln!("verify-harness: failed to open database at {}: {e}", db_path.display());
+        eprintln!(
+            "verify-harness: failed to open database at {}: {e}",
+            db_path.display()
+        );
         std::process::exit(1);
     });
 
@@ -85,10 +93,15 @@ fn main() {
     // (the one above) is the "short list, no fade" case on its own; this is
     // the "content scrolled out of view" case. Unset by default, same
     // pattern as every other verification-only env var in this codebase.
-    if let Some(count) = std::env::var("NEKO_VERIFY_SEED_CLIPBOARD_COUNT").ok().and_then(|v| v.parse::<u32>().ok()) {
+    if let Some(count) = std::env::var("NEKO_VERIFY_SEED_CLIPBOARD_COUNT")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+    {
         for i in 0..count {
             let _ = db.record_clipboard_entry(
-                &format!("neko-frost edge-fade verification fixture #{i}: a distinct clipboard entry"),
+                &format!(
+                    "neko-frost edge-fade verification fixture #{i}: a distinct clipboard entry"
+                ),
                 "text",
                 Some("Terminal"),
                 server::now_unix_ms() - i as i64,
