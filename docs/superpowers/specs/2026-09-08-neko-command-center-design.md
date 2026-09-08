@@ -29,7 +29,7 @@ person should do immediately:
 - four compact live task tiles, ordered **needs you → working → recent**;
 - a backend-neutral **Needs you** section for a pending agent approval,
   explicit question, or an actionable work-inbox item;
-- quick commands such as *Open neko*, *New Codex task*, *Review approval*,
+- quick commands such as *Open task*, *New Codex task*, *Review approval*,
   *Snooze issue*, and *Open clipboard history*.
 
 The palette never shows a full conversation, a project sidebar or a feed of
@@ -112,9 +112,9 @@ project is useful on its own and must pass its own live verification.
 
 1. **Quick attention loop — first build.** Implement the Codex app-server
    adapter, all-local task snapshot, palette tiles, backend-neutral urgent
-   approvals and `Open neko`. This fulfills the daily launcher/clipboard plus
-   “are any agents blocked?” promise. The existing Codex control-plane spec
-   supplies its technical design.
+   approvals and an *Open task* quick view/handoff. This fulfills the daily
+   launcher/clipboard plus “are any agents blocked?” promise. The existing
+   Codex control-plane spec supplies its technical design.
 2. **Coding workspace.** Add the persistent app shell and focused task view:
    transcript, streaming, follow-up, start, interrupt, archive, fork, diffs,
    terminals, projects and explicit worktree flow. The palette remains quick;
