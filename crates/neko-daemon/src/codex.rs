@@ -7,7 +7,8 @@
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -22,6 +23,7 @@ const MAX_BACKOFF: Duration = Duration::from_secs(5);
 const STABLE_SESSION: Duration = Duration::from_secs(30);
 const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
+const CONTROL_QUEUE_CAPACITY: usize = 16;
 
 /// The only route from a palette click to the supervised stdio actor. It is
 /// deliberately a request/reply channel: callers get an honest unavailable
@@ -29,13 +31,16 @@ const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 /// the app-server stdin.
 pub struct ControlHandle {
     snapshot: SharedSnapshot,
-    sender: RwLock<Option<Sender<ControlRequest>>>,
+    sender: RwLock<Option<SyncSender<ControlRequest>>>,
 }
 
 struct ControlRequest {
     thread_id: String,
-    request_id: String,
+    request_id: Value,
     approve: bool,
+    /// A caller that stopped waiting must not leave a decision queued for a
+    /// later actor iteration to write to app-server stdin.
+    cancelled: Arc<AtomicBool>,
     completed: Sender<Result<(), neko_core::provider::ProviderError>>,
 }
 
@@ -47,7 +52,7 @@ impl ControlHandle {
         }
     }
 
-    fn attach(&self, sender: Sender<ControlRequest>) {
+    fn attach(&self, sender: SyncSender<ControlRequest>) {
         *self.sender.write().unwrap() = Some(sender);
     }
 
@@ -60,14 +65,26 @@ impl neko_core::codex::CodexControl for ControlHandle {
     fn resolve_approval(
         &self,
         thread_id: &str,
-        request_id: &str,
+        request_id: &Value,
         approve: bool,
+    ) -> Result<(), neko_core::provider::ProviderError> {
+        self.resolve_approval_with_timeout(thread_id, request_id, approve, CONTROL_TIMEOUT)
+    }
+}
+
+impl ControlHandle {
+    fn resolve_approval_with_timeout(
+        &self,
+        thread_id: &str,
+        request_id: &Value,
+        approve: bool,
+        timeout: Duration,
     ) -> Result<(), neko_core::provider::ProviderError> {
         if !self
             .snapshot
             .read()
             .unwrap()
-            .can_resolve(thread_id, request_id)
+            .can_resolve_id(thread_id, request_id)
         {
             return Err(neko_core::provider::ProviderError(
                 "approval was already resolved".to_string(),
@@ -77,21 +94,34 @@ impl neko_core::codex::CodexControl for ControlHandle {
             neko_core::provider::ProviderError("Codex is unavailable".to_string())
         })?;
         let (completed, receipt) = mpsc::channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
         sender
-            .send(ControlRequest {
+            .try_send(ControlRequest {
                 thread_id: thread_id.to_owned(),
-                request_id: request_id.to_owned(),
+                request_id: request_id.clone(),
                 approve,
+                cancelled: cancelled.clone(),
                 completed,
             })
-            .map_err(|_| neko_core::provider::ProviderError("Codex is unavailable".to_string()))?;
-        receipt.recv_timeout(CONTROL_TIMEOUT).map_err(|error| {
-            let message = match error {
-                mpsc::RecvTimeoutError::Timeout => "Codex did not accept the approval in time",
-                mpsc::RecvTimeoutError::Disconnected => "Codex is unavailable",
-            };
-            neko_core::provider::ProviderError(message.to_string())
-        })?
+            .map_err(|error| match error {
+                TrySendError::Full(_) => neko_core::provider::ProviderError(
+                    "Codex is busy processing another approval".to_string(),
+                ),
+                TrySendError::Disconnected(_) => {
+                    neko_core::provider::ProviderError("Codex is unavailable".to_string())
+                }
+            })?;
+        match receipt.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(error) => {
+                cancelled.store(true, Ordering::Release);
+                let message = match error {
+                    mpsc::RecvTimeoutError::Timeout => "Codex did not accept the approval in time",
+                    mpsc::RecvTimeoutError::Disconnected => "Codex is unavailable",
+                };
+                Err(neko_core::provider::ProviderError(message.to_string()))
+            }
+        }
     }
 }
 
@@ -179,7 +209,7 @@ fn start_session(
         }
     };
     let mut transport = ProcessTransport::new(stdin, stdout);
-    let (controls, control_requests) = mpsc::channel();
+    let (controls, control_requests) = mpsc::sync_channel(CONTROL_QUEUE_CAPACITY);
     control.attach(controls);
     let (active_for, result) = match bootstrap(&mut transport, &snapshot) {
         Ok(()) => {
@@ -366,11 +396,30 @@ fn read_notifications_with_controls(
 ) -> io::Result<()> {
     loop {
         while let Ok(request) = controls.try_recv() {
-            let result = respond_to_approval(transport, snapshot, &request);
-            if result.is_ok() {
-                state.set_codex_attention(snapshot.read().unwrap().approvals.len());
+            if request.cancelled.load(Ordering::Acquire) {
+                continue;
             }
-            let _ = request.completed.send(result);
+            match respond_to_approval(transport, snapshot, &request) {
+                Ok(result) => {
+                    if result.is_ok() {
+                        state.set_codex_attention(snapshot.read().unwrap().approvals.len());
+                    }
+                    let _ = request.completed.send(result);
+                }
+                Err(error) => {
+                    // A failed stdin write means this session cannot honestly
+                    // remain available. Clear its controls now; returning the
+                    // error sends the supervisor through its restart path.
+                    mark_unavailable(snapshot);
+                    state.set_codex_attention(0);
+                    let _ = request
+                        .completed
+                        .send(Err(neko_core::provider::ProviderError(
+                            "Codex is unavailable".to_string(),
+                        )));
+                    return Err(error);
+                }
+            }
         }
         match transport.read_line(Some(Duration::from_millis(50))) {
             Ok(Some(line)) => {
@@ -388,18 +437,18 @@ fn respond_to_approval(
     transport: &mut impl LineTransport,
     snapshot: &SharedSnapshot,
     request: &ControlRequest,
-) -> Result<(), neko_core::provider::ProviderError> {
-    let (response_id, kind, permissions) = {
+) -> io::Result<Result<(), neko_core::provider::ProviderError>> {
+    let (request_id, kind, permissions) = {
         let snapshot = snapshot.read().unwrap();
         let Some(approval) = snapshot.approvals.iter().find(|approval| {
             approval.thread_id == request.thread_id && approval.request_id == request.request_id
         }) else {
-            return Err(neko_core::provider::ProviderError(
+            return Ok(Err(neko_core::provider::ProviderError(
                 "approval was already resolved".to_string(),
-            ));
+            )));
         };
         (
-            approval.response_id.clone(),
+            approval.request_id.clone(),
             approval.kind.clone(),
             approval.permissions.clone(),
         )
@@ -407,11 +456,12 @@ fn respond_to_approval(
     let result = match kind {
         neko_core::codex::ApprovalKind::Permissions => {
             let permissions = if request.approve {
-                permissions.ok_or_else(|| {
-                    neko_core::provider::ProviderError(
+                let Some(permissions) = permissions else {
+                    return Ok(Err(neko_core::provider::ProviderError(
                         "Codex permission request is missing its permission profile".to_string(),
-                    )
-                })?
+                    )));
+                };
+                permissions
             } else {
                 json!({})
             };
@@ -423,24 +473,20 @@ fn respond_to_approval(
         }
         _ => json!({"decision": if request.approve { "accept" } else { "decline" }}),
     };
-    transport
-        .send_line(
-            &json!({
-                "jsonrpc": "2.0",
-                "id": response_id,
-                "result": result,
-            })
-            .to_string(),
-            CONTROL_TIMEOUT,
-        )
-        .map_err(|error| {
-            neko_core::provider::ProviderError(format!("Codex is unavailable: {error}"))
-        })?;
+    transport.send_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": result,
+        })
+        .to_string(),
+        CONTROL_TIMEOUT,
+    )?;
     snapshot
         .write()
         .unwrap()
-        .resolve(&request.thread_id, &request.request_id);
-    Ok(())
+        .resolve_id(&request.thread_id, &request.request_id);
+    Ok(Ok(()))
 }
 
 fn apply_line(snapshot: &SharedSnapshot, line: &str) {
@@ -657,6 +703,10 @@ mod tests {
         Arc::new(RwLock::new(neko_core::codex::Snapshot::default()))
     }
 
+    fn state() -> AppState {
+        AppState::new(neko_core::db::Db::open_in_memory().unwrap(), Vec::new())
+    }
+
     #[test]
     fn bootstrap_initializes_before_listing_threads() {
         let mut fake = FakeTransport::replying([
@@ -822,13 +872,16 @@ mod tests {
         let (completed, _receipt) = mpsc::channel();
         let request = ControlRequest {
             thread_id: "thr".to_string(),
-            request_id: "old-request".to_string(),
+            request_id: json!("old-request"),
             approve: true,
+            cancelled: Arc::new(AtomicBool::new(false)),
             completed,
         };
         let mut fake = FakeTransport::replying([]);
 
-        let error = respond_to_approval(&mut fake, &snapshot, &request).unwrap_err();
+        let error = respond_to_approval(&mut fake, &snapshot, &request)
+            .unwrap()
+            .unwrap_err();
 
         assert_eq!(error.to_string(), "approval was already resolved");
         assert!(
@@ -836,6 +889,76 @@ mod tests {
             "a stale click must not answer the newer request"
         );
         assert!(snapshot.read().unwrap().can_resolve("thr", "new-request"));
+    }
+
+    #[test]
+    fn timed_out_control_is_cancelled_before_a_later_actor_turn_can_write() {
+        let snapshot = Arc::new(RwLock::new(neko_core::codex::Snapshot::with_approval(
+            "thr", "request",
+        )));
+        let handle = ControlHandle::new(snapshot.clone());
+        let (sender, pending) = mpsc::sync_channel(CONTROL_QUEUE_CAPACITY);
+        handle.attach(sender);
+
+        let error = handle
+            .resolve_approval_with_timeout("thr", &json!("request"), true, Duration::ZERO)
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Codex did not accept the approval in time"
+        );
+
+        let (actor_sender, actor_controls) = mpsc::channel();
+        actor_sender.send(pending.recv().unwrap()).unwrap();
+        let mut fake = FakeTransport::replying([]);
+        let error =
+            read_notifications_with_controls(&mut fake, &snapshot, &actor_controls, &state())
+                .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(
+            fake.sent.is_empty(),
+            "a timed-out click must never write later"
+        );
+        assert!(snapshot.read().unwrap().can_resolve("thr", "request"));
+    }
+
+    #[test]
+    fn approval_write_failure_marks_the_session_unavailable_and_returns_for_restart() {
+        let state = state();
+        let snapshot = state.codex.clone();
+        snapshot.write().unwrap().apply_notification(&json!({
+            "id": "request",
+            "method": "item/fileChange/requestApproval",
+            "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1}
+        }));
+        let (sender, controls) = mpsc::channel();
+        let (completed, receipt) = mpsc::channel();
+        sender
+            .send(ControlRequest {
+                thread_id: "thr".to_string(),
+                request_id: json!("request"),
+                approve: true,
+                cancelled: Arc::new(AtomicBool::new(false)),
+                completed,
+            })
+            .unwrap();
+
+        let error = read_notifications_with_controls(
+            &mut FakeTransport::failing_writes(io::ErrorKind::BrokenPipe),
+            &snapshot,
+            &controls,
+            &state,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        assert!(!snapshot.read().unwrap().available);
+        assert!(snapshot.read().unwrap().approvals.is_empty());
+        assert_eq!(
+            receipt.recv().unwrap().unwrap_err().to_string(),
+            "Codex is unavailable"
+        );
     }
 
     #[test]
@@ -850,22 +973,32 @@ mod tests {
                 "method": "item/fileChange/requestApproval",
                 "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1, "reason": "edit config"},
             }));
+        snapshot.write().unwrap().apply_notification(&json!({
+            "jsonrpc": "2.0",
+            "id": "42",
+            "method": "item/fileChange/requestApproval",
+            "params": {"threadId": "thr", "itemId": "item", "turnId": "turn", "startedAtMs": 1},
+        }));
         let (completed, _receipt) = mpsc::channel();
         let request = ControlRequest {
             thread_id: "thr".to_string(),
-            request_id: "42".to_string(),
+            request_id: json!(42),
             approve: true,
+            cancelled: Arc::new(AtomicBool::new(false)),
             completed,
         };
         let mut fake = FakeTransport::replying([]);
 
-        respond_to_approval(&mut fake, &snapshot, &request).unwrap();
+        respond_to_approval(&mut fake, &snapshot, &request)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(
             serde_json::from_str::<Value>(&fake.sent[0]).unwrap(),
             json!({"jsonrpc": "2.0", "id": 42, "result": {"decision": "accept"}})
         );
-        assert!(!snapshot.read().unwrap().can_resolve("thr", "42"));
+        assert!(!snapshot.read().unwrap().can_resolve_id("thr", &json!(42)));
+        assert!(snapshot.read().unwrap().can_resolve_id("thr", &json!("42")));
     }
 
     #[test]
@@ -888,12 +1021,15 @@ mod tests {
             let (completed, _receipt) = mpsc::channel();
             let request = ControlRequest {
                 thread_id: "thr".to_string(),
-                request_id: id.to_string(),
+                request_id: json!(id),
                 approve,
+                cancelled: Arc::new(AtomicBool::new(false)),
                 completed,
             };
             let mut fake = FakeTransport::replying([]);
-            respond_to_approval(&mut fake, &snapshot, &request).unwrap();
+            respond_to_approval(&mut fake, &snapshot, &request)
+                .unwrap()
+                .unwrap();
             serde_json::from_str::<Value>(&fake.sent[0]).unwrap()
         };
 

@@ -1431,7 +1431,9 @@ mod tests {
             &state,
             Request::Activate {
                 kind: "codex-approval".into(),
-                id: "request-1".into(),
+                // Provider row ids use typed JSON so a numeric id cannot
+                // collide with this string request id.
+                id: r#""request-1""#.into(),
                 action: Some("approve".into()),
                 query: String::new(),
             },
