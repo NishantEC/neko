@@ -609,6 +609,18 @@ fn summon_from_outside(cx: &mut App) {
                         active_onboarding.clone(),
                     );
                 });
+            } else if should_summon_without_hotkey(
+                onboarding_state.completed,
+                controller.borrow().current_hotkey_id().is_some(),
+            ) {
+                // A completed setup with no live hotkey used to leave the
+                // app hidden. That makes Neko unreachable after an
+                // Accessibility refusal *and* after a conflicting hotkey.
+                // Opening once gives the person an immediate, visible way
+                // back to Settings; ordinary focus-loss dismissal still
+                // applies from here onward.
+                eprintln!("neko: no summon hotkey is live — opening the panel so it remains reachable");
+                cx.update(summon_from_outside);
             }
 
             loop {
@@ -809,6 +821,14 @@ struct OnboardingStateSnapshot {
     completed: bool,
 }
 
+/// A completed setup normally starts hidden until its global hotkey is
+/// pressed. If no registration actually succeeded, starting hidden makes the
+/// app impossible to reach except through an empty menu-bar item. Show it once
+/// instead; subsequent dismissal keeps the normal launcher behavior.
+fn should_summon_without_hotkey(onboarding_completed: bool, summon_hotkey_is_live: bool) -> bool {
+    onboarding_completed && !summon_hotkey_is_live
+}
+
 async fn fetch_onboarding_state(client: &NekoClient, cx: &AsyncApp) -> OnboardingStateSnapshot {
     if std::env::var_os(RESET_ONBOARDING_ENV_VAR).is_some() {
         let _ = client.request(Request::SetOnboardingComplete { completed: false }).await;
@@ -824,6 +844,22 @@ async fn fetch_onboarding_state(client: &NekoClient, cx: &AsyncApp) -> Onboardin
     // through it again.
     eprintln!("neko: could not reach neko-daemon for onboarding state in time, assuming already completed");
     OnboardingStateSnapshot { completed: true }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::should_summon_without_hotkey;
+
+    #[test]
+    fn completed_setup_without_a_live_hotkey_opens_a_reachable_panel() {
+        assert!(should_summon_without_hotkey(true, false));
+    }
+
+    #[test]
+    fn onboarding_or_a_live_hotkey_does_not_force_open_the_panel() {
+        assert!(!should_summon_without_hotkey(false, false));
+        assert!(!should_summon_without_hotkey(true, true));
+    }
 }
 
 /// The design report's §2 panel geometry: "positioned upper-third, not

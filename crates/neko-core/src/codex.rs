@@ -1130,7 +1130,11 @@ fn task_item(task: &Task, available: bool) -> SearchItem {
         TaskStatus::Waiting => (Glyph::AgentLive, Some("WAITING".to_string())),
         TaskStatus::Idle => (Glyph::Agent, None),
         TaskStatus::Failed => (Glyph::Agent, Some("FAILED".to_string())),
-        TaskStatus::Unknown => (Glyph::Agent, Some("UNKNOWN".to_string())),
+        // Codex's list API returns `notLoaded` for saved tasks it has not
+        // hydrated. That is an honest lack of execution state, not a task in
+        // an error state. Call out the useful fact — it is indexed and can be
+        // opened — without presenting an alarming pseudo-status.
+        TaskStatus::Unknown => (Glyph::Agent, Some("INDEXED".to_string())),
     };
     let actions = (task.status == TaskStatus::Waiting)
         .then(|| ItemAction {
@@ -1175,6 +1179,7 @@ mod tests {
     use super::{
         CodexApprovalsProvider, CodexControl, CodexStartTaskProvider, CodexTaskProvider,
         CodexTasksProvider, MAX_ACTIVITY_SUMMARY_CHARS, Snapshot, StartTask, Task, TaskStatus,
+        task_item,
     };
 
     fn snapshot_with_approval(thread_id: &str, request_id: &str) -> Snapshot {
@@ -1629,6 +1634,22 @@ mod tests {
         assert_eq!(snapshot.tasks[2].status, TaskStatus::Failed);
         assert_eq!(snapshot.tasks[3].title, "Untitled task");
         assert_eq!(snapshot.tasks[3].status, TaskStatus::Unknown);
+    }
+
+    #[test]
+    fn indexed_task_does_not_claim_an_unknown_status() {
+        let task = task(
+            "indexed",
+            "Indexed task",
+            None,
+            Some("openai"),
+            0,
+            TaskStatus::Unknown,
+        );
+
+        let item = task_item(&task, true);
+
+        assert_eq!(item.badge.as_deref(), Some("INDEXED"));
     }
 
     #[test]
