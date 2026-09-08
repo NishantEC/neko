@@ -15,11 +15,12 @@
 //! Delete this file once the investigation it was built for is closed.
 
 // **Dead code here is expected, not a smell.** This harness hosts the real
-// `server` module but starts none of its background threads — no clipboard
-// capture (the whole reason it exists) and no pollers, since an evidence run
-// must not reach the captain's pasteboard, Paseo, or three vendor APIs. The
-// poll functions are therefore genuinely uncalled *in this binary* and
-// perfectly live in the real daemon.
+// `server` module but starts neither clipboard capture (the whole reason it
+// exists) nor Paseo/quota/application pollers, since an evidence run must not
+// reach the captain's pasteboard, Paseo, or three vendor APIs. It starts only
+// the local Codex actor below, against a synthetic stdio executable. The poll
+// functions are therefore genuinely uncalled *in this binary* and perfectly
+// live in the real daemon.
 #[allow(dead_code)]
 #[path = "../codex.rs"]
 mod codex;
@@ -133,6 +134,13 @@ fn main() {
     eprintln!("verify-harness: indexed {} applications", apps.len());
 
     let state = Arc::new(server::AppState::new(db, apps));
+
+    // Exercise the same one-child Codex supervision seam as the shipped
+    // daemon without starting its systemwide clipboard-capture loop. The
+    // evidence recipe supplies only a synthetic local stdio executable via
+    // `NEKO_CODEX_PATH`; this harness is the sole place that combination is
+    // allowed for verification.
+    codex::spawn(state.codex.clone(), state.clone());
 
     {
         let state = state.clone();
