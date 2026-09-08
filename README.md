@@ -125,8 +125,20 @@ If you decline Accessibility, the hotkey cannot register. neko opens its panel
 on launch so it stays reachable; after dismissing it, use the menu-bar item to
 summon it again.
 
-`cargo run --release` works for development. The latency numbers in
-`AGENTS.md` are measured against the release binary run directly.
+For development without a global hotkey, `cargo run --release` works. If you
+need `⌥Space`, use a stable Apple Development signature instead — ad-hoc
+debug signatures change on every rebuild, so macOS treats each one as a new
+Accessibility client:
+
+```sh
+NEKO_CODESIGN_IDENTITY='Apple Development: Your Name (TEAMID)' scripts/run-dev.sh
+```
+
+Find the exact identity on this Mac with `security find-identity -v -p
+codesigning`. Add `target/debug/neko` once in System Settings → Privacy &
+Security → Accessibility; subsequent runs through that script retain the
+same permission. The latency numbers in `AGENTS.md` are measured against the
+release binary run directly.
 
 ## How it is put together
 
