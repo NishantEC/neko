@@ -135,10 +135,11 @@ NEKO_CODESIGN_IDENTITY='Apple Development: Your Name (TEAMID)' scripts/run-dev.s
 ```
 
 Find the exact identity on this Mac with `security find-identity -v -p
-codesigning`. Add `target/debug/neko` once in System Settings → Privacy &
-Security → Accessibility; subsequent runs through that script retain the
-same permission. The latency numbers in `AGENTS.md` are measured against the
-release binary run directly.
+codesigning`. The script builds `target/debug/Neko.app`; add that app once in
+System Settings → Privacy & Security → Accessibility. Subsequent runs retain
+the same permission because the signed bundle identifier remains stable. The
+latency numbers in `AGENTS.md` are measured against the release binary run
+directly.
 
 ## How it is put together
 
