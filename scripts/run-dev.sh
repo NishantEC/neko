@@ -34,4 +34,8 @@ cp "$build_directory/neko-daemon" "$daemon_binary"
 codesign --force --sign "$NEKO_CODESIGN_IDENTITY" --identifier 'dev.neko.launcher.daemon' --timestamp=none "$daemon_binary"
 codesign --force --sign "$NEKO_CODESIGN_IDENTITY" --identifier 'dev.neko.launcher' --timestamp=none "$client_binary"
 codesign --force --sign "$NEKO_CODESIGN_IDENTITY" --identifier 'dev.neko.launcher' --timestamp=none "$bundle"
-exec "$client_binary"
+
+# Execute through LaunchServices rather than invoking Contents/MacOS/neko
+# directly. Accessibility authorization is attached to the application process
+# that LaunchServices creates for this bundle, not to an arbitrary child Mach-O.
+exec open -W "$bundle"
