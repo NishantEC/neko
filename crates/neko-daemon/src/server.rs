@@ -1404,6 +1404,7 @@ mod tests {
             .replace_tasks(vec![neko_core::codex::Task {
                 id: "thr-1".into(),
                 title: "Review this change".into(),
+                opening_prompt: None,
                 cwd: None,
                 provider: None,
                 updated_at: 1,

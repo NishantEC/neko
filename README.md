@@ -48,7 +48,10 @@ own MCP endpoint, so the things you would switch apps for are a keypress away:
   its session mode or cancels the run.
 - **Codex tasks** share the agent tile strip, but keep a separate local
   app-server control path. A task opens a compact, read-only activity view;
-  an approval presents a readable summary when Codex supplies one, plus
+  when Codex indexes a task without exposing its turns, the view shows its
+  real opening request and says that the conversation is unavailable instead
+  of pretending the task title is its content.
+  An approval presents a readable summary when Codex supplies one, plus
   explicit Approve/Decline actions. A decline uses the same confirmation guard
   as other destructive menu actions.
 - **Schedules** shows what runs on a cron and when it next fires. Enter pauses

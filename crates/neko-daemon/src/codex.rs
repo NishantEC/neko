@@ -1348,6 +1348,7 @@ mod tests {
             state.replace_tasks(vec![neko_core::codex::Task {
                 id: "thr-1".into(),
                 title: "Only this task".into(),
+                opening_prompt: None,
                 cwd: None,
                 provider: None,
                 updated_at: 0,
@@ -1382,6 +1383,7 @@ mod tests {
                 neko_core::codex::Task {
                     id: "thr-a".into(),
                     title: "A".into(),
+                    opening_prompt: None,
                     cwd: None,
                     provider: None,
                     updated_at: 0,
@@ -1390,6 +1392,7 @@ mod tests {
                 neko_core::codex::Task {
                     id: "thr-b".into(),
                     title: "B".into(),
+                    opening_prompt: None,
                     cwd: None,
                     provider: None,
                     updated_at: 0,

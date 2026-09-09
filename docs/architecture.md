@@ -393,7 +393,9 @@ the launcher window.
 This is intentionally not a persistent Neko workspace and not a third-party
 work inbox. Those are separate parent-product decisions. The delivered surface
 only reflects local Codex tasks and explicit approvals through Codex's own
-local app-server contract. See
+local app-server contract. An indexed task may expose only its title and
+opening request; in that case Neko shows that request and explicitly marks the
+conversation unavailable rather than rendering a fabricated transcript. See
 `docs/evidence/codex-quick-attention-loop-report.md`.
 
 ## Agents on disk

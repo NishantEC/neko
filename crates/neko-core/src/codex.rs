@@ -64,6 +64,10 @@ impl TaskStatus {
 pub struct Task {
     pub id: String,
     pub title: String,
+    /// The opening request that Codex exposes for an indexed task. This is
+    /// deliberately not called a transcript: the local app-server can omit
+    /// every turn while still supplying this one truthful piece of context.
+    pub opening_prompt: Option<String>,
     pub cwd: Option<String>,
     pub provider: Option<String>,
     pub updated_at: i64,
@@ -506,6 +510,12 @@ fn parse_task(entry: &Value) -> Option<Task> {
     Some(Task {
         id: id.to_owned(),
         title: title.to_string(),
+        opening_prompt: entry
+            .get("preview")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|preview| !preview.is_empty())
+            .map(str::to_owned),
         cwd: entry.get("cwd").and_then(Value::as_str).map(str::to_owned),
         provider: entry
             .get("modelProvider")
@@ -801,7 +811,7 @@ impl Provider for CodexTaskProvider {
                     subtitle: Some(if snapshot.history_available {
                         "No recent visible activity.".to_string()
                     } else {
-                        "History is available in Codex".to_string()
+                        "Codex has not exposed this task's history.".to_string()
                     }),
                     icon: Icon::Glyph(Glyph::Agent),
                     section_label: self.section_label().to_string(),
@@ -817,7 +827,7 @@ impl Provider for CodexTaskProvider {
                     preview_markdown: false,
                     speaker: None,
                     images: Vec::new(),
-                    preview: None,
+                    preview: task.opening_prompt.clone(),
                 }
                 .into_candidate(1.0),
             ],
@@ -1415,6 +1425,7 @@ mod tests {
         Task {
             id: id.into(),
             title: title.into(),
+            opening_prompt: None,
             cwd: cwd.map(str::to_owned),
             provider: provider.map(str::to_owned),
             updated_at,
@@ -1721,6 +1732,41 @@ mod tests {
     }
 
     #[test]
+    fn thread_list_keeps_the_indexed_tasks_opening_prompt() {
+        let snapshot = Snapshot::from_thread_list(&json!({"data": [{
+            "id": "thr-1",
+            "name": "Read Novo Paseo agent",
+            "preview": "can you read paseo agent b74478f7"
+        }]}));
+
+        assert_eq!(
+            snapshot.tasks[0].opening_prompt.as_deref(),
+            Some("can you read paseo agent b74478f7"),
+            "the task detail must show Codex's real opening request rather than repeat its title"
+        );
+    }
+
+    #[test]
+    fn indexed_task_view_carries_the_opening_request_to_the_detail_pane() {
+        let snapshot = Snapshot::from_thread_list(&json!({"data": [{
+            "id": "thr-1",
+            "name": "Read Novo Paseo agent",
+            "preview": "can you read paseo agent b74478f7"
+        }]}));
+        let provider = CodexTaskProvider::with_snapshot_and_control(
+            Arc::new(RwLock::new(snapshot)),
+            Arc::new(TaskControl::default()),
+        );
+
+        let row = provider.search("thr-1", 0).pop().expect("indexed task row").item;
+        assert_eq!(row.preview.as_deref(), Some("can you read paseo agent b74478f7"));
+        assert_eq!(
+            row.subtitle.as_deref(),
+            Some("Codex has not exposed this task's history.")
+        );
+    }
+
+    #[test]
     fn thread_list_refresh_keeps_pending_approvals() {
         let mut snapshot = Snapshot::with_approval("thr-1", "request-1");
         snapshot.available = false;
@@ -1936,6 +1982,7 @@ mod tests {
         let tasks = vec![super::Task {
             id: "thr-1".into(),
             title: "Fix ranking".into(),
+            opening_prompt: None,
             cwd: None,
             provider: None,
             updated_at: 42,

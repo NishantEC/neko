@@ -149,15 +149,16 @@ pub const MODES: &[ModeChrome] = &[
         transcript: false,
         skeleton: crate::components::skeleton::SkeletonShape::Row,
     },
-    // A task row enters this plain scoped list. Task 5 will add its bounded
-    // activity history and task-specific detail semantics; until then the
-    // existing mode machinery gives Enter a real, searchable destination.
+    // A task row enters this scoped activity list. When Codex exposes visible
+    // turns, they are shown here; when it only indexes the task, the detail
+    // pane shows its real opening request and explicitly marks the transcript
+    // unavailable instead of inventing one.
     ModeChrome {
         id: "codex-task",
         provider_id: "codex-task",
         title: "Codex Tasks",
         placeholder: "Type to filter Codex tasks…",
-        empty_line: "History is available in Codex.",
+        empty_line: "Codex has not exposed task history.",
         has_detail: true,
         transcript: false,
         skeleton: crate::components::skeleton::SkeletonShape::Row,
