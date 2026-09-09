@@ -3855,18 +3855,44 @@ impl Root {
             let metadata = task
                 .and_then(|item| item.subtitle.as_deref())
                 .unwrap_or("Read-only local task view");
-            let summary = self.results.get(self.selected)
-                .map(|item| item.title.as_str())
-                .unwrap_or("History is available in Codex");
+            let item = self.results.get(self.selected);
+            let (label, content, availability) = match item {
+                Some(item) if item.preview.is_some() => (
+                    "Opening request",
+                    item.preview.as_deref().expect("checked above"),
+                    Some("Codex has not exposed this task's conversation to Neko."),
+                ),
+                Some(item) if item.subtitle.as_deref() == Some("No recent visible activity.") => (
+                    "No visible activity",
+                    "Codex exposed no recent visible turns for this task.",
+                    None,
+                ),
+                Some(item) => (
+                    "Visible activity",
+                    item.title.as_str(),
+                    None,
+                ),
+                None => (
+                    "Task details unavailable",
+                    "Codex did not expose any readable task content.",
+                    Some("Open the task in Codex to read its conversation."),
+                ),
+            };
             return col
                 .child(div().text_size(px(15.)).text_color(theme::active().text_primary).child(SharedString::from(title.to_owned())))
                 .child(div().text_size(px(11.5)).text_color(theme::active().text_tertiary).child(SharedString::from(metadata.to_owned())))
                 .child(
-                    div().flex_1().min_h(px(0.)).overflow_hidden().p_3()
+                    div().flex().flex_col().flex_1().min_h(px(0.)).overflow_hidden().p_3().gap(px(10.))
                         .rounded(px(theme::ROW_RADIUS_PX)).bg(theme::active().surface_input)
                         .border_1().border_color(theme::active().border_hairline)
-                        .text_size(px(13.)).text_color(theme::active().text_primary)
-                        .child(SharedString::from(summary.to_owned())),
+                        .child(div().text_size(px(11.)).text_color(theme::active().text_tertiary).child(label))
+                        .child(div().text_size(px(13.)).text_color(theme::active().text_primary).whitespace_normal().child(SharedString::from(content.to_owned())))
+                        .children(availability.map(|availability| {
+                            div().mt(px(6.)).pt(px(10.)).border_t_1()
+                                .border_color(theme::active().border_hairline)
+                                .text_size(px(11.5)).text_color(theme::active().text_secondary)
+                                .whitespace_normal().child(availability)
+                        })),
                 );
         }
         let Some(item) = self.results.get(self.selected) else {
