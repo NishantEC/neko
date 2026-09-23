@@ -20,6 +20,17 @@ of the same product, not two competing apps.
 
 ## Product outcome
 
+Neko is the person's standing work delegate. Its primary job is to maintain
+continuity while they are away: notice what they would notice, investigate it,
+make a plan using their working preferences, execute within their delegated
+authority, and follow through until the outcome is verified. The workspace and
+command center are surfaces for inspecting and steering that ongoing work.
+
+The success measure is fewer unattended responsibilities and fewer decisions
+the person must reconstruct on return. Activity volume and the number of
+spawned agents are not success measures. This is the intended product behavior;
+the current launcher does not yet implement this operating loop.
+
 Neko turns connected work signals into safe, complete outcomes:
 
 1. It reads the sources the person explicitly connects.
@@ -34,6 +45,56 @@ Neko turns connected work signals into safe, complete outcomes:
 Neko should feel proactive but calm. It batches routine information, keeps
 healthy work quiet, and interrupts only for a genuine decision, risk, blocker,
 or completion.
+
+### Working the way the person would
+
+Neko maintains an inspectable working profile: project ownership, priorities,
+triage habits, preferred investigation steps, acceptable fixes, review standards,
+communication style, and existing commitments. Explicit instructions override
+inferred preferences. It may propose refinements from approved past decisions
+and corrections; observations alone cannot expand its permissions.
+
+Every plan connects source evidence to that profile: why this matters now,
+what is already being handled, what Neko proposes to do, and what will prove
+it worked. An unresolved assumption stays visible. An agent team is created
+only when the task benefits from it; routine triage may need no coding agent.
+
+### Away operation
+
+With configured connections and a standing delegation policy, Neko can notice,
+investigate, plan, and start eligible tasks without waiting for a new prompt.
+Delegation is specific to workspace, repository, action, and resource budget.
+Replies, PR publication, issue changes, merges, and deployments are separately
+authorized capabilities. Routine actions already covered by a standing grant
+do not require repeated approval. Actions outside that grant wait for a decision.
+
+Neko follows its own work: review feedback, test failures, new issue information,
+and approaching deadlines can resume a task. It records outbound actions and
+external identifiers so a restart does not duplicate a message, issue, or PR.
+Completion, publication, merge, deployment, and observed resolution remain
+separate facts. On return, the person sees what was handled, what remains, and
+the small set of decisions that need them.
+
+Away operation requires an available execution host. The first local version
+runs while the Mac and Neko daemon are awake and connected; it reports coverage
+gaps and reconciles missed events after recovery. Continuous operation while
+the Mac is off requires a later always-on host and must not be implied by a
+heartbeat indicator.
+
+### Target scenario
+
+A Sentry regression, a Slack report, and a recent GitHub commit refer to the
+same failure. Neko links the evidence, checks impact and ownership, investigates
+the likely cause, and chooses a plan using the person's standards. Within its
+standing authority, it spawns agents to reproduce, fix, review, and test; opens
+a PR; communicates a factual update; and follows review feedback. It records
+resolution only when the relevant evidence supports it. This is the target
+scenario after those connectors ship, not a current integration claim.
+
+The first version proves the same loop using Linear: an eligible assigned issue
+is noticed, prioritized with a reason, converted into a Neko task without a
+manual copy step, investigated, and taken to a verified result within the
+configured delegation policy. Linear remains the first connector.
 
 ## Neko agents
 
@@ -97,7 +158,7 @@ External Linear writes—creating an issue, changing state, or commenting—rema
 explicit and opt-in per workspace. They must never happen merely because an
 issue was indexed or because another workspace permits similar writes.
 
-Slack, Gmail, and GitHub follow the same source-connection model after Linear.
+Sentry, Slack, GitHub, and Gmail follow the same source-connection model after Linear.
 They are not required for the initial shippable slice.
 
 ## Cross-workspace federation
@@ -195,14 +256,16 @@ heartbeat-based attention.
 
 Add multi-workspace Linear connections, selected team/project indexing,
 origin-labelled priority inbox, issue-to-task conversion, and per-workspace
-authorization. Add external writes only after the read and task path is
-proven.
+authorization. Prove a complete away-operation loop for eligible assigned
+issues under a standing delegation policy, including recovery and a return
+brief. Add external writes only after the read and task path is proven.
 
 ### Phase 4 — personal work intelligence
 
 Add workspace federation, source correlation, priority explanation, context
-capsules, scheduled beats, and a quiet briefing. Then add Slack, Gmail, and
-GitHub through the same connection model.
+capsules, scheduled beats, and a quiet briefing. Extend the working profile from
+explicit preferences and approved corrections. Then add Sentry, Slack, GitHub,
+and Gmail through the same connection model to prove the target scenario.
 
 ## Verification
 
@@ -217,3 +280,9 @@ instead of invented activity.
 The first manual evidence pass must create one task in an isolated worktree,
 observe a healthy heartbeat, force a meaningful blocker, approve or decline it,
 and inspect the completed outcome and its verification record.
+
+The Linear acceptance pass must also demonstrate a task progressing while the
+person is away under a configured standing grant, a restricted action waiting
+for approval, and restart recovery without duplicate tasks or external actions.
+The return brief must distinguish verified results from work still awaiting
+review, deployment, or observed resolution.
