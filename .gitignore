@@ -17,7 +17,7 @@
 # unreleased features, and fragments of real prompts — see `AGENTS.md`'s
 # standing capture-safety rules. The written reports beside them are the
 # durable record and stay; the images are local-only.
-/docs/evidence/*.png
+/docs/evidence/**/*.png
 
 # The patched gpui fork checkout, populated by `scripts/setup-gpui-patch.sh`.
 # It is a whole third-party monorepo, and it is what the root `Cargo.toml`'s
