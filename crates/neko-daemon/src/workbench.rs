@@ -453,7 +453,13 @@ fn converse(db: &Arc<Mutex<Db>>, pending: &str, message: &str, preferred: Option
             .filter(|w| chosen == Some(w.id.as_str()) || message.to_lowercase().contains(&w.name.to_lowercase()));
         let entry = neko_protocol::workbench::MemoryEntry {
             id: String::new(),
-            kind: if workspace.is_some() { neko_protocol::workbench::MemoryKind::Workspace } else { neko_protocol::workbench::MemoryKind::Profile },
+            kind: if memory.decision {
+                neko_protocol::workbench::MemoryKind::Decision
+            } else if workspace.is_some() {
+                neko_protocol::workbench::MemoryKind::Workspace
+            } else {
+                neko_protocol::workbench::MemoryKind::Profile
+            },
             workspace_id: workspace.map(|w| w.id.clone()),
             text: memory.text,
             source: "chat".into(),

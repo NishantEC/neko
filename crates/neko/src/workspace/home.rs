@@ -8,7 +8,7 @@ use super::*;
 use crate::assets::icon;
 use gpui::{AnyElement, FontWeight, MouseButton, Rgba};
 use neko_protocol::mcp_host::{McpCommand, Responsibility};
-use neko_protocol::workbench::{ChatMessage, ChatRole, Task};
+use neko_protocol::workbench::{ChatMessage, ChatRole, MemoryEntry, MemoryKind, Task};
 
 /// The logo's pink: the only colour that means "this needs you".
 const ATTENTION: u32 = 0xE88BA8;
@@ -495,6 +495,7 @@ impl WorkspaceRoot {
                     .child(nav("nav-today", icon::MARK, "Today", 0, View::Today, cx))
                     .child(nav("nav-tickets", icon::CLIPBOARD, "Tickets", needs_you, View::Tickets, cx))
                     .child(nav("nav-responsibilities", icon::SLIDERS, "Responsibilities", self.snapshot.mcp.responsibilities.len(), View::Responsibilities, cx))
+                    .child(nav("nav-memory", icon::TEXT_LINES, "Memory", self.snapshot.memory.len(), View::Memory, cx))
                     .child(nav("nav-tools", icon::TERMINAL, "Tools & skills", 0, View::Integrations, cx)),
             )
             .child(
@@ -779,6 +780,22 @@ impl WorkspaceRoot {
                     .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).line_height(px(22.)).when(message.failed, |r| r.text_color(t.text_secondary)).child(crate::markdown::render_cached(&message.text))),
             );
             let linked: Vec<&Task> = message.ticket_ids.iter().filter_map(|id| self.snapshot.tasks.iter().find(|x| &x.id == id)).collect();
+            if !message.remembered.is_empty() {
+                let mut saved = div().flex().flex_col().gap(px(4.));
+                for text in &message.remembered {
+                    saved = saved.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(7.))
+                            .text_size(px(12.))
+                            .text_color(t.text_secondary)
+                            .child(gpui::svg().path(icon::TEXT_LINES).size(px(12.)).text_color(t.text_tertiary))
+                            .child(format!("Remembered: {text}")),
+                    );
+                }
+                body = body.child(saved);
+            }
             if !linked.is_empty() {
                 let mut chips = div().flex().flex_wrap().gap(px(8.));
                 for task in linked {
@@ -1281,6 +1298,111 @@ impl WorkspaceRoot {
                         cx.notify();
                     }))),
             )
+            .into_any_element()
+    }
+}
+
+impl WorkspaceRoot {
+    fn save_memory(&mut self, kind: MemoryKind, cx: &mut Context<Self>) {
+        let text = value(&self.memory_input, cx);
+        if text.is_empty() {
+            return;
+        }
+        let workspace_id = if kind == MemoryKind::Workspace { self.selection.workspace.clone() } else { None };
+        self.request(
+            Command::SaveMemory { entry: MemoryEntry { id: String::new(), kind, workspace_id, text, source: "user".into(), created_at_ms: 0, updated_at_ms: 0 } },
+            cx,
+        );
+    }
+
+    fn memory_rows(&self, entries: Vec<&MemoryEntry>, cx: &mut Context<Self>) -> AnyElement {
+        let t = theme::active();
+        let n = entries.len();
+        let rows: Vec<AnyElement> = entries
+            .into_iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let id = e.id.clone();
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .px(px(16.))
+                    .py(px(11.))
+                    .when(i + 1 < n, |r| r.border_b_1().border_color(t.border_hairline))
+                    .child(div().flex_1().min_w(px(0.)).text_size(px(13.)).line_height(px(19.)).child(e.text.clone()))
+                    .child(div().flex_shrink_0().text_size(px(11.)).text_color(t.text_tertiary).child(if e.source == "chat" { "from chat" } else { "added by you" }))
+                    .child(action(format!("forget-{}", e.id), "Forget", false, !self.busy, cx, move |root, _, cx| root.request(Command::DeleteMemory { id: id.clone() }, cx)))
+                    .into_any_element()
+            })
+            .collect();
+        self.card_list(rows).into_any_element()
+    }
+
+    pub(super) fn memory_page(&self, cx: &mut Context<Self>) -> AnyElement {
+        let t = theme::active();
+        let memory = &self.snapshot.memory;
+        let mut sorted: Vec<&MemoryEntry> = memory.iter().collect();
+        sorted.sort_by_key(|e| std::cmp::Reverse(e.updated_at_ms));
+        let profile: Vec<&MemoryEntry> = sorted.iter().copied().filter(|e| e.workspace_id.is_none() && e.kind != MemoryKind::Decision).collect();
+        let decisions: Vec<&MemoryEntry> = sorted.iter().copied().filter(|e| e.kind == MemoryKind::Decision).collect();
+        let selected_name = self.selection.workspace.as_ref().map(|id| self.workspace_name(id));
+        let mut list = div()
+            .id("memory-list")
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .gap(px(22.))
+            .px(px(24.))
+            .py(px(20.))
+            .child(div().text_size(px(13.)).line_height(px(20.)).text_color(t.text_secondary).child("Neko uses this in every chat and when it plans or builds a ticket. It learns from what you tell it in chat, and you can add or forget anything here. Memory shapes how Neko works; it never gives it permissions."))
+            .child(
+                div()
+                    .id("memory-add")
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .pl(px(14.))
+                    .pr(px(6.))
+                    .h(px(44.))
+                    .rounded(px(12.))
+                    .bg(t.surface_input)
+                    .border_1()
+                    .border_color(t.border_hairline_strong)
+                    .on_key_down(cx.listener(|root, event: &KeyDownEvent, _, cx| {
+                        if event.keystroke.key == "enter" && !event.keystroke.modifiers.shift {
+                            root.save_memory(MemoryKind::Profile, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .child(div().flex_1().min_w(px(0.)).overflow_hidden().child(self.memory_input.clone()))
+                    .child(action("memory-add-me", "About me", false, !self.busy, cx, |root, _, cx| root.save_memory(MemoryKind::Profile, cx)))
+                    .when_some(selected_name, |row, name| row.child(action("memory-add-ws", format!("For {name}"), false, !self.busy, cx, |root, _, cx| root.save_memory(MemoryKind::Workspace, cx)))),
+            );
+        let empty = div().text_size(px(12.)).text_color(t.text_tertiary).child("Nothing yet. Tell Neko how you like to work, in chat or above.").into_any_element();
+        let about = if profile.is_empty() { empty } else { self.memory_rows(profile, cx) };
+        list = list.child(div().flex().flex_col().gap(px(10.)).child(label("ABOUT YOU")).child(about));
+        for workspace in &self.snapshot.workspaces {
+            let notes: Vec<&MemoryEntry> = sorted.iter().copied().filter(|e| e.workspace_id.as_deref() == Some(workspace.id.as_str()) && e.kind != MemoryKind::Decision).collect();
+            if notes.is_empty() {
+                continue;
+            }
+            let rows = self.memory_rows(notes, cx);
+            list = list.child(div().flex().flex_col().gap(px(10.)).child(label(workspace.name.to_uppercase())).child(rows));
+        }
+        if !decisions.is_empty() {
+            let rows = self.memory_rows(decisions, cx);
+            list = list.child(div().flex().flex_col().gap(px(10.)).child(label("DECISIONS")).child(rows));
+        }
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(self.page_header("Memory", Some(format!("{} things Neko knows", memory.len())), cx))
+            .children(self.problem_banner())
+            .child(list)
             .into_any_element()
     }
 }
