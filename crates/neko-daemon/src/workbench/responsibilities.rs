@@ -288,12 +288,13 @@ impl Controller {
                 claim.responsibility.connection_ids.clone(),
                 Some(claim.responsibility.clone()),
             )?;
+            let skills = self.responsibility_skills(&state, &claim.workspace.id)?;
             let spec = native_runner::RunSpec {
                 directory: claim.workspace.repository.clone().into(),
                 writable: false,
                 timeout: Duration::from_secs(600),
                 prompt: format!(
-                    "{}\nThis wake is read-only: do not mutate external systems, publish, send messages, or edit files. A tool grant is not permission to exceed this read-only wake.\nWorkspace preferences:\n{}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context, recheck them using current tools):\n{}",
+                    "{}\nThis wake is read-only: do not mutate external systems, publish, send messages, or edit files. A tool grant is not permission to exceed this read-only wake.\nWorkspace preferences:\n{}\nUser-enabled workspace skills:\n{skills}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context, recheck them using current tools):\n{}",
                     responsibility::INSTRUCTION,
                     claim.workspace.instructions,
                     claim.responsibility.instruction,
@@ -317,6 +318,10 @@ impl Controller {
             result.as_deref().map_err(String::as_str),
             store::now_ms(),
         )
+    }
+    fn responsibility_skills(&self, state: &Snapshot, workspace: &str) -> Result<String, String> {
+        let db = self.db.lock().map_err(|_| "Skill storage unavailable")?;
+        neko_core::skills::instructions(&db, &state.workspaces, Some(workspace))
     }
     pub(super) fn run_native(
         &self,
@@ -487,6 +492,35 @@ mod tests {
         );
     }
     #[test]
+    fn responsibility_skills_are_scoped_and_changed_files_fail_before_launch() {
+        let controller = configured();
+        let temp = std::env::temp_dir().join(format!("neko-wake-skill-test-{}", store::new_id()));
+        let folder = temp.join(".neko/skills/wake");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("SKILL.md");
+        std::fs::write(&path, "RESPONSIBILITY_SKILL_SENTINEL").unwrap();
+        let state = {
+            let db = controller.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.workspaces[0].repository = temp.to_string_lossy().into_owned();
+            store::save(&db, &state).unwrap();
+            let available = neko_core::skills::discover(&[neko_core::skills::Root { path: folder, source: "Test".into(), workspace_id: Some("w".into()) }]);
+            let skill = &available[0];
+            neko_core::skills::set_enabled(&db, &available, &["w".into()], "w", &skill.path, &skill.content_hash, true).unwrap();
+            state
+        };
+        assert!(controller.responsibility_skills(&state, "w").unwrap().contains("RESPONSIBILITY_SKILL_SENTINEL"));
+        assert!(controller.responsibility_skills(&state, "other").unwrap().is_empty());
+        std::fs::write(&path, "Changed instructions").unwrap();
+        controller.responsibility_tick().unwrap();
+        let failed = controller.command(Command::Snapshot).unwrap();
+        assert!(failed.mcp.responsibilities[0].last_result.contains("changed"));
+        assert_eq!(failed.mcp.responsibilities[0].failures, 1);
+        std::fs::remove_file(path).unwrap();
+        assert!(controller.responsibility_skills(&state, "w").unwrap_err().contains("unavailable"));
+        std::fs::remove_dir_all(temp).unwrap();
+    }
+    #[test]
     fn invalid_result_records_failure_and_backoff_without_creating_tasks() {
         let controller = configured();
         let claim = controller.claim_due(100).unwrap().unwrap();
@@ -577,7 +611,7 @@ mod tests {
         let state = controller.command(Command::Snapshot).unwrap();
         let authority = RunAuthority::for_task(&state, &state.tasks[0]).unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
-        *controller.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Active {
+        controller.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(Active {
             task_id: "t".into(),
             cancelled: cancel.clone(),
         });

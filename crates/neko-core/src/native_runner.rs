@@ -6,7 +6,9 @@
 //! as enforcing a filesystem read allowlist. Named permission profiles exist,
 //! but must pass an OS-level denied-read probe before replacing this policy.
 //! `--ignore-user-config` and `--ignore-rules` also do not disable skill
-//! discovery; model-visible user/project skills are not a privacy boundary.
+//! discovery. `skills.include_instructions=false` suppresses automatic skill
+//! instructions; Neko injects only explicit workspace activations. This is not
+//! a filesystem read privacy boundary.
 //! Read-only runs cannot create temporary files, including tool caches. A
 //! writable TMPDIR exception must not silently widen the review's policy.
 
@@ -108,6 +110,8 @@ fn run_configured(
             },
             "-c",
             "approval_policy=\"never\"",
+            "-c",
+            "skills.include_instructions=false",
             "-c",
             "sandbox_workspace_write.network_access=false",
             "-c",
@@ -860,6 +864,27 @@ mod tests {
             timeout: Duration::from_secs(10),
         };
         (temp, executable, spec)
+    }
+
+    #[test]
+    fn enabled_skill_instructions_reach_child_prompt_and_automatic_skills_are_disabled() {
+        let (temp, executable, mut spec) = fixture(r#"
+printf '%s\n' "$@" > arguments
+cat > received_prompt
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}' '{"type":"turn.completed"}'
+"#);
+        let skill_dir = temp.path().join("skill");
+        fs::create_dir(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "UNIQUE_SKILL_INSTRUCTION: check the actual diff").unwrap();
+        let available = crate::skills::discover(&[crate::skills::Root { path: skill_dir, source: "Test".into(), workspace_id: Some("one".into()) }]);
+        let db = crate::Db::open_in_memory().unwrap();
+        let skill = &available[0];
+        let enabled = crate::skills::set_enabled(&db, &available, &["one".into(), "two".into()], "one", &skill.path, &skill.content_hash, true).unwrap();
+        spec.prompt.push_str(&crate::skills::for_prompt(&enabled, &available, Some("one")).unwrap());
+        run_with_executable(&executable, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        assert!(fs::read_to_string(temp.path().join("received_prompt")).unwrap().contains("UNIQUE_SKILL_INSTRUCTION"));
+        assert!(fs::read_to_string(temp.path().join("arguments")).unwrap().contains("skills.include_instructions=false"));
+        assert!(crate::skills::for_prompt(&enabled, &available, Some("two")).unwrap().is_empty());
     }
 
     #[test]

@@ -29,7 +29,7 @@ fn bump_revision() {
 
 pub fn load(db: &Db) -> Result<Snapshot, String> {
     let Some(json) = db.get_setting(SETTING).map_err(|e| e.to_string())? else {
-        return Ok(Snapshot::default());
+        return Ok(Snapshot { skills: crate::skills::load(db)?, ..Snapshot::default() });
     };
     if json.len() > MAX_SNAPSHOT_BYTES {
         return Err("Workbench storage exceeds its size limit".into());
@@ -50,6 +50,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     // Attached for readers only; save() never writes it into this setting.
     snapshot.conversation = crate::neko_chat::load(db)?;
     snapshot.memory = crate::neko_memory::load(db)?;
+    snapshot.skills = crate::skills::load(db)?;
     Ok(snapshot)
 }
 
@@ -72,6 +73,7 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     let mut compacted = snapshot.clone();
     compacted.conversation.clear();
     compacted.memory.clear();
+    compacted.skills = Default::default();
     for task in &mut compacted.tasks {
         for event in &mut task.events {
             event.message = truncate(&event.message, MAX_EVENT_BYTES);
@@ -164,6 +166,7 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
     let mut snapshot = load(db)?;
     match command {
         Command::Mcp(command) => crate::mcp_host::store::apply_command(&mut snapshot, command, now_ms())?,
+        Command::Skills(_) => return Err("Skill commands must be handled by the daemon".into()),
         Command::Snapshot => return Ok(snapshot),
         Command::SaveWorkspace { mut workspace } => {
             workspace.name = workspace.name.trim().to_owned();
