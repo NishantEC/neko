@@ -22,6 +22,29 @@ pub struct Host {
     call_slot: Mutex<()>,
     auth: Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
 }
+
+/// Removes an in-flight authentication marker on success, failure or unwind.
+struct AuthAttempt {
+    host: Arc<Host>,
+    id: String,
+    cancel: Arc<AtomicBool>,
+}
+impl Drop for AuthAttempt {
+    fn drop(&mut self) {
+        let mut attempts = self.host.auth.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if attempts.get(&self.id).is_some_and(|current| Arc::ptr_eq(current, &self.cancel)) {
+            attempts.remove(&self.id);
+        }
+    }
+}
+
+/// A new credential belongs to a connection only after its snapshot is saved.
+struct PendingCredential(Option<String>);
+impl Drop for PendingCredential {
+    fn drop(&mut self) {
+        if let Some(id) = &self.0 { credentials::remove(id); }
+    }
+}
 impl Host {
     pub fn cancel_chat(&self, turn_id: &str) {
         self.registry.cancel_run(&format!("chat:{turn_id}"));
@@ -117,7 +140,9 @@ impl Host {
                 auth.insert(connection_id.clone(), cancel.clone());
                 drop(auth);
                 let host = self.clone();
-                std::thread::spawn(move || {
+                let attempt = AuthAttempt { host: host.clone(), id: connection_id.clone(), cancel: cancel.clone() };
+                std::thread::Builder::new().name("neko-oauth".into()).spawn(move || {
+                    let _attempt = attempt;
                     let result = neko_core::mcp_host::oauth::authorize(
                         &connection_id,
                         &url,
@@ -151,10 +176,7 @@ impl Host {
                             }
                         }
                     }
-                    if let Ok(mut auth) = host.auth.lock() {
-                        auth.remove(&connection_id);
-                    }
-                });
+                }).map_err(|e| format!("Cannot start browser sign-in: {e}"))?;
                 store::load(
                     &*self
                         .db
@@ -187,27 +209,32 @@ impl Host {
                     discovered_ms: None,
                     error: None,
                 };
-                let db = self
-                    .db
-                    .lock()
-                    .map_err(|_| "Workspace storage unavailable")?;
-                let mut state = store::load(&db)?;
-                state.mcp.connections.push(connection);
-                policy::validate(&state)?;
-                if let Some(secret) = &secret {
-                    db.delete_clipboard_entry(&secret.0)
-                        .map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
-                    db.delete_clipboard_entry(secret.0.trim())
-                        .map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
-                    credentials::store(&id, &secret.0)?;
-                }
-                if let Err(error) = store::save(&db, &state) {
-                    if secret.is_some() {
-                        credentials::remove(&id);
+                {
+                    let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+                    let mut state = store::load(&db)?;
+                    state.mcp.connections.push(connection.clone());
+                    policy::validate(&state)?;
+                    if let Some(secret) = &secret {
+                        db.delete_clipboard_entry(&secret.0)
+                            .map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
+                        db.delete_clipboard_entry(secret.0.trim())
+                            .map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
                     }
-                    return Err(error);
                 }
-                store::load(&db)
+                let mut pending = PendingCredential(secret.as_ref().map(|_| id.clone()));
+                // Keychain may prompt or block. Never hold the database while
+                // contacting it; other chats and workspace edits remain usable.
+                if let Some(secret) = &secret { credentials::store(&id, &secret.0)?; }
+                {
+                    let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+                    let mut state = store::load(&db)?;
+                    state.mcp.connections.push(connection);
+                    // Workspace/grant state may have changed while Keychain ran.
+                    policy::validate(&state)?;
+                    store::save(&db, &state)?;
+                    pending.0 = None;
+                    store::load(&db)
+                }
             }
             McpCommand::Discover { connection_id } => {
                 let _slot = self
@@ -578,6 +605,24 @@ mod tests {
         store::save(&db, &snapshot).unwrap();
         Arc::new(Host::new(Arc::new(Mutex::new(db))))
     }
+    #[test]
+    fn authentication_attempt_cleans_up_on_unwind_without_removing_a_replacement() {
+        let host = host();
+        let cancel = Arc::new(AtomicBool::new(false));
+        host.auth.lock().unwrap().insert("connection".into(), cancel.clone());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _attempt = AuthAttempt { host: host.clone(), id: "connection".into(), cancel: cancel.clone() };
+            panic!("fixture failure");
+        }));
+        assert!(result.is_err());
+        assert!(!host.auth.lock().unwrap().contains_key("connection"));
+        let attempt = AuthAttempt { host: host.clone(), id: "connection".into(), cancel };
+        let replacement = Arc::new(AtomicBool::new(false));
+        host.auth.lock().unwrap().insert("connection".into(), replacement.clone());
+        drop(attempt);
+        assert!(Arc::ptr_eq(host.auth.lock().unwrap().get("connection").unwrap(), &replacement));
+    }
+
     #[test]
     fn adding_a_server_does_not_grant_or_launch_it() {
         let h = host();
