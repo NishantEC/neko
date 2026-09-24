@@ -333,21 +333,12 @@ fn startup_lock_path(socket_path: &Path) -> std::path::PathBuf {
 
 fn lock_startup(socket_path: &Path) -> io::Result<std::fs::File> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-    // OpenOptions exposes the native flags without requiring a new dependency.
-    // Neko targets Darwin; Linux is also defined for isolated IPC CI tests.
-    #[cfg(target_os = "macos")]
-    const O_NOFOLLOW: i32 = 0x0100;
-    #[cfg(target_os = "linux")]
-    const O_NOFOLLOW: i32 = 0o400000;
-    #[cfg(target_os = "macos")]
-    const O_NONBLOCK: i32 = 0x0004;
-    #[cfg(target_os = "linux")]
-    const O_NONBLOCK: i32 = 0o4000;
-    unsafe extern "C" { fn geteuid() -> u32; }
     let file = std::fs::OpenOptions::new().read(true).write(true).create(true)
-        .mode(0o600).custom_flags(O_NOFOLLOW | O_NONBLOCK).open(startup_lock_path(socket_path))?;
+        .mode(0o600).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(startup_lock_path(socket_path))?;
     let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.uid() != unsafe { geteuid() }
+    // SAFETY: geteuid has no arguments or memory preconditions.
+    let owner = unsafe { libc::geteuid() };
+    if !metadata.is_file() || metadata.uid() != owner
         || metadata.mode() & 0o7777 != 0o600 || metadata.nlink() != 1 {
         return Err(io::Error::new(io::ErrorKind::PermissionDenied,
             "daemon startup lock must be an owner-only regular file with one link"));
