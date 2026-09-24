@@ -1,5 +1,12 @@
 use neko_protocol::mcp_host::ServerConfig;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Tab {
+    Connections,
+    Skills,
+    Browse,
+}
+
 fn responsibility_from_form(
     workspace: &str,
     instruction: &str,
@@ -72,15 +79,41 @@ pub(super) fn view(
         .child(heading(
             "Tools & skills",
             "Add your own servers. No integration is required or granted automatically.",
-        ))
-        .child(super::skills::view(root, cx));
-    for c in root
-        .snapshot
-        .mcp
-        .connections
-        .iter()
-        .filter(|c| root.selection.includes(&c.workspace_id))
-    {
+        ));
+    let mut tabs = div().flex().gap(px(8.));
+    for (tab, label) in [
+        (Tab::Connections, "Connections"),
+        (Tab::Skills, "Skills"),
+        (Tab::Browse, "Browse"),
+    ] {
+        tabs = tabs.child(button(
+            format!("tools-tab-{label}"),
+            label,
+            true,
+            root.tools_tab == tab,
+            cx,
+            move |r, _, cx| {
+                r.tools_tab = tab;
+                cx.notify();
+            },
+        ));
+    }
+    body = body.child(tabs);
+    match root.tools_tab {
+        Tab::Skills => return body.child(super::skills::view(root,cx)).into_any_element(),
+        Tab::Browse => return body
+            .child(heading("Find tools and skills","Catalogs are discovery sources, not permission grants. Review the source before adding anything."))
+            .child(button("browse-mcp-registry","Open MCP Registry",true,false,cx,|_,_,cx|cx.open_url("https://registry.modelcontextprotocol.io")))
+            .child(note("Copy a server's configuration, then add it in Connections. Local servers require explicit process trust; every tool requires a workspace grant."))
+            .child(super::skills::catalog(root,cx)).into_any_element(),
+        Tab::Connections => {}
+    }
+    for c in root.snapshot.mcp.connections.iter().filter(|c| {
+        root.selection
+            .workspace
+            .as_ref()
+            .is_some_and(|w| c.available_in(w))
+    }) {
         let id = c.id.clone();
         let toggle = id.clone();
         let enabled = c.enabled;
@@ -97,7 +130,12 @@ pub(super) fn view(
                     .child(c.label.clone()),
             )
             .child(note(format!(
-                "{} · {} discovered tools",
+                "{} · {} · {} discovered tools",
+                if c.workspace_id.is_empty() {
+                    "Global definition · grants are workspace-specific"
+                } else {
+                    "Workspace connection"
+                },
                 if enabled { "Enabled" } else { "Paused" },
                 c.tools.len()
             )))
@@ -172,7 +210,7 @@ pub(super) fn view(
         for tool in &c.tools {
             let allowed = root.snapshot.mcp.grants.iter().any(|g| {
                 g.connection_id == c.id
-                    && g.workspace_id == c.workspace_id
+                    && Some(&g.workspace_id) == root.selection.workspace.as_ref()
                     && g.tool_name == tool.name
                     && g.schema_hash == tool.schema_hash
             });
@@ -200,7 +238,8 @@ pub(super) fn view(
                         cx,
                         move |root, _, cx| {
                             root.request(
-                                Command::Mcp(McpCommand::SetToolGrant {
+                                Command::Mcp(McpCommand::SetWorkspaceToolGrant {
+                                    workspace_id: root.selection.workspace.clone().unwrap_or_default(),
                                     connection_id: id.clone(),
                                     tool_name: name.clone(),
                                     schema_hash: hash.clone(),
@@ -219,6 +258,7 @@ pub(super) fn view(
         .child(responsibilities(root, cx));
     body.child(heading("Add an MCP server", "Credentials and permissions are independent for every connection."))
         .child(field("Connection name", &root.server_label))
+        .child(button("mcp-scope", if root.global_server { "Scope: Global · grant separately in each workspace" } else { "Scope: This workspace" }, !root.busy, root.global_server, cx, |root, _, cx| { root.global_server = !root.global_server; cx.notify(); }))
         .child(button("mcp-transport", if root.local_server { "Transport: local process" } else { "Transport: remote HTTP" }, !root.busy, root.local_server, cx, |root, _, cx| { root.local_server = !root.local_server; root.trust_server = false; cx.notify(); }))
         .child(field(if root.local_server { "Absolute executable path" } else { "Server URL" }, &root.server_target))
         .when(root.local_server, |body| body.child(field("Arguments (JSON array)", &root.server_args))
@@ -358,13 +398,12 @@ fn responsibilities(
             root.responsibility_instruction.update(cx, |field, cx| field.clear(cx));
             cx.notify();
         }))).child(note("Select only the connections this responsibility needs. Only explicitly granted tools are available."));
-    for c in root
-        .snapshot
-        .mcp
-        .connections
-        .iter()
-        .filter(|c| root.selection.includes(&c.workspace_id))
-    {
+    for c in root.snapshot.mcp.connections.iter().filter(|c| {
+        root.selection
+            .workspace
+            .as_ref()
+            .is_some_and(|w| c.available_in(w))
+    }) {
         let id = c.id.clone();
         let selected = root.responsibility_connections.contains(&id);
         body = body.child(button(

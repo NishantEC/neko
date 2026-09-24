@@ -1,6 +1,6 @@
 //! Durable Neko-owned work. The daemon serializes access to this store.
 use crate::Db;
-use neko_protocol::workbench::{Command, Snapshot, Task, TaskEvent, TaskStatus};
+use neko_protocol::workbench::{Command, Snapshot, Task, TaskEvent, TaskStatus, TaskSplit, SupervisorDecision, SupervisorAction, Risk};
 use std::collections::HashSet;
 
 const SETTING: &str = "workbench_snapshot_v1";
@@ -28,14 +28,14 @@ fn bump_revision() {
 }
 
 pub fn load(db: &Db) -> Result<Snapshot, String> {
-    let Some(json) = db.get_setting(SETTING).map_err(|e| e.to_string())? else {
-        return Ok(Snapshot { skills: crate::skills::load(db)?, ..Snapshot::default() });
+    let mut snapshot = if let Some(json) = db.get_setting(SETTING).map_err(|e| e.to_string())? {
+        if json.len() > MAX_SNAPSHOT_BYTES {
+            return Err("Workbench storage exceeds its size limit".into());
+        }
+        serde_json::from_str(&json).map_err(|e| format!("Cannot read workbench storage: {e}"))?
+    } else {
+        Snapshot::default()
     };
-    if json.len() > MAX_SNAPSHOT_BYTES {
-        return Err("Workbench storage exceeds its size limit".into());
-    }
-    let mut snapshot =
-        serde_json::from_str(&json).map_err(|e| format!("Cannot read workbench storage: {e}"))?;
     let migrated = crate::mcp_host::store::migrate(&mut snapshot)?;
     validate(&snapshot)?;
     if migrated {
@@ -50,7 +50,9 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     // Attached for readers only; save() never writes it into this setting.
     snapshot.conversation = crate::neko_chat::load(db)?;
     snapshot.memory = crate::neko_memory::load(db)?;
+    snapshot.memory_proposals = crate::memory_learning::proposals(db, &snapshot)?;
     snapshot.skills = crate::skills::load(db)?;
+    snapshot.import_preview = crate::setup_import::load_preview(db)?;
     Ok(snapshot)
 }
 
@@ -71,9 +73,12 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
         }
     }
     let mut compacted = snapshot.clone();
+    crate::scheduled_plans::refresh_results(&mut compacted);
     compacted.conversation.clear();
     compacted.memory.clear();
+    compacted.memory_proposals.clear();
     compacted.skills = Default::default();
+    compacted.import_preview = Default::default();
     for task in &mut compacted.tasks {
         for event in &mut task.events {
             event.message = truncate(&event.message, MAX_EVENT_BYTES);
@@ -130,6 +135,7 @@ fn reserved_capacity(snapshot: &Snapshot) -> Result<usize, String> {
     let mut metadata = snapshot.clone();
     metadata.conversation.clear();
     metadata.memory.clear();
+    metadata.memory_proposals.clear();
     for task in &mut metadata.tasks {
         task.events.clear();
     }
@@ -163,8 +169,52 @@ fn reserved_capacity(snapshot: &Snapshot) -> Result<usize, String> {
 }
 
 pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
+    if matches!(command, Command::Snapshot) { return load(db); }
+    let completed = match &command { Command::CompleteTask { task_id } => Some(task_id.clone()), _ => None };
+    let decision = match &command {
+        Command::ApproveTask { task_id } => Some((task_id.clone(), "approval", None)),
+        Command::CancelTask { task_id } => Some((task_id.clone(), "cancellation", Some("Cancelled this task.".to_owned()))),
+        Command::AddTicketNote { task_id, text } => Some((task_id.clone(), "note", Some(text.trim().to_owned()))),
+        _ => None,
+    };
+    db.atomic(|| {
+        let mut snapshot = apply_inner(db, command)?;
+        if let Some(id) = completed {
+            if crate::memory_learning::has_capacity(db)? {
+                crate::memory_learning::enqueue(db, &snapshot, crate::memory_learning::Source::Ticket(id))?;
+            } else if let Some(task) = snapshot.tasks.iter_mut().find(|t| t.id == id) {
+                append_event(task, "learning", "Memory learning queue is full. This ticket is complete; no memory or skill extraction was started.");
+                save(db, &snapshot)?;
+            }
+        }
+        if let Some((id, action, text)) = decision {
+            let task = snapshot.tasks.iter().find(|t| t.id == id).ok_or("Task no longer exists")?;
+            // Notes are retained preferentially, so the corresponding event may
+            // already have been evicted. Record the successful command itself.
+            let text = text.unwrap_or_else(|| if snapshot.splits.iter().any(|s| s.parent_id == id && s.approved) {
+                "Approved subtask plans. Children use isolated worktrees; integration stays in this parent worktree.".into()
+            } else { "Approved the plan for a local build.".into() });
+            let entry = neko_protocol::workbench::MemoryEntry {
+                id: String::new(),
+                agent_profile_id: snapshot.agent_profiles.owner(&task.workspace_id).into(),
+                workspace_id: Some(task.workspace_id.clone()),
+                kind: neko_protocol::workbench::MemoryKind::Decision,
+                text: truncate(&text, crate::neko_memory::MAX_TEXT),
+                source: format!("ticket:{}:{action}:{}:{}", task.id, now_ms(), new_id()),
+                created_at_ms: 0, updated_at_ms: 0,
+            };
+            crate::neko_memory::record_decision(db, entry)?;
+        }
+        load(db)
+    })
+}
+
+fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
     let mut snapshot = load(db)?;
     match command {
+        Command::AgentProfiles(command) => crate::agent_profiles::apply(&mut snapshot, command)?,
+        Command::Schedules(neko_protocol::scheduled_plans::ScheduleCommand::List) => return Ok(snapshot),
+        Command::Schedules(command) => crate::scheduled_plans::apply(&mut snapshot, command)?,
         Command::Mcp(command) => crate::mcp_host::store::apply_command(&mut snapshot, command, now_ms())?,
         Command::Skills(_) => return Err("Skill commands must be handled by the daemon".into()),
         Command::Snapshot => return Ok(snapshot),
@@ -236,7 +286,37 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
             task.source_revision = Some(issue.updated_at.clone());
             snapshot.tasks.push(task);
         }
+        Command::ProposeSplit { task_id } => {
+            let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).ok_or("Task missing")?;
+            if task.status != TaskStatus::AwaitingApproval || snapshot.splits.iter().any(|s| s.parent_id == task_id || s.subtasks.iter().any(|p| p.task_id.as_deref() == Some(&task_id))) {
+                return Err("Only an unsplit plan awaiting approval can request a split".into());
+            }
+            task.status = TaskStatus::Queued;
+            task.supervision = None;
+            snapshot.splits.push(TaskSplit { parent_id:task_id, subtasks:vec![], approved:false, integrated:false, base:None });
+        }
         Command::ApproveTask { task_id } => {
+            if let Some(index) = snapshot.splits.iter().position(|s| s.parent_id == task_id) {
+                let split = snapshot.splits[index].clone();
+                if split.approved { return Err("Split already approved; retry the parent after failure".into()); }
+                crate::decomposition::validate(&split.subtasks)?;
+                let parent = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("Parent missing")?.clone();
+                if parent.status != TaskStatus::AwaitingApproval { return Err("Split proposal is not ready for approval".into()); }
+                for (i, plan) in split.subtasks.iter().enumerate() {
+                    let mut child = create_task(parent.workspace_id.clone(), None, plan.title.clone(), plan.goal.clone())?;
+                    child.plan = format!("{}\nFiles: {}\nRequired checks: {}", plan.goal, plan.files.join(", "), plan.tests.join("; "));
+                    child.status = TaskStatus::Building;
+                    child.supervision = Some(SupervisorDecision { action:SupervisorAction::PrepareFix, risk:Risk::Low, is_bug:false, reason:"User approved this subtask and its scope".into(), evidence:vec![parent.id.clone()], files:plan.files.clone(), tests:plan.tests.clone(), sensitive_areas:vec![], uncertainties:vec![], plan:child.plan.clone() });
+                    snapshot.splits[index].subtasks[i].task_id = Some(child.id.clone());
+                    snapshot.tasks.push(child);
+                }
+                snapshot.splits[index].approved = true;
+                let parent = snapshot.tasks.iter_mut().find(|t| t.id == task_id).unwrap();
+                parent.status = TaskStatus::Reviewing;
+                append_event(parent, "user", "Approved subtask plans. Children use isolated worktrees; integration stays in this parent worktree.");
+                save(db, &snapshot)?;
+                return load(db);
+            }
             let task = snapshot
                 .tasks
                 .iter_mut()
@@ -249,6 +329,8 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
             append_event(task, "user", "Approved the plan for a local build.");
         }
         Command::CancelTask { task_id } => {
+            let children: Vec<String> = snapshot.splits.iter().filter(|s| s.parent_id == task_id).flat_map(|s| s.subtasks.iter().filter_map(|p| p.task_id.clone())).collect();
+            for child in snapshot.tasks.iter_mut().filter(|t| children.contains(&t.id) && !terminal(t.status)) { child.status = TaskStatus::Cancelled; append_event(child, "supervisor", "Parent cancelled; child worktree preserved."); }
             let task = snapshot
                 .tasks
                 .iter_mut()
@@ -277,6 +359,8 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
             );
         }
         Command::RetryTask { task_id } => {
+            if snapshot.splits.iter().any(|s| s.subtasks.iter().any(|p| p.task_id.as_deref() == Some(&task_id))) { return Err("Retry the parent ticket to propose a fresh bounded split".into()); }
+            if let Some(split) = snapshot.splits.iter_mut().find(|s| s.parent_id == task_id) { split.approved = false; split.integrated = false; split.subtasks.clear(); }
             let task = snapshot
                 .tasks
                 .iter_mut()
@@ -307,6 +391,7 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::ConnectLinear { .. } | Command::SyncLinear { .. } => {
             return Err("This command requires the workbench orchestrator".into());
         }
+        Command::SetupImport(_) => return Err("Import requires the daemon".into()),
         Command::SendMessage { .. } | Command::DecideChatTool { .. } | Command::CancelChat { .. } => {
             return Err("Talking to Neko requires the daemon".into());
         }
@@ -324,6 +409,7 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
             append_event(task, NOTE_ROLE, &text);
         }
         Command::SaveMemory { entry } => {
+            crate::agent_profiles::validate_memory(&snapshot, &entry)?;
             let known: Vec<String> = snapshot.workspaces.iter().map(|w| w.id.clone()).collect();
             crate::neko_memory::upsert(db, entry, &known)?;
             return load(db);
@@ -332,6 +418,10 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
             crate::neko_memory::delete(db, &id)?;
             return load(db);
         }
+        Command::DecideMemoryProposal { id, accept } => {
+            crate::memory_learning::decide(db, &snapshot, &id, accept)?;
+            return load(db);
+        },
     }
     save(db, &snapshot)?;
     load(db)
@@ -519,6 +609,20 @@ fn unique_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Result<HashSet<&'a str>
 }
 
 fn validate(snapshot: &Snapshot) -> Result<(), String> {
+    crate::agent_profiles::validate(snapshot)?;
+    crate::scheduled_plans::validate(snapshot)?;
+    if snapshot.splits.len() > snapshot.tasks.len() { return Err("Split history exceeds task history".into()); }
+    let mut parents = HashSet::new();
+    let mut children = HashSet::new();
+    for split in &snapshot.splits {
+        if !parents.insert(&split.parent_id) || !snapshot.tasks.iter().any(|t| t.id == split.parent_id) { return Err("Invalid split parent".into()); }
+        if !split.subtasks.is_empty() { crate::decomposition::validate(&split.subtasks)?; }
+        if split.approved && split.subtasks.is_empty() { return Err("Approved split has no subtasks".into()); }
+        for p in &split.subtasks {
+            if let Some(id) = &p.task_id { if !children.insert(id) || !snapshot.tasks.iter().any(|t| &t.id == id) { return Err("Invalid or duplicate subtask claim".into()); } }
+            else if split.approved { return Err("Approved subtask missing its ticket".into()); }
+        }
+    }
     crate::mcp_host::store::validate(snapshot)?;
     if snapshot.workspaces.len() > 100
         || snapshot.connections.len() > 100
@@ -622,6 +726,55 @@ fn validate(snapshot: &Snapshot) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn decisions_remain_exact_when_notes_fill_the_event_history() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let ticket = task(&db, &ws);
+        let mut state = load(&db).unwrap();
+        state.tasks[0].status = TaskStatus::AwaitingApproval;
+        state.tasks[0].events = (0..MAX_EVENTS).map(|i| TaskEvent { at_ms: i as i64, role: NOTE_ROLE.into(), message: format!("Retained note {i}") }).collect();
+        save(&db, &state).unwrap();
+        let approved = apply(&db, Command::ApproveTask { task_id: ticket.id.clone() }).unwrap();
+        let decision = approved.memory.iter().find(|m| m.source.contains(":approval:")).unwrap();
+        assert_eq!(decision.text, "Approved the plan for a local build.");
+        let cancelled = apply(&db, Command::CancelTask { task_id: ticket.id }).unwrap();
+        let decision = cancelled.memory.iter().find(|m| m.source.contains(":cancellation:")).unwrap();
+        assert_eq!(decision.text, "Cancelled this task.");
+    }
+    #[test]
+    fn full_learning_queue_never_blocks_ticket_completion() {
+        let db = Db::open_in_memory().unwrap();
+        for _ in 0..32 {
+            let id = crate::neko_chat::begin_turn(&db, "Evidence").unwrap();
+            crate::neko_chat::finish_turn(&db, &id, "Answer", vec![], false).unwrap();
+            crate::memory_learning::enqueue(&db, &load(&db).unwrap(), crate::memory_learning::Source::Chat(id)).unwrap();
+        }
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let ticket = task(&db, &ws);
+        let mut state = load(&db).unwrap();
+        state.tasks[0].status = TaskStatus::ReadyForReview;
+        save(&db, &state).unwrap();
+        let state = apply(&db, Command::CompleteTask { task_id: ticket.id }).unwrap();
+        assert_eq!(state.tasks[0].status, TaskStatus::Completed);
+        assert!(state.tasks[0].events.iter().any(|e| e.role == "learning" && e.message.contains("queue is full")));
+    }
+    #[test]
+    fn successful_ticket_steering_is_a_durable_exact_decision() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let task = task(&db, &ws);
+        let noted = apply(&db, Command::AddTicketNote { task_id: task.id.clone(), text: "Use the existing parser".into() }).unwrap();
+        assert!(noted.memory.iter().any(|m| m.kind == neko_protocol::workbench::MemoryKind::Decision && m.text.contains("Use the existing parser") && m.source.contains(&task.id)));
+        let cancelled = apply(&db, Command::CancelTask { task_id: task.id.clone() }).unwrap();
+        assert!(cancelled.memory.iter().any(|m| m.text == "Cancelled this task."));
+        let count = cancelled.memory.len();
+        assert!(apply(&db, Command::CancelTask { task_id: task.id }).is_err());
+        assert_eq!(load(&db).unwrap().memory.len(), count);
+    }
     use super::*;
     use neko_protocol::workbench::{Issue, LinearConnection, TaskStatus, Workspace};
 

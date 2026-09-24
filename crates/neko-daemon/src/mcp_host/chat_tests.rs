@@ -57,7 +57,7 @@ fn fixture(read_only: bool) -> (Arc<Host>, String, Lease, String) {
     })
     .unwrap();
     let lease = host
-        .lease(&format!("chat:{turn}"), "a", vec![connection.clone()])
+        .lease(&format!("chat:{turn}"), "a", vec![connection.clone()], 0)
         .unwrap();
     (host, turn, lease, connection)
 }
@@ -71,6 +71,23 @@ fn call(host: &Host, lease: &Lease, connection: &str) -> Result<String, String> 
             arguments_json: "{\"text\":\"proof\"}".into(),
         },
     })
+}
+
+#[test]
+fn global_tool_dispatch_keeps_workspace_grants_separate() {
+    let (host, _, lease_a, connection) = fixture(true);
+    {
+        let db = host.db.lock().unwrap();
+        let mut state = store::load(&db).unwrap();
+        state.mcp.connections[0].workspace_id.clear();
+        store::save(&db, &state).unwrap();
+    }
+    assert!(call(&host, &lease_a, &connection).unwrap().contains("proof"));
+    let lease_b = host.lease("ungranted-b", "b", vec![connection.clone()], 0).unwrap();
+    assert!(call(&host, &lease_b, &connection).is_err());
+    let state = store::load(&host.db.lock().unwrap()).unwrap();
+    assert_eq!(state.mcp.receipts.len(), 1);
+    assert_eq!(state.mcp.receipts[0].workspace_id, "a");
 }
 
 fn wait_card(host: &Host, turn: &str) -> String {
@@ -188,10 +205,10 @@ fn timeout_restart_and_dropped_lease_fail_closed() {
 fn ungranted_and_cross_workspace_calls_are_rejected() {
     let (host, _, lease, connection) = fixture(true);
     assert!(
-        host.lease("foreign", "b", vec![connection.clone()])
+        host.lease("foreign", "b", vec![connection.clone()], 0)
             .is_err()
     );
-    let foreign = host.lease("empty", "b", vec![]).unwrap();
+    let foreign = host.lease("empty", "b", vec![], 0).unwrap();
     assert!(call(&host, &foreign, &connection).is_err());
     host.command(McpCommand::SetEnabled {
         connection_id: connection.clone(),

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Deterministic process fixture. Never contacts an AI service.
 import fs from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import readline from 'node:readline';
 import assert from 'node:assert/strict';
 const args = process.argv.slice(2);
@@ -9,16 +9,40 @@ if (!args.includes('--ephemeral') || !args.includes('--ignore-user-config')) pro
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 assert.ok(args.includes('skills.include_instructions=false'), 'Neko must control injected skill instructions');
+for (const feature of ['apps','browser_use','computer_use','plugins','remote_plugin','multi_agent','hooks','workspace_dependencies','skill_mcp_dependency_install']) assert.ok(args.includes(`features.${feature}=false`), `Ambient ${feature} bypasses Neko authority`);
+if (prompt.startsWith('Extract bounded memory proposals')) {
+  for (const feature of ['shell_tool', 'unified_exec', 'view_image', 'image_generation', 'skill_search', 'tool_suggest', 'sleep_tool', 'apps', 'browser_use', 'computer_use', 'remote_plugin', 'plugins', 'goals', 'hooks', 'workspace_dependencies', 'code_mode_host', 'multi_agent', 'memories', 'skill_mcp_dependency_install']) assert.ok(args.includes(`features.${feature}=false`), `Extraction must disable ${feature}`);
+  assert.ok(args.includes('features.skip_host_skill_discovery=true'));
+  assert.ok(args.includes('read-only'));
+  assert.ok(!args.some(arg => arg.startsWith('mcp_servers.')), 'Learning must never get an MCP bridge');
+  assert.deepEqual(fs.readdirSync(process.cwd()), [], 'Learning requires an independent empty scratch directory');
+  const probe = prompt.includes('MEMORY_LEARNING_PROBE');
+  const memories = probe ? [{text:'Bounded verification batches were useful for this work.',kind:'workspace'},{text:'Keep verification evidence attached to the work.',kind:'decision'}] : [];
+  process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'agent_message',text:JSON.stringify({memories})}})}\n${JSON.stringify({type:'turn.completed'})}\n`);
+  process.exit(0);
+}
 if (prompt.startsWith('Extract one reusable skill')) {
   process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '---\nname: isolated-checkout\ndescription: Verify an isolated checkout before accepting work\n---\nRun the relevant tests and inspect the actual diff before accepting the result.' } })}\n`);
   process.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
   process.exit(0);
 }
 const responsibility = prompt.includes("Investigate the user's standing responsibility");
+assert.ok(!args.includes('features.code_mode_host=false'), 'Ordinary scoped tools require code-mode host transport');
 const chat = prompt.includes("You are Neko, the user's personal engineering agent");
 if (chat) {
   // Read-only chat turn: never touches files. Asking for a fix proposes one ticket.
   const message = prompt.slice(prompt.lastIndexOf('\nUser: ') + 7).split('\n')[0];
+  if (message.startsWith('PROFILE_PROMPT_CHECK ')) {
+    const check = JSON.parse(message.slice('PROFILE_PROMPT_CHECK '.length));
+    // Earlier test requests name forbidden sentinels themselves. Inspect the
+    // actual injected profile/state blocks, not those user-authored probes.
+    const context = prompt.slice(0, prompt.indexOf('\n\nRecent conversation'));
+    for (const value of check.present) assert.ok(context.includes(value), `Missing profile context: ${value}`);
+    for (const value of check.absent) assert.ok(!context.includes(value), `Profile context leaked: ${value}`);
+    process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ reply: 'Profile context verified.', tickets: [] }) } })}\n`);
+    process.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+    process.exit(0);
+  }
   if (message.includes('SKILL_PROMPT_CHECK')) {
     assert.ok(prompt.includes('SKILL_PROBE_SENTINEL'), 'Enabled skill never reached chat runner');
     process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ reply: 'Enabled skill reached chat.', tickets: [] }) } })}\n`);
@@ -104,20 +128,36 @@ async function observeThroughBridge() {
 const scout = prompt.includes("Neko's scout");
 const supervisor = prompt.includes("Neko's supervisor");
 const review = prompt.includes("Neko's reviewer");
+const splitter = prompt.includes("Neko's splitter");
 if (prompt.includes('SKILL_ROLE_CHECK')) assert.ok(prompt.includes('SKILL_PROBE_SENTINEL'), 'Enabled skill never reached ticket role');
+if (splitter) {
+  const conflict = prompt.includes('SPLIT_CONFLICT');
+  const plans = ['left', 'right'].map((name, i) => ({title: `Subtask ${name}`, goal:`Add the verified fixture file. SUBTASK_FILE=${conflict ? 'shared' : name}.txt${i===0 && prompt.includes('SPLIT_DEPENDENCY_FAILURE') ? ' BROKEN_BUILDER' : ''}${prompt.includes('SPLIT_HOLD') ? ' PARALLEL_HOLD' : ''}`, files:[`${conflict ? 'shared' : name}.txt`], tests:['node fixture-check'], depends_on:i===1 && prompt.includes('SPLIT_DEPEND')?[0]:[]}));
+  process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'agent_message',text:JSON.stringify(plans)}})}\n${JSON.stringify({type:'turn.completed'})}\n`);
+  process.exit(0);
+}
 if (scout && fs.existsSync('neko-smoke.txt')) throw new Error('Scout changed source');
-if (!responsibility && !scout && !supervisor && !review) fs.writeFileSync('neko-smoke.txt', 'Isolated task output\n');
-if (review && !fs.existsSync('neko-smoke.txt')) throw new Error('Builder output missing');
+const outputFile = prompt.match(/SUBTASK_FILE=([a-z]+\.txt)/)?.[1] || 'neko-smoke.txt';
+if (!responsibility && !scout && !supervisor && !review && prompt.includes('PARALLEL_HOLD')) await new Promise(resolve=>setTimeout(resolve,9000));
+if (!responsibility && !scout && !supervisor && !review) fs.writeFileSync(outputFile, prompt.includes('BROKEN_BUILDER') ? 'broken\n' : 'Isolated task output\n');
+let verdict;
+if (review) {
+  const files = [...new Set((execFileSync('git',['diff','--name-only','HEAD'],{encoding:'utf8'}) + execFileSync('git',['ls-files','--others','--exclude-standard'],{encoding:'utf8'})).trim().split('\n').filter(Boolean))];
+  const check = spawnSync(process.execPath, ['-e', 'const fs=require("fs");for(const f of process.argv.slice(1)){if(fs.readFileSync(f,"utf8")!=="Isolated task output\\n")throw Error("broken builder output: "+f)}console.log("Verified "+process.argv.slice(1).join(", "))', ...files], {encoding:'utf8'});
+  const command = prompt.includes('PARENT_MISSING_CHECK') ? 'node unrelated-check' : 'node fixture-check';
+  process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'command_execution',command,status:check.status===0?'completed':'failed',exit_code:check.status,aggregated_output:check.stdout+check.stderr}})}\n`);
+  verdict = {passed:check.status===0,findings:check.status===0?[]:['Broken builder output'],files,tests:[command],summary:check.status===0?'Actual isolated files checked by independent child process':'Independent check failed'};
+}
 const text = responsibility ? JSON.stringify(await observeThroughBridge()) : supervisor ? JSON.stringify({
   action: prompt.includes('Sensitive fixture') ? 'ask_user' : 'prepare_fix',
   risk: prompt.includes('Sensitive fixture') ? 'high' : 'low',
   is_bug: true, reason: 'Deterministic fixture assessment, not a real model judgment.',
   evidence: ['Fixture repository missing its expected output'], files: ['neko-smoke.txt'],
-  tests: ['Read neko-smoke.txt and compare exactly with Isolated task output followed by newline'],
+  tests: ['node fixture-check'],
   sensitive_areas: prompt.includes('Sensitive fixture') ? ['authentication'] : [], uncertainties: [],
   plan: 'Add neko-smoke.txt with the exact requested text and verify its bytes.'
 }) : scout ? 'Plan: add the isolated smoke file, then verify its contents.'
-  : review ? 'Reviewed actual task output. Fixture check passed; no publication.'
+  : review ? JSON.stringify(verdict)
   : 'Created neko-smoke.txt in the task worktree.';
 process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text } })}\n`);
 process.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);

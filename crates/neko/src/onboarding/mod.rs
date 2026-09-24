@@ -1,4 +1,4 @@
-//! The first-run onboarding arc (design report §3, steps 00-09): a real,
+//! The six-step first-run setup: a real,
 //! ordinary chrome window — never the borderless summon popup — walking
 //! the captain through both permission asks and hotkey capture exactly
 //! once. See `state` for the pure step machine and `view` for the GPUI

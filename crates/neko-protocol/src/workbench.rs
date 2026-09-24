@@ -127,8 +127,40 @@ pub struct Task {
     pub supervision: Option<SupervisorDecision>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SubtaskPlan {
+    pub title: String,
+    pub goal: String,
+    pub files: Vec<String>,
+    pub tests: Vec<String>,
+    /// Zero-based indices of earlier subtasks. Keeps the plan acyclic.
+    pub depends_on: Vec<usize>,
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default)]
+    pub base: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskSplit {
+    pub parent_id: String,
+    pub subtasks: Vec<SubtaskPlan>,
+    pub approved: bool,
+    pub integrated: bool,
+    pub base: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub agent_profiles: crate::agent_profiles::AgentProfiles,
+    #[serde(default)]
+    pub schedules: Vec<crate::scheduled_plans::Schedule>,
+    #[serde(default)]
+    pub import_preview: crate::setup_import::ImportPreview,
+    #[serde(default)]
+    pub splits: Vec<TaskSplit>,
     #[serde(default)]
     pub skills: crate::skills::SkillState,
     #[serde(default = "crate::mcp_host::legacy_state")]
@@ -146,6 +178,20 @@ pub struct Snapshot {
     /// separately from the task store, visible and editable by the user.
     #[serde(default)]
     pub memory: Vec<MemoryEntry>,
+    /// Suggested learning requires an explicit accept or reject.
+    #[serde(default)]
+    pub memory_proposals: Vec<MemoryProposal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryProposal {
+    pub id: String,
+    pub agent_profile_id: String,
+    pub workspace_id: Option<String>,
+    pub kind: MemoryKind,
+    pub text: String,
+    pub source: String,
+    pub created_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -161,6 +207,8 @@ pub enum MemoryKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryEntry {
+    #[serde(default = "crate::agent_profiles::default_profile_id")]
+    pub agent_profile_id: String,
     pub id: String,
     pub kind: MemoryKind,
     /// Set for workspace notes and workspace-specific decisions.
@@ -184,6 +232,10 @@ pub enum ChatRole {
 /// completed (or marked failed) by the daemon; tickets it opened are linked.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatMessage {
+    #[serde(default)]
+    pub agent_profile_revision: u64,
+    #[serde(default = "crate::agent_profiles::default_profile_id")]
+    pub agent_profile_id: String,
     #[serde(default)]
     pub workspace_id: Option<String>,
     #[serde(default)]
@@ -219,6 +271,11 @@ pub enum ChatToolStatus { AwaitingApproval, Approved, Running, Succeeded, Failed
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
+    AgentProfiles(crate::agent_profiles::ProfileCommand),
+    Schedules(crate::scheduled_plans::ScheduleCommand),
+    SetupImport(crate::setup_import::ImportCommand),
+    /// Read-only proposal; approval remains a separate explicit command.
+    ProposeSplit { task_id: String },
     Skills(crate::skills::SkillCommand),
     DecideChatTool { turn_id: String, call_id: String, approve: bool },
     CancelChat { turn_id: String },
@@ -278,6 +335,10 @@ pub enum Command {
     },
     DeleteMemory {
         id: String,
+    },
+    DecideMemoryProposal {
+        id: String,
+        accept: bool,
     },
 }
 

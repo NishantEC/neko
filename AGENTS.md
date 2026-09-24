@@ -12,7 +12,14 @@ snapshots in `neko-core::workbench`, the daemon's `workbench` supervisor, and
 `native_runner` ephemeral Codex CLI processes. A scout plans read-only,
 explicit approval allows an isolated-worktree build, and a
 read-only reviewer returns a result for human review. No publication occurs.
-One task executes at once. Cross-workspace filesystem read isolation is NOT
+At most three task workers execute globally and two per workspace. An awaiting
+plan can request a read-only two/three-subtask proposal; explicit approval
+creates isolated child tickets using those same limits. Verified child patches
+integrate only into the parent task worktree, followed by independent review.
+Structured reviewer verdicts require successful command receipts and complete
+host-observed diff coverage; findings, missing evidence and conflicts fail
+closed. Cancellation/restart preserve child worktrees. See
+`docs/evidence/parallel-verifier.md`. Cross-workspace filesystem read isolation is NOT
 guaranteed by the current Codex sandbox; do not describe scoped prompts as a
 security boundary. Task worktrees are preserved, including failed work.
 
@@ -459,6 +466,14 @@ attempt fails, then calls `rebind` and on success `Request::CommitHotkey`. See
 state machine `rebind` itself guarantees.
 
 ## Onboarding (design report §3)
+
+**Current implementation (2026-09-25) supersedes the historical arc below:**
+six visible Paper steps live in `onboarding/setup.rs`; `state.rs` now contains
+only Mac permission/shortcut substates, and `view.rs` owns native lifecycle.
+Completion waits for daemon acknowledgement. Import requires selected items
+and fresh credential/process consent; schedules remain paused. A first brief
+is an actual scoped chat turn. Evidence uses `NEKO_SHOW_SETUP` plus one-based
+`NEKO_SETUP_STEP`, never takes focus, and is not interaction proof.
 
 The 14-screen first-run arc, `crates/neko/src/onboarding/`. Split the same
 way `hotkey_client.rs` splits from `main.rs`: `state.rs` is a pure,
@@ -6468,6 +6483,14 @@ one inline approval per exact call. See `docs/architecture.md` and
 `crates/neko-daemon/src/mcp_host/chat_tests.rs`; `node scripts/smoke-workbench.mjs`
 exercises actual chat-worker/bridge IPC with approval, denial, Stop and restart.
 Filesystem read privacy is still not provided by the Codex sandbox.
+
+Profile ownership, scheduled planning, and bounded follow-up learning now extend
+this boundary. Profile revisions fence both capability issuance and result
+commit under the database lock. Learning proposals require explicit acceptance;
+shared profile memory never shares tool authority. `docs/architecture.md`'s final
+two sections and `docs/evidence/memory-learning.md` describe these current seams.
+Native CLI runs disable ambient plugins/agent spawning so only Neko-managed tools
+and workers participate. Do not re-enable those features as a compatibility fix.
 
 ## Maintaining this file
 

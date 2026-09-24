@@ -9,7 +9,8 @@ arbitrary; several of these decisions cost days to learn.
 `neko-protocol::workbench` supplies typed commands and snapshots. The GPUI
 `workspace.rs` window is a client only. `neko-core::workbench` stores bounded,
 validated snapshots atomically in the daemon-owned SQLite settings table.
-`neko-daemon::workbench` supervises one task at a time without holding the
+`neko-daemon::workbench` supervises up to three tasks globally and two per
+workspace without holding the
 database mutex during model/network calls. A two-second supervisor heartbeat
 is separate from task progress; it does not claim the model made progress.
 
@@ -66,7 +67,16 @@ automatic local preparation. Sensitive or uncertain work holds for approval.
 An instruction/connection change invalidates prior source eligibility.
 
 Explicit approval or qualifying standing authority allows a builder. A separate
-read-only reviewer leaves a human-review result, not an automatic merge.
+read-only reviewer must return a structured passing verdict, no findings,
+complete host-observed changed-file coverage, and successful command receipts
+for its checks before the result becomes ready for human review.
+`decomposition` validates bounded two/three-subtask proposals. Explicit approval
+creates ordinary child tickets, sharing the same scheduler limits. Dependencies
+receive earlier verified patches in separate scopes. The daemon integrates
+child patches into the isolated parent and independently verifies that result;
+conflicts preserve every worktree and block completion. No original-checkout
+merge or publication occurs. See `docs/evidence/parallel-verifier.md` for proof
+and read-only verification limits.
 Cancellation terminates the process group; interrupted tasks fail on restart
 with worktrees retained. Model risk and source interpretation are judgments,
 not proof. Codex write sandboxing does not establish filesystem read privacy
@@ -680,7 +690,7 @@ one local patch applied on top by `scripts/setup-gpui-patch.sh`.
 | Where an icon comes from | `crates/neko/src/assets.rs` |
 | How the text field edits, selects, and pastes | `crates/neko/src/text_field.rs` |
 | How the daemon dispatches a request | `crates/neko-daemon/src/server.rs`, `handle_request` |
-| What the first-run arc does | `crates/neko/src/onboarding/` (`state.rs` is pure, `view.rs` does the I/O) |
+| What the six-step first run does | `crates/neko/src/onboarding/` (`setup.rs` holds the six forms, `state.rs` Mac substates, `view.rs` native lifecycle and shortcut I/O) |
 | Why any of the above is the way it is | `AGENTS.md`, and the report it points at in `docs/evidence/` |
 # Workspace skills
 
@@ -694,3 +704,36 @@ This does not provide filesystem read privacy. Accepted proposals and reviewed
 standalone GitHub SKILL.md previews save only into Neko's own skill folder; they
 must be enabled separately. See `docs/evidence/skills-phase3.md` for installation
 limits and tested boundaries.
+
+## Agent profiles and scheduled planning
+
+`neko-protocol::agent_profiles` defines user-owned identities, workspace
+assignments and directional global-memory read grants. `neko-core::agent_profiles`
+validates/persists configuration through the workbench snapshot and builds bounded
+profile context. Default migration preserves legacy Neko ownership. Memory and
+conversation entries retain their original profile identity. Workspace tools
+stay behind the same explicit grants; shared memory never carries capabilities.
+Profile revisions participate in worker authority and capability issuance so
+stale workers cannot gain permissions from later configuration. Assignment is
+blocked by unfinished work, pending chat and enabled watches/schedules.
+
+`scheduled_plans` stores recurrence drafts in the same workbench snapshot as
+tasks. Claiming an occurrence and adding its ticket is one persisted operation;
+restart does not duplicate it. Final COUNT/UNTIL occurrences queue once and
+disable future runs. `schedule_time` bounds traversal, supports timezones/DST,
+and rejects invalid or unbounded evaluation. Imports resolve filesystem paths
+outside the shared database mutex and match against fresh state inside it.
+See `docs/evidence/agent-profiles.md` and `docs/evidence/schedules-and-import.md`.
+
+## Follow-up memory learning
+
+`neko-core::memory_learning` persists a bounded queue and immutable proposals;
+the daemon runs one independent follow-up worker for chat/ticket memory and
+completed-ticket skills. Extraction receives bounded evidence in an empty scratch
+directory, read-only with no bridge or shell tools. Native actors suppress
+ambient CLI tool paths so Neko's own scoped bridge and worker limits remain the
+authority. Source fingerprints, profile/workspace fences and retry-attempt tokens
+reject stale output. The Memory page accepts or dismisses proposals explicitly;
+accepting the exact stored proposal and resolving it share one transaction.
+Ticket decisions have a separate bounded allowance from user-created memories.
+See `docs/evidence/memory-learning.md` for limits and verification boundaries.

@@ -2,6 +2,8 @@
 mod home;
 mod tools;
 mod skills;
+mod schedules;
+mod profiles;
 
 use home::TicketFilter;
 use crate::{text_field::TextField, theme};
@@ -114,6 +116,7 @@ fn evidence_view() -> Option<View> {
         Ok("tickets") => Some(View::Tickets),
         Ok("responsibilities") => Some(View::Responsibilities),
         Ok("memory") => Some(View::Memory),
+        Ok("profiles") => Some(View::Profiles),
         _ => None,
     }
 }
@@ -165,9 +168,13 @@ enum View {
     Memory,
     Workspaces,
     Integrations,
+    Profiles,
 }
 
 pub struct WorkspaceRoot {
+    profile_form: profiles::Form,
+    memory_editing: Option<neko_protocol::workbench::MemoryEntry>,
+    schedule_form: schedules::Form,
     client: NekoClient,
     snapshot: Snapshot,
     selection: Selection,
@@ -190,6 +197,10 @@ pub struct WorkspaceRoot {
     api_key: Entity<TextField>,
     server_label: Entity<TextField>,
     skill_source: Entity<TextField>,
+    skill_filter: Entity<TextField>,
+    tools_tab: tools::Tab,
+    browse_skills: bool,
+    skill_limit: usize,
     opened_skill_audits: Vec<(String, String)>,
     server_target: Entity<TextField>,
     server_args: Entity<TextField>,
@@ -199,6 +210,7 @@ pub struct WorkspaceRoot {
     responsibility_prepare: bool,
     responsibility_editing: Option<String>,
     local_server: bool,
+    global_server: bool,
     trust_server: bool,
     appearance: Option<theme::Appearance>,
     composer: Entity<TextField>,
@@ -215,6 +227,8 @@ pub struct WorkspaceRoot {
 impl WorkspaceRoot {
     fn new(client: NekoClient, cx: &mut Context<Self>) -> Self {
         let api_key = input("Optional credential JSON (stored in Keychain)", cx);
+        let skill_filter = input("Find a skill by name, description or source", cx);
+        cx.observe(&skill_filter, |_, _, cx| cx.notify()).detach();
         api_key.update(cx, |field, cx| field.set_masked(true, cx));
         // A single in-flight gate covers polling and every mutation. A poll
         // cannot return stale state over a more recent user action.
@@ -235,6 +249,7 @@ impl WorkspaceRoot {
         })
         .detach();
         Self {
+            schedule_form: schedules::Form::new(cx),
             client,
             snapshot: Snapshot::default(),
             selection: Selection::default(),
@@ -263,6 +278,12 @@ impl WorkspaceRoot {
             api_key,
             server_label: input("Name this connection", cx),
             skill_source: input("https://github.com/owner/repo/blob/commit/path/SKILL.md", cx),
+            skill_filter,
+            profile_form: profiles::Form::new(cx),
+            memory_editing: None,
+            tools_tab: tools::Tab::Connections,
+            browse_skills: false,
+            skill_limit: 20,
             opened_skill_audits: Vec::new(),
             server_target: input("https://server.example/mcp or /absolute/executable", cx),
             server_args: input("[\"/path/to/server.js\"]", cx),
@@ -275,6 +296,7 @@ impl WorkspaceRoot {
             responsibility_prepare: false,
             responsibility_editing: None,
             local_server: false,
+            global_server: false,
             trust_server: false,
             appearance: None,
             composer: input("Ask Neko anything, or tell it what to look after…", cx),
@@ -308,9 +330,14 @@ impl WorkspaceRoot {
             _ => None,
         };
         let new_task = matches!(
+            // Scheduled planning is separately recorded by its schedule.
             &command,
             Command::CreateTask { .. } | Command::PlanIssue { .. }
         );
+        let submitted_schedule=match &command {Command::Schedules(neko_protocol::scheduled_plans::ScheduleCommand::Save{schedule})=>Some(schedule.clone()),_=>None};
+        let previous_schedules=self.snapshot.schedules.iter().map(|s|s.id.clone()).collect::<Vec<_>>();
+        let submitted_profile=match &command {Command::AgentProfiles(neko_protocol::agent_profiles::ProfileCommand::Save{profile})=>Some(profile.clone()),_=>None};
+        let previous_profiles=self.snapshot.agent_profiles.profiles.iter().map(|p|p.id.clone()).collect::<Vec<_>>();
         let submitted_draft = match &command {
             Command::CreateTask { title, goal, .. } => Some((title.clone(), goal.clone())),
             _ => None,
@@ -324,7 +351,7 @@ impl WorkspaceRoot {
             _ => None,
         };
         let submitted_memory = match &command {
-            Command::SaveMemory { entry } if entry.id.is_empty() => Some(entry.text.clone()),
+            Command::SaveMemory { entry } => Some(entry.text.clone()),
             _ => None,
         };
         let submitted_responsibility = match &command {
@@ -371,6 +398,14 @@ impl WorkspaceRoot {
                             if let Some(workspace) = workspace { root.select_workspace(&workspace.id, cx); }
                             root.notice = Some("Workspace saved.".into());
                         }
+                        if let Some(schedule)=submitted_schedule {
+                            root.schedule_form.saved(&schedule,&root.snapshot,&previous_schedules,cx);
+                            root.notice=Some("Schedule saved paused. Review it, then enable when ready.".into());
+                        }
+                        if let Some(profile)=submitted_profile {
+                            root.profile_form.saved(&profile,&root.snapshot,&previous_profiles);
+                            root.notice=Some("Agent profile saved.".into());
+                        }
                         if new_task {
                             root.selection.task = root.snapshot.tasks.iter().rev().find(|task|
                                 root.selection.includes(&task.workspace_id) && !previous_tasks.contains(&task.id)
@@ -393,7 +428,7 @@ impl WorkspaceRoot {
                             if value(&root.note_input, cx) == text { root.note_input.update(cx, |field, cx| field.clear(cx)); }
                         }
                         if let Some(text) = submitted_memory {
-                            if value(&root.memory_input, cx) == text { root.memory_input.update(cx, |field, cx| field.clear(cx)); }
+                            if value(&root.memory_input, cx) == text { root.memory_input.update(cx, |field, cx| field.clear(cx)); root.memory_editing=None; }
                         }
                         if let Some(r) = submitted_responsibility {
                             if root.responsibility_editing.as_deref().unwrap_or("") == r.id
@@ -480,6 +515,7 @@ impl WorkspaceRoot {
         });
         self.away_enabled = false;
         self.trust_server = false;
+        self.global_server = false;
         self.responsibility_connections.clear();
         self.responsibility_prepare = false;
         self.responsibility_editing = None;
@@ -563,7 +599,7 @@ impl WorkspaceRoot {
         self.api_key.update(cx, |field, cx| field.clear(cx));
         self.request(
             Command::Mcp(McpCommand::AddConnection {
-                workspace_id,
+                workspace_id: if self.global_server { String::new() } else { workspace_id },
                 label: value(&self.server_label, cx),
                 config,
                 trust_local_process: self.trust_server,
@@ -619,6 +655,10 @@ impl Render for WorkspaceRoot {
             View::Tickets => self.tickets_page(cx),
             View::Responsibilities => self.responsibilities_page(cx),
             View::Memory => self.memory_page(cx),
+            View::Profiles => {
+                let content=profiles::view(self,cx);
+                self.settings_page("Agent profiles",content,cx)
+            }
             View::Workspaces => {
                 let content = self.workspaces_view(cx).into_any_element();
                 self.settings_page("Workspace", content, cx)

@@ -191,50 +191,7 @@ impl Host {
                 trust_local_process,
                 credentials: secret,
             } => {
-                policy::validate_config(&config)?;
-                if matches!(config, ServerConfig::Stdio { .. }) && !trust_local_process {
-                    return Err("Explicitly trust this local process before adding it".into());
-                }
-                let id = store::new_id();
-                let connection = McpConnection {
-                    oauth: false,
-                    id: id.clone(),
-                    workspace_id,
-                    label: label.trim().into(),
-                    config,
-                    enabled: true,
-                    trusted: true,
-                    has_credentials: secret.is_some(),
-                    tools: vec![],
-                    discovered_ms: None,
-                    error: None,
-                };
-                {
-                    let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
-                    let mut state = store::load(&db)?;
-                    state.mcp.connections.push(connection.clone());
-                    policy::validate(&state)?;
-                    if let Some(secret) = &secret {
-                        db.delete_clipboard_entry(&secret.0)
-                            .map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
-                        db.delete_clipboard_entry(secret.0.trim())
-                            .map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
-                    }
-                }
-                let mut pending = PendingCredential(secret.as_ref().map(|_| id.clone()));
-                // Keychain may prompt or block. Never hold the database while
-                // contacting it; other chats and workspace edits remain usable.
-                if let Some(secret) = &secret { credentials::store(&id, &secret.0)?; }
-                {
-                    let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
-                    let mut state = store::load(&db)?;
-                    state.mcp.connections.push(connection);
-                    // Workspace/grant state may have changed while Keychain ran.
-                    policy::validate(&state)?;
-                    store::save(&db, &state)?;
-                    pending.0 = None;
-                    store::load(&db)
-                }
+                self.add_connection(workspace_id, label, config, trust_local_process, secret, true).map(|(_, snapshot)| snapshot)
             }
             McpCommand::Discover { connection_id } => {
                 let _slot = self
@@ -304,6 +261,40 @@ impl Host {
         }
     }
 
+    /// Import chooses the initial enabled state in the same durable write as
+    /// creation. The returned ID is unambiguous even during concurrent adds.
+    pub(crate) fn add_connection(&self, workspace_id: String, label: String, config: ServerConfig, trust_local_process: bool, secret: Option<neko_protocol::workbench::Secret>, enabled: bool) -> Result<(String, Snapshot), String> {
+        policy::validate_config(&config)?;
+        if matches!(config, ServerConfig::Stdio { .. }) && !trust_local_process {
+            return Err("Explicitly trust this local process before adding it".into());
+        }
+        let id = store::new_id();
+        let connection = McpConnection {
+            oauth: false, id: id.clone(), workspace_id, label: label.trim().into(), config,
+            enabled, trusted: true, has_credentials: secret.is_some(), tools: vec![], discovered_ms: None, error: None,
+        };
+        {
+            let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+            let mut state = store::load(&db)?;
+            state.mcp.connections.push(connection.clone());
+            policy::validate(&state)?;
+            if let Some(secret) = &secret {
+                db.delete_clipboard_entry(&secret.0).map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
+                db.delete_clipboard_entry(secret.0.trim()).map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
+            }
+        }
+        let mut pending = PendingCredential(secret.as_ref().map(|_| id.clone()));
+        // Keychain can prompt; never hold the database while contacting it.
+        if let Some(secret) = &secret { credentials::store(&id, &secret.0)?; }
+        let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+        let mut state = store::load(&db)?;
+        state.mcp.connections.push(connection);
+        policy::validate(&state)?;
+        store::save(&db, &state)?;
+        pending.0 = None;
+        Ok((id, store::load(&db)?))
+    }
+
     fn connection(&self, id: &str) -> Result<McpConnection, String> {
         store::load(
             &*self
@@ -359,7 +350,7 @@ impl Host {
                 .ok()
                 .and_then(|db| store::load(&db).ok())
                 .is_some_and(|s| {
-                    policy::authorize(&s, &scope.workspace_id, connection, tool)
+                    s.agent_profiles.revision == scope.profile_revision && policy::authorize(&s, &scope.workspace_id, connection, tool)
                         .is_ok_and(|t| t.schema_hash == hash)
                 })
     }
@@ -387,23 +378,35 @@ impl Host {
         run_id: &str,
         workspace_id: &str,
         connection_ids: Vec<String>,
+        expected_profile_revision: u64,
     ) -> Result<Lease, String> {
-        let state = store::load(
-            &*self
-                .db
-                .lock()
-                .map_err(|_| "Workspace storage unavailable")?,
-        )?;
+        // Validate the actor's captured revision and issue its capability in
+        // one DB critical section. Never upgrade a stale worker to whatever
+        // profile authority happens to be current when it reaches the host.
+        let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+        let state = store::load(&db)?;
+        if state.agent_profiles.revision != expected_profile_revision {
+            return Err("Agent profile authority changed before lease issuance".into());
+        }
+        if let Some(turn_id) = run_id.strip_prefix("chat:") {
+            let turn = state.conversation.iter().find(|m| m.id == turn_id && m.pending).ok_or("Chat turn is no longer active")?;
+            if turn.agent_profile_revision != state.agent_profiles.revision
+                || turn.workspace_id.as_deref() != Some(workspace_id)
+                || turn.agent_profile_id != state.agent_profiles.owner(workspace_id) {
+                return Err("Chat agent profile authority changed before launch".into());
+            }
+        }
         if connection_ids.iter().any(|id| {
             !state
                 .mcp
                 .connections
                 .iter()
-                .any(|c| &c.id == id && c.workspace_id == workspace_id)
+                .any(|c| &c.id == id && c.available_in(workspace_id))
         }) {
             return Err("Run connection belongs to another workspace".into());
         }
         let token = self.registry.issue(Scope {
+            profile_revision: expected_profile_revision,
             run_id: run_id.into(),
             workspace_id: workspace_id.into(),
             connection_ids,
@@ -424,6 +427,9 @@ impl Host {
                 .lock()
                 .map_err(|_| "Workspace storage unavailable")?,
         )?;
+        if state.agent_profiles.revision != scope.profile_revision {
+            return Err("Agent profile authority changed; start a new run".into());
+        }
         match request.action {
             BridgeAction::List => {
                 let mut tools = Vec::new();
@@ -606,6 +612,45 @@ mod tests {
         Arc::new(Host::new(Arc::new(Mutex::new(db))))
     }
     #[test]
+    fn imported_disabled_connection_is_created_disabled_without_touching_other_connections() {
+        let h = host();
+        let (first, _) = h.add_connection("w".into(), "Existing".into(), ServerConfig::Http { url:"https://example.org/mcp".into() }, false, None, true).unwrap();
+        let (imported, state) = h.add_connection(String::new(), "Imported".into(), ServerConfig::Http { url:"https://example.org/mcp".into() }, false, None, false).unwrap();
+        assert!(state.mcp.connections.iter().find(|c| c.id == first).unwrap().enabled);
+        assert!(!state.mcp.connections.iter().find(|c| c.id == imported).unwrap().enabled);
+        assert!(state.mcp.grants.is_empty());
+    }
+
+    #[test]
+    fn profile_changes_revoke_old_bridge_capabilities() {
+        let h = host();
+        let lease = h.lease("profile-test", "w", vec![], 0).unwrap();
+        let request = || BridgeRequest { token: neko_protocol::workbench::Secret(lease.token().into()), action: BridgeAction::List };
+        assert_eq!(h.bridge(request()).unwrap(), "[]");
+        let db = h.db.lock().unwrap();
+        store::apply(&db, Command::AgentProfiles(neko_protocol::agent_profiles::ProfileCommand::Save { profile: neko_protocol::agent_profiles::AgentProfile { id: "default".into(), name: "Work".into(), instructions: "Updated instructions".into() } })).unwrap();
+        drop(db);
+        assert!(h.bridge(request()).unwrap_err().contains("authority changed"));
+    }
+
+    #[test]
+    fn stale_nonchat_claim_cannot_adopt_new_profile_authority_at_issuance() {
+        let h = host();
+        // Deterministically place the edit between the worker's snapshot read
+        // and Host::lease's own reload. No watchdog timing or sleeps involved.
+        let claimed_revision = store::load(&h.db.lock().unwrap()).unwrap().agent_profiles.revision;
+        let db = h.db.lock().unwrap();
+        let newer = store::apply(&db, Command::AgentProfiles(neko_protocol::agent_profiles::ProfileCommand::Save {
+            profile: neko_protocol::agent_profiles::AgentProfile { id: "default".into(), name: "Work".into(), instructions: "Changed after claim".into() },
+        })).unwrap().agent_profiles.revision;
+        drop(db);
+        assert_ne!(claimed_revision, newer);
+        let stale = h.lease("task:old-claim", "w", vec![], claimed_revision);
+        assert!(stale.is_err(), "An old actor received a fresh capability after its authority changed");
+        assert!(h.lease("task:new-claim", "w", vec![], newer).is_ok());
+    }
+
+    #[test]
     fn authentication_attempt_cleans_up_on_unwind_without_removing_a_replacement() {
         let host = host();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -702,6 +747,7 @@ mod tests {
             store::save(&db, &state).unwrap();
         }
         let scope = Scope {
+            profile_revision: 0,
             run_id: "run".into(),
             workspace_id: "w".into(),
             connection_ids: vec!["c".into()],
@@ -772,6 +818,7 @@ mod tests {
         let token = h
             .registry
             .issue(Scope {
+                profile_revision: 0,
                 run_id: "run".into(),
                 workspace_id: "w".into(),
                 connection_ids: vec![id.clone()],

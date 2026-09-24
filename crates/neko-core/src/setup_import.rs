@@ -16,6 +16,19 @@ use std::{
 
 const MAX_FILE: usize = 512 * 1024;
 const MAX_CONNECTIONS: usize = 100;
+const PREVIEW_SETTING: &str = "neko_import_preview_v1";
+
+pub fn load_preview(db: &crate::Db) -> Result<ImportPreview, String> {
+    db.get_setting(PREVIEW_SETTING).map_err(|e| e.to_string())?
+        .map(|value| serde_json::from_str(&value).map_err(|_| "Cannot read import preview".into()))
+        .unwrap_or_else(|| Ok(ImportPreview::default()))
+}
+
+pub fn save_preview(db: &crate::Db, preview: &ImportPreview) -> Result<(), String> {
+    let value = serde_json::to_string(preview).map_err(|e| e.to_string())?;
+    if value.len() > 1024 * 1024 { return Err("Import preview exceeds its limit".into()); }
+    db.set_setting(PREVIEW_SETTING, &value).map_err(|e| e.to_string())
+}
 
 pub struct Candidate {
     pub preview: ImportConnection,
@@ -33,6 +46,7 @@ impl std::fmt::Debug for Candidate {
 
 #[derive(Default)]
 pub struct Discovery {
+    pub schedules: Vec<neko_protocol::setup_import::ImportSchedule>,
     pub candidates: Vec<Candidate>,
     pub warnings: Vec<String>,
     pub repositories: Vec<String>,
@@ -40,6 +54,8 @@ pub struct Discovery {
 impl Discovery {
     pub fn preview(&self) -> ImportPreview {
         ImportPreview {
+            schedules: self.schedules.clone(),
+            preview_id: String::new(),
             connections: self.candidates.iter().map(|c| c.preview.clone()).collect(),
             repositories: self.repositories.clone(),
             warnings: self.warnings.clone(),
@@ -379,7 +395,10 @@ pub fn discover(
         files.push((repository.join(".mcp.json"), scope.clone(), false));
         files.push((repository.join(".codex/config.toml"), scope, true));
     }
-    for (file, repository, toml) in files {
+    let mut cursor = 0;
+    while cursor < files.len() && cursor < 202 {
+        let (file, repository, toml) = files[cursor].clone();
+        cursor += 1;
         let source = file.to_string_lossy().into_owned();
         let text = match file_text(&file) {
             Ok(Some(text)) => text,
@@ -416,8 +435,17 @@ pub fn discover(
                 if !Path::new(directory).is_absolute() {
                     continue;
                 }
+                if out.repositories.len() >= 100 && !out.repositories.contains(directory) {
+                    continue;
+                }
                 if !out.repositories.contains(directory) {
                     out.repositories.push(directory.clone());
+                }
+                for (relative, is_toml) in [(".mcp.json", false), (".codex/config.toml", true)] {
+                    let path = Path::new(directory).join(relative);
+                    if files.len() < 202 && !files.iter().any(|(p, _, _)| *p == path) {
+                        files.push((path, Some(directory.clone()), is_toml));
+                    }
                 }
                 if !toml {
                     add_servers(
@@ -438,12 +466,39 @@ pub fn discover(
             }
         }
     }
+    let (schedules, warnings) = crate::schedule_import::discover(home);
+    for schedule in &schedules {
+        if let Some(repository) = &schedule.repository {
+            if !out.repositories.contains(repository) && out.repositories.len() < 100 { out.repositories.push(repository.clone()); }
+        }
+    }
+    out.schedules = schedules;
+    out.warnings.extend(warnings);
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fresh_workbench_snapshot_includes_separately_stored_import_preview() {
+        let db = crate::Db::open_in_memory().unwrap();
+        let preview = ImportPreview { preview_id:"reviewed".into(), repositories:vec!["/fixture".into()], ..Default::default() };
+        save_preview(&db, &preview).unwrap();
+        assert_eq!(crate::workbench::load(&db).unwrap().import_preview, preview);
+    }
+    #[test]
+    fn project_configs_are_discovered_from_global_project_inventory() {
+        let home = tempfile::tempdir().unwrap();
+        let repository = home.path().join("repo");
+        fs::create_dir_all(repository.join(".codex")).unwrap();
+        fs::create_dir_all(home.path().join(".codex")).unwrap();
+        fs::write(home.path().join(".codex/config.toml"), format!("[projects.{}]\ntrust_level='trusted'\n", serde_json::to_string(&repository.to_string_lossy()).unwrap())).unwrap();
+        fs::write(repository.join(".codex/config.toml"), "[mcp_servers.scoped]\nurl='https://example.org/mcp'").unwrap();
+        let result = discover(home.path(), &[], &[], &BTreeMap::new());
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].preview.repository.as_deref(), repository.to_str());
+    }
     #[test]
     fn preserves_header_environment_and_project_disable_and_rejects_unsupported_cwd() {
         let home = tempfile::tempdir().unwrap();
