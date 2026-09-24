@@ -140,6 +140,35 @@ pub struct Snapshot {
     /// store, so it never competes with capacity reserved for task results.
     #[serde(default)]
     pub conversation: Vec<ChatMessage>,
+    /// What Neko has learned about the user and their workspaces. Stored
+    /// separately from the task store, visible and editable by the user.
+    #[serde(default)]
+    pub memory: Vec<MemoryEntry>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryKind {
+    /// About the user: preferences, habits, how they like work done.
+    Profile,
+    /// About one workspace: conventions, commands, context.
+    Workspace,
+    /// A decision the user made that should guide similar work later.
+    Decision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryEntry {
+    pub id: String,
+    pub kind: MemoryKind,
+    /// Set for workspace notes and workspace-specific decisions.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    pub text: String,
+    /// Where it came from: "user" (typed on the Memory page) or "chat".
+    pub source: String,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -163,6 +192,9 @@ pub struct ChatMessage {
     pub pending: bool,
     #[serde(default)]
     pub failed: bool,
+    /// Memories Neko saved from this turn, shown under the reply.
+    #[serde(default)]
+    pub remembered: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +248,13 @@ pub enum Command {
     AddTicketNote {
         task_id: String,
         text: String,
+    },
+    /// Add (empty id) or replace a memory entry.
+    SaveMemory {
+        entry: MemoryEntry,
+    },
+    DeleteMemory {
+        id: String,
     },
 }
 

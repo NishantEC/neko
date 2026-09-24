@@ -22,6 +22,7 @@ pub mod linear;
 pub mod native_runner;
 pub mod native_tasks;
 pub mod neko_chat;
+pub mod neko_memory;
 pub mod workbench;
 pub mod mcp;
 pub mod mcp_host;
