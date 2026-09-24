@@ -53,8 +53,11 @@ recording any external-provider or native-interaction checks that could not be p
   window rendering evidence only.
 - Real external MCP account sign-in and credential migration. Live-model MCP
   tests used a local fixture service, not the user's provider accounts.
-- Signed installed-app replacement and live acceptance against that installation.
-  No installed app was replaced, branch pushed, or merge performed.
+- Signed app installation completed after user approval; installed bundle and
+  sibling daemon verified, Welcome rendering captured. Loaded profile rendering
+  still shows stale non-key chrome, and manual native acceptance remains open.
+  See `docs/evidence/installed-app-acceptance.md`. No existing app was deleted,
+  branch pushed, or merge performed.
 
 Away notifications remain intentionally deferred. Multi-file skill packages and
 cross-profile filesystem privacy are not supported capabilities.
