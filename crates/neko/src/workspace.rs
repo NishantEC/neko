@@ -112,6 +112,7 @@ fn evidence_view() -> Option<View> {
         Ok("integrations") => Some(View::Integrations),
         Ok("tickets") => Some(View::Tickets),
         Ok("responsibilities") => Some(View::Responsibilities),
+        Ok("memory") => Some(View::Memory),
         _ => None,
     }
 }
@@ -160,6 +161,7 @@ enum View {
     Today,
     Tickets,
     Responsibilities,
+    Memory,
     Workspaces,
     Integrations,
 }
@@ -198,6 +200,7 @@ pub struct WorkspaceRoot {
     appearance: Option<theme::Appearance>,
     composer: Entity<TextField>,
     note_input: Entity<TextField>,
+    memory_input: Entity<TextField>,
     ticket_filter: TicketFilter,
     translucent: bool,
     drag_armed: bool,
@@ -271,6 +274,7 @@ impl WorkspaceRoot {
             appearance: None,
             composer: input("Ask Neko anything, or tell it what to look after…", cx),
             note_input: input("Steer this ticket…", cx),
+            memory_input: input("Something Neko should know, like \"we use pytest in hme\"", cx),
             ticket_filter: TicketFilter::NeedsYou,
             translucent: false,
             drag_armed: false,
@@ -312,6 +316,10 @@ impl WorkspaceRoot {
         };
         let submitted_note = match &command {
             Command::AddTicketNote { text, .. } => Some(text.clone()),
+            _ => None,
+        };
+        let submitted_memory = match &command {
+            Command::SaveMemory { entry } if entry.id.is_empty() => Some(entry.text.clone()),
             _ => None,
         };
         let submitted_responsibility = match &command {
@@ -378,6 +386,9 @@ impl WorkspaceRoot {
                         }
                         if let Some(text) = submitted_note {
                             if value(&root.note_input, cx) == text { root.note_input.update(cx, |field, cx| field.clear(cx)); }
+                        }
+                        if let Some(text) = submitted_memory {
+                            if value(&root.memory_input, cx) == text { root.memory_input.update(cx, |field, cx| field.clear(cx)); }
                         }
                         if let Some(r) = submitted_responsibility {
                             if root.responsibility_editing.as_deref().unwrap_or("") == r.id
@@ -602,6 +613,7 @@ impl Render for WorkspaceRoot {
             View::Today => self.today_view(cx),
             View::Tickets => self.tickets_page(cx),
             View::Responsibilities => self.responsibilities_page(cx),
+            View::Memory => self.memory_page(cx),
             View::Workspaces => {
                 let content = self.workspaces_view(cx).into_any_element();
                 self.settings_page("Workspace", content, cx)

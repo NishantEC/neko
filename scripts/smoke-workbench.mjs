@@ -229,6 +229,23 @@ try {
     await stop(); launch(); await connect();
     const kept = await command('Snapshot');
     assert.equal(kept.conversation.length, 4);
+    // Memory: a stated preference is remembered and shown under the reply; a
+    // decision is filed as one; user entries can be added and forgotten.
+    await command({ SendMessage: { text: 'Remember that I always want small PRs', workspace_id: workspaceId } });
+    const learned = await waitSnapshot(s => s.conversation.length === 6 && !s.conversation[5].pending, 'Neko did not remember');
+    assert.equal(learned.conversation[5].remembered.length, 1);
+    assert.equal(learned.memory.length, 1);
+    assert.equal(learned.memory[0].source, 'chat');
+    await command({ SendMessage: { text: 'We decided to drop IE11 support', workspace_id: workspaceId } });
+    const decided = await waitSnapshot(s => s.conversation.length === 8 && !s.conversation[7].pending, 'Neko did not record the decision');
+    assert.ok(decided.memory.some(m => m.kind === 'decision'));
+    const added = await command({ SaveMemory: { entry: { id: '', kind: 'workspace', workspace_id: workspaceId, text: 'Run make test before committing', source: 'user', created_at_ms: 0, updated_at_ms: 0 } } });
+    const note = added.memory.find(m => m.text === 'Run make test before committing');
+    assert.equal(note.workspace_id, workspaceId);
+    const forgotten = await command({ DeleteMemory: { id: note.id } });
+    assert.ok(!forgotten.memory.some(m => m.id === note.id));
+    await stop(); launch(); await connect();
+    assert.equal((await command('Snapshot')).memory.length, 2);
   }
-  console.log(JSON.stringify({ passed: true, agent: live ? 'live Codex CLI' : 'deterministic fixture', scratch, taskId, checks: ['real IPC', 'private socket', 'durable storage', 'read-only plan', 'approval gate', 'isolated build', 'independent review', 'palette task', 'invalid approval', 'cancellation', 'daemon restart', ...(!live ? ['user-added generic MCPs', 'explicit schema grants', 'real stdio bridge and receipts', 'workspace scope rejection', 'low-risk standing delegation', 'sensitive work held', 'manual task held under Away', 'wake deduplication', 'pause and revoke', 'durable MCP policy', 'Neko chat reply', 'chat opens a ticket', 'one turn at a time', 'ticket notes', 'durable chat'] : [])] }, null, 2));
+  console.log(JSON.stringify({ passed: true, agent: live ? 'live Codex CLI' : 'deterministic fixture', scratch, taskId, checks: ['real IPC', 'private socket', 'durable storage', 'read-only plan', 'approval gate', 'isolated build', 'independent review', 'palette task', 'invalid approval', 'cancellation', 'daemon restart', ...(!live ? ['user-added generic MCPs', 'explicit schema grants', 'real stdio bridge and receipts', 'workspace scope rejection', 'low-risk standing delegation', 'sensitive work held', 'manual task held under Away', 'wake deduplication', 'pause and revoke', 'durable MCP policy', 'Neko chat reply', 'chat opens a ticket', 'one turn at a time', 'ticket notes', 'durable chat', 'memory from chat', 'decisions', 'memory editing', 'durable memory'] : [])] }, null, 2));
 } finally { await stop(); }

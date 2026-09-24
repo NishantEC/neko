@@ -14,7 +14,10 @@ if (chat) {
   // Read-only chat turn: never touches files. Asking for a fix proposes one ticket.
   const message = prompt.slice(prompt.lastIndexOf('\nUser: ') + 7).split('\n')[0];
   const wantsWork = /\b(fix|investigate|review|build)\b/i.test(message);
-  const reply = wantsWork
+  const remembers = /\b(always|remember|prefer|decided)\b/i.test(message);
+  const reply = remembers
+    ? { reply: "Got it, I'll remember that.", tickets: [], remember: [{ text: message.trim(), workspace_id: null, decision: /\bdecided\b/i.test(message) }] }
+    : wantsWork
     ? { reply: 'On it. I opened a ticket and will plan it read-only first.', tickets: [{ title: 'Fix the empty cart total crash', goal: 'Checkout must show 0 for carts with only free items. Add a test for a free-only cart and run the checkout tests.' }] }
     : { reply: 'Quiet so far. Nothing is blocked, and I will tell you when something needs you.', tickets: [] };
   process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify(reply) } })}\n`);
