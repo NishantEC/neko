@@ -185,6 +185,7 @@ pub(super) fn view(
                     .gap(px(6.))
                     .child(div().child(tool.name.clone()))
                     .child(note(tool.description.clone()))
+                    .child(note(if tool.read_only { "Server declares this tool read-only. Granting access permits chat lookups without another prompt." } else { "Action or unspecified effect. Chat asks you to approve each call; unattended responsibilities use the grant directly." }))
                     .child(note(format!("Input schema: {}", tool.input_schema)))
                     .child(button(
                         format!("grant-{id}-{name}"),

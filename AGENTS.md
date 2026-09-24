@@ -6459,6 +6459,16 @@ product decisions, not extensions of this local app-server loop. Evidence:
   `docs/evidence/gpui-fork-migration-report.md` §8) — not root-caused, a
   real follow-up.
 
+## Chat tool authority
+
+Chat MCP tools use the selected workspace's lease and current schema grants;
+unscoped chat has no bridge. Server `readOnlyHint` participates in schema identity
+and is an explicit trust decision at grant time. Unknown/action tools require
+one inline approval per exact call. See `docs/architecture.md` and
+`crates/neko-daemon/src/mcp_host/chat_tests.rs`; `node scripts/smoke-workbench.mjs`
+exercises actual chat-worker/bridge IPC with approval, denial, Stop and restart.
+Filesystem read privacy is still not provided by the Codex sandbox.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

@@ -22,6 +22,7 @@ pub struct Controller {
     pub mcp: Arc<crate::mcp_host::Host>,
     db: Arc<Mutex<Db>>,
     active: Mutex<Option<Active>>,
+    chat_active: Mutex<Option<Active>>,
     waking: Mutex<()>,
 }
 
@@ -31,12 +32,27 @@ impl Controller {
             mcp: Arc::new(crate::mcp_host::Host::new(db.clone())),
             db,
             active: Mutex::new(None),
+            chat_active: Mutex::new(None),
             waking: Mutex::new(()),
         }
     }
 
     pub fn command(&self, command: Command) -> Result<Snapshot, String> {
         match command {
+            Command::DecideChatTool { turn_id, call_id, approve } => {
+                let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
+                neko_chat::decide_call(&db, &turn_id, &call_id, approve)?;
+                store::load(&db)
+            }
+            Command::CancelChat { turn_id } => {
+                if let Some(active) = self.chat_active.lock().map_err(|_| "Chat state unavailable")?.as_ref().filter(|a| a.task_id == turn_id) {
+                    active.cancelled.store(true, Ordering::Release);
+                }
+                self.mcp.cancel_chat(&turn_id);
+                let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
+                neko_chat::finish_turn(&db, &turn_id, "Stopped.", vec![], true)?;
+                store::load(&db)
+            }
             Command::Mcp(command) => self.mcp.command(command),
             Command::ConnectLinear { .. } | Command::SyncLinear { .. } | Command::SetConnectionEnabled { .. } => {
                 Err("Built-in Linear sync is retired. Add a user-configured MCP connection, discover and grant its tools, then create a responsibility. Historical issues remain available.".into())
@@ -69,11 +85,19 @@ impl Controller {
                 store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), Command::RetryTask { task_id })
             }
             Command::SendMessage { text, workspace_id } => {
-                let pending = neko_chat::begin_turn(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &text)?;
+                let mut active = self.chat_active.lock().map_err(|_| "Chat state unavailable")?;
+                if let Some(id) = &workspace_id {
+                    let state = store::load(&*self.db.lock().map_err(|_| "Chat storage unavailable")?)?;
+                    if !state.workspaces.iter().any(|w| &w.id == id) { return Err("Selected workspace no longer exists".into()); }
+                }
+                let pending = neko_chat::begin_scoped_turn(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &text, workspace_id.as_deref())?;
+                let cancelled = Arc::new(AtomicBool::new(false));
+                *active = Some(Active { task_id: pending.clone(), cancelled: cancelled.clone() });
                 let db = self.db.clone();
+                let mcp = self.mcp.clone();
                 let text = text.trim().to_owned();
                 std::thread::spawn(move || {
-                    let run = std::panic::AssertUnwindSafe(|| converse(&db, &pending, &text, workspace_id.as_deref()));
+                    let run = std::panic::AssertUnwindSafe(|| converse(&db, &mcp, &cancelled, &pending, &text, workspace_id.as_deref()));
                     if std::panic::catch_unwind(run).is_err() {
                         // Never leave "thinking" stuck; a poisoned lock is recovered.
                         let guard = db.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -373,9 +397,9 @@ impl Controller {
     }
 }
 
-/// One Neko reply. Runs read-only, outside any lock, and may open tickets as
+/// One Neko reply. Runs filesystem-read-only with scoped tools, outside any lock, and may open tickets as
 /// ordinary queued tasks so planning and approval stay exactly as they are.
-fn converse(db: &Arc<Mutex<Db>>, pending: &str, message: &str, preferred: Option<&str>) {
+fn converse(db: &Arc<Mutex<Db>>, mcp: &Arc<crate::mcp_host::Host>, cancel: &AtomicBool, pending: &str, message: &str, preferred: Option<&str>) {
     let finish = |text: &str, tickets: Vec<String>, failed: bool| {
         if let Err(error) = neko_chat::finish_turn(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), pending, text, tickets, failed) {
             eprintln!("neko chat: {error}");
@@ -411,10 +435,25 @@ fn converse(db: &Arc<Mutex<Db>>, pending: &str, message: &str, preferred: Option
         writable: false,
         timeout: Duration::from_secs(180),
     };
-    let result = native_runner::run(&spec, &AtomicBool::new(false), |_| {});
+    let result = (|| {
+        if cancel.load(Ordering::Acquire) { return Err("Cancelled".into()); }
+        if let Some(workspace) = chosen {
+            let connections = snapshot.mcp.connections.iter().filter(|c| c.workspace_id == workspace && c.enabled && c.trusted).map(|c| c.id.clone()).collect();
+            let lease = mcp.lease(&format!("chat:{pending}"), workspace, connections)?;
+            let bridge = native_runner::BridgeConfig {
+                executable: std::env::current_exe().map_err(|e| e.to_string())?,
+                socket: neko_protocol::socket_path(), token: lease.token().into(),
+            };
+            // Lease drop also cancels any approval waiter and in-flight call.
+            native_runner::run_with_bridge(&spec, &bridge, cancel, |_| {})
+        } else {
+            native_runner::run(&spec, cancel, |_| {})
+        }
+    })();
     if let Some(dir) = &scratch {
         let _ = std::fs::remove_dir_all(dir);
     }
+    if cancel.load(Ordering::Acquire) { return; }
     let answer = match result {
         Ok(answer) => answer,
         Err(error) => {

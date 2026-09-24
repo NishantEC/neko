@@ -44,7 +44,7 @@ pub struct BridgeConfig {
 fn configure_bridge(command: &mut Command, bridge: &BridgeConfig) -> Result<(), String> {
     if !bridge.executable.is_absolute() || !bridge.socket.is_absolute() || bridge.token.is_empty() { return Err("Invalid scoped bridge configuration".into()); }
     let executable = serde_json::to_string(&bridge.executable.to_string_lossy()).map_err(|_| "Invalid bridge executable")?;
-    command.args(["-c", &format!("mcp_servers.neko={{command={executable},args=[\"--mcp-bridge\"],env_vars=[\"NEKO_MCP_TOKEN\",\"NEKO_MCP_SOCKET\"],required=true,enabled_tools=[\"neko_list_tools\",\"neko_call_tool\"],default_tools_approval_mode=\"prompt\",tools={{neko_list_tools={{approval_mode=\"approve\"}},neko_call_tool={{approval_mode=\"approve\"}}}}}}")]);
+    command.args(["-c", &format!("mcp_servers.neko={{command={executable},args=[\"--mcp-bridge\"],env_vars=[\"NEKO_MCP_TOKEN\",\"NEKO_MCP_SOCKET\"],required=true,tool_timeout_sec=150,enabled_tools=[\"neko_list_tools\",\"neko_call_tool\"],default_tools_approval_mode=\"prompt\",tools={{neko_list_tools={{approval_mode=\"approve\"}},neko_call_tool={{approval_mode=\"approve\"}}}}}}")]);
     command.args(["-c", "shell_environment_policy.exclude=[\"NEKO_MCP_*\"]"]);
     command.env("NEKO_MCP_TOKEN", &bridge.token).env("NEKO_MCP_SOCKET", &bridge.socket);
     Ok(())

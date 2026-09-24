@@ -20,11 +20,24 @@ conversation with Neko: a brief built from those groups, ticket cards, the
 chat, and a rail of running work and responsibility health. Opening a ticket
 shows a panel with its actions, activity and the user's steering notes.
 `neko-core::neko_chat` stores the conversation in its own bounded setting,
-outside the task store's reserved capacity. Each message is one read-only Codex
-turn (`neko-daemon::workbench::converse`); a reply may propose up to three
+outside the task store's reserved capacity. Each message is one Codex turn with
+read-only filesystem access (`neko-daemon::workbench::converse`). A selected
+workspace receives only its granted MCP connections through a temporary lease;
+an unscoped chat receives no bridge. Chat history injected into the prompt is
+also scoped. A reply may propose up to three
 tickets, which become ordinary queued tasks, so planning and approval gates are
 unchanged. Ticket notes (event role `note`) reach planner and builder prompts
 as direction inside the approved scope and never grant tools or publication.
+
+Chat tool cards persist the exact arguments and workspace. A tool whose server
+declares `readOnlyHint=true` can run under its grant; the declaration participates
+in the schema hash and the grant UI states this trust decision. Unknown/action
+tools need an inline approval for each exact call. Denial never dispatches.
+Approvals expire after 120 seconds; upstream execution remains bounded to 20
+seconds. Stop, runner timeout, lease drop, or daemon restart fail closed.
+Successful and failed dispatched calls have inline receipts. These guarantees
+depend on the explicitly trusted server's effect declaration; Neko cannot prove
+that arbitrary remote code is read-only, or undo an action already dispatched.
 
 The daemon-owned `neko-core::mcp_host` hosts user-added stdio and Streamable
 HTTP servers through pinned rmcp 3.4.1. Connections, discovered schema hashes,

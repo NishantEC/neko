@@ -13,6 +13,12 @@ const chat = prompt.includes("You are Neko, the user's personal engineering agen
 if (chat) {
   // Read-only chat turn: never touches files. Asking for a fix proposes one ticket.
   const message = prompt.slice(prompt.lastIndexOf('\nUser: ') + 7).split('\n')[0];
+  if (message.includes('CHAT_TOOL_PROBE')) {
+    const result = await observeThroughBridge();
+    process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ reply: result.summary, tickets: [] }) } })}\n`);
+    process.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+    process.exit(0);
+  }
   const wantsWork = /\b(fix|investigate|review|build)\b/i.test(message);
   const remembers = /\b(always|remember|prefer|decided)\b/i.test(message);
   const reply = remembers
@@ -61,6 +67,10 @@ async function observeThroughBridge() {
     assert.equal(tools.length, 1);
     const tool = tools[0];
     const call = await rpc('tools/call', { name: 'neko_call_tool', arguments: { connection_id: tool.connection_id, tool_name: tool.tool_name, arguments: {} } });
+    if (chat && prompt.slice(prompt.lastIndexOf('\nUser: ')).includes('CHAT_TOOL_DENY')) {
+      assert.equal(call.isError, true, 'Denied chat action unexpectedly executed');
+      return { summary: 'Chat action denied without execution.', observations: [] };
+    }
     assert.ok(!call.isError, 'Granted fixture call failed');
     const receipt = JSON.parse(call.content.find(item => item.type === 'text').text);
     assert.ok(receipt.receipt_id, 'Real daemon receipt missing');

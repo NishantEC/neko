@@ -245,6 +245,7 @@ mod tests {
             trusted: true,
             has_credentials: false,
             tools: vec![McpTool {
+                read_only: false,
                 name: "lookup".into(),
                 description: "Read".into(),
                 input_schema: "{}".into(),

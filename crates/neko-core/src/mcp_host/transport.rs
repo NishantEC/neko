@@ -526,10 +526,17 @@ async fn operate(
                     if !seen.insert(name.clone()) {
                         return Err("MCP server returned duplicate tool names".into());
                     }
-                    let identity = serde_json::to_vec(&(&name, &description, &input_schema))
-                        .map_err(|_| "Invalid MCP tool")?;
+                    let read_only = tool.annotations.as_ref().and_then(|a| a.read_only_hint).unwrap_or(false);
+                    // Preserve existing grants for conservative/unknown tools;
+                    // declaring read-only changes identity and needs a regrant.
+                    let identity = if read_only {
+                        serde_json::to_vec(&(&name, &description, &input_schema, true))
+                    } else {
+                        serde_json::to_vec(&(&name, &description, &input_schema))
+                    }.map_err(|_| "Invalid MCP tool")?;
                     let schema_hash = format!("{:x}", Sha256::digest(identity));
                     tools.push(McpTool {
+                        read_only,
                         name,
                         description,
                         input_schema,
@@ -710,6 +717,9 @@ mod tests {
         assert_eq!(tools[0].schema_hash.len(), 64);
         let changed = discover(&fixture("changed"), &credentials, &cancel).unwrap();
         assert_ne!(tools[0].schema_hash, changed[0].schema_hash);
+        let readonly = discover(&fixture("readonly"), &credentials, &cancel).unwrap();
+        assert!(!tools[0].read_only && readonly[0].read_only);
+        assert_ne!(tools[0].schema_hash, readonly[0].schema_hash, "Changing a tool's effect declaration requires a fresh grant");
         let response = call(
             &fixture("normal"),
             &credentials,

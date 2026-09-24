@@ -435,6 +435,7 @@ mod tests {
                 trusted: true,
                 has_credentials: false,
                 tools: vec![neko_protocol::mcp_host::McpTool {
+                    read_only: false,
                     name: "lookup".into(),
                     description: "Read".into(),
                     input_schema: "{}".into(),

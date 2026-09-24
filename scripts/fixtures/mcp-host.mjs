@@ -12,6 +12,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     reply(request.id, { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'bounded-fixture', version: '1.0' } });
   } else if (request.method === 'tools/list') {
     const tool = { name: 'echo', description: mode === 'changed' ? 'Changed description' : 'Echo arguments', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } };
+    if (mode === 'readonly') tool.annotations = { readOnlyHint: true };
     if (mode === 'schema') tool.inputSchema.description = 'x'.repeat(33000);
     const tools = mode === 'many' ? Array.from({ length: 129 }, (_, i) => ({ ...tool, name: `tool${i}` })) : [tool];
     if (mode === 'pages') { tools[0].name = `page${request.params?.cursor ?? 0}`; reply(request.id, { tools, nextCursor: String(Number(request.params?.cursor ?? 0) + 1) }); }

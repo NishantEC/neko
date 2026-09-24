@@ -246,6 +246,27 @@ try {
     assert.ok(!forgotten.memory.some(m => m.id === note.id));
     await stop(); launch(); await connect();
     assert.equal((await command('Snapshot')).memory.length, 2);
+    // Actual chat runner -> stdio MCP adapter -> scoped daemon host. The
+    // unannotated fixture conservatively needs approval even with a grant.
+    await mcp({ SetEnabled: { connection_id: own.id, enabled: true } });
+    await mcp({ SetToolGrant: { connection_id: own.id, tool_name: own.tools[0].name, schema_hash: own.tools[0].schema_hash, allowed: true } });
+    for (const outcome of ['approve', 'deny', 'cancel', 'restart']) {
+      const start = await command({ SendMessage: { text: `CHAT_TOOL_PROBE ${outcome === 'deny' ? 'CHAT_TOOL_DENY ' : ''}FOREIGN_CONNECTION_ID=${foreign.id}`, workspace_id: workspaceId } });
+      const turnId = start.conversation.at(-1).id;
+      const waiting = await waitSnapshot(s => s.conversation.find(m => m.id === turnId)?.tool_calls.some(c => c.status === 'awaiting_approval'), 'Chat approval card did not appear');
+      const call = waiting.conversation.find(m => m.id === turnId).tool_calls[0];
+      assert.equal(call.workspace_id, workspaceId);
+      assert.ok(!waiting.mcp.receipts.some(r => r.run_id === `chat:${turnId}`), 'Action executed before approval');
+      if (outcome === 'restart') { await stop(); launch(); await connect(); }
+      else if (outcome === 'cancel') await command({ CancelChat: { turn_id: turnId } });
+      else await command({ DecideChatTool: { turn_id: turnId, call_id: call.id, approve: outcome === 'approve' } });
+      const done = await waitSnapshot(s => !s.conversation.find(m => m.id === turnId)?.pending, 'Chat did not settle');
+      const receipts = done.mcp.receipts.filter(r => r.run_id === `chat:${turnId}`);
+      assert.equal(receipts.length, outcome === 'approve' ? 1 : 0);
+      if (outcome === 'approve') assert.equal(receipts[0].success, true);
+      const stale = await request({ Workbench: { DecideChatTool: { turn_id: turnId, call_id: call.id, approve: true } } });
+      assert.ok(stale.Error, 'A closed approval was accepted again');
+    }
   }
   console.log(JSON.stringify({ passed: true, agent: live ? 'live Codex CLI' : 'deterministic fixture', scratch, taskId, checks: ['real IPC', 'private socket', 'durable storage', 'read-only plan', 'approval gate', 'isolated build', 'independent review', 'palette task', 'invalid approval', 'cancellation', 'daemon restart', ...(!live ? ['user-added generic MCPs', 'explicit schema grants', 'real stdio bridge and receipts', 'workspace scope rejection', 'low-risk standing delegation', 'sensitive work held', 'manual task held under Away', 'wake deduplication', 'pause and revoke', 'durable MCP policy', 'Neko chat reply', 'chat opens a ticket', 'one turn at a time', 'ticket notes', 'durable chat', 'memory from chat', 'decisions', 'memory editing', 'durable memory'] : [])] }, null, 2));
 } finally { await stop(); }
