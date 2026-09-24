@@ -39,8 +39,20 @@ Historical argument cards are capped at 256 KB plus the active turn's bounded
   and fixture MCP server; they verify approval before execution, denial, Stop,
   restart, receipt ownership, and rejection of foreign-workspace access.
 
-No app install, push, live provider request, OAuth provider verification, real
-model chat run, or rendered-window acceptance was performed. The UI compiles;
+Follow-up verification: `NEKO_SMOKE_LIVE=1 node scripts/smoke-workbench.mjs`
+passed with a real Codex model. In a disposable repository, the model planned,
+built after approval and underwent independent review. The expanded live smoke
+also called a granted read-only MCP fixture and an action fixture that waited
+for exact-call approval, then produced a successful receipt and the expected
+answer. The MCP server was local test code, not an external service account.
+
+Spec review found a Stop-versus-completion race; `5b3e002` fixes it by serializing
+the pending check and all reply mutations under one database lock. Deterministic
+tests cover Stop winning and completion winning. Independent quality review
+passed after that fix.
+
+No app install, push, external provider request, OAuth provider verification,
+or rendered-window acceptance was performed. The UI compiles;
 visual review remains separate. The underlying Codex sandbox does not enforce
 filesystem read privacy between workspaces, as already documented.
 

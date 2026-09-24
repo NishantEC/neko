@@ -130,6 +130,33 @@ try {
   const restored = await command('Snapshot');
   assert.equal(restored.tasks.find(task => task.id === taskId).status, 'Completed');
   assert.equal(restored.tasks.find(task => task.id === cancelId).status, 'Cancelled');
+  if (live) {
+    // Real model, real bridge and a disposable MCP server. No upstream account
+    // or external write is involved; the action tool simply echoes arguments.
+    for (const mode of ['readonly', 'normal']) {
+      const added = await mcp({ AddConnection: { workspace_id: workspaceId, label: `Live chat ${mode}`, config: { transport: 'stdio', command: process.execPath, args: [path.join(root, 'scripts/fixtures/mcp-host.mjs'), mode] }, trust_local_process: true, credentials: null } });
+      const connection = added.mcp.connections.find(c => c.label === `Live chat ${mode}`);
+      const discovered = await mcp({ Discover: { connection_id: connection.id } });
+      const tool = discovered.mcp.connections.find(c => c.id === connection.id).tools[0];
+      assert.ok(tool, 'Live fixture discovery failed');
+      await mcp({ SetToolGrant: { connection_id: connection.id, tool_name: tool.name, schema_hash: tool.schema_hash, allowed: true } });
+      const start = await command({ SendMessage: { workspace_id: workspaceId, text: `Use neko_list_tools and neko_call_tool now to call the echo tool on connection ${connection.id} with arguments {"text":"neko-live-${mode}"}. This is a disposable local fixture. Wait for host approval if needed. Do not create a ticket, remember anything, or use shell. Report the returned text.` } });
+      const turnId = start.conversation.at(-1).id;
+      if (mode === 'normal') {
+        const waiting = await waitSnapshot(s => s.conversation.find(m => m.id === turnId)?.tool_calls.some(c => c.status === 'awaiting_approval'), 'Real model did not request tool approval');
+        assert.ok(!waiting.mcp.receipts.some(r => r.run_id === `chat:${turnId}`));
+        const call = waiting.conversation.find(m => m.id === turnId).tool_calls.find(c => c.status === 'awaiting_approval');
+        await command({ DecideChatTool: { turn_id: turnId, call_id: call.id, approve: true } });
+      }
+      const done = await waitSnapshot(s => !s.conversation.find(m => m.id === turnId)?.pending, 'Real model chat did not finish');
+      const turn = done.conversation.find(m => m.id === turnId);
+      assert.equal(turn.failed, false, turn.text);
+      assert.ok(done.mcp.receipts.some(r => r.run_id === `chat:${turnId}` && r.connection_id === connection.id && r.success), 'Real model never completed the tool call');
+      assert.match(turn.text, new RegExp(`neko-live-${mode}`));
+      await mcp({ SetEnabled: { connection_id: connection.id, enabled: false } });
+    }
+    console.log('Live chat read and approved action passed with real model and local MCP fixture.');
+  }
   // Configure everything through user-facing IPC. No direct database seeding.
   if (!live) {
     await command({ SaveWorkspace: { workspace: { ...restored.workspaces.find(w => w.id === workspaceId), away_enabled: true } } });
