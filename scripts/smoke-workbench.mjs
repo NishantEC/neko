@@ -207,6 +207,28 @@ try {
     assert.ok(!durable.mcp.grants.some(g => g.connection_id === own.id));
     assert.equal(durable.mcp.sources.length, 2);
     assert.equal(durable.mcp.receipts.length, repeated.mcp.receipts.length);
+    // Talking to Neko: a plain question gets a reply and no work; asking for
+    // a fix opens exactly one ordinary queued ticket linked to the reply.
+    const before = durable.tasks.length;
+    await command({ SendMessage: { text: 'Anything on fire?', workspace_id: workspaceId } });
+    const busy = await request({ Workbench: { SendMessage: { text: 'second', workspace_id: null } } });
+    assert.ok(busy.Error && /still replying/.test(busy.Error.message), JSON.stringify(busy));
+    const quiet = await waitSnapshot(s => s.conversation.length === 2 && !s.conversation[1].pending, 'Neko did not reply');
+    assert.equal(quiet.conversation[1].role, 'neko');
+    assert.equal(quiet.conversation[1].failed, false);
+    assert.equal(quiet.tasks.length, before);
+    await command({ SendMessage: { text: 'Please fix the cart crash', workspace_id: workspaceId } });
+    const replied = await waitSnapshot(s => s.conversation.length === 4 && !s.conversation[3].pending, 'Neko did not open a ticket');
+    assert.equal(replied.conversation[3].ticket_ids.length, 1);
+    const opened = replied.tasks.find(t => t.id === replied.conversation[3].ticket_ids[0]);
+    assert.equal(opened.workspace_id, workspaceId);
+    assert.ok(['Queued', 'Planning', 'AwaitingApproval'].includes(opened.status), opened.status);
+    const noted = await command({ AddTicketNote: { task_id: opened.id, text: 'Also cover discount-only carts.' } });
+    assert.ok(noted.tasks.find(t => t.id === opened.id).events.some(e => e.role === 'note' && /discount-only/.test(e.message)));
+    await command({ CancelTask: { task_id: opened.id } });
+    await stop(); launch(); await connect();
+    const kept = await command('Snapshot');
+    assert.equal(kept.conversation.length, 4);
   }
-  console.log(JSON.stringify({ passed: true, agent: live ? 'live Codex CLI' : 'deterministic fixture', scratch, taskId, checks: ['real IPC', 'private socket', 'durable storage', 'read-only plan', 'approval gate', 'isolated build', 'independent review', 'palette task', 'invalid approval', 'cancellation', 'daemon restart', ...(!live ? ['user-added generic MCPs', 'explicit schema grants', 'real stdio bridge and receipts', 'workspace scope rejection', 'low-risk standing delegation', 'sensitive work held', 'manual task held under Away', 'wake deduplication', 'pause and revoke', 'durable MCP policy'] : [])] }, null, 2));
+  console.log(JSON.stringify({ passed: true, agent: live ? 'live Codex CLI' : 'deterministic fixture', scratch, taskId, checks: ['real IPC', 'private socket', 'durable storage', 'read-only plan', 'approval gate', 'isolated build', 'independent review', 'palette task', 'invalid approval', 'cancellation', 'daemon restart', ...(!live ? ['user-added generic MCPs', 'explicit schema grants', 'real stdio bridge and receipts', 'workspace scope rejection', 'low-risk standing delegation', 'sensitive work held', 'manual task held under Away', 'wake deduplication', 'pause and revoke', 'durable MCP policy', 'Neko chat reply', 'chat opens a ticket', 'one turn at a time', 'ticket notes', 'durable chat'] : [])] }, null, 2));
 } finally { await stop(); }

@@ -8,6 +8,9 @@ pub const MAX_CONTENT_BYTES: usize = 32_768;
 pub const MAX_EVENT_BYTES: usize = 2048;
 pub const MAX_RESULT_BYTES: usize = 132 * 1024;
 pub const MAX_EVENTS: usize = 100;
+pub const MAX_NOTE_BYTES: usize = 2048;
+/// Event role for the user's steering notes on a ticket.
+pub const NOTE_ROLE: &str = "note";
 const MAX_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
 const STATE_RESERVE_BYTES: usize = 64 * 1024;
 
@@ -30,6 +33,8 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
         }
         db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
     }
+    // Attached for readers only; save() never writes it into this setting.
+    snapshot.conversation = crate::neko_chat::load(db)?;
     Ok(snapshot)
 }
 
@@ -50,6 +55,7 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
         }
     }
     let mut compacted = snapshot.clone();
+    compacted.conversation.clear();
     for task in &mut compacted.tasks {
         for event in &mut task.events {
             event.message = truncate(&event.message, MAX_EVENT_BYTES);
@@ -102,6 +108,7 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
 /// Six is JSON's maximum expansion for a UTF-8 byte (a control character).
 fn reserved_capacity(snapshot: &Snapshot) -> Result<usize, String> {
     let mut metadata = snapshot.clone();
+    metadata.conversation.clear();
     for task in &mut metadata.tasks {
         task.events.clear();
     }
@@ -277,6 +284,22 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
         }
         Command::ConnectLinear { .. } | Command::SyncLinear { .. } => {
             return Err("This command requires the workbench orchestrator".into());
+        }
+        Command::SendMessage { .. } => {
+            return Err("Talking to Neko requires the daemon".into());
+        }
+        Command::AddTicketNote { task_id, text } => {
+            let text = text.trim().to_owned();
+            required("Note", &text, MAX_NOTE_BYTES)?;
+            let task = snapshot
+                .tasks
+                .iter_mut()
+                .find(|t| t.id == task_id)
+                .ok_or("Task no longer exists")?;
+            if task.status == TaskStatus::Completed {
+                return Err("This ticket is done. Ask Neko for a follow-up instead".into());
+            }
+            append_event(task, NOTE_ROLE, &text);
         }
     }
     save(db, &snapshot)?;

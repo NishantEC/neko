@@ -24,8 +24,12 @@ have separate workspace scope, credentials, and permissions.
    independent read-only reviewer leaves a result for your review.
 
 Open the full app from the Dock, menu bar **Open Neko Workspace**, or the
-palette's **Open Neko Workspace** command. Closing this window does not stop
-the daemon. Dismissing the palette hides only the palette.
+palette's **Open Neko Workspace** command. **Today** is a conversation with
+Neko: its brief lists tickets that need you, and asking for work opens a
+ticket that is planned read-only and waits for your approval. **Tickets**
+lists everything by needs you, working and done; open one to approve, retry,
+or add a note that steers its next plan or build. Closing this window does not
+stop the daemon. Dismissing the palette hides only the palette.
 
 Automatic local preparation requires successful scoped tool receipts no older
 than fifteen minutes, unchanged source revision/content, current responsibility

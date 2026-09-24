@@ -1,11 +1,13 @@
 //! The persistent native workspace, separate from the quick launcher.
+mod home;
 mod tools;
 
+use home::TicketFilter;
 use crate::{text_field::TextField, theme};
 use gpui::{
     App, Context, Entity, Global, IntoElement, KeyDownEvent, ParentElement, Render, SharedString,
-    Styled, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowHandle,
-    WindowKind, WindowOptions, div, prelude::*, px,
+    Styled, TitlebarOptions, Window, WindowBounds, WindowHandle,
+    WindowKind, WindowOptions, div, point, prelude::*, px,
 };
 use neko_client::NekoClient;
 use neko_protocol::{
@@ -42,14 +44,15 @@ pub fn open(client: NekoClient, cx: &mut App) {
             return;
         }
     }
-    let bounds = gpui::Bounds::centered(None, gpui::size(px(1100.), px(760.)), cx);
+    let bounds = gpui::Bounds::centered(None, gpui::size(px(1240.), px(800.)), cx);
     match cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_min_size: Some(gpui::size(px(900.), px(600.))),
+            window_min_size: Some(gpui::size(px(980.), px(620.))),
             titlebar: Some(TitlebarOptions {
-                title: Some("Neko Workspace".into()),
-                ..Default::default()
+                title: Some("Neko".into()),
+                appears_transparent: true,
+                traffic_light_position: Some(point(px(16.), px(16.))),
             }),
             kind: WindowKind::Normal,
             is_resizable: true,
@@ -57,7 +60,7 @@ pub fn open(client: NekoClient, cx: &mut App) {
             is_movable: true,
             focus: !evidence,
             show: true,
-            window_background: WindowBackgroundAppearance::Opaque,
+            window_background: crate::material::window_background(),
             ..Default::default()
         },
         move |_, cx| cx.new(|cx| WorkspaceRoot::new(client, cx)),
@@ -68,6 +71,10 @@ pub fn open(client: NekoClient, cx: &mut App) {
                 cx.activate(true);
             }
             let _ = window.update(cx, |root, window, cx| {
+                // The same native glass the quick panel sits on. Without it the
+                // window stays opaque and the palette's solid panel colour is used.
+                root.translucent = crate::material::install(window).is_ok();
+                eprintln!("neko: workspace translucent={}", root.translucent);
                 if evidence {
                     show_evidence_window(window);
                 } else {
@@ -103,6 +110,8 @@ fn evidence_view() -> Option<View> {
     match std::env::var("NEKO_WORKSPACE_VIEW").as_deref() {
         Ok("workspaces") => Some(View::Workspaces),
         Ok("integrations") => Some(View::Integrations),
+        Ok("tickets") => Some(View::Tickets),
+        Ok("responsibilities") => Some(View::Responsibilities),
         _ => None,
     }
 }
@@ -139,7 +148,7 @@ pub fn open_task(client: NekoClient, task_id: String, cx: &mut App) {
     if let Some(window) = cx.try_global::<WorkspaceWindow>().and_then(|slot| slot.0) {
         let _ = window.update(cx, |root, _, cx| {
             root.pending_task = Some(task_id);
-            root.view = View::Tasks;
+            root.view = View::Tickets;
             root.request(Command::Snapshot, cx);
             cx.notify();
         });
@@ -148,7 +157,9 @@ pub fn open_task(client: NekoClient, task_id: String, cx: &mut App) {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View {
-    Tasks,
+    Today,
+    Tickets,
+    Responsibilities,
     Workspaces,
     Integrations,
 }
@@ -185,6 +196,13 @@ pub struct WorkspaceRoot {
     local_server: bool,
     trust_server: bool,
     appearance: Option<theme::Appearance>,
+    composer: Entity<TextField>,
+    note_input: Entity<TextField>,
+    ticket_filter: TicketFilter,
+    translucent: bool,
+    drag_armed: bool,
+    /// A user action that arrived while a poll was in flight; sent next.
+    queued: Option<Command>,
 }
 
 impl WorkspaceRoot {
@@ -220,7 +238,7 @@ impl WorkspaceRoot {
             } else {
                 None
             },
-            view: evidence_view().unwrap_or(View::Tasks),
+            view: evidence_view().unwrap_or(View::Today),
             loaded: false,
             busy: false,
             refreshing: false,
@@ -250,11 +268,20 @@ impl WorkspaceRoot {
             local_server: false,
             trust_server: false,
             appearance: None,
+            composer: input("Ask Neko anything, or tell it what to look after…", cx),
+            note_input: input("Steer this ticket…", cx),
+            ticket_filter: TicketFilter::NeedsYou,
+            translucent: false,
+            drag_armed: false,
+            queued: None,
         }
     }
 
     fn request(&mut self, command: Command, cx: &mut Context<Self>) {
         if self.busy {
+            if !matches!(command, Command::Snapshot) {
+                self.queued = Some(command);
+            }
             return;
         }
         self.busy = true;
@@ -274,6 +301,14 @@ impl WorkspaceRoot {
         );
         let submitted_draft = match &command {
             Command::CreateTask { title, goal, .. } => Some((title.clone(), goal.clone())),
+            _ => None,
+        };
+        let submitted_message = match &command {
+            Command::SendMessage { text, .. } => Some(text.clone()),
+            _ => None,
+        };
+        let submitted_note = match &command {
+            Command::AddTicketNote { text, .. } => Some(text.clone()),
             _ => None,
         };
         let submitted_responsibility = match &command {
@@ -334,6 +369,13 @@ impl WorkspaceRoot {
                                 root.task_goal.update(cx, |field, cx| field.clear(cx));
                             }
                         }
+                        // Clear what was sent, unless the user kept typing.
+                        if let Some(text) = submitted_message {
+                            if value(&root.composer, cx) == text { root.composer.update(cx, |field, cx| field.clear(cx)); }
+                        }
+                        if let Some(text) = submitted_note {
+                            if value(&root.note_input, cx) == text { root.note_input.update(cx, |field, cx| field.clear(cx)); }
+                        }
                         if let Some(r) = submitted_responsibility {
                             if root.responsibility_editing.as_deref().unwrap_or("") == r.id
                                 && value(&root.responsibility_instruction, cx) == r.instruction
@@ -355,7 +397,7 @@ impl WorkspaceRoot {
                             if let Some(workspace_id) = workspace_id {
                                 root.select_workspace(&workspace_id, cx);
                                 root.selection.task = Some(task_id);
-                                root.view = evidence_view().unwrap_or(View::Tasks);
+                                root.view = evidence_view().unwrap_or(View::Tickets);
                             } else { root.error = Some("That task is no longer available.".into()); }
                         }
                     }
@@ -369,6 +411,9 @@ impl WorkspaceRoot {
                     }
                     Ok(_) => root.transport_error = Some("The daemon returned an unexpected workspace response.".into()),
                     Err(_) => root.transport_error = Some("Neko cannot reach its daemon. Reconnecting automatically…".into()),
+                }
+                if let Some(next) = root.queued.take() {
+                    root.request(next, cx);
                 }
                 cx.notify();
                 // Native evidence showed a loaded snapshot behind stale
@@ -472,30 +517,6 @@ impl WorkspaceRoot {
         self.request(Command::SaveWorkspace { workspace }, cx);
     }
 
-    fn create_task(&mut self, cx: &mut Context<Self>) {
-        if self.busy {
-            return;
-        }
-        let Some(workspace_id) = self.selection.workspace.clone() else {
-            return;
-        };
-        let title = value(&self.task_title, cx);
-        let goal = value(&self.task_goal, cx);
-        if title.is_empty() || goal.is_empty() {
-            self.error = Some("Give the task a title and a concrete outcome.".into());
-            cx.notify();
-            return;
-        }
-        self.request(
-            Command::CreateTask {
-                workspace_id,
-                title,
-                goal,
-            },
-            cx,
-        );
-    }
-
     fn connect_mcp(&mut self, cx: &mut Context<Self>) {
         use neko_protocol::mcp_host::McpCommand;
         if self.busy {
@@ -530,94 +551,6 @@ impl WorkspaceRoot {
         );
     }
 
-    fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut sidebar = div()
-            .w(px(210.))
-            .flex_shrink_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .p(px(16.))
-            .bg(theme::active().surface_raised)
-            .border_r_1()
-            .border_color(theme::active().border_hairline)
-            .child(
-                div()
-                    .text_size(px(22.))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .mb(px(16.))
-                    .child("neko"),
-            );
-        for (view, label, id) in [
-            (View::Tasks, "Tasks & inbox", "nav-tasks"),
-            (View::Workspaces, "Workspaces", "nav-workspaces"),
-            (View::Integrations, "Tools / MCP", "nav-integrations"),
-        ] {
-            sidebar = sidebar.child(button(
-                id,
-                label,
-                true,
-                self.view == view,
-                cx,
-                move |root, _, cx| {
-                    if root.view == View::Integrations && view != View::Integrations {
-                        root.api_key.update(cx, |field, cx| field.clear(cx));
-                    }
-                    root.view = view;
-                    cx.notify();
-                },
-            ));
-        }
-        sidebar = sidebar.child(
-            div()
-                .mt(px(24.))
-                .mb(px(4.))
-                .text_size(px(11.))
-                .text_color(theme::active().text_secondary)
-                .child("WORKSPACE"),
-        );
-        let mut scopes = div()
-            .id("workspace-scopes")
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .max_h(px(280.))
-            .overflow_y_scroll();
-        for workspace in &self.snapshot.workspaces {
-            let id = workspace.id.clone();
-            scopes = scopes.child(button(
-                format!("scope-{}", id),
-                workspace.name.clone(),
-                !self.busy,
-                self.selection.includes(&id),
-                cx,
-                move |root, _, cx| root.select_workspace(&id, cx),
-            ));
-        }
-        sidebar
-            .child(scopes)
-            .when(self.snapshot.workspaces.is_empty(), |sidebar| {
-                sidebar.child(note("No workspace yet."))
-            })
-            .child(button(
-                "new-workspace",
-                "+ New workspace",
-                !self.busy,
-                false,
-                cx,
-                |root, _, cx| root.new_workspace(cx),
-            ))
-            .child(div().flex_1())
-            .child(note(if self.busy && !self.refreshing {
-                "Working…"
-            } else if !self.loaded {
-                "Connecting to daemon…"
-            } else {
-                "Updates every 2 seconds"
-            }))
-    }
-
     fn workspaces_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let creating = self.creating_workspace;
         div().id("workspace-editor").flex().flex_col().gap(px(20.)).size_full().overflow_y_scroll()
@@ -628,354 +561,6 @@ impl WorkspaceRoot {
             .child(field("Workspace instructions", &self.instructions))
             .child(note("Tools and responsibilities are configured per workspace in Tools / MCP. Manual tasks require your approval before editing. Worker reads are not a cross-workspace filesystem privacy boundary."))
             .child(button("save-workspace", if creating { "Create workspace" } else { "Save workspace" }, !self.busy, true, cx, |root, _, cx| root.save_workspace(cx)))
-    }
-
-    fn tasks_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.selection.workspace.is_none() {
-            return self
-                .choose_workspace(
-                    "Select a workspace to see its tasks and source history.",
-                    cx,
-                )
-                .into_any_element();
-        }
-        let mut tasks = div()
-            .id("tasks-and-issues")
-            .w(px(300.))
-            .flex_shrink_0()
-            .h_full()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .gap(px(10.));
-        tasks = tasks.child(div().font_weight(gpui::FontWeight::SEMIBOLD).child("Tasks"));
-        let scoped_tasks: Vec<_> = self
-            .snapshot
-            .tasks
-            .iter()
-            .filter(|task| self.selection.includes(&task.workspace_id))
-            .collect();
-        if scoped_tasks.is_empty() {
-            tasks = tasks.child(note("No tasks yet. Describe the first outcome below."));
-        }
-        for task in scoped_tasks.into_iter().rev() {
-            let id = task.id.clone();
-            tasks = tasks.child(button(
-                format!("task-{}", id),
-                format!("{}  ·  {}", task.title, status_label(task.status)),
-                true,
-                self.selection.task.as_deref() == Some(&id),
-                cx,
-                move |root, _, cx| {
-                    root.selection.task = Some(id.clone());
-                    cx.notify();
-                },
-            ));
-        }
-        tasks = tasks.child(
-            div()
-                .mt(px(16.))
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .child("Assigned issues"),
-        );
-        let scoped_issues: Vec<_> = self
-            .snapshot
-            .issues
-            .iter()
-            .filter(|issue| issue.assigned && self.selection.includes(&issue.workspace_id))
-            .collect();
-        if scoped_issues.is_empty() {
-            tasks = tasks.child(note(
-                "No historical source items. Add your own MCP servers in Tools / MCP.",
-            ));
-        }
-        for issue in scoped_issues {
-            let id = issue.id.clone();
-            let existing_task = self
-                .snapshot
-                .tasks
-                .iter()
-                .find(|task| {
-                    task.issue_id.as_deref() == Some(&id)
-                        && self.selection.includes(&task.workspace_id)
-                })
-                .map(|task| task.id.clone());
-            tasks = tasks.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.))
-                    .p(px(12.))
-                    .rounded(px(8.))
-                    .bg(theme::active().surface_raised)
-                    .child(note(issue.identifier.clone()))
-                    .child(issue.title.clone())
-                    .child(button(
-                        format!("plan-{}", id),
-                        if existing_task.is_some() {
-                            "View task"
-                        } else {
-                            "Plan issue"
-                        },
-                        !self.busy,
-                        false,
-                        cx,
-                        move |root, _, cx| {
-                            if let Some(task_id) = &existing_task {
-                                root.selection.task = Some(task_id.clone());
-                                cx.notify();
-                                return;
-                            }
-                            root.request(
-                                Command::PlanIssue {
-                                    issue_id: id.clone(),
-                                },
-                                cx,
-                            )
-                        },
-                    )),
-            );
-        }
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .gap(px(20.))
-            .child(heading(
-                "Tasks & inbox",
-                "Plans, approvals, and results for the selected workspace.",
-            ))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(10.))
-                    .p(px(16.))
-                    .rounded(px(12.))
-                    .bg(theme::active().surface_raised)
-                    .child(field("New task", &self.task_title))
-                    .child(field("Outcome", &self.task_goal))
-                    .child(button(
-                        "create-task",
-                        "Create task & plan",
-                        !self.busy,
-                        true,
-                        cx,
-                        |root, _, cx| root.create_task(cx),
-                    )),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .flex()
-                    .gap(px(22.))
-                    .child(tasks)
-                    .child(self.task_detail(cx)),
-            )
-            .into_any_element()
-    }
-
-    fn task_detail(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let task = self.snapshot.tasks.iter().find(|task| {
-            self.selection.task.as_deref() == Some(&task.id)
-                && self.selection.includes(&task.workspace_id)
-        });
-        let Some(task) = task else {
-            return div()
-                .flex_1()
-                .p(px(20.))
-                .child(note(
-                    "Select a task to read its plan, timeline, and result.",
-                ))
-                .into_any_element();
-        };
-        let mut detail = div()
-            .id(SharedString::from(format!("detail-{}", task.id)))
-            .flex_1()
-            .min_w(px(0.))
-            .h_full()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .gap(px(16.))
-            .child(heading(&task.title, status_label(task.status)))
-            .child(task.goal.clone());
-        let mut controls = div().flex().flex_wrap().gap(px(8.));
-        if let Some(decision) = &task.supervision {
-            let action = match decision.action {
-                neko_protocol::workbench::SupervisorAction::PrepareFix => {
-                    "Prepare a fix when the standing permission and assignment are current"
-                }
-                neko_protocol::workbench::SupervisorAction::AskUser => "Needs your decision",
-                neko_protocol::workbench::SupervisorAction::Skip => {
-                    "Not recommended for this responsibility"
-                }
-            };
-            detail = detail.child(section_text("Supervisor decision", &format!("{action}\nRisk: {:?}\n{}\n\nEvidence:\n{}\n\nProposed files:\n{}\n\nVerification:\n{}\n\nSensitive areas: {}\nUncertainties: {}", decision.risk, decision.reason, decision.evidence.join("\n"), decision.files.join("\n"), decision.tests.join("\n"), decision.sensitive_areas.join(", "), decision.uncertainties.join(", "))));
-        }
-        if task.status == TaskStatus::AwaitingApproval {
-            let id = task.id.clone();
-            controls = controls.child(button(
-                "approve-task",
-                "Approve local build",
-                !self.busy,
-                true,
-                cx,
-                move |root, _, cx| {
-                    root.request(
-                        Command::ApproveTask {
-                            task_id: id.clone(),
-                        },
-                        cx,
-                    )
-                },
-            ));
-        }
-        if task.status == TaskStatus::ReadyForReview {
-            let id = task.id.clone();
-            controls = controls.child(button(
-                "complete-task",
-                "Mark reviewed",
-                !self.busy,
-                true,
-                cx,
-                move |root, _, cx| {
-                    root.request(
-                        Command::CompleteTask {
-                            task_id: id.clone(),
-                        },
-                        cx,
-                    )
-                },
-            ));
-        }
-        if matches!(task.status, TaskStatus::Failed | TaskStatus::Cancelled) {
-            let id = task.id.clone();
-            controls = controls.child(button(
-                "retry-task",
-                "Retry task",
-                !self.busy,
-                true,
-                cx,
-                move |root, _, cx| {
-                    root.request(
-                        Command::RetryTask {
-                            task_id: id.clone(),
-                        },
-                        cx,
-                    )
-                },
-            ));
-        }
-        if matches!(
-            task.status,
-            TaskStatus::Queued
-                | TaskStatus::Planning
-                | TaskStatus::AwaitingApproval
-                | TaskStatus::Building
-                | TaskStatus::Reviewing
-        ) {
-            let id = task.id.clone();
-            controls = controls.child(button(
-                "cancel-task",
-                "Cancel task",
-                !self.busy,
-                false,
-                cx,
-                move |root, _, cx| {
-                    root.request(
-                        Command::CancelTask {
-                            task_id: id.clone(),
-                        },
-                        cx,
-                    )
-                },
-            ));
-        }
-        detail = detail
-            .child(controls)
-            .when(task.status == TaskStatus::ReadyForReview, |detail| detail.child(note("Mark reviewed completes this task. It does not merge or push changes; the local worktree is preserved.")))
-            .when(matches!(task.status, TaskStatus::Failed | TaskStatus::Cancelled), |detail| detail.child(note(
-                if task.worktree.is_some() { "Retry runs a new read-only plan using the existing preserved worktree." }
-                else { "Retry starts with a new read-only plan. A worktree will be created when needed." }
-            )))
-            .child(section_text(
-                "Plan",
-                if task.plan.is_empty() {
-                    "The planner has not returned a plan yet."
-                } else {
-                    &task.plan
-                },
-            ))
-            .child(section_text(
-                "Result",
-                if task.result.is_empty() {
-                    "No result yet. Progress appears in the timeline below."
-                } else {
-                    &task.result
-                },
-            ));
-        if let Some(path) = &task.worktree {
-            let reveal_path = std::path::PathBuf::from(path);
-            detail = detail
-                .child(
-                    div()
-                        .min_w(px(0.))
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.))
-                        .child(
-                            div()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child("Worktree"),
-                        )
-                        .child(
-                            div()
-                                .min_w(px(0.))
-                                .w_full()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis_middle()
-                                .child(path.clone()),
-                        ),
-                )
-                .child(button(
-                    "reveal-worktree",
-                    "Show worktree in Finder",
-                    true,
-                    false,
-                    cx,
-                    move |_, _, cx| cx.reveal_path(&reveal_path),
-                ));
-        }
-        detail = detail.child(
-            div()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .child("Timeline"),
-        );
-        if task.events.is_empty() {
-            detail = detail.child(note("Waiting for the first task event."));
-        }
-        for event in &task.events {
-            detail = detail.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(5.))
-                    .border_l_2()
-                    .border_color(theme::active().border_hairline_strong)
-                    .pl(px(12.))
-                    .child(note(format!(
-                        "{} · {}",
-                        event.role,
-                        relative_time(event.at_ms)
-                    )))
-                    .child(event.message.clone()),
-            );
-        }
-        detail.into_any_element()
     }
 
     fn integrations_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1008,9 +593,22 @@ impl Render for WorkspaceRoot {
             self.appearance = Some(appearance);
         }
         let body = match self.view {
-            View::Tasks => self.tasks_view(cx).into_any_element(),
-            View::Workspaces => self.workspaces_view(cx).into_any_element(),
-            View::Integrations => self.integrations_view(cx).into_any_element(),
+            View::Today => self.today_view(cx),
+            View::Tickets => self.tickets_page(cx),
+            View::Responsibilities => self.responsibilities_page(cx),
+            View::Workspaces => {
+                let content = self.workspaces_view(cx).into_any_element();
+                self.settings_page("Workspace", content, cx)
+            }
+            View::Integrations => {
+                let content = self.integrations_view(cx).into_any_element();
+                self.settings_page("Tools & skills", content, cx)
+            }
+        };
+        let background = if self.translucent {
+            theme::active().surface_panel_translucent
+        } else {
+            theme::active().surface_panel
         };
         div()
             .id("neko-workspace")
@@ -1019,7 +617,7 @@ impl Render for WorkspaceRoot {
             .flex()
             .text_size(px(13.))
             .text_color(theme::active().text_primary)
-            .bg(theme::active().surface_panel)
+            .bg(background)
             .on_key_down(|event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "tab" {
                     if event.keystroke.modifiers.shift {
@@ -1030,12 +628,23 @@ impl Render for WorkspaceRoot {
                     cx.stop_propagation();
                 }
             })
-            .child(self.sidebar(cx))
+            .child(self.home_sidebar(cx))
+            .child(div().flex_1().min_w(px(0.)).h_full().child(body))
+    }
+}
+
+impl WorkspaceRoot {
+    /// The existing workspace and tool editors, inside the new chrome.
+    fn settings_page(&self, title: &str, content: gpui::AnyElement, cx: &mut Context<Self>) -> gpui::AnyElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(self.page_header(title, None, cx))
             .child(
                 div()
                     .flex_1()
-                    .min_w(px(0.))
-                    .h_full()
+                    .min_h(px(0.))
                     .p(px(28.))
                     .flex()
                     .flex_col()
@@ -1054,8 +663,9 @@ impl Render for WorkspaceRoot {
                         },
                     )
                     .when_some(self.notice.clone(), |body, notice| body.child(note(notice)))
-                    .child(div().flex_1().min_h(px(0.)).child(body)),
+                    .child(div().flex_1().min_h(px(0.)).child(content)),
             )
+            .into_any_element()
     }
 }
 
@@ -1109,15 +719,6 @@ fn heading(title: &str, subtitle: &str) -> impl IntoElement {
                 .child(title.to_owned()),
         )
         .child(note(subtitle.to_owned()))
-}
-
-fn section_text(title: &'static str, text: &str) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(8.))
-        .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(title))
-        .child(text.to_owned())
 }
 
 fn button(
@@ -1179,14 +780,6 @@ fn status_label(status: TaskStatus) -> &'static str {
     }
 }
 
-fn scope_label(ids: &[String]) -> String {
-    if ids.is_empty() {
-        "all visible".into()
-    } else {
-        ids.join(", ")
-    }
-}
-
 fn relative_time(at_ms: i64) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1221,16 +814,6 @@ impl Selection {
     }
 }
 
-fn parse_ids(value: &str) -> Vec<String> {
-    let mut ids = Vec::new();
-    for id in value.split(',').map(str::trim).filter(|id| !id.is_empty()) {
-        if !ids.iter().any(|existing| existing == id) {
-            ids.push(id.to_string());
-        }
-    }
-    ids
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1252,11 +835,5 @@ mod tests {
         let selection = Selection::default();
         assert!(!selection.includes("one"));
         assert!(!selection.includes("two"));
-    }
-
-    #[test]
-    fn scope_filters_trim_empty_and_duplicate_ids() {
-        assert_eq!(parse_ids(" a, ,b,a,  b , c "), vec!["a", "b", "c"]);
-        assert!(parse_ids(" , ").is_empty());
     }
 }

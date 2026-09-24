@@ -9,6 +9,18 @@ if (!args.includes('--ephemeral') || !args.includes('--ignore-user-config')) pro
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 const responsibility = prompt.includes("Investigate the user's standing responsibility");
+const chat = prompt.includes("You are Neko, the user's personal engineering agent");
+if (chat) {
+  // Read-only chat turn: never touches files. Asking for a fix proposes one ticket.
+  const message = prompt.slice(prompt.lastIndexOf('\nUser: ') + 7).split('\n')[0];
+  const wantsWork = /\b(fix|investigate|review|build)\b/i.test(message);
+  const reply = wantsWork
+    ? { reply: 'On it. I opened a ticket and will plan it read-only first.', tickets: [{ title: 'Fix the empty cart total crash', goal: 'Checkout must show 0 for carts with only free items. Add a test for a free-only cart and run the checkout tests.' }] }
+    : { reply: 'Quiet so far. Nothing is blocked, and I will tell you when something needs you.', tickets: [] };
+  process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify(reply) } })}\n`);
+  process.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+  process.exit(0);
+}
 async function observeThroughBridge() {
   const config = args.find(arg => arg.startsWith('mcp_servers.neko='));
   const command = config?.match(/command=("(?:[^"\\]|\\.)*")/);
