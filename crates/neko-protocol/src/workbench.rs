@@ -1,0 +1,196 @@
+//! Neko-owned work. Credentials are write-only and never returned in snapshots.
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Secret(pub String);
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("[REDACTED]")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Workspace {
+    pub id: String,
+    pub name: String,
+    pub repository: String,
+    pub instructions: String,
+    /// Standing responsibility: prepare local fixes for assessed low-risk assigned bugs.
+    pub away_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LinearConnection {
+    pub id: String,
+    pub workspace_id: String,
+    pub name: String,
+    pub organization_id: String,
+    pub viewer_id: String,
+    /// Empty means all teams/projects visible to this explicitly connected account.
+    pub team_ids: Vec<String>,
+    pub project_ids: Vec<String>,
+    pub enabled: bool,
+    pub last_sync_ms: Option<i64>,
+    pub error: Option<String>,
+    /// Queue backpressure is not a provider/auth failure and must not revoke fresh evidence.
+    #[serde(default)]
+    pub intake_notice: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Issue {
+    pub id: String,
+    pub connection_id: String,
+    pub workspace_id: String,
+    pub external_id: String,
+    pub identifier: String,
+    pub title: String,
+    pub description: String,
+    pub url: String,
+    pub priority: u8,
+    pub updated_at: String,
+    /// Confirmed in the latest successful assigned-issues sync. Old caches fail closed.
+    #[serde(default)]
+    pub assigned: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SupervisorAction {
+    PrepareFix,
+    AskUser,
+    Skip,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Risk {
+    Low,
+    Medium,
+    High,
+    Unknown,
+}
+
+/// Model judgment, not a security guarantee. Host permission checks remain mandatory.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SupervisorDecision {
+    pub action: SupervisorAction,
+    pub risk: Risk,
+    pub is_bug: bool,
+    pub reason: String,
+    pub evidence: Vec<String>,
+    pub files: Vec<String>,
+    pub tests: Vec<String>,
+    pub sensitive_areas: Vec<String>,
+    pub uncertainties: Vec<String>,
+    pub plan: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TaskStatus {
+    Queued,
+    Planning,
+    AwaitingApproval,
+    Building,
+    Reviewing,
+    ReadyForReview,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskEvent {
+    pub at_ms: i64,
+    pub role: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Task {
+    pub id: String,
+    pub workspace_id: String,
+    pub issue_id: Option<String>,
+    pub title: String,
+    pub goal: String,
+    pub status: TaskStatus,
+    pub plan: String,
+    pub result: String,
+    pub worktree: Option<String>,
+    pub events: Vec<TaskEvent>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    #[serde(default)]
+    pub source_revision: Option<String>,
+    #[serde(default)]
+    pub supervision: Option<SupervisorDecision>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Snapshot {
+    #[serde(default = "crate::mcp_host::legacy_state")]
+    pub mcp: crate::mcp_host::McpState,
+    pub workspaces: Vec<Workspace>,
+    pub connections: Vec<LinearConnection>,
+    pub issues: Vec<Issue>,
+    pub tasks: Vec<Task>,
+    pub heartbeat_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Command {
+    Mcp(crate::mcp_host::McpCommand),
+    Snapshot,
+    SaveWorkspace {
+        workspace: Workspace,
+    },
+    ConnectLinear {
+        workspace_id: String,
+        api_key: Secret,
+        team_ids: Vec<String>,
+        project_ids: Vec<String>,
+    },
+    SyncLinear {
+        connection_id: String,
+    },
+    SetConnectionEnabled {
+        connection_id: String,
+        enabled: bool,
+    },
+    CreateTask {
+        workspace_id: String,
+        title: String,
+        goal: String,
+    },
+    PlanIssue {
+        issue_id: String,
+    },
+    ApproveTask {
+        task_id: String,
+    },
+    CancelTask {
+        task_id: String,
+    },
+    RetryTask {
+        task_id: String,
+    },
+    CompleteTask {
+        task_id: String,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn credential_debug_does_not_expose_key() {
+        let command = Command::ConnectLinear {
+            workspace_id: "w".into(),
+            api_key: Secret("sensitive-key".into()),
+            team_ids: vec![],
+            project_ids: vec![],
+        };
+        assert!(!format!("{command:?}").contains("sensitive-key"));
+    }
+}

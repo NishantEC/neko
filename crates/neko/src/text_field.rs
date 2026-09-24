@@ -63,6 +63,8 @@ impl EventEmitter<ContentChanged> for TextField {}
 pub struct TextField {
     focus_handle: FocusHandle,
     content: String,
+    /// Credential fields paint bullets and refuse copy/cut and native text reads.
+    masked: bool,
     placeholder: SharedString,
     cursor: usize,
     /// The fixed end of an in-progress selection; `cursor` is always the
@@ -99,6 +101,7 @@ impl TextField {
             Self {
                 focus_handle: cx.focus_handle(),
                 content: String::new(),
+                masked: false,
                 placeholder: DEFAULT_PLACEHOLDER.into(),
                 cursor: 0,
                 selection_anchor: None,
@@ -112,6 +115,26 @@ impl TextField {
 
     pub fn content(&self) -> &str {
         &self.content
+    }
+
+    pub fn set_masked(&mut self, masked: bool, cx: &mut Context<Self>) {
+        self.masked = masked;
+        self.last_layout = None;
+        cx.notify();
+    }
+
+    fn display_content(&self) -> String {
+        if self.masked { "•".repeat(self.content.chars().count()) } else { self.content.clone() }
+    }
+
+    fn display_offset(&self, content_offset: usize) -> usize {
+        if self.masked { self.content[..content_offset].chars().count() * "•".len() } else { content_offset }
+    }
+
+    fn content_offset(&self, display_offset: usize) -> usize {
+        if self.masked {
+            self.content.char_indices().nth(display_offset / "•".len()).map(|(index, _)| index).unwrap_or(self.content.len())
+        } else { display_offset }
     }
 
     /// Reset to empty with the cursor at the start — used when a launch
@@ -309,6 +332,7 @@ impl TextField {
     /// so (unlike every edit path) this never calls `commit_edit` and never
     /// emits `ContentChanged`.
     fn on_copy(&mut self, _: &Copy, _window: &mut Window, _cx: &mut Context<Self>) {
+        if self.masked { return; }
         if let Some(range) = self.selection_range() {
             pasteboard::write_string(&self.content[range]);
         }
@@ -319,6 +343,7 @@ impl TextField {
     /// nothing selected does nothing, it doesn't fall back to deleting one
     /// character.
     fn on_cut(&mut self, _: &Cut, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.masked { return; }
         let Some(range) = self.selection_range() else {
             return;
         };
@@ -483,7 +508,7 @@ impl TextField {
         if local >= layout.width {
             return Some(self.content.len());
         }
-        layout.index_for_x(local).or(Some(self.content.len()))
+        layout.index_for_x(local).map(|index| self.content_offset(index)).or(Some(self.content.len()))
     }
 
     /// What a press at `index` should select, given how many clicks it is.
@@ -626,6 +651,7 @@ impl EntityInputHandler for TextField {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
+        if self.masked { return None; }
         let range = self.range_from_utf16(&range_utf16);
         actual_range.replace(self.range_to_utf16(&range));
         Some(self.content[range].to_string())
@@ -693,7 +719,7 @@ impl EntityInputHandler for TextField {
     ) -> Option<Bounds<Pixels>> {
         let layout = self.last_layout.as_ref()?;
         let range = self.range_from_utf16(&range_utf16);
-        let x = bounds.left() + layout.x_for_index(range.start);
+        let x = bounds.left() + layout.x_for_index(self.display_offset(range.start));
         Some(Bounds::new(
             point(x, bounds.top()),
             gpui::size(px(1.), bounds.bottom() - bounds.top()),
@@ -709,7 +735,7 @@ impl EntityInputHandler for TextField {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
         let byte_idx = layout.index_for_x(point.x - bounds.left())?;
-        Some(self.utf16_offset_for_byte(byte_idx))
+        Some(self.utf16_offset_for_byte(self.content_offset(byte_idx)))
     }
 }
 
@@ -770,7 +796,7 @@ impl gpui::Element for TextFieldElement {
         let (display_text, color) = if field.content.is_empty() {
             (field.placeholder.clone(), theme::active().text_tertiary.into())
         } else {
-            (field.content.clone().into(), text_style.color)
+            (field.display_content().into(), text_style.color)
         };
         let run = TextRun {
             len: display_text.len(),
@@ -792,8 +818,8 @@ impl gpui::Element for TextFieldElement {
         // reused here rather than inventing a new token) sits behind its
         // row's own content, not above it.
         let selection = field.selection_range().map(|range| {
-            let start_x = bounds.left() + line.x_for_index(range.start);
-            let end_x = bounds.left() + line.x_for_index(range.end);
+            let start_x = bounds.left() + line.x_for_index(field.display_offset(range.start));
+            let end_x = bounds.left() + line.x_for_index(field.display_offset(range.end));
             fill(
                 Bounds::new(
                     point(start_x, bounds.top()),
@@ -807,7 +833,7 @@ impl gpui::Element for TextFieldElement {
             && field.focus_handle.is_focused(window)
             && field.blink.read(cx).visible();
         let cursor = if show_cursor {
-            let x = bounds.left() + line.x_for_index(field.cursor);
+            let x = bounds.left() + line.x_for_index(field.display_offset(field.cursor));
             Some(fill(
                 Bounds::new(
                     point(x, bounds.top()),
@@ -885,6 +911,7 @@ impl Render for TextField {
         div()
             .key_context("TextField")
             .track_focus(&self.focus_handle)
+            .tab_index(0)
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::on_backspace))
             .on_action(cx.listener(Self::on_left))
@@ -917,8 +944,9 @@ impl Render for TextField {
             // against, and swallowing it then would make the press do nothing.
             .on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(|field, event: &gpui::MouseDownEvent, _window, cx| {
+                cx.listener(|field, event: &gpui::MouseDownEvent, window, cx| {
                     if field.on_mouse_down(event.position, event.click_count, cx) {
+                        window.focus(&field.focus_handle, cx);
                         cx.stop_propagation();
                     }
                 }),
@@ -936,6 +964,22 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    #[gpui::test]
+    fn masked_field_never_exposes_display_content_and_maps_unicode_offsets(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("key-東京", cx);
+            field.set_masked(true, cx);
+            assert_eq!(field.display_content(), "••••••");
+            assert_eq!(field.display_offset(7), 15);
+            assert_eq!(field.content_offset(15), 7);
+            assert_eq!(field.content_offset(18), 10);
+            field.clear(cx);
+            assert_eq!(field.display_content(), "");
+            assert_eq!(field.content(), "");
+        });
+    }
 
     /// `pasteboard.rs` reads/writes the real, systemwide `NSPasteboard` —
     /// there's no per-test isolation for it the way `TestAppContext` gives

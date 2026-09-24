@@ -4,6 +4,59 @@ The map, not the territory. Every section points at the code that owns the
 detail. `AGENTS.md` has the full decision record for anything below that looks
 arbitrary; several of these decisions cost days to learn.
 
+## Current default: standalone Neko work
+
+`neko-protocol::workbench` supplies typed commands and snapshots. The GPUI
+`workspace.rs` window is a client only. `neko-core::workbench` stores bounded,
+validated snapshots atomically in the daemon-owned SQLite settings table.
+`neko-daemon::workbench` supervises one task at a time without holding the
+database mutex during model/network calls. A two-second supervisor heartbeat
+is separate from task progress; it does not claim the model made progress.
+
+The daemon-owned `neko-core::mcp_host` hosts user-added stdio and Streamable
+HTTP servers through pinned rmcp 3.4.1. Connections, discovered schema hashes,
+explicit grants, responsibilities, receipts and source evidence live in the
+versioned workbench snapshot. Credentials live in per-connection Keychain
+entries; OAuth uses discovered metadata, PKCE/state/issuer checks and bounded
+browser callbacks. Legacy Linear data remains historical; old polling and
+permissions are disabled, not converted into grants.
+
+`native_runner` starts ephemeral Codex processes in isolated task worktrees.
+A scoped, expiring capability in environment variables connects a temporary
+stdio bridge back to the daemon. Only `neko_list_tools` and `neko_call_tool`
+are enabled and preapproved. Upstream configurations and credentials are not
+passed to workers. Global user config/rules are ignored and shell networking
+stays disabled. Current workspace scope, grant and schema are checked before
+each call, including after upstream rediscovery. Revocation prevents subsequent
+dispatch; cancellation cannot undo a request already delivered upstream.
+
+Responsibilities persist their next due time before running. A ten-minute
+local wake invokes a read-only agent with selected tools, with bounded failure
+backoff and no replay of missed intervals. Generic observations require real
+successful scoped receipts. Source identity/revision deduplicates tasks;
+failed retrieval never implies deletion. `mcp_host::responsibility` combines
+fresh source evidence with `supervision`'s bounded model assessment before
+automatic local preparation. Sensitive or uncertain work holds for approval.
+An instruction/connection change invalidates prior source eligibility.
+
+Explicit approval or qualifying standing authority allows a builder. A separate
+read-only reviewer leaves a human-review result, not an automatic merge.
+Cancellation terminates the process group; interrupted tasks fail on restart
+with worktrees retained. Model risk and source interpretation are judgments,
+not proof. Codex write sandboxing does not establish filesystem read privacy
+between workspaces. Local MCP executables are explicitly trusted host software,
+not sandboxed plugins. No cross-workspace context is deliberately injected.
+
+The full workspace is a regular Dock/Cmd-Tab window. The quick panel remains
+resident, and `order_out` hides only that window. Native task rows deep-open
+the workspace. Historical Codex Desktop/Paseo providers and their polling are
+disabled unless `NEKO_LEGACY_AGENTS` is set. The historical sections below
+describe those compatibility providers, not the default execution path.
+
+IPC frames are capped at 16 MiB and the socket is owner-only (0600). Secret
+request fields redact Debug output and never appear in returned snapshots.
+`NEKO_DATA_DIR` optionally selects an absolute isolated development data path.
+
 ## Five crates, and the boundary they exist to enforce
 
 ```

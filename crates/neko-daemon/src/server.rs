@@ -2,6 +2,7 @@ use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use neko_core::cancel::Cancel;
@@ -39,6 +40,7 @@ impl AttentionCounts {
 }
 
 pub struct AppState {
+    pub workbench: Arc<crate::workbench::Controller>,
     pub db: Arc<Mutex<Db>>,
     pub apps: Arc<RwLock<Vec<AppEntry>>>,
     /// The daemon-owned projection of the local Codex app-server. The
@@ -67,6 +69,7 @@ pub struct AppState {
     /// has to go through the *same* lock.
     broadcast: Mutex<Vec<Arc<Mutex<UnixStream>>>>,
     attention: Mutex<AttentionCounts>,
+    native_attention: AtomicUsize,
 }
 
 impl AppState {
@@ -76,13 +79,20 @@ impl AppState {
             // needs the same `Db` every other provider shares — which only
             // exists inside `with_test_providers`, hence the closure-free
             // two-step here rather than a direct call.
-            Self::with_test_providers(
+            let mut state = Self::with_test_providers(
                 db,
                 apps,
                 None,
                 neko_core::settings::SettingsProvider::new(),
                 neko_core::permissions::PermissionsProvider::new(),
-            )
+            );
+            if std::env::var_os("NEKO_LEGACY_AGENTS").is_none() {
+                state.providers.retain(|p| matches!(p.id(), "app"|"file"|"clipboard"|"settings"|"theme"|"preference"));
+                state.providers.push(Box::new(neko_core::commands::CommandsProvider::standalone()));
+                state.providers.push(Box::new(neko_core::native_tasks::NativeTasksProvider::new(state.db.clone())));
+                state.mode_providers.retain(|p| p.id()=="folder-scope");
+            }
+            state
         }
     }
 
@@ -216,6 +226,7 @@ impl AppState {
             ),
         ];
         Self {
+            workbench: Arc::new(crate::workbench::Controller::new(db.clone())),
             db,
             apps,
             codex,
@@ -224,6 +235,7 @@ impl AppState {
             mode_providers,
             broadcast: Mutex::new(Vec::new()),
             attention: Mutex::new(AttentionCounts::default()),
+            native_attention: AtomicUsize::new(0),
         }
     }
 }
@@ -262,6 +274,21 @@ pub fn now_unix_ms() -> i64 {
     neko_core::now_unix_ms()
 }
 
+pub fn run_native_attention_poll(state: Arc<AppState>) {
+    let mut previous=0;
+    loop {
+        let result=neko_core::workbench::load(&state.db.lock().unwrap());
+        if let Ok(snapshot)=result {
+            use neko_protocol::workbench::TaskStatus;
+            let count=snapshot.tasks.iter().filter(|t|matches!(t.status,TaskStatus::AwaitingApproval|TaskStatus::Failed|TaskStatus::ReadyForReview)).count()
+                +snapshot.connections.iter().filter(|c|c.enabled && c.error.is_some()).count();
+            state.native_attention.store(count,Ordering::Relaxed);
+            if count!=previous { broadcast(&state,&Event::AttentionChanged{count});previous=count; }
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
 /// Binds the daemon's socket, taking over a stale one if the process that
 /// created it is gone. Returns `None` (rather than an error) when a live
 /// daemon already answers on this socket — that's the normal "already
@@ -270,27 +297,79 @@ pub fn bind_singleton(socket_path: &Path) -> io::Result<Option<UnixListener>> {
     if let Some(parent) = socket_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    // Keep one lock inode permanently at this path. Unlinking the lock on
+    // release would let another starter lock a new inode concurrently.
+    let _startup_lock = lock_startup(socket_path)?;
     if socket_path.exists() {
         match UnixStream::connect(socket_path) {
             Ok(mut stream) => {
-                if ping(&mut stream).is_ok() {
-                    return Ok(None);
-                }
-                // Connected but didn't answer a ping like a neko-daemon
-                // would — treat as stale rather than trusting it's alive.
-                std::fs::remove_file(socket_path)?;
+                // A connection proves a listener exists. Malformed, delayed,
+                // or absent replies cannot prove its process has exited; never
+                // unlink it and create a second writer on the same database.
+                ping(&mut stream)?;
+                return Ok(None);
             }
-            Err(_) => {
+            Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
                 // Nothing is listening; the file is left over from a
                 // process that didn't clean up on exit.
                 std::fs::remove_file(socket_path)?;
             }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
     }
-    Ok(Some(UnixListener::bind(socket_path)?))
+    let listener = UnixListener::bind(socket_path)?;
+    // The socket now accepts credentials and task mutations, not just search.
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(Some(listener))
+}
+
+fn startup_lock_path(socket_path: &Path) -> std::path::PathBuf {
+    let mut path = socket_path.as_os_str().to_os_string();
+    path.push(".startup.lock");
+    path.into()
+}
+
+fn lock_startup(socket_path: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    // OpenOptions exposes the native flags without requiring a new dependency.
+    // Neko targets Darwin; Linux is also defined for isolated IPC CI tests.
+    #[cfg(target_os = "macos")]
+    const O_NOFOLLOW: i32 = 0x0100;
+    #[cfg(target_os = "linux")]
+    const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(target_os = "macos")]
+    const O_NONBLOCK: i32 = 0x0004;
+    #[cfg(target_os = "linux")]
+    const O_NONBLOCK: i32 = 0o4000;
+    unsafe extern "C" { fn geteuid() -> u32; }
+    let file = std::fs::OpenOptions::new().read(true).write(true).create(true)
+        .mode(0o600).custom_flags(O_NOFOLLOW | O_NONBLOCK).open(startup_lock_path(socket_path))?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.uid() != unsafe { geteuid() }
+        || metadata.mode() & 0o7777 != 0o600 || metadata.nlink() != 1 {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied,
+            "daemon startup lock must be an owner-only regular file with one link"));
+    }
+    // std implements this with flock(LOCK_EX | LOCK_NB) on Unix. A contender
+    // fails immediately instead of waiting behind another startup's probe.
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(io::Error::new(io::ErrorKind::WouldBlock,
+            "another daemon startup is in progress; this contender will not replace its socket")),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    }
 }
 
 fn ping(stream: &mut UnixStream) -> io::Result<()> {
+    ping_with_timeout(stream, Duration::from_secs(1))
+}
+
+fn ping_with_timeout(stream: &mut UnixStream, timeout: Duration) -> io::Result<()> {
+    use std::io::Read;
+    let deadline = std::time::Instant::now() + timeout;
+    stream.set_write_timeout(Some(timeout))?;
     write_frame(
         &mut *stream,
         &Frame::Request {
@@ -298,13 +377,43 @@ fn ping(stream: &mut UnixStream) -> io::Result<()> {
             request: Request::Ping,
         },
     )?;
-    match read_frame(&mut *stream)? {
-        Some(Frame::Response {
-            response: Response::Pong,
-            ..
-        }) => Ok(()),
-        _ => Err(io::Error::other("unexpected reply to ping")),
+    // read_exact can perform many reads. Reset the socket timeout from the
+    // absolute deadline before EACH read so a trickled payload cannot extend
+    // the probe indefinitely. These short probes never reuse the connection.
+    struct DeadlineReader<'a> {
+        stream: &'a mut UnixStream,
+        deadline: std::time::Instant,
     }
+    impl Read for DeadlineReader<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let remaining = self.deadline.checked_duration_since(std::time::Instant::now())
+                .filter(|remaining| !remaining.is_zero())
+                .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "daemon probe deadline exceeded"))?;
+            self.stream.set_read_timeout(Some(remaining))?;
+            self.stream.read(buf)
+        }
+    }
+    let mut reader = DeadlineReader { stream, deadline };
+    // A singleton probe needs only tiny events and Pong, not arbitrary large
+    // search payloads. Bound both count and allocation before decoding JSON.
+    for _ in 0..32 {
+        let mut prefix = [0u8; 4];
+        reader.read_exact(&mut prefix)?;
+        let length = u32::from_le_bytes(prefix) as usize;
+        if length > 64 * 1024 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "daemon probe frame exceeds limit"));
+        }
+        let mut payload = vec![0; length];
+        reader.read_exact(&mut payload)?;
+        let frame: Frame = serde_json::from_slice(&payload)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid daemon probe reply"))?;
+        match frame {
+            Frame::Response { id: 0, response: Response::Pong } => return Ok(()),
+            Frame::Event(_) => continue,
+            _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "unexpected daemon probe reply")),
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::InvalidData, "daemon probe event limit exceeded"))
 }
 
 /// Reads request frames off `stream` and spawns one thread per request to
@@ -343,6 +452,10 @@ pub fn handle_connection(state: Arc<AppState>, stream: UnixStream) {
         Err(_) => return,
     };
     state.broadcast.lock().unwrap().push(writer.clone());
+    let count=state.native_attention.load(Ordering::Relaxed);
+    if count>0 {
+        let _=write_frame(&mut *writer.lock().unwrap(),&Frame::Event(Event::AttentionChanged{count}));
+    }
 
     // The one piece of genuinely per-connection state this daemon has: the
     // cancellation token of whichever `Search` is currently in flight for
@@ -461,6 +574,14 @@ fn search_concurrently<'a>(
 
 fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> Response {
     match request {
+        Request::McpBridge(request) => match state.workbench.mcp.bridge(request) {
+            Ok(json) => Response::McpBridge { json },
+            Err(message) => Response::Error { message },
+        },
+        Request::Workbench(command) => match state.workbench.command(command) {
+            Ok(snapshot) => Response::Workbench(snapshot),
+            Err(message) => Response::Error { message },
+        },
         Request::Ping => Response::Pong,
 
         Request::Search {
@@ -829,6 +950,222 @@ mod tests {
     use super::*;
     use neko_core::clipboard::ClipboardContentKind;
     use neko_protocol::SearchItem;
+
+    struct ProbeSocket(std::path::PathBuf);
+    impl ProbeSocket {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!("neko-probe-{}-{}.sock", std::process::id(), neko_core::workbench::new_id())))
+        }
+    }
+    impl Drop for ProbeSocket { fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(startup_lock_path(&self.0));
+    } }
+
+    #[test]
+    fn singleton_real_connection_skips_initial_attention_before_pong() {
+        let socket = ProbeSocket::new();
+        let listener = UnixListener::bind(&socket.0).unwrap();
+        let state = Arc::new(test_state(Db::open_in_memory().unwrap(), vec![]));
+        state.native_attention.store(3, Ordering::Relaxed);
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle_connection(state, stream);
+        });
+        let result = bind_singleton(&socket.0);
+        server.join().unwrap();
+        assert!(matches!(result, Ok(None)), "an initial event must not replace the live daemon socket");
+    }
+
+    #[test]
+    fn singleton_preserves_listener_when_connected_peer_replies_malformed() {
+        use std::io::Write;
+        use std::os::unix::fs::MetadataExt;
+        let socket = ProbeSocket::new();
+        let listener = UnixListener::bind(&socket.0).unwrap();
+        let inode = std::fs::metadata(&socket.0).unwrap().ino();
+        let peer = listener.try_clone().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = peer.accept().unwrap();
+            let _ = read_frame(&mut stream);
+            stream.write_all(&1u32.to_le_bytes()).unwrap();
+            stream.write_all(b"!").unwrap();
+        });
+        let result = bind_singleton(&socket.0);
+        server.join().unwrap();
+        assert!(result.is_err(), "a connected peer is not proof of a stale socket");
+        assert_eq!(std::fs::metadata(&socket.0).unwrap().ino(), inode);
+        let _client = UnixStream::connect(&socket.0).unwrap();
+        assert!(listener.accept().is_ok(), "the original listener remains reachable");
+    }
+    #[test]
+    fn singleton_timeout_preserves_the_existing_listener() {
+        use std::os::unix::fs::MetadataExt;
+        let socket = ProbeSocket::new();
+        let listener = UnixListener::bind(&socket.0).unwrap();
+        let inode = std::fs::metadata(&socket.0).unwrap().ino();
+        let peer = listener.try_clone().unwrap();
+        let (finish, wait) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = peer.accept().unwrap();
+            let _ = read_frame(&mut stream);
+            let _ = wait.recv_timeout(Duration::from_secs(3));
+        });
+        let start = std::time::Instant::now();
+        let result = bind_singleton(&socket.0);
+        let elapsed = start.elapsed();
+        let _ = finish.send(()); server.join().unwrap();
+        assert!(result.is_err());
+        assert!(elapsed < Duration::from_secs(2), "silent peer exceeded the probe deadline: {elapsed:?}");
+        assert_eq!(std::fs::metadata(&socket.0).unwrap().ino(), inode);
+        let _client = UnixStream::connect(&socket.0).unwrap();
+        assert!(listener.accept().is_ok());
+    }
+    #[test]
+    fn singleton_disconnected_stale_socket_can_be_replaced() {
+        let socket = ProbeSocket::new();
+        drop(UnixListener::bind(&socket.0).unwrap());
+        let listener = bind_singleton(&socket.0).unwrap().expect("stale socket is recoverable");
+        let _client = UnixStream::connect(&socket.0).unwrap();
+        assert!(listener.accept().is_ok());
+    }
+    #[test]
+    fn singleton_rejects_symlinked_startup_lock_without_touching_socket() {
+        use std::os::unix::fs::{symlink, MetadataExt};
+        let socket = ProbeSocket::new();
+        drop(UnixListener::bind(&socket.0).unwrap());
+        let inode = std::fs::metadata(&socket.0).unwrap().ino();
+        let mut name = socket.0.as_os_str().to_os_string(); name.push(".startup.lock");
+        let lock = std::path::PathBuf::from(name);
+        symlink(&socket.0, &lock).unwrap();
+        let result = bind_singleton(&socket.0);
+        let _ = std::fs::remove_file(&lock);
+        assert!(result.is_err(), "startup coordination must not follow a symlink");
+        assert_eq!(std::fs::metadata(&socket.0).unwrap().ino(), inode);
+    }
+    #[test]
+    fn singleton_lock_contender_stands_down_without_unlinking_stale_socket() {
+        use std::os::unix::fs::MetadataExt;
+        let socket = ProbeSocket::new();
+        drop(UnixListener::bind(&socket.0).unwrap());
+        let inode = std::fs::metadata(&socket.0).unwrap().ino();
+        let owner = lock_startup(&socket.0).unwrap();
+        let start = std::time::Instant::now();
+        let result = bind_singleton(&socket.0);
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        assert!(start.elapsed() < Duration::from_millis(200));
+        assert_eq!(std::fs::metadata(&socket.0).unwrap().ino(), inode);
+        drop(owner);
+        assert!(bind_singleton(&socket.0).unwrap().is_some());
+    }
+    #[test]
+    fn singleton_startup_lock_rejects_shared_permissions_and_hard_links() {
+        use std::os::unix::fs::PermissionsExt;
+        for hard_link in [false, true] {
+            let socket = ProbeSocket::new();
+            let file = lock_startup(&socket.0).unwrap(); drop(file);
+            let path = startup_lock_path(&socket.0);
+            let alias = path.with_extension("hardlink");
+            if hard_link { std::fs::hard_link(&path, &alias).unwrap(); }
+            else { std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap(); }
+            let result = bind_singleton(&socket.0);
+            if hard_link { std::fs::remove_file(alias).unwrap(); }
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+            assert!(!socket.0.exists());
+        }
+    }
+    #[test]
+    fn singleton_concurrent_stale_recovery_keeps_one_reachable_listener() {
+        let socket = ProbeSocket::new();
+        drop(UnixListener::bind(&socket.0).unwrap());
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let listeners = std::thread::scope(|threads| {
+            let workers: Vec<_> = (0..8).map(|_| {
+                let barrier = barrier.clone(); let path = &socket.0;
+                threads.spawn(move || { barrier.wait(); bind_singleton(path) })
+            }).collect();
+            workers.into_iter().filter_map(|worker| match worker.join().unwrap() { Ok(Some(listener)) => Some(listener), Ok(None) | Err(_) => None }).collect::<Vec<_>>()
+        });
+        assert_eq!(listeners.len(), 1, "two recoverers must not unlink each other's newly bound listener");
+        let mut client = UnixStream::connect(&socket.0).unwrap();
+        // Failed probes may have left queued connections before the explicit
+        // path check; the live server handles each until the final Ping lands.
+        let listener = listeners.into_iter().next().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let peer = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            let mut connections = Vec::new();
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        // Darwin can reject socket options on already-closed
+                        // queued probe connections. They are not the live
+                        // verification client and should simply be discarded.
+                        if stream.set_nonblocking(false).is_err()
+                            || stream.set_read_timeout(Some(Duration::from_millis(100))).is_err() { continue; }
+                        if let Ok(Some(Frame::Request { id, request: Request::Ping })) = read_frame(&mut stream) {
+                            let _ = write_frame(&mut stream, &Frame::Response { id, response: Response::Pong });
+                            // Like handle_connection, keep the peer alive for
+                            // the probe. Darwin rejects setsockopt on a closed
+                            // peer even when its last response is still queued.
+                            connections.push(stream);
+                        }
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(1)),
+                }
+            }
+        });
+        let result = ping(&mut client); drop(client); peer.join().unwrap();
+        result.expect("pathname must still connect to the sole winning listener");
+    }
+    #[test]
+    fn singleton_probe_bounds_events_and_requires_matching_pong_id() {
+        for flood in [false, true] {
+            let (mut client, mut server) = UnixStream::pair().unwrap();
+            let peer = std::thread::spawn(move || {
+                let _ = read_frame(&mut server);
+                if flood {
+                    for _ in 0..32 { write_frame(&mut server, &Frame::Event(Event::AttentionChanged { count: 1 })).unwrap(); }
+                } else {
+                    write_frame(&mut server, &Frame::Response { id: 99, response: Response::Pong }).unwrap();
+                }
+            });
+            assert!(ping_with_timeout(&mut client, Duration::from_millis(100)).is_err());
+            peer.join().unwrap();
+        }
+    }
+    #[test]
+    fn singleton_probe_deadline_includes_partial_frame_reads() {
+        use std::io::Write;
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let peer = std::thread::spawn(move || {
+            let _ = read_frame(&mut server);
+            server.write_all(&100u32.to_le_bytes()).unwrap();
+            for _ in 0..100 {
+                if server.write_all(b" ").is_err() { break; }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let start = std::time::Instant::now();
+        let result = ping_with_timeout(&mut client, Duration::from_millis(50));
+        let elapsed = start.elapsed();
+        drop(client); peer.join().unwrap();
+        assert!(result.is_err());
+        assert!(elapsed < Duration::from_millis(500), "trickled reads extended deadline: {elapsed:?}");
+    }
+    #[test]
+    fn singleton_probe_rejects_oversized_frame_prefix_before_payload() {
+        use std::io::Write;
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let peer = std::thread::spawn(move || {
+            let _ = read_frame(&mut server);
+            server.write_all(&(64u32 * 1024 + 1).to_le_bytes()).unwrap();
+        });
+        let error = ping_with_timeout(&mut client, Duration::from_millis(100)).unwrap_err();
+        peer.join().unwrap();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("exceeds limit"));
+    }
 
     #[test]
     fn combined_attention_counts_paseo_and_codex() {

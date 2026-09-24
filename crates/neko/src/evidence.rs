@@ -397,7 +397,8 @@ pub fn activation_opt_in() -> bool {
 /// first, which is exactly the kind of remember-to-do-it mitigation that
 /// failed here. Suppressing it structurally cannot be forgotten.
 pub fn evidence_run_active() -> bool {
-    show_on_launch_requested()
+    std::env::var_os("NEKO_SHOW_WORKSPACE").is_some()
+        || show_on_launch_requested()
         || bench_iterations().is_some()
         || bench_real_iterations().is_some()
         || preferences_focus().is_some()

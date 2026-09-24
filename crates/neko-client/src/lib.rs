@@ -31,7 +31,9 @@ impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ClientError::NotConnected => write!(f, "not connected to neko-daemon"),
-            ClientError::Disconnected => write!(f, "disconnected from neko-daemon before a reply arrived"),
+            ClientError::Disconnected => {
+                write!(f, "disconnected from neko-daemon before a reply arrived")
+            }
         }
     }
 }
@@ -64,6 +66,24 @@ struct Shared {
 #[derive(Clone)]
 pub struct NekoClient {
     shared: Arc<Shared>,
+}
+
+/// Retires a local waiter when its future/stream is dropped, including an
+/// unpolled future. This does not cancel the daemon's requested operation.
+struct RequestRegistration {
+    shared: Arc<Shared>,
+    id: u64,
+    streaming: bool,
+}
+
+impl Drop for RequestRegistration {
+    fn drop(&mut self) {
+        if self.streaming {
+            self.shared.pending_streams.lock().unwrap().remove(&self.id);
+        } else {
+            self.shared.pending.lock().unwrap().remove(&self.id);
+        }
+    }
 }
 
 impl NekoClient {
@@ -100,11 +120,22 @@ impl NekoClient {
     ) -> impl std::future::Future<Output = Result<Response, ClientError>> + 'static {
         let id = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = futures_channel::oneshot::channel();
+        let registration = RequestRegistration {
+            shared: self.shared.clone(),
+            id,
+            streaming: false,
+        };
 
         let send_result = {
             let mut stream_guard = self.shared.write_stream.lock().unwrap();
             match stream_guard.as_mut() {
-                Some(stream) => write_frame(stream, &Frame::Request { id, request }),
+                Some(stream) => {
+                    // The reader may receive a response before write_frame
+                    // returns. Register first, while holding the connection
+                    // lock so disconnect cleanup cannot split this operation.
+                    self.shared.pending.lock().unwrap().insert(id, tx);
+                    write_frame(stream, &Frame::Request { id, request })
+                }
                 None => Err(std::io::Error::new(
                     std::io::ErrorKind::NotConnected,
                     "no live connection",
@@ -112,11 +143,12 @@ impl NekoClient {
             }
         };
 
-        if send_result.is_ok() {
-            self.shared.pending.lock().unwrap().insert(id, tx);
+        if send_result.is_err() {
+            self.shared.pending.lock().unwrap().remove(&id);
         }
 
         async move {
+            let _registration = registration;
             if send_result.is_err() {
                 return Err(ClientError::NotConnected);
             }
@@ -135,29 +167,41 @@ impl NekoClient {
     /// connection — a caller wired to "every keystroke" gets `None` on the
     /// first poll and naturally retries on the next one, exactly as
     /// [`NekoClient::request`]'s own `Err(NotConnected)` already behaves.
-    /// **A caller must drain until `None`** rather than stopping at the
-    /// first frame it likes the look of: the correlation entry is retired
-    /// by the reader thread when the final frame arrives, but the
-    /// caller-side task is what decides whether anything is still waiting
-    /// on it.
+    /// Drain until `None` to receive every phase. Dropping the stream early
+    /// retires its local correlation entry; it does not cancel the daemon's
+    /// requested operation.
     pub fn request_streaming(&self, request: Request) -> ResponseStream {
         let id = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = futures_channel::mpsc::unbounded();
+        let registration = RequestRegistration {
+            shared: self.shared.clone(),
+            id,
+            streaming: true,
+        };
 
         let send_result = {
             let mut stream_guard = self.shared.write_stream.lock().unwrap();
             match stream_guard.as_mut() {
-                Some(stream) => write_frame(stream, &Frame::Request { id, request }),
-                None => Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "no live connection")),
+                Some(stream) => {
+                    self.shared.pending_streams.lock().unwrap().insert(id, tx);
+                    write_frame(stream, &Frame::Request { id, request })
+                }
+                None => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "no live connection",
+                )),
             }
         };
 
-        if send_result.is_ok() {
-            self.shared.pending_streams.lock().unwrap().insert(id, tx);
+        if send_result.is_err() {
+            self.shared.pending_streams.lock().unwrap().remove(&id);
         }
-        // On a send failure `tx` drops here, so the returned stream is
-        // already finished — the caller sees `None` on its first poll.
-        ResponseStream { rx }
+        // On a send failure removing `tx` finishes the returned stream: the
+        // caller sees `None` on its first poll.
+        ResponseStream {
+            rx,
+            _registration: registration,
+        }
     }
 
     /// Whether the reconnect supervisor currently has a live socket open to
@@ -177,6 +221,7 @@ impl NekoClient {
 /// drops mid-request.
 pub struct ResponseStream {
     rx: futures_channel::mpsc::UnboundedReceiver<Response>,
+    _registration: RequestRegistration,
 }
 
 impl ResponseStream {
@@ -214,17 +259,7 @@ fn run_supervisor(socket_path: PathBuf, shared: Arc<Shared>) {
                 // that's the resume point for the outer reconnect loop.
                 read_until_disconnected(reader_stream, &shared);
 
-                *shared.write_stream.lock().unwrap() = None;
-                shared.connected.store(false, Ordering::Relaxed);
-                // Any request that was mid-flight when the connection died
-                // resolves now: dropping these senders turns their
-                // `rx.await` into `Err(Canceled)`, i.e. `ClientError::Disconnected`.
-                shared.pending.lock().unwrap().clear();
-                // Same for streaming requests — dropping the sender ends
-                // the stream, so a caller awaiting the *second* frame of a
-                // two-phase search stops waiting instead of hanging on a
-                // frame that can no longer arrive.
-                shared.pending_streams.lock().unwrap().clear();
+                mark_disconnected(&shared);
             }
             Err(_) => {
                 std::thread::sleep(backoff);
@@ -232,6 +267,18 @@ fn run_supervisor(socket_path: PathBuf, shared: Arc<Shared>) {
             }
         }
     }
+}
+
+fn mark_disconnected(shared: &Shared) {
+    // Same lock order as publication: connection, then correlation maps.
+    // No waiter can be inserted on the old connection after it is drained.
+    let mut write_stream = shared.write_stream.lock().unwrap();
+    *write_stream = None;
+    shared.connected.store(false, Ordering::Relaxed);
+    // Dropping senders resolves ordinary waiters with Disconnected and ends
+    // streaming waiters, including one waiting for a search's second frame.
+    shared.pending.lock().unwrap().clear();
+    shared.pending_streams.lock().unwrap().clear();
 }
 
 fn read_until_disconnected(stream: UnixStream, shared: &Arc<Shared>) {
@@ -285,7 +332,210 @@ fn read_until_disconnected(stream: UnixStream, shared: &Arc<Shared>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
     use std::os::unix::net::UnixListener;
+
+    fn connected_pair() -> (NekoClient, UnixStream) {
+        let (stream, server) = UnixStream::pair().unwrap();
+        let (event_tx, _event_rx) = std_mpsc::channel();
+        let shared = Arc::new(Shared {
+            next_id: AtomicU64::new(1),
+            pending: Mutex::new(HashMap::new()),
+            pending_streams: Mutex::new(HashMap::new()),
+            write_stream: Mutex::new(Some(stream)),
+            event_tx,
+            connected: AtomicBool::new(true),
+        });
+        (NekoClient { shared }, server)
+    }
+
+    fn assert_correlation_exists_before_publication(streaming: bool) {
+        let (client, mut server) = connected_pair();
+        server
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let shared = client.shared.clone();
+        // The payload exceeds a Unix socket's send buffer. Reading just its
+        // header proves publication has begun while the caller is still in
+        // write_frame, so this catches the race without scheduler luck.
+        let sender = std::thread::spawn(move || {
+            let request = Request::Search {
+                query: "x".repeat(4 * 1024 * 1024),
+                limit: 1,
+                provider: None,
+            };
+            if streaming {
+                drop(client.request_streaming(request));
+            } else {
+                drop(client.request(request));
+            }
+        });
+        let mut header = [0; 4];
+        server.read_exact(&mut header).unwrap();
+        let registered = if streaming {
+            shared.pending_streams.lock().unwrap().contains_key(&1)
+        } else {
+            shared.pending.lock().unwrap().contains_key(&1)
+        };
+        // Close the fixture peer before asserting so a failed regression
+        // cannot leave its writer blocked behind a full socket buffer.
+        drop(server);
+        sender.join().unwrap();
+        assert!(
+            registered,
+            "response waiter was missing after its frame became visible to the daemon"
+        );
+    }
+
+    #[test]
+    fn ordinary_correlation_is_registered_before_any_request_bytes_are_published() {
+        assert_correlation_exists_before_publication(false);
+    }
+
+    #[test]
+    fn streaming_correlation_is_registered_before_any_request_bytes_are_published() {
+        assert_correlation_exists_before_publication(true);
+    }
+
+    #[test]
+    fn dropping_an_unpolled_request_retires_its_correlation() {
+        let (client, _server) = connected_pair();
+        let future = client.request(Request::Ping);
+        assert_eq!(client.shared.pending.lock().unwrap().len(), 1);
+        drop(future);
+        assert!(client.shared.pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn dropping_a_stream_retires_its_correlation() {
+        let (client, _server) = connected_pair();
+        let stream = client.request_streaming(Request::Ping);
+        assert_eq!(client.shared.pending_streams.lock().unwrap().len(), 1);
+        drop(stream);
+        assert!(client.shared.pending_streams.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn send_failures_leave_no_response_waiters() {
+        let (client, server) = connected_pair();
+        drop(server);
+        assert!(matches!(
+            futures::executor::block_on(client.request(Request::Ping)),
+            Err(ClientError::NotConnected)
+        ));
+        let mut stream = client.request_streaming(Request::Ping);
+        assert!(futures::executor::block_on(stream.next()).is_none());
+        assert!(client.shared.pending.lock().unwrap().is_empty());
+        assert!(client.shared.pending_streams.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn disconnect_retires_waiters_and_rejects_new_requests() {
+        let (client, _server) = connected_pair();
+        let pending = client.request(Request::Ping);
+        let mut streaming = client.request_streaming(Request::Ping);
+        mark_disconnected(&client.shared);
+        assert!(matches!(
+            futures::executor::block_on(pending),
+            Err(ClientError::Disconnected)
+        ));
+        assert!(futures::executor::block_on(streaming.next()).is_none());
+        assert!(matches!(
+            futures::executor::block_on(client.request(Request::Ping)),
+            Err(ClientError::NotConnected)
+        ));
+        assert!(client.shared.pending.lock().unwrap().is_empty());
+        assert!(client.shared.pending_streams.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn immediate_socket_replies_reach_ordinary_and_streaming_waiters() {
+        let (client, server) = connected_pair();
+        let stop_server = server.try_clone().unwrap();
+        let reader_stream = client
+            .shared
+            .write_stream
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .try_clone()
+            .unwrap();
+        let shared = client.shared.clone();
+        let reader = std::thread::spawn(move || {
+            read_until_disconnected(reader_stream, &shared);
+            mark_disconnected(&shared);
+        });
+        let server = std::thread::spawn(move || {
+            let mut writer = server.try_clone().unwrap();
+            while let Ok(Some(Frame::Request { id, request })) = read_frame(&server) {
+                let responses = match request {
+                    Request::Ping => vec![Response::Pong],
+                    Request::Search { .. } => vec![
+                        Response::SearchResults {
+                            items: vec![],
+                            complete: false,
+                        },
+                        Response::SearchResults {
+                            items: vec![],
+                            complete: true,
+                        },
+                    ],
+                    _ => break,
+                };
+                for response in responses {
+                    if write_frame(&mut writer, &Frame::Response { id, response }).is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+        let (done_tx, done_rx) = std_mpsc::channel();
+        let requests = std::thread::spawn(move || {
+            let success = futures::executor::block_on(async {
+                for _ in 0..128 {
+                    if !matches!(client.request(Request::Ping).await, Ok(Response::Pong)) {
+                        return false;
+                    }
+                    let mut stream = client.request_streaming(Request::Search {
+                        query: "instant".into(),
+                        limit: 1,
+                        provider: None,
+                    });
+                    if !matches!(
+                        stream.next().await,
+                        Some(Response::SearchResults {
+                            complete: false,
+                            ..
+                        })
+                    ) {
+                        return false;
+                    }
+                    if !matches!(
+                        stream.next().await,
+                        Some(Response::SearchResults { complete: true, .. })
+                    ) {
+                        return false;
+                    }
+                    if stream.next().await.is_some() {
+                        return false;
+                    }
+                }
+                client.shared.pending.lock().unwrap().is_empty()
+                    && client.shared.pending_streams.lock().unwrap().is_empty()
+            });
+            let _ = done_tx.send(success);
+        });
+        let result = done_rx.recv_timeout(Duration::from_secs(5));
+        stop_server.shutdown(std::net::Shutdown::Both).unwrap();
+        server.join().unwrap();
+        reader.join().unwrap();
+        requests.join().unwrap();
+        assert!(
+            matches!(result, Ok(true)),
+            "an immediate reply was lost: {result:?}"
+        );
+    }
 
     fn temp_socket_path() -> PathBuf {
         // A monotonic counter, not just pid+timestamp: `cargo test` runs
@@ -296,7 +546,10 @@ mod tests {
         std::env::temp_dir().join(format!(
             "neko-client-test-{}-{}-{}.sock",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
             NEXT.fetch_add(1, Ordering::Relaxed),
         ))
     }
@@ -318,9 +571,19 @@ mod tests {
             let (stream, _) = listener.accept().unwrap();
             loop {
                 match read_frame(&stream) {
-                    Ok(Some(Frame::Request { id, request: Request::Ping })) => {
+                    Ok(Some(Frame::Request {
+                        id,
+                        request: Request::Ping,
+                    })) => {
                         let mut writer = stream.try_clone().unwrap();
-                        write_frame(&mut writer, &Frame::Response { id, response: Response::Pong }).unwrap();
+                        write_frame(
+                            &mut writer,
+                            &Frame::Response {
+                                id,
+                                response: Response::Pong,
+                            },
+                        )
+                        .unwrap();
                     }
                     _ => return,
                 }
@@ -343,13 +606,19 @@ mod tests {
             let (stream, _) = listener.accept().unwrap();
             loop {
                 match read_frame(&stream) {
-                    Ok(Some(Frame::Request { id, request: Request::Search { .. } })) => {
+                    Ok(Some(Frame::Request {
+                        id,
+                        request: Request::Search { .. },
+                    })) => {
                         let mut writer = stream.try_clone().unwrap();
                         write_frame(
                             &mut writer,
                             &Frame::Response {
                                 id,
-                                response: Response::SearchResults { items: Vec::new(), complete: false },
+                                response: Response::SearchResults {
+                                    items: Vec::new(),
+                                    complete: false,
+                                },
                             },
                         )
                         .unwrap();
@@ -358,7 +627,10 @@ mod tests {
                             &mut writer,
                             &Frame::Response {
                                 id,
-                                response: Response::SearchResults { items: Vec::new(), complete: true },
+                                response: Response::SearchResults {
+                                    items: Vec::new(),
+                                    complete: true,
+                                },
                             },
                         )
                         .unwrap();
@@ -378,15 +650,30 @@ mod tests {
         let (client, _events) = NekoClient::connect(path);
         assert!(wait_until(|| client.is_connected(), Duration::from_secs(2)));
 
-        let mut stream =
-            client.request_streaming(Request::Search { query: "do".into(), limit: 8, provider: None });
+        let mut stream = client.request_streaming(Request::Search {
+            query: "do".into(),
+            limit: 8,
+            provider: None,
+        });
         futures::executor::block_on(async {
             assert!(
-                matches!(stream.next().await, Some(Response::SearchResults { complete: false, .. })),
+                matches!(
+                    stream.next().await,
+                    Some(Response::SearchResults {
+                        complete: false,
+                        ..
+                    })
+                ),
                 "the partial frame must reach the caller, not be swallowed"
             );
-            assert!(matches!(stream.next().await, Some(Response::SearchResults { complete: true, .. })));
-            assert!(stream.next().await.is_none(), "the stream ends after the frame that ends the request");
+            assert!(matches!(
+                stream.next().await,
+                Some(Response::SearchResults { complete: true, .. })
+            ));
+            assert!(
+                stream.next().await.is_none(),
+                "the stream ends after the frame that ends the request"
+            );
         });
     }
 
@@ -403,9 +690,11 @@ mod tests {
         let (client, _events) = NekoClient::connect(path);
         assert!(wait_until(|| client.is_connected(), Duration::from_secs(2)));
 
-        let result = futures::executor::block_on(
-            client.request(Request::Search { query: "do".into(), limit: 8, provider: None }),
-        );
+        let result = futures::executor::block_on(client.request(Request::Search {
+            query: "do".into(),
+            limit: 8,
+            provider: None,
+        }));
         assert!(
             matches!(result, Ok(Response::SearchResults { complete: true, .. })),
             "expected the complete frame, got {result:?}"
@@ -416,8 +705,11 @@ mod tests {
     fn a_streaming_request_with_no_live_connection_ends_immediately() {
         let path = temp_socket_path();
         let (client, _events) = NekoClient::connect(path);
-        let mut stream =
-            client.request_streaming(Request::Search { query: "do".into(), limit: 8, provider: None });
+        let mut stream = client.request_streaming(Request::Search {
+            query: "do".into(),
+            limit: 8,
+            provider: None,
+        });
         assert!(futures::executor::block_on(stream.next()).is_none());
     }
 
@@ -432,7 +724,10 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
 
         let (client, _events) = NekoClient::connect(path.clone());
-        assert!(!client.is_connected(), "not connected before the daemon-like listener ever accepts");
+        assert!(
+            !client.is_connected(),
+            "not connected before the daemon-like listener ever accepts"
+        );
 
         let (stream, _) = listener.accept().unwrap();
         assert!(

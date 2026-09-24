@@ -1,8 +1,79 @@
 # neko
 
-A hotkey-summoned launcher and agent control plane for macOS, written from
-scratch in Rust on [GPUI](https://gpui.rs). Press ⌥Space anywhere, type, press
-Enter.
+A native personal-agent workspace and quick command center for macOS, written
+in Rust on [GPUI](https://gpui.rs). Launch Neko for the full app; press ⌥Space
+for quick search, clipboard history, and task attention.
+
+## Neko-owned work
+
+Create a workspace with a Git repository, then create a task or add your own
+MCP servers in **Tools / MCP**. No Linear, Slack, or other service is bundled
+or required. Multiple connections, including instances of the same server,
+have separate workspace scope, credentials, and permissions.
+
+1. Add a remote Streamable HTTP URL or an explicitly trusted local executable
+   and JSON argument array. Neko does not download or install server packages.
+2. Sign in through the browser if the server supports OAuth, or supply optional
+   credential JSON in the masked field. Secrets are stored in macOS Keychain.
+3. Discover tools, inspect their schemas, and grant only those you trust to run
+   unattended. New or changed tool schemas need fresh permission.
+4. Add a responsibility, select its connections, and write what to watch.
+   Checks run every ten minutes while the daemon is running; failures back off.
+5. Keep **Plan only**, or explicitly allow low-risk local fixes. A read-only
+   supervisor investigates, a builder uses an isolated Git worktree, and an
+   independent read-only reviewer leaves a result for your review.
+
+Open the full app from the Dock, menu bar **Open Neko Workspace**, or the
+palette's **Open Neko Workspace** command. Closing this window does not stop
+the daemon. Dismissing the palette hides only the palette.
+
+Automatic local preparation requires successful scoped tool receipts no older
+than fifteen minutes, unchanged source revision/content, current responsibility
+and tool permission, and a bounded low-risk bug assessment with evidence,
+files and tests. Sensitive or uncertain work needs a decision. Manual tasks
+still require approval. Model assessments and source interpretation are
+judgment, not proof. **Ready for review** does not mean tests passed or merged.
+
+Pausing a connection revokes its grants; resuming does not restore them.
+Pausing a responsibility prevents future wakes and cancels its active watch.
+Revocation cannot undo a remote action already sent. User-granted MCP tools
+can themselves mutate external systems: a server's read-only annotation is
+not a security guarantee. Permission to prepare a local fix does not grant
+push, PR creation, messages, or deployment.
+
+The local Codex CLI must be installed and authenticated. `NEKO_CODEX_PATH`
+can select an absolute executable path. Runs ignore global user config/rules
+and receive only a temporary Neko bridge, not upstream server credentials.
+Shell network access stays disabled; only the two capability-checked bridge
+tools are preapproved. Your global Codex configuration is not modified.
+**Filesystem read confidentiality between workspaces is not guaranteed** by
+the installed Codex sandbox. Local MCP executables run outside that sandbox
+and must be trusted as software.
+
+Historical Linear records, tasks and worktrees are preserved. Old polling and
+standing grants are disabled; reconnect with a user-added MCP server.
+Legacy Paseo/Codex Desktop imports remain opt-in through `NEKO_LEGACY_AGENTS`.
+No marketplace, arbitrary swarm, cross-workspace grants, cloud scheduling,
+or automatic publication is included. Checks do not run while the Mac sleeps.
+
+OAuth requires usable server discovery and a public client registration
+(server registration or a client ID supplied by you). This implementation
+does not promise compatibility with every MCP extension or server. A real
+user account must be verified separately before calling monitoring active.
+
+`NEKO_DATA_DIR=/absolute/path` isolates development data, sockets and task
+worktrees. Never point a test instance at your daily data. Credential-free
+end-to-end fixture:
+
+```sh
+cargo build -p neko-daemon --bin neko-daemon
+node scripts/smoke-workbench.mjs
+```
+
+Optional real-model/local-fixture probe (uses your authenticated CLI quota):
+`NEKO_SMOKE_LIVE=1 node scripts/smoke-mcp-live.mjs`. It does not authenticate
+an external MCP account or activate personal monitoring.
+
 
 ![The neko panel, showing application, System Settings, command and clipboard
 results for one query](docs/screenshot.png)
@@ -19,24 +90,19 @@ One query searches every source at once, each under its own section header:
   and `~/Downloads`. Enter opens.
 - **System Settings panes** — "displays", "bluetooth", "sound". Enter opens
   that pane.
-- **Agents** — the coding agents running on this machine right now, as tiles
-  above the results.
-- **Codex tasks** — recent local Codex tasks in that same tile strip. Their
-  data is a warmed local snapshot, so a palette keystroke never starts Codex
-  or reads a session file.
-- **Needs you** — blocked Paseo permissions lead the list: Enter approves and
-  ⌘K offers an ordinary Deny choice. Codex approval rows, when Codex supplies
-  them, use explicit Approve/Decline actions and require a second confirmation
-  for Decline.
+- **Neko tasks** — local task status and plans, with approval waits and failures
+  highlighted. Enter opens the exact task in the full workspace.
 - **Commands** — rows that open a mode inside the panel instead of launching
-  something: Clipboard History, Themes, Agents, Schedules, Terminals, Usage,
-  New Agent, and Ask neko.
+  something: Clipboard History, Themes, Preferences, and Open Neko Workspace.
 
 ⌘K opens the actions menu for the selected row. Escape leaves a mode, then
 hides the panel. Seventeen themes ship built in, with live preview as you
 arrow through them.
 
-## Agents
+## Historical agent browsers (opt-in only)
+
+The following older surfaces are disabled by default. They are retained behind
+`NEKO_LEGACY_AGENTS=1` for compatibility, not dependencies of Neko-owned work.
 
 neko drives the agents [Paseo](https://paseo.sh) supervises, over its daemon's
 own MCP endpoint, so the things you would switch apps for are a keypress away:
@@ -78,10 +144,13 @@ capability. neko never reads Codex session/rollout files.
 
 - **Not cross-platform.** It links AppKit directly for window material,
   pasteboard access, hotkeys and icon extraction.
-- **Not a plugin host.** Result types are compiled in. The extension seam is
+- **No launcher plugin runtime.** Search result types are compiled in; MCP
+  tool servers are separate user-trusted processes or services. The search seam is
   the `Provider` trait, not WASM — see
   [docs/adding-a-provider.md](docs/adding-a-provider.md).
-- **Not a cloud app, but no longer entirely offline.** Searching is local:
+- **Not a cloud app.** Normal search is local; user-connected MCP tools and
+  explicitly created/authorized agent tasks use their respective services.
+  The following outbound behavior applies only to the opt-in legacy surfaces:
   SQLite and Spotlight's own index, with nothing leaving the machine. Three
   features do make outbound requests, all of them to somewhere you are already
   signed in, and none of them running unless you use it: **Usage** reads quota
@@ -117,8 +186,8 @@ Run it once more from a clean shell to confirm — it is idempotent and prints
 
 The first launch walks a 14-screen onboarding arc: what neko needs, the
 Accessibility permission ask (a real macOS prompt), the clipboard-history ask,
-and choosing and testing the summon hotkey. After that, launching goes straight
-to summon-on-hotkey. To replay onboarding:
+and choosing and testing the summon hotkey. The workspace is available as a
+normal app window independently of that hotkey. To replay onboarding:
 
 ```sh
 NEKO_RESET_ONBOARDING=1 ./target/release/neko
