@@ -129,6 +129,8 @@ pub struct Task {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub skills: crate::skills::SkillState,
     #[serde(default = "crate::mcp_host::legacy_state")]
     pub mcp: crate::mcp_host::McpState,
     pub workspaces: Vec<Workspace>,
@@ -217,6 +219,7 @@ pub enum ChatToolStatus { AwaitingApproval, Approved, Running, Succeeded, Failed
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
+    Skills(crate::skills::SkillCommand),
     DecideChatTool { turn_id: String, call_id: String, approve: bool },
     CancelChat { turn_id: String },
     Mcp(crate::mcp_host::McpCommand),

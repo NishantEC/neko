@@ -1,6 +1,7 @@
 //! The persistent native workspace, separate from the quick launcher.
 mod home;
 mod tools;
+mod skills;
 
 use home::TicketFilter;
 use crate::{text_field::TextField, theme};
@@ -188,6 +189,8 @@ pub struct WorkspaceRoot {
     task_goal: Entity<TextField>,
     api_key: Entity<TextField>,
     server_label: Entity<TextField>,
+    skill_source: Entity<TextField>,
+    opened_skill_audits: Vec<(String, String)>,
     server_target: Entity<TextField>,
     server_args: Entity<TextField>,
     oauth_client_id: Entity<TextField>,
@@ -259,6 +262,8 @@ impl WorkspaceRoot {
             task_goal: input("Describe the outcome and how to verify it", cx),
             api_key,
             server_label: input("Name this connection", cx),
+            skill_source: input("https://github.com/owner/repo/blob/commit/path/SKILL.md", cx),
+            opened_skill_audits: Vec::new(),
             server_target: input("https://server.example/mcp or /absolute/executable", cx),
             server_args: input("[\"/path/to/server.js\"]", cx),
             oauth_client_id: input("Optional registered OAuth client ID", cx),

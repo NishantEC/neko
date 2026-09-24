@@ -682,3 +682,15 @@ one local patch applied on top by `scripts/setup-gpui-patch.sh`.
 | How the daemon dispatches a request | `crates/neko-daemon/src/server.rs`, `handle_request` |
 | What the first-run arc does | `crates/neko/src/onboarding/` (`state.rs` is pure, `view.rs` does the I/O) |
 | Why any of the above is the way it is | `AGENTS.md`, and the report it points at in `docs/evidence/` |
+# Workspace skills
+
+The Tools & skills page discovers global and workspace SKILL.md files and pins
+explicit activation to one workspace and content hash. `neko-core::skills` owns
+discovery, activation, bounded prompt injection and exact-content proposals in a
+separate persisted setting. Chat and each ticket role receive enabled skills;
+changed or missing instructions stop execution until the user reviews/enables or
+disables them. Codex automatic skill instructions are disabled for these runs.
+This does not provide filesystem read privacy. Accepted proposals and reviewed
+standalone GitHub SKILL.md previews save only into Neko's own skill folder; they
+must be enabled separately. See `docs/evidence/skills-phase3.md` for installation
+limits and tested boundaries.

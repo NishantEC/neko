@@ -8,11 +8,23 @@ const args = process.argv.slice(2);
 if (!args.includes('--ephemeral') || !args.includes('--ignore-user-config')) process.exit(2);
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
+assert.ok(args.includes('skills.include_instructions=false'), 'Neko must control injected skill instructions');
+if (prompt.startsWith('Extract one reusable skill')) {
+  process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '---\nname: isolated-checkout\ndescription: Verify an isolated checkout before accepting work\n---\nRun the relevant tests and inspect the actual diff before accepting the result.' } })}\n`);
+  process.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+  process.exit(0);
+}
 const responsibility = prompt.includes("Investigate the user's standing responsibility");
 const chat = prompt.includes("You are Neko, the user's personal engineering agent");
 if (chat) {
   // Read-only chat turn: never touches files. Asking for a fix proposes one ticket.
   const message = prompt.slice(prompt.lastIndexOf('\nUser: ') + 7).split('\n')[0];
+  if (message.includes('SKILL_PROMPT_CHECK')) {
+    assert.ok(prompt.includes('SKILL_PROBE_SENTINEL'), 'Enabled skill never reached chat runner');
+    process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ reply: 'Enabled skill reached chat.', tickets: [] }) } })}\n`);
+    process.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+    process.exit(0);
+  }
   if (message.includes('CHAT_TOOL_PROBE')) {
     const result = await observeThroughBridge();
     process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ reply: result.summary, tickets: [] }) } })}\n`);
@@ -92,6 +104,7 @@ async function observeThroughBridge() {
 const scout = prompt.includes("Neko's scout");
 const supervisor = prompt.includes("Neko's supervisor");
 const review = prompt.includes("Neko's reviewer");
+if (prompt.includes('SKILL_ROLE_CHECK')) assert.ok(prompt.includes('SKILL_PROBE_SENTINEL'), 'Enabled skill never reached ticket role');
 if (scout && fs.existsSync('neko-smoke.txt')) throw new Error('Scout changed source');
 if (!responsibility && !scout && !supervisor && !review) fs.writeFileSync('neko-smoke.txt', 'Isolated task output\n');
 if (review && !fs.existsSync('neko-smoke.txt')) throw new Error('Builder output missing');

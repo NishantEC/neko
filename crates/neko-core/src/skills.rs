@@ -83,6 +83,137 @@ fn hash(body: &str) -> String {
     format!("{:x}", Sha256::digest(body.as_bytes()))
 }
 
+pub fn current_roots(workspaces: &[neko_protocol::workbench::Workspace]) -> Vec<Root> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    roots(&home, &neko_protocol::support_dir(), &workspaces.iter().map(|w| (w.id.clone(), PathBuf::from(&w.repository))).collect::<Vec<_>>())
+}
+
+pub fn save(db: &Db, state: &SkillState) -> Result<(), String> {
+    let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
+    if json.len() > 4 * 1024 * 1024 { return Err("Skill storage is full; review pending proposals first".into()); }
+    db.set_setting(SETTING, &json).map_err(|e| e.to_string())
+}
+
+pub fn refresh(db: &Db, workspaces: &[neko_protocol::workbench::Workspace]) -> Result<(), String> {
+    let mut state = load(db)?;
+    state.available = discover(&current_roots(workspaces));
+    save(db, &state)
+}
+
+pub fn instructions(db: &Db, workspaces: &[neko_protocol::workbench::Workspace], workspace: Option<&str>) -> Result<String, String> {
+    let state = load(db)?;
+    if !state.enabled.iter().any(|s| Some(s.workspace_id.as_str()) == workspace) { return Ok(String::new()); }
+    for_prompt(&state, &discover(&current_roots(workspaces)), workspace)
+}
+
+/// A preview is durable review material, never executable installation authority.
+pub fn propose(db: &Db, workspace: &str, name: &str, body: &str, source: &str, audit_url: Option<String>) -> Result<(), String> {
+    if body.trim().is_empty() || body.len() > MAX_SKILL_BYTES { return Err("Skill content must contain 1–65536 bytes".into()); }
+    let mut state = load(db)?;
+    if state.proposals.iter().any(|p| p.source == source && p.workspace_id == workspace) { return Ok(()); }
+    if state.proposals.len() >= 20 { return Err("Review pending skill proposals before adding more".into()); }
+    state.proposals.push(neko_protocol::skills::SkillProposal {
+        id: crate::workbench::new_id(), workspace_id: workspace.into(), name: name.chars().take(160).collect(), body: body.into(), content_hash: hash(body), source: source.into(), audit_url,
+        audit_status: "Not audited by Neko. Review the exact instructions and source; linked third-party audit results are not verified here.".into(),
+        audit_reviewed_hash: None,
+    });
+    save(db, &state)
+}
+
+pub fn decide(db: &Db, data: &Path, id: &str, expected_hash: &str, accept: bool) -> Result<(), String> {
+    decide_with_hook(db, data, id, expected_hash, accept, |_| Ok(()))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InstallStep { Open, Write, Sync, Publish, Save }
+
+struct SkillStage(PathBuf);
+impl Drop for SkillStage {
+    fn drop(&mut self) {
+        // This fresh generated directory is owned solely by this installation.
+        // It is outside all discovery roots, including during a failed write.
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn install_exact(data: &Path, id: &str, body: &str, hook: &mut impl FnMut(InstallStep) -> Result<(), String>) -> Result<(), String> {
+    use std::io::Write;
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') { return Err("Invalid skill proposal identity".into()); }
+    let root = data.join("skills");
+    let directory = root.join(format!("reviewed-{id}"));
+    if fs::symlink_metadata(&directory).is_ok() {
+        let file = directory.join("SKILL.md");
+        let exact = fs::symlink_metadata(&directory).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+            && fs::symlink_metadata(&file).is_ok_and(|m| m.is_file() && !m.file_type().is_symlink())
+            && read(&file).is_ok_and(|installed| installed == body);
+        return if exact { Ok(()) } else { Err("Existing installation differs from reviewed content; nothing overwritten".into()) };
+    }
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let staging = data.join(format!(".skill-stage-{}", crate::workbench::new_id()));
+    fs::create_dir(&staging).map_err(|e| format!("Cannot stage skill: {e}"))?;
+    let staging = SkillStage(staging);
+    hook(InstallStep::Open)?;
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(staging.0.join("SKILL.md")).map_err(|e| e.to_string())?;
+    hook(InstallStep::Write)?;
+    file.write_all(body.as_bytes()).map_err(|e| e.to_string())?;
+    hook(InstallStep::Sync)?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    drop(file);
+    hook(InstallStep::Publish)?;
+    // The complete directory enters discovery in one rename. An existing
+    // nonempty installation cannot be replaced by this operation.
+    fs::rename(&staging.0, directory).map_err(|e| format!("Cannot publish reviewed skill: {e}"))?;
+    Ok(())
+}
+
+fn decide_with_hook(db: &Db, data: &Path, id: &str, expected_hash: &str, accept: bool, mut hook: impl FnMut(InstallStep) -> Result<(), String>) -> Result<(), String> {
+    let mut state = load(db)?;
+    let proposal = state.proposals.iter().find(|p| p.id == id).ok_or("Proposal no longer exists")?;
+    if proposal.content_hash != expected_hash || hash(&proposal.body) != expected_hash { return Err("Proposal changed; review it again before deciding".into()); }
+    if accept {
+        if proposal.audit_url.is_some() && proposal.audit_reviewed_hash.as_deref() != Some(expected_hash) {
+            return Err("Open the linked audit, review its published results, then explicitly confirm that review before installing".into());
+        }
+        install_exact(data, &proposal.id, &proposal.body, &mut hook)?;
+    }
+    state.proposals.retain(|p| p.id != id);
+    hook(InstallStep::Save)?;
+    save(db, &state)
+}
+
+pub fn confirm_audit_review(db: &Db, id: &str, expected_hash: &str, audit_url: &str) -> Result<(), String> {
+    let mut state = load(db)?;
+    let proposal = state.proposals.iter_mut().find(|p| p.id == id).ok_or("Proposal no longer exists")?;
+    if proposal.content_hash != expected_hash || hash(&proposal.body) != expected_hash || proposal.audit_url.as_deref() != Some(audit_url) {
+        return Err("Skill content or audit link changed; review both again".into());
+    }
+    proposal.audit_reviewed_hash = Some(expected_hash.into());
+    proposal.audit_status = "You confirmed review of the linked published audit results for these instructions. Neko has not verified the audit or declared this skill safe.".into();
+    save(db, &state)
+}
+
+/// Fetch a single, reviewable instruction file. No archive extraction, scripts,
+/// redirects, arbitrary hosts or relative asset downloads.
+pub fn repository_preview(url: &str) -> Result<(String, String, String), String> {
+    let url = reqwest::Url::parse(url).map_err(|_| "Use a GitHub SKILL.md file URL")?;
+    if url.scheme() != "https" || url.host_str() != Some("github.com") || url.port().is_some() || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
+        return Err("Use an HTTPS github.com SKILL.md file URL".into());
+    }
+    let segments: Vec<_> = url.path_segments().ok_or("Missing skill path")?.collect();
+    if segments.len() < 6 || segments[2] != "blob" || segments.last() != Some(&"SKILL.md") || segments.iter().any(|s| s.is_empty() || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)) || *s == "." || *s == "..") {
+        return Err("Use github.com/owner/repo/blob/ref/path/SKILL.md (a commit SHA is preferred)".into());
+    }
+    let raw = format!("https://raw.githubusercontent.com/{}/{}/{}/{}", segments[0], segments[1], segments[3], segments[4..].join("/"));
+    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(15)).redirect(reqwest::redirect::Policy::none()).build().map_err(|e| e.to_string())?;
+    let response = client.get(raw).send().map_err(|e| format!("Cannot fetch skill: {e}"))?.error_for_status().map_err(|e| format!("Cannot fetch skill: {e}"))?;
+    let mut body = String::new();
+    response.take((MAX_SKILL_BYTES + 1) as u64).read_to_string(&mut body).map_err(|e| e.to_string())?;
+    if body.is_empty() || body.len() > MAX_SKILL_BYTES { return Err("Remote skill is empty or exceeds 64 KB".into()); }
+    let (name, _) = metadata(&body, segments[segments.len()-2]);
+    let audit = format!("https://skills.sh/{}/{}/{}", segments[0], segments[1], segments[segments.len()-2]);
+    Ok((name, body, audit))
+}
+
 /// Metadata is display-only. The original full text, including frontmatter,
 /// reaches the runner; this deliberately does not interpret arbitrary YAML.
 fn metadata(body: &str, fallback: &str) -> (String, String) {
@@ -290,6 +421,113 @@ pub fn for_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proposals_require_exact_approval_and_rejection_never_installs() {
+        let db = Db::open_in_memory().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let body = "---\nname: learned\ndescription: Test before commit\n---\nRun cargo test.";
+        propose(&db, "a", "Learned", body, "ticket:1", None).unwrap();
+        let proposal = load(&db).unwrap().proposals[0].clone();
+        assert!(!data.path().join("skills").exists());
+        assert!(decide(&db, data.path(), &proposal.id, "old hash", true).is_err());
+        assert!(!data.path().join("skills").exists());
+        decide(&db, data.path(), &proposal.id, &proposal.content_hash, false).unwrap();
+        assert!(!data.path().join("skills").exists());
+        assert!(load(&db).unwrap().proposals.is_empty());
+        propose(&db, "a", "Learned", body, "ticket:2", None).unwrap();
+        let proposal = load(&db).unwrap().proposals[0].clone();
+        decide(&db, data.path(), &proposal.id, &proposal.content_hash, true).unwrap();
+        assert_eq!(fs::read_to_string(data.path().join("skills").join(format!("reviewed-{}", proposal.id)).join("SKILL.md")).unwrap(), body);
+        assert!(load(&db).unwrap().enabled.is_empty());
+    }
+
+    #[test]
+    fn installation_failures_never_publish_partial_content_and_retry_succeeds() {
+        for failure in [InstallStep::Open, InstallStep::Write, InstallStep::Sync, InstallStep::Publish, InstallStep::Save] {
+            let db = Db::open_in_memory().unwrap();
+            let data = tempfile::tempdir().unwrap();
+            propose(&db, "w", "Safe", "Complete reviewed instructions", "ticket:test", None).unwrap();
+            let proposal = load(&db).unwrap().proposals[0].clone();
+            let installed = data.path().join("skills").join(format!("reviewed-{}", proposal.id)).join("SKILL.md");
+            let result = decide_with_hook(&db, data.path(), &proposal.id, &proposal.content_hash, true, |step| {
+                if step == failure { Err("Injected installation failure".into()) } else { Ok(()) }
+            });
+            assert!(result.is_err(), "{failure:?}");
+            assert_eq!(load(&db).unwrap().proposals.len(), 1);
+            assert!(!fs::read_dir(data.path()).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".skill-stage-")));
+            if failure == InstallStep::Save {
+                assert_eq!(fs::read_to_string(&installed).unwrap(), proposal.body);
+            } else {
+                assert!(!installed.exists());
+                assert!(discover(&[Root { path: data.path().join("skills"), source: "Neko".into(), workspace_id: None }]).is_empty());
+            }
+            decide(&db, data.path(), &proposal.id, &proposal.content_hash, true).unwrap();
+            assert_eq!(fs::read_to_string(installed).unwrap(), proposal.body);
+            assert!(load(&db).unwrap().proposals.is_empty());
+        }
+    }
+
+    #[test]
+    fn retry_after_database_failure_refuses_changed_installed_content() {
+        let db = Db::open_in_memory().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        propose(&db, "w", "Safe", "Reviewed instructions", "ticket:test", None).unwrap();
+        let proposal = load(&db).unwrap().proposals[0].clone();
+        assert!(decide_with_hook(&db, data.path(), &proposal.id, &proposal.content_hash, true, |step| {
+            if step == InstallStep::Save { Err("Injected database failure".into()) } else { Ok(()) }
+        }).is_err());
+        let installed = data.path().join("skills").join(format!("reviewed-{}", proposal.id)).join("SKILL.md");
+        fs::write(&installed, "Changed after publication").unwrap();
+        assert!(decide(&db, data.path(), &proposal.id, &proposal.content_hash, true).unwrap_err().contains("differs"));
+        assert_eq!(fs::read_to_string(installed).unwrap(), "Changed after publication");
+        assert_eq!(load(&db).unwrap().proposals.len(), 1);
+    }
+
+    #[test]
+    fn repository_install_requires_content_and_link_pinned_audit_review() {
+        let db = Db::open_in_memory().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let audit = "https://skills.sh/owner/repo/skill";
+        propose(&db, "a", "Review", "Instructions", "https://github.com/owner/repo/blob/main/skill/SKILL.md", Some(audit.into())).unwrap();
+        let proposal = load(&db).unwrap().proposals[0].clone();
+        assert!(decide(&db, data.path(), &proposal.id, &proposal.content_hash, true).unwrap_err().contains("audit"));
+        assert!(!data.path().join("skills").exists());
+        assert!(confirm_audit_review(&db, &proposal.id, "wrong hash", audit).is_err());
+        assert!(confirm_audit_review(&db, &proposal.id, &proposal.content_hash, "https://different.example").is_err());
+        confirm_audit_review(&db, &proposal.id, &proposal.content_hash, audit).unwrap();
+        let mut state = load(&db).unwrap();
+        assert_eq!(state.proposals[0].audit_reviewed_hash.as_deref(), Some(proposal.content_hash.as_str()));
+        assert!(state.proposals[0].audit_status.contains("not verified"));
+        state.proposals[0].body = "Changed reviewed content".into();
+        let changed_hash = hash(&state.proposals[0].body);
+        state.proposals[0].content_hash = changed_hash.clone();
+        save(&db, &state).unwrap();
+        assert!(decide(&db, data.path(), &proposal.id, &changed_hash, true).is_err());
+        assert!(!data.path().join("skills").exists());
+        confirm_audit_review(&db, &proposal.id, &changed_hash, audit).unwrap();
+        decide(&db, data.path(), &proposal.id, &changed_hash, true).unwrap();
+        assert!(data.path().join("skills").exists());
+    }
+
+    #[test]
+    fn skill_state_is_separate_from_ticket_snapshot_and_survives_ordinary_writes() {
+        let db = Db::open_in_memory().unwrap();
+        propose(&db, "a", "Learning", "Instructions", "ticket:1", None).unwrap();
+        let snapshot = crate::workbench::load(&db).unwrap();
+        assert_eq!(snapshot.skills.proposals.len(), 1);
+        crate::workbench::save(&db, &snapshot).unwrap();
+        assert_eq!(crate::workbench::load(&db).unwrap().skills.proposals.len(), 1);
+        let raw = db.get_setting("workbench_snapshot_v1").unwrap().unwrap();
+        assert!(!raw.contains("Instructions"));
+    }
+
+    #[test]
+    fn remote_preview_rejects_non_github_and_ambiguous_urls_without_network() {
+        for url in ["http://github.com/a/b/blob/main/x/SKILL.md", "https://127.0.0.1/a", "https://github.com/a/b/raw/main/x/SKILL.md", "https://token@github.com/a/b/blob/main/x/SKILL.md", "https://github.com/a/b/blob/main/x/SKILL.md?token=secret", "https://github.com/a/b/blob/main/x/script.sh"] {
+            assert!(repository_preview(url).is_err(), "{url}");
+        }
+    }
 
     #[test]
     fn discovery_enablement_and_prompt_are_scoped_and_content_pinned() {

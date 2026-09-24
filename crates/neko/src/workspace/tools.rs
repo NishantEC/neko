@@ -70,9 +70,10 @@ pub(super) fn view(
         .flex_col()
         .gap(px(18.))
         .child(heading(
-            "Tools / MCP",
+            "Tools & skills",
             "Add your own servers. No integration is required or granted automatically.",
-        ));
+        ))
+        .child(super::skills::view(root, cx));
     for c in root
         .snapshot
         .mcp
