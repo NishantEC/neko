@@ -35,6 +35,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     }
     // Attached for readers only; save() never writes it into this setting.
     snapshot.conversation = crate::neko_chat::load(db)?;
+    snapshot.memory = crate::neko_memory::load(db)?;
     Ok(snapshot)
 }
 
@@ -56,6 +57,7 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     }
     let mut compacted = snapshot.clone();
     compacted.conversation.clear();
+    compacted.memory.clear();
     for task in &mut compacted.tasks {
         for event in &mut task.events {
             event.message = truncate(&event.message, MAX_EVENT_BYTES);
@@ -109,6 +111,7 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
 fn reserved_capacity(snapshot: &Snapshot) -> Result<usize, String> {
     let mut metadata = snapshot.clone();
     metadata.conversation.clear();
+    metadata.memory.clear();
     for task in &mut metadata.tasks {
         task.events.clear();
     }
@@ -300,6 +303,15 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
                 return Err("This ticket is done. Ask Neko for a follow-up instead".into());
             }
             append_event(task, NOTE_ROLE, &text);
+        }
+        Command::SaveMemory { entry } => {
+            let known: Vec<String> = snapshot.workspaces.iter().map(|w| w.id.clone()).collect();
+            crate::neko_memory::upsert(db, entry, &known)?;
+            return load(db);
+        }
+        Command::DeleteMemory { id } => {
+            crate::neko_memory::delete(db, &id)?;
+            return load(db);
         }
     }
     save(db, &snapshot)?;
