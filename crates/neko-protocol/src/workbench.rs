@@ -182,6 +182,10 @@ pub enum ChatRole {
 /// completed (or marked failed) by the daemon; tickets it opened are linked.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatMessage {
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Vec<ChatToolCall>,
     pub id: String,
     pub at_ms: i64,
     pub role: ChatRole,
@@ -197,8 +201,24 @@ pub struct ChatMessage {
     pub remembered: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatToolCall {
+    pub id: String,
+    pub workspace_id: String,
+    pub connection_id: String,
+    pub tool_name: String,
+    pub arguments_json: String,
+    pub status: ChatToolStatus,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatToolStatus { AwaitingApproval, Approved, Running, Succeeded, Failed, Denied }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
+    DecideChatTool { turn_id: String, call_id: String, approve: bool },
+    CancelChat { turn_id: String },
     Mcp(crate::mcp_host::McpCommand),
     Snapshot,
     SaveWorkspace {

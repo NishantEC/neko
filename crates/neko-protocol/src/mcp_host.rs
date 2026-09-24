@@ -11,6 +11,10 @@ pub enum ServerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpTool {
+    /// Server declaration, included in the schema identity the user grants.
+    /// Missing declarations conservatively require per-call approval in chat.
+    #[serde(default)]
+    pub read_only: bool,
     pub name: String,
     pub description: String,
     pub input_schema: String,

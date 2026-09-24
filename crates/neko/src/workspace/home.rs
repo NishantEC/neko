@@ -140,28 +140,17 @@ pub(super) fn until(at_ms: i64, now_ms: i64) -> String {
 
 #[cfg(target_os = "macos")]
 pub(super) fn local_hour() -> u32 {
-    #[repr(C)]
-    struct Tm {
-        sec: i32,
-        min: i32,
-        hour: i32,
-        mday: i32,
-        mon: i32,
-        year: i32,
-        wday: i32,
-        yday: i32,
-        isdst: i32,
-        gmtoff: i64,
-        zone: *const i8,
+    let now = (now_ms() / 1000) as libc::time_t;
+    let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
+    // SAFETY: both pointers are valid and aligned for the platform's ABI;
+    // localtime_r initializes tm on success and does not retain either pointer.
+    let ok = unsafe { !libc::localtime_r(&now, tm.as_mut_ptr()).is_null() };
+    if ok {
+        // SAFETY: the successful localtime_r call initialized every field.
+        unsafe { tm.assume_init() }.tm_hour.clamp(0, 23) as u32
+    } else {
+        9
     }
-    unsafe extern "C" {
-        fn localtime_r(time: *const i64, out: *mut Tm) -> *mut Tm;
-    }
-    let now = (now_ms() / 1000) as i64;
-    let mut tm = std::mem::MaybeUninit::<Tm>::zeroed();
-    // SAFETY: localtime_r writes one struct tm and returns null on failure.
-    let ok = unsafe { !localtime_r(&now, tm.as_mut_ptr()).is_null() };
-    if ok { unsafe { tm.assume_init() }.hour.clamp(0, 23) as u32 } else { 9 }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -824,6 +813,41 @@ impl WorkspaceRoot {
                 body = body.child(chips);
             }
         }
+        for call in &message.tool_calls {
+            use neko_protocol::workbench::ChatToolStatus;
+            let status = match call.status {
+                ChatToolStatus::AwaitingApproval => "Needs your approval",
+                ChatToolStatus::Approved => "Approved",
+                ChatToolStatus::Running => "Running",
+                ChatToolStatus::Succeeded => "Completed",
+                ChatToolStatus::Failed => "Stopped or failed",
+                ChatToolStatus::Denied => "Denied",
+            };
+            let connection = self.snapshot.mcp.connections.iter().find(|c| c.id == call.connection_id).map(|c| c.label.as_str()).unwrap_or("Removed connection");
+            let mut card = div().flex().flex_col().gap(px(6.)).p(px(10.)).rounded(px(8.)).bg(t.surface_raised)
+                .child(format!("{} · {connection} · {} · {status}", self.workspace_name(&call.workspace_id), call.tool_name))
+                .child(div().text_size(px(12.)).text_color(t.text_secondary).child(call.arguments_json.clone()));
+            if message.pending && call.status == ChatToolStatus::AwaitingApproval {
+                let mut actions = div().flex().gap(px(12.));
+                for (approve, label) in [(true, "Approve once"), (false, "Deny")] {
+                    let turn_id = message.id.clone();
+                    let call_id = call.id.clone();
+                    actions = actions.child(button(format!("chat-call-{call_id}-{approve}"), label, !self.busy, approve, cx,
+                        move |root, _, cx| root.request(Command::DecideChatTool { turn_id: turn_id.clone(), call_id: call_id.clone(), approve }, cx)));
+                }
+                card = card.child(actions);
+            }
+            body = body.child(card);
+        }
+        for receipt in self.snapshot.mcp.receipts.iter().filter(|r| r.run_id == format!("chat:{}", message.id)) {
+            body = body.child(div().text_size(px(12.)).text_color(t.text_secondary)
+                .child(format!("{} · {} · receipt {}", receipt.tool_name, if receipt.success { "Completed" } else { "Failed" }, receipt.id)));
+        }
+        if message.pending {
+            let turn_id = message.id.clone();
+            body = body.child(button(format!("stop-chat-{turn_id}"), "Stop", !self.busy, false, cx,
+                move |root, _, cx| root.request(Command::CancelChat { turn_id: turn_id.clone() }, cx)));
+        }
         div().flex().gap(px(14.)).child(avatar()).child(body).into_any_element()
     }
 
@@ -858,7 +882,7 @@ impl WorkspaceRoot {
                     .border_1()
                     .border_color(t.border_hairline_strong)
                     .on_key_down(cx.listener(|root, event: &KeyDownEvent, _, cx| {
-                        if event.keystroke.key == "enter" && !event.keystroke.modifiers.shift {
+                        if event.keystroke.key == "enter" && !event.keystroke.modifiers.shift && !root.composer.read(cx).is_composing() {
                             root.send_message(cx);
                             cx.stop_propagation();
                         }
@@ -1104,7 +1128,7 @@ impl WorkspaceRoot {
                 .border_1()
                 .border_color(t.border_hairline_strong)
                 .on_key_down(cx.listener(move |root, event: &KeyDownEvent, _, cx| {
-                    if event.keystroke.key == "enter" && !event.keystroke.modifiers.shift {
+                    if event.keystroke.key == "enter" && !event.keystroke.modifiers.shift && !root.note_input.read(cx).is_composing() {
                         root.add_note(key_task_id.clone(), cx);
                         cx.stop_propagation();
                     }
@@ -1372,7 +1396,7 @@ impl WorkspaceRoot {
                     .border_1()
                     .border_color(t.border_hairline_strong)
                     .on_key_down(cx.listener(|root, event: &KeyDownEvent, _, cx| {
-                        if event.keystroke.key == "enter" && !event.keystroke.modifiers.shift {
+                        if event.keystroke.key == "enter" && !event.keystroke.modifiers.shift && !root.memory_input.read(cx).is_composing() {
                             root.save_memory(MemoryKind::Profile, cx);
                             cx.stop_propagation();
                         }

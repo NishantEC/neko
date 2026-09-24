@@ -23,6 +23,46 @@ pub struct Host {
     auth: Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
 }
 impl Host {
+    pub fn cancel_chat(&self, turn_id: &str) {
+        self.registry.cancel_run(&format!("chat:{turn_id}"));
+    }
+
+    fn chat_approval(&self, scope: &Scope, connection_id: &str, tool: &McpTool, arguments_json: &str, timeout: std::time::Duration) -> Result<Option<String>, String> {
+        use neko_protocol::workbench::{ChatToolCall, ChatToolStatus};
+        let Some(turn_id) = scope.run_id.strip_prefix("chat:") else { return Ok(None); };
+        if arguments_json.len() > 16 * 1024 { return Err("Chat tool arguments exceed 16 KB".into()); }
+        serde_json::from_str::<serde_json::Value>(arguments_json).map_err(|_| "Invalid tool arguments")?;
+        let id = store::new_id();
+        neko_core::neko_chat::record_call(&*self.db.lock().map_err(|_| "Chat storage unavailable")?, turn_id, ChatToolCall {
+            id: id.clone(), workspace_id: scope.workspace_id.clone(), connection_id: connection_id.into(), tool_name: tool.name.clone(), arguments_json: arguments_json.into(),
+            status: if tool.read_only { ChatToolStatus::Running } else { ChatToolStatus::AwaitingApproval },
+        })?;
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if scope.cancelled.load(Ordering::Acquire) || std::time::Instant::now() >= deadline || !self.current_call_allowed(scope, connection_id, &tool.name, &tool.schema_hash) {
+                let _ = self.finish_chat_call(scope, &id, false);
+                return Err("Chat tool approval expired or permission was revoked".into());
+            }
+            let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
+            match neko_core::neko_chat::call_status(&db, turn_id, &id)? {
+                ChatToolStatus::Running if tool.read_only => return Ok(Some(id)),
+                ChatToolStatus::Approved => {
+                    neko_core::neko_chat::set_call_status(&db, turn_id, &id, ChatToolStatus::Running)?;
+                    return Ok(Some(id));
+                }
+                ChatToolStatus::AwaitingApproval => {},
+                _ => return Err("Tool call was denied or cancelled".into()),
+            }
+            drop(db);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    fn finish_chat_call(&self, scope: &Scope, call_id: &str, success: bool) -> Result<(), String> {
+        use neko_protocol::workbench::ChatToolStatus;
+        let turn_id = scope.run_id.strip_prefix("chat:").ok_or("Not a chat run")?;
+        neko_core::neko_chat::set_call_status(&*self.db.lock().map_err(|_| "Chat storage unavailable")?, turn_id, call_id, if success { ChatToolStatus::Succeeded } else { ChatToolStatus::Failed })
+    }
     pub fn new(db: Arc<Mutex<Db>>) -> Self {
         Self {
             db,
@@ -398,6 +438,7 @@ impl Host {
                     .find(|c| c.id == connection_id)
                     .ok_or("Connection missing")?
                     .clone();
+                let chat_call = self.chat_approval(&scope, &connection_id, &tool, &arguments_json, std::time::Duration::from_secs(120))?;
                 let stop = AtomicBool::new(false);
                 let cancelled = AtomicBool::new(false);
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -469,6 +510,7 @@ impl Host {
                     serde_json::from_str::<serde_json::Value>(raw)
                         .is_ok_and(|v| v.get("isError").and_then(|v| v.as_bool()) != Some(true))
                 });
+                if let Some(call_id) = &chat_call { let _ = self.finish_chat_call(&scope, call_id, success); }
                 {
                     let db = self
                         .db
@@ -503,6 +545,10 @@ pub struct Lease {
     host: Arc<Host>,
     token: String,
 }
+
+#[cfg(test)]
+#[path = "mcp_host/chat_tests.rs"]
+mod chat_tests;
 impl Lease {
     pub fn token(&self) -> &str {
         &self.token
@@ -593,6 +639,7 @@ mod tests {
                 trusted: true,
                 has_credentials: false,
                 tools: vec![McpTool {
+                    read_only: false,
                     name: "lookup".into(),
                     description: "Read".into(),
                     input_schema: "{}".into(),
@@ -699,6 +746,7 @@ mod tests {
             let db = h.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state.mcp.connections[0].tools.push(McpTool {
+                read_only: false,
                 name: "lookup".into(),
                 description: "Read".into(),
                 input_schema: "{}".into(),

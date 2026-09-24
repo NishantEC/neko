@@ -304,7 +304,7 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::ConnectLinear { .. } | Command::SyncLinear { .. } => {
             return Err("This command requires the workbench orchestrator".into());
         }
-        Command::SendMessage { .. } => {
+        Command::SendMessage { .. } | Command::DecideChatTool { .. } | Command::CancelChat { .. } => {
             return Err("Talking to Neko requires the daemon".into());
         }
         Command::AddTicketNote { task_id, text } => {

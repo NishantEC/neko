@@ -18,6 +18,16 @@ pub struct Scope {
 #[derive(Default)]
 pub struct Registry(Mutex<HashMap<String, Scope>>);
 impl Registry {
+    pub fn cancel_run(&self, run_id: &str) {
+        if let Ok(mut scopes) = self.0.lock() {
+            scopes.retain(|_, scope| {
+                if scope.run_id == run_id {
+                    scope.cancelled.store(true, Ordering::Release);
+                    false
+                } else { true }
+            });
+        }
+    }
     pub fn issue(&self, scope: Scope) -> Result<String, String> {
         use std::io::Read;
         let mut bytes = [0_u8; 32];
