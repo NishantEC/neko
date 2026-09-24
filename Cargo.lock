@@ -3546,6 +3546,7 @@ dependencies = [
  "global-hotkey",
  "gpui",
  "gpui_platform",
+ "libc",
  "neko-client",
  "neko-protocol",
  "objc2 0.6.4",
@@ -3600,6 +3601,7 @@ dependencies = [
 name = "neko-daemon"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "neko-core",
  "neko-protocol",
  "serde_json",

@@ -9,6 +9,7 @@ name = "neko"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 neko-protocol.workspace = true
 neko-client.workspace = true
 serde_json.workspace = true

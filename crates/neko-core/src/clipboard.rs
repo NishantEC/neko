@@ -298,11 +298,37 @@ fn clipboard_item_actions() -> Vec<neko_protocol::ItemAction> {
 /// task's "every rendering decision comes from the provider" rule.
 pub struct ClipboardProvider {
     db: Arc<Mutex<crate::Db>>,
+    cache: Mutex<Option<(u64, Arc<Vec<ClipboardEntry>>)>>,
 }
 
 impl ClipboardProvider {
     pub fn new(db: Arc<Mutex<crate::Db>>) -> Self {
-        Self { db }
+        Self { db, cache: Mutex::new(None) }
+    }
+
+    fn cached_entries(&self) -> Arc<Vec<ClipboardEntry>> {
+        // Always take the database before the cache. Capture and deletion only
+        // take the database, so they cannot invert this order.
+        let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let revision = db.clipboard_revision();
+        let mut cache = self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((cached_revision, entries)) = &*cache {
+            if *cached_revision == revision {
+                return Arc::clone(entries);
+            }
+        }
+        match entries(&db) {
+            Ok(entries) => {
+                let entries = Arc::new(entries);
+                *cache = Some((revision, Arc::clone(&entries)));
+                entries
+            }
+            Err(_) => {
+                // Never show deleted/private entries from a stale cache.
+                *cache = None;
+                Arc::new(Vec::new())
+            }
+        }
     }
 }
 
@@ -332,10 +358,7 @@ impl Provider for ClipboardProvider {
     }
 
     fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate> {
-        let stored = {
-            let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            entries(&db).unwrap_or_default()
-        };
+        let stored = self.cached_entries();
         stored
             .iter()
             .filter_map(|entry| {
@@ -744,6 +767,39 @@ mod tests {
         assert!(entries(&db).unwrap().is_empty());
         record_entry(&db, r#"{"regular":"configuration"}"#, ClipboardContentKind::Text, None, 101).unwrap();
         assert_eq!(entries(&db).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn search_cache_reuses_entries_and_tracks_insert_update_delete_and_prune() {
+        let db = Arc::new(Mutex::new(crate::Db::open_in_memory().unwrap()));
+        let provider = ClipboardProvider::new(Arc::clone(&db));
+        let first = provider.cached_entries();
+        assert!(Arc::ptr_eq(&first, &provider.cached_entries()));
+        {
+            let db = db.lock().unwrap();
+            db.set_setting("unrelated", "value").unwrap();
+        }
+        assert!(Arc::ptr_eq(&first, &provider.cached_entries()));
+        {
+            let db = db.lock().unwrap();
+            db.record_clipboard_entry("one", "text", None, 1, 2).unwrap();
+            db.record_clipboard_entry("two", "text", None, 2, 2).unwrap();
+        }
+        assert_eq!(provider.search("", 3).len(), 2);
+        {
+            let db = db.lock().unwrap();
+            db.record_clipboard_entry("one", "text", Some("Notes"), 3, 2).unwrap();
+            db.record_clipboard_entry("three", "text", None, 4, 2).unwrap();
+        }
+        let refreshed = provider.cached_entries();
+        assert_eq!(refreshed.len(), 2);
+        assert_eq!(refreshed[0].content, "three");
+        assert_eq!(refreshed[1].source_app.as_deref(), Some("Notes"));
+        provider.perform_action("one", "delete").unwrap();
+        let remaining = provider.cached_entries();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].content, "three");
+        assert!(Arc::ptr_eq(&remaining, &provider.cached_entries()));
     }
 
     #[test]
