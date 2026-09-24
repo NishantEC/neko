@@ -462,6 +462,29 @@ fn converse(db: &Arc<Mutex<Db>>, mcp: &Arc<crate::mcp_host::Host>, cancel: &Atom
         }
     };
     let reply = neko_chat::parse_reply(&answer);
+    if let Err(error) = complete_chat_reply(db, cancel, pending, message, chosen, reply) {
+        finish(&format!("I couldn't save my reply: {error}"), vec![], true);
+    }
+}
+
+/// Serialize every reply mutation with Stop. The pending-state check and all
+/// ticket/memory/completion writes share the same database lock, so a reply
+/// that lost to Stop cannot create work or persist memories afterward.
+fn complete_chat_reply(
+    db: &Arc<Mutex<Db>>,
+    cancel: &AtomicBool,
+    pending: &str,
+    message: &str,
+    chosen: Option<&str>,
+    reply: neko_chat::Reply,
+) -> Result<(), String> {
+    let db = db.lock().map_err(|_| "Chat storage unavailable")?;
+    let snapshot = store::load(&db)?;
+    if cancel.load(Ordering::Acquire)
+        || !snapshot.conversation.iter().any(|turn| turn.id == pending && turn.pending && turn.workspace_id.as_deref() == chosen)
+    {
+        return Ok(());
+    }
     let mut opened = Vec::new();
     let mut skipped = false;
     for ticket in reply.tickets {
@@ -471,7 +494,7 @@ fn converse(db: &Arc<Mutex<Db>>, mcp: &Arc<crate::mcp_host::Host>, cancel: &Atom
             continue;
         };
         let created = store::apply(
-            &db.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+            &db,
             Command::CreateTask { workspace_id: workspace.id.clone(), title: ticket.title, goal: ticket.goal },
         );
         match created {
@@ -505,7 +528,7 @@ fn converse(db: &Arc<Mutex<Db>>, mcp: &Arc<crate::mcp_host::Host>, cancel: &Atom
             created_at_ms: 0,
             updated_at_ms: 0,
         };
-        match neko_memory::upsert(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), entry, &known) {
+        match neko_memory::upsert(&db, entry, &known) {
             Ok(saved) => remembered.push(saved.text),
             Err(error) => eprintln!("neko chat: could not remember: {error}"),
         }
@@ -514,9 +537,7 @@ fn converse(db: &Arc<Mutex<Db>>, mcp: &Arc<crate::mcp_host::Host>, cancel: &Atom
     if skipped {
         text.push_str("\n\nI couldn't open a ticket because you don't have a workspace yet. Add one first.");
     }
-    if let Err(error) = neko_chat::finish_turn_remembering(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), pending, &text, opened, remembered, false) {
-        eprintln!("neko chat: {error}");
-    }
+    neko_chat::finish_turn_remembering(&db, pending, &text, opened, remembered, false)
 }
 
 /// The user's steering notes, newest last, bounded for the prompt budget.
@@ -574,6 +595,68 @@ fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reply_with_ticket_and_memory() -> neko_chat::Reply {
+        neko_chat::Reply {
+            text: "Opened a ticket and remembered your preference.".into(),
+            tickets: vec![neko_chat::ProposedTicket { title: "New ticket".into(), goal: "Make and verify the change".into(), workspace_id: Some("w".into()) }],
+            memories: vec![neko_chat::ProposedMemory { text: "Use small changes".into(), workspace_id: None, decision: false }],
+        }
+    }
+
+    #[test]
+    fn stop_after_early_cancel_check_prevents_all_reply_mutations() {
+        let controller = controller_with_task(TaskStatus::Completed);
+        let turn = neko_chat::begin_scoped_turn(&controller.db.lock().unwrap(), "Remember small changes and fix it", Some("w")).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        *controller.chat_active.lock().unwrap() = Some(Active { task_id: turn.clone(), cancelled: cancel.clone() });
+        let passed_early_check = std::sync::Barrier::new(2);
+        let resume_completion = std::sync::Barrier::new(2);
+        std::thread::scope(|threads| {
+            let worker = threads.spawn(|| {
+                // Reproduce the exact interleaving: the runner's old early
+                // check passes, then Stop completes before reply processing.
+                assert!(!cancel.load(Ordering::Acquire));
+                passed_early_check.wait();
+                resume_completion.wait();
+                complete_chat_reply(&controller.db, &cancel, &turn, "Remember small changes and fix it", Some("w"), reply_with_ticket_and_memory()).unwrap();
+            });
+            passed_early_check.wait();
+            controller.command(Command::CancelChat { turn_id: turn.clone() }).unwrap();
+            resume_completion.wait();
+            worker.join().unwrap();
+        });
+        let state = store::load(&controller.db.lock().unwrap()).unwrap();
+        assert_eq!(state.tasks.len(), 1, "Stopped reply must not create a ticket");
+        assert!(state.memory.is_empty(), "Stopped reply must not save a memory");
+        let message = state.conversation.iter().find(|m| m.id == turn).unwrap();
+        assert_eq!(message.text, "Stopped.");
+        assert!(message.failed && !message.pending);
+        assert!(message.ticket_ids.is_empty() && message.remembered.is_empty());
+    }
+
+    #[test]
+    fn reply_completion_wins_once_and_closed_turn_rejects_replay() {
+        let controller = controller_with_task(TaskStatus::Completed);
+        let turn = neko_chat::begin_scoped_turn(&controller.db.lock().unwrap(), "Remember small changes and fix it", Some("w")).unwrap();
+        let cancel = AtomicBool::new(false);
+        complete_chat_reply(&controller.db, &cancel, &turn, "Remember small changes and fix it", Some("w"), reply_with_ticket_and_memory()).unwrap();
+        controller.command(Command::CancelChat { turn_id: turn.clone() }).unwrap();
+        // A fresh false token deliberately proves persisted pending state is
+        // checked too, independently of the in-memory cancellation flag.
+        let mut late = reply_with_ticket_and_memory();
+        late.memories[0].text = "Must not be saved".into();
+        complete_chat_reply(&controller.db, &AtomicBool::new(false), &turn, "late", Some("w"), late).unwrap();
+        let state = store::load(&controller.db.lock().unwrap()).unwrap();
+        assert_eq!(state.tasks.len(), 2);
+        assert_eq!(state.memory.len(), 1);
+        assert_eq!(state.memory[0].text, "Use small changes");
+        let message = state.conversation.iter().find(|m| m.id == turn).unwrap();
+        assert!(!message.failed && !message.pending);
+        assert_eq!(message.ticket_ids.len(), 1);
+        assert_eq!(message.remembered.len(), 1);
+    }
+
     pub(super) fn controller_with_task(status: TaskStatus) -> Controller {
         let db = Db::open_in_memory().unwrap();
         let snapshot = Snapshot {
