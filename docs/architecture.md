@@ -13,6 +13,19 @@ validated snapshots atomically in the daemon-owned SQLite settings table.
 database mutex during model/network calls. A two-second supervisor heartbeat
 is separate from task progress; it does not claim the model made progress.
 
+The main window (`workspace.rs`, `workspace/home.rs`) is organised around
+Neko, tickets and responsibilities. Tickets are workbench tasks; status alone
+places each in *needs you*, *working* or *done* (`home::group`). **Today** is a
+conversation with Neko: a brief built from those groups, ticket cards, the
+chat, and a rail of running work and responsibility health. Opening a ticket
+shows a panel with its actions, activity and the user's steering notes.
+`neko-core::neko_chat` stores the conversation in its own bounded setting,
+outside the task store's reserved capacity. Each message is one read-only Codex
+turn (`neko-daemon::workbench::converse`); a reply may propose up to three
+tickets, which become ordinary queued tasks, so planning and approval gates are
+unchanged. Ticket notes (event role `note`) reach planner and builder prompts
+as direction inside the approved scope and never grant tools or publication.
+
 The daemon-owned `neko-core::mcp_host` hosts user-added stdio and Streamable
 HTTP servers through pinned rmcp 3.4.1. Connections, discovered schema hashes,
 explicit grants, responsibilities, receipts and source evidence live in the

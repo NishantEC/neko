@@ -136,6 +136,33 @@ pub struct Snapshot {
     pub issues: Vec<Issue>,
     pub tasks: Vec<Task>,
     pub heartbeat_ms: i64,
+    /// The user's conversation with Neko. Stored separately from the task
+    /// store, so it never competes with capacity reserved for task results.
+    #[serde(default)]
+    pub conversation: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatRole {
+    User,
+    Neko,
+}
+
+/// One turn in the conversation with Neko. A Neko turn starts pending and is
+/// completed (or marked failed) by the daemon; tickets it opened are linked.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatMessage {
+    pub id: String,
+    pub at_ms: i64,
+    pub role: ChatRole,
+    pub text: String,
+    #[serde(default)]
+    pub ticket_ids: Vec<String>,
+    #[serde(default)]
+    pub pending: bool,
+    #[serde(default)]
+    pub failed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +204,18 @@ pub enum Command {
     },
     CompleteTask {
         task_id: String,
+    },
+    /// Talk to Neko. The reply arrives in a later snapshot.
+    SendMessage {
+        text: String,
+        /// Where new tickets should go when the message doesn't say.
+        workspace_id: Option<String>,
+    },
+    /// Steer one ticket. Notes reach its planner and builder as user
+    /// direction; they never grant tools or permissions.
+    AddTicketNote {
+        task_id: String,
+        text: String,
     },
 }
 
