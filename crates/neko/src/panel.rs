@@ -3629,7 +3629,7 @@ impl Root {
                                 .rounded(px(theme::CHIP_RADIUS_PX))
                         }))
                         .when(!text.is_empty(), |el| {
-                            el.child(crate::markdown::render(&text))
+                            el.child(crate::markdown::render_cached(&text))
                         }),
                 )
                 .into_any_element(),
@@ -3709,7 +3709,7 @@ impl Root {
                 .text_color(theme::active().text_primary)
                 .map(|el| {
                     if item.preview_markdown {
-                        el.child(crate::markdown::render(&text))
+                        el.child(crate::markdown::render_cached(&text))
                     } else {
                         el.child(SharedString::from(text))
                     }
@@ -3941,7 +3941,7 @@ impl Root {
                 let markdown = crate::evidence::force_preview_markdown() || item.preview_markdown;
                 let text = item.preview.clone().unwrap_or_else(|| item.id.clone());
                 if markdown {
-                    el.text_size(px(12.)).child(crate::markdown::render(&text))
+                    el.text_size(px(12.)).child(crate::markdown::render_cached(&text))
                 } else if item.preview.is_some() {
                     el.font_family(theme::MONOSPACE_FAMILY)
                         .text_size(px(theme::PREVIEW_MONOSPACE_SIZE_PX))

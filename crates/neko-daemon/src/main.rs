@@ -142,7 +142,11 @@ fn main() {
 
     eprintln!("neko-daemon: listening on {}", socket_path.display());
     for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
+        let Ok(stream) = stream else {
+            // Out of descriptors or similar: back off instead of spinning.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            continue;
+        };
         let state = state.clone();
         std::thread::spawn(move || server::handle_connection(state, stream));
     }

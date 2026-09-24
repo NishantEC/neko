@@ -14,6 +14,19 @@ pub const NOTE_ROLE: &str = "note";
 const MAX_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
 const STATE_RESERVE_BYTES: usize = 64 * 1024;
 
+/// Bumped after every successful write of the task store. Readers that poll
+/// (authority watchdogs, the quick panel's ticket list) re-parse the store
+/// only when this moves, instead of on every tick or keystroke.
+static REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+pub fn revision() -> u64 {
+    REVISION.load(std::sync::atomic::Ordering::Acquire)
+}
+
+fn bump_revision() {
+    REVISION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+}
+
 pub fn load(db: &Db) -> Result<Snapshot, String> {
     let Some(json) = db.get_setting(SETTING).map_err(|e| e.to_string())? else {
         return Ok(Snapshot::default());
@@ -32,6 +45,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
             return Err("Migration needs storage headroom; original workspace data has not been changed".into());
         }
         db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
+        bump_revision();
     }
     // Attached for readers only; save() never writes it into this setting.
     snapshot.conversation = crate::neko_chat::load(db)?;
@@ -102,7 +116,9 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
             );
         }
     }
-    db.set_setting(SETTING, &json).map_err(|e| e.to_string())
+    db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
+    bump_revision();
+    Ok(())
 }
 
 /// Reserve the worst possible JSON size of every pending plan/result/worktree.

@@ -333,7 +333,7 @@ impl Provider for ClipboardProvider {
 
     fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate> {
         let stored = {
-            let db = self.db.lock().unwrap();
+            let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             entries(&db).unwrap_or_default()
         };
         stored
@@ -393,7 +393,7 @@ impl Provider for ClipboardProvider {
         match action_id {
             "paste" | "copy" => self.activate(id),
             "delete" => {
-                let db = self.db.lock().unwrap();
+                let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 db.delete_clipboard_entry(id).map_err(|e| ProviderError(e.to_string()))
             }
             other => Err(ProviderError(format!("no action '{other}' on this row"))),
@@ -598,7 +598,9 @@ mod pasteboard {
 /// itself needs no macOS-only code — only `pasteboard::*` does. The
 /// autorelease-pool guarantee lives entirely inside `pasteboard::poll` (see
 /// its doc comment) — this function only ever sees owned Rust data.
-fn poll_once(db: &crate::Db, last_change_count: &mut i64) {
+/// The pasteboard is read (an AppKit call) without the database lock; the
+/// lock is held only for the short write, so search never waits on AppKit.
+fn poll_once(db: &std::sync::Mutex<crate::Db>, last_change_count: &mut i64) {
     let tick = pasteboard::poll(*last_change_count);
     *last_change_count = tick.change_count;
 
@@ -609,7 +611,8 @@ fn poll_once(db: &crate::Db, last_change_count: &mut i64) {
         return;
     }
     let kind = classify(&content, has_url_type);
-    if let Err(e) = record_entry(db, &content, kind, tick.source_app.as_deref(), crate::now_unix_ms()) {
+    let db = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Err(e) = record_entry(&db, &content, kind, tick.source_app.as_deref(), crate::now_unix_ms()) {
         eprintln!("neko-daemon: failed to record clipboard entry: {e}");
     }
 }
@@ -622,8 +625,7 @@ pub fn run_capture_loop(db: &std::sync::Mutex<crate::Db>) {
     let mut last_change_count = pasteboard::current_change_count();
     loop {
         std::thread::sleep(POLL_INTERVAL);
-        let db = db.lock().unwrap();
-        poll_once(&db, &mut last_change_count);
+        poll_once(db, &mut last_change_count);
     }
 }
 
@@ -858,10 +860,10 @@ mod tests {
     #[test]
     fn perform_action_delete_removes_the_entry_from_history() {
         let db = Arc::new(Mutex::new(crate::Db::open_in_memory().unwrap()));
-        record_entry(&db.lock().unwrap(), "gone soon", ClipboardContentKind::Text, None, 100).unwrap();
+        record_entry(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), "gone soon", ClipboardContentKind::Text, None, 100).unwrap();
         let provider = ClipboardProvider::new(db.clone());
         assert!(provider.perform_action("gone soon", "delete").is_ok());
-        assert!(entries(&db.lock().unwrap()).unwrap().is_empty());
+        assert!(entries(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).unwrap().is_empty());
     }
 
     // Deliberately no test calls `perform_action` with `"copy"`/`"paste"`

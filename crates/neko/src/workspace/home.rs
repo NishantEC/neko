@@ -776,7 +776,7 @@ impl WorkspaceRoot {
                     .gap(px(8.))
                     .items_start()
                     .when(message.failed, |r| r.child(div().pt(px(8.)).child(dot(attention()))))
-                    .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).line_height(px(22.)).when(message.failed, |r| r.text_color(t.text_secondary)).child(crate::markdown::render(&message.text))),
+                    .child(div().flex_1().min_w(px(0.)).text_size(px(14.)).line_height(px(22.)).when(message.failed, |r| r.text_color(t.text_secondary)).child(crate::markdown::render_cached(&message.text))),
             );
             let linked: Vec<&Task> = message.ticket_ids.iter().filter_map(|id| self.snapshot.tasks.iter().find(|x| &x.id == id)).collect();
             if !linked.is_empty() {
@@ -1012,12 +1012,12 @@ impl WorkspaceRoot {
                     .child(div().text_size(px(13.)).line_height(px(20.)).child(format!("Risk: {:?}. {}", decision.risk, decision.reason))),
             );
         }
-        body = body.child(div().flex().flex_col().gap(px(6.)).child(label("GOAL")).child(div().text_size(px(13.)).line_height(px(20.)).child(crate::markdown::render(&task.goal))));
+        body = body.child(div().flex().flex_col().gap(px(6.)).child(label("GOAL")).child(div().text_size(px(13.)).line_height(px(20.)).child(crate::markdown::render_cached(&task.goal))));
         if !task.plan.is_empty() {
-            body = body.child(div().flex().flex_col().gap(px(6.)).child(label("PLAN")).child(div().text_size(px(13.)).line_height(px(20.)).child(crate::markdown::render(&task.plan))));
+            body = body.child(div().flex().flex_col().gap(px(6.)).child(label("PLAN")).child(div().text_size(px(13.)).line_height(px(20.)).child(crate::markdown::render_cached(&task.plan))));
         }
         if !task.result.is_empty() {
-            body = body.child(div().flex().flex_col().gap(px(6.)).child(label("RESULT")).child(div().text_size(px(13.)).line_height(px(20.)).child(crate::markdown::render(&task.result))));
+            body = body.child(div().flex().flex_col().gap(px(6.)).child(label("RESULT")).child(div().text_size(px(13.)).line_height(px(20.)).child(crate::markdown::render_cached(&task.result))));
         }
         if let Some(path) = &task.worktree {
             let reveal = std::path::PathBuf::from(path);

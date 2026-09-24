@@ -403,14 +403,26 @@ impl Host {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
                 let result = std::thread::scope(|threads| {
                     threads.spawn(|| {
+                        let mut seen = 0_u64;
+                        let mut allowed = true;
                         while !stop.load(Ordering::Acquire) {
-                            if std::time::Instant::now() >= deadline
-                                || !self.current_call_allowed(
+                            // The full policy check parses the store; repeat
+                            // it only after a save. Cancellation and expiry
+                            // are checked every tick.
+                            let revision = store::revision();
+                            if revision != seen {
+                                seen = revision;
+                                allowed = self.current_call_allowed(
                                     &scope,
                                     &connection_id,
                                     &tool_name,
                                     &tool.schema_hash,
-                                )
+                                );
+                            }
+                            if std::time::Instant::now() >= deadline
+                                || !allowed
+                                || scope.cancelled.load(Ordering::Acquire)
+                                || store::now_ms() >= scope.expires_ms
                             {
                                 cancelled.store(true, Ordering::Release);
                                 break;
@@ -556,7 +568,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            store::load(&h.db.lock().unwrap())
+            store::load(&h.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
                 .unwrap()
                 .mcp
                 .connections
@@ -567,7 +579,7 @@ mod tests {
     fn revocation_during_preparation_prevents_dispatch() {
         let h = host();
         {
-            let db = h.db.lock().unwrap();
+            let db = h.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state.mcp.connections.push(McpConnection {
                 oauth: false,
@@ -684,7 +696,7 @@ mod tests {
             serde_json::json!([])
         );
         {
-            let db = h.db.lock().unwrap();
+            let db = h.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state.mcp.connections[0].tools.push(McpTool {
                 name: "lookup".into(),

@@ -377,13 +377,19 @@ mod macos {
     /// the chosen item's own action fires before this returns, setting its
     /// flag for the 20ms poll exactly like a plain click does.
     fn show_menu(mtm: MainThreadMarker, event: &objc2_app_kit::NSEvent) {
-        ITEM.with(|slot| {
-            if let Some(held) = slot.borrow().as_ref()
-                && let Some(button) = held.item.button(mtm)
-            {
-                NSMenu::popUpContextMenu_withEvent_forView(&held.menu, event, &button);
-            }
+        // Take retained handles and release the RefCell borrow *before* the
+        // synchronous tracking loop: GPUI tasks keep running inside it, and a
+        // quota update rebuilding the menu would otherwise hit "already
+        // borrowed" and abort. The retained menu stays alive while shown even
+        // if a rebuild swaps in a new one.
+        let handles = ITEM.with(|slot| {
+            let held = slot.borrow();
+            let held = held.as_ref()?;
+            Some((held.menu.clone(), held.item.button(mtm)?))
         });
+        if let Some((menu, button)) = handles {
+            NSMenu::popUpContextMenu_withEvent_forView(&menu, event, &button);
+        }
     }
 
     impl Target {
@@ -509,7 +515,10 @@ mod macos {
     fn rebuild_menu() {
         let Some(mtm) = MainThreadMarker::new() else { return };
         ITEM.with(|slot| {
-            if let Some(item) = slot.borrow_mut().as_mut() {
+            // Never panic on a nested borrow; the next quota update rebuilds.
+            if let Ok(mut held) = slot.try_borrow_mut()
+                && let Some(item) = held.as_mut()
+            {
                 item.menu = build_menu(mtm, &item.target);
             }
         });

@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn refresh_lock_wait_is_deadline_bound_and_cancellable() {
         let lock = Mutex::new(());
-        let _held = lock.lock().unwrap();
+        let _held = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         runtime(async {
             let cancel = AtomicBool::new(false);
             let start = Instant::now();
@@ -590,7 +590,7 @@ mod tests {
                 gate.commit("test", epoch, false, || {
                     entered_tx.send(()).unwrap();
                     release_rx.recv().unwrap();
-                    *value.lock().unwrap() = Some("refreshed");
+                    *value.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some("refreshed");
                     Ok(())
                 })
                 .unwrap()
@@ -601,14 +601,14 @@ mod tests {
             let gate = gate.clone();
             let value = value.clone();
             std::thread::spawn(move || {
-                gate.invalidate("test", || *value.lock().unwrap() = None)
+                gate.invalidate("test", || *value.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None)
                     .unwrap()
             })
         };
         release_tx.send(()).unwrap();
         refresh.join().unwrap();
         removal.join().unwrap();
-        assert_eq!(*value.lock().unwrap(), None);
+        assert_eq!(*value.lock().unwrap_or_else(std::sync::PoisonError::into_inner), None);
         assert!(
             gate.commit("test", epoch, false, || panic!(
                 "removed credential restored"

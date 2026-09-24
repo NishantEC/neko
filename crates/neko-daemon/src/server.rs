@@ -244,7 +244,7 @@ impl AppState {
     /// Updates only Paseo's part of the single client-facing attention total.
     /// A provider change that leaves the total unchanged needs no Dock redraw.
     pub fn set_paseo_attention(&self, count: usize) {
-        let total = self.attention.lock().unwrap().set_paseo(count);
+        let total = self.attention.lock().unwrap_or_else(std::sync::PoisonError::into_inner).set_paseo(count);
         if let Some(total) = total {
             broadcast(self, &Event::AttentionChanged { count: total });
         }
@@ -252,7 +252,7 @@ impl AppState {
 
     /// Updates only Codex's part of the single client-facing attention total.
     pub fn set_codex_attention(&self, count: usize) {
-        let total = self.attention.lock().unwrap().set_codex(count);
+        let total = self.attention.lock().unwrap_or_else(std::sync::PoisonError::into_inner).set_codex(count);
         if let Some(total) = total {
             broadcast(self, &Event::AttentionChanged { count: total });
         }
@@ -277,7 +277,7 @@ pub fn now_unix_ms() -> i64 {
 pub fn run_native_attention_poll(state: Arc<AppState>) {
     let mut previous=0;
     loop {
-        let result=neko_core::workbench::load(&state.db.lock().unwrap());
+        let result=neko_core::workbench::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         if let Ok(snapshot)=result {
             use neko_protocol::workbench::TaskStatus;
             let count=snapshot.tasks.iter().filter(|t|matches!(t.status,TaskStatus::AwaitingApproval|TaskStatus::Failed|TaskStatus::ReadyForReview)).count()
@@ -451,10 +451,22 @@ pub fn handle_connection(state: Arc<AppState>, stream: UnixStream) {
         Ok(w) => Arc::new(Mutex::new(w)),
         Err(_) => return,
     };
-    state.broadcast.lock().unwrap().push(writer.clone());
+    // A client that stops reading must not block writers forever: a full
+    // socket buffer turns into a write error after this, not a hang.
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(2)));
+    state.broadcast.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(writer.clone());
+    // Leaving, for any reason, removes this connection from broadcasts so
+    // short-lived bridge and ping connections don't accumulate descriptors.
+    struct Unregister<'a>(&'a AppState, Arc<Mutex<UnixStream>>);
+    impl Drop for Unregister<'_> {
+        fn drop(&mut self) {
+            self.0.broadcast.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|w| !Arc::ptr_eq(w, &self.1));
+        }
+    }
+    let _unregister = Unregister(&state, writer.clone());
     let count=state.native_attention.load(Ordering::Relaxed);
     if count>0 {
-        let _=write_frame(&mut *writer.lock().unwrap(),&Frame::Event(Event::AttentionChanged{count}));
+        let _=write_frame(&mut *writer.lock().unwrap_or_else(std::sync::PoisonError::into_inner),&Frame::Event(Event::AttentionChanged{count}));
     }
 
     // The one piece of genuinely per-connection state this daemon has: the
@@ -482,7 +494,7 @@ pub fn handle_connection(state: Arc<AppState>, stream: UnixStream) {
                     let ctx = RequestContext::new(cancel, {
                         let writer = writer.clone();
                         move |response| {
-                            let mut writer = writer.lock().unwrap();
+                            let mut writer = writer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                             let _ = write_frame(&mut *writer, &Frame::Response { id, response });
                         }
                     });
@@ -510,7 +522,7 @@ pub fn handle_connection(state: Arc<AppState>, stream: UnixStream) {
 /// does with the signal.
 fn supersede_previous_search(in_flight: &Mutex<Option<Cancel>>) -> Cancel {
     let fresh = Cancel::new();
-    let mut slot = in_flight.lock().unwrap();
+    let mut slot = in_flight.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(previous) = slot.replace(fresh.clone()) {
         previous.cancel();
     }
@@ -716,7 +728,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         },
 
         Request::GetHotkey => {
-            let db = state.db.lock().unwrap();
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match neko_core::hotkey::get_hotkey(&db) {
                 Ok(config) => Response::Hotkey { config },
                 Err(e) => Response::Error {
@@ -731,7 +743,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
 
         Request::CommitHotkey { candidate } => {
             let result = {
-                let db = state.db.lock().unwrap();
+                let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 neko_core::hotkey::set_hotkey(&db, candidate, now_unix_ms())
             };
             match result {
@@ -751,7 +763,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         }
 
         Request::GetOnboardingState => {
-            let db = state.db.lock().unwrap();
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match neko_core::onboarding::get_onboarding_state(&db) {
                 Ok(s) => onboarding_response(s),
                 Err(e) => error_response(e),
@@ -759,7 +771,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         }
 
         Request::SetOnboardingComplete { completed } => {
-            let db = state.db.lock().unwrap();
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match neko_core::onboarding::set_onboarding_completed(&db, completed) {
                 Ok(s) => onboarding_response(s),
                 Err(e) => error_response(e),
@@ -767,7 +779,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         }
 
         Request::DismissAccessibilityBanner => {
-            let db = state.db.lock().unwrap();
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match neko_core::onboarding::dismiss_accessibility_banner(&db) {
                 Ok(s) => onboarding_response(s),
                 Err(e) => error_response(e),
@@ -775,7 +787,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         }
 
         Request::GetTheme => {
-            let db = state.db.lock().unwrap();
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match neko_core::themes::get_theme(&db) {
                 Ok(id) => Response::Theme { id },
                 Err(e) => error_response(e),
@@ -783,7 +795,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         }
 
         Request::GetClipboardHistoryEnabled => {
-            let db = state.db.lock().unwrap();
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match neko_core::onboarding::get_clipboard_history_enabled(&db) {
                 Ok(enabled) => Response::ClipboardHistoryEnabled { enabled },
                 Err(e) => error_response(e),
@@ -791,7 +803,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         }
 
         Request::SetClipboardHistoryEnabled { enabled } => {
-            let db = state.db.lock().unwrap();
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match neko_core::onboarding::set_clipboard_history_enabled(&db, enabled) {
                 Ok(enabled) => Response::ClipboardHistoryEnabled { enabled },
                 Err(e) => error_response(e),
@@ -814,11 +826,24 @@ fn error_response(e: impl std::fmt::Display) -> Response {
 }
 
 fn broadcast(state: &AppState, event: &Event) {
-    let mut writers = state.broadcast.lock().unwrap();
-    writers.retain(|w| {
-        let mut w = w.lock().unwrap();
-        write_frame(&mut *w, &Frame::Event(event.clone())).is_ok()
-    });
+    // Write outside the list lock: one slow client must never stall new
+    // connections from registering. Failed writers are removed afterwards.
+    let writers: Vec<_> = state.broadcast.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    let frame = Frame::Event(event.clone());
+    let failed: Vec<_> = writers
+        .into_iter()
+        .filter(|w| {
+            let mut w = w.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            write_frame(&mut *w, &frame).is_err()
+        })
+        .collect();
+    if !failed.is_empty() {
+        state
+            .broadcast
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|w| !failed.iter().any(|f| Arc::ptr_eq(f, w)));
+    }
 }
 
 /// Called by `main.rs`'s background icon-extraction passes (startup and
@@ -1197,10 +1222,10 @@ mod tests {
         let collected: Arc<Mutex<Vec<Response>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = collected.clone();
         let ctx = RequestContext::new(Cancel::never(), move |response| {
-            sink.lock().unwrap().push(response)
+            sink.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(response)
         });
         let final_response = handle_request(state, request, &ctx);
-        let mut frames = collected.lock().unwrap().clone();
+        let mut frames = collected.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
         frames.push(final_response);
         frames
     }
@@ -1401,7 +1426,7 @@ mod tests {
         let partials: Arc<Mutex<Vec<Response>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = partials.clone();
         let ctx = RequestContext::new(Cancel::never(), move |response| {
-            sink.lock().unwrap().push(response)
+            sink.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(response)
         });
 
         let request_state = state.clone();
@@ -1422,7 +1447,7 @@ mod tests {
         // provider having returned anything at all.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            if !partials.lock().unwrap().is_empty() {
+            if !partials.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty() {
                 break;
             }
             assert!(
@@ -1432,7 +1457,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
 
-        let partial = partials.lock().unwrap()[0].clone();
+        let partial = partials.lock().unwrap_or_else(std::sync::PoisonError::into_inner)[0].clone();
         let Response::SearchResults { items, complete } = partial else {
             panic!("expected SearchResults")
         };
