@@ -10,6 +10,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 plist = "1"
 serde.workspace = true
 serde_json.workspace = true
+toml = "0.8"
 base64 = "0.22"
 libc = "0.2"
 rmcp = { version = "=3.4.1", default-features = false, features = ["server", "transport-io", "client", "auth", "transport-async-rw", "transport-streamable-http-client-reqwest", "reqwest"] }
