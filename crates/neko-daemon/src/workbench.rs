@@ -43,7 +43,7 @@ impl Controller {
             }
             Command::CancelTask { task_id } => {
                 let result = store::apply(
-                    &self.db.lock().unwrap(),
+                    &self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
                     Command::CancelTask {
                         task_id: task_id.clone(),
                     },
@@ -62,14 +62,14 @@ impl Controller {
             Command::RetryTask { task_id } => {
                 // A cancelled worker may still be unwinding. Its late output
                 // must not mutate a freshly queued generation of this task.
-                let active = self.active.lock().unwrap();
+                let active = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if active.as_ref().is_some_and(|a| a.task_id == task_id) {
                     return Err("The previous worker is still stopping. Retry in a moment.".into());
                 }
-                store::apply(&self.db.lock().unwrap(), Command::RetryTask { task_id })
+                store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), Command::RetryTask { task_id })
             }
             Command::SendMessage { text, workspace_id } => {
-                let pending = neko_chat::begin_turn(&self.db.lock().unwrap(), &text)?;
+                let pending = neko_chat::begin_turn(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &text)?;
                 let db = self.db.clone();
                 let text = text.trim().to_owned();
                 std::thread::spawn(move || {
@@ -80,14 +80,14 @@ impl Controller {
                         let _ = neko_chat::finish_turn(&guard, &pending, "Something went wrong while I was replying. Send your message again.", vec![], true);
                     }
                 });
-                store::load(&self.db.lock().unwrap())
+                store::load(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
             }
-            command => store::apply(&self.db.lock().unwrap(), command),
+            command => store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), command),
         }
     }
 
     fn update_task(&self, id: &str, update: impl FnOnce(&mut Task)) -> Result<(), String> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut snapshot = store::load(&db)?;
         let task = snapshot
             .tasks
@@ -103,18 +103,21 @@ impl Controller {
     }
 
     pub fn start(self: &Arc<Self>) {
-        if let Err(error) = store::recover_interrupted(&self.db.lock().unwrap()) {
+        if let Err(error) = store::recover_interrupted(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
             eprintln!("neko: cannot recover tasks: {error}");
             return;
         }
-        if let Err(error) = neko_chat::recover_interrupted(&self.db.lock().unwrap()) {
+        if let Err(error) = neko_chat::recover_interrupted(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
             eprintln!("neko: cannot recover chat: {error}");
         }
         let controller = self.clone();
         std::thread::spawn(move || {
             loop {
-                if let Err(error) = controller.tick() {
-                    eprintln!("neko supervisor: {error}");
+                // One bad tick must never end scheduling for the daemon's life.
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| controller.tick())) {
+                    Ok(Err(error)) => eprintln!("neko supervisor: {error}"),
+                    Err(_) => eprintln!("neko supervisor: tick panicked; continuing"),
+                    Ok(Ok(())) => {}
                 }
                 std::thread::sleep(Duration::from_secs(2));
             }
@@ -122,8 +125,10 @@ impl Controller {
         let controller = self.clone();
         std::thread::spawn(move || {
             loop {
-                if let Err(error) = controller.responsibility_tick() {
-                    eprintln!("neko responsibility: {error}");
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| controller.responsibility_tick())) {
+                    Ok(Err(error)) => eprintln!("neko responsibility: {error}"),
+                    Err(_) => eprintln!("neko responsibility: tick panicked; continuing"),
+                    Ok(Ok(())) => {}
                 }
                 std::thread::sleep(Duration::from_secs(2));
             }
@@ -131,9 +136,9 @@ impl Controller {
     }
 
     fn tick(self: &Arc<Self>) -> Result<(), String> {
-        let mut active = self.active.lock().unwrap();
+        let mut active = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let next = {
-            let db = self.db.lock().unwrap();
+            let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut snapshot = store::load(&db)?;
             snapshot.heartbeat_ms = store::now_ms();
             let next = if active.is_none() {
@@ -181,14 +186,19 @@ impl Controller {
             let controller = self.clone();
             std::thread::spawn(move || {
                 let task = &claim.task;
-                let result = controller.execute(&claim, &cancel);
+                // A panicking worker still fails its task and frees the slot,
+                // so one crash can't block every later ticket.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| controller.execute(&claim, &cancel)))
+                    .unwrap_or_else(|_| Err("Neko's worker crashed. Try again; the worktree is preserved.".into()));
                 if let Err(error) = result {
-                    let _ = controller.update_task(&task.id, |t| {
+                    if let Err(save_error) = controller.update_task(&task.id, |t| {
                         t.status = TaskStatus::Failed;
                         store::append_event(t, "supervisor", &error);
-                    });
+                    }) {
+                        eprintln!("neko supervisor: could not record failure of {}: {save_error}", task.id);
+                    }
                 }
-                *controller.active.lock().unwrap() = None;
+                *controller.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             });
         }
         Ok(())
@@ -210,7 +220,7 @@ impl Controller {
     ) -> Result<(), String> {
         let task = &claim.task;
         let authority = &claim.authority;
-        let snapshot = store::load(&self.db.lock().unwrap())?;
+        let snapshot = store::load(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
         if !authority.valid(&snapshot) {
             return Err("Claimed task authority changed before execution".into());
         }
@@ -250,7 +260,7 @@ impl Controller {
         self.record_worktree(&task.id, &directory)?;
         // Worktree creation may be slow. Revalidate the original claim after
         // it completes, before selecting/starting any writable model run.
-        let current = store::load(&self.db.lock().unwrap())?;
+        let current = store::load(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
         if !authority.valid(&current) {
             return Err("Claimed task authority changed during worktree setup".into());
         }
@@ -351,7 +361,7 @@ impl Controller {
 
     fn record_worktree(&self, task_id: &str, path: &std::path::Path) -> Result<(), String> {
         // Artifact ownership survives cancellation, including a partial checkout.
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut snapshot = store::load(&db)?;
         let task = snapshot
             .tasks
@@ -367,11 +377,11 @@ impl Controller {
 /// ordinary queued tasks so planning and approval stay exactly as they are.
 fn converse(db: &Arc<Mutex<Db>>, pending: &str, message: &str, preferred: Option<&str>) {
     let finish = |text: &str, tickets: Vec<String>, failed: bool| {
-        if let Err(error) = neko_chat::finish_turn(&db.lock().unwrap(), pending, text, tickets, failed) {
+        if let Err(error) = neko_chat::finish_turn(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), pending, text, tickets, failed) {
             eprintln!("neko chat: {error}");
         }
     };
-    let snapshot = match store::load(&db.lock().unwrap()) {
+    let snapshot = match store::load(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
         Ok(snapshot) => snapshot,
         Err(error) => return finish(&format!("I couldn't read your tickets: {error}"), vec![], true),
     };
@@ -422,7 +432,7 @@ fn converse(db: &Arc<Mutex<Db>>, pending: &str, message: &str, preferred: Option
             continue;
         };
         let created = store::apply(
-            &db.lock().unwrap(),
+            &db.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
             Command::CreateTask { workspace_id: workspace.id.clone(), title: ticket.title, goal: ticket.goal },
         );
         match created {
@@ -450,7 +460,7 @@ fn converse(db: &Arc<Mutex<Db>>, pending: &str, message: &str, preferred: Option
             created_at_ms: 0,
             updated_at_ms: 0,
         };
-        match neko_memory::upsert(&db.lock().unwrap(), entry, &known) {
+        match neko_memory::upsert(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), entry, &known) {
             Ok(saved) => remembered.push(saved.text),
             Err(error) => eprintln!("neko chat: could not remember: {error}"),
         }
@@ -459,7 +469,7 @@ fn converse(db: &Arc<Mutex<Db>>, pending: &str, message: &str, preferred: Option
     if skipped {
         text.push_str("\n\nI couldn't open a ticket because you don't have a workspace yet. Add one first.");
     }
-    if let Err(error) = neko_chat::finish_turn_remembering(&db.lock().unwrap(), pending, &text, opened, remembered, false) {
+    if let Err(error) = neko_chat::finish_turn_remembering(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), pending, &text, opened, remembered, false) {
         eprintln!("neko chat: {error}");
     }
 }
@@ -588,7 +598,7 @@ mod tests {
             intake_notice: None,
         };
         {
-            let db = controller.db.lock().unwrap();
+            let db = controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state.connections.push(connection);
             store::save(&db, &state).unwrap();
@@ -632,7 +642,7 @@ mod tests {
     fn away_does_not_claim_a_task_without_a_risk_assessment() {
         let controller = Arc::new(controller_with_task(TaskStatus::AwaitingApproval));
         {
-            let db = controller.db.lock().unwrap();
+            let db = controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut snapshot = store::load(&db).unwrap();
             snapshot.workspaces[0].away_enabled = true;
             snapshot.tasks[0].plan = "A plausible plan is not a low-risk assessment".into();
@@ -661,7 +671,7 @@ mod tests {
     fn cancellation_reaches_the_active_process_token() {
         let controller = controller_with_task(TaskStatus::Planning);
         let token = Arc::new(AtomicBool::new(false));
-        *controller.active.lock().unwrap() = Some(Active {
+        *controller.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Active {
             task_id: "t".into(),
             cancelled: token.clone(),
         });
@@ -711,7 +721,7 @@ mod tests {
     #[test]
     fn retry_waits_for_cancelled_worker_cleanup() {
         let controller = controller_with_task(TaskStatus::Cancelled);
-        *controller.active.lock().unwrap() = Some(Active {
+        *controller.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Active {
             task_id: "t".into(),
             cancelled: Arc::new(AtomicBool::new(true)),
         });

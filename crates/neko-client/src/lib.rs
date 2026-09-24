@@ -4,13 +4,17 @@
 //! nothing in `neko` should reach past this crate to `neko-protocol`'s
 //! framing directly (see `AGENTS.md`'s crate-boundary rule).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// A reply that hasn't arrived by now never will: a wedged or crashed daemon
+/// request must surface as an error instead of a UI waiting forever.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 use futures_core::Stream;
 use neko_protocol::{Event, Frame, Request, Response, read_frame, write_frame};
@@ -25,6 +29,8 @@ pub enum ClientError {
     /// The connection dropped after the request was sent but before a
     /// reply arrived.
     Disconnected,
+    /// The daemon accepted the request but never replied in time.
+    Timeout,
 }
 
 impl std::fmt::Display for ClientError {
@@ -34,11 +40,40 @@ impl std::fmt::Display for ClientError {
             ClientError::Disconnected => {
                 write!(f, "disconnected from neko-daemon before a reply arrived")
             }
+            ClientError::Timeout => write!(f, "neko-daemon did not reply in time"),
         }
     }
 }
 
 impl std::error::Error for ClientError {}
+
+/// Drops the waiter of any one-shot request past its deadline, which resolves
+/// its future with `ClientError::Timeout`. Exits when the client is gone.
+fn run_deadline_sweeper(shared: std::sync::Weak<Shared>) {
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+        let Some(shared) = shared.upgrade() else { return };
+        sweep_expired(&shared, Instant::now());
+    }
+}
+
+fn sweep_expired(shared: &Shared, now: Instant) {
+    let expired: Vec<u64> = {
+        let mut deadlines = shared.deadlines.lock().unwrap();
+        let ids: Vec<u64> = deadlines.iter().filter(|(_, at)| **at <= now).map(|(id, _)| *id).collect();
+        for id in &ids {
+            deadlines.remove(id);
+        }
+        ids
+    };
+    for id in expired {
+        // Mark first, so the waiter sees Timeout rather than Disconnected.
+        shared.timed_out.lock().unwrap().insert(id);
+        if shared.pending.lock().unwrap().remove(&id).is_none() {
+            shared.timed_out.lock().unwrap().remove(&id);
+        }
+    }
+}
 
 struct Shared {
     next_id: AtomicU64,
@@ -50,6 +85,9 @@ struct Shared {
     /// allocation and no way for a caller to accidentally await a second
     /// frame that will never come.
     pending_streams: Mutex<HashMap<u64, futures_channel::mpsc::UnboundedSender<Response>>>,
+    /// Reply deadlines for one-shot requests, swept by a single timer thread.
+    deadlines: Mutex<HashMap<u64, Instant>>,
+    timed_out: Mutex<HashSet<u64>>,
     write_stream: Mutex<Option<UnixStream>>,
     event_tx: std_mpsc::Sender<Event>,
     /// Mirrors whether `run_supervisor` currently holds a live socket —
@@ -82,6 +120,8 @@ impl Drop for RequestRegistration {
             self.shared.pending_streams.lock().unwrap().remove(&self.id);
         } else {
             self.shared.pending.lock().unwrap().remove(&self.id);
+            self.shared.deadlines.lock().unwrap().remove(&self.id);
+            self.shared.timed_out.lock().unwrap().remove(&self.id);
         }
     }
 }
@@ -99,6 +139,8 @@ impl NekoClient {
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             pending_streams: Mutex::new(HashMap::new()),
+            deadlines: Mutex::new(HashMap::new()),
+            timed_out: Mutex::new(HashSet::new()),
             write_stream: Mutex::new(None),
             event_tx,
             connected: AtomicBool::new(false),
@@ -106,6 +148,8 @@ impl NekoClient {
 
         let supervisor_shared = shared.clone();
         std::thread::spawn(move || run_supervisor(socket_path, supervisor_shared));
+        let weak = Arc::downgrade(&shared);
+        std::thread::spawn(move || run_deadline_sweeper(weak));
 
         (Self { shared }, event_rx)
     }
@@ -145,14 +189,19 @@ impl NekoClient {
 
         if send_result.is_err() {
             self.shared.pending.lock().unwrap().remove(&id);
+        } else {
+            self.shared.deadlines.lock().unwrap().insert(id, Instant::now() + REQUEST_TIMEOUT);
         }
 
+        let shared = self.shared.clone();
         async move {
             let _registration = registration;
             if send_result.is_err() {
                 return Err(ClientError::NotConnected);
             }
-            rx.await.map_err(|_| ClientError::Disconnected)
+            rx.await.map_err(|_| {
+                if shared.timed_out.lock().unwrap().remove(&id) { ClientError::Timeout } else { ClientError::Disconnected }
+            })
         }
     }
 
@@ -342,11 +391,35 @@ mod tests {
             next_id: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             pending_streams: Mutex::new(HashMap::new()),
+            deadlines: Mutex::new(HashMap::new()),
+            timed_out: Mutex::new(HashSet::new()),
             write_stream: Mutex::new(Some(stream)),
             event_tx,
             connected: AtomicBool::new(true),
         });
         (NekoClient { shared }, server)
+    }
+
+    #[test]
+    fn an_unanswered_request_times_out_instead_of_hanging() {
+        let (client, _server) = connected_pair();
+        let future = client.request(Request::Ping);
+        let id = *client.shared.deadlines.lock().unwrap().keys().next().expect("deadline registered");
+        sweep_expired(&client.shared, Instant::now() + REQUEST_TIMEOUT + Duration::from_secs(1));
+        let result = futures_executor_block_on(future);
+        assert!(matches!(result, Err(ClientError::Timeout)), "{result:?}");
+        assert!(!client.shared.timed_out.lock().unwrap().contains(&id));
+    }
+
+    /// A tiny executor: the future is already resolved by the sweep.
+    fn futures_executor_block_on<F: std::future::Future>(future: F) -> F::Output {
+        use std::task::{Context, Poll, Waker};
+        let mut future = std::pin::pin!(future);
+        let mut cx = Context::from_waker(Waker::noop());
+        match future.as_mut().poll(&mut cx) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("future should be resolved"),
+        }
     }
 
     fn assert_correlation_exists_before_publication(streaming: bool) {
