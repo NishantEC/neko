@@ -35,6 +35,7 @@ pub mod schedules;
 pub mod search;
 pub mod settings;
 pub mod skills;
+pub mod setup_import;
 pub mod supervision;
 pub mod terminals;
 pub mod themes;

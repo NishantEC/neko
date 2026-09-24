@@ -3594,6 +3594,7 @@ dependencies = [
  "sse-stream",
  "tempfile",
  "tokio",
+ "toml 0.8.23",
  "tracing",
 ]
 
