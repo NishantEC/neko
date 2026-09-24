@@ -21,7 +21,7 @@ impl Provider for NativeTasksProvider {
         "neko-task"
     }
     fn section_label(&self) -> &'static str {
-        "Neko Tasks"
+        "Tickets"
     }
     fn search(&self, query: &str, _now: i64) -> Vec<Candidate> {
         let Ok(snapshot) = workbench::load(&self.db.lock().unwrap()) else {
@@ -53,8 +53,8 @@ impl Provider for NativeTasksProvider {
                 item.id = task.id.clone();
                 item.kind = "neko-task".into();
                 item.title = task.title.clone();
-                item.section_label = "Neko Tasks".into();
-                item.badge = Some(format!("{:?}", task.status));
+                item.section_label = "Tickets".into();
+                item.badge = Some(badge(task.status).into());
                 item.subtitle = snapshot
                     .workspaces
                     .iter()
@@ -67,15 +67,7 @@ impl Provider for NativeTasksProvider {
                 });
                 item.preview_markdown = true;
                 Some(Candidate {
-                    score: score
-                        + if matches!(
-                            task.status,
-                            TaskStatus::AwaitingApproval | TaskStatus::Failed
-                        ) {
-                            100.0
-                        } else {
-                            0.0
-                        },
+                    score: score + priority(task.status),
                     item,
                 })
             })
@@ -87,6 +79,30 @@ impl Provider for NativeTasksProvider {
     }
 }
 
+/// The same words the main window uses.
+pub fn badge(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::AwaitingApproval => "Needs approval",
+        TaskStatus::ReadyForReview => "Ready for review",
+        TaskStatus::Failed => "Stopped",
+        TaskStatus::Queued => "Queued",
+        TaskStatus::Planning => "Planning",
+        TaskStatus::Building => "Building",
+        TaskStatus::Reviewing => "Reviewing",
+        TaskStatus::Completed => "Done",
+        TaskStatus::Cancelled => "Cancelled",
+    }
+}
+
+/// Needs you first, then running work, then the rest.
+fn priority(status: TaskStatus) -> f32 {
+    match status {
+        TaskStatus::AwaitingApproval | TaskStatus::ReadyForReview | TaskStatus::Failed => 100.0,
+        TaskStatus::Queued | TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing => 50.0,
+        TaskStatus::Completed | TaskStatus::Cancelled => 0.0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +111,12 @@ mod tests {
         let provider =
             NativeTasksProvider::new(Arc::new(Mutex::new(Db::open_in_memory().unwrap())));
         assert!(provider.search("", 0).is_empty());
+    }
+
+    #[test]
+    fn tickets_that_need_you_rank_above_running_work() {
+        assert!(priority(TaskStatus::ReadyForReview) > priority(TaskStatus::Building));
+        assert!(priority(TaskStatus::Building) > priority(TaskStatus::Completed));
+        assert_eq!(badge(TaskStatus::AwaitingApproval), "Needs approval");
     }
 }

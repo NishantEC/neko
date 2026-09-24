@@ -201,8 +201,9 @@ pub struct WorkspaceRoot {
     ticket_filter: TicketFilter,
     translucent: bool,
     drag_armed: bool,
-    /// A user action that arrived while a poll was in flight; sent next.
-    queued: Option<Command>,
+    /// User actions that arrived while a background poll was in flight, sent
+    /// in order. A failure drops the rest so its error stays visible.
+    queued: std::collections::VecDeque<Command>,
 }
 
 impl WorkspaceRoot {
@@ -273,14 +274,16 @@ impl WorkspaceRoot {
             ticket_filter: TicketFilter::NeedsYou,
             translucent: false,
             drag_armed: false,
-            queued: None,
+            queued: std::collections::VecDeque::new(),
         }
     }
 
     fn request(&mut self, command: Command, cx: &mut Context<Self>) {
         if self.busy {
-            if !matches!(command, Command::Snapshot) {
-                self.queued = Some(command);
+            // Only a background refresh is worth waiting behind; another user
+            // action in flight already disables the controls.
+            if self.refreshing && !matches!(command, Command::Snapshot) && self.queued.len() < 8 {
+                self.queued.push_back(command);
             }
             return;
         }
@@ -412,7 +415,10 @@ impl WorkspaceRoot {
                     Ok(_) => root.transport_error = Some("The daemon returned an unexpected workspace response.".into()),
                     Err(_) => root.transport_error = Some("Neko cannot reach its daemon. Reconnecting automatically…".into()),
                 }
-                if let Some(next) = root.queued.take() {
+                let failed = root.error.is_some() || root.connection_error.is_some() || root.transport_error.is_some();
+                if failed && !is_poll {
+                    root.queued.clear();
+                } else if let Some(next) = root.queued.pop_front() {
                     root.request(next, cx);
                 }
                 cx.notify();

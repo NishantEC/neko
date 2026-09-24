@@ -315,7 +315,9 @@ impl WorkspaceRoot {
             ),
             _ => {}
         }
-        if !compact && group(task.status) != Group::Done {
+        // Only statuses the daemon can actually cancel.
+        let cancellable = matches!(task.status, TaskStatus::Queued | TaskStatus::Planning | TaskStatus::AwaitingApproval | TaskStatus::Building | TaskStatus::Reviewing);
+        if !compact && cancellable {
             let id = task.id.clone();
             out.push(action(format!("cancel-{id}"), "Cancel", false, enabled, cx, move |r, _, cx| r.request(Command::CancelTask { task_id: id.clone() }, cx)).into_any_element());
         }
@@ -798,7 +800,8 @@ impl WorkspaceRoot {
                             .hover(|s| s.bg(t.surface_selected))
                             .on_click(cx.listener(move |root, _, _, cx| root.open_ticket(id.clone(), cx)))
                             .child(dot(group_color(group(task.status))))
-                            .child(one_line(&task.title, 48)),
+                            .child(one_line(&task.title, 48))
+                            .child(div().text_color(t.text_tertiary).child(self.workspace_name(&task.workspace_id))),
                     );
                 }
                 body = body.child(chips);
@@ -1055,13 +1058,22 @@ impl WorkspaceRoot {
         let task_id = task.id.clone();
         let key_task_id = task.id.clone();
         let mut thread = div().flex().flex_col().gap(px(10.)).px(px(20.)).pt(px(14.)).pb(px(18.)).border_t_1().border_color(t.border_hairline).child(label("ON THIS TICKET"));
-        if notes.is_empty() {
-            thread = thread.child(div().text_size(px(12.)).text_color(t.text_tertiary).child("Steer this ticket. Notes reach its planner and builder."));
+        // Where a note will actually be read, say so; where it can't, don't offer it.
+        let hint = match task.status {
+            TaskStatus::Queued | TaskStatus::Planning => Some("Notes are read when this ticket is planned."),
+            TaskStatus::AwaitingApproval => Some("Notes are read when you approve and it builds."),
+            TaskStatus::Failed | TaskStatus::Cancelled => Some("Notes are read when you try again."),
+            TaskStatus::Building | TaskStatus::Reviewing | TaskStatus::ReadyForReview => Some("This run already started. Notes apply if you try again later."),
+            TaskStatus::Completed => None,
+        };
+        if let Some(hint) = hint {
+            thread = thread.child(div().text_size(px(12.)).text_color(t.text_tertiary).child(hint));
         }
         for n in notes.iter().rev().take(4).rev() {
             thread = thread.child(div().flex().gap(px(10.)).text_size(px(12.)).line_height(px(18.)).child(div().w(px(32.)).flex_shrink_0().text_color(t.text_tertiary).child("You")).child(div().flex_1().min_w(px(0.)).child(n.message.clone())));
         }
-        thread = thread.child(
+        let accepts_notes = task.status != TaskStatus::Completed;
+        thread = thread.when(accepts_notes, |thread| thread.child(
             div()
                 .id("ticket-note")
                 .flex()
@@ -1075,14 +1087,14 @@ impl WorkspaceRoot {
                 .border_1()
                 .border_color(t.border_hairline_strong)
                 .on_key_down(cx.listener(move |root, event: &KeyDownEvent, _, cx| {
-                    if event.keystroke.key == "enter" {
+                    if event.keystroke.key == "enter" && !event.keystroke.modifiers.shift {
                         root.add_note(key_task_id.clone(), cx);
                         cx.stop_propagation();
                     }
                 }))
                 .child(div().flex_1().min_w(px(0.)).overflow_hidden().child(self.note_input.clone()))
                 .child(action("ticket-note-send", "Add", false, !self.busy, cx, move |r, _, cx| r.add_note(task_id.clone(), cx))),
-        );
+        ));
 
         div()
             .w(px(440.))
