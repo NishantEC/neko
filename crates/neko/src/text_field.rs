@@ -55,11 +55,9 @@ impl EventEmitter<ContentChanged> for TextField {}
 ///
 /// Has real keyboard-driven selection (⇧←/⇧→, ⇧⌥←/⇧⌥→, ⇧⌘←/⇧⌘→, ⌘A) and
 /// clipboard (⌘C/⌘X/⌘V, via `pasteboard.rs`) — see this task's own commit
-/// history for why those were the seam and not a gap. Deliberately still
-/// skips mouse selection (click-drag) and IME composition (marked text) —
-/// those remain real, separate pieces of work. It wires up just enough of
-/// `EntityInputHandler` to receive typed characters through GPUI's native
-/// input path, which is the part worth proving here.
+/// history for why those were the seam and not a gap. Mouse selection and
+/// IME marked-text replacement use GPUI's native input path. Parents must
+/// check `is_composing` before using Enter to submit or activate a result.
 pub struct TextField {
     focus_handle: FocusHandle,
     content: String,
@@ -72,6 +70,8 @@ pub struct TextField {
     /// clears this (standard macOS behavior — see each `on_*` handler
     /// below); any real edit clears it too, in `commit_edit`.
     selection_anchor: Option<usize>,
+    /// Bytes occupied by the current IME candidate, replaced on each update.
+    marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     /// True between a mouse-down inside the field and the release that ends
@@ -105,6 +105,7 @@ impl TextField {
                 placeholder: DEFAULT_PLACEHOLDER.into(),
                 cursor: 0,
                 selection_anchor: None,
+                marked_range: None,
                 last_layout: None,
                 last_bounds: None,
                 mouse_selecting: false,
@@ -115,6 +116,10 @@ impl TextField {
 
     pub fn content(&self) -> &str {
         &self.content
+    }
+
+    pub fn is_composing(&self) -> bool {
+        self.marked_range.is_some()
     }
 
     pub fn set_masked(&mut self, masked: bool, cx: &mut Context<Self>) {
@@ -146,6 +151,7 @@ impl TextField {
     /// after calling this, so emitting here too would fire the search
     /// request twice for one summon.
     pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.marked_range = None;
         self.content.clear();
         self.cursor = 0;
         self.selection_anchor = None;
@@ -195,12 +201,30 @@ impl TextField {
     /// window at hand — `on_backspace`, and this file's own tests — can
     /// still drive a real edit.
     fn commit_edit(&mut self, range: Range<usize>, new_text: &str, cx: &mut Context<Self>) {
+        self.marked_range = None;
         self.content.replace_range(range.clone(), new_text);
         self.cursor = range.start + new_text.len();
         self.selection_anchor = None;
         self.touch_cursor(cx);
         cx.notify();
         cx.emit(ContentChanged);
+    }
+
+    fn compose(&mut self, range_utf16: Option<Range<usize>>, text: &str, selection_utf16: Option<Range<usize>>, cx: &mut Context<Self>) {
+        let range = range_utf16.map(|r| self.range_from_utf16(&r))
+            .or_else(|| self.marked_range.clone()).unwrap_or_else(|| self.edit_target_range());
+        let start = range.start;
+        self.commit_edit(range, text, cx);
+        if !text.is_empty() {
+            let end = start + text.len();
+            self.marked_range = Some(start..end);
+            if let Some(selection) = selection_utf16 {
+                let base = self.utf16_offset_for_byte(start);
+                let selected = self.range_from_utf16(&(base.saturating_add(selection.start)..base.saturating_add(selection.end)));
+                self.selection_anchor = Some(selected.start.clamp(start, end));
+                self.cursor = selected.end.clamp(start, end);
+            }
+        }
     }
 
     /// The range a typed character or a delete action should act on: the
@@ -679,10 +703,13 @@ impl EntityInputHandler for TextField {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Range<usize>> {
-        None
+        self.marked_range.as_ref().map(|range| self.range_to_utf16(range))
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+    fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        cx.notify();
+    }
 
     fn replace_text_in_range(
         &mut self,
@@ -693,6 +720,7 @@ impl EntityInputHandler for TextField {
     ) {
         let range = range_utf16
             .map(|r| self.range_from_utf16(&r))
+            .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.edit_target_range());
         self.commit_edit(range, new_text, cx);
     }
@@ -701,13 +729,11 @@ impl EntityInputHandler for TextField {
         &mut self,
         range_utf16: Option<Range<usize>>,
         new_text: &str,
-        _new_selected_range_utf16: Option<Range<usize>>,
-        window: &mut Window,
+        new_selected_range_utf16: Option<Range<usize>>,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Composition (marked text) is not supported in this minimal field;
-        // treat it as an immediate insert so IME input still lands.
-        self.replace_text_in_range(range_utf16, new_text, window, cx);
+        self.compose(range_utf16, new_text, new_selected_range_utf16, cx);
     }
 
     fn bounds_for_range(
@@ -1074,6 +1100,42 @@ mod tests {
     // calls), the same way the existing tests above exercise
     // `previous_char_boundary` without going through GPUI's action-dispatch
     // layer, which needs a live `Window` these entity-only tests don't open.
+
+    #[gpui::test]
+    fn ime_candidates_replace_previous_candidates_and_keep_utf16_selection(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("Hi ", cx);
+            field.compose(None, "に", Some(1..1), cx);
+            assert!(field.is_composing());
+            field.compose(None, "日本", Some(0..2), cx);
+            assert_eq!(field.content(), "Hi 日本");
+            assert_eq!(field.selection_range(), Some(3..9));
+            field.compose(None, "😀", Some(2..2), cx);
+            assert_eq!(field.content(), "Hi 😀");
+            assert_eq!(field.cursor, 7);
+            assert_eq!(field.marked_range, Some(3..7));
+            let range = field.marked_range.clone().unwrap();
+            field.commit_edit(range, "東京", cx);
+            assert_eq!(field.content(), "Hi 東京");
+            assert!(!field.is_composing());
+        });
+    }
+
+    #[gpui::test]
+    fn clearing_a_composition_does_not_leave_stale_marked_offsets(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.compose(None, "候補", None, cx);
+            field.clear(cx);
+            assert!(!field.is_composing());
+            field.compose(None, "次", None, cx);
+            assert_eq!(field.content(), "次");
+            field.compose(None, "", None, cx);
+            assert_eq!(field.content(), "");
+            assert!(!field.is_composing());
+        });
+    }
 
     #[gpui::test]
     fn cmd_backspace_deletes_to_line_start(cx: &mut TestAppContext) {

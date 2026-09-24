@@ -1320,6 +1320,9 @@ impl Root {
     }
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        if self.text_field.read(cx).is_composing() {
+            return;
+        }
         if self.actions_menu.is_some() {
             self.confirm_menu_action(window, cx);
             return;
@@ -5270,6 +5273,35 @@ mod tests {
                 assert!(root.activation_error.is_none(), "a UI transition is not a daemon activation");
             })
             .unwrap();
+    }
+
+    #[gpui::test]
+    fn ime_enter_does_not_activate_a_result_and_native_commit_replaces_candidate(cx: &mut TestAppContext) {
+        use gpui::EntityInputHandler;
+        let (client, _events) = NekoClient::connect(std::path::PathBuf::from("/tmp/neko-ime-test.sock"));
+        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        let (opener, opened) = recording_preferences_opener();
+        let window = cx.add_window(|_window, cx| {
+            Root::build(client, accessibility, true, true, no_appearance_setter(), opener, crate::window_drag::disabled(), cx)
+        });
+        window.update(cx, |root, window, cx| {
+            root.results = vec![preferences_command_row()];
+            root.selected = 0;
+            root.text_field.update(cx, |field, cx| {
+                field.replace_and_mark_text_in_range(None, "に", Some(1..1), window, cx);
+                field.replace_and_mark_text_in_range(None, "日本", Some(2..2), window, cx);
+                assert_eq!(field.content(), "日本");
+            });
+            root.confirm(&Confirm, window, cx);
+            assert_eq!(opened.get(), 0);
+            root.text_field.update(cx, |field, cx| {
+                field.replace_text_in_range(None, "日本語", window, cx);
+                assert_eq!(field.content(), "日本語");
+                assert!(!field.is_composing());
+            });
+            root.confirm(&Confirm, window, cx);
+            assert_eq!(opened.get(), 1);
+        }).unwrap();
     }
 
     #[gpui::test]
