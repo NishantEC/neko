@@ -12,12 +12,15 @@ pub fn authorize<'a>(
         .iter()
         .find(|c| {
             c.id == connection
-                && c.workspace_id == workspace
+                && c.available_in(workspace)
                 && c.enabled
                 && c.trusted
                 && c.error.is_none()
         })
         .ok_or("MCP connection is unavailable in this workspace")?;
+    if !state.workspaces.iter().any(|w| w.id == workspace) {
+        return Err("Workspace is unavailable".into());
+    }
     let tool = connection
         .tools
         .iter()
@@ -82,12 +85,21 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
             schema_hash,
             allowed,
         } => {
+            let workspace_id = state.mcp.connections.iter().find(|c| c.id == connection_id)
+                .ok_or("MCP connection missing")?.workspace_id.clone();
+            if workspace_id.is_empty() { return Err("Choose a workspace for this global connection's tool grant".into()); }
+            return apply_command(state, McpCommand::SetWorkspaceToolGrant { workspace_id, connection_id, tool_name, schema_hash, allowed }, now);
+        }
+        McpCommand::SetWorkspaceToolGrant { workspace_id, connection_id, tool_name, schema_hash, allowed } => {
             let c = state
                 .mcp
                 .connections
                 .iter()
                 .find(|c| c.id == connection_id)
                 .ok_or("MCP connection missing")?;
+            if !c.available_in(&workspace_id) || !state.workspaces.iter().any(|w| w.id == workspace_id) {
+                return Err("MCP connection is unavailable in this workspace".into());
+            }
             if allowed
                 && (!c.enabled
                     || !c.trusted
@@ -102,11 +114,11 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
             state
                 .mcp
                 .grants
-                .retain(|g| !(g.connection_id == connection_id && g.tool_name == tool_name));
+                .retain(|g| !(g.connection_id == connection_id && g.tool_name == tool_name && g.workspace_id == workspace_id));
             if allowed {
                 state.mcp.grants.push(ToolGrant {
                     connection_id,
-                    workspace_id: c.workspace_id.clone(),
+                    workspace_id,
                     tool_name,
                     schema_hash,
                 });
@@ -219,7 +231,7 @@ fn validate_responsibility(state: &Snapshot, r: &Responsibility) -> Result<(), S
                 .mcp
                 .connections
                 .iter()
-                .any(|c| &c.id == id && c.workspace_id == r.workspace_id)
+                .any(|c| &c.id == id && c.available_in(&r.workspace_id))
         {
             return Err(
                 "Responsibility connection is duplicated or belongs to another workspace".into(),
@@ -242,7 +254,7 @@ pub fn validate(state: &Snapshot) -> Result<(), String> {
     for c in &state.mcp.connections {
         text(&c.id, 256, true)?;
         text(&c.label, 256, true)?;
-        if !ids.insert(&c.id) || !state.workspaces.iter().any(|w| w.id == c.workspace_id) {
+        if !ids.insert(&c.id) || (!c.workspace_id.is_empty() && !state.workspaces.iter().any(|w| w.id == c.workspace_id)) {
             return Err("MCP connection identity or workspace is invalid".into());
         }
         validate_config(&c.config)?;
@@ -273,10 +285,11 @@ pub fn validate(state: &Snapshot) -> Result<(), String> {
     }
     let mut grants = std::collections::HashSet::new();
     for g in &state.mcp.grants {
-        if !grants.insert((&g.connection_id, &g.tool_name))
+        if !grants.insert((&g.connection_id, &g.tool_name, &g.workspace_id))
+            || !state.workspaces.iter().any(|w| w.id == g.workspace_id)
             || !state.mcp.connections.iter().any(|c| {
                 c.id == g.connection_id
-                    && c.workspace_id == g.workspace_id
+                    && c.available_in(&g.workspace_id)
                     && c.tools
                         .iter()
                         .any(|t| t.name == g.tool_name && t.schema_hash == g.schema_hash)
@@ -363,6 +376,28 @@ mod tests {
         });
         state
     }
+    #[test]
+    fn global_definitions_require_separate_workspace_grants() {
+        let mut state = state();
+        let mut second = state.workspaces[0].clone();
+        second.id = "b".into(); second.repository = "/tmp/b".into();
+        state.workspaces.push(second);
+        state.mcp.connections[0].workspace_id.clear();
+        assert!(validate(&state).is_ok());
+        assert!(authorize(&state, "a", "c", "lookup").is_err());
+        let grant = |workspace: &str, allowed| McpCommand::SetWorkspaceToolGrant {
+            workspace_id: workspace.into(), connection_id: "c".into(), tool_name: "lookup".into(), schema_hash: "v1".into(), allowed,
+        };
+        apply_command(&mut state, grant("a", true), 1).unwrap();
+        assert!(authorize(&state, "a", "c", "lookup").is_ok());
+        assert!(authorize(&state, "b", "c", "lookup").is_err());
+        apply_command(&mut state, grant("b", true), 1).unwrap();
+        apply_command(&mut state, grant("a", false), 1).unwrap();
+        assert!(authorize(&state, "a", "c", "lookup").is_err());
+        assert!(authorize(&state, "b", "c", "lookup").is_ok());
+        assert!(apply_command(&mut state, grant("missing", true), 1).is_err());
+    }
+
     #[test]
     fn grants_are_bound_to_discovered_schema_and_do_not_survive_pause() {
         let mut state = state();

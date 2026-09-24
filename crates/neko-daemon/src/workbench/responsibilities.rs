@@ -4,6 +4,7 @@ use neko_core::mcp_host::{responsibility, store as policy};
 use neko_protocol::mcp_host::{Responsibility, SourceEvidence, ToolGrant};
 
 struct WakeClaim {
+    profile_revision: u64,
     responsibility: Responsibility,
     workspace: Workspace,
     run_id: String,
@@ -11,6 +12,7 @@ struct WakeClaim {
 
 #[derive(Clone)]
 pub(super) struct RunAuthority {
+    profile_revision: u64,
     workspace: String,
     connections: Vec<String>,
     grants: Vec<ToolGrant>,
@@ -28,6 +30,11 @@ fn same_responsibility(a: &Responsibility, b: &Responsibility) -> bool {
         && a.prepare_low_risk == b.prepare_low_risk
 }
 impl RunAuthority {
+    /// Learning has no tools, source action, or live task capability. A completed
+    /// ticket is evidence, so the live-task status check does not apply.
+    pub(super) fn for_learning(state: &Snapshot, workspace: &str) -> Result<Self, String> {
+        Self::new(state, workspace, vec![], None)
+    }
     fn new(
         state: &Snapshot,
         workspace: &str,
@@ -42,6 +49,7 @@ impl RunAuthority {
             .cloned()
             .collect();
         let authority = Self {
+            profile_revision: state.agent_profiles.revision,
             workspace: workspace.into(),
             connections,
             grants,
@@ -88,7 +96,7 @@ impl RunAuthority {
                     .connections
                     .iter()
                     .filter(|c| {
-                        c.workspace_id == task.workspace_id
+                        c.available_in(&task.workspace_id)
                             && c.enabled
                             && c.trusted
                             && state.mcp.grants.iter().any(|g| {
@@ -115,10 +123,11 @@ impl RunAuthority {
         Ok(authority)
     }
     pub(super) fn valid(&self, state: &Snapshot) -> bool {
-        state.workspaces.iter().any(|w| w.id == self.workspace)
+        state.agent_profiles.revision == self.profile_revision
+            && state.workspaces.iter().any(|w| w.id == self.workspace)
             && self.connections.iter().all(|id| {
                 state.mcp.connections.iter().any(|c| {
-                    &c.id == id && c.workspace_id == self.workspace && c.enabled && c.trusted
+                    &c.id == id && c.available_in(&self.workspace) && c.enabled && c.trusted
                 })
             })
             && self.grants.iter().all(|g| {
@@ -222,6 +231,7 @@ impl Controller {
             .ok_or("Responsibility workspace missing")?;
         store::save(&db, &state)?;
         Ok(Some(WakeClaim {
+            profile_revision: state.agent_profiles.revision,
             responsibility,
             workspace,
             run_id: store::new_id(),
@@ -238,6 +248,7 @@ impl Controller {
             .lock()
             .map_err(|_| "Workspace storage unavailable")?;
         let state = store::load(&db)?;
+        if state.agent_profiles.revision != claim.profile_revision { return Ok(()); }
         let Some(index) = state.mcp.responsibilities.iter().position(|r| {
             same_responsibility(&claim.responsibility, r)
                 && r.last_attempt_ms == claim.responsibility.last_attempt_ms
@@ -282,6 +293,7 @@ impl Controller {
                     .lock()
                     .map_err(|_| "Workspace storage unavailable")?,
             )?;
+            if state.agent_profiles.revision != claim.profile_revision { return Err("Agent settings changed before responsibility started".into()); }
             let authority = RunAuthority::new(
                 &state,
                 &claim.workspace.id,
@@ -294,9 +306,10 @@ impl Controller {
                 writable: false,
                 timeout: Duration::from_secs(600),
                 prompt: format!(
-                    "{}\nThis wake is read-only: do not mutate external systems, publish, send messages, or edit files. A tool grant is not permission to exceed this read-only wake.\nWorkspace preferences:\n{}\nUser-enabled workspace skills:\n{skills}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context, recheck them using current tools):\n{}",
+                    "{}\nThis wake is read-only: do not mutate external systems, publish, send messages, or edit files. A tool grant is not permission to exceed this read-only wake.\nWorkspace preferences:\n{}\nAgent context:\n{}\nUser-enabled workspace skills:\n{skills}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context, recheck them using current tools):\n{}",
                     responsibility::INSTRUCTION,
                     claim.workspace.instructions,
+                    neko_core::agent_profiles::context(&state, Some(&claim.workspace.id)),
                     claim.responsibility.instruction,
                     serde_json::to_string(
                         &state
@@ -356,7 +369,7 @@ impl Controller {
         }
         let lease = self
             .mcp
-            .lease(run_id, &authority.workspace, authority.connections.clone())?;
+            .lease(run_id, &authority.workspace, authority.connections.clone(), authority.profile_revision)?;
         let bridge = native_runner::BridgeConfig {
             executable: std::env::current_exe().map_err(|_| "Cannot locate Neko MCP bridge")?,
             socket: neko_protocol::socket_path(),

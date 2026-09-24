@@ -8,6 +8,9 @@ use neko_protocol::workbench::{MemoryEntry, MemoryKind};
 
 const SETTING: &str = "neko_memory_v1";
 pub const MAX_ENTRIES: usize = 300;
+/// A separate bounded allowance means a full user memory page cannot prevent
+/// cancelling a running task. Older automatic decisions remain in task events.
+pub const MAX_DECISIONS: usize = 64;
 pub const MAX_TEXT: usize = 500;
 /// Memory included in any one prompt.
 pub const PROMPT_BUDGET: usize = 4 * 1024;
@@ -53,13 +56,13 @@ pub fn upsert(db: &Db, mut entry: MemoryEntry, known_workspaces: &[String]) -> R
     let mut entries = load(db)?;
     if entry.id.is_empty() {
         // The same fact twice is one memory.
-        if let Some(existing) = entries.iter_mut().find(|e| e.kind == entry.kind && e.workspace_id == entry.workspace_id && e.text.eq_ignore_ascii_case(&entry.text)) {
+        if let Some(existing) = entries.iter_mut().find(|e| e.agent_profile_id == entry.agent_profile_id && e.kind == entry.kind && e.workspace_id == entry.workspace_id && e.text.eq_ignore_ascii_case(&entry.text) && (entry.kind != MemoryKind::Decision || e.source == entry.source)) {
             existing.updated_at_ms = now;
             let saved = existing.clone();
             save(db, &entries)?;
             return Ok(saved);
         }
-        if entries.len() >= MAX_ENTRIES {
+        if entries.iter().filter(|e| !e.id.starts_with("decision-")).count() >= MAX_ENTRIES {
             return Err(format!("Memory is full ({MAX_ENTRIES} entries). Delete some on the Memory page"));
         }
         entry.id = crate::workbench::new_id();
@@ -68,12 +71,33 @@ pub fn upsert(db: &Db, mut entry: MemoryEntry, known_workspaces: &[String]) -> R
         entries.push(entry.clone());
     } else {
         let existing = entries.iter_mut().find(|e| e.id == entry.id).ok_or("That memory no longer exists")?;
+        if existing.agent_profile_id != entry.agent_profile_id { return Err("A memory cannot be moved between agents".into()); }
         entry.created_at_ms = existing.created_at_ms;
         entry.updated_at_ms = now;
         *existing = entry.clone();
     }
     save(db, &entries)?;
     Ok(entry)
+}
+
+/// Host-authored account of a successful user action, committed in the same
+/// transaction as that action. Never stores an inferred preference or reason.
+pub fn record_decision(db: &Db, mut entry: MemoryEntry) -> Result<(), String> {
+    entry.text = clean(&entry.text)?;
+    if entry.kind != MemoryKind::Decision || entry.workspace_id.is_none() {
+        return Err("Ticket decisions require their exact workspace".into());
+    }
+    let mut entries = load(db)?;
+    if entries.iter().any(|e| e.source == entry.source && e.agent_profile_id == entry.agent_profile_id && e.text == entry.text) { return Ok(()); }
+    while entries.iter().filter(|e| e.id.starts_with("decision-")).count() >= MAX_DECISIONS {
+        let index = entries.iter().enumerate().filter(|(_, e)| e.id.starts_with("decision-")).min_by_key(|(_, e)| e.created_at_ms).map(|(i, _)| i).ok_or("Decision history unavailable")?;
+        entries.remove(index);
+    }
+    entry.id = format!("decision-{}", crate::workbench::new_id());
+    entry.created_at_ms = crate::now_unix_ms();
+    entry.updated_at_ms = entry.created_at_ms;
+    entries.push(entry);
+    save(db, &entries)
 }
 
 pub fn delete(db: &Db, id: &str) -> Result<(), String> {
@@ -95,9 +119,10 @@ pub fn retain_workspaces(db: &Db, known_workspaces: &[String]) -> Result<(), Str
     Ok(())
 }
 
-/// Memory for one prompt: the user's profile plus notes for the workspace in
-/// scope (none of another workspace's), newest first, within a fixed budget.
-pub fn for_prompt(entries: &[MemoryEntry], scope: Option<&str>) -> String {
+/// Format already profile-filtered memory. Production callers must use
+/// `agent_profiles::context`, which enforces ownership and explicit sharing.
+/// This layer only narrows workspace scope and applies the fixed text budget.
+pub(crate) fn for_prompt(entries: &[MemoryEntry], scope: Option<&str>) -> String {
     let mut relevant: Vec<&MemoryEntry> = entries
         .iter()
         .filter(|e| match &e.workspace_id {
@@ -129,7 +154,7 @@ mod tests {
     use super::*;
 
     fn entry(kind: MemoryKind, ws: Option<&str>, text: &str) -> MemoryEntry {
-        MemoryEntry { id: String::new(), kind, workspace_id: ws.map(Into::into), text: text.into(), source: "user".into(), created_at_ms: 0, updated_at_ms: 0 }
+        MemoryEntry { agent_profile_id: neko_protocol::agent_profiles::default_profile_id(), id: String::new(), kind, workspace_id: ws.map(Into::into), text: text.into(), source: "user".into(), created_at_ms: 0, updated_at_ms: 0 }
     }
 
     #[test]
@@ -194,5 +219,17 @@ mod tests {
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].text, "me");
     }
+    #[test]
+    fn bounded_decision_history_does_not_consume_user_memory_capacity() {
+        let db = Db::open_in_memory().unwrap();
+        for i in 0..MAX_ENTRIES { upsert(&db, entry(MemoryKind::Profile, None, &format!("fact {i}")), &[]).unwrap(); }
+        for i in 0..(MAX_DECISIONS + 2) {
+            let mut decision = entry(MemoryKind::Decision, Some("w"), "Cancelled this task.");
+            decision.source = format!("ticket:{i}:cancellation:0");
+            record_decision(&db, decision).unwrap();
+        }
+        let memories = load(&db).unwrap();
+        assert_eq!(memories.len(), MAX_ENTRIES + MAX_DECISIONS);
+        assert_eq!(memories.iter().filter(|m| m.kind == MemoryKind::Profile).count(), MAX_ENTRIES);
+    }
 }
-

@@ -11,6 +11,14 @@ pub struct Db {
 }
 
 impl Db {
+    /// Commit related settings together. Dropping the transaction rolls back
+    /// every write when the operation or commit fails.
+    pub fn atomic<T>(&self, operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let transaction = self.conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let value = operation()?;
+        transaction.commit().map_err(|e| e.to_string())?;
+        Ok(value)
+    }
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);

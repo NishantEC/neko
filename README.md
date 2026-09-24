@@ -7,7 +7,7 @@ for quick search, clipboard history, and task attention.
 ## Neko-owned work
 
 Create a workspace with a Git repository, then create a task or add your own
-MCP servers in **Tools / MCP**. No Linear, Slack, or other service is bundled
+MCP servers in **Tools & skills → Connections**. No Linear, Slack, or other service is bundled
 or required. Multiple connections, including instances of the same server,
 have separate workspace scope, credentials, and permissions.
 
@@ -21,15 +21,41 @@ have separate workspace scope, credentials, and permissions.
    Checks run every ten minutes while the daemon is running; failures back off.
 5. Keep **Plan only**, or explicitly allow low-risk local fixes. A read-only
    supervisor investigates, a builder uses an isolated Git worktree, and an
-   independent read-only reviewer leaves a result for your review.
+   independent read-only reviewer checks the actual diff and executes checks.
+   Findings or missing evidence block the result from becoming ready for review.
 
 Open the full app from the Dock, menu bar **Open Neko Workspace**, or the
 palette's **Open Neko Workspace** command. **Today** is a conversation with
 Neko: its brief lists tickets that need you, and asking for work opens a
 ticket that is planned read-only and waits for your approval. **Tickets**
 lists everything by needs you, working and done; open one to approve, retry,
-or add a note that steers its next plan or build. Closing this window does not
+or add a note that steers its next plan or build. **Propose parallel subtasks**
+on an awaiting plan generates two or three scoped proposals for your approval.
+Approved children run in isolated worktrees (three workers globally, two per
+workspace), then integrate into the parent task worktree for a final independent
+review. Conflicts, cancellation and restart preserve their evidence.
+Closing this window does not
 stop the daemon. Dismissing the palette hides only the palette.
+
+**Agent profiles** separates identities, instructions and memories. A workspace
+has one owning agent; unscoped chat uses the selected default. Explicit one-way
+read grants share profile memories only, never workspace notes or tools. Changing
+ownership requires finishing/cancelling work and pausing schedules and watches.
+Profile edits invalidate existing worker authority. These are application-level
+boundaries, not filesystem privacy guarantees.
+
+**Memory** shows saved preferences, workspace notes and ticket decisions, with
+edit/delete controls. A separate bounded learning pass after chats and completed
+tickets may suggest memories. Suggestions show their source and remain inactive
+until you choose **Remember this**; **Dismiss** rejects them across restarts.
+
+**Responsibilities** also manages scheduled plans: save a paused draft with an
+hourly-or-slower recurrence and IANA timezone, then enable it explicitly. Due
+runs create ordinary approval-gated tickets, with no catch-up burst after sleep.
+Codex and Claude imports preserve available instructions as paused drafts;
+missing schedule metadata must be filled in rather than guessed. **Browse** links
+the MCP Registry and skills.sh; skill installation previews standalone SKILL.md
+content and requires source/audit review before saving and separate activation.
 
 Automatic local preparation requires successful scoped tool receipts no older
 than fifteen minutes, unchanged source revision/content, current responsibility
@@ -188,10 +214,12 @@ patch itself fixes a ~30ms warm-summon regression in the fork; see
 Run it once more from a clean shell to confirm — it is idempotent and prints
 `nothing to do` when the checkout is already current.
 
-The first launch walks a 14-screen onboarding arc: what neko needs, the
-Accessibility permission ask (a real macOS prompt), the clipboard-history ask,
-and choosing and testing the summon hotkey. The workspace is available as a
-normal app window independently of that hotkey. To replay onboarding:
+The first launch has six setup steps: welcome, optional Mac permissions and
+shortcut, selected import, workspace-scoped tools and skills, a responsibility,
+and a real read-only first brief. Imported schedules are paused; credentials
+are copied only with explicit consent. The workspace remains a normal app
+window independently of the shortcut. Setup can be skipped without granting
+tools or running a sweep. To replay onboarding:
 
 ```sh
 NEKO_RESET_ONBOARDING=1 ./target/release/neko

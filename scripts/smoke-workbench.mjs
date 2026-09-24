@@ -130,6 +130,90 @@ try {
   const restored = await command('Snapshot');
   assert.equal(restored.tasks.find(task => task.id === taskId).status, 'Completed');
   assert.equal(restored.tasks.find(task => task.id === cancelId).status, 'Cancelled');
+  if (!live) {
+    const parallelRepo = path.join(scratch,'parallel-repo'); fs.mkdirSync(parallelRepo);
+    execFileSync('git',['-C',parallelRepo,'init','--quiet']);
+    execFileSync('git',['-C',parallelRepo,'-c','user.name=Neko Test','-c','user.email=test@example.invalid','commit','--allow-empty','-qm','parallel']);
+    const parallelWorkspace = await command({SaveWorkspace:{workspace:{id:'',name:'Parallel capacity',repository:parallelRepo,instructions:'Disposable fixture',away_enabled:false}}});
+    const parallelWorkspaceId = parallelWorkspace.workspaces.find(w=>w.name==='Parallel capacity').id;
+    const parallelIds = [];
+    for (const workspace of [workspaceId,workspaceId,parallelWorkspaceId]) {
+      const queued = await command({CreateTask:{workspace_id:workspace,title:'Concurrent ticket',goal:'PARALLEL_HOLD: create and verify the isolated smoke output'}});
+      parallelIds.push(queued.tasks.at(-1).id);
+    }
+    for (const id of parallelIds) await waitFor(id,'AwaitingApproval');
+    for (const id of parallelIds) await command({ApproveTask:{task_id:id}});
+    await waitSnapshot(s=>parallelIds.every(id=>s.tasks.find(t=>t.id===id).events.some(e=>e.role==='builder' && e.message.includes('Agent started'))) && parallelIds.every(id=>s.tasks.find(t=>t.id===id).status==='Building'),'Three builders did not overlap');
+    for (const id of parallelIds) await waitFor(id,'ReadyForReview');
+    console.log('Three real fixture child processes overlapped across two workspaces.');
+    const broken = await command({ CreateTask: {workspace_id:workspaceId,title:'Broken builder gate',goal:'BROKEN_BUILDER: create the requested file and verify it'} });
+    const id = broken.tasks.at(-1).id;
+    await waitFor(id,'AwaitingApproval');
+    await command({ApproveTask:{task_id:id}});
+    const rejected = await waitFor(id,'Failed');
+    assert.ok(rejected.events.some(e => e.message.includes('Independent verification failed')));
+    assert.match(rejected.result,/Broken builder output/);
+    for (const conflict of [false,true]) {
+      const created = await command({CreateTask:{workspace_id:workspaceId,title:conflict?'Conflicting split':'Parallel split',goal:conflict?'SPLIT_CONFLICT':'Split into independent left and right files'}});
+      const parentId = created.tasks.at(-1).id;
+      await waitFor(parentId,'AwaitingApproval');
+      await command({ProposeSplit:{task_id:parentId}});
+      await waitFor(parentId,'AwaitingApproval');
+      const proposed = await command('Snapshot');
+      assert.equal(proposed.splits.find(s=>s.parent_id===parentId).approved,false);
+      assert.ok(proposed.splits.find(s=>s.parent_id===parentId).subtasks.every(p=>p.task_id===null));
+      await command({ApproveTask:{task_id:parentId}});
+      const duplicate = await request({Workbench:{ApproveTask:{task_id:parentId}}});
+      assert.ok(duplicate.Error);
+      const done = await waitFor(parentId,conflict?'Failed':'ReadyForReview');
+      const state = await command('Snapshot');
+      const split = state.splits.find(s=>s.parent_id===parentId);
+      assert.ok(split.subtasks.every(p=>state.tasks.find(t=>t.id===p.task_id).status==='ReadyForReview'));
+      if (conflict) assert.ok(done.events.some(e=>e.message.includes('integration conflict')));
+      else for(const file of ['left.txt','right.txt']) assert.equal(fs.readFileSync(path.join(done.worktree,file),'utf8'),'Isolated task output\n');
+      assert.equal(git('status','--porcelain'),'');
+    }
+    console.log('Parallel decomposition, duplicate approval rejection, preserved conflict, and broken-builder verification gate passed.');
+    for (const fail of [false,true]) {
+      const created = await command({CreateTask:{workspace_id:workspaceId,title:'Dependency split',goal:fail?'SPLIT_DEPENDENCY_FAILURE':'SPLIT_DEPENDENT'}});
+      const id = created.tasks.at(-1).id;
+      await waitFor(id,'AwaitingApproval');
+      await command({ProposeSplit:{task_id:id}}); await waitFor(id,'AwaitingApproval');
+      await command({ApproveTask:{task_id:id}});
+      await waitFor(id,fail?'Failed':'ReadyForReview');
+      const state = await command('Snapshot');
+      const split = state.splits.find(s=>s.parent_id===id);
+      const dependent = state.tasks.find(t=>t.id===split.subtasks[1].task_id);
+      if (fail) { assert.equal(dependent.status,'Cancelled'); assert.equal(dependent.worktree,null); }
+      else { assert.equal(fs.readFileSync(path.join(dependent.worktree,'left.txt'),'utf8'),'Isolated task output\n'); }
+    }
+    console.log('Dependency seeding and dependency-failure cancellation passed.');
+    {
+      const created = await command({CreateTask:{workspace_id:workspaceId,title:'Parent required-check gate',goal:'PARENT_MISSING_CHECK'}});
+      const id = created.tasks.at(-1).id;
+      await waitFor(id,'AwaitingApproval'); await command({ProposeSplit:{task_id:id}}); await waitFor(id,'AwaitingApproval');
+      await command({ApproveTask:{task_id:id}});
+      const failed = await waitFor(id,'Failed');
+      assert.ok(failed.events.some(e=>e.message.includes('omitted approved check: node fixture-check')));
+      const state=await command('Snapshot');
+      assert.ok(state.splits.find(s=>s.parent_id===id).subtasks.every(p=>state.tasks.find(t=>t.id===p.task_id).status==='ReadyForReview'));
+      console.log('Parent integration cannot omit approved checks despite an unrelated successful receipt.');
+    }
+    for (const restart of [false,true]) {
+      const created = await command({CreateTask:{workspace_id:workspaceId,title:'Split lifecycle',goal:'SPLIT_HOLD'}});
+      const id = created.tasks.at(-1).id;
+      await waitFor(id,'AwaitingApproval'); await command({ProposeSplit:{task_id:id}}); await waitFor(id,'AwaitingApproval');
+      await command({ApproveTask:{task_id:id}});
+      await waitSnapshot(s=>s.splits.find(p=>p.parent_id===id).subtasks.some(p=>s.tasks.find(t=>t.id===p.task_id).events.some(e=>e.role==='builder' && e.message.includes('Agent started'))),'Child did not start');
+      if(restart) { await stop(); launch(); await connect(); }
+      else await command({CancelTask:{task_id:id}});
+      const state=await command('Snapshot'); const split=state.splits.find(s=>s.parent_id===id);
+      assert.equal(state.tasks.find(t=>t.id===id).status,restart?'Failed':'Cancelled');
+      assert.ok(split.subtasks.every(p=>state.tasks.find(t=>t.id===p.task_id).status===(restart?'Failed':'Cancelled')));
+      assert.ok(split.subtasks.some(p=>state.tasks.find(t=>t.id===p.task_id).worktree));
+    }
+    console.log('Parent cancellation and restart fail closed while preserving child worktrees.');
+  }
   if (live) {
     // Real model, real bridge and a disposable MCP server. No upstream account
     // or external write is involved; the action tool simply echoes arguments.
@@ -164,7 +248,7 @@ try {
     execFileSync('git', ['-C', otherRepo, 'init', '--quiet']);
     execFileSync('git', ['-C', otherRepo, '-c', 'user.name=Neko Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture']);
     const second = await command({ SaveWorkspace: { workspace: { id: '', name: 'Other workspace', repository: otherRepo, instructions: 'Disposable scope-isolation fixture.', away_enabled: false } } });
-    const otherWorkspaceId = second.workspaces.find(w => w.id !== workspaceId).id;
+    const otherWorkspaceId = second.workspaces.find(w => w.name === 'Other workspace').id;
     const fixtureServer = path.join(root, 'scripts/fixtures/mcp-workbench.mjs');
     async function addConnection(workspace_id, label, namespace) {
       const added = await mcp({ AddConnection: { workspace_id, label, config: { transport: 'stdio', command: process.execPath, args: [fixtureServer, namespace] }, trust_local_process: true, credentials: null } });
@@ -261,8 +345,8 @@ try {
     await command({ SendMessage: { text: 'Remember that I always want small PRs', workspace_id: workspaceId } });
     const learned = await waitSnapshot(s => s.conversation.length === 6 && !s.conversation[5].pending, 'Neko did not remember');
     assert.equal(learned.conversation[5].remembered.length, 1);
-    assert.equal(learned.memory.length, 1);
-    assert.equal(learned.memory[0].source, 'chat');
+    assert.equal(learned.memory.filter(m => m.source === 'chat').length, 1);
+    assert.ok(learned.memory.some(m => m.source.startsWith('ticket:') && m.kind === 'decision'));
     await command({ SendMessage: { text: 'We decided to drop IE11 support', workspace_id: workspaceId } });
     const decided = await waitSnapshot(s => s.conversation.length === 8 && !s.conversation[7].pending, 'Neko did not record the decision');
     assert.ok(decided.memory.some(m => m.kind === 'decision'));
@@ -272,7 +356,7 @@ try {
     const forgotten = await command({ DeleteMemory: { id: note.id } });
     assert.ok(!forgotten.memory.some(m => m.id === note.id));
     await stop(); launch(); await connect();
-    assert.equal((await command('Snapshot')).memory.length, 2);
+    assert.equal((await command('Snapshot')).memory.filter(m => m.source === 'chat').length, 2);
     // Actual chat runner -> stdio MCP adapter -> scoped daemon host. The
     // unannotated fixture conservatively needs approval even with a grant.
     await mcp({ SetEnabled: { connection_id: own.id, enabled: true } });

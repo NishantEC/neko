@@ -74,3 +74,11 @@ repeat it. The real scout's plan contained that marker and stopped awaiting
 approval without implementing the change. Evidence data:
 `/var/folders/6f/fd69tssd61g96wf5l3xqf2rw0000gq/T/neko-skills-smoke-kVima8`.
 This proves instruction use, not native UI acceptance or third-party audit quality.
+# Native library follow-up
+
+The default library now shows enabled skills, with scoped search, an explicit
+Browse all control, and bounded 20-row pagination. The updated real GPUI window was
+captured at `/tmp/neko-skills-filtered.png` using window ID 35095; logs confirmed
+`key window false`, `loaded=true`, and `connected=true`. The enabled probe appears
+without the full installed inventory crowding out the catalog. This is rendering
+evidence, not manual click or keyboard acceptance.

@@ -11,9 +11,11 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 pub mod workbench;
+pub mod agent_profiles;
 pub mod mcp_host;
 pub mod skills;
 pub mod setup_import;
+pub mod scheduled_plans;
 
 /// A modifier key in a hotkey combination, independent of any particular
 /// hotkey-registration crate's own enum so this type can stay in the pure

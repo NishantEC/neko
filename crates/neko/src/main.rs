@@ -185,8 +185,6 @@ fn summon_from_outside(cx: &mut App) {
             KeyBinding::new("cmd-enter", panel::OpenInPaseo, Some("Panel")),
             KeyBinding::new("cmd-k", panel::OpenActionsMenu, Some("Panel")),
             KeyBinding::new("escape", DismissWindow, Some("Panel")),
-            KeyBinding::new("enter", onboarding::view::Primary, Some("Onboarding")),
-            KeyBinding::new("escape", onboarding::view::Secondary, Some("Onboarding")),
             // The Preferences window's own context. Only Enter is bound: the
             // folder field is an ordinary `TextField`, so every editing and
             // selection shortcut above already applies to it unchanged.
@@ -594,7 +592,8 @@ fn summon_from_outside(cx: &mut App) {
             let mut last_accessibility_trusted = initial_accessibility_trusted;
             let mut next_accessibility_check = Instant::now() + Duration::from_millis(500);
 
-            if !onboarding_state.completed && !evidence::evidence_run_active() {
+            if (!onboarding_state.completed && !evidence::evidence_run_active())
+                || (evidence::evidence_run_active() && std::env::var_os("NEKO_SHOW_SETUP").is_some()) {
                 cx.update(|cx| {
                     onboarding::open_window(
                         cx,

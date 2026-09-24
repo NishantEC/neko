@@ -483,9 +483,10 @@ impl WorkspaceRoot {
                     .gap(px(2.))
                     .child(nav("nav-today", icon::MARK, "Today", 0, View::Today, cx))
                     .child(nav("nav-tickets", icon::CLIPBOARD, "Tickets", needs_you, View::Tickets, cx))
-                    .child(nav("nav-responsibilities", icon::SLIDERS, "Responsibilities", self.snapshot.mcp.responsibilities.len(), View::Responsibilities, cx))
+                    .child(nav("nav-responsibilities", icon::SLIDERS, "Responsibilities", self.snapshot.mcp.responsibilities.len()+self.snapshot.schedules.len(), View::Responsibilities, cx))
                     .child(nav("nav-memory", icon::TEXT_LINES, "Memory", self.snapshot.memory.len(), View::Memory, cx))
-                    .child(nav("nav-tools", icon::TERMINAL, "Tools & skills", 0, View::Integrations, cx)),
+                    .child(nav("nav-tools", icon::TERMINAL, "Tools & skills", 0, View::Integrations, cx))
+                    .child(nav("nav-profiles", icon::MARK, "Agent profiles", 0, View::Profiles, cx)),
             )
             .child(
                 div()
@@ -699,7 +700,8 @@ impl WorkspaceRoot {
         column = column.child(div().flex().gap(px(14.)).child(avatar()).child(brief_col));
 
         // The conversation.
-        for message in &self.snapshot.conversation {
+        let profile_id=self.snapshot.agent_profiles.for_scope(self.selection.workspace.as_deref());
+        for message in self.snapshot.conversation.iter().filter(|m|conversation_in_scope(m,profile_id,self.selection.workspace.as_deref())) {
             column = column.child(self.chat_message(message, cx));
         }
 
@@ -731,7 +733,7 @@ impl WorkspaceRoot {
             .size_full()
             .flex()
             .flex_col()
-            .child(self.page_header("Today", None, cx))
+            .child(self.page_header("Today", Some(format!("Agent: {}",self.snapshot.agent_profiles.profiles.iter().find(|p|p.id==profile_id).map(|p|p.name.as_str()).unwrap_or(profile_id))), cx))
             .children(self.problem_banner())
             .child(div().flex_1().min_h(px(0.)).flex().child(chat).child(side))
             .into_any_element()
@@ -859,7 +861,7 @@ impl WorkspaceRoot {
             .workspace
             .as_ref()
             .map(|id| self.workspace_name(id))
-            .or_else(|| self.snapshot.workspaces.first().map(|w| w.name.clone()));
+            .or_else(|| self.snapshot.agent_profiles.profiles.iter().find(|p|p.id==self.snapshot.agent_profiles.active_profile_id).map(|p|format!("{} · no workspace",p.name)));
         div()
             .flex()
             .justify_center()
@@ -1056,6 +1058,18 @@ impl WorkspaceRoot {
         body = body.child(div().flex().flex_col().gap(px(6.)).child(label("GOAL")).child(div().text_size(px(13.)).line_height(px(20.)).child(crate::markdown::render_cached(&task.goal))));
         if !task.plan.is_empty() {
             body = body.child(div().flex().flex_col().gap(px(6.)).child(label("PLAN")).child(div().text_size(px(13.)).line_height(px(20.)).child(crate::markdown::render_cached(&task.plan))));
+        }
+        if task.status == TaskStatus::AwaitingApproval && !self.snapshot.splits.iter().any(|s| s.parent_id == task.id || s.subtasks.iter().any(|p| p.task_id.as_deref() == Some(&task.id))) {
+            let id = task.id.clone();
+            body = body.child(action("propose-split", "Propose parallel subtasks", false, true, cx, move |r, _, cx| r.request(Command::ProposeSplit { task_id:id.clone() }, cx)));
+        }
+        if let Some(split) = self.snapshot.splits.iter().find(|s| s.parent_id == task.id) {
+            let mut children = div().flex().flex_col().gap(px(8.)).child(label(if split.approved { "APPROVED SUBTASKS" } else { "SUBTASK PROPOSAL · APPROVAL REQUIRED" }));
+            for plan in &split.subtasks {
+                let status = plan.task_id.as_ref().and_then(|id| self.snapshot.tasks.iter().find(|t| &t.id == id)).map(|t| format!("{:?}",t.status)).unwrap_or_else(|| "Awaiting approval".into());
+                children = children.child(div().text_size(px(13.)).child(format!("{} · {}\nFiles: {}",plan.title,status,plan.files.join(", "))));
+            }
+            body = body.child(children);
         }
         if !task.result.is_empty() {
             body = body.child(div().flex().flex_col().gap(px(6.)).child(label("RESULT")).child(div().text_size(px(13.)).line_height(px(20.)).child(crate::markdown::render_cached(&task.result))));
@@ -1320,7 +1334,8 @@ impl WorkspaceRoot {
                     .child(div().flex().child(action("edit-responsibilities", "Add or edit in Tools & skills", false, true, cx, |root, _, cx| {
                         root.view = View::Integrations;
                         cx.notify();
-                    }))),
+                    })))
+                    .child(super::schedules::view(self,cx)),
             )
             .into_any_element()
     }
@@ -1332,9 +1347,13 @@ impl WorkspaceRoot {
         if text.is_empty() {
             return;
         }
+        if let Some(entry)=edited_memory(self.memory_editing.as_ref(),&text) {
+            self.request(Command::SaveMemory{entry},cx);
+            return;
+        }
         let workspace_id = if kind == MemoryKind::Workspace { self.selection.workspace.clone() } else { None };
         self.request(
-            Command::SaveMemory { entry: MemoryEntry { id: String::new(), kind, workspace_id, text, source: "user".into(), created_at_ms: 0, updated_at_ms: 0 } },
+            Command::SaveMemory { entry: MemoryEntry { id: String::new(), kind, agent_profile_id: self.snapshot.agent_profiles.for_scope(self.selection.workspace.as_deref()).to_owned(), workspace_id, text, source: "user".into(), created_at_ms: 0, updated_at_ms: 0 } },
             cx,
         );
     }
@@ -1347,6 +1366,7 @@ impl WorkspaceRoot {
             .enumerate()
             .map(|(i, e)| {
                 let id = e.id.clone();
+                let edit = e.clone();
                 div()
                     .flex()
                     .items_center()
@@ -1356,6 +1376,7 @@ impl WorkspaceRoot {
                     .when(i + 1 < n, |r| r.border_b_1().border_color(t.border_hairline))
                     .child(div().flex_1().min_w(px(0.)).text_size(px(13.)).line_height(px(19.)).child(e.text.clone()))
                     .child(div().flex_shrink_0().text_size(px(11.)).text_color(t.text_tertiary).child(if e.source == "chat" { "from chat" } else { "added by you" }))
+                    .child(action(format!("edit-memory-{}", e.id), "Edit", false, !self.busy, cx, move |root, _, cx| {root.memory_editing=Some(edit.clone());root.memory_input.update(cx,|f,cx|f.set_content(&edit.text,cx));cx.notify();}))
                     .child(action(format!("forget-{}", e.id), "Forget", false, !self.busy, cx, move |root, _, cx| root.request(Command::DeleteMemory { id: id.clone() }, cx)))
                     .into_any_element()
             })
@@ -1366,7 +1387,8 @@ impl WorkspaceRoot {
     pub(super) fn memory_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let t = theme::active();
         let memory = &self.snapshot.memory;
-        let mut sorted: Vec<&MemoryEntry> = memory.iter().collect();
+        let profile_id=self.snapshot.agent_profiles.for_scope(self.selection.workspace.as_deref());
+        let mut sorted: Vec<&MemoryEntry> = memory.iter().filter(|m|m.agent_profile_id==profile_id).collect();
         sorted.sort_by_key(|e| std::cmp::Reverse(e.updated_at_ms));
         let profile: Vec<&MemoryEntry> = sorted.iter().copied().filter(|e| e.workspace_id.is_none() && e.kind != MemoryKind::Decision).collect();
         let decisions: Vec<&MemoryEntry> = sorted.iter().copied().filter(|e| e.kind == MemoryKind::Decision).collect();
@@ -1381,7 +1403,7 @@ impl WorkspaceRoot {
             .gap(px(22.))
             .px(px(24.))
             .py(px(20.))
-            .child(div().text_size(px(13.)).line_height(px(20.)).text_color(t.text_secondary).child("Neko uses this in every chat and when it plans or builds a ticket. It learns from what you tell it in chat, and you can add or forget anything here. Memory shapes how Neko works; it never gives it permissions."))
+            .child(div().text_size(px(13.)).line_height(px(20.)).text_color(t.text_secondary).child("These memories belong to the selected workspace’s agent, or the active agent when no workspace is selected. Memory shapes chat and plans; it never grants permissions. Manage one-way sharing in Agent profiles."))
             .child(
                 div()
                     .id("memory-add")
@@ -1402,9 +1424,29 @@ impl WorkspaceRoot {
                         }
                     }))
                     .child(div().flex_1().min_w(px(0.)).overflow_hidden().child(self.memory_input.clone()))
-                    .child(action("memory-add-me", "About me", false, !self.busy, cx, |root, _, cx| root.save_memory(MemoryKind::Profile, cx)))
-                    .when_some(selected_name, |row, name| row.child(action("memory-add-ws", format!("For {name}"), false, !self.busy, cx, |root, _, cx| root.save_memory(MemoryKind::Workspace, cx)))),
+                    .child(action("memory-add-me", if self.memory_editing.is_some(){"Save edit"}else{"About me"}, false, !self.busy, cx, |root, _, cx| root.save_memory(MemoryKind::Profile, cx)))
+                    .when(self.memory_editing.is_some(),|row|row.child(action("memory-cancel-edit","Cancel edit",false,!self.busy,cx,|root,_,cx|{root.memory_editing=None;root.memory_input.update(cx,|f,cx|f.clear(cx));cx.notify();})))
+                    .when_some(selected_name.filter(|_|self.memory_editing.is_none()), |row, name| row.child(action("memory-add-ws", format!("For {name}"), false, !self.busy, cx, |root, _, cx| root.save_memory(MemoryKind::Workspace, cx)))),
             );
+        let proposals:Vec<_>=self.snapshot.memory_proposals.iter().filter(|p|p.agent_profile_id==profile_id).collect();
+        if !proposals.is_empty() {
+            let mut review=div().flex().flex_col().gap(px(10.)).child(label("PROPOSED MEMORIES · NOT ACTIVE YET"));
+            for proposal in proposals {
+                let accept=proposal.id.clone();let reject=proposal.id.clone();
+                let scope=proposal.workspace_id.as_ref().map(|id|self.workspace_name(id)).unwrap_or_else(||"Profile-wide".into());
+                review=review.child(div().flex().flex_col().gap(px(8.)).p(px(14.)).rounded(px(10.)).border_1().border_color(t.border_hairline)
+                    .child(div().text_size(px(13.)).child(proposal.text.clone()))
+                    .child(div().text_size(px(12.)).text_color(t.text_secondary).child(format!("{scope} · {}",proposal.source)))
+                    .child(div().flex().gap(px(8.))
+                        .child(action(format!("accept-memory-{accept}"),"Remember this",true,!self.busy,cx,move|root,_,cx|root.request(Command::DecideMemoryProposal{id:accept.clone(),accept:true},cx)))
+                        .child(action(format!("reject-memory-{reject}"),"Dismiss",false,!self.busy,cx,move|root,_,cx|root.request(Command::DecideMemoryProposal{id:reject.clone(),accept:false},cx)))));
+            }
+            list=list.child(review);
+        }
+        if let Some(entry)=&self.memory_editing {
+            let owner=self.snapshot.agent_profiles.profiles.iter().find(|p|p.id==entry.agent_profile_id).map(|p|p.name.as_str()).unwrap_or(&entry.agent_profile_id);
+            list=list.child(div().text_size(px(12.)).text_color(t.text_secondary).child(format!("Editing a memory belonging to {owner}. Its original profile and workspace scope are preserved.")));
+        }
         let empty = div().text_size(px(12.)).text_color(t.text_tertiary).child("Nothing yet. Tell Neko how you like to work, in chat or above.").into_any_element();
         let about = if profile.is_empty() { empty } else { self.memory_rows(profile, cx) };
         list = list.child(div().flex().flex_col().gap(px(10.)).child(label("ABOUT YOU")).child(about));
@@ -1424,11 +1466,19 @@ impl WorkspaceRoot {
             .size_full()
             .flex()
             .flex_col()
-            .child(self.page_header("Memory", Some(format!("{} things Neko knows", memory.len())), cx))
+            .child(self.page_header("Memory", Some(format!("Agent: {}", self.snapshot.agent_profiles.profiles.iter().find(|p|p.id==profile_id).map(|p|p.name.as_str()).unwrap_or(profile_id))), cx))
             .children(self.problem_banner())
             .child(list)
             .into_any_element()
     }
+}
+
+fn conversation_in_scope(message:&ChatMessage, profile:&str,workspace:Option<&str>)->bool {
+    message.agent_profile_id==profile && message.workspace_id.as_deref()==workspace
+}
+
+fn edited_memory(existing:Option<&MemoryEntry>,text:&str)->Option<MemoryEntry> {
+    existing.map(|entry|MemoryEntry{text:text.to_owned(),..entry.clone()})
 }
 
 pub(super) fn matches_filter(status: TaskStatus, filter: TicketFilter) -> bool {
@@ -1443,6 +1493,39 @@ pub(super) fn matches_filter(status: TaskStatus, filter: TicketFilter) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[gpui::test]
+    fn pending_memory_edit_cannot_intercept_chat_send(cx:&mut gpui::TestAppContext) {
+        let (client,_events)=neko_client::NekoClient::connect(std::env::temp_dir().join(format!("neko-no-socket-{}-memory-routing",std::process::id())));
+        let root=cx.update(|cx|cx.new(|cx|WorkspaceRoot::new(client,cx)));
+        root.update(cx,|root,cx| {
+            root.busy=true;root.refreshing=true;
+            let original=MemoryEntry{agent_profile_id:"work".into(),id:"memory-1".into(),kind:MemoryKind::Workspace,workspace_id:Some("a".into()),text:"before".into(),source:"chat".into(),created_at_ms:10,updated_at_ms:20};
+            root.memory_editing=Some(original.clone());
+            root.selection.workspace=Some("different".into());
+            root.composer.update(cx,|f,cx|f.set_content("hello",cx));
+            root.send_message(cx);
+            assert!(matches!(root.queued.pop_front(),Some(Command::SendMessage{text,..}) if text=="hello"));
+            root.memory_input.update(cx,|f,cx|f.set_content("edited",cx));
+            root.save_memory(MemoryKind::Profile,cx);
+            let Some(Command::SaveMemory{entry})=root.queued.pop_front() else {panic!("Expected memory edit");};
+            assert_eq!(entry,MemoryEntry{text:"edited".into(),..original});
+        });
+    }
+    #[test]
+    fn today_history_is_scoped_to_agent_and_workspace() {
+        let message:ChatMessage=serde_json::from_value(serde_json::json!({"agent_profile_id":"personal","workspace_id":"a","id":"m","at_ms":0,"role":"neko","text":"hello"})).unwrap();
+        assert!(conversation_in_scope(&message,"personal",Some("a")));
+        assert!(!conversation_in_scope(&message,"work",Some("a")));
+        assert!(!conversation_in_scope(&message,"personal",Some("b")));
+        assert!(!conversation_in_scope(&message,"personal",None));
+    }
+    #[test]
+    fn memory_edit_changes_only_text_and_never_creates_a_new_entry() {
+        let old=MemoryEntry{agent_profile_id:"work".into(),id:"memory-1".into(),kind:MemoryKind::Workspace,workspace_id:Some("a".into()),text:"before".into(),source:"chat".into(),created_at_ms:10,updated_at_ms:20};
+        let updated=edited_memory(Some(&old),"after").unwrap();
+        assert_eq!(updated,MemoryEntry{text:"after".into(),..old});
+        assert!(edited_memory(None,"new").is_none());
+    }
 
     fn task(status: TaskStatus, updated_at_ms: i64) -> Task {
         Task { id: "t".into(), workspace_id: "w".into(), issue_id: None, title: "T".into(), goal: "G".into(), status, plan: String::new(), result: String::new(), worktree: None, events: vec![], created_at_ms: 0, updated_at_ms, source_revision: None, supervision: None }

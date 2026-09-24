@@ -26,6 +26,8 @@ pub struct McpConnection {
     #[serde(default)]
     pub oauth: bool,
     pub id: String,
+    /// Empty means a global definition, never a global grant. Each workspace
+    /// must separately authorize tools before any actor can use them.
     pub workspace_id: String,
     pub label: String,
     pub config: ServerConfig,
@@ -35,6 +37,11 @@ pub struct McpConnection {
     pub tools: Vec<McpTool>,
     pub discovered_ms: Option<i64>,
     pub error: Option<String>,
+}
+impl McpConnection {
+    pub fn available_in(&self, workspace: &str) -> bool {
+        !workspace.is_empty() && (self.workspace_id.is_empty() || self.workspace_id == workspace)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -136,6 +143,13 @@ pub enum McpCommand {
         enabled: bool,
     },
     SetToolGrant {
+        connection_id: String,
+        tool_name: String,
+        schema_hash: String,
+        allowed: bool,
+    },
+    SetWorkspaceToolGrant {
+        workspace_id: String,
         connection_id: String,
         tool_name: String,
         schema_hash: String,

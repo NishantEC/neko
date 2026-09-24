@@ -29,6 +29,22 @@ const MAX_STDOUT: usize = 4 * 1024 * 1024;
 const MAX_STDERR: usize = 64 * 1024;
 const MAX_ANSWER: usize = 64 * 1024;
 const MAX_EVENT: usize = 2048;
+// Neko owns the agent pool and tool grants. Ambient tools must not bypass its
+// scoped bridge, even in ordinary writable task actors. All names are recognized
+// by the supported CLI; ignore-user-config alone does not suppress built-ins.
+const AMBIENT_DISABLED_FEATURES: &[&str] = &[
+    "image_generation", "skill_search", "skill_mcp_dependency_install", "tool_suggest",
+    "apps", "browser_use", "browser_use_external", "browser_use_full_cdp_access",
+    "computer_use", "remote_plugin", "plugins", "goals", "hooks",
+    "workspace_dependencies", "code_mode", "multi_agent",
+    "multi_agent_v2", "memories", "chronicle", "in_app_browser", "in_app_chat",
+    "in_app_local_automation", "in_app_updates", "artifact", "enable_mcp_apps",
+    "request_permissions_tool", "default_mode_request_user_input",
+    "standalone_web_search", "tool_call_mcp_elicitation", "auth_elicitation",
+];
+// code_mode_host transports legitimate shell/MCP calls on the supported CLI;
+// disabling it for ordinary actors prevents their scoped tools from running.
+const EXTRACTION_DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec", "view_image", "sleep_tool", "code_mode_host"];
 
 pub struct RunSpec {
     pub directory: PathBuf,
@@ -73,12 +89,28 @@ fn run_with_executable(
     run_configured(executable, spec, None, cancel, on_event)
 }
 
+/// Extraction has no tool authority, no MCP bridge, and only supplied text.
+pub fn extract(spec: &RunSpec, cancel: &AtomicBool) -> Result<String, String> {
+    run_configured_mode(&resolve_codex()?, spec, None, cancel, |_| {}, true)
+}
+
 fn run_configured(
     executable: &Path,
     spec: &RunSpec,
     bridge: Option<&BridgeConfig>,
     cancel: &AtomicBool,
+    on_event: impl FnMut(String),
+) -> Result<String, String> {
+    run_configured_mode(executable, spec, bridge, cancel, on_event, false)
+}
+
+fn run_configured_mode(
+    executable: &Path,
+    spec: &RunSpec,
+    bridge: Option<&BridgeConfig>,
+    cancel: &AtomicBool,
     mut on_event: impl FnMut(String),
+    extraction: bool,
 ) -> Result<String, String> {
     if spec.prompt.trim().is_empty() || spec.prompt.len() > MAX_PROMPT {
         return Err(format!(
@@ -125,6 +157,16 @@ fn run_configured(
         .arg(&directory)
         .arg("-");
     if let Some(bridge) = bridge { configure_bridge(&mut command, bridge)?; }
+    for feature in AMBIENT_DISABLED_FEATURES {
+        command.args(["-c", &format!("features.{feature}=false")]);
+    }
+    command.args(["-c", "features.skip_host_skill_discovery=true"]);
+    if extraction {
+        if spec.writable || bridge.is_some() { return Err("Extraction cannot receive write or tool authority".into()); }
+        for feature in EXTRACTION_DISABLED_FEATURES {
+            command.args(["-c", &format!("features.{feature}=false")]);
+        }
+    }
     // A GUI launch commonly inherits only /usr/bin:/bin. Also make node-based
     // CLI installs usable without executing a shell's startup files.
     let mut paths = executable
@@ -155,6 +197,10 @@ fn run_configured(
         }
         let value: serde_json::Value = serde_json::from_slice(line)
             .map_err(|e| format!("Codex returned invalid JSON: {e}"))?;
+        if extraction && matches!(value["type"].as_str(), Some("item.started" | "item.updated" | "item.completed"))
+            && !matches!(value["item"]["type"].as_str(), Some("agent_message" | "reasoning" | "error")) {
+            return Err("Extraction attempted a tool call; output discarded".into());
+        }
         match value["type"].as_str() {
             Some("turn.completed") => completed = true,
             Some("turn.failed" | "error") => {
@@ -166,7 +212,7 @@ fn run_configured(
             }
             Some("item.completed") if value["item"]["type"] == "agent_message" => {
                 if let Some(text) = value["item"]["text"].as_str() {
-                    if text.len() > MAX_ANSWER {
+                    if text.len() > if extraction { 4096 } else { MAX_ANSWER } {
                         return Err("Codex answer exceeded the output limit".into());
                     }
                     answer = Some(text.to_owned());
@@ -191,10 +237,16 @@ fn run_configured(
                             MAX_EVENT,
                         ));
                     }
-                    Some("command_execution") => on_event(bounded_text(
-                        &format!("Command {}", item["status"].as_str().unwrap_or("running")),
-                        MAX_EVENT,
-                    )),
+                    Some("command_execution") => {
+                        on_event(bounded_text(&format!("Command {}", item["status"].as_str().unwrap_or("running")), MAX_EVENT));
+                        if value["type"].as_str() == Some("item.completed") {
+                            on_event(format!("VERIFICATION_COMMAND {}", serde_json::json!({
+                                "command": item["command"].as_str().unwrap_or(""),
+                                "exit_code": item["exit_code"],
+                                "output": bounded_text(item["aggregated_output"].as_str().unwrap_or(""), MAX_EVENT),
+                            })));
+                        }
+                    },
                     Some("file_change") => on_event("Updating workspace files".into()),
                     _ => {}
                 }
@@ -203,9 +255,10 @@ fn run_configured(
         }
         Ok(())
     };
+    let prompt = if extraction { spec.prompt.clone() } else { prompt_with_git(&spec.prompt) };
     let output = execute(
         command,
-        spec.prompt.as_bytes(),
+        prompt.as_bytes(),
         cancel,
         spec.timeout,
         |bytes| {
@@ -366,8 +419,40 @@ fn create_worktree_in_cancellable(
     Ok(path)
 }
 
+/// Fixed installed developer-tool candidates, resolved on the host before the
+/// worker sandbox starts. No shell, xcrun process, PATH lookup, or cache write.
+/// At most two local filesystem candidates are checked, with no child to hang.
+fn developer_git() -> Option<PathBuf> {
+    developer_git_from(&[
+        Path::new("/Library/Developer/CommandLineTools/usr/bin/git"),
+        Path::new("/Applications/Xcode.app/Contents/Developer/usr/bin/git"),
+    ])
+}
+
+fn developer_git_from(candidates: &[&Path]) -> Option<PathBuf> {
+    candidates.iter().take(2).filter(|path| path.is_absolute()).find_map(|path| {
+        let canonical = path.canonicalize().ok()?;
+        let text = canonical.to_str()?;
+        if canonical == Path::new("/usr/bin/git") || text.len() > 512 || text.chars().any(char::is_control) { return None; }
+        let metadata = fs::metadata(&canonical).ok()?;
+        (metadata.is_file() && metadata.permissions().mode() & 0o111 != 0).then_some(canonical)
+    })
+}
+
+fn shell_quote(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+fn prompt_with_git(prompt: &str) -> String {
+    let instruction = match developer_git() {
+        Some(git) => format!("Direct Git executable: {}. Use this absolute executable for Git commands, including within login shells; do not rely on PATH or the /usr/bin/git developer-tools launcher.", shell_quote(&git)),
+        None => "No direct developer Git executable is available. The /usr/bin/git launcher may fail when its cache is not writable; report that failure as missing evidence.".into(),
+    };
+    format!("{prompt}\n\nHost tool instruction: {instruction} Sandbox permissions are unchanged. Report real Git failures and missing diff evidence; never treat an error as a clean result.\n")
+}
+
 fn git_command(directory: &Path) -> Command {
-    let mut command = Command::new("/usr/bin/git");
+    let mut command = Command::new(developer_git().unwrap_or_else(|| PathBuf::from("/usr/bin/git")));
     command.current_dir(directory).args([
         "-c",
         "core.hooksPath=/dev/null",
@@ -391,11 +476,12 @@ fn git_command(directory: &Path) -> Command {
     command
 }
 
-fn git_output(directory: &Path, args: &[&str], cancel: &AtomicBool) -> Result<String, String> {
-    let mut command = git_command(directory);
+pub(crate) fn git_output(directory: &Path, args: &[&str], cancel: &AtomicBool) -> Result<String, String> {
+    let mut command = if args.first() == Some(&"diff") { git_without_filters(directory, cancel)? } else { git_command(directory) };
     command.args(args);
     let mut bytes = Vec::new();
     let output = execute(command, &[], cancel, Duration::from_secs(15), |chunk| {
+        if bytes.len() + chunk.len() > MAX_STDOUT { return Err("Git evidence exceeded the output limit".into()); }
         bytes.extend_from_slice(chunk);
         Ok(())
     })?;
@@ -406,6 +492,67 @@ fn git_output(directory: &Path, args: &[&str], cancel: &AtomicBool) -> Result<St
         ));
     }
     String::from_utf8(bytes).map_err(|_| "Git returned non-UTF-8 output".into())
+}
+
+// --no-textconv does not disable clean/process filters used when Git compares
+// working files. Host evidence collection must never execute repository code.
+fn git_without_filters(directory: &Path, cancel: &AtomicBool) -> Result<Command, String> {
+    let names = git_output(directory, &["config", "--name-only", "--list"], cancel)?;
+    let mut command = git_command(directory);
+    for name in names.lines().filter(|n| n.starts_with("filter.") && [".clean", ".smudge", ".process", ".required"].iter().any(|suffix| n.ends_with(suffix))) {
+        command.arg("-c").arg(format!("{name}={}", if name.ends_with(".required") { "false" } else { "" }));
+    }
+    Ok(command)
+}
+
+/// Host-observed tracked and untracked scope, including committed worker edits.
+pub fn changed_files(directory: &Path, base: &str, cancel: &AtomicBool) -> Result<Vec<String>, String> {
+    let tracked = git_output(directory, &["diff", "--name-only", "--no-ext-diff", "--no-textconv", "-z", base, "--"], cancel)?;
+    let untracked = git_output(directory, &["ls-files", "--others", "--exclude-standard", "-z"], cancel)?;
+    let mut files: Vec<String> = tracked.split('\0').chain(untracked.split('\0')).filter(|s| !s.is_empty()).map(str::to_owned).collect();
+    files.sort(); files.dedup();
+    Ok(files)
+}
+
+pub fn head(directory: &Path, cancel: &AtomicBool) -> Result<String, String> {
+    Ok(git_output(directory, &["rev-parse", "HEAD"], cancel)?.trim().into())
+}
+
+/// Binary patch with untracked additions. Commands never invoke repository
+/// hooks, external diff drivers, or a shell. Patch evidence stays in memory.
+pub fn task_patch(directory: &Path, base: &str, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
+    task_patch_scoped(directory, base, &[], cancel)
+}
+
+pub fn task_patch_scoped(directory: &Path, base: &str, scope: &[String], cancel: &AtomicBool) -> Result<Vec<u8>, String> {
+    let mut args = vec!["diff", "--binary", "--no-ext-diff", "--no-textconv", base, "--"];
+    args.extend(scope.iter().map(String::as_str));
+    let mut patch = git_output(directory, &args, cancel)?.into_bytes();
+    let untracked = git_output(directory, &["ls-files", "--others", "--exclude-standard", "-z"], cancel)?;
+    for file in untracked.split('\0').filter(|f| !f.is_empty()) {
+        if !scope.is_empty() && !scope.iter().any(|s| s == file) { continue; }
+        let mut command = git_without_filters(directory, cancel)?;
+        command.args(["diff", "--no-index", "--binary", "--no-ext-diff", "--no-textconv", "--", "/dev/null", file]);
+        let output = execute(command, &[], cancel, Duration::from_secs(15), |chunk| {
+            if patch.len() + chunk.len() > 4 * 1024 * 1024 { return Err("Subtask patch exceeds 4 MiB".into()); }
+            patch.extend_from_slice(chunk); Ok(())
+        })?;
+        if output.status.code() != Some(1) && !output.status.success() { return Err("Cannot capture untracked subtask diff".into()); }
+    }
+    if patch.len() > 4 * 1024 * 1024 { return Err("Subtask patch exceeds 4 MiB".into()); }
+    Ok(patch)
+}
+
+pub fn apply_task_patch(directory: &Path, patch: &[u8], cancel: &AtomicBool) -> Result<(), String> {
+    for check in [true, false] {
+        let mut command = git_command(directory);
+        command.args(["apply", "--binary"]);
+        if check { command.arg("--check"); }
+        command.arg("-");
+        let output = execute(command, patch, cancel, Duration::from_secs(30), |_| Ok(()))?;
+        if !output.status.success() { return Err(format!("Subtask integration conflict; all child worktrees preserved: {}", bounded_text(&output.stderr, MAX_EVENT))); }
+    }
+    Ok(())
 }
 
 fn executable_directories() -> Vec<PathBuf> {
@@ -867,6 +1014,35 @@ mod tests {
     }
 
     #[test]
+    fn developer_git_rejects_malformed_non_executable_and_unbounded_candidates() {
+        let temp=TempDir::new().unwrap();
+        let file=temp.path().join("git");fs::write(&file,"#!/bin/sh\nexit 0\n").unwrap();
+        assert!(developer_git_from(&[Path::new("relative"),&file]).is_none());
+        assert!(developer_git_from(&[temp.path()]).is_none());
+        fs::set_permissions(&file,fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(developer_git_from(&[&file]),Some(file.canonicalize().unwrap()));
+        assert!(developer_git_from(&[Path::new("/missing-one"),Path::new("/missing-two"),&file]).is_none());
+        let bad=temp.path().join("git\nunsafe");fs::copy(&file,&bad).unwrap();
+        assert!(developer_git_from(&[&bad]).is_none());
+        let shim=temp.path().join("shim");std::os::unix::fs::symlink("/usr/bin/git",&shim).unwrap();
+        assert!(developer_git_from(&[&shim]).is_none());
+        let started=Instant::now();for _ in 0..100 { developer_git_from(&[Path::new("/missing-one"),Path::new("/missing-two")]); }
+        assert!(started.elapsed()<Duration::from_secs(2),"bounded local lookup launches no child process");
+    }
+
+    #[test]
+    fn developer_git_survives_login_shell_path_reset_and_preserves_real_failures() {
+        let Some(git)=developer_git() else { return };
+        let temp=TempDir::new().unwrap();
+        assert!(Command::new(&git).args(["init","--quiet"]).arg(temp.path()).status().unwrap().success());
+        let mut command=Command::new("/bin/zsh");
+        command.args(["-lc",&format!("exec {} -C {} status --porcelain",shell_quote(&git),shell_quote(temp.path()))]);
+        let result=execute(command,&[],&AtomicBool::new(false),Duration::from_secs(10),|_|Ok(())).unwrap();
+        assert!(result.status.success());assert!(result.stderr.is_empty(),"{}",result.stderr);
+        assert!(git_output(temp.path(),&["not-a-real-git-subcommand"],&AtomicBool::new(false)).is_err());
+    }
+
+    #[test]
     fn enabled_skill_instructions_reach_child_prompt_and_automatic_skills_are_disabled() {
         let (temp, executable, mut spec) = fixture(r#"
 printf '%s\n' "$@" > arguments
@@ -884,7 +1060,54 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"d
         run_with_executable(&executable, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         assert!(fs::read_to_string(temp.path().join("received_prompt")).unwrap().contains("UNIQUE_SKILL_INSTRUCTION"));
         assert!(fs::read_to_string(temp.path().join("arguments")).unwrap().contains("skills.include_instructions=false"));
+        let arguments = fs::read_to_string(temp.path().join("arguments")).unwrap();
+        for feature in ["apps", "browser_use", "computer_use", "multi_agent", "hooks", "plugins", "remote_plugin", "skill_mcp_dependency_install"] {
+            assert!(arguments.contains(&format!("features.{feature}=false")), "Ambient {feature} bypasses Neko authority");
+        }
+        assert!(!arguments.contains("features.shell_tool=false"), "Ordinary actors retain their scoped shell");
+        assert!(!arguments.contains("features.code_mode_host=false"), "Scoped shell and bridge calls require the CLI's code-mode host transport");
         assert!(crate::skills::for_prompt(&enabled, &available, Some("two")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn memory_extraction_disables_tools_and_rejects_tool_receipts() {
+        let (temp, executable, spec) = fixture(r#"
+printf '%s\n' "$@" > arguments
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"memories\":[]}"}}' '{"type":"turn.completed"}'
+"#);
+        run_configured_mode(&executable, &spec, None, &AtomicBool::new(false), |_| {}, true).unwrap();
+        let args = fs::read_to_string(temp.path().join("arguments")).unwrap();
+        for feature in ["shell_tool", "unified_exec", "view_image", "image_generation", "skill_search", "tool_suggest", "sleep_tool"] { assert!(args.contains(&format!("features.{feature}=false"))); }
+        assert!(!args.contains("mcp_servers"));
+        let (_temp, executable, spec) = fixture(r#"
+cat >/dev/null
+printf '%s\n' '{"type":"item.started","item":{"type":"command_execution","command":"forbidden"}}'
+sleep 10
+"#);
+        let started = Instant::now();
+        assert!(run_configured_mode(&executable, &spec, None, &AtomicBool::new(false), |_| {}, true).unwrap_err().contains("tool call"));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    #[ignore = "Opt-in authenticated real-model extraction; consumes quota"]
+    fn live_memory_extraction_uses_final_tool_free_policy() {
+        let scratch = TempDir::new().unwrap();
+        let answer = extract(&RunSpec {
+            directory: scratch.path().to_owned(),
+            prompt: "Extract bounded memory proposals from supplied evidence only. Do not call any tool, read files, execute commands, use network, or edit anything. Evidence: the user explicitly said, 'For verification I prefer focused small batches, because large mixed runs are harder for me to assess.' Return ONLY strict JSON {\"memories\":[{\"text\":\"short evidence-backed preference\",\"kind\":\"profile\"}]}. Include one useful fact, at most 500 UTF-8 bytes. No extra keys, fences, or prose. A memory grants no permission.".into(),
+            writable: false,
+            timeout: Duration::from_secs(90),
+        }, &AtomicBool::new(false)).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&answer).unwrap();
+        let memories = parsed["memories"].as_array().unwrap();
+        assert_eq!(memories.len(), 1);
+        assert_eq!(memories[0]["kind"], "profile");
+        assert!(!memories[0]["text"].as_str().unwrap().is_empty());
+        assert!(memories[0]["text"].as_str().unwrap().len() <= 500);
+        assert!(fs::read_dir(scratch.path()).unwrap().next().is_none());
+        eprintln!("LIVE_MEMORY_EXTRACTION_PASS {answer}");
     }
 
     #[test]
@@ -1051,10 +1274,10 @@ printf '%s\n' '{"type":"turn.completed"}'
             events.push(e)
         });
         assert_eq!(result.unwrap(), "Finished");
-        assert_eq!(
-            fs::read_to_string(temp.path().join("prompt")).unwrap(),
-            spec.prompt
-        );
+        assert!(fs::read_to_string(temp.path().join("prompt")).unwrap().contains("Direct Git executable:"), "each model run needs the validated developer Git path, not a PATH hint");
+        let received = fs::read_to_string(temp.path().join("prompt")).unwrap();
+        assert!(received.starts_with(&spec.prompt));
+        assert!(received.contains(&shell_quote(&developer_git().unwrap())));
         let args = fs::read_to_string(temp.path().join("args")).unwrap();
         for expected in [
             "exec",
@@ -1214,6 +1437,24 @@ printf '%s\n' '{error}'
     }
 
     #[test]
+    fn host_diff_never_runs_repository_clean_filters() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path();
+        git(repo, &["init", "--quiet"]);
+        fs::write(repo.join(".gitattributes"), "*.txt filter=evil\n").unwrap();
+        fs::write(repo.join("a.txt"), "before\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial"]);
+        git(repo, &["config", "filter.evil.clean", "touch filter-ran; cat"]);
+        fs::write(repo.join("a.txt"), "after\n").unwrap();
+        let cancel = AtomicBool::new(false);
+        assert_eq!(changed_files(repo, "HEAD", &cancel).unwrap(), vec!["a.txt"]);
+        assert!(!repo.join("filter-ran").exists(), "Host diff executed repository code outside the worker sandbox");
+        task_patch(repo, "HEAD", &cancel).unwrap();
+        assert!(!repo.join("filter-ran").exists());
+    }
+
+    #[test]
     fn allows_256_kib_prompt_without_losing_bytes() {
         let (temp, executable, mut spec) = fixture(
             r#"
@@ -1227,10 +1468,9 @@ printf '%s\n' '{"type":"turn.completed"}'
             run_with_executable(&executable, &spec, &AtomicBool::new(false), |_| {}).unwrap(),
             "Done"
         );
-        assert_eq!(
-            fs::read_to_string(temp.path().join("prompt")).unwrap(),
-            spec.prompt
-        );
+        let received = fs::read_to_string(temp.path().join("prompt")).unwrap();
+        assert!(received.starts_with(&spec.prompt));
+        assert!(received.len() <= MAX_PROMPT + 2048);
     }
 
     #[test]

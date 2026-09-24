@@ -9,6 +9,7 @@ use std::{
 
 #[derive(Clone)]
 pub struct Scope {
+    pub profile_revision: u64,
     pub run_id: String,
     pub workspace_id: String,
     pub connection_ids: Vec<String>,
@@ -69,6 +70,7 @@ mod tests {
         let registry = Registry::default();
         let token = registry
             .issue(Scope {
+                profile_revision: 0,
                 run_id: "run".into(),
                 workspace_id: "w".into(),
                 connection_ids: vec!["c".into()],
@@ -88,6 +90,7 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         let token = registry
             .issue(Scope {
+                profile_revision: 0,
                 run_id: "run".into(),
                 workspace_id: "w".into(),
                 connection_ids: vec!["c".into()],
