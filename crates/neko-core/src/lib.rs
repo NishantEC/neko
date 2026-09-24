@@ -34,6 +34,7 @@ pub mod provider;
 pub mod schedules;
 pub mod search;
 pub mod settings;
+pub mod skills;
 pub mod supervision;
 pub mod terminals;
 pub mod themes;

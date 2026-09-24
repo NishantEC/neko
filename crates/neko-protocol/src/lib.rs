@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod workbench;
 pub mod mcp_host;
+pub mod skills;
 
 /// A modifier key in a hotkey combination, independent of any particular
 /// hotkey-registration crate's own enum so this type can stay in the pure
