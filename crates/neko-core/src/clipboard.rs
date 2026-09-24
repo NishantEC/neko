@@ -154,6 +154,12 @@ pub fn record_entry(
     source_app: Option<&str>,
     copied_at_unix_ms: i64,
 ) -> rusqlite::Result<()> {
+    // Connection secrets commonly arrive via copy/paste. This recognizes
+    // Neko's credential JSON, not every possible credential in arbitrary text.
+    let mcp_credentials = content.len() <= 32_768 && serde_json::from_str::<serde_json::Value>(content).is_ok_and(|v| v.as_object().is_some_and(|o| o.contains_key("bearer") || o.contains_key("environment")));
+    if content.trim().starts_with("lin_api_") || mcp_credentials {
+        return db.delete_clipboard_entry(content);
+    }
     db.record_clipboard_entry(
         content,
         content_kind_to_db(content_kind),
@@ -719,6 +725,23 @@ mod tests {
         assert_eq!(entries[0].content_kind, ClipboardContentKind::Text);
         assert_eq!(entries[0].source_app.as_deref(), Some("Terminal"));
         assert_eq!(entries[0].copied_at_unix_ms, 100);
+    }
+
+    #[test]
+    fn linear_personal_keys_are_not_kept_in_clipboard_history() {
+        let db = crate::Db::open_in_memory().unwrap();
+        record_entry(&db, "lin_api_private_test_credential", ClipboardContentKind::Text, None, 100).unwrap();
+        assert!(entries(&db).unwrap().is_empty());
+    }
+    #[test]
+    fn mcp_credential_json_is_not_kept_in_clipboard_history() {
+        let db = crate::Db::open_in_memory().unwrap();
+        for secret in [r#"{"bearer":"test-only-secret"}"#, r#"{"environment":{"TOKEN":"test-only-secret"}}"#] {
+            record_entry(&db, secret, ClipboardContentKind::Text, None, 100).unwrap();
+        }
+        assert!(entries(&db).unwrap().is_empty());
+        record_entry(&db, r#"{"regular":"configuration"}"#, ClipboardContentKind::Text, None, 101).unwrap();
+        assert_eq!(entries(&db).unwrap().len(), 1);
     }
 
     #[test]

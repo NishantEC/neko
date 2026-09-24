@@ -1,5 +1,54 @@
 # neko — project knowledge
 
+## Current standalone workspace (2026-09-24)
+
+The current default supersedes the historical agent-browser and accessory-only
+window decisions below. Neko opens a regular, persistent `workspace.rs` app
+window; the hotkey remains a separate palette, dismissed with native
+`order_out`, never app-wide `hide`. Dock reopen and the menu open the workspace.
+
+Native work uses `neko-protocol::workbench`, daemon-owned bounded SQLite
+snapshots in `neko-core::workbench`, the daemon's `workbench` supervisor, and
+`native_runner` ephemeral Codex CLI processes. A scout plans read-only,
+explicit approval allows an isolated-worktree build, and a
+read-only reviewer returns a result for human review. No publication occurs.
+One task executes at once. Cross-workspace filesystem read isolation is NOT
+guaranteed by the current Codex sandbox; do not describe scoped prompts as a
+security boundary. Task worktrees are preserved, including failed work.
+
+User-owned MCP replaces the built-in Linear integration. The separate
+`neko-core::mcp_host` module owns SDK transport, schema-bound grants,
+Keychain credentials/OAuth, run capabilities, source receipts and generic
+responsibility policy. The legacy Paseo-specific `mcp` module is unchanged.
+Versioned migration retains old tasks, sources, worktrees and credential IDs,
+but disables legacy polling/away authority. No global Codex configuration is
+modified. Never reintroduce a service-specific connector as the default.
+
+Users add local executable/argument configurations or remote HTTP URLs in
+Tools / MCP, discover tools and explicitly grant unattended use per workspace.
+Local executable trust is separate from tool permission; server annotations
+are not a security boundary. A per-run daemon bridge keeps upstream credentials
+out of worker configuration and rechecks current scope, grants and schema.
+Its two tools alone are preapproved; shell networking remains disabled.
+Remote tools may mutate systems if granted: local-fix authority is not
+publication authority and cancellation cannot undo completed remote effects.
+
+Generic responsibilities wake every ten minutes while the daemon runs, with
+durable due claims and bounded backoff. Successful scoped receipts back source
+observations; a fresh unchanged actionable source plus a bounded low-risk
+model assessment can authorize a local fix when explicitly enabled. Manual
+tasks, missing evidence and sensitive/uncertain changes still need approval.
+Editing responsibility instructions/connections invalidates old eligibility.
+No automatic installation, marketplace, arbitrary swarm, cloud execution,
+cross-workspace sharing or automatic PR publication is claimed. Legacy
+Codex/Paseo providers remain opt-in via `NEKO_LEGACY_AGENTS=1`.
+
+`NEKO_DATA_DIR` isolates socket/database/task worktrees for development without
+changing HOME. `scripts/smoke-workbench.mjs` exercises real daemon IPC, storage,
+approval, worktrees, result review and restart with a deterministic child
+fixture, not a live model or an authenticated user MCP account. See README and architecture
+for setup, permissions, and current limits.
+
 neko is a hotkey-summoned, GPU-rendered launcher for macOS, written from scratch
 in Rust on [GPUI](https://gpui.rs) (Zed's UI framework). See `README.md` for how
 to run it and `data/dim/plan.md` (in the firstmate home, not this repo) for the

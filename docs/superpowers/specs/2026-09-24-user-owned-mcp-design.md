@@ -1,7 +1,7 @@
 # User-owned MCP connections
 
-Status: Product direction approved in conversation; written migration spec
-awaiting review. No MCP migration is implemented by this document.
+Status: Written design approved by the user's “build it” on 2026-09-24.
+Implementation and verification are tracked in the matching plan and evidence.
 
 ## Product boundary
 

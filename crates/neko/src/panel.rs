@@ -1373,6 +1373,16 @@ impl Root {
         // confirming it is a client-side UI transition, not a daemon
         // action (see `crate::modes`'s module doc comment).
         if let Some(mode_id) = item.enters_mode.clone() {
+            if mode_id == "workspace" {
+                #[cfg(not(test))]
+                let _ = crate::material::order_out(window);
+                if item.kind == "neko-task" {
+                    crate::menu_bar::request_workspace_task(item.id.clone());
+                } else {
+                    crate::menu_bar::request_workspace();
+                }
+                return;
+            }
             // Preferences is a real window, not a mode — the one
             // `enters_mode` value that opens one. Everything else names a
             // mode; an unknown value resolves to nothing and is ignored.
@@ -1567,7 +1577,7 @@ impl Root {
                 root.finish_activation(error_message, hide_on_success, enter_mode_on_success, cx);
             });
             if !failed && hide_on_success {
-                cx.update(|cx| cx.hide());
+                cx.update(crate::hide_palette);
             }
         })
         .detach();
@@ -2278,7 +2288,8 @@ impl Root {
             self.exit_mode(window, cx);
             return;
         }
-        cx.hide();
+        #[cfg(not(test))]
+        let _ = crate::material::order_out(window);
     }
 }
 

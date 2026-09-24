@@ -1,5 +1,7 @@
 mod codex;
 mod server;
+mod workbench;
+mod mcp_host;
 
 use std::sync::Arc;
 
@@ -7,6 +9,8 @@ use neko_core::Db;
 use server::AppState;
 
 fn main() {
+    if neko_core::mcp_host::bridge::run_if_requested() { return; }
+    if neko_core::native_runner::run_guard_if_requested() { return; }
     let socket_path = neko_protocol::socket_path();
     let db_path = neko_protocol::database_path();
 
@@ -107,6 +111,15 @@ fn main() {
         std::thread::spawn(move || neko_core::clipboard::run_capture_loop(&state.db));
     }
 
+    state.workbench.start();
+    {
+        let state=state.clone();
+        std::thread::spawn(move || server::run_native_attention_poll(state));
+    }
+
+    // Historical task browsers are available only when explicitly opted in.
+    // Normal Neko operation owns its own tasks and never opens those stores.
+    if std::env::var_os("NEKO_LEGACY_AGENTS").is_some() {
     codex::spawn(state.codex.clone(), state.clone());
 
     {
@@ -124,6 +137,7 @@ fn main() {
         // this cannot ride along with the attention poll above.
         let state = state.clone();
         std::thread::spawn(move || server::run_quota_poll(state));
+    }
     }
 
     eprintln!("neko-daemon: listening on {}", socket_path.display());

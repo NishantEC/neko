@@ -10,6 +10,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub mod workbench;
+pub mod mcp_host;
+
 /// A modifier key in a hotkey combination, independent of any particular
 /// hotkey-registration crate's own enum so this type can stay in the pure
 /// wire layer.
@@ -353,6 +356,8 @@ pub struct MeterStat {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Request {
+    McpBridge(mcp_host::BridgeRequest),
+    Workbench(workbench::Command),
     Ping,
     /// `provider`, when set, scopes this search to exactly one provider's
     /// own `search()` — no cross-provider `allocate()`, no section
@@ -441,6 +446,8 @@ pub enum Request {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Response {
+    McpBridge { json: String },
+    Workbench(workbench::Snapshot),
     Pong,
     /// One search reply. **A single `Request::Search` can be answered by
     /// more than one of these** — see [`Response::ends_request`] and
@@ -562,6 +569,9 @@ pub fn database_path() -> PathBuf {
 }
 
 pub fn support_dir() -> PathBuf {
+    if let Some(path) = std::env::var_os("NEKO_DATA_DIR").map(PathBuf::from).filter(|p|p.is_absolute()) {
+        return path;
+    }
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
@@ -573,6 +583,9 @@ pub fn support_dir() -> PathBuf {
 /// bytes a binary codec would save.
 pub fn write_frame<W: Write>(mut w: W, frame: &Frame) -> io::Result<()> {
     let payload = serde_json::to_vec(frame).map_err(io::Error::other)?;
+    if payload.len() > 16 * 1024 * 1024 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "IPC frame exceeds 16 MiB"));
+    }
     let len = u32::try_from(payload.len()).map_err(io::Error::other)?;
     w.write_all(&len.to_le_bytes())?;
     w.write_all(&payload)?;
@@ -589,6 +602,9 @@ pub fn read_frame<R: Read>(mut r: R) -> io::Result<Option<Frame>> {
         Err(e) => return Err(e),
     }
     let len = u32::from_le_bytes(len_bytes) as usize;
+    if len > 16 * 1024 * 1024 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "IPC frame exceeds 16 MiB"));
+    }
     let mut payload = vec![0u8; len];
     r.read_exact(&mut payload)?;
     let frame = serde_json::from_slice(&payload).map_err(io::Error::other)?;
@@ -598,6 +614,12 @@ pub fn read_frame<R: Read>(mut r: R) -> io::Result<Option<Frame>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_frame_is_rejected_before_allocating_payload() {
+        let length = (16_u32 * 1024 * 1024 + 1).to_le_bytes();
+        assert_eq!(read_frame(&length[..]).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
 
     #[test]
     fn frame_round_trips_through_the_wire_codec() {
