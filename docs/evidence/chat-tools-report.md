@@ -43,3 +43,13 @@ No app install, push, live provider request, OAuth provider verification, real
 model chat run, or rendered-window acceptance was performed. The UI compiles;
 visual review remains separate. The underlying Codex sandbox does not enforce
 filesystem read privacy between workspaces, as already documented.
+
+## Stop versus reply completion follow-up
+
+Review identified a gap after the runner's early cancellation check: Stop could
+close a turn before its proposed tickets or memories were saved. Reply
+completion now takes the database mutex once, reloads and checks the pending
+turn and cancellation flag, and keeps that lock for all ticket, memory, and
+final-message writes. Stop and completion therefore have one serialization
+point. Two deterministic tests cover Stop winning after the early check, and
+completion winning once with later replay rejected by persisted turn state.
