@@ -339,8 +339,11 @@ pub fn append_event(task: &mut Task, role: &str, message: &str) {
         role: truncate(role, 64),
         message: truncate(message, MAX_EVENT_BYTES),
     });
-    if task.events.len() > MAX_EVENTS {
-        task.events.drain(..task.events.len() - MAX_EVENTS);
+    // Evict the oldest progress events first. The user's notes are direction
+    // for future runs and go only when nothing else is left to evict.
+    while task.events.len() > MAX_EVENTS {
+        let index = task.events.iter().position(|e| e.role != NOTE_ROLE).unwrap_or(0);
+        task.events.remove(index);
     }
     task.updated_at_ms = at_ms;
 }
@@ -1203,6 +1206,18 @@ mod tests {
                     && event.message.chars().all(|ch| ch == '猫'))
         );
         assert!(task.updated_at_ms > 0);
+    }
+
+    #[test]
+    fn notes_outlive_progress_events() {
+        let mut task = create_task("w".into(), None, "t".into(), "g".into()).unwrap();
+        append_event(&mut task, NOTE_ROLE, "cover discount-only carts");
+        for i in 0..250 {
+            append_event(&mut task, "builder", &format!("step {i}"));
+        }
+        assert_eq!(task.events.len(), MAX_EVENTS);
+        assert!(task.events.iter().any(|e| e.role == NOTE_ROLE));
+        assert_eq!(task.events.last().unwrap().message, "step 249");
     }
 
     #[test]
