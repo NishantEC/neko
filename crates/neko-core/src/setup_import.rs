@@ -603,9 +603,8 @@ fn discover_codex_claude(context: &DiscoveryContext<'_>) -> Discovery {
         );
         if let Some(projects) = value.get("projects").and_then(Value::as_object) {
             for (directory, project) in projects.iter().take(100) {
-                if !Path::new(directory).is_absolute() {
-                    continue;
-                }
+                // Project inventory remains importable for its config files;
+                // skill roots are separately bounded below to caller/home roots.
                 if out.repositories.len() >= 100 && !out.repositories.contains(directory) {
                     continue;
                 }
@@ -724,7 +723,14 @@ pub fn discover(
         .take(100)
         .filter_map(|repository| {
             let path = PathBuf::from(repository);
-            path.is_absolute().then_some((repository.clone(), path))
+            let canonical = path.canonicalize().ok()?;
+            let home_root = home.canonicalize().ok()?;
+            let caller_root = repositories
+                .iter()
+                .filter_map(|root| root.canonicalize().ok())
+                .any(|root| canonical.starts_with(root));
+            (canonical.starts_with(home_root) || caller_root)
+                .then_some((repository.clone(), canonical))
         })
         .collect::<Vec<_>>();
     let mut roots = Vec::new();
@@ -835,6 +841,29 @@ mod tests {
         assert!(preview.candidates.iter().any(|candidate| {
             candidate.kind == ImportCandidateKind::Skill && candidate.name == "Local"
         }));
+    }
+
+    #[test]
+    fn codex_external_project_inventory_cannot_expand_skill_roots() {
+        let home = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        fs::create_dir_all(external.path().join(".agents/skills/escaped")).unwrap();
+        fs::write(
+            external.path().join(".agents/skills/escaped/SKILL.md"),
+            "---\nname: Escaped\n---\nExternal content",
+        )
+        .unwrap();
+        fs::create_dir_all(home.path().join(".codex")).unwrap();
+        fs::write(
+            home.path().join(".codex/config.toml"),
+            format!(
+                "[projects.\"{}\"]\ntrust_level=\"trusted\"\n",
+                external.path().display()
+            ),
+        )
+        .unwrap();
+        let preview = discover(home.path(), &[], &[], &BTreeMap::new()).preview();
+        assert!(!preview.candidates.iter().any(|candidate| candidate.name == "Escaped"));
     }
 
     #[cfg(unix)]
