@@ -18,6 +18,14 @@ const MAX_FILE: usize = 512 * 1024;
 const MAX_CONNECTIONS: usize = 100;
 const PREVIEW_SETTING: &str = "neko_import_preview_v1";
 
+pub fn read_skill_for_import(path: &str, expected_hash: &str) -> Result<String, String> {
+    let body = file_text(Path::new(path))?.ok_or("Skill file is unavailable")?;
+    if format!("{:x}", Sha256::digest(body.as_bytes())) != expected_hash {
+        return Err("Skill changed; rediscover it before importing".into());
+    }
+    Ok(body)
+}
+
 pub fn load_preview(db: &crate::Db) -> Result<ImportPreview, String> {
     db.get_setting(PREVIEW_SETTING)
         .map_err(|e| e.to_string())?
@@ -119,6 +127,7 @@ impl std::fmt::Debug for Candidate {
 pub struct Discovery {
     pub schedules: Vec<neko_protocol::setup_import::ImportSchedule>,
     pub candidates: Vec<Candidate>,
+    pub skills: Vec<neko_protocol::skills::Skill>,
     pub warnings: Vec<String>,
     pub repositories: Vec<String>,
 }
@@ -185,6 +194,31 @@ impl Discovery {
                     .unwrap_or(path)
                     .into(),
                 metadata: BTreeMap::new(),
+                problem: None,
+            }
+        }));
+        ledger.extend(self.skills.iter().map(|skill| {
+            let id = format!(
+                "skill:{:x}",
+                Sha256::digest(format!("skill\0{}\0{}", skill.path, skill.content_hash).as_bytes())
+            );
+            let (scope, workspace) = skill
+                .workspace_id
+                .as_deref()
+                .map(|path| (format!("workspace:{path}"), Some(path.to_owned())))
+                .unwrap_or_else(|| ("global".into(), None));
+            ImportCandidate {
+                id,
+                kind: ImportCandidateKind::Skill,
+                source: skill.source.clone(),
+                scope,
+                workspace,
+                name: skill.name.clone(),
+                metadata: BTreeMap::from([
+                    ("path".into(), skill.path.clone()),
+                    ("content_hash".into(), skill.content_hash.clone()),
+                    ("description".into(), skill.description.clone()),
+                ]),
                 problem: None,
             }
         }));
@@ -678,6 +712,42 @@ pub fn discover(
     let mut out = Discovery::default();
     CodexClaudeSource.discover(&context, &mut out);
     PaseoSource.discover(&context, &mut out);
+    let workspace_roots = repositories
+        .iter()
+        .map(|repository| (repository.to_string_lossy().into_owned(), repository.clone()))
+        .collect::<Vec<_>>();
+    let mut roots = Vec::new();
+    for (directory, source) in [
+        (".codex/skills", "Codex"),
+        (".agents/skills", "Agents"),
+        (".claude/skills", "Claude"),
+    ] {
+        roots.push(crate::skills::Root {
+            path: home.join(directory),
+            source: source.into(),
+            workspace_id: None,
+        });
+    }
+    for (workspace_id, repository) in workspace_roots {
+        for directory in [".agents/skills", ".claude/skills", ".codex/skills", ".neko/skills"] {
+            roots.push(crate::skills::Root {
+                path: repository.join(directory),
+                source: "Workspace".into(),
+                workspace_id: Some(workspace_id.clone()),
+            });
+        }
+    }
+    let allowed_roots = roots
+        .iter()
+        .filter_map(|root| root.path.canonicalize().ok())
+        .collect::<Vec<_>>();
+    out.skills = crate::skills::discover(&roots)
+        .into_iter()
+        .filter(|skill| {
+            let path = Path::new(&skill.path);
+            allowed_roots.iter().any(|root| path.starts_with(root))
+        })
+        .collect();
     for repository in repositories.iter().take(100) {
         let path = repository.to_string_lossy().into_owned();
         if !out.repositories.contains(&path) {
@@ -691,6 +761,66 @@ pub fn discover(
 mod tests {
     use super::*;
     use neko_protocol::setup_import::ImportCandidateKind;
+
+    #[test]
+    fn discovery_preview_includes_global_and_workspace_skill_path_and_hash_without_body() {
+        let home = tempfile::tempdir().unwrap();
+        let repository = tempfile::tempdir().unwrap();
+        fs::create_dir_all(home.path().join(".codex/skills/example")).unwrap();
+        fs::create_dir_all(repository.path().join(".agents/skills/local")).unwrap();
+        let global = "---\nname: Global\ndescription: safe\n---\nInstructions";
+        let local = "---\nname: Local\ndescription: repo\n---\nWorkspace instructions";
+        fs::write(home.path().join(".codex/skills/example/SKILL.md"), global).unwrap();
+        fs::write(repository.path().join(".agents/skills/local/SKILL.md"), local).unwrap();
+        let preview = discover(
+            home.path(),
+            &[repository.path().to_path_buf()],
+            &[],
+            &BTreeMap::new(),
+        )
+        .preview();
+        let skills: Vec<_> = preview
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.kind == ImportCandidateKind::Skill)
+            .collect();
+        assert_eq!(skills.len(), 2);
+        assert!(skills.iter().all(|candidate| {
+            candidate.metadata.contains_key("path")
+                && candidate.metadata.contains_key("content_hash")
+                && !candidate.metadata.values().any(|value| value.contains("Instructions"))
+        }));
+        assert!(skills.iter().any(|candidate| candidate.scope == "global"));
+        assert!(skills.iter().any(|candidate| candidate.scope.starts_with("workspace:")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skill_discovery_rejects_symlink_escape_from_workspace_root() {
+        use std::os::unix::fs::symlink;
+        let home = tempfile::tempdir().unwrap();
+        let repository = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::create_dir_all(outside.path().join("escape")).unwrap();
+        fs::write(outside.path().join("escape/SKILL.md"), "outside").unwrap();
+        fs::create_dir_all(repository.path().join(".agents/skills")).unwrap();
+        symlink(
+            outside.path().join("escape"),
+            repository.path().join(".agents/skills/escape"),
+        )
+        .unwrap();
+        let preview = discover(
+            home.path(),
+            &[repository.path().to_path_buf()],
+            &[],
+            &BTreeMap::new(),
+        )
+        .preview();
+        assert!(!preview.candidates.iter().any(|candidate| {
+            candidate.kind == ImportCandidateKind::Skill
+                && candidate.name == "escape"
+        }));
+    }
 
     #[test]
     fn preview_ledger_has_stable_redacted_ids_and_scope_metadata() {

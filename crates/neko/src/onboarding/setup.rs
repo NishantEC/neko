@@ -130,9 +130,11 @@ fn brief_in_scope(actual: Option<&str>, selected: Option<&str>) -> bool {
     selected.is_some() && actual == selected
 }
 
-fn begin_clipboard_change(busy:&mut bool,ready:bool)->bool {
-    if *busy || !ready { return false; }
-    *busy=true;
+fn begin_clipboard_change(busy: &mut bool, ready: bool) -> bool {
+    if *busy || !ready {
+        return false;
+    }
+    *busy = true;
     true
 }
 
@@ -145,18 +147,20 @@ fn recording_after_navigation(step: SetupStep, recording: RecordingState) -> Rec
 }
 
 impl OnboardingRoot {
-    fn setup_read_clipboard(&mut self, cx:&mut Context<Self>) {
-        if self.setup.busy { return; }
-        self.setup.busy=true;
+    fn setup_read_clipboard(&mut self, cx: &mut Context<Self>) {
+        if self.setup.busy {
+            return;
+        }
+        self.setup.busy = true;
         let client = self.client.clone();
         cx.spawn(async move |this, cx| {
             let result = client.request(Request::GetClipboardHistoryEnabled).await;
             let _ = this.update(cx, |root, cx| {
-                root.setup.busy=false;
+                root.setup.busy = false;
                 if let Ok(Response::ClipboardHistoryEnabled { enabled }) = result {
                     root.flow.clipboard_enabled = enabled;
-                    root.setup.clipboard_ready=true;
-                    root.setup_request(Command::Snapshot,cx);
+                    root.setup.clipboard_ready = true;
+                    root.setup_request(Command::Snapshot, cx);
                 }
                 cx.notify();
             });
@@ -178,7 +182,11 @@ impl OnboardingRoot {
                             root.ensure_hotkey_registered();
                         }
                         if !root.setup.busy {
-                            if !root.setup.clipboard_ready {root.setup_read_clipboard(cx);} else {root.setup_request(Command::Snapshot, cx);}
+                            if !root.setup.clipboard_ready {
+                                root.setup_read_clipboard(cx);
+                            } else {
+                                root.setup_request(Command::Snapshot, cx);
+                            }
                         }
                     })
                     .is_err()
@@ -449,6 +457,8 @@ impl OnboardingRoot {
         self.setup_request(
             Command::SetupImport(ImportCommand::Apply {
                 schedule_ids: self.setup.selected_schedules.iter().cloned().collect(),
+                skill_ids: vec![],
+                workspace_ids: vec![],
                 preview_id: self.setup.snapshot.import_preview.preview_id.clone(),
                 connection_ids: self.setup.selected_connections.iter().cloned().collect(),
                 repositories: self.setup.selected_repositories.iter().cloned().collect(),
@@ -1093,11 +1103,11 @@ mod tests {
     use super::*;
     #[test]
     fn delayed_clipboard_ack_rejects_duplicate_activation() {
-        let mut busy=false;
-        assert!(!begin_clipboard_change(&mut busy,false));
+        let mut busy = false;
+        assert!(!begin_clipboard_change(&mut busy, false));
         assert!(!busy);
-        assert!(begin_clipboard_change(&mut busy,true));
-        assert!(!begin_clipboard_change(&mut busy,true));
+        assert!(begin_clipboard_change(&mut busy, true));
+        assert!(!begin_clipboard_change(&mut busy, true));
         assert!(busy);
     }
     #[test]
