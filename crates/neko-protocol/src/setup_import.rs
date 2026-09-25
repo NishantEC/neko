@@ -80,6 +80,10 @@ pub enum ImportCommand {
     Apply {
         #[serde(default)]
         schedule_ids: Vec<String>,
+        #[serde(default)]
+        skill_ids: Vec<String>,
+        #[serde(default)]
+        workspace_ids: Vec<String>,
         preview_id: String,
         connection_ids: Vec<String>,
         repositories: Vec<String>,
