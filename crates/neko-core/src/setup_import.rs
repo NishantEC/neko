@@ -2,7 +2,7 @@
 //! omitted from the serializable preview. Discovery never launches a server.
 use neko_protocol::{
     mcp_host::ServerConfig,
-    setup_import::{ImportConnection, ImportPreview},
+    setup_import::{ImportCandidate, ImportCandidateKind, ImportConnection, ImportPreview},
     workbench::Secret,
 };
 use serde_json::Value;
@@ -19,21 +19,92 @@ const MAX_CONNECTIONS: usize = 100;
 const PREVIEW_SETTING: &str = "neko_import_preview_v1";
 
 pub fn load_preview(db: &crate::Db) -> Result<ImportPreview, String> {
-    db.get_setting(PREVIEW_SETTING).map_err(|e| e.to_string())?
+    db.get_setting(PREVIEW_SETTING)
+        .map_err(|e| e.to_string())?
         .map(|value| serde_json::from_str(&value).map_err(|_| "Cannot read import preview".into()))
         .unwrap_or_else(|| Ok(ImportPreview::default()))
 }
 
 pub fn save_preview(db: &crate::Db, preview: &ImportPreview) -> Result<(), String> {
     let value = serde_json::to_string(preview).map_err(|e| e.to_string())?;
-    if value.len() > 1024 * 1024 { return Err("Import preview exceeds its limit".into()); }
-    db.set_setting(PREVIEW_SETTING, &value).map_err(|e| e.to_string())
+    if value.len() > 1024 * 1024 {
+        return Err("Import preview exceeds its limit".into());
+    }
+    db.set_setting(PREVIEW_SETTING, &value)
+        .map_err(|e| e.to_string())
 }
 
 pub struct Candidate {
     pub preview: ImportConnection,
     pub config: Option<ServerConfig>,
     pub credentials: Option<Secret>,
+}
+
+/// Read-only capability set handed to source adapters. It deliberately has no
+/// process, network, or credential-store handle.
+pub struct DiscoveryContext<'a> {
+    home: &'a Path,
+    repositories: &'a [PathBuf],
+    paths: &'a [PathBuf],
+    environment: &'a BTreeMap<String, String>,
+}
+impl<'a> DiscoveryContext<'a> {
+    pub fn new(
+        home: &'a Path,
+        repositories: &'a [PathBuf],
+        paths: &'a [PathBuf],
+        environment: &'a BTreeMap<String, String>,
+    ) -> Self {
+        Self {
+            home,
+            repositories,
+            paths,
+            environment,
+        }
+    }
+    pub fn home(&self) -> &Path {
+        self.home
+    }
+    pub fn repositories(&self) -> &[PathBuf] {
+        self.repositories
+    }
+    pub fn executable_paths(&self) -> &[PathBuf] {
+        self.paths
+    }
+    pub fn environment(&self) -> &BTreeMap<String, String> {
+        self.environment
+    }
+    pub fn read_text(&self, path: &Path) -> Result<String, String> {
+        let candidate = path
+            .canonicalize()
+            .map_err(|_| "Import path is unavailable")?;
+        let roots = std::iter::once(self.home)
+            .chain(self.repositories.iter().map(PathBuf::as_path))
+            .filter_map(|root| root.canonicalize().ok());
+        if !roots.into_iter().any(|root| candidate.starts_with(root)) {
+            return Err("Import path is outside the discovery roots".into());
+        }
+        file_text(&candidate)?.ok_or("Import file is unavailable".into())
+    }
+    fn canonical_directory(&self, path: &Path) -> Option<PathBuf> {
+        let candidate = path.canonicalize().ok()?;
+        if !candidate.is_dir() {
+            return None;
+        }
+        let roots = std::iter::once(self.home)
+            .chain(self.repositories.iter().map(PathBuf::as_path))
+            .filter_map(|root| root.canonicalize().ok());
+        roots
+            .into_iter()
+            .any(|root| candidate.starts_with(root))
+            .then_some(candidate)
+    }
+}
+
+/// Internal source seam. Implementations may only inspect the supplied
+/// bounded context and append redacted records to a discovery session.
+pub(crate) trait ImportSource {
+    fn discover(&self, context: &DiscoveryContext<'_>, out: &mut Discovery);
 }
 impl std::fmt::Debug for Candidate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -53,7 +124,72 @@ pub struct Discovery {
 }
 impl Discovery {
     pub fn preview(&self) -> ImportPreview {
+        let mut ledger = self
+            .candidates
+            .iter()
+            .map(|candidate| ImportCandidate {
+                id: candidate.preview.id.clone(),
+                kind: ImportCandidateKind::Connection,
+                source: candidate.preview.source.clone(),
+                scope: candidate
+                    .preview
+                    .repository
+                    .as_deref()
+                    .map_or_else(|| "global".into(), |path| format!("workspace:{path}")),
+                workspace: candidate.preview.repository.clone(),
+                name: candidate.preview.name.clone(),
+                metadata: BTreeMap::from([
+                    (
+                        "enabled_at_source".into(),
+                        candidate.preview.enabled_at_source.to_string(),
+                    ),
+                    (
+                        "has_credentials".into(),
+                        candidate.preview.has_credentials.to_string(),
+                    ),
+                ]),
+                problem: candidate.preview.problem.clone(),
+            })
+            .collect::<Vec<_>>();
+        ledger.extend(self.schedules.iter().map(|schedule| {
+            ImportCandidate {
+                id: schedule.id.clone(),
+                kind: ImportCandidateKind::Schedule,
+                source: schedule.source.clone(),
+                scope: schedule
+                    .repository
+                    .as_deref()
+                    .map_or_else(|| "global".into(), |path| format!("workspace:{path}")),
+                workspace: schedule.repository.clone(),
+                name: schedule.name.clone(),
+                metadata: BTreeMap::from([
+                    ("timezone".into(), schedule.timezone.clone()),
+                    ("rule".into(), schedule.rule.clone()),
+                ]),
+                problem: schedule.warnings.first().cloned(),
+            }
+        }));
+        ledger.extend(self.repositories.iter().map(|path| {
+            ImportCandidate {
+                id: format!(
+                    "workspace:{:x}",
+                    Sha256::digest(format!("workspace\0{path}").as_bytes())
+                ),
+                kind: ImportCandidateKind::Workspace,
+                source: "local".into(),
+                scope: format!("workspace:{path}"),
+                workspace: Some(path.clone()),
+                name: Path::new(path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(path)
+                    .into(),
+                metadata: BTreeMap::new(),
+                problem: None,
+            }
+        }));
         ImportPreview {
+            candidates: ledger,
             schedules: self.schedules.clone(),
             preview_id: String::new(),
             connections: self.candidates.iter().map(|c| c.preview.clone()).collect(),
@@ -379,12 +515,11 @@ fn add_servers(
 }
 
 /// Caller supplies environment and executable search roots; no shell is run.
-pub fn discover(
-    home: &Path,
-    repositories: &[PathBuf],
-    paths: &[PathBuf],
-    environment: &BTreeMap<String, String>,
-) -> Discovery {
+fn discover_codex_claude(context: &DiscoveryContext<'_>) -> Discovery {
+    let home = context.home;
+    let repositories = context.repositories;
+    let paths = context.paths;
+    let environment = context.environment;
     let mut out = Discovery::default();
     let mut files = vec![
         (home.join(".codex/config.toml"), None, true),
@@ -400,9 +535,11 @@ pub fn discover(
         let (file, repository, toml) = files[cursor].clone();
         cursor += 1;
         let source = file.to_string_lossy().into_owned();
-        let text = match file_text(&file) {
-            Ok(Some(text)) => text,
-            Ok(None) => continue,
+        if !file.exists() {
+            continue;
+        }
+        let text = match context.read_text(&file) {
+            Ok(text) => text,
             Err(e) => {
                 out.warnings.push(format!("{source}: {e}"));
                 continue;
@@ -469,7 +606,9 @@ pub fn discover(
     let (schedules, warnings) = crate::schedule_import::discover(home);
     for schedule in &schedules {
         if let Some(repository) = &schedule.repository {
-            if !out.repositories.contains(repository) && out.repositories.len() < 100 { out.repositories.push(repository.clone()); }
+            if !out.repositories.contains(repository) && out.repositories.len() < 100 {
+                out.repositories.push(repository.clone());
+            }
         }
     }
     out.schedules = schedules;
@@ -477,13 +616,214 @@ pub fn discover(
     out
 }
 
+struct CodexClaudeSource;
+impl ImportSource for CodexClaudeSource {
+    fn discover(&self, context: &DiscoveryContext<'_>, out: &mut Discovery) {
+        let found = discover_codex_claude(context);
+        *out = found;
+    }
+}
+
+struct PaseoSource;
+impl ImportSource for PaseoSource {
+    fn discover(&self, context: &DiscoveryContext<'_>, out: &mut Discovery) {
+        let metadata = context.home.join(".paseo/projects/projects.json");
+        if let Ok(text) = context.read_text(&metadata) {
+            let Ok(entries) = serde_json::from_str::<Vec<Value>>(&text) else {
+                out.warnings.push(
+                    "Paseo project metadata is unsupported; no live state was imported".into(),
+                );
+                return;
+            };
+            for entry in entries
+                .into_iter()
+                .filter(|entry| entry.get("archivedAt").is_none_or(Value::is_null))
+                .take(100)
+            {
+                let Some(path) = entry.get("rootPath").and_then(Value::as_str).map(str::trim)
+                else {
+                    continue;
+                };
+                let Some(path) = context.canonical_directory(Path::new(path)) else {
+                    continue;
+                };
+                let path = path.to_string_lossy().into_owned();
+                if out.repositories.contains(&path) {
+                    continue;
+                }
+                out.repositories.push(path);
+                if out.repositories.len() >= 100 {
+                    break;
+                }
+            }
+        }
+        if context
+            .home
+            .join(".paseo/paseo.pid")
+            .symlink_metadata()
+            .is_ok()
+        {
+            out.warnings.push("Paseo live state is unsupported; no processes, transcripts, credentials, grants, or enabled state were imported".into());
+        }
+    }
+}
+
+pub fn discover(
+    home: &Path,
+    repositories: &[PathBuf],
+    paths: &[PathBuf],
+    environment: &BTreeMap<String, String>,
+) -> Discovery {
+    let context = DiscoveryContext::new(home, repositories, paths, environment);
+    let mut out = Discovery::default();
+    CodexClaudeSource.discover(&context, &mut out);
+    PaseoSource.discover(&context, &mut out);
+    for repository in repositories.iter().take(100) {
+        let path = repository.to_string_lossy().into_owned();
+        if !out.repositories.contains(&path) {
+            out.repositories.push(path.clone());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neko_protocol::setup_import::ImportCandidateKind;
+
+    #[test]
+    fn preview_ledger_has_stable_redacted_ids_and_scope_metadata() {
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir_all(home.path().join(".codex")).unwrap();
+        fs::write(
+            home.path().join(".codex/config.toml"),
+            "[mcp_servers.global]\nurl='https://example.com/mcp'\nbearer_token_env_var='TOKEN'\n[projects.\"/repo\"]\ntrust_level='trusted'\n",
+        )
+        .unwrap();
+        let first = discover(
+            home.path(),
+            &[],
+            &[],
+            &BTreeMap::from([("TOKEN".into(), "secret-value".into())]),
+        )
+        .preview();
+        let second = discover(
+            home.path(),
+            &[],
+            &[],
+            &BTreeMap::from([("TOKEN".into(), "secret-value".into())]),
+        )
+        .preview();
+        assert_eq!(first.candidates, second.candidates);
+        assert!(first.candidates.iter().any(|candidate| {
+            candidate.kind == ImportCandidateKind::Connection
+                && candidate.source.contains(".codex/config.toml")
+                && candidate.scope == "global"
+        }));
+        assert!(first.candidates.iter().all(|candidate| {
+            !candidate.id.is_empty()
+                && !candidate.id.contains("secret")
+                && !serde_json::to_string(candidate)
+                    .unwrap()
+                    .contains("secret-value")
+        }));
+    }
+
+    #[test]
+    fn discovery_context_reads_only_bounded_roots() {
+        let home = tempfile::tempdir().unwrap();
+        fs::write(home.path().join("inside.json"), "{}").unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let environment = BTreeMap::new();
+        let context = DiscoveryContext::new(home.path(), &[], &[], &environment);
+        assert_eq!(
+            context.read_text(&home.path().join("inside.json")).unwrap(),
+            "{}"
+        );
+        assert!(context.read_text(outside.path()).is_err());
+    }
+
+    #[test]
+    fn paseo_projects_use_root_path_and_ignore_archived_missing_or_outside_entries() {
+        let home = tempfile::tempdir().unwrap();
+        let good = home.path().join("good");
+        fs::create_dir(&good).unwrap();
+        fs::create_dir_all(home.path().join(".paseo/projects")).unwrap();
+        let missing = home.path().join("missing");
+        fs::write(
+            home.path().join(".paseo/projects/projects.json"),
+            serde_json::json!([
+                {"rootPath": good, "archivedAt": null},
+                {"rootPath": missing, "archivedAt": null},
+                {"rootPath": good, "archivedAt": "2026-01-01T00:00:00Z"}
+            ])
+            .to_string(),
+        )
+        .unwrap();
+        let preview = discover(home.path(), &[], &[], &BTreeMap::new()).preview();
+        let workspaces: Vec<_> = preview
+            .candidates
+            .iter()
+            .filter(|c| c.kind == ImportCandidateKind::Workspace)
+            .collect();
+        assert_eq!(workspaces.len(), 1);
+        assert_eq!(
+            workspaces[0].workspace.as_deref(),
+            good.canonicalize().unwrap().to_str()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovery_context_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret.json"), "secret").unwrap();
+        symlink(
+            outside.path().join("secret.json"),
+            home.path().join("link.json"),
+        )
+        .unwrap();
+        let environment = BTreeMap::new();
+        let context = DiscoveryContext::new(home.path(), &[], &[], &environment);
+        assert!(context.read_text(&home.path().join("link.json")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_and_claude_config_symlink_escape_is_not_read() {
+        use std::os::unix::fs::symlink;
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(
+            outside.path().join("config.json"),
+            r#"{"mcpServers":{"escaped":{"url":"https://outside.example"}}}"#,
+        )
+        .unwrap();
+        symlink(
+            outside.path().join("config.json"),
+            home.path().join(".claude.json"),
+        )
+        .unwrap();
+        let result = discover(home.path(), &[], &[], &BTreeMap::new());
+        assert!(result.candidates.is_empty());
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("outside the discovery roots"))
+        );
+    }
     #[test]
     fn fresh_workbench_snapshot_includes_separately_stored_import_preview() {
         let db = crate::Db::open_in_memory().unwrap();
-        let preview = ImportPreview { preview_id:"reviewed".into(), repositories:vec!["/fixture".into()], ..Default::default() };
+        let preview = ImportPreview {
+            preview_id: "reviewed".into(),
+            repositories: vec!["/fixture".into()],
+            ..Default::default()
+        };
         save_preview(&db, &preview).unwrap();
         assert_eq!(crate::workbench::load(&db).unwrap().import_preview, preview);
     }
@@ -493,11 +833,25 @@ mod tests {
         let repository = home.path().join("repo");
         fs::create_dir_all(repository.join(".codex")).unwrap();
         fs::create_dir_all(home.path().join(".codex")).unwrap();
-        fs::write(home.path().join(".codex/config.toml"), format!("[projects.{}]\ntrust_level='trusted'\n", serde_json::to_string(&repository.to_string_lossy()).unwrap())).unwrap();
-        fs::write(repository.join(".codex/config.toml"), "[mcp_servers.scoped]\nurl='https://example.org/mcp'").unwrap();
+        fs::write(
+            home.path().join(".codex/config.toml"),
+            format!(
+                "[projects.{}]\ntrust_level='trusted'\n",
+                serde_json::to_string(&repository.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
+        fs::write(
+            repository.join(".codex/config.toml"),
+            "[mcp_servers.scoped]\nurl='https://example.org/mcp'",
+        )
+        .unwrap();
         let result = discover(home.path(), &[], &[], &BTreeMap::new());
         assert_eq!(result.candidates.len(), 1);
-        assert_eq!(result.candidates[0].preview.repository.as_deref(), repository.to_str());
+        assert_eq!(
+            result.candidates[0].preview.repository.as_deref(),
+            repository.to_str()
+        );
     }
     #[test]
     fn preserves_header_environment_and_project_disable_and_rejects_unsupported_cwd() {
