@@ -38,7 +38,10 @@ pub(super) struct Setup {
     server_trust: bool,
     selected_connections: HashSet<String>,
     selected_repositories: HashSet<String>,
+    selected_skills: HashSet<String>,
+    selected_workspaces: HashSet<String>,
     selected_schedules: HashSet<String>,
+    import_discovery_started: bool,
     credentials: bool,
     trust: bool,
     brief_turn: Option<String>,
@@ -89,7 +92,10 @@ impl Setup {
             server_trust: false,
             selected_connections: HashSet::new(),
             selected_repositories: HashSet::new(),
+            selected_skills: HashSet::new(),
+            selected_workspaces: HashSet::new(),
             selected_schedules: HashSet::new(),
+            import_discovery_started: false,
             credentials: false,
             trust: false,
             brief_turn: None,
@@ -138,6 +144,60 @@ fn begin_clipboard_change(busy: &mut bool, ready: bool) -> bool {
     true
 }
 
+fn should_start_import_discovery(step: SetupStep, busy: bool, started: bool) -> bool {
+    step == SetupStep::Import && !busy && !started
+}
+
+fn begin_import_discovery(busy: bool, started: &mut bool, force: bool) -> bool {
+    if busy {
+        return false;
+    }
+    if *started && !force {
+        return false;
+    }
+    *started = true;
+    true
+}
+
+fn candidate_is_unavailable(
+    kind: &neko_protocol::setup_import::ImportCandidateKind,
+    problem: Option<&str>,
+    workspace: Option<&str>,
+    workspace_selected: bool,
+) -> bool {
+    if matches!(kind, neko_protocol::setup_import::ImportCandidateKind::Schedule) {
+        return false;
+    }
+    problem.is_some()
+        || (matches!(kind, neko_protocol::setup_import::ImportCandidateKind::Connection)
+            && workspace.is_some()
+            && !workspace_selected)
+}
+
+fn workspace_scope_selected(
+    candidate_workspace: Option<&str>,
+    selected_candidate: bool,
+    existing_workspace: bool,
+) -> bool {
+    candidate_workspace.is_none() || selected_candidate || existing_workspace
+}
+
+fn uses_legacy_import_rows(candidate_count: usize) -> bool {
+    candidate_count == 0
+}
+
+fn reset_import_discovery_after_failure(discover: bool, started: &mut bool) {
+    if discover {
+        *started = false;
+    }
+}
+
+fn candidate_has_credentials(metadata: &std::collections::BTreeMap<String, String>) -> bool {
+    metadata
+        .get("has_credentials")
+        .is_some_and(|value| value == "true")
+}
+
 fn recording_after_navigation(step: SetupStep, recording: RecordingState) -> RecordingState {
     if step == SetupStep::Mac {
         recording
@@ -147,6 +207,23 @@ fn recording_after_navigation(step: SetupStep, recording: RecordingState) -> Rec
 }
 
 impl OnboardingRoot {
+    fn setup_discover_import(&mut self, cx: &mut Context<Self>, force: bool) {
+        if !begin_import_discovery(self.setup.busy, &mut self.setup.import_discovery_started, force) {
+            return;
+        }
+        let repository = self.setup.repository.read(cx).content().trim().to_owned();
+        self.setup_request(
+            Command::SetupImport(ImportCommand::Discover {
+                repositories: if repository.is_empty() {
+                    vec![]
+                } else {
+                    vec![repository]
+                },
+            }),
+            cx,
+        );
+    }
+
     fn setup_read_clipboard(&mut self, cx: &mut Context<Self>) {
         if self.setup.busy {
             return;
@@ -208,6 +285,7 @@ impl OnboardingRoot {
             command,
             Command::SetupImport(ImportCommand::Discover { .. })
         );
+        let apply = matches!(command, Command::SetupImport(ImportCommand::Apply { .. }));
         let brief = matches!(command, Command::SendMessage { .. });
         let connection_io = matches!(
             command,
@@ -232,15 +310,29 @@ impl OnboardingRoot {
                             root.setup.reset_import_consent();
                             root.setup.selected_connections.clear();
                             root.setup.selected_repositories.clear();
+                            root.setup.selected_skills.clear();
+                            root.setup.selected_workspaces.clear();
                             root.setup.selected_schedules.clear();
                             root.setup.notice = Some("Select what to bring over. Nothing runs or gains permission during import.".into());
+                        }
+                        if apply {
+                            root.setup.notice = Some("Import applied. MCP connections remain untrusted, skills remain disabled, and schedules stay paused until you opt in later.".into());
                         }
                         if brief { root.setup.brief_turn = snapshot.conversation.iter().rev().find(|m| m.role == ChatRole::Neko && m.pending).map(|m| m.id.clone()); }
                         root.setup.snapshot = snapshot;
                     }
-                    Ok(Response::Error { message }) => root.setup.error = Some(if connection_io {"Connection failed. Review the server setup or sign in, then retry.".into()} else {message}),
-                    Err(error) => root.setup.error = Some(error.to_string()),
-                    _ => root.setup.error = Some("Unexpected setup response; try again.".into()),
+                    Ok(Response::Error { message }) => {
+                        reset_import_discovery_after_failure(discover, &mut root.setup.import_discovery_started);
+                        root.setup.error = Some(if connection_io {"Connection failed. Review the server setup or sign in, then retry.".into()} else {message})
+                    },
+                    Err(error) => {
+                        reset_import_discovery_after_failure(discover, &mut root.setup.import_discovery_started);
+                        root.setup.error = Some(error.to_string())
+                    },
+                    _ => {
+                        reset_import_discovery_after_failure(discover, &mut root.setup.import_discovery_started);
+                        root.setup.error = Some("Unexpected setup response; try again.".into())
+                    },
                 }
                 cx.notify();
             });
@@ -256,11 +348,22 @@ impl OnboardingRoot {
             self.close_and_persist_completion(window, cx);
             return;
         }
+        let previous = self.setup.step;
         self.setup.step = self.setup.step.next();
         self.flow.hotkey_recording =
             recording_after_navigation(self.setup.step, self.flow.hotkey_recording.clone());
         self.setup.error = None;
         self.setup.notice = None;
+        if previous == SetupStep::Import && self.setup.step != SetupStep::Import {
+            self.setup.import_discovery_started = false;
+        }
+        if should_start_import_discovery(
+            self.setup.step,
+            self.setup.busy,
+            self.setup.import_discovery_started,
+        ) {
+            self.setup_discover_import(cx, false);
+        }
         cx.notify();
     }
 
@@ -297,114 +400,189 @@ impl OnboardingRoot {
     }
 
     fn setup_import_view(&self, cx: &mut Context<Self>) -> gpui::Div {
-        let mut content = div().flex().flex_col().gap(px(12.)).child(button(
+        let mut content = div().flex().flex_col().gap(px(12.)).child(note(
+            "Review local sources and scopes. Discovery is read-only: it never executes tools, starts processes, enables skills, or grants access."
+        )).child(button(
             "setup-scan",
-            "Scan Codex and Claude settings",
+            if self.setup.import_discovery_started { "Refresh discovery" } else { "Discover local setup" },
             !self.setup.busy,
             cx,
             |r, _, cx| {
-                let repository = r.setup.repository.read(cx).content().trim().to_owned();
-                r.setup_request(
-                    Command::SetupImport(ImportCommand::Discover {
-                        repositories: if repository.is_empty() {
-                            vec![]
-                        } else {
-                            vec![repository]
-                        },
-                    }),
-                    cx,
-                );
+                r.setup_discover_import(cx, true);
             },
         ));
         let preview = &self.setup.snapshot.import_preview;
-        for repository in &preview.repositories {
-            let path = repository.clone();
-            content = content.child(button(
-                format!("setup-import-repo-{path}"),
-                format!(
-                    "{} Workspace · {path}",
-                    if self.setup.selected_repositories.contains(&path) {
-                        "✓"
-                    } else {
-                        "+"
-                    }
-                ),
-                !self.setup.busy,
-                cx,
-                move |r, _, cx| {
-                    if !r.setup.selected_repositories.remove(&path) {
-                        r.setup.selected_repositories.insert(path.clone());
-                    }
-                    r.setup.reset_import_consent();
-                    cx.notify();
-                },
-            ));
+        if !preview.candidates.is_empty() {
+            content = content.child(note("Sources and scopes"));
         }
-        for connection in &preview.connections {
-            let id = connection.id.clone();
+        for candidate in &preview.candidates {
+            let id = candidate.id.clone();
+            let candidate_kind = candidate.kind.clone();
+            let selected = match &candidate_kind {
+                neko_protocol::setup_import::ImportCandidateKind::Connection => {
+                    self.setup.selected_connections.contains(&id)
+                }
+                neko_protocol::setup_import::ImportCandidateKind::Skill => {
+                    self.setup.selected_skills.contains(&id)
+                }
+                neko_protocol::setup_import::ImportCandidateKind::Workspace => {
+                    self.setup.selected_workspaces.contains(&id)
+                }
+                neko_protocol::setup_import::ImportCandidateKind::Schedule => {
+                    self.setup.selected_schedules.contains(&id)
+                }
+            };
+            let kind = format!("{:?}", candidate.kind);
+            let source = candidate.source.clone();
+            let scope = candidate.scope.clone();
+            let credentials = candidate_has_credentials(&candidate.metadata);
+            let problem = candidate.problem.clone();
+            let selected_candidate = self.setup.selected_workspaces.iter().any(|selected| {
+                preview.candidates.iter().any(|workspace| {
+                    workspace.id == *selected && workspace.workspace == candidate.workspace
+                })
+            });
+            let existing_workspace = self.setup.snapshot.workspaces.iter().any(|workspace| {
+                candidate.workspace.as_deref() == Some(workspace.repository.as_str())
+            });
+            let workspace_selected = workspace_scope_selected(
+                candidate.workspace.as_deref(),
+                selected_candidate,
+                existing_workspace,
+            );
+            let disabled = candidate_is_unavailable(
+                &candidate_kind,
+                problem.as_deref(),
+                candidate.workspace.as_deref(),
+                workspace_selected,
+            );
             content = content.child(button(
-                format!("setup-import-connection-{id}"),
+                format!("setup-import-candidate-{id}"),
                 format!(
-                    "{} {} · {}{}",
-                    if self.setup.selected_connections.contains(&id) {
-                        "✓"
-                    } else {
-                        "+"
-                    },
-                    connection.name,
-                    connection.repository.as_deref().unwrap_or("Global"),
-                    if connection.has_credentials {
-                        " · credentials found"
-                    } else {
-                        ""
-                    }
+                    "{} {kind} · {} · source:{source} · {scope}{}{}",
+                    if selected { "✓" } else { "○" },
+                    candidate.name,
+                    if credentials { " · credentials found" } else { "" },
+                    if disabled { " · unavailable" } else { "" }
                 ),
-                !self.setup.busy && connection.problem.is_none(),
+                !self.setup.busy && !disabled,
                 cx,
                 move |r, _, cx| {
-                    if !r.setup.selected_connections.remove(&id) {
-                        r.setup.selected_connections.insert(id.clone());
+                    let set = match &candidate_kind {
+                        neko_protocol::setup_import::ImportCandidateKind::Connection => {
+                            &mut r.setup.selected_connections
+                        }
+                        neko_protocol::setup_import::ImportCandidateKind::Skill => {
+                            &mut r.setup.selected_skills
+                        }
+                        neko_protocol::setup_import::ImportCandidateKind::Workspace => {
+                            &mut r.setup.selected_workspaces
+                        }
+                        neko_protocol::setup_import::ImportCandidateKind::Schedule => {
+                            &mut r.setup.selected_schedules
+                        }
+                    };
+                    if !set.remove(&id) {
+                        set.insert(id.clone());
                     }
                     r.setup.reset_import_consent();
                     cx.notify();
                 },
             ));
-            if let Some(problem) = &connection.problem {
-                content = content.child(note(problem.clone()));
+            if let Some(problem) = problem {
+                content = content.child(note(problem));
             }
         }
         for warning in &preview.warnings {
             content = content.child(note(warning.clone()));
         }
-        for schedule in &preview.schedules {
-            let id = schedule.id.clone();
-            content = content
-                .child(button(
-                    format!("setup-import-schedule-{id}"),
+        if uses_legacy_import_rows(preview.candidates.len()) {
+            for repository in &preview.repositories {
+                let path = repository.clone();
+                content = content.child(button(
+                    format!("setup-import-repo-{path}"),
                     format!(
-                        "{} Schedule · {} · import paused",
-                        if self.setup.selected_schedules.contains(&id) {
+                        "{} Workspace · {path}",
+                        if self.setup.selected_repositories.contains(&path) {
                             "✓"
                         } else {
                             "+"
-                        },
-                        schedule.name
+                        }
                     ),
                     !self.setup.busy,
                     cx,
                     move |r, _, cx| {
-                        if !r.setup.selected_schedules.remove(&id) {
-                            r.setup.selected_schedules.insert(id.clone());
+                        if !r.setup.selected_repositories.remove(&path) {
+                            r.setup.selected_repositories.insert(path.clone());
                         }
                         r.setup.reset_import_consent();
                         cx.notify();
                     },
-                ))
-                .child(note(format!(
-                    "{} · {}",
-                    schedule.source,
-                    schedule.warnings.join(" · ")
-                )));
+                ));
+            }
+            for connection in &preview.connections {
+                let id = connection.id.clone();
+                content = content.child(button(
+                    format!("setup-import-connection-{id}"),
+                    format!(
+                        "{} {} · {}{}",
+                        if self.setup.selected_connections.contains(&id) {
+                            "✓"
+                        } else {
+                            "+"
+                        },
+                        connection.name,
+                        connection.repository.as_deref().unwrap_or("Global"),
+                        if connection.has_credentials {
+                            " · credentials found"
+                        } else {
+                            ""
+                        }
+                    ),
+                    !self.setup.busy && connection.problem.is_none(),
+                    cx,
+                    move |r, _, cx| {
+                        if !r.setup.selected_connections.remove(&id) {
+                            r.setup.selected_connections.insert(id.clone());
+                        }
+                        r.setup.reset_import_consent();
+                        cx.notify();
+                    },
+                ));
+                if let Some(problem) = &connection.problem {
+                    content = content.child(note(problem.clone()));
+                }
+            }
+            for schedule in &preview.schedules {
+                let id = schedule.id.clone();
+                content = content
+                    .child(button(
+                        format!("setup-import-schedule-{id}"),
+                        format!(
+                            "{} Schedule · {} · import paused",
+                            if self.setup.selected_schedules.contains(&id) {
+                                "✓"
+                            } else {
+                                "+"
+                            },
+                            schedule.name
+                        ),
+                        !self.setup.busy,
+                        cx,
+                        move |r, _, cx| {
+                            if !r.setup.selected_schedules.remove(&id) {
+                                r.setup.selected_schedules.insert(id.clone());
+                            }
+                            r.setup.reset_import_consent();
+                            cx.notify();
+                        },
+                    ))
+                    .child(note(format!(
+                        "{} · {}",
+                        schedule.source,
+                        schedule.warnings.join(" · ")
+                    )));
+            }
         }
         content=content.child(note(format!("{} local skills discovered. They stay in their source folders; enable reviewed instructions per workspace in Tools & skills.",self.setup.snapshot.skills.available.len())));
         if !preview.preview_id.is_empty() {
@@ -457,8 +635,8 @@ impl OnboardingRoot {
         self.setup_request(
             Command::SetupImport(ImportCommand::Apply {
                 schedule_ids: self.setup.selected_schedules.iter().cloned().collect(),
-                skill_ids: vec![],
-                workspace_ids: vec![],
+                skill_ids: self.setup.selected_skills.iter().cloned().collect(),
+                workspace_ids: self.setup.selected_workspaces.iter().cloned().collect(),
                 preview_id: self.setup.snapshot.import_preview.preview_id.clone(),
                 connection_ids: self.setup.selected_connections.iter().cloned().collect(),
                 repositories: self.setup.selected_repositories.iter().cloned().collect(),
@@ -969,9 +1147,20 @@ impl OnboardingRoot {
                 !self.setup.busy && stage != SetupStep::Welcome,
                 cx,
                 |r, _, cx| {
+                    let previous = r.setup.step;
                     r.setup.step = r.setup.step.back();
                     r.flow.hotkey_recording =
                         recording_after_navigation(r.setup.step, r.flow.hotkey_recording.clone());
+                    if previous == SetupStep::Import && r.setup.step != SetupStep::Import {
+                        r.setup.import_discovery_started = false;
+                    }
+                    if should_start_import_discovery(
+                        r.setup.step,
+                        r.setup.busy,
+                        r.setup.import_discovery_started,
+                    ) {
+                        r.setup_discover_import(cx, false);
+                    }
                     cx.notify();
                 },
             ))
@@ -1151,5 +1340,91 @@ mod tests {
         }
         assert_eq!(step.next(), SetupStep::Sweep);
         assert_eq!(step.back(), SetupStep::Responsibility);
+    }
+    #[test]
+    fn import_discovery_starts_once_on_entry_but_can_retry_after_error() {
+        assert!(should_start_import_discovery(
+            SetupStep::Import,
+            false,
+            false
+        ));
+        assert!(!should_start_import_discovery(
+            SetupStep::Import,
+            true,
+            false
+        ));
+        assert!(!should_start_import_discovery(
+            SetupStep::Import,
+            false,
+            true
+        ));
+        assert!(should_start_import_discovery(
+            SetupStep::Import,
+            false,
+            false
+        ));
+    }
+    #[test]
+    fn import_discovery_does_not_start_for_other_steps() {
+        assert!(!should_start_import_discovery(
+            SetupStep::Tools,
+            false,
+            false
+        ));
+    }
+    #[test]
+    fn busy_import_discovery_does_not_mark_started() {
+        let mut started = false;
+        assert!(!begin_import_discovery(true, &mut started, false));
+        assert!(!started);
+        assert!(begin_import_discovery(false, &mut started, false));
+        assert!(!begin_import_discovery(false, &mut started, false));
+        assert!(begin_import_discovery(false, &mut started, true));
+    }
+    #[test]
+    fn legacy_import_rows_are_only_used_without_candidates() {
+        assert!(uses_legacy_import_rows(0));
+        assert!(!uses_legacy_import_rows(1));
+    }
+    #[test]
+    fn every_discovery_failure_allows_refresh() {
+        let mut started = true;
+        reset_import_discovery_after_failure(true, &mut started);
+        assert!(!started);
+        let mut unrelated = true;
+        reset_import_discovery_after_failure(false, &mut unrelated);
+        assert!(unrelated);
+    }
+    #[test]
+    fn credential_marker_requires_explicit_true_metadata() {
+        let mut metadata = std::collections::BTreeMap::new();
+        assert!(!candidate_has_credentials(&metadata));
+        metadata.insert("has_credentials".into(), "false".into());
+        assert!(!candidate_has_credentials(&metadata));
+        metadata.insert("has_credentials".into(), "true".into());
+        assert!(candidate_has_credentials(&metadata));
+    }
+    #[test]
+    fn scoped_connections_wait_for_workspace_but_schedules_with_warnings_remain_selectable() {
+        use neko_protocol::setup_import::ImportCandidateKind;
+        assert!(candidate_is_unavailable(
+            &ImportCandidateKind::Connection,
+            None,
+            Some("/repo"),
+            false
+        ));
+        assert!(!candidate_is_unavailable(
+            &ImportCandidateKind::Connection,
+            None,
+            Some("/repo"),
+            true
+        ));
+        assert!(!candidate_is_unavailable(
+            &ImportCandidateKind::Schedule,
+            Some("warning"),
+            None,
+            false
+        ));
+        assert!(workspace_scope_selected(Some("/repo"), false, true));
     }
 }
