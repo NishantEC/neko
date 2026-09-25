@@ -100,6 +100,26 @@ cargo build -p neko-daemon --bin neko-daemon
 node scripts/smoke-workbench.mjs
 ```
 
+First-run Import performs one bounded, read-only local scan for Codex, Claude,
+portable Paseo-compatible project metadata, global/workspace skills, MCP
+definitions, and documented schedules. The review ledger records source and
+scope without secrets or skill bodies. Applying selected items creates
+workspaces idempotently, stores skills as disabled review proposals, keeps MCP
+definitions disabled with no grants/tools, and saves schedules paused. It does
+not launch local tools, read Keychain credentials, import transcripts, or
+enable provider/live authority. Unsupported metadata is shown as a warning or
+problem for review. Verify the credential-free path with:
+
+```sh
+cargo build -p neko-daemon --bin neko-daemon
+node scripts/smoke-import.mjs
+```
+
+This smoke uses a synthetic home and daemon data directory. It proves IPC,
+redaction, source/scope grouping, selected apply, disabled/paused defaults, and
+idempotent retry; it does not prove OAuth, Keychain acceptance, provider
+accounts, or native onboarding capture.
+
 Optional real-model/local-fixture probe (uses your authenticated CLI quota):
 `NEKO_SMOKE_LIVE=1 node scripts/smoke-mcp-live.mjs`. It does not authenticate
 an external MCP account or activate personal monitoring.

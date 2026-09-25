@@ -712,9 +712,20 @@ pub fn discover(
     let mut out = Discovery::default();
     CodexClaudeSource.discover(&context, &mut out);
     PaseoSource.discover(&context, &mut out);
-    let workspace_roots = repositories
+    for repository in repositories.iter().take(100) {
+        let path = repository.to_string_lossy().into_owned();
+        if !out.repositories.contains(&path) {
+            out.repositories.push(path.clone());
+        }
+    }
+    let workspace_roots = out
+        .repositories
         .iter()
-        .map(|repository| (repository.to_string_lossy().into_owned(), repository.clone()))
+        .take(100)
+        .filter_map(|repository| {
+            let path = PathBuf::from(repository);
+            path.is_absolute().then_some((repository.clone(), path))
+        })
         .collect::<Vec<_>>();
     let mut roots = Vec::new();
     for (directory, source) in [
@@ -729,7 +740,12 @@ pub fn discover(
         });
     }
     for (workspace_id, repository) in workspace_roots {
-        for directory in [".agents/skills", ".claude/skills", ".codex/skills", ".neko/skills"] {
+        for directory in [
+            ".agents/skills",
+            ".claude/skills",
+            ".codex/skills",
+            ".neko/skills",
+        ] {
             roots.push(crate::skills::Root {
                 path: repository.join(directory),
                 source: "Workspace".into(),
@@ -748,12 +764,6 @@ pub fn discover(
             allowed_roots.iter().any(|root| path.starts_with(root))
         })
         .collect();
-    for repository in repositories.iter().take(100) {
-        let path = repository.to_string_lossy().into_owned();
-        if !out.repositories.contains(&path) {
-            out.repositories.push(path.clone());
-        }
-    }
     out
 }
 
@@ -771,7 +781,11 @@ mod tests {
         let global = "---\nname: Global\ndescription: safe\n---\nInstructions";
         let local = "---\nname: Local\ndescription: repo\n---\nWorkspace instructions";
         fs::write(home.path().join(".codex/skills/example/SKILL.md"), global).unwrap();
-        fs::write(repository.path().join(".agents/skills/local/SKILL.md"), local).unwrap();
+        fs::write(
+            repository.path().join(".agents/skills/local/SKILL.md"),
+            local,
+        )
+        .unwrap();
         let preview = discover(
             home.path(),
             &[repository.path().to_path_buf()],
@@ -788,10 +802,39 @@ mod tests {
         assert!(skills.iter().all(|candidate| {
             candidate.metadata.contains_key("path")
                 && candidate.metadata.contains_key("content_hash")
-                && !candidate.metadata.values().any(|value| value.contains("Instructions"))
+                && !candidate
+                    .metadata
+                    .values()
+                    .any(|value| value.contains("Instructions"))
         }));
         assert!(skills.iter().any(|candidate| candidate.scope == "global"));
-        assert!(skills.iter().any(|candidate| candidate.scope.starts_with("workspace:")));
+        assert!(
+            skills
+                .iter()
+                .any(|candidate| candidate.scope.starts_with("workspace:"))
+        );
+    }
+
+    #[test]
+    fn discovery_adds_skills_for_workspaces_found_by_paseo_adapter() {
+        let home = tempfile::tempdir().unwrap();
+        let repository = home.path().join("repo");
+        fs::create_dir_all(repository.join(".agents/skills/local")).unwrap();
+        fs::write(
+            repository.join(".agents/skills/local/SKILL.md"),
+            "---\nname: Local\n---\nWorkspace instructions",
+        )
+        .unwrap();
+        fs::create_dir_all(home.path().join(".paseo/projects")).unwrap();
+        fs::write(
+            home.path().join(".paseo/projects/projects.json"),
+            serde_json::json!([{"rootPath": repository, "archivedAt": null}]).to_string(),
+        )
+        .unwrap();
+        let preview = discover(home.path(), &[], &[], &BTreeMap::new()).preview();
+        assert!(preview.candidates.iter().any(|candidate| {
+            candidate.kind == ImportCandidateKind::Skill && candidate.name == "Local"
+        }));
     }
 
     #[cfg(unix)]
@@ -817,8 +860,7 @@ mod tests {
         )
         .preview();
         assert!(!preview.candidates.iter().any(|candidate| {
-            candidate.kind == ImportCandidateKind::Skill
-                && candidate.name == "escape"
+            candidate.kind == ImportCandidateKind::Skill && candidate.name == "escape"
         }));
     }
 
