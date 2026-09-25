@@ -263,6 +263,23 @@ impl NekoClient {
     pub fn is_connected(&self) -> bool {
         self.shared.connected.load(Ordering::Relaxed)
     }
+
+    /// Wait for the reconnect supervisor to establish its first usable
+    /// socket, up to `timeout`. This is deliberately a blocking helper for
+    /// background workers; interactive callers must keep using `request`,
+    /// which never stalls a UI thread or buffers work.
+    pub fn wait_for_connection(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.is_connected() {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 }
 
 /// The frames of one streaming request, in arrival order. Ends after the
@@ -633,6 +650,23 @@ mod tests {
         let (client, _events) = NekoClient::connect(path);
         let result = futures::executor::block_on(client.request(Request::Ping));
         assert!(matches!(result, Err(ClientError::NotConnected)));
+    }
+
+    #[test]
+    fn waits_for_the_initial_reconnecting_connection() {
+        let path = temp_socket_path();
+        let (client, _events) = NekoClient::connect(path.clone());
+        let (release_tx, release_rx) = std_mpsc::channel();
+        let listener = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let listener = UnixListener::bind(path).unwrap();
+            let _ = listener.accept().unwrap();
+            release_rx.recv().unwrap();
+        });
+
+        assert!(client.wait_for_connection(Duration::from_secs(2)));
+        release_tx.send(()).unwrap();
+        listener.join().unwrap();
     }
 
     #[test]

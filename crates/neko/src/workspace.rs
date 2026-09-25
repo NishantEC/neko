@@ -229,6 +229,7 @@ impl WorkspaceRoot {
     fn new(client: NekoClient, cx: &mut Context<Self>) -> Self {
         let api_key = input("Optional credential JSON (stored in Keychain)", cx);
         let skill_filter = input("Find a skill by name, description or source", cx);
+        let initial_snapshot_client = client.clone();
         cx.observe(&skill_filter, |_, _, cx| cx.notify()).detach();
         api_key.update(cx, |field, cx| field.set_masked(true, cx));
         // A single in-flight gate covers polling and every mutation. A poll
@@ -246,6 +247,26 @@ impl WorkspaceRoot {
                 {
                     break;
                 }
+            }
+        })
+        .detach();
+        // Search is naturally retried by the next keystroke, but a persistent
+        // workspace has to load useful content even when nobody has typed.
+        // The daemon can still be indexing applications on a first launch, so
+        // wait off the UI executor for its first socket before retrying once.
+        cx.spawn(async move |this, cx| {
+            let connected = cx
+                .background_executor()
+                .spawn(async move {
+                    initial_snapshot_client.wait_for_connection(Duration::from_secs(5))
+                })
+                .await;
+            if connected {
+                let _ = this.update(cx, |root, cx| {
+                    if !root.loaded && !root.busy {
+                        root.request(Command::Snapshot, cx);
+                    }
+                });
             }
         })
         .detach();

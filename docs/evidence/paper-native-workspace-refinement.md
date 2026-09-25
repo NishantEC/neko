@@ -8,30 +8,29 @@ Date: 2026-09-25
   compact workspace draft cases (folder-derived name, explicit name, and
   plain-language missing-folder error).
 - `cargo build --release -p neko -p neko-daemon` — passed.
-- `cargo test --workspace` — 525 passed, 6 ignored, 2 failed. Both failures
-  are existing process-guardian tests in `neko-core::native_runner` that pass
-  when invoked one at a time but fail in the parallel suite:
-  `guardian_preserves_stdin_exit_code_and_cleans_up_background_children` and
-  `supervisor_death_kills_guarded_descendants`. This change does not touch the
-  runner. The suite therefore is not a clean parallel-suite pass.
+- `cargo test --workspace` — passed: 527 tests, 6 intentionally ignored.
+  The guarded-process fixtures retain their coverage while using a realistic
+  15-second startup bound for Cargo's full parallel suite; the production
+  runner timeout contract is unchanged.
 
 ## Native window probe
 
 Launched the release binaries against isolated data:
 
 ```sh
-NEKO_DATA_DIR=/tmp/neko-paper-native.H6hqrv \
+NEKO_DATA_DIR=/tmp/neko-paper-native-final \
 NEKO_SHOW_WORKSPACE=1 NEKO_WORKSPACE_VIEW=workspaces \
 target/release/neko
 ```
 
 Observed from the live app: the workspace window was non-key, its native Glass
 material installed, and its Space/full-screen collection behavior was verified.
-The isolated daemon listened on its isolated socket.
+The daemon listened on its isolated socket after its real application index
+completed; the workspace then made its bounded first-connection retry and
+rendered the loaded Tools & skills / workspace-choice surface.
 
-The visual capture did **not** pass: `screencapture -o -l1867` returned
-`could not create image from window`, and the workspace snapshot remained
-unloaded in that non-key evidence session. No screenshot is claimed as proof.
-This needs a macOS Screen Recording-authorized capture session plus a repair of
-the isolated workspace snapshot delivery before native visual acceptance can be
-called complete.
+`screencapture` remains denied by macOS Screen Recording policy, but a live
+native-app accessibility capture succeeded. It shows the rendered 1240px
+workspace window with the Paper-native sidebar, selected Tools & skills state,
+workspace chooser, create-workspace entry point, and Watching status card.
+No synthetic input was used in that evidence run.

@@ -999,6 +999,12 @@ mod tests {
     use std::time::Instant;
     use tempfile::TempDir;
 
+    // These cases fork a nested test binary, then a guardian, then a shell
+    // child. Five seconds is ample in isolation but not under Cargo's full
+    // parallel workspace load; this is a fixture startup bound, not the
+    // product timeout contract exercised by the tests.
+    const GUARDIAN_FIXTURE_DEADLINE: Duration = Duration::from_secs(15);
+
     fn fixture(body: &str) -> (TempDir, PathBuf, RunSpec) {
         let temp = TempDir::new().unwrap();
         let executable = temp.path().join("fixture-codex");
@@ -1157,7 +1163,7 @@ sleep 10
             command,
             b"original prompt",
             &AtomicBool::new(false),
-            Duration::from_secs(5),
+            GUARDIAN_FIXTURE_DEADLINE,
             |_| Ok(()),
             Some(&helper),
         )
@@ -1189,7 +1195,7 @@ sleep 10
                 command,
                 &[],
                 &cancel,
-                Duration::from_secs(5),
+                GUARDIAN_FIXTURE_DEADLINE,
                 |_| Ok(()),
                 Some(&helper),
             )
@@ -1242,7 +1248,7 @@ sleep 10
             .spawn()
             .unwrap();
         let started = Instant::now();
-        while !temp.path().join("started").exists() && started.elapsed() < Duration::from_secs(5) {
+        while !temp.path().join("started").exists() && started.elapsed() < GUARDIAN_FIXTURE_DEADLINE {
             std::thread::sleep(Duration::from_millis(10));
         }
         supervisor.kill().unwrap();
