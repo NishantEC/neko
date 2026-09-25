@@ -4,6 +4,95 @@ The map, not the territory. Every section points at the code that owns the
 detail. `AGENTS.md` has the full decision record for anything below that looks
 arbitrary; several of these decisions cost days to learn.
 
+## Current default: standalone Neko work
+
+`neko-protocol::workbench` supplies typed commands and snapshots. The GPUI
+`workspace.rs` window is a client only. `neko-core::workbench` stores bounded,
+validated snapshots atomically in the daemon-owned SQLite settings table.
+`neko-daemon::workbench` supervises up to three tasks globally and two per
+workspace without holding the
+database mutex during model/network calls. A two-second supervisor heartbeat
+is separate from task progress; it does not claim the model made progress.
+
+The main window (`workspace.rs`, `workspace/home.rs`) is organised around
+Neko, tickets and responsibilities. Tickets are workbench tasks; status alone
+places each in *needs you*, *working* or *done* (`home::group`). **Today** is a
+conversation with Neko: a brief built from those groups, ticket cards, the
+chat, and a rail of running work and responsibility health. Opening a ticket
+shows a panel with its actions, activity and the user's steering notes.
+`neko-core::neko_chat` stores the conversation in its own bounded setting,
+outside the task store's reserved capacity. Each message is one Codex turn with
+read-only filesystem access (`neko-daemon::workbench::converse`). A selected
+workspace receives only its granted MCP connections through a temporary lease;
+an unscoped chat receives no bridge. Chat history injected into the prompt is
+also scoped. A reply may propose up to three
+tickets, which become ordinary queued tasks, so planning and approval gates are
+unchanged. Ticket notes (event role `note`) reach planner and builder prompts
+as direction inside the approved scope and never grant tools or publication.
+
+Chat tool cards persist the exact arguments and workspace. A tool whose server
+declares `readOnlyHint=true` can run under its grant; the declaration participates
+in the schema hash and the grant UI states this trust decision. Unknown/action
+tools need an inline approval for each exact call. Denial never dispatches.
+Approvals expire after 120 seconds; upstream execution remains bounded to 20
+seconds. Stop, runner timeout, lease drop, or daemon restart fail closed.
+Successful and failed dispatched calls have inline receipts. These guarantees
+depend on the explicitly trusted server's effect declaration; Neko cannot prove
+that arbitrary remote code is read-only, or undo an action already dispatched.
+
+The daemon-owned `neko-core::mcp_host` hosts user-added stdio and Streamable
+HTTP servers through pinned rmcp 3.4.1. Connections, discovered schema hashes,
+explicit grants, responsibilities, receipts and source evidence live in the
+versioned workbench snapshot. Credentials live in per-connection Keychain
+entries; OAuth uses discovered metadata, PKCE/state/issuer checks and bounded
+browser callbacks. Legacy Linear data remains historical; old polling and
+permissions are disabled, not converted into grants.
+
+`native_runner` starts ephemeral Codex processes in isolated task worktrees.
+A scoped, expiring capability in environment variables connects a temporary
+stdio bridge back to the daemon. Only `neko_list_tools` and `neko_call_tool`
+are enabled and preapproved. Upstream configurations and credentials are not
+passed to workers. Global user config/rules are ignored and shell networking
+stays disabled. Current workspace scope, grant and schema are checked before
+each call, including after upstream rediscovery. Revocation prevents subsequent
+dispatch; cancellation cannot undo a request already delivered upstream.
+
+Responsibilities persist their next due time before running. A ten-minute
+local wake invokes a read-only agent with selected tools, with bounded failure
+backoff and no replay of missed intervals. Generic observations require real
+successful scoped receipts. Source identity/revision deduplicates tasks;
+failed retrieval never implies deletion. `mcp_host::responsibility` combines
+fresh source evidence with `supervision`'s bounded model assessment before
+automatic local preparation. Sensitive or uncertain work holds for approval.
+An instruction/connection change invalidates prior source eligibility.
+
+Explicit approval or qualifying standing authority allows a builder. A separate
+read-only reviewer must return a structured passing verdict, no findings,
+complete host-observed changed-file coverage, and successful command receipts
+for its checks before the result becomes ready for human review.
+`decomposition` validates bounded two/three-subtask proposals. Explicit approval
+creates ordinary child tickets, sharing the same scheduler limits. Dependencies
+receive earlier verified patches in separate scopes. The daemon integrates
+child patches into the isolated parent and independently verifies that result;
+conflicts preserve every worktree and block completion. No original-checkout
+merge or publication occurs. See `docs/evidence/parallel-verifier.md` for proof
+and read-only verification limits.
+Cancellation terminates the process group; interrupted tasks fail on restart
+with worktrees retained. Model risk and source interpretation are judgments,
+not proof. Codex write sandboxing does not establish filesystem read privacy
+between workspaces. Local MCP executables are explicitly trusted host software,
+not sandboxed plugins. No cross-workspace context is deliberately injected.
+
+The full workspace is a regular Dock/Cmd-Tab window. The quick panel remains
+resident, and `order_out` hides only that window. Native task rows deep-open
+the workspace. Historical Codex Desktop/Paseo providers and their polling are
+disabled unless `NEKO_LEGACY_AGENTS` is set. The historical sections below
+describe those compatibility providers, not the default execution path.
+
+IPC frames are capped at 16 MiB and the socket is owner-only (0600). Secret
+request fields redact Debug output and never appear in returned snapshots.
+`NEKO_DATA_DIR` optionally selects an absolute isolated development data path.
+
 ## Five crates, and the boundary they exist to enforce
 
 ```
@@ -601,5 +690,50 @@ one local patch applied on top by `scripts/setup-gpui-patch.sh`.
 | Where an icon comes from | `crates/neko/src/assets.rs` |
 | How the text field edits, selects, and pastes | `crates/neko/src/text_field.rs` |
 | How the daemon dispatches a request | `crates/neko-daemon/src/server.rs`, `handle_request` |
-| What the first-run arc does | `crates/neko/src/onboarding/` (`state.rs` is pure, `view.rs` does the I/O) |
+| What the six-step first run does | `crates/neko/src/onboarding/` (`setup.rs` holds the six forms, `state.rs` Mac substates, `view.rs` native lifecycle and shortcut I/O) |
 | Why any of the above is the way it is | `AGENTS.md`, and the report it points at in `docs/evidence/` |
+# Workspace skills
+
+The Tools & skills page discovers global and workspace SKILL.md files and pins
+explicit activation to one workspace and content hash. `neko-core::skills` owns
+discovery, activation, bounded prompt injection and exact-content proposals in a
+separate persisted setting. Chat and each ticket role receive enabled skills;
+changed or missing instructions stop execution until the user reviews/enables or
+disables them. Codex automatic skill instructions are disabled for these runs.
+This does not provide filesystem read privacy. Accepted proposals and reviewed
+standalone GitHub SKILL.md previews save only into Neko's own skill folder; they
+must be enabled separately. See `docs/evidence/skills-phase3.md` for installation
+limits and tested boundaries.
+
+## Agent profiles and scheduled planning
+
+`neko-protocol::agent_profiles` defines user-owned identities, workspace
+assignments and directional global-memory read grants. `neko-core::agent_profiles`
+validates/persists configuration through the workbench snapshot and builds bounded
+profile context. Default migration preserves legacy Neko ownership. Memory and
+conversation entries retain their original profile identity. Workspace tools
+stay behind the same explicit grants; shared memory never carries capabilities.
+Profile revisions participate in worker authority and capability issuance so
+stale workers cannot gain permissions from later configuration. Assignment is
+blocked by unfinished work, pending chat and enabled watches/schedules.
+
+`scheduled_plans` stores recurrence drafts in the same workbench snapshot as
+tasks. Claiming an occurrence and adding its ticket is one persisted operation;
+restart does not duplicate it. Final COUNT/UNTIL occurrences queue once and
+disable future runs. `schedule_time` bounds traversal, supports timezones/DST,
+and rejects invalid or unbounded evaluation. Imports resolve filesystem paths
+outside the shared database mutex and match against fresh state inside it.
+See `docs/evidence/agent-profiles.md` and `docs/evidence/schedules-and-import.md`.
+
+## Follow-up memory learning
+
+`neko-core::memory_learning` persists a bounded queue and immutable proposals;
+the daemon runs one independent follow-up worker for chat/ticket memory and
+completed-ticket skills. Extraction receives bounded evidence in an empty scratch
+directory, read-only with no bridge or shell tools. Native actors suppress
+ambient CLI tool paths so Neko's own scoped bridge and worker limits remain the
+authority. Source fingerprints, profile/workspace fences and retry-attempt tokens
+reject stale output. The Memory page accepts or dismisses proposals explicitly;
+accepting the exact stored proposal and resolving it share one transaction.
+Ticket decisions have a separate bounded allowance from user-created memories.
+See `docs/evidence/memory-learning.md` for limits and verification boundaries.

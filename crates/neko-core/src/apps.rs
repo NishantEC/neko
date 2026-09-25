@@ -127,7 +127,7 @@ impl Provider for AppsProvider {
         // query, and calling it Applications is the honest label.
         let section = if suggesting { "Suggested" } else { "Applications" };
         let apps = self.apps.read().unwrap();
-        let recency = self.db.lock().unwrap().recency().unwrap_or_default();
+        let recency = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recency().unwrap_or_default();
         let mut scored: Vec<Candidate> = apps
             .iter()
             .filter_map(|app| {
@@ -189,7 +189,7 @@ impl Provider for AppsProvider {
             return Err(ProviderError(format!("no such app: {id}")));
         };
         crate::launch::launch_app(&app_path).map_err(|e| ProviderError(e.to_string()))?;
-        let _ = self.db.lock().unwrap().record_launch(id, crate::now_unix_ms());
+        let _ = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner).record_launch(id, crate::now_unix_ms());
         Ok(())
     }
 

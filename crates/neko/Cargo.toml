@@ -9,8 +9,10 @@ name = "neko"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 neko-protocol.workspace = true
 neko-client.workspace = true
+serde_json.workspace = true
 # `wingleeio/zed` fork, pinned by rev (never a branch — see `AGENTS.md`, "The
 # GPUI dependency decision" for the full record of this reversal and its
 # licence consequence). Rev matches exactly what comet pins

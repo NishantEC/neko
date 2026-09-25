@@ -501,7 +501,7 @@ impl FileProvider {
         match &self.scope {
             Scope::Fixed(dirs) => dirs.clone(),
             Scope::Configured(db) => {
-                let db = db.lock().unwrap();
+                let db = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 crate::preferences::get_search_folders(&db)
                     .into_iter()
                     .filter(|d| d.is_dir())

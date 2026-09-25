@@ -1,5 +1,61 @@
 # neko — project knowledge
 
+## Current standalone workspace (2026-09-24)
+
+The current default supersedes the historical agent-browser and accessory-only
+window decisions below. Neko opens a regular, persistent `workspace.rs` app
+window; the hotkey remains a separate palette, dismissed with native
+`order_out`, never app-wide `hide`. Dock reopen and the menu open the workspace.
+
+Native work uses `neko-protocol::workbench`, daemon-owned bounded SQLite
+snapshots in `neko-core::workbench`, the daemon's `workbench` supervisor, and
+`native_runner` ephemeral Codex CLI processes. A scout plans read-only,
+explicit approval allows an isolated-worktree build, and a
+read-only reviewer returns a result for human review. No publication occurs.
+At most three task workers execute globally and two per workspace. An awaiting
+plan can request a read-only two/three-subtask proposal; explicit approval
+creates isolated child tickets using those same limits. Verified child patches
+integrate only into the parent task worktree, followed by independent review.
+Structured reviewer verdicts require successful command receipts and complete
+host-observed diff coverage; findings, missing evidence and conflicts fail
+closed. Cancellation/restart preserve child worktrees. See
+`docs/evidence/parallel-verifier.md`. Cross-workspace filesystem read isolation is NOT
+guaranteed by the current Codex sandbox; do not describe scoped prompts as a
+security boundary. Task worktrees are preserved, including failed work.
+
+User-owned MCP replaces the built-in Linear integration. The separate
+`neko-core::mcp_host` module owns SDK transport, schema-bound grants,
+Keychain credentials/OAuth, run capabilities, source receipts and generic
+responsibility policy. The legacy Paseo-specific `mcp` module is unchanged.
+Versioned migration retains old tasks, sources, worktrees and credential IDs,
+but disables legacy polling/away authority. No global Codex configuration is
+modified. Never reintroduce a service-specific connector as the default.
+
+Users add local executable/argument configurations or remote HTTP URLs in
+Tools / MCP, discover tools and explicitly grant unattended use per workspace.
+Local executable trust is separate from tool permission; server annotations
+are not a security boundary. A per-run daemon bridge keeps upstream credentials
+out of worker configuration and rechecks current scope, grants and schema.
+Its two tools alone are preapproved; shell networking remains disabled.
+Remote tools may mutate systems if granted: local-fix authority is not
+publication authority and cancellation cannot undo completed remote effects.
+
+Generic responsibilities wake every ten minutes while the daemon runs, with
+durable due claims and bounded backoff. Successful scoped receipts back source
+observations; a fresh unchanged actionable source plus a bounded low-risk
+model assessment can authorize a local fix when explicitly enabled. Manual
+tasks, missing evidence and sensitive/uncertain changes still need approval.
+Editing responsibility instructions/connections invalidates old eligibility.
+No automatic installation, marketplace, arbitrary swarm, cloud execution,
+cross-workspace sharing or automatic PR publication is claimed. Legacy
+Codex/Paseo providers remain opt-in via `NEKO_LEGACY_AGENTS=1`.
+
+`NEKO_DATA_DIR` isolates socket/database/task worktrees for development without
+changing HOME. `scripts/smoke-workbench.mjs` exercises real daemon IPC, storage,
+approval, worktrees, result review and restart with a deterministic child
+fixture, not a live model or an authenticated user MCP account. See README and architecture
+for setup, permissions, and current limits.
+
 neko is a hotkey-summoned, GPU-rendered launcher for macOS, written from scratch
 in Rust on [GPUI](https://gpui.rs) (Zed's UI framework). See `README.md` for how
 to run it and `data/dim/plan.md` (in the firstmate home, not this repo) for the
@@ -410,6 +466,14 @@ attempt fails, then calls `rebind` and on success `Request::CommitHotkey`. See
 state machine `rebind` itself guarantees.
 
 ## Onboarding (design report §3)
+
+**Current implementation (2026-09-25) supersedes the historical arc below:**
+six visible Paper steps live in `onboarding/setup.rs`; `state.rs` now contains
+only Mac permission/shortcut substates, and `view.rs` owns native lifecycle.
+Completion waits for daemon acknowledgement. Import requires selected items
+and fresh credential/process consent; schedules remain paused. A first brief
+is an actual scoped chat turn. Evidence uses `NEKO_SHOW_SETUP` plus one-based
+`NEKO_SETUP_STEP`, never takes focus, and is not interaction proof.
 
 The 14-screen first-run arc, `crates/neko/src/onboarding/`. Split the same
 way `hotkey_client.rs` splits from `main.rs`: `state.rs` is a pure,
@@ -6409,6 +6473,24 @@ product decisions, not extensions of this local app-server loop. Evidence:
   roughly 6–8x on the fork (`AGENTS.md`'s own "Summon latency" section,
   `docs/evidence/gpui-fork-migration-report.md` §8) — not root-caused, a
   real follow-up.
+
+## Chat tool authority
+
+Chat MCP tools use the selected workspace's lease and current schema grants;
+unscoped chat has no bridge. Server `readOnlyHint` participates in schema identity
+and is an explicit trust decision at grant time. Unknown/action tools require
+one inline approval per exact call. See `docs/architecture.md` and
+`crates/neko-daemon/src/mcp_host/chat_tests.rs`; `node scripts/smoke-workbench.mjs`
+exercises actual chat-worker/bridge IPC with approval, denial, Stop and restart.
+Filesystem read privacy is still not provided by the Codex sandbox.
+
+Profile ownership, scheduled planning, and bounded follow-up learning now extend
+this boundary. Profile revisions fence both capability issuance and result
+commit under the database lock. Learning proposals require explicit acceptance;
+shared profile memory never shares tool authority. `docs/architecture.md`'s final
+two sections and `docs/evidence/memory-learning.md` describe these current seams.
+Native CLI runs disable ambient plugins/agent spawning so only Neko-managed tools
+and workers participate. Do not re-enable those features as a compatibility fix.
 
 ## Maintaining this file
 

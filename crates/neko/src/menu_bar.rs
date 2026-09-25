@@ -1,4 +1,8 @@
-//! The menu bar item, and getting neko out of the Dock.
+//! The menu bar item for the quick launcher and full workspace.
+//!
+//! Neko now retains regular Dock/Cmd-Tab activation for its full workspace.
+//! The historical accessory-app rationale below describes the original
+//! palette-only app; only the event/flag bridge still applies unchanged.
 //!
 //! **A command palette does not belong in the Dock.** Raycast, Alfred and
 //! Spotlight are all accessory apps: no Dock tile, no ⌘Tab entry, a small
@@ -58,6 +62,16 @@ static CLICKED: AtomicBool = AtomicBool::new(false);
 
 /// Set by the menu's "Preferences…" item. Same flag discipline as [`CLICKED`].
 static PREFERENCES_REQUESTED: AtomicBool = AtomicBool::new(false);
+static WORKSPACE_REQUESTED: AtomicBool = AtomicBool::new(false);
+static WORKSPACE_TASK: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn request_workspace() { WORKSPACE_REQUESTED.store(true, Ordering::Relaxed); }
+pub fn take_workspace_request() -> bool { WORKSPACE_REQUESTED.swap(false, Ordering::Relaxed) }
+pub fn request_workspace_task(id: String) {
+    *WORKSPACE_TASK.lock().unwrap() = Some(id);
+    request_workspace();
+}
+pub fn take_workspace_task() -> Option<String> { WORKSPACE_TASK.lock().unwrap().take() }
 
 /// The quota the menu last heard about, and the count beside it.
 ///
@@ -157,9 +171,6 @@ mod stub {
         None
     }
     pub fn set_waiting_count(_count: usize) {}
-    pub fn hide_from_dock() -> Result<(), String> {
-        Ok(())
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -176,7 +187,7 @@ mod macos {
     use objc2::runtime::{AnyObject, Sel};
     use objc2::{AnyThread, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::{
-        NSApplication, NSApplicationActivationPolicy, NSBitmapImageRep, NSColor,
+        NSApplication, NSBitmapImageRep, NSColor,
         NSDeviceRGBColorSpace, NSEventMask, NSEventModifierFlags, NSEventType, NSGraphicsContext,
         NSImage, NSMenu, NSMenuItem, NSRectFill, NSStatusBar, NSStatusItem,
         NSVariableStatusItemLength,
@@ -346,6 +357,11 @@ mod macos {
                 PREFERENCES_REQUESTED.store(true, Ordering::Relaxed);
             }
 
+            #[unsafe(method(nekoMenuWorkspace:))]
+            fn menu_workspace(&self, _sender: Option<&AnyObject>) {
+                super::WORKSPACE_REQUESTED.store(true, Ordering::Relaxed);
+            }
+
             #[unsafe(method(nekoMenuQuit:))]
             fn menu_quit(&self, _sender: Option<&AnyObject>) {
                 QUIT_REQUESTED.store(true, Ordering::Relaxed);
@@ -361,13 +377,19 @@ mod macos {
     /// the chosen item's own action fires before this returns, setting its
     /// flag for the 20ms poll exactly like a plain click does.
     fn show_menu(mtm: MainThreadMarker, event: &objc2_app_kit::NSEvent) {
-        ITEM.with(|slot| {
-            if let Some(held) = slot.borrow().as_ref()
-                && let Some(button) = held.item.button(mtm)
-            {
-                NSMenu::popUpContextMenu_withEvent_forView(&held.menu, event, &button);
-            }
+        // Take retained handles and release the RefCell borrow *before* the
+        // synchronous tracking loop: GPUI tasks keep running inside it, and a
+        // quota update rebuilding the menu would otherwise hit "already
+        // borrowed" and abort. The retained menu stays alive while shown even
+        // if a rebuild swaps in a new one.
+        let handles = ITEM.with(|slot| {
+            let held = slot.borrow();
+            let held = held.as_ref()?;
+            Some((held.menu.clone(), held.item.button(mtm)?))
         });
+        if let Some((menu, button)) = handles {
+            NSMenu::popUpContextMenu_withEvent_forView(&menu, event, &button);
+        }
     }
 
     impl Target {
@@ -493,7 +515,10 @@ mod macos {
     fn rebuild_menu() {
         let Some(mtm) = MainThreadMarker::new() else { return };
         ITEM.with(|slot| {
-            if let Some(item) = slot.borrow_mut().as_mut() {
+            // Never panic on a nested borrow; the next quota update rebuilds.
+            if let Ok(mut held) = slot.try_borrow_mut()
+                && let Some(item) = held.as_mut()
+            {
                 item.menu = build_menu(mtm, &item.target);
             }
         });
@@ -548,6 +573,7 @@ mod macos {
             menu.addItem(&NSMenuItem::separatorItem(mtm));
         }
         add("Summon neko", sel!(nekoMenuSummon:));
+        add("Open Neko Workspace", sel!(nekoMenuWorkspace:));
         add("Preferences\u{2026}", sel!(nekoMenuPreferences:));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         let quit = unsafe {
@@ -607,24 +633,6 @@ mod macos {
         }
     }
 
-    /// Drops the Dock icon and the ⌘Tab entry.
-    ///
-    /// Called *after* gpui has started, because gpui sets
-    /// `NSApplicationActivationPolicyRegular` itself during startup and the
-    /// last call wins. Read back rather than trusted: a silently-ignored
-    /// policy change would look exactly like the Dock icon being a gpui
-    /// limitation, which is the belief this module exists to correct.
-    pub fn hide_from_dock() -> Result<(), String> {
-        let mtm = MainThreadMarker::new().ok_or("not on the main thread")?;
-        autoreleasepool(|_| {
-            let app = NSApplication::sharedApplication(mtm);
-            app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-            match app.activationPolicy() {
-                NSApplicationActivationPolicy::Accessory => Ok(()),
-                other => Err(format!("activation policy is {other:?}, not Accessory")),
-            }
-        })
-    }
 }
 
 #[cfg(test)]

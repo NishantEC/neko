@@ -71,7 +71,7 @@ impl ControlCompletion {
     }
 
     fn claim_write(&self) -> bool {
-        let mut phase = self.phase.lock().unwrap();
+        let mut phase = self.phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if matches!(*phase, ControlPhase::Pending) {
             *phase = ControlPhase::Writing;
             true
@@ -81,7 +81,7 @@ impl ControlCompletion {
     }
 
     fn finish(&self, result: Result<(), neko_core::provider::ProviderError>) {
-        let mut phase = self.phase.lock().unwrap();
+        let mut phase = self.phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if matches!(*phase, ControlPhase::Writing) {
             *phase = ControlPhase::Finished(result.map_err(|error| error.0));
             self.changed.notify_all();
@@ -93,7 +93,7 @@ impl ControlCompletion {
         timeout: Duration,
     ) -> Result<(), neko_core::provider::ProviderError> {
         let deadline = Instant::now() + timeout;
-        let mut phase = self.phase.lock().unwrap();
+        let mut phase = self.phase.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
             match &*phase {
                 ControlPhase::Finished(result) => {
@@ -913,7 +913,7 @@ impl WriteGate {
     }
 
     fn claim_write(&self) -> bool {
-        let mut phase = self.0.lock().unwrap();
+        let mut phase = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if matches!(*phase, WritePhase::Pending) {
             *phase = WritePhase::Writing;
             true
@@ -923,7 +923,7 @@ impl WriteGate {
     }
 
     fn cancel_if_pending(&self) -> bool {
-        let mut phase = self.0.lock().unwrap();
+        let mut phase = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if matches!(*phase, WritePhase::Pending) {
             *phase = WritePhase::Cancelled;
             true
@@ -1120,7 +1120,7 @@ mod tests {
         fn send_line(&mut self, line: &str, _timeout: Duration) -> io::Result<()> {
             self.entered_write.send(()).unwrap();
             self.release_write.recv().unwrap();
-            self.sent.lock().unwrap().push(line.to_owned());
+            self.sent.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(line.to_owned());
             Ok(())
         }
 
@@ -1153,7 +1153,7 @@ mod tests {
                 entered_write.send(()).unwrap();
                 self.release_write.recv().unwrap();
             }
-            self.bytes.lock().unwrap().extend_from_slice(bytes);
+            self.bytes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).extend_from_slice(bytes);
             Ok(bytes.len())
         }
 
@@ -1534,7 +1534,7 @@ mod tests {
         drop(writer);
         writer_thread.join().unwrap();
         assert!(
-            result.is_ok() || bytes.lock().unwrap().is_empty(),
+            result.is_ok() || bytes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty(),
             "a writer timeout must cancel before bytes are owned, or wait for the written result"
         );
     }
@@ -1664,7 +1664,7 @@ mod tests {
 
         assert!(
             caller_result.is_ok()
-                || (sent.lock().unwrap().is_empty()
+                || (sent.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty()
                     && snapshot.read().unwrap().can_resolve("thr", "request")),
             "a caller must not receive failure while the actor later writes its approval"
         );

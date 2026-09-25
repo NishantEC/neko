@@ -160,12 +160,13 @@ const COMMANDS: &[CommandSpec] = &[
 /// compiled-in table (see [`COMMANDS`]), not something scanned or
 /// persisted, since "what commands exist" is a build-time fact today (no
 /// extension host yet — see `AGENTS.md`'s "Seams for follow-up work").
-pub struct CommandsProvider;
+pub struct CommandsProvider { standalone: bool }
 
 impl CommandsProvider {
     pub fn new() -> Self {
-        Self
+        Self { standalone: false }
     }
+    pub fn standalone() -> Self { Self { standalone: true } }
 }
 
 impl Default for CommandsProvider {
@@ -184,8 +185,15 @@ impl Provider for CommandsProvider {
     }
 
     fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
+        const WORKSPACE: CommandSpec = CommandSpec {
+            id: "workspace", title: "Open Neko Workspace",
+            aliases: &["Neko", "Workspace", "Tasks", "Agents", "Inbox", "Linear", "New Task"],
+            mode: "workspace", glyph: Glyph::Agent,
+        };
         COMMANDS
             .iter()
+            .filter(|cmd| !self.standalone || matches!(cmd.id,"clipboard-history"|"themes"|"preferences"))
+            .chain(self.standalone.then_some(&WORKSPACE))
             .filter_map(|cmd| {
                 // An empty query lists every command — the state the slash
                 // palette opens in (`/` with nothing after it). `fuzzy_score`
@@ -245,6 +253,13 @@ impl Provider for CommandsProvider {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn standalone_commands_do_not_depend_on_other_agent_apps() {
+        use crate::provider::Provider;
+        let rows=super::CommandsProvider::standalone().search("",0);
+        assert!(rows.iter().any(|r|r.item.enters_mode.as_deref()==Some("workspace")));
+        assert!(!rows.iter().any(|r|matches!(r.item.enters_mode.as_deref(),Some("new-agent"|"new-codex-task"|"agent"|"schedule"|"ask"|"terminal"))));
+    }
     use super::*;
 
     #[test]

@@ -332,12 +332,38 @@ fn styled_line(spans: &[Span]) -> StyledText {
     StyledText::new(SharedString::from(text)).with_highlights(highlights)
 }
 
-/// Markdown → one column of gpui elements, in this app's own tokens.
-pub fn render(source: &str) -> Div {
-    let blocks = parse(source);
+/// Markdown → one column of gpui elements, in this app's own tokens. Reuses
+/// parsed blocks across frames. Views re-render
+/// on every poll; chat history and ticket results can be long, so parsing is
+/// paid once per distinct text instead of once per frame.
+pub fn render_cached(source: &str) -> Div {
+    use std::hash::{Hash, Hasher};
+    thread_local! {
+        static CACHE: std::cell::RefCell<std::collections::HashMap<u64, std::rc::Rc<Vec<Block>>>> = Default::default();
+    }
+    const MAX_ENTRIES: usize = 512;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    let key = hasher.finish();
+    let blocks = CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(blocks) = cache.get(&key) {
+            return blocks.clone();
+        }
+        if cache.len() >= MAX_ENTRIES {
+            cache.clear();
+        }
+        let blocks = std::rc::Rc::new(parse(source));
+        cache.insert(key, blocks.clone());
+        blocks
+    });
+    render_blocks(&blocks)
+}
+
+fn render_blocks(blocks: &[Block]) -> Div {
     let mut column = div().flex().flex_col().gap(px(7.));
     for block in blocks {
-        column = column.child(render_block(&block));
+        column = column.child(render_block(block));
     }
     column
 }
