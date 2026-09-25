@@ -55,14 +55,14 @@ impl EventEmitter<ContentChanged> for TextField {}
 ///
 /// Has real keyboard-driven selection (⇧←/⇧→, ⇧⌥←/⇧⌥→, ⇧⌘←/⇧⌘→, ⌘A) and
 /// clipboard (⌘C/⌘X/⌘V, via `pasteboard.rs`) — see this task's own commit
-/// history for why those were the seam and not a gap. Deliberately still
-/// skips mouse selection (click-drag) and IME composition (marked text) —
-/// those remain real, separate pieces of work. It wires up just enough of
-/// `EntityInputHandler` to receive typed characters through GPUI's native
-/// input path, which is the part worth proving here.
+/// history for why those were the seam and not a gap. Mouse selection and
+/// IME marked-text replacement use GPUI's native input path. Parents must
+/// check `is_composing` before using Enter to submit or activate a result.
 pub struct TextField {
     focus_handle: FocusHandle,
     content: String,
+    /// Credential fields paint bullets and refuse copy/cut and native text reads.
+    masked: bool,
     placeholder: SharedString,
     cursor: usize,
     /// The fixed end of an in-progress selection; `cursor` is always the
@@ -70,6 +70,8 @@ pub struct TextField {
     /// clears this (standard macOS behavior — see each `on_*` handler
     /// below); any real edit clears it too, in `commit_edit`.
     selection_anchor: Option<usize>,
+    /// Bytes occupied by the current IME candidate, replaced on each update.
+    marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     /// True between a mouse-down inside the field and the release that ends
@@ -99,9 +101,11 @@ impl TextField {
             Self {
                 focus_handle: cx.focus_handle(),
                 content: String::new(),
+                masked: false,
                 placeholder: DEFAULT_PLACEHOLDER.into(),
                 cursor: 0,
                 selection_anchor: None,
+                marked_range: None,
                 last_layout: None,
                 last_bounds: None,
                 mouse_selecting: false,
@@ -114,6 +118,30 @@ impl TextField {
         &self.content
     }
 
+    pub fn is_composing(&self) -> bool {
+        self.marked_range.is_some()
+    }
+
+    pub fn set_masked(&mut self, masked: bool, cx: &mut Context<Self>) {
+        self.masked = masked;
+        self.last_layout = None;
+        cx.notify();
+    }
+
+    fn display_content(&self) -> String {
+        if self.masked { "•".repeat(self.content.chars().count()) } else { self.content.clone() }
+    }
+
+    fn display_offset(&self, content_offset: usize) -> usize {
+        if self.masked { self.content[..content_offset].chars().count() * "•".len() } else { content_offset }
+    }
+
+    fn content_offset(&self, display_offset: usize) -> usize {
+        if self.masked {
+            self.content.char_indices().nth(display_offset / "•".len()).map(|(index, _)| index).unwrap_or(self.content.len())
+        } else { display_offset }
+    }
+
     /// Reset to empty with the cursor at the start — used when a launch
     /// dismisses the panel, so the next summon starts from a clean field
     /// rather than the previous query.
@@ -123,6 +151,7 @@ impl TextField {
     /// after calling this, so emitting here too would fire the search
     /// request twice for one summon.
     pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.marked_range = None;
         self.content.clear();
         self.cursor = 0;
         self.selection_anchor = None;
@@ -172,12 +201,30 @@ impl TextField {
     /// window at hand — `on_backspace`, and this file's own tests — can
     /// still drive a real edit.
     fn commit_edit(&mut self, range: Range<usize>, new_text: &str, cx: &mut Context<Self>) {
+        self.marked_range = None;
         self.content.replace_range(range.clone(), new_text);
         self.cursor = range.start + new_text.len();
         self.selection_anchor = None;
         self.touch_cursor(cx);
         cx.notify();
         cx.emit(ContentChanged);
+    }
+
+    fn compose(&mut self, range_utf16: Option<Range<usize>>, text: &str, selection_utf16: Option<Range<usize>>, cx: &mut Context<Self>) {
+        let range = range_utf16.map(|r| self.range_from_utf16(&r))
+            .or_else(|| self.marked_range.clone()).unwrap_or_else(|| self.edit_target_range());
+        let start = range.start;
+        self.commit_edit(range, text, cx);
+        if !text.is_empty() {
+            let end = start + text.len();
+            self.marked_range = Some(start..end);
+            if let Some(selection) = selection_utf16 {
+                let base = self.utf16_offset_for_byte(start);
+                let selected = self.range_from_utf16(&(base.saturating_add(selection.start)..base.saturating_add(selection.end)));
+                self.selection_anchor = Some(selected.start.clamp(start, end));
+                self.cursor = selected.end.clamp(start, end);
+            }
+        }
     }
 
     /// The range a typed character or a delete action should act on: the
@@ -309,6 +356,7 @@ impl TextField {
     /// so (unlike every edit path) this never calls `commit_edit` and never
     /// emits `ContentChanged`.
     fn on_copy(&mut self, _: &Copy, _window: &mut Window, _cx: &mut Context<Self>) {
+        if self.masked { return; }
         if let Some(range) = self.selection_range() {
             pasteboard::write_string(&self.content[range]);
         }
@@ -319,6 +367,7 @@ impl TextField {
     /// nothing selected does nothing, it doesn't fall back to deleting one
     /// character.
     fn on_cut(&mut self, _: &Cut, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.masked { return; }
         let Some(range) = self.selection_range() else {
             return;
         };
@@ -483,7 +532,7 @@ impl TextField {
         if local >= layout.width {
             return Some(self.content.len());
         }
-        layout.index_for_x(local).or(Some(self.content.len()))
+        layout.index_for_x(local).map(|index| self.content_offset(index)).or(Some(self.content.len()))
     }
 
     /// What a press at `index` should select, given how many clicks it is.
@@ -626,6 +675,7 @@ impl EntityInputHandler for TextField {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
+        if self.masked { return None; }
         let range = self.range_from_utf16(&range_utf16);
         actual_range.replace(self.range_to_utf16(&range));
         Some(self.content[range].to_string())
@@ -653,10 +703,13 @@ impl EntityInputHandler for TextField {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Range<usize>> {
-        None
+        self.marked_range.as_ref().map(|range| self.range_to_utf16(range))
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+    fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.marked_range = None;
+        cx.notify();
+    }
 
     fn replace_text_in_range(
         &mut self,
@@ -667,6 +720,7 @@ impl EntityInputHandler for TextField {
     ) {
         let range = range_utf16
             .map(|r| self.range_from_utf16(&r))
+            .or_else(|| self.marked_range.clone())
             .unwrap_or_else(|| self.edit_target_range());
         self.commit_edit(range, new_text, cx);
     }
@@ -675,13 +729,11 @@ impl EntityInputHandler for TextField {
         &mut self,
         range_utf16: Option<Range<usize>>,
         new_text: &str,
-        _new_selected_range_utf16: Option<Range<usize>>,
-        window: &mut Window,
+        new_selected_range_utf16: Option<Range<usize>>,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Composition (marked text) is not supported in this minimal field;
-        // treat it as an immediate insert so IME input still lands.
-        self.replace_text_in_range(range_utf16, new_text, window, cx);
+        self.compose(range_utf16, new_text, new_selected_range_utf16, cx);
     }
 
     fn bounds_for_range(
@@ -693,7 +745,7 @@ impl EntityInputHandler for TextField {
     ) -> Option<Bounds<Pixels>> {
         let layout = self.last_layout.as_ref()?;
         let range = self.range_from_utf16(&range_utf16);
-        let x = bounds.left() + layout.x_for_index(range.start);
+        let x = bounds.left() + layout.x_for_index(self.display_offset(range.start));
         Some(Bounds::new(
             point(x, bounds.top()),
             gpui::size(px(1.), bounds.bottom() - bounds.top()),
@@ -709,7 +761,7 @@ impl EntityInputHandler for TextField {
         let bounds = self.last_bounds?;
         let layout = self.last_layout.as_ref()?;
         let byte_idx = layout.index_for_x(point.x - bounds.left())?;
-        Some(self.utf16_offset_for_byte(byte_idx))
+        Some(self.utf16_offset_for_byte(self.content_offset(byte_idx)))
     }
 }
 
@@ -770,7 +822,7 @@ impl gpui::Element for TextFieldElement {
         let (display_text, color) = if field.content.is_empty() {
             (field.placeholder.clone(), theme::active().text_tertiary.into())
         } else {
-            (field.content.clone().into(), text_style.color)
+            (field.display_content().into(), text_style.color)
         };
         let run = TextRun {
             len: display_text.len(),
@@ -792,8 +844,8 @@ impl gpui::Element for TextFieldElement {
         // reused here rather than inventing a new token) sits behind its
         // row's own content, not above it.
         let selection = field.selection_range().map(|range| {
-            let start_x = bounds.left() + line.x_for_index(range.start);
-            let end_x = bounds.left() + line.x_for_index(range.end);
+            let start_x = bounds.left() + line.x_for_index(field.display_offset(range.start));
+            let end_x = bounds.left() + line.x_for_index(field.display_offset(range.end));
             fill(
                 Bounds::new(
                     point(start_x, bounds.top()),
@@ -807,7 +859,7 @@ impl gpui::Element for TextFieldElement {
             && field.focus_handle.is_focused(window)
             && field.blink.read(cx).visible();
         let cursor = if show_cursor {
-            let x = bounds.left() + line.x_for_index(field.cursor);
+            let x = bounds.left() + line.x_for_index(field.display_offset(field.cursor));
             Some(fill(
                 Bounds::new(
                     point(x, bounds.top()),
@@ -885,6 +937,7 @@ impl Render for TextField {
         div()
             .key_context("TextField")
             .track_focus(&self.focus_handle)
+            .tab_index(0)
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::on_backspace))
             .on_action(cx.listener(Self::on_left))
@@ -917,8 +970,9 @@ impl Render for TextField {
             // against, and swallowing it then would make the press do nothing.
             .on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(|field, event: &gpui::MouseDownEvent, _window, cx| {
+                cx.listener(|field, event: &gpui::MouseDownEvent, window, cx| {
                     if field.on_mouse_down(event.position, event.click_count, cx) {
+                        window.focus(&field.focus_handle, cx);
                         cx.stop_propagation();
                     }
                 }),
@@ -936,6 +990,22 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    #[gpui::test]
+    fn masked_field_never_exposes_display_content_and_maps_unicode_offsets(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("key-東京", cx);
+            field.set_masked(true, cx);
+            assert_eq!(field.display_content(), "••••••");
+            assert_eq!(field.display_offset(7), 15);
+            assert_eq!(field.content_offset(15), 7);
+            assert_eq!(field.content_offset(18), 10);
+            field.clear(cx);
+            assert_eq!(field.display_content(), "");
+            assert_eq!(field.content(), "");
+        });
+    }
 
     /// `pasteboard.rs` reads/writes the real, systemwide `NSPasteboard` —
     /// there's no per-test isolation for it the way `TestAppContext` gives
@@ -1030,6 +1100,42 @@ mod tests {
     // calls), the same way the existing tests above exercise
     // `previous_char_boundary` without going through GPUI's action-dispatch
     // layer, which needs a live `Window` these entity-only tests don't open.
+
+    #[gpui::test]
+    fn ime_candidates_replace_previous_candidates_and_keep_utf16_selection(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.set_content("Hi ", cx);
+            field.compose(None, "に", Some(1..1), cx);
+            assert!(field.is_composing());
+            field.compose(None, "日本", Some(0..2), cx);
+            assert_eq!(field.content(), "Hi 日本");
+            assert_eq!(field.selection_range(), Some(3..9));
+            field.compose(None, "😀", Some(2..2), cx);
+            assert_eq!(field.content(), "Hi 😀");
+            assert_eq!(field.cursor, 7);
+            assert_eq!(field.marked_range, Some(3..7));
+            let range = field.marked_range.clone().unwrap();
+            field.commit_edit(range, "東京", cx);
+            assert_eq!(field.content(), "Hi 東京");
+            assert!(!field.is_composing());
+        });
+    }
+
+    #[gpui::test]
+    fn clearing_a_composition_does_not_leave_stale_marked_offsets(cx: &mut TestAppContext) {
+        let field = cx.update(TextField::new);
+        field.update(cx, |field, cx| {
+            field.compose(None, "候補", None, cx);
+            field.clear(cx);
+            assert!(!field.is_composing());
+            field.compose(None, "次", None, cx);
+            assert_eq!(field.content(), "次");
+            field.compose(None, "", None, cx);
+            assert_eq!(field.content(), "");
+            assert!(!field.is_composing());
+        });
+    }
 
     #[gpui::test]
     fn cmd_backspace_deletes_to_line_start(cx: &mut TestAppContext) {

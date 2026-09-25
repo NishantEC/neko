@@ -7,9 +7,18 @@ use rusqlite::Connection;
 
 pub struct Db {
     conn: Connection,
+    clipboard_revision: std::cell::Cell<u64>,
 }
 
 impl Db {
+    /// Commit related settings together. Dropping the transaction rolls back
+    /// every write when the operation or commit fails.
+    pub fn atomic<T>(&self, operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let transaction = self.conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let value = operation()?;
+        transaction.commit().map_err(|e| e.to_string())?;
+        Ok(value)
+    }
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -17,7 +26,7 @@ impl Db {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", true)?;
-        let db = Self { conn };
+        let db = Self { conn, clipboard_revision: std::cell::Cell::new(0) };
         db.migrate()?;
         Ok(db)
     }
@@ -25,6 +34,7 @@ impl Db {
     pub fn open_in_memory() -> rusqlite::Result<Self> {
         let db = Self {
             conn: Connection::open_in_memory()?,
+            clipboard_revision: std::cell::Cell::new(0),
         };
         db.migrate()?;
         Ok(db)
@@ -123,6 +133,8 @@ impl Db {
                 copied_at_unix_ms = excluded.copied_at_unix_ms",
             (content, content_kind, source_app, copied_at_unix_ms),
         )?;
+        // Invalidate even if pruning fails after the successful insert.
+        self.clipboard_revision.set(self.clipboard_revision.get().wrapping_add(1));
         self.conn.execute(
             "DELETE FROM clipboard_entries
              WHERE content NOT IN (
@@ -143,7 +155,13 @@ impl Db {
     /// already what the caller wanted.
     pub fn delete_clipboard_entry(&self, content: &str) -> rusqlite::Result<()> {
         self.conn.execute("DELETE FROM clipboard_entries WHERE content = ?1", [content])?;
+        self.clipboard_revision.set(self.clipboard_revision.get().wrapping_add(1));
         Ok(())
+    }
+
+    /// This daemon owns the only writer; unrelated settings do not invalidate search.
+    pub fn clipboard_revision(&self) -> u64 {
+        self.clipboard_revision.get()
     }
 
     /// `(content, content_kind, source_app, copied_at_unix_ms)` per entry,
@@ -182,6 +200,26 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clipboard_reload_failure_never_returns_a_deleted_cached_entry() {
+        use crate::provider::Provider;
+        use std::sync::{Arc, Mutex};
+        let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
+        db.lock().unwrap().record_clipboard_entry("private", "text", None, 1, 200).unwrap();
+        let provider = crate::clipboard::ClipboardProvider::new(Arc::clone(&db));
+        assert_eq!(provider.search("private", 2).len(), 1);
+        {
+            let db = db.lock().unwrap();
+            db.delete_clipboard_entry("private").unwrap();
+            db.conn.execute_batch("DROP TABLE clipboard_entries").unwrap();
+        }
+        assert!(provider.search("private", 3).is_empty());
+        assert!(provider.search("private", 4).is_empty());
+        db.lock().unwrap().migrate().unwrap();
+        db.lock().unwrap().record_clipboard_entry("new", "text", None, 5, 200).unwrap();
+        assert_eq!(provider.search("new", 6).len(), 1);
+    }
 
     #[test]
     fn settings_round_trip() {

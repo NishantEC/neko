@@ -25,6 +25,7 @@ mod spaces;
 mod text_field;
 mod theme;
 mod window_drag;
+mod workspace;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -53,11 +54,19 @@ const RESET_ONBOARDING_ENV_VAR: &str = "NEKO_RESET_ONBOARDING";
 /// `Application::on_reopen` must be registered before `.run()` is called,
 /// before the summon window or the onboarding slot exist yet.
 struct ReopenTargets {
+    client: NekoClient,
     window: gpui::WindowHandle<Root>,
     active_onboarding: SharedOnboardingSlot,
 }
 
 impl gpui::Global for ReopenTargets {}
+
+/// Dismiss only the launcher, never the persistent workspace window.
+fn hide_palette(cx: &mut App) {
+    if let Some(panel) = cx.try_global::<ReopenTargets>().map(|t| t.window) {
+        let _ = panel.update(cx, |_, window, _| { let _ = material::order_out(window); });
+    }
+}
 
 fn main() {
     // **Before anything opens a window.** A second client must take over
@@ -116,7 +125,11 @@ fn summon_from_outside(cx: &mut App) {
 
     // See `assets.rs`.
     let app = gpui_platform::application().with_assets(assets::NekoAssets);
-    app.on_reopen(summon_from_outside);
+    app.on_reopen(|cx| {
+        if let Some(client) = cx.try_global::<ReopenTargets>().map(|t| t.client.clone()) {
+            workspace::open(client, cx);
+        }
+    });
 
 
 
@@ -172,14 +185,12 @@ fn summon_from_outside(cx: &mut App) {
             KeyBinding::new("cmd-enter", panel::OpenInPaseo, Some("Panel")),
             KeyBinding::new("cmd-k", panel::OpenActionsMenu, Some("Panel")),
             KeyBinding::new("escape", DismissWindow, Some("Panel")),
-            KeyBinding::new("enter", onboarding::view::Primary, Some("Onboarding")),
-            KeyBinding::new("escape", onboarding::view::Secondary, Some("Onboarding")),
             // The Preferences window's own context. Only Enter is bound: the
             // folder field is an ordinary `TextField`, so every editing and
             // selection shortcut above already applies to it unchanged.
             KeyBinding::new("enter", preferences::view::Submit, Some("Preferences")),
         ]);
-        cx.on_action(|_: &DismissWindow, cx| cx.hide());
+        cx.on_action(|_: &DismissWindow, cx| hide_palette(cx));
 
         // Verification-only, inert unless `NEKO_BACKDROP_IMAGE` is set —
         // see `evidence.rs`'s own doc comment.
@@ -282,19 +293,9 @@ fn summon_from_outside(cx: &mut App) {
                         // flipped back to `Opaque` explicitly or the panel
                         // would render over whatever is genuinely behind it
                         // on screen instead of a solid fill.
-                        // **Out of the Dock, into the menu bar.** gpui sets
-                        // `NSApplicationActivationPolicyRegular` on every app
-                        // it starts, which is the only reason a command
-                        // palette had a Dock tile; the last call wins, so
-                        // this happens after gpui has had its say. See
-                        // `crate::menu_bar` for the two jobs the Dock icon
-                        // was doing and where both of them went.
-                        match menu_bar::hide_from_dock() {
-                            Ok(()) => eprintln!(
-                                "neko: activation policy Accessory (verified) \u{2014} no Dock icon, no \u{2318}Tab entry"
-                            ),
-                            Err(e) => eprintln!("neko: couldn't leave the Dock: {e}"),
-                        }
+                        // Neko now has a full workspace: retain GPUI's regular
+                        // Dock / Cmd-Tab activation policy. The hotkey remains
+                        // the separate quick command center.
                         // **Not on an evidence run.** A throwaway client has
                         // no business putting a live, clickable item in the
                         // captain's real menu bar — every run would add
@@ -426,33 +427,14 @@ fn summon_from_outside(cx: &mut App) {
         // above; this is the focus-loss half — registered once, on the one
         // resident summon window, never on the separate onboarding window,
         // so declining/stepping through onboarding is never affected by it.
-        // `cx.hide()` here is exactly `confirm()`'s own hide
-        // (`panel.rs::confirm`) — both just tell the OS the window is no
-        // longer active, so there's nothing to reconcile between the two
-        // paths.
+        // Native order_out dismisses the palette without hiding the separate
+        // persistent workspace when focus moves to another application.
         let _ = window.update(cx, |_root, window, cx| {
-            cx.observe_window_activation(window, |_root, window, cx| {
+            cx.observe_window_activation(window, |_root, window, _cx| {
                 if window.is_window_active() {
                     return;
                 }
-                // `cx.hide()` is `[NSApp hide:]` — it hides *every* window
-                // this app owns. That was always fine when the summon panel
-                // was the only window that could be active, and stopped
-                // being fine the moment Preferences became a real window:
-                // opening it makes the panel inactive, and hiding the app
-                // here would take the window that just opened down with it.
-                //
-                // `active_window()` is the precise question — "did focus go
-                // to another neko window, or out of neko entirely?" — and
-                // needs no state of our own to answer. Only the second case
-                // should hide the app, because only then is there something
-                // for macOS to restore focus to.
-                if cx.active_window().is_some() {
-                    eprintln!("neko: summon window lost activation to another neko window, leaving the app alone");
-                    return;
-                }
-                eprintln!("neko: summon window lost activation, hiding");
-                cx.hide();
+                let _ = material::order_out(window);
             })
             .detach();
         });
@@ -464,9 +446,13 @@ fn summon_from_outside(cx: &mut App) {
         // itself the moment it closes.
         let active_onboarding: SharedOnboardingSlot = Rc::new(RefCell::new(None));
         cx.set_global(ReopenTargets {
+            client: client.clone(),
             window,
             active_onboarding: active_onboarding.clone(),
         });
+        if !evidence::evidence_run_active() || std::env::var_os("NEKO_SHOW_WORKSPACE").is_some() {
+            workspace::open(client.clone(), cx);
+        }
 
         // Evidence/verification-only, both inert unless their env var is
         // set — see `evidence.rs`'s own doc comment.
@@ -606,7 +592,8 @@ fn summon_from_outside(cx: &mut App) {
             let mut last_accessibility_trusted = initial_accessibility_trusted;
             let mut next_accessibility_check = Instant::now() + Duration::from_millis(500);
 
-            if !onboarding_state.completed {
+            if (!onboarding_state.completed && !evidence::evidence_run_active())
+                || (evidence::evidence_run_active() && std::env::var_os("NEKO_SHOW_SETUP").is_some()) {
                 cx.update(|cx| {
                     onboarding::open_window(
                         cx,
@@ -617,7 +604,7 @@ fn summon_from_outside(cx: &mut App) {
                         active_onboarding.clone(),
                     );
                 });
-            } else if should_summon_without_hotkey(
+            } else if !evidence::evidence_run_active() && should_summon_without_hotkey(
                 onboarding_state.completed,
                 controller.borrow().current_hotkey_id().is_some(),
             ) {
@@ -627,8 +614,8 @@ fn summon_from_outside(cx: &mut App) {
                 // Opening once gives the person an immediate, visible way
                 // back to Settings; ordinary focus-loss dismissal still
                 // applies from here onward.
-                eprintln!("neko: no summon hotkey is live — opening the panel so it remains reachable");
-                cx.update(summon_from_outside);
+                eprintln!("neko: no summon hotkey is live — the full workspace remains reachable");
+                cx.update(|cx| workspace::open(client.clone(), cx));
             }
 
             loop {
@@ -657,7 +644,7 @@ fn summon_from_outside(cx: &mut App) {
                         cx.update(|cx| {
                             let _ = window.update(cx, |root, window, cx| {
                                 if window.is_window_active() {
-                                    cx.hide();
+                                    let _ = material::order_out(window);
                                 } else {
                                     root.reset_for_summon(window, cx);
                                     reposition_to_cursor_display(window);
@@ -738,6 +725,17 @@ fn summon_from_outside(cx: &mut App) {
                 // and 20ms is well under what a person can perceive.
                 if menu_bar::take_click() {
                     cx.update(summon_from_outside);
+                }
+                if menu_bar::take_workspace_request() {
+                    cx.update(|cx| {
+                        if let Some(client) = cx.try_global::<ReopenTargets>().map(|t| t.client.clone()) {
+                            if let Some(task_id) = menu_bar::take_workspace_task() {
+                                workspace::open_task(client, task_id, cx);
+                            } else {
+                                workspace::open(client, cx);
+                            }
+                        }
+                    });
                 }
                 // The other two menu items, same flag discipline as the click.
                 if menu_bar::take_preferences_request() {

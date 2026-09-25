@@ -1320,6 +1320,9 @@ impl Root {
     }
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        if self.text_field.read(cx).is_composing() {
+            return;
+        }
         if self.actions_menu.is_some() {
             self.confirm_menu_action(window, cx);
             return;
@@ -1373,6 +1376,16 @@ impl Root {
         // confirming it is a client-side UI transition, not a daemon
         // action (see `crate::modes`'s module doc comment).
         if let Some(mode_id) = item.enters_mode.clone() {
+            if mode_id == "workspace" {
+                #[cfg(not(test))]
+                let _ = crate::material::order_out(window);
+                if item.kind == "neko-task" {
+                    crate::menu_bar::request_workspace_task(item.id.clone());
+                } else {
+                    crate::menu_bar::request_workspace();
+                }
+                return;
+            }
             // Preferences is a real window, not a mode — the one
             // `enters_mode` value that opens one. Everything else names a
             // mode; an unknown value resolves to nothing and is ignored.
@@ -1567,7 +1580,7 @@ impl Root {
                 root.finish_activation(error_message, hide_on_success, enter_mode_on_success, cx);
             });
             if !failed && hide_on_success {
-                cx.update(|cx| cx.hide());
+                cx.update(crate::hide_palette);
             }
         })
         .detach();
@@ -2278,7 +2291,8 @@ impl Root {
             self.exit_mode(window, cx);
             return;
         }
-        cx.hide();
+        #[cfg(not(test))]
+        let _ = crate::material::order_out(window);
     }
 }
 
@@ -3618,7 +3632,7 @@ impl Root {
                                 .rounded(px(theme::CHIP_RADIUS_PX))
                         }))
                         .when(!text.is_empty(), |el| {
-                            el.child(crate::markdown::render(&text))
+                            el.child(crate::markdown::render_cached(&text))
                         }),
                 )
                 .into_any_element(),
@@ -3698,7 +3712,7 @@ impl Root {
                 .text_color(theme::active().text_primary)
                 .map(|el| {
                     if item.preview_markdown {
-                        el.child(crate::markdown::render(&text))
+                        el.child(crate::markdown::render_cached(&text))
                     } else {
                         el.child(SharedString::from(text))
                     }
@@ -3930,7 +3944,7 @@ impl Root {
                 let markdown = crate::evidence::force_preview_markdown() || item.preview_markdown;
                 let text = item.preview.clone().unwrap_or_else(|| item.id.clone());
                 if markdown {
-                    el.text_size(px(12.)).child(crate::markdown::render(&text))
+                    el.text_size(px(12.)).child(crate::markdown::render_cached(&text))
                 } else if item.preview.is_some() {
                     el.font_family(theme::MONOSPACE_FAMILY)
                         .text_size(px(theme::PREVIEW_MONOSPACE_SIZE_PX))
@@ -5259,6 +5273,35 @@ mod tests {
                 assert!(root.activation_error.is_none(), "a UI transition is not a daemon activation");
             })
             .unwrap();
+    }
+
+    #[gpui::test]
+    fn ime_enter_does_not_activate_a_result_and_native_commit_replaces_candidate(cx: &mut TestAppContext) {
+        use gpui::EntityInputHandler;
+        let (client, _events) = NekoClient::connect(std::path::PathBuf::from("/tmp/neko-ime-test.sock"));
+        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        let (opener, opened) = recording_preferences_opener();
+        let window = cx.add_window(|_window, cx| {
+            Root::build(client, accessibility, true, true, no_appearance_setter(), opener, crate::window_drag::disabled(), cx)
+        });
+        window.update(cx, |root, window, cx| {
+            root.results = vec![preferences_command_row()];
+            root.selected = 0;
+            root.text_field.update(cx, |field, cx| {
+                field.replace_and_mark_text_in_range(None, "に", Some(1..1), window, cx);
+                field.replace_and_mark_text_in_range(None, "日本", Some(2..2), window, cx);
+                assert_eq!(field.content(), "日本");
+            });
+            root.confirm(&Confirm, window, cx);
+            assert_eq!(opened.get(), 0);
+            root.text_field.update(cx, |field, cx| {
+                field.replace_text_in_range(None, "日本語", window, cx);
+                assert_eq!(field.content(), "日本語");
+                assert!(!field.is_composing());
+            });
+            root.confirm(&Confirm, window, cx);
+            assert_eq!(opened.get(), 1);
+        }).unwrap();
     }
 
     #[gpui::test]

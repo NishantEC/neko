@@ -154,6 +154,12 @@ pub fn record_entry(
     source_app: Option<&str>,
     copied_at_unix_ms: i64,
 ) -> rusqlite::Result<()> {
+    // Connection secrets commonly arrive via copy/paste. This recognizes
+    // Neko's credential JSON, not every possible credential in arbitrary text.
+    let mcp_credentials = content.len() <= 32_768 && serde_json::from_str::<serde_json::Value>(content).is_ok_and(|v| v.as_object().is_some_and(|o| o.contains_key("bearer") || o.contains_key("environment")));
+    if content.trim().starts_with("lin_api_") || mcp_credentials {
+        return db.delete_clipboard_entry(content);
+    }
     db.record_clipboard_entry(
         content,
         content_kind_to_db(content_kind),
@@ -292,11 +298,37 @@ fn clipboard_item_actions() -> Vec<neko_protocol::ItemAction> {
 /// task's "every rendering decision comes from the provider" rule.
 pub struct ClipboardProvider {
     db: Arc<Mutex<crate::Db>>,
+    cache: Mutex<Option<(u64, Arc<Vec<ClipboardEntry>>)>>,
 }
 
 impl ClipboardProvider {
     pub fn new(db: Arc<Mutex<crate::Db>>) -> Self {
-        Self { db }
+        Self { db, cache: Mutex::new(None) }
+    }
+
+    fn cached_entries(&self) -> Arc<Vec<ClipboardEntry>> {
+        // Always take the database before the cache. Capture and deletion only
+        // take the database, so they cannot invert this order.
+        let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let revision = db.clipboard_revision();
+        let mut cache = self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((cached_revision, entries)) = &*cache {
+            if *cached_revision == revision {
+                return Arc::clone(entries);
+            }
+        }
+        match entries(&db) {
+            Ok(entries) => {
+                let entries = Arc::new(entries);
+                *cache = Some((revision, Arc::clone(&entries)));
+                entries
+            }
+            Err(_) => {
+                // Never show deleted/private entries from a stale cache.
+                *cache = None;
+                Arc::new(Vec::new())
+            }
+        }
     }
 }
 
@@ -326,10 +358,7 @@ impl Provider for ClipboardProvider {
     }
 
     fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate> {
-        let stored = {
-            let db = self.db.lock().unwrap();
-            entries(&db).unwrap_or_default()
-        };
+        let stored = self.cached_entries();
         stored
             .iter()
             .filter_map(|entry| {
@@ -387,7 +416,7 @@ impl Provider for ClipboardProvider {
         match action_id {
             "paste" | "copy" => self.activate(id),
             "delete" => {
-                let db = self.db.lock().unwrap();
+                let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 db.delete_clipboard_entry(id).map_err(|e| ProviderError(e.to_string()))
             }
             other => Err(ProviderError(format!("no action '{other}' on this row"))),
@@ -592,7 +621,9 @@ mod pasteboard {
 /// itself needs no macOS-only code — only `pasteboard::*` does. The
 /// autorelease-pool guarantee lives entirely inside `pasteboard::poll` (see
 /// its doc comment) — this function only ever sees owned Rust data.
-fn poll_once(db: &crate::Db, last_change_count: &mut i64) {
+/// The pasteboard is read (an AppKit call) without the database lock; the
+/// lock is held only for the short write, so search never waits on AppKit.
+fn poll_once(db: &std::sync::Mutex<crate::Db>, last_change_count: &mut i64) {
     let tick = pasteboard::poll(*last_change_count);
     *last_change_count = tick.change_count;
 
@@ -603,7 +634,8 @@ fn poll_once(db: &crate::Db, last_change_count: &mut i64) {
         return;
     }
     let kind = classify(&content, has_url_type);
-    if let Err(e) = record_entry(db, &content, kind, tick.source_app.as_deref(), crate::now_unix_ms()) {
+    let db = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Err(e) = record_entry(&db, &content, kind, tick.source_app.as_deref(), crate::now_unix_ms()) {
         eprintln!("neko-daemon: failed to record clipboard entry: {e}");
     }
 }
@@ -616,8 +648,7 @@ pub fn run_capture_loop(db: &std::sync::Mutex<crate::Db>) {
     let mut last_change_count = pasteboard::current_change_count();
     loop {
         std::thread::sleep(POLL_INTERVAL);
-        let db = db.lock().unwrap();
-        poll_once(&db, &mut last_change_count);
+        poll_once(db, &mut last_change_count);
     }
 }
 
@@ -719,6 +750,56 @@ mod tests {
         assert_eq!(entries[0].content_kind, ClipboardContentKind::Text);
         assert_eq!(entries[0].source_app.as_deref(), Some("Terminal"));
         assert_eq!(entries[0].copied_at_unix_ms, 100);
+    }
+
+    #[test]
+    fn linear_personal_keys_are_not_kept_in_clipboard_history() {
+        let db = crate::Db::open_in_memory().unwrap();
+        record_entry(&db, "lin_api_private_test_credential", ClipboardContentKind::Text, None, 100).unwrap();
+        assert!(entries(&db).unwrap().is_empty());
+    }
+    #[test]
+    fn mcp_credential_json_is_not_kept_in_clipboard_history() {
+        let db = crate::Db::open_in_memory().unwrap();
+        for secret in [r#"{"bearer":"test-only-secret"}"#, r#"{"environment":{"TOKEN":"test-only-secret"}}"#] {
+            record_entry(&db, secret, ClipboardContentKind::Text, None, 100).unwrap();
+        }
+        assert!(entries(&db).unwrap().is_empty());
+        record_entry(&db, r#"{"regular":"configuration"}"#, ClipboardContentKind::Text, None, 101).unwrap();
+        assert_eq!(entries(&db).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn search_cache_reuses_entries_and_tracks_insert_update_delete_and_prune() {
+        let db = Arc::new(Mutex::new(crate::Db::open_in_memory().unwrap()));
+        let provider = ClipboardProvider::new(Arc::clone(&db));
+        let first = provider.cached_entries();
+        assert!(Arc::ptr_eq(&first, &provider.cached_entries()));
+        {
+            let db = db.lock().unwrap();
+            db.set_setting("unrelated", "value").unwrap();
+        }
+        assert!(Arc::ptr_eq(&first, &provider.cached_entries()));
+        {
+            let db = db.lock().unwrap();
+            db.record_clipboard_entry("one", "text", None, 1, 2).unwrap();
+            db.record_clipboard_entry("two", "text", None, 2, 2).unwrap();
+        }
+        assert_eq!(provider.search("", 3).len(), 2);
+        {
+            let db = db.lock().unwrap();
+            db.record_clipboard_entry("one", "text", Some("Notes"), 3, 2).unwrap();
+            db.record_clipboard_entry("three", "text", None, 4, 2).unwrap();
+        }
+        let refreshed = provider.cached_entries();
+        assert_eq!(refreshed.len(), 2);
+        assert_eq!(refreshed[0].content, "three");
+        assert_eq!(refreshed[1].source_app.as_deref(), Some("Notes"));
+        provider.perform_action("one", "delete").unwrap();
+        let remaining = provider.cached_entries();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].content, "three");
+        assert!(Arc::ptr_eq(&remaining, &provider.cached_entries()));
     }
 
     #[test]
@@ -835,10 +916,10 @@ mod tests {
     #[test]
     fn perform_action_delete_removes_the_entry_from_history() {
         let db = Arc::new(Mutex::new(crate::Db::open_in_memory().unwrap()));
-        record_entry(&db.lock().unwrap(), "gone soon", ClipboardContentKind::Text, None, 100).unwrap();
+        record_entry(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), "gone soon", ClipboardContentKind::Text, None, 100).unwrap();
         let provider = ClipboardProvider::new(db.clone());
         assert!(provider.perform_action("gone soon", "delete").is_ok());
-        assert!(entries(&db.lock().unwrap()).unwrap().is_empty());
+        assert!(entries(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).unwrap().is_empty());
     }
 
     // Deliberately no test calls `perform_action` with `"copy"`/`"paste"`

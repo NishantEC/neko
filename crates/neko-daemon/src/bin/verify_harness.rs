@@ -26,6 +26,10 @@
 mod codex;
 #[path = "../server.rs"]
 mod server;
+#[path = "../workbench.rs"]
+mod workbench;
+#[path = "../mcp_host.rs"]
+mod mcp_host;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
