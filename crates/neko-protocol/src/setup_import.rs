@@ -1,5 +1,34 @@
 //! Secret-free previews of configurations discovered on this Mac.
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportCandidateKind {
+    Workspace,
+    Connection,
+    Skill,
+    Schedule,
+}
+
+/// Secret-free, independently selectable ledger entry. The daemon keeps any
+/// matching ServerConfig/Secret outside this wire type.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImportCandidate {
+    pub id: String,
+    pub kind: ImportCandidateKind,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default)]
+    pub workspace: Option<String>,
+    pub name: String,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
+    #[serde(default)]
+    pub problem: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImportConnection {
@@ -16,11 +45,16 @@ pub struct ImportConnection {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImportPreview {
     #[serde(default)]
+    pub candidates: Vec<ImportCandidate>,
+    #[serde(default)]
     pub schedules: Vec<ImportSchedule>,
     #[serde(default)]
     pub preview_id: String,
+    #[serde(default)]
     pub connections: Vec<ImportConnection>,
+    #[serde(default)]
     pub repositories: Vec<String>,
+    #[serde(default)]
     pub warnings: Vec<String>,
 }
 
@@ -40,7 +74,9 @@ pub struct ImportSchedule {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ImportCommand {
-    Discover { repositories: Vec<String> },
+    Discover {
+        repositories: Vec<String>,
+    },
     Apply {
         #[serde(default)]
         schedule_ids: Vec<String>,
