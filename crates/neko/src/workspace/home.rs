@@ -317,9 +317,12 @@ impl WorkspaceRoot {
         let t = theme::active();
         let selected = self.selection.task.as_deref() == Some(&task.id);
         let id = task.id.clone();
+        let click_id = id.clone();
         let g = group(task.status);
         div()
             .id(SharedString::from(format!("ticket-{}", task.id)))
+            .tab_index(0)
+            .tab_stop(true)
             .flex()
             .items_center()
             .gap(px(12.))
@@ -329,7 +332,14 @@ impl WorkspaceRoot {
             .when(!last, |r| r.border_b_1().border_color(t.border_hairline))
             .when(selected, |r| r.bg(t.surface_selected))
             .hover(|s| s.bg(alpha(t.surface_selected, 0.6)))
-            .on_click(cx.listener(move |root, _, _, cx| root.open_ticket(id.clone(), cx)))
+            .focus_visible(|s| s.border_1().border_color(t.text_primary))
+            .on_click(cx.listener(move |root, _, _, cx| root.open_ticket(click_id.clone(), cx)))
+            .on_key_down(cx.listener(move |root, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "enter" || event.keystroke.key == "space" {
+                    root.open_ticket(id.clone(), cx);
+                    cx.stop_propagation();
+                }
+            }))
             .child(dot(group_color(g)))
             .child(
                 div()
@@ -360,8 +370,12 @@ impl WorkspaceRoot {
 
     fn chip(&self, id: &'static str, text: String, cx: &mut Context<Self>, run: impl Fn(&mut WorkspaceRoot, &mut Context<WorkspaceRoot>) + 'static) -> impl IntoElement {
         let t = theme::active();
+        let run = Rc::new(run);
+        let key_run = run.clone();
         div()
             .id(id)
+            .tab_index(0)
+            .tab_stop(true)
             .px(px(11.))
             .py(px(6.))
             .rounded(px(999.))
@@ -372,7 +386,14 @@ impl WorkspaceRoot {
             .text_color(t.text_secondary)
             .cursor_pointer()
             .hover(|s| s.text_color(t.text_primary))
+            .focus_visible(|s| s.border_1().border_color(t.text_primary))
             .on_click(cx.listener(move |root, _, _, cx| run(root, cx)))
+            .on_key_down(cx.listener(move |root, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "enter" || event.keystroke.key == "space" {
+                    key_run(root, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .child(text)
     }
 
@@ -385,6 +406,8 @@ impl WorkspaceRoot {
             let selected = self.view == view;
             div()
                 .id(id)
+                .tab_index(0)
+                .tab_stop(true)
                 .flex()
                 .items_center()
                 .gap(px(10.))
@@ -394,12 +417,23 @@ impl WorkspaceRoot {
                 .cursor_pointer()
                 .when(selected, |r| r.bg(t.surface_selected))
                 .hover(|s| s.bg(alpha(t.surface_selected, 0.6)))
+                .focus_visible(|s| s.border_1().border_color(t.text_primary))
                 .on_click(cx.listener(move |root, _, _, cx| {
                     if root.view == View::Integrations && view != View::Integrations {
                         root.api_key.update(cx, |field, cx| field.clear(cx));
                     }
                     root.view = view;
                     cx.notify();
+                }))
+                .on_key_down(cx.listener(move |root, event: &KeyDownEvent, _, cx| {
+                    if event.keystroke.key == "enter" || event.keystroke.key == "space" {
+                        if root.view == View::Integrations && view != View::Integrations {
+                            root.api_key.update(cx, |field, cx| field.clear(cx));
+                        }
+                        root.view = view;
+                        cx.notify();
+                        cx.stop_propagation();
+                    }
                 }))
                 .child(gpui::svg().path(glyph).size(px(15.)).text_color(if selected { t.text_primary } else { t.text_secondary }))
                 .child(div().flex_1().text_size(px(13.)).text_color(if selected { t.text_primary } else { t.text_secondary }).font_weight(if selected { FontWeight::MEDIUM } else { FontWeight::NORMAL }).child(text))
@@ -412,10 +446,13 @@ impl WorkspaceRoot {
             let running = tasks.iter().any(|x| group(x.status) == Group::Working);
             let selected = self.selection.workspace.as_deref() == Some(&w.id);
             let id = w.id.clone();
+            let click_id = id.clone();
             let settings_id = w.id.clone();
             workspaces = workspaces.child(
                 div()
                     .id(SharedString::from(format!("ws-{}", w.id)))
+                    .tab_index(0)
+                    .tab_stop(true)
                     .flex()
                     .items_center()
                     .gap(px(10.))
@@ -425,12 +462,24 @@ impl WorkspaceRoot {
                     .cursor_pointer()
                     .when(selected, |r| r.bg(t.surface_selected))
                     .hover(|s| s.bg(alpha(t.surface_selected, 0.6)))
+                    .focus_visible(|s| s.border_1().border_color(t.text_primary))
                     .on_click(cx.listener(move |root, _, _, cx| {
-                        if root.selection.workspace.as_deref() == Some(&id) {
+                        if root.selection.workspace.as_deref() == Some(&click_id) {
                             root.selection = Selection::default();
                             cx.notify();
                         } else {
-                            root.select_workspace(&id, cx);
+                            root.select_workspace(&click_id, cx);
+                        }
+                    }))
+                    .on_key_down(cx.listener(move |root, event: &KeyDownEvent, _, cx| {
+                        if event.keystroke.key == "enter" || event.keystroke.key == "space" {
+                            if root.selection.workspace.as_deref() == Some(&id) {
+                                root.selection = Selection::default();
+                                cx.notify();
+                            } else {
+                                root.select_workspace(&id, cx);
+                            }
+                            cx.stop_propagation();
                         }
                     }))
                     .child(div().w(px(15.)).flex().justify_center().child(dot(if waiting > 0 { attention() } else if running { t.state_success } else { alpha(t.text_tertiary, 0.5) })))
@@ -469,7 +518,7 @@ impl WorkspaceRoot {
             .h_full()
             .flex()
             .flex_col()
-            .gap(px(20.))
+            .gap(px(16.))
             .px(px(12.))
             .pb(px(12.))
             .bg(alpha(t.surface_raised, if self.translucent { 0.35 } else { 0.9 }))
@@ -483,10 +532,10 @@ impl WorkspaceRoot {
                     .gap(px(2.))
                     .child(nav("nav-today", icon::MARK, "Today", 0, View::Today, cx))
                     .child(nav("nav-tickets", icon::CLIPBOARD, "Tickets", needs_you, View::Tickets, cx))
+                    .child(nav("nav-agents", icon::MARK, "Agents", self.snapshot.agent_profiles.profiles.len(), View::Profiles, cx))
                     .child(nav("nav-responsibilities", icon::SLIDERS, "Responsibilities", self.snapshot.mcp.responsibilities.len()+self.snapshot.schedules.len(), View::Responsibilities, cx))
-                    .child(nav("nav-memory", icon::TEXT_LINES, "Memory", self.snapshot.memory.len(), View::Memory, cx))
                     .child(nav("nav-tools", icon::TERMINAL, "Tools & skills", 0, View::Integrations, cx))
-                    .child(nav("nav-profiles", icon::MARK, "Agent profiles", 0, View::Profiles, cx)),
+                    .child(nav("nav-memory", icon::TEXT_LINES, "Memory", self.snapshot.memory.len(), View::Memory, cx)),
             )
             .child(
                 div()
@@ -634,7 +683,7 @@ impl WorkspaceRoot {
         let t = theme::active();
         let tasks = self.scoped_tasks();
         let b = brief(&tasks, now_ms());
-        let mut column = div().w_full().max_w(px(680.)).flex().flex_col().gap(px(22.));
+        let mut column = div().w_full().max_w(px(640.)).flex().flex_col().gap(px(22.));
 
         // Neko's brief.
         let brief_body = if !self.loaded {
@@ -729,14 +778,17 @@ impl WorkspaceRoot {
             Some(task) => self.ticket_panel(task, cx).into_any_element(),
             None => self.rail(&tasks, cx).into_any_element(),
         };
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(self.page_header("Today", Some(format!("Agent: {}",self.snapshot.agent_profiles.profiles.iter().find(|p|p.id==profile_id).map(|p|p.name.as_str()).unwrap_or(profile_id))), cx))
-            .children(self.problem_banner())
-            .child(div().flex_1().min_h(px(0.)).flex().child(chat).child(side))
-            .into_any_element()
+        crate::motion::fade_in(
+            "today-content-reveal",
+            crate::motion::system_reduce_motion(),
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(self.page_header("Today", Some(format!("Agent: {}",self.snapshot.agent_profiles.profiles.iter().find(|p|p.id==profile_id).map(|p|p.name.as_str()).unwrap_or(profile_id))), cx))
+                .children(self.problem_banner())
+                .child(div().flex_1().min_h(px(0.)).flex().child(chat).child(side)),
+        )
     }
 
     fn chat_message(&self, message: &ChatMessage, cx: &mut Context<Self>) -> AnyElement {
@@ -872,7 +924,7 @@ impl WorkspaceRoot {
                 div()
                     .id("composer")
                     .w_full()
-                    .max_w(px(680.))
+                    .max_w(px(640.))
                     .flex()
                     .items_center()
                     .gap(px(10.))
@@ -985,7 +1037,7 @@ impl WorkspaceRoot {
         }
         div()
             .id("rail")
-            .w(px(300.))
+            .w(px(320.))
             .flex_shrink_0()
             .h_full()
             .overflow_y_scroll()

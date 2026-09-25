@@ -192,6 +192,7 @@ pub struct WorkspaceRoot {
     instructions: Entity<TextField>,
     away_enabled: bool,
     creating_workspace: bool,
+    workspace_advanced: bool,
     task_title: Entity<TextField>,
     task_goal: Entity<TextField>,
     api_key: Entity<TextField>,
@@ -273,6 +274,7 @@ impl WorkspaceRoot {
             instructions: input("How Neko should work in this repository", cx),
             away_enabled: false,
             creating_workspace: true,
+            workspace_advanced: false,
             task_title: input("What needs doing?", cx),
             task_goal: input("Describe the outcome and how to verify it", cx),
             api_key,
@@ -506,6 +508,7 @@ impl WorkspaceRoot {
         };
         self.selection.select_workspace(workspace.id);
         self.creating_workspace = false;
+        self.workspace_advanced = false;
         self.workspace_name
             .update(cx, |field, cx| field.set_content(&workspace.name, cx));
         self.repository
@@ -540,6 +543,7 @@ impl WorkspaceRoot {
     fn new_workspace(&mut self, cx: &mut Context<Self>) {
         self.view = View::Workspaces;
         self.creating_workspace = true;
+        self.workspace_advanced = false;
         self.selection = Selection::default();
         self.away_enabled = false;
         for field in [
@@ -556,19 +560,23 @@ impl WorkspaceRoot {
     }
 
     fn save_workspace(&mut self, cx: &mut Context<Self>) {
-        let workspace = Workspace {
-            id: if self.creating_workspace {
-                String::new()
-            } else {
-                self.selection.workspace.clone().unwrap_or_default()
-            },
-            name: value(&self.workspace_name, cx),
-            repository: value(&self.repository, cx),
-            instructions: value(&self.instructions, cx),
-            away_enabled: self.away_enabled,
+        let mut workspace = match workspace_from_draft(
+            &value(&self.workspace_name, cx),
+            &value(&self.repository, cx),
+            &value(&self.instructions, cx),
+            self.creating_workspace,
+            self.selection.workspace.as_deref(),
+        ) {
+            Ok(workspace) => workspace,
+            Err(message) => {
+                self.error = Some(message.into());
+                cx.notify();
+                return;
+            }
         };
-        if workspace.name.is_empty() || workspace.repository.is_empty() {
-            self.error = Some("Enter a workspace name and the path to a Git repository.".into());
+        workspace.away_enabled = self.away_enabled;
+        if workspace.name.is_empty() {
+            self.error = Some("Give this workspace a name.".into());
             cx.notify();
             return;
         }
@@ -611,14 +619,66 @@ impl WorkspaceRoot {
 
     fn workspaces_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let creating = self.creating_workspace;
-        div().id("workspace-editor").flex().flex_col().gap(px(20.)).size_full().overflow_y_scroll()
-            .child(heading(if creating { "Create a workspace" } else { "Workspace settings" }, "Give Neko a repository and instructions for the work it owns."))
-            .child(field("Name", &self.workspace_name))
-            .child(field("Git repository", &self.repository))
-            .child(note("Use a local Git repository path. Tasks build in isolated worktrees."))
-            .child(field("Workspace instructions", &self.instructions))
-            .child(note("Tools and responsibilities are configured per workspace in Tools / MCP. Manual tasks require your approval before editing. Worker reads are not a cross-workspace filesystem privacy boundary."))
-            .child(button("save-workspace", if creating { "Create workspace" } else { "Save workspace" }, !self.busy, true, cx, |root, _, cx| root.save_workspace(cx)))
+        let t = theme::active();
+        let mut form = div()
+            .w_full()
+            .max_w(px(if creating { 600. } else { 680. }))
+            .flex()
+            .flex_col()
+            .gap(px(16.));
+
+        if creating {
+            form = form
+                .child(heading("Add a workspace", "Start with where the work lives. You can refine Neko's instructions after it is added."))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(14.))
+                        .p(px(18.))
+                        .rounded(px(14.))
+                        .bg(alpha(t.surface_raised, 0.76))
+                        .border_1()
+                        .border_color(t.border_hairline)
+                        .child(field("Workspace name", &self.workspace_name))
+                        .child(field("Local repository folder", &self.repository))
+                        .child(note("Paste the folder path. Neko uses isolated worktrees, so your checkout stays untouched."))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap(px(12.))
+                                .child(button("workspace-advanced", if self.workspace_advanced { "Hide instructions" } else { "Add instructions" }, !self.busy, false, cx, |root, _, cx| {
+                                    root.workspace_advanced = !root.workspace_advanced;
+                                    cx.notify();
+                                }))
+                                .child(button("save-workspace", "Add workspace", !self.busy, true, cx, |root, _, cx| root.save_workspace(cx))),
+                        )
+                        .when(self.workspace_advanced, |card| {
+                            card.child(field("What Neko should know", &self.instructions))
+                                .child(note("Optional. Keep it short: conventions, checks, or things Neko should avoid."))
+                        }),
+                );
+        } else {
+            form = form
+                .child(heading("Workspace settings", "Update where this workspace lives or the standing guidance Neko uses."))
+                .child(field("Name", &self.workspace_name))
+                .child(field("Local repository folder", &self.repository))
+                .child(field("Workspace instructions", &self.instructions))
+                .child(note("Tools and responsibilities are scoped separately. Editing work still waits for your approval."))
+                .child(div().flex().justify_end().child(button("save-workspace", "Save changes", !self.busy, true, cx, |root, _, cx| root.save_workspace(cx))));
+        }
+
+        div()
+            .id("workspace-editor")
+            .size_full()
+            .overflow_y_scroll()
+            .px(px(32.))
+            .py(px(28.))
+            .flex()
+            .justify_center()
+            .child(crate::motion::fade_in("workspace-editor-reveal", crate::motion::system_reduce_motion(), form))
     }
 
     fn integrations_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -740,6 +800,49 @@ fn input(placeholder: &'static str, cx: &mut App) -> Entity<TextField> {
 
 fn value(field: &Entity<TextField>, cx: &App) -> String {
     field.read(cx).content().trim().to_string()
+}
+
+fn alpha(mut color: gpui::Rgba, a: f32) -> gpui::Rgba {
+    color.a = a;
+    color
+}
+
+/// The compact create flow has one non-negotiable value: a real local folder.
+/// A name is optional because the last path component is already the most
+/// useful default and asking twice makes the first step feel like a settings
+/// form. This stays pure so the UI and its tests cannot drift apart.
+fn workspace_from_draft(
+    name: &str,
+    repository: &str,
+    instructions: &str,
+    creating: bool,
+    existing_id: Option<&str>,
+) -> Result<Workspace, &'static str> {
+    let repository = repository.trim().trim_end_matches('/');
+    if repository.is_empty() {
+        return Err("Choose the local repository folder for this workspace.");
+    }
+    let name = if name.trim().is_empty() {
+        std::path::Path::new(repository)
+            .file_name()
+            .and_then(|part| part.to_str())
+            .filter(|part| !part.is_empty())
+            .ok_or("Give this workspace a name.")?
+            .to_owned()
+    } else {
+        name.trim().to_owned()
+    };
+    Ok(Workspace {
+        id: if creating {
+            String::new()
+        } else {
+            existing_id.unwrap_or_default().to_owned()
+        },
+        name,
+        repository: repository.to_owned(),
+        instructions: instructions.trim().to_owned(),
+        away_enabled: false,
+    })
 }
 
 fn field(label: &'static str, input: &Entity<TextField>) -> impl IntoElement {
@@ -898,5 +1001,25 @@ mod tests {
         let selection = Selection::default();
         assert!(!selection.includes("one"));
         assert!(!selection.includes("two"));
+    }
+
+    #[test]
+    fn compact_workspace_draft_uses_the_folder_name_when_name_is_blank() {
+        let workspace = workspace_from_draft("", "/Users/nish/Projects/triage-fe/", "", true, None)
+            .expect("a folder is enough to create a compact workspace");
+        assert_eq!(workspace.name, "triage-fe");
+        assert_eq!(workspace.repository, "/Users/nish/Projects/triage-fe");
+    }
+
+    #[test]
+    fn compact_workspace_draft_keeps_an_explicit_name() {
+        let workspace = workspace_from_draft("CareConnect", "/Users/nish/Projects/triage-fe", "", true, None)
+            .expect("an explicit name remains valid");
+        assert_eq!(workspace.name, "CareConnect");
+    }
+
+    #[test]
+    fn compact_workspace_draft_explains_when_the_folder_is_missing() {
+        assert_eq!(workspace_from_draft("", "", "", true, None).unwrap_err(), "Choose the local repository folder for this workspace.");
     }
 }
