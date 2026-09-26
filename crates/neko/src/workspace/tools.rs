@@ -52,6 +52,7 @@ pub(super) fn config_from_form(
         Ok(ServerConfig::Stdio {
             command: target.into(),
             args,
+            cwd: None,
         })
     } else {
         Ok(ServerConfig::Http { url: target.into() })
@@ -464,7 +465,8 @@ mod tests {
             .unwrap(),
             ServerConfig::Stdio {
                 command: "/usr/bin/node".into(),
-                args: vec!["/path with spaces/server.js".into(), "--read-only".into()]
+                args: vec!["/path with spaces/server.js".into(), "--read-only".into()],
+                cwd: None,
             }
         );
         assert!(config_from_form(true, "node", "[]").is_err());

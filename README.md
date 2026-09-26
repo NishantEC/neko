@@ -6,10 +6,15 @@ for quick search, clipboard history, and task attention.
 
 ## Neko-owned work
 
-Create a workspace with a Git repository, then create a task or add your own
+Create a workspace from any existing folder, then add your own
 MCP servers in **Tools & skills → Connections**. No Linear, Slack, or other service is bundled
 or required. Multiple connections, including instances of the same server,
 have separate workspace scope, credentials, and permissions.
+
+Code tasks need a Git repository because Neko builds in an isolated worktree;
+non-Git folders can still be saved as workspaces. During setup, discovered
+project folders appear first. Generated and worktree folders stay selectable
+under the collapsed **Other folders** section.
 
 1. Add a remote Streamable HTTP URL or an explicitly trusted local executable
    and JSON argument array. Neko does not download or install server packages.
@@ -106,6 +111,9 @@ definitions, and documented schedules. The review ledger records source and
 scope without secrets or skill bodies. Applying selected items creates
 workspaces idempotently, stores skills as disabled review proposals, keeps MCP
 definitions disabled with no grants/tools, and saves schedules paused. It does
+not silently widen a workspace-scoped MCP: if its workspace is unavailable,
+the review can explicitly keep that definition global and paused for later
+workspace-specific grants. It still does
 not launch local tools, read Keychain credentials, import transcripts, or
 enable provider/live authority. Unsupported metadata is shown as a warning or
 problem for review. Verify the credential-free path with:
@@ -257,6 +265,17 @@ Accessibility client:
 ```sh
 NEKO_CODESIGN_IDENTITY='Apple Development: Your Name (TEAMID)' scripts/run-dev.sh
 ```
+
+To replace the installed app with a **fully clean** local install (the bundle,
+Neko database/configuration, and Neko-owned Keychain credentials are removed
+before replacement), run:
+
+```sh
+NEKO_CODESIGN_IDENTITY='Apple Development: Your Name (TEAMID)' scripts/install-clean.sh
+```
+
+This intentionally preserves the macOS Accessibility approval for the stable
+`dev.neko.launcher` identity, so the configured summon shortcut can keep working.
 
 Find the exact identity on this Mac with `security find-identity -v -p
 codesigning`. The script builds `target/debug/Neko.app`; add that app once in

@@ -16,9 +16,9 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, KeyDownEvent, ParentElement, Render, SharedString,
-    Styled, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowKind,
-    WindowOptions, actions, div, point, prelude::*, px,
+    App, Context, Entity, FocusHandle, Focusable, KeyDownEvent, ParentElement, Render,
+    SharedString, Styled, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds,
+    WindowKind, WindowOptions, actions, div, point, prelude::*, px,
 };
 use neko_client::NekoClient;
 use neko_protocol::{HotkeyCombo, Request, Response};
@@ -26,8 +26,8 @@ use neko_protocol::{HotkeyCombo, Request, Response};
 use super::SharedPreferencesSlot;
 use super::state::{Recording, Tab, candidate_from_press};
 use crate::components::keycap;
-use crate::motion::HoverWash as _;
 use crate::hotkey_client::SharedRebinder;
+use crate::motion::HoverWash as _;
 use crate::text_field::TextField;
 use crate::theme;
 
@@ -158,7 +158,6 @@ fn centered_bounds(cx: &App, window_size: gpui::Size<gpui::Pixels>) -> gpui::Bou
     gpui::Bounds::new(origin, window_size)
 }
 
-
 /// One keyboard stop in the Preferences window.
 ///
 /// The window's controls had **no keyboard path at all**: `on_key_down`
@@ -178,7 +177,6 @@ enum Control {
     Toggle(&'static str),
     RemoveFolder(String),
 }
-
 
 /// The keyboard's position, drawn.
 ///
@@ -333,7 +331,10 @@ impl PreferencesRoot {
                     root.folders = items.into_iter().map(|item| item.id).collect();
                 }
                 if let Ok(Response::SearchResults { items, .. }) = agents {
-                    let running = items.iter().filter(|i| i.badge.as_deref() == Some("LIVE")).count();
+                    let running = items
+                        .iter()
+                        .filter(|i| i.badge.as_deref() == Some("LIVE"))
+                        .count();
                     root.agent_census = Some(("Paseo".to_string(), running, items.len() - running));
                 }
                 cx.notify();
@@ -363,7 +364,6 @@ impl PreferencesRoot {
         })
         .detach();
     }
-
 
     /// Every keyboard stop on the current tab, in reading order: the tab bar
     /// first, then the tab's own controls top to bottom.
@@ -424,7 +424,11 @@ impl PreferencesRoot {
         if n == 0 {
             return;
         }
-        self.focused = if forward { (self.focused + 1) % n } else { (self.focused + n - 1) % n };
+        self.focused = if forward {
+            (self.focused + 1) % n
+        } else {
+            (self.focused + n - 1) % n
+        };
     }
 
     /// Switching tabs changes the control list under the focus index, so it
@@ -465,7 +469,6 @@ impl PreferencesRoot {
             None => {}
         }
     }
-
 
     /// Keyboard navigation for everything that is not the hotkey recorder.
     ///
@@ -538,7 +541,8 @@ impl PreferencesRoot {
         if typed.is_empty() {
             return;
         }
-        self.folder_input.update(cx, |field, cx| field.set_content("", cx));
+        self.folder_input
+            .update(cx, |field, cx| field.set_content("", cx));
         self.apply(
             Request::Activate {
                 kind: "folder-scope".to_string(),
@@ -555,7 +559,12 @@ impl PreferencesRoot {
 
     fn remove_folder(&mut self, path: String, cx: &mut Context<Self>) {
         self.apply(
-            Request::Activate { kind: "folder-scope".to_string(), id: path, action: None, query: String::new() },
+            Request::Activate {
+                kind: "folder-scope".to_string(),
+                id: path,
+                action: None,
+                query: String::new(),
+            },
             cx,
         );
     }
@@ -580,7 +589,9 @@ impl PreferencesRoot {
     /// listening rather than being recorded — it is refused as a hotkey
     /// anyway, and "get me out of this control" is what a person means by it.
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.recording != Recording::Listening && !matches!(self.recording, Recording::Rejected(_)) {
+        if self.recording != Recording::Listening
+            && !matches!(self.recording, Recording::Rejected(_))
+        {
             self.on_navigation_key(event, window, cx);
             return;
         }
@@ -615,8 +626,9 @@ impl PreferencesRoot {
     /// never reaches storage and never costs the working hotkey.
     fn commit_hotkey(&mut self, candidate: HotkeyCombo, cx: &mut Context<Self>) {
         let Some(rebinder) = self.rebinder.borrow().clone() else {
-            self.recording =
-                Recording::Rejected("neko is still starting up — try again in a moment.".to_string());
+            self.recording = Recording::Rejected(
+                "neko is still starting up — try again in a moment.".to_string(),
+            );
             cx.notify();
             return;
         };
@@ -625,7 +637,9 @@ impl PreferencesRoot {
             // The daemon's heuristic supplies a *reason* a live failure
             // cannot: a Carbon registration failure is an opaque status code.
             let heuristic = match client
-                .request(Request::CheckHotkeyConflict { candidate: candidate.clone() })
+                .request(Request::CheckHotkeyConflict {
+                    candidate: candidate.clone(),
+                })
                 .await
             {
                 Ok(Response::HotkeyConflict { reason }) => reason,
@@ -639,7 +653,9 @@ impl PreferencesRoot {
                         let client = root.client.clone();
                         let combo = candidate.clone();
                         cx.spawn(async move |this, cx| {
-                            let _ = client.request(Request::CommitHotkey { candidate: combo }).await;
+                            let _ = client
+                                .request(Request::CommitHotkey { candidate: combo })
+                                .await;
                             let _ = this.update(cx, |root, cx| root.reload(cx));
                         })
                         .detach();
@@ -777,7 +793,14 @@ impl PreferencesRoot {
     }
 
     fn render_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = div().flex().flex_col().flex_1().min_h(px(0.)).gap(px(18.)).px(px(28.)).py(px(22.));
+        let body = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.))
+            .gap(px(18.))
+            .px(px(28.))
+            .py(px(22.));
         match self.tab {
             Tab::General => body
                 .child(self.render_hotkey_row(cx))
@@ -823,7 +846,15 @@ impl PreferencesRoot {
                     .text_right()
                     .child(label),
             )
-            .child(div().flex().flex_col().flex_1().min_w(px(0.)).gap(px(6.)).child(control))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .gap(px(6.))
+                    .child(control),
+            )
     }
 
     fn render_hotkey_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -860,7 +891,8 @@ impl PreferencesRoot {
                     // the two borders would fight.
                     .map(|el| {
                         if listening {
-                            el.border_2().border_color(theme::active().state_danger_border)
+                            el.border_2()
+                                .border_color(theme::active().state_danger_border)
                         } else {
                             focus_ring(el, self.is_focused(&Control::RecordHotkey))
                         }
@@ -890,7 +922,8 @@ impl PreferencesRoot {
                     .child(SharedString::from(match &self.recording {
                         Recording::Rejected(reason) => reason.clone(),
                         Recording::Listening => {
-                            "Include at least one modifier — ⌘, ⌥, ⌃ or ⇧. Escape cancels.".to_string()
+                            "Include at least one modifier — ⌘, ⌥, ⌃ or ⇧. Escape cancels."
+                                .to_string()
                         }
                         Recording::Idle => "Click to record a new combination.".to_string(),
                     })),
@@ -930,7 +963,11 @@ impl PreferencesRoot {
             .w(px(40.))
             .h(px(24.))
             .rounded(px(12.))
-            .bg(if on { theme::active().state_success } else { theme::active().surface_input })
+            .bg(if on {
+                theme::active().state_success
+            } else {
+                theme::active().surface_input
+            })
             .border_1()
             .border_color(if on {
                 theme::active().state_success_border
@@ -966,12 +1003,12 @@ impl PreferencesRoot {
                     .rounded(px(8.))
                     .bg(theme::active().text_primary),
             );
-        let control = div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .child(track)
-            .child(div().text_size(px(11.5)).text_color(theme::active().text_tertiary).child(help));
+        let control = div().flex().flex_col().gap(px(6.)).child(track).child(
+            div()
+                .text_size(px(11.5))
+                .text_color(theme::active().text_tertiary)
+                .child(help),
+        );
         Self::labelled(label, control)
     }
 
@@ -1069,12 +1106,13 @@ impl PreferencesRoot {
                                 theme::active().banner_danger_bg,
                             )
                             .map(|el| {
-                                focus_ring(el, self.is_focused(&Control::RemoveFolder(path.clone())))
+                                focus_ring(
+                                    el,
+                                    self.is_focused(&Control::RemoveFolder(path.clone())),
+                                )
                             })
                             .on_click(cx.listener(move |root, _event, _window, cx| {
-                                root.focus_control(&Control::RemoveFolder(
-                                    path_for_remove.clone(),
-                                ));
+                                root.focus_control(&Control::RemoveFolder(path_for_remove.clone()));
                                 root.remove_folder(path_for_remove.clone(), cx)
                             }))
                             .child("Remove"),
@@ -1133,7 +1171,10 @@ impl PreferencesRoot {
                 div()
                     .text_size(px(12.5))
                     .text_color(theme::active().text_secondary)
-                    .child(SharedString::from(format!("Version {}", env!("CARGO_PKG_VERSION")))),
+                    .child(SharedString::from(format!(
+                        "Version {}",
+                        env!("CARGO_PKG_VERSION")
+                    ))),
             )
             .child(
                 div()
@@ -1189,7 +1230,11 @@ mod tests {
     #[gpui::test]
     fn a_delivered_key_press_while_listening_becomes_a_candidate(cx: &mut TestAppContext) {
         let window = test_root(cx);
-        window.update(cx, |root, window, cx| root.begin_recording_for_test(window, cx)).unwrap();
+        window
+            .update(cx, |root, window, cx| {
+                root.begin_recording_for_test(window, cx)
+            })
+            .unwrap();
         window
             .update(cx, |root, window, cx| {
                 let event = gpui::KeyDownEvent {
@@ -1211,9 +1256,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_bare_modifier_press_leaves_the_control_listening_rather_than_rejecting(cx: &mut TestAppContext) {
+    fn a_bare_modifier_press_leaves_the_control_listening_rather_than_rejecting(
+        cx: &mut TestAppContext,
+    ) {
         let window = test_root(cx);
-        window.update(cx, |root, window, cx| root.begin_recording_for_test(window, cx)).unwrap();
+        window
+            .update(cx, |root, window, cx| {
+                root.begin_recording_for_test(window, cx)
+            })
+            .unwrap();
         window
             .update(cx, |root, window, cx| {
                 let event = gpui::KeyDownEvent {
@@ -1234,7 +1285,11 @@ mod tests {
     #[gpui::test]
     fn escape_stops_listening_without_recording_anything(cx: &mut TestAppContext) {
         let window = test_root(cx);
-        window.update(cx, |root, window, cx| root.begin_recording_for_test(window, cx)).unwrap();
+        window
+            .update(cx, |root, window, cx| {
+                root.begin_recording_for_test(window, cx)
+            })
+            .unwrap();
         window
             .update(cx, |root, window, cx| {
                 let event = gpui::KeyDownEvent {

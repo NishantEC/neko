@@ -158,12 +158,24 @@ impl ThemeShim {
             info: p.text_secondary.into(),
             info_foreground: p.text_on_light.into(),
             red: p.state_danger.into(),
-            shadow: gpui::Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }.into(),
+            shadow: gpui::Rgba {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.0,
+            }
+            .into(),
             skeleton: p.row_icon_socket_bg.into(),
             // The track stays invisible: the panel is translucent over a live
             // native material, and a filled track would be an opaque stripe
             // through it.
-            scrollbar: gpui::Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }.into(),
+            scrollbar: gpui::Rgba {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.0,
+            }
+            .into(),
             scrollbar_thumb: alpha(p.text_primary, THUMB_ALPHA),
             scrollbar_thumb_hover: alpha(p.text_primary, THUMB_HOVER_ALPHA),
             scrollbar_show: ScrollbarShow::default(),
@@ -174,7 +186,13 @@ impl ThemeShim {
             progress_bar: p.text_primary.into(),
             accordion: p.surface_panel.into(),
             accordion_hover: p.surface_selected.into(),
-            transparent: gpui::Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }.into(),
+            transparent: gpui::Rgba {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.0,
+            }
+            .into(),
             radius: px(theme::ROW_RADIUS_PX),
             radius_lg: px(theme::DIALOG_RADIUS_PX),
             is_dark: is_dark(p.surface_panel),
@@ -192,7 +210,11 @@ impl ThemeShim {
 /// shipping a cream panel would be believed.
 pub fn is_dark(surface: gpui::Rgba) -> bool {
     fn linear(c: f32) -> f32 {
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     }
     let l = 0.2126 * linear(surface.r) + 0.7152 * linear(surface.g) + 0.0722 * linear(surface.b);
     l < 0.5
@@ -331,7 +353,17 @@ mod tests {
     fn a_light_panel_is_not_reported_as_dark() {
         // Luminance, not a flag: a theme declaring itself dark while shipping a
         // cream panel would otherwise be believed.
-        assert!(is_dark(gpui::Rgba { r: 0.1, g: 0.1, b: 0.1, a: 1.0 }));
-        assert!(!is_dark(gpui::Rgba { r: 0.98, g: 0.96, b: 0.92, a: 1.0 }));
+        assert!(is_dark(gpui::Rgba {
+            r: 0.1,
+            g: 0.1,
+            b: 0.1,
+            a: 1.0
+        }));
+        assert!(!is_dark(gpui::Rgba {
+            r: 0.98,
+            g: 0.96,
+            b: 0.92,
+            a: 1.0
+        }));
     }
 }

@@ -72,7 +72,11 @@ impl Terminal {
     /// `"~/Documents/neko · Terminal 1"`.
     pub fn detail_line(&self) -> String {
         let path = crate::agents::tildify_path(&self.cwd);
-        if self.name.is_empty() { path } else { format!("{path} \u{b7} {}", self.name) }
+        if self.name.is_empty() {
+            path
+        } else {
+            format!("{path} \u{b7} {}", self.name)
+        }
     }
 }
 
@@ -87,8 +91,16 @@ pub fn parse_terminals(value: &Value) -> Vec<Terminal> {
                 // Everything here is addressed by id; a row without one could
                 // only ever produce a request aimed at nothing.
                 id: entry.get("id")?.as_str()?.to_string(),
-                name: entry.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
-                cwd: entry.get("cwd").and_then(Value::as_str).unwrap_or("").to_string(),
+                name: entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                cwd: entry
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
             })
         })
         .collect()
@@ -120,8 +132,10 @@ pub fn capture_text(value: &Value) -> String {
         .iter()
         .filter_map(Value::as_str)
         .map(|line| {
-            let stripped: String =
-                line.chars().map(|c| if is_private_use(c) { ' ' } else { c }).collect();
+            let stripped: String = line
+                .chars()
+                .map(|c| if is_private_use(c) { ' ' } else { c })
+                .collect();
             stripped.trim_end().to_string()
         })
         .collect();
@@ -183,7 +197,9 @@ impl TerminalsProvider {
     }
 
     fn list(&self) -> Vec<Terminal> {
-        let Ok(client) = self.client() else { return Vec::new() };
+        let Ok(client) = self.client() else {
+            return Vec::new();
+        };
         client
             .call("list_terminals", json!({ "all": true }))
             .map(|value| parse_terminals(&value))
@@ -201,7 +217,9 @@ impl TerminalsProvider {
         if let Some(cached) = cached_captures(&key) {
             return cached;
         }
-        let Ok(client) = self.client() else { return Vec::new() };
+        let Ok(client) = self.client() else {
+            return Vec::new();
+        };
         let wanted: Vec<&Terminal> = terminals.iter().take(MAX_PREVIEWS).collect();
         let fresh: Vec<Capture> = std::thread::scope(|scope| {
             let running: Vec<_> = wanted
@@ -263,7 +281,9 @@ impl Provider for TerminalsProvider {
                     [&headline, &detail]
                         .into_iter()
                         .filter_map(|hay| crate::search::fuzzy_score(trimmed, hay))
-                        .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?
+                        .fold(None, |best: Option<f32>, s| {
+                            Some(best.map_or(s, |b| b.max(s)))
+                        })?
                 };
                 let preview = captures
                     .iter()
@@ -364,7 +384,8 @@ mod tests {
         // A capture is a fixed-height screen: 24 lines whether or not
         // anything is on them. Rendering all of it would put one line of
         // content at the top of an empty pane and read as a fault.
-        let value = json!({"lines": ["$ cargo test", "527 passed", "", "", "", ""], "totalLines": 24});
+        let value =
+            json!({"lines": ["$ cargo test", "527 passed", "", "", "", ""], "totalLines": 24});
         assert_eq!(capture_text(&value), "$ cargo test\n527 passed");
     }
 
@@ -373,7 +394,8 @@ mod tests {
         // Real capture text from this machine's own prompt: Powerlevel10k
         // draws its separators from the private use area, and neko renders
         // in the system font, which has nothing there.
-        let value = json!({"lines": [" \u{f179} \u{e0b1} \u{f115} /tmp \u{e0b0}  ", "\u{276f} echo hi"]});
+        let value =
+            json!({"lines": [" \u{f179} \u{e0b1} \u{f115} /tmp \u{e0b0}  ", "\u{276f} echo hi"]});
         assert_eq!(capture_text(&value), "       /tmp\n\u{276f} echo hi");
         // A line that was *only* icons becomes blank rather than tofu, and a
         // trailing run of those is then trimmed like any other padding —
@@ -387,7 +409,10 @@ mod tests {
         // The prompt caret, box drawing, emoji — all real characters the
         // system font can draw, and all meaning-bearing.
         let value = json!({"lines": ["\u{276f} cargo test \u{2714} 533 \u{2502} ok"]});
-        assert_eq!(capture_text(&value), "\u{276f} cargo test \u{2714} 533 \u{2502} ok");
+        assert_eq!(
+            capture_text(&value),
+            "\u{276f} cargo test \u{2714} 533 \u{2502} ok"
+        );
     }
 
     #[test]
@@ -429,11 +454,16 @@ mod tests {
         // would show a preview for a terminal that is gone.
         let one: CaptureKey = vec!["a".to_string()];
         let two: CaptureKey = vec!["a".to_string(), "b".to_string()];
-        *CAPTURES.lock().unwrap() =
-            Some((Instant::now(), one.clone(), vec![("a".to_string(), "hi".to_string())]));
+        *CAPTURES.lock().unwrap() = Some((
+            Instant::now(),
+            one.clone(),
+            vec![("a".to_string(), "hi".to_string())],
+        ));
         assert!(cached_captures(&one).is_some(), "the same set is reused");
-        assert!(cached_captures(&two).is_none(), "a changed set is refetched");
+        assert!(
+            cached_captures(&two).is_none(),
+            "a changed set is refetched"
+        );
         *CAPTURES.lock().unwrap() = None;
     }
-
 }

@@ -134,7 +134,11 @@ mod tests {
         let path = client_socket_path();
         assert!(path.to_string_lossy().contains("Application Support/neko"));
         assert!(path.ends_with("client.sock"));
-        assert_ne!(path, neko_protocol::socket_path(), "not the daemon's socket");
+        assert_ne!(
+            path,
+            neko_protocol::socket_path(),
+            "not the daemon's socket"
+        );
     }
 
     #[test]
@@ -153,6 +157,9 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let started = std::time::Instant::now();
         wait_for_release(&path);
-        assert!(started.elapsed() < RELEASE_TIMEOUT, "did not sit out the timeout");
+        assert!(
+            started.elapsed() < RELEASE_TIMEOUT,
+            "did not sit out the timeout"
+        );
     }
 }

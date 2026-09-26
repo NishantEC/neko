@@ -52,7 +52,9 @@ impl std::error::Error for ClientError {}
 fn run_deadline_sweeper(shared: std::sync::Weak<Shared>) {
     loop {
         std::thread::sleep(Duration::from_secs(1));
-        let Some(shared) = shared.upgrade() else { return };
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
         sweep_expired(&shared, Instant::now());
     }
 }
@@ -60,7 +62,11 @@ fn run_deadline_sweeper(shared: std::sync::Weak<Shared>) {
 fn sweep_expired(shared: &Shared, now: Instant) {
     let expired: Vec<u64> = {
         let mut deadlines = shared.deadlines.lock().unwrap();
-        let ids: Vec<u64> = deadlines.iter().filter(|(_, at)| **at <= now).map(|(id, _)| *id).collect();
+        let ids: Vec<u64> = deadlines
+            .iter()
+            .filter(|(_, at)| **at <= now)
+            .map(|(id, _)| *id)
+            .collect();
         for id in &ids {
             deadlines.remove(id);
         }
@@ -190,7 +196,11 @@ impl NekoClient {
         if send_result.is_err() {
             self.shared.pending.lock().unwrap().remove(&id);
         } else {
-            self.shared.deadlines.lock().unwrap().insert(id, Instant::now() + REQUEST_TIMEOUT);
+            self.shared
+                .deadlines
+                .lock()
+                .unwrap()
+                .insert(id, Instant::now() + REQUEST_TIMEOUT);
         }
 
         let shared = self.shared.clone();
@@ -200,7 +210,11 @@ impl NekoClient {
                 return Err(ClientError::NotConnected);
             }
             rx.await.map_err(|_| {
-                if shared.timed_out.lock().unwrap().remove(&id) { ClientError::Timeout } else { ClientError::Disconnected }
+                if shared.timed_out.lock().unwrap().remove(&id) {
+                    ClientError::Timeout
+                } else {
+                    ClientError::Disconnected
+                }
             })
         }
     }
@@ -421,8 +435,18 @@ mod tests {
     fn an_unanswered_request_times_out_instead_of_hanging() {
         let (client, _server) = connected_pair();
         let future = client.request(Request::Ping);
-        let id = *client.shared.deadlines.lock().unwrap().keys().next().expect("deadline registered");
-        sweep_expired(&client.shared, Instant::now() + REQUEST_TIMEOUT + Duration::from_secs(1));
+        let id = *client
+            .shared
+            .deadlines
+            .lock()
+            .unwrap()
+            .keys()
+            .next()
+            .expect("deadline registered");
+        sweep_expired(
+            &client.shared,
+            Instant::now() + REQUEST_TIMEOUT + Duration::from_secs(1),
+        );
         let result = futures_executor_block_on(future);
         assert!(matches!(result, Err(ClientError::Timeout)), "{result:?}");
         assert!(!client.shared.timed_out.lock().unwrap().contains(&id));
@@ -831,11 +855,10 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
 
         let (client, _events) = NekoClient::connect(path.clone());
-        assert!(
-            !client.is_connected(),
-            "not connected before the daemon-like listener ever accepts"
-        );
-
+        // `connect(2)` completes against the listener's kernel backlog, not
+        // when this test thread calls `accept()`. Under a busy test run the
+        // supervisor can therefore truthfully report connected before this
+        // thread observes the accepted stream.
         let (stream, _) = listener.accept().unwrap();
         assert!(
             wait_until(|| client.is_connected(), Duration::from_secs(2)),

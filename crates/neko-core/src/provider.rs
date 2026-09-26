@@ -99,7 +99,12 @@ pub trait Provider: Send + Sync {
     /// today) implements exactly one method, exactly as before this
     /// existed — the "registering a new provider is one `impl` plus one
     /// line" accounting in `AGENTS.md` is unchanged.
-    fn search_cancellable(&self, query: &str, now_unix_ms: i64, _cancel: &Cancel) -> Vec<Candidate> {
+    fn search_cancellable(
+        &self,
+        query: &str,
+        now_unix_ms: i64,
+        _cancel: &Cancel,
+    ) -> Vec<Candidate> {
         self.search(query, now_unix_ms)
     }
 
@@ -154,7 +159,10 @@ pub trait Provider: Send + Sync {
     }
 
     fn perform_action(&self, _id: &str, action_id: &str) -> Result<(), ProviderError> {
-        Err(ProviderError(format!("provider '{}' has no action '{action_id}'", self.id())))
+        Err(ProviderError(format!(
+            "provider '{}' has no action '{action_id}'",
+            self.id()
+        )))
     }
 
     /// A `⌘K` action that also needs what was typed.
@@ -211,9 +219,7 @@ pub fn path_actions() -> Vec<neko_protocol::ItemAction> {
 /// Performs [`path_actions`] against a real path.
 pub fn perform_path_action(path: &std::path::Path, action: &str) -> Result<(), ProviderError> {
     match action {
-        "reveal" => {
-            crate::launch::reveal_in_finder(path).map_err(|e| ProviderError(e.to_string()))
-        }
+        "reveal" => crate::launch::reveal_in_finder(path).map_err(|e| ProviderError(e.to_string())),
         "copy-path" => {
             if crate::clipboard::write_to_pasteboard(&path.to_string_lossy()) {
                 Ok(())
@@ -260,7 +266,12 @@ mod tests {
         // if it stopped delegating, every provider that never asked for a
         // query would silently stop activating at all.
         let provider = MinimalProvider::default();
-        provider.activate_with_query("/Applications/Safari.app", "saf").unwrap();
-        assert_eq!(provider.activated.lock().unwrap().as_slice(), ["/Applications/Safari.app"]);
+        provider
+            .activate_with_query("/Applications/Safari.app", "saf")
+            .unwrap();
+        assert_eq!(
+            provider.activated.lock().unwrap().as_slice(),
+            ["/Applications/Safari.app"]
+        );
     }
 }

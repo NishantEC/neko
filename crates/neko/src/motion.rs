@@ -123,7 +123,11 @@ impl CubicBezier {
         let (mut lo, mut hi) = (0.0_f32, 1.0_f32);
         for _ in 0..32 {
             let mid = (lo + hi) / 2.0;
-            if self.sample_x(mid) < x { lo = mid } else { hi = mid }
+            if self.sample_x(mid) < x {
+                lo = mid
+            } else {
+                hi = mid
+            }
         }
         (lo + hi) / 2.0
     }
@@ -175,7 +179,10 @@ pub struct MotionSpec {
 
 impl MotionSpec {
     const fn new(duration_ms: u64) -> Self {
-        Self { duration_ms, curve: EASE_OUT }
+        Self {
+            duration_ms,
+            curve: EASE_OUT,
+        }
     }
 
     const fn with_curve(duration_ms: u64, curve: CubicBezier) -> Self {
@@ -273,7 +280,9 @@ pub fn menu_fade_in(id: &'static str, reduced: bool, element: Div) -> gpui::AnyE
         return element.into_any_element();
     }
     element
-        .with_animation(id, MENU_FADE.animation(), |el, t| el.opacity(t).relative().top(px(4.0 * (1.0 - t))))
+        .with_animation(id, MENU_FADE.animation(), |el, t| {
+            el.opacity(t).relative().top(px(4.0 * (1.0 - t)))
+        })
         .into_any_element()
 }
 
@@ -311,8 +320,17 @@ pub struct ScrollGlide {
 }
 
 impl ScrollGlide {
-    pub fn new(from: gpui::Point<gpui::Pixels>, to: gpui::Point<gpui::Pixels>, now: Instant) -> Self {
-        Self { from, to, last_written: from, started: now }
+    pub fn new(
+        from: gpui::Point<gpui::Pixels>,
+        to: gpui::Point<gpui::Pixels>,
+        now: Instant,
+    ) -> Self {
+        Self {
+            from,
+            to,
+            last_written: from,
+            started: now,
+        }
     }
 
     /// Where the view should sit at `now`, and whether the glide is finished.
@@ -324,8 +342,16 @@ impl ScrollGlide {
         }
         let t = SCROLL_GLIDE.progress(elapsed.as_secs_f32() / duration.as_secs_f32());
         let at = gpui::point(
-            gpui::px(lerp(self.from.x.to_f64() as f32, self.to.x.to_f64() as f32, t)),
-            gpui::px(lerp(self.from.y.to_f64() as f32, self.to.y.to_f64() as f32, t)),
+            gpui::px(lerp(
+                self.from.x.to_f64() as f32,
+                self.to.x.to_f64() as f32,
+                t,
+            )),
+            gpui::px(lerp(
+                self.from.y.to_f64() as f32,
+                self.to.y.to_f64() as f32,
+                t,
+            )),
         );
         (at, false)
     }
@@ -465,8 +491,11 @@ impl HoverFades {
     pub fn set_at(&mut self, key: &str, hovered: bool, reduced: bool, now: Instant) {
         let target = if hovered { 1.0 } else { 0.0 };
         let duration = Self::duration();
-        let current =
-            self.entries.get(key).map(|e| e.value(now, duration)).unwrap_or(0.0);
+        let current = self
+            .entries
+            .get(key)
+            .map(|e| e.value(now, duration))
+            .unwrap_or(0.0);
         if target == 0.0 && !self.entries.contains_key(key) {
             // A never-hovered element reporting a leave. Recording it would
             // create an entry whose only purpose is to be pruned.
@@ -474,8 +503,15 @@ impl HoverFades {
         }
         let origin = if reduced { target } else { current };
         let seen = self.frame;
-        self.entries
-            .insert(key.to_string(), FadeEntry { origin, target, started: now, seen });
+        self.entries.insert(
+            key.to_string(),
+            FadeEntry {
+                origin,
+                target,
+                started: now,
+                seen,
+            },
+        );
     }
 
     /// Like [`set_at`](Self::set_at), but a no-op when the fade is already
@@ -524,9 +560,9 @@ impl HoverFades {
         // hold for any number of surfaces without any of them knowing about
         // the others. The threshold is below one frame at 120Hz, so a genuine
         // frame is never skipped.
-        let advance = self.last_tick.is_none_or(|last| {
-            now.saturating_duration_since(last) >= MIN_TICK_INTERVAL
-        });
+        let advance = self
+            .last_tick
+            .is_none_or(|last| now.saturating_duration_since(last) >= MIN_TICK_INTERVAL);
         if advance {
             self.frame += 1;
             self.last_tick = Some(now);
@@ -565,7 +601,11 @@ pub fn hover_t(key: &str) -> f32 {
 
 /// Record a hover flip for `key`.
 pub fn set_hover(key: &str, hovered: bool, reduced: bool) {
-    HOVER_FADES.with(|fades| fades.borrow_mut().set_at(key, hovered, reduced, Instant::now()));
+    HOVER_FADES.with(|fades| {
+        fades
+            .borrow_mut()
+            .set_at(key, hovered, reduced, Instant::now())
+    });
 }
 
 /// The `.on_hover` listener for `key` — pair it with [`hover_blend`] on the
@@ -576,7 +616,9 @@ pub fn set_hover(key: &str, hovered: bool, reduced: bool) {
 /// and is draw-phase-only. Refresh marks the window dirty, the render pass
 /// re-evaluates the blend, and its tail keeps frames coming while anything is
 /// still moving.
-pub fn hover_listener(key: impl Into<SharedString>) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
+pub fn hover_listener(
+    key: impl Into<SharedString>,
+) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
     let key = key.into();
     move |hovered, window, cx| {
         set_hover(&key, *hovered, cx.reduce_motion());
@@ -592,7 +634,11 @@ pub fn hover_fades_active() -> bool {
 
 /// Record a *state* for `key` — see [`HoverFades::set_target_at`].
 pub fn set_state(key: &str, on: bool, reduced: bool) {
-    HOVER_FADES.with(|fades| fades.borrow_mut().set_target_at(key, on, reduced, Instant::now()));
+    HOVER_FADES.with(|fades| {
+        fades
+            .borrow_mut()
+            .set_target_at(key, on, reduced, Instant::now())
+    });
 }
 
 /// `off` → `on` at `key`'s current progress, for a state re-derived every
@@ -746,13 +792,17 @@ mod tests {
         );
         let mut previous = f32::MAX;
         for step in 0..=20 {
-            let at = glide.sample(t0 + SCROLL_GLIDE.duration().mul_f32(step as f32 / 20.0)).0;
+            let at = glide
+                .sample(t0 + SCROLL_GLIDE.duration().mul_f32(step as f32 / 20.0))
+                .0;
             let y = at.y.to_f64() as f32;
-            assert!(y <= previous + 1e-3, "step {step}: went back from {previous} to {y}");
+            assert!(
+                y <= previous + 1e-3,
+                "step {step}: went back from {previous} to {y}"
+            );
             previous = y;
         }
     }
-
 
     #[test]
     fn a_wash_starts_at_rest_and_arrives_at_full() {
@@ -808,12 +858,20 @@ mod tests {
         // One frame where it still renders: read, then tick.
         fades.value_at("row", settled);
         fades.tick_at(settled + MIN_TICK_INTERVAL);
-        assert_eq!(fades.value_at("row", settled), 1.0, "still mounted, still hovered");
+        assert_eq!(
+            fades.value_at("row", settled),
+            1.0,
+            "still mounted, still hovered"
+        );
 
         // A frame where it does not render at all.
         fades.tick_at(settled + MIN_TICK_INTERVAL * 2);
         fades.tick_at(settled + MIN_TICK_INTERVAL * 3);
-        assert_eq!(fades.value_at("row", settled), 0.0, "gone, and its wash with it");
+        assert_eq!(
+            fades.value_at("row", settled),
+            0.0,
+            "gone, and its wash with it"
+        );
     }
 
     #[test]
@@ -849,7 +907,10 @@ mod tests {
         let t0 = Instant::now();
         fades.set_at("k", true, false, t0);
         fades.value_at("k", t0);
-        assert!(fades.tick_at(t0 + MIN_TICK_INTERVAL), "mid-flight keeps frames coming");
+        assert!(
+            fades.tick_at(t0 + MIN_TICK_INTERVAL),
+            "mid-flight keeps frames coming"
+        );
 
         let done = t0 + HOVER_FADE.duration() + MIN_TICK_INTERVAL;
         fades.value_at("k", done);
@@ -862,26 +923,56 @@ mod tests {
         // component lerp: a straight mix interpolates the hidden channels of a
         // fully transparent colour too, so a light wash fading in over a dark
         // panel visibly darkens on its way up.
-        let from = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
-        let to = Rgba { r: 1.0, g: 1.0, b: 1.0, a: 0.06 };
+        let from = Rgba {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.0,
+        };
+        let to = Rgba {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 0.06,
+        };
         let mid = mix(from, to, 0.5);
-        assert!((mid.r - 1.0).abs() < 1e-4, "hue is the target's throughout, got {}", mid.r);
-        assert!((mid.a - 0.03).abs() < 1e-4, "only the alpha travels, got {}", mid.a);
+        assert!(
+            (mid.r - 1.0).abs() < 1e-4,
+            "hue is the target's throughout, got {}",
+            mid.r
+        );
+        assert!(
+            (mid.a - 0.03).abs() < 1e-4,
+            "only the alpha travels, got {}",
+            mid.a
+        );
     }
 
     #[test]
     fn mix_returns_its_endpoints_exactly() {
-        let a = Rgba { r: 0.1, g: 0.2, b: 0.3, a: 1.0 };
-        let b = Rgba { r: 0.9, g: 0.8, b: 0.7, a: 1.0 };
+        let a = Rgba {
+            r: 0.1,
+            g: 0.2,
+            b: 0.3,
+            a: 1.0,
+        };
+        let b = Rgba {
+            r: 0.9,
+            g: 0.8,
+            b: 0.7,
+            a: 1.0,
+        };
         assert_eq!(mix(a, b, 0.0).r, a.r);
         assert_eq!(mix(a, b, 1.0).r, b.r);
         assert_eq!(mix(a, b, -5.0).r, a.r, "clamped");
         assert_eq!(mix(a, b, 5.0).r, b.r, "clamped");
     }
 
-
     fn assert_close(actual: f32, expected: f32, tol: f32, ctx: &str) {
-        assert!((actual - expected).abs() <= tol, "{ctx}: got {actual}, expected {expected} ±{tol}");
+        assert!(
+            (actual - expected).abs() <= tol,
+            "{ctx}: got {actual}, expected {expected} ±{tol}"
+        );
     }
 
     #[test]
@@ -988,7 +1079,10 @@ impl PulseClock {
     /// The one clock. Created on first use, never more than one.
     pub fn global(cx: &mut App) -> Entity<PulseClock> {
         if !cx.has_global::<GlobalPulseClock>() {
-            let clock = cx.new(|_| PulseClock { elapsed_ms: 0.0, running: false });
+            let clock = cx.new(|_| PulseClock {
+                elapsed_ms: 0.0,
+                running: false,
+            });
             cx.set_global(GlobalPulseClock(clock));
         }
         cx.global::<GlobalPulseClock>().0.clone()
@@ -1063,20 +1157,30 @@ mod pulse_tests {
     /// The clock's waveform is pure arithmetic on `elapsed_ms`, so it can be
     /// checked without a running task or a window.
     fn clock_at(elapsed_ms: f32, running: bool) -> PulseClock {
-        PulseClock { elapsed_ms, running }
+        PulseClock {
+            elapsed_ms,
+            running,
+        }
     }
 
     #[test]
     fn a_stopped_clock_reports_a_fixed_midpoint_so_callers_never_branch_on_it() {
         assert_eq!(clock_at(0.0, false).intensity(), 0.5);
-        assert_eq!(clock_at(12345.0, false).intensity(), 0.5, "a stopped clock does not drift");
+        assert_eq!(
+            clock_at(12345.0, false).intensity(),
+            0.5,
+            "a stopped clock does not drift"
+        );
     }
 
     #[test]
     fn intensity_stays_inside_the_unit_interval_across_a_dense_sweep() {
         for step in 0..2000 {
             let i = clock_at(step as f32 * 7.3, true).intensity();
-            assert!((0.0..=1.0).contains(&i), "intensity {i} out of range at step {step}");
+            assert!(
+                (0.0..=1.0).contains(&i),
+                "intensity {i} out of range at step {step}"
+            );
         }
     }
 

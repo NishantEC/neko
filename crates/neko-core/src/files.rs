@@ -171,7 +171,10 @@ fn is_noisy(path: &Path) -> bool {
         return true;
     }
     let path_str = path.to_string_lossy();
-    if NOISY_PATH_SUBSTRINGS.iter().any(|needle| path_str.contains(needle)) {
+    if NOISY_PATH_SUBSTRINGS
+        .iter()
+        .any(|needle| path_str.contains(needle))
+    {
         return true;
     }
     path.components()
@@ -193,8 +196,8 @@ const SOURCE_ARTIFACT_EXTENSIONS: &[&str] = &[
     "pyc", "pyo", "o", "obj", "class", "so", "dylib", "a", "rlib",
     // Source code, across the languages this codebase's own machines and
     // the captain's repos are most likely to contain.
-    "rs", "c", "h", "hpp", "cc", "cpp", "cxx", "m", "mm", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "go", "rb",
-    "java", "kt", "swift", "scala", "php", "cs", "sh", "bash", "zsh",
+    "rs", "c", "h", "hpp", "cc", "cpp", "cxx", "m", "mm", "py", "js", "mjs", "cjs", "ts", "tsx",
+    "jsx", "go", "rb", "java", "kt", "swift", "scala", "php", "cs", "sh", "bash", "zsh",
     // Markup/data formats that are almost always project source, not a
     // document a person saved for its own sake — an SVG in a repo is an
     // icon asset, not artwork someone's looking for by filename.
@@ -234,7 +237,11 @@ const SOURCE_ARTIFACT_DEMOTION: f32 = 0.85;
 fn is_source_artifact(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| SOURCE_ARTIFACT_EXTENSIONS.iter().any(|candidate| candidate.eq_ignore_ascii_case(ext)))
+        .is_some_and(|ext| {
+            SOURCE_ARTIFACT_EXTENSIONS
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(ext))
+        })
 }
 
 pub fn default_scope_dirs() -> Vec<PathBuf> {
@@ -328,7 +335,11 @@ fn query_spotlight_paths(query: &str, dirs: &[PathBuf], cancel: &Cancel) -> Vec<
 /// multi-second delay set, a superseded keystroke visibly abandons its
 /// query instead of holding a thread.
 fn verification_delay() -> Option<Duration> {
-    std::env::var("NEKO_FILE_SEARCH_DELAY_MS").ok()?.parse::<u64>().ok().map(Duration::from_millis)
+    std::env::var("NEKO_FILE_SEARCH_DELAY_MS")
+        .ok()?
+        .parse::<u64>()
+        .ok()
+        .map(Duration::from_millis)
 }
 
 /// Sleeps for `delay` in [`CANCEL_POLL_INTERVAL`] slices, returning `false`
@@ -366,7 +377,10 @@ const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// which is direct evidence the child process was killed rather than
 /// merely abandoned with its output discarded. [`query_spotlight_paths`]
 /// itself discards the status.
-fn run_bounded_child(mut command: Command, cancel: &Cancel) -> (Vec<PathBuf>, Option<std::process::ExitStatus>) {
+fn run_bounded_child(
+    mut command: Command,
+    cancel: &Cancel,
+) -> (Vec<PathBuf>, Option<std::process::ExitStatus>) {
     let Ok(mut child) = command.spawn() else {
         return (Vec::new(), None);
     };
@@ -427,7 +441,11 @@ fn kill_and_reap(
 }
 
 fn glyph_for(path: &Path) -> Glyph {
-    if path.is_dir() { Glyph::Folder } else { Glyph::File }
+    if path.is_dir() {
+        Glyph::Folder
+    } else {
+        Glyph::File
+    }
 }
 
 fn build_candidate(score: f32, path: PathBuf, name: String) -> Candidate {
@@ -489,12 +507,16 @@ enum Scope {
 
 impl FileProvider {
     pub fn new() -> Self {
-        Self { scope: Scope::Fixed(default_scope_dirs()) }
+        Self {
+            scope: Scope::Fixed(default_scope_dirs()),
+        }
     }
 
     /// The real daemon's constructor: scope follows the persisted setting.
     pub fn with_db(db: Arc<Mutex<crate::Db>>) -> Self {
-        Self { scope: Scope::Configured(db) }
+        Self {
+            scope: Scope::Configured(db),
+        }
     }
 
     fn scope_dirs(&self) -> Vec<PathBuf> {
@@ -516,7 +538,9 @@ impl FileProvider {
     /// provider list but must stay hermetic and fast rather than depending
     /// on the test machine's own `~/Documents` contents.
     pub fn empty() -> Self {
-        Self { scope: Scope::Fixed(Vec::new()) }
+        Self {
+            scope: Scope::Fixed(Vec::new()),
+        }
     }
 }
 
@@ -551,7 +575,12 @@ impl Provider for FileProvider {
         !self.scope_dirs().is_empty() && query.trim().chars().count() >= MIN_QUERY_LEN
     }
 
-    fn search_cancellable(&self, query: &str, _now_unix_ms: i64, cancel: &Cancel) -> Vec<Candidate> {
+    fn search_cancellable(
+        &self,
+        query: &str,
+        _now_unix_ms: i64,
+        cancel: &Cancel,
+    ) -> Vec<Candidate> {
         let query = query.trim();
         if query.chars().count() < MIN_QUERY_LEN {
             return Vec::new();
@@ -565,7 +594,11 @@ impl Provider for FileProvider {
             .filter_map(|path| {
                 let name = path.file_name()?.to_string_lossy().into_owned();
                 let score = fuzzy_score(query, &name)?;
-                let score = if is_source_artifact(&path) { score * SOURCE_ARTIFACT_DEMOTION } else { score };
+                let score = if is_source_artifact(&path) {
+                    score * SOURCE_ARTIFACT_DEMOTION
+                } else {
+                    score
+                };
                 Some(build_candidate(score, path, name))
             })
             .take(MAX_CANDIDATES)
@@ -627,7 +660,10 @@ mod tests {
             elapsed < QUERY_TIMEOUT / 2,
             "a cancelled query must return promptly, not run out its own {QUERY_TIMEOUT:?} bound (took {elapsed:?})"
         );
-        assert!(paths.is_empty(), "a cancelled query contributes nothing, even if a line had already streamed in");
+        assert!(
+            paths.is_empty(),
+            "a cancelled query contributes nothing, even if a line had already streamed in"
+        );
         assert_eq!(
             status.and_then(|s| s.signal()),
             Some(9),
@@ -661,16 +697,33 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         let (paths, _status) = run_bounded_child(command, &Cancel::never());
-        assert_eq!(paths, vec![PathBuf::from("/tmp/one.txt"), PathBuf::from("/tmp/two.txt")]);
+        assert_eq!(
+            paths,
+            vec![PathBuf::from("/tmp/one.txt"), PathBuf::from("/tmp/two.txt")]
+        );
     }
 
     #[test]
     fn the_file_provider_only_defers_once_the_query_is_long_enough_to_query_spotlight() {
-        let provider = FileProvider { scope: Scope::Fixed(vec![PathBuf::from("/tmp")]) };
-        assert!(!provider.defers_for(""), "an empty query never reaches mdfind");
-        assert!(!provider.defers_for("a"), "a single character is below MIN_QUERY_LEN");
-        assert!(!provider.defers_for("  a  "), "whitespace does not count toward the minimum");
-        assert!(provider.defers_for("do"), "two characters is the point mdfind actually runs");
+        let provider = FileProvider {
+            scope: Scope::Fixed(vec![PathBuf::from("/tmp")]),
+        };
+        assert!(
+            !provider.defers_for(""),
+            "an empty query never reaches mdfind"
+        );
+        assert!(
+            !provider.defers_for("a"),
+            "a single character is below MIN_QUERY_LEN"
+        );
+        assert!(
+            !provider.defers_for("  a  "),
+            "whitespace does not count toward the minimum"
+        );
+        assert!(
+            provider.defers_for("do"),
+            "two characters is the point mdfind actually runs"
+        );
     }
 
     #[test]
@@ -683,8 +736,14 @@ mod tests {
         });
         let started = std::time::Instant::now();
         let completed = sleep_unless_cancelled(Some(Duration::from_secs(30)), &cancel);
-        assert!(!completed, "a cancelled delay reports that it did not elapse");
-        assert!(started.elapsed() < Duration::from_secs(1), "and returns without waiting the rest of it out");
+        assert!(
+            !completed,
+            "a cancelled delay reports that it did not elapse"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "and returns without waiting the rest of it out"
+        );
     }
 
     #[test]
@@ -703,8 +762,12 @@ mod tests {
 
     #[test]
     fn noisy_paths_are_excluded() {
-        assert!(is_noisy(Path::new("/Users/x/Documents/proj/node_modules/leftpad/index.js")));
-        assert!(is_noisy(Path::new("/Users/x/Documents/proj/target/debug/build")));
+        assert!(is_noisy(Path::new(
+            "/Users/x/Documents/proj/node_modules/leftpad/index.js"
+        )));
+        assert!(is_noisy(Path::new(
+            "/Users/x/Documents/proj/target/debug/build"
+        )));
         assert!(is_noisy(Path::new("/Users/x/Documents/proj/.git/HEAD")));
         assert!(is_noisy(Path::new("/Users/x/Documents/.hidden/file.txt")));
         assert!(is_noisy(Path::new("/Users/x/Documents/Safari.app")));
@@ -721,47 +784,82 @@ mod tests {
         assert!(is_noisy(Path::new(
             "/Users/x/Documents/proj/env/lib/python3.8/site-packages/django/contrib/staticfiles/finders.py"
         )));
-        assert!(is_noisy(Path::new("/Users/x/Documents/proj/env/lib/python3.8/site-packages/djangobower/finders.py")));
+        assert!(is_noisy(Path::new(
+            "/Users/x/Documents/proj/env/lib/python3.8/site-packages/djangobower/finders.py"
+        )));
     }
 
     #[test]
     fn source_and_build_artifact_extensions_are_recognized() {
-        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/terminal.rs")));
-        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/terminal.h")));
-        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/terminal.svg")));
-        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/module.pyc")));
-        assert!(is_source_artifact(Path::new("/Users/x/Documents/proj/Main.CLASS")), "extension match must be case-insensitive");
+        assert!(is_source_artifact(Path::new(
+            "/Users/x/Documents/proj/terminal.rs"
+        )));
+        assert!(is_source_artifact(Path::new(
+            "/Users/x/Documents/proj/terminal.h"
+        )));
+        assert!(is_source_artifact(Path::new(
+            "/Users/x/Documents/proj/terminal.svg"
+        )));
+        assert!(is_source_artifact(Path::new(
+            "/Users/x/Documents/proj/module.pyc"
+        )));
+        assert!(
+            is_source_artifact(Path::new("/Users/x/Documents/proj/Main.CLASS")),
+            "extension match must be case-insensitive"
+        );
     }
 
     #[test]
     fn documents_images_and_folders_are_never_source_artifacts() {
-        assert!(!is_source_artifact(Path::new("/Users/x/Documents/report.pdf")));
-        assert!(!is_source_artifact(Path::new("/Users/x/Documents/photo.heic")));
-        assert!(!is_source_artifact(Path::new("/Users/x/Documents/notes.txt")));
+        assert!(!is_source_artifact(Path::new(
+            "/Users/x/Documents/report.pdf"
+        )));
+        assert!(!is_source_artifact(Path::new(
+            "/Users/x/Documents/photo.heic"
+        )));
+        assert!(!is_source_artifact(Path::new(
+            "/Users/x/Documents/notes.txt"
+        )));
         assert!(!is_source_artifact(Path::new("/Users/x/Documents/project"))); // no extension
     }
 
     #[test]
     fn a_source_artifact_is_demoted_but_not_dropped() {
         let raw = fuzzy_score("terminal", "terminal.rs").unwrap();
-        let score = if is_source_artifact(Path::new("terminal.rs")) { raw * SOURCE_ARTIFACT_DEMOTION } else { raw };
-        assert!(score > 0.0, "a source-artifact match must still be a real, positive-scoring candidate");
-        assert!(score < raw, "it must score lower than an equivalent non-artifact match would");
+        let score = if is_source_artifact(Path::new("terminal.rs")) {
+            raw * SOURCE_ARTIFACT_DEMOTION
+        } else {
+            raw
+        };
+        assert!(
+            score > 0.0,
+            "a source-artifact match must still be a real, positive-scoring candidate"
+        );
+        assert!(
+            score < raw,
+            "it must score lower than an equivalent non-artifact match would"
+        );
     }
 
     #[test]
     fn home_relative_parent_abbreviates_with_a_tilde() {
         let home = Path::new("/Users/testuser");
         assert_eq!(
-            home_relative_parent_within(Path::new("/Users/testuser/Documents/report.pdf"), Some(home)).as_deref(),
+            home_relative_parent_within(
+                Path::new("/Users/testuser/Documents/report.pdf"),
+                Some(home)
+            )
+            .as_deref(),
             Some("~/Documents")
         );
         assert_eq!(
-            home_relative_parent_within(Path::new("/Users/testuser/report.pdf"), Some(home)).as_deref(),
+            home_relative_parent_within(Path::new("/Users/testuser/report.pdf"), Some(home))
+                .as_deref(),
             Some("~")
         );
         assert_eq!(
-            home_relative_parent_within(Path::new("/Volumes/External/report.pdf"), Some(home)).as_deref(),
+            home_relative_parent_within(Path::new("/Volumes/External/report.pdf"), Some(home))
+                .as_deref(),
             Some("/Volumes/External")
         );
     }
@@ -774,20 +872,28 @@ mod tests {
 
     #[test]
     fn a_query_shorter_than_the_minimum_returns_no_candidates_without_querying() {
-        let provider = FileProvider { scope: Scope::Fixed(default_scope_dirs()) };
+        let provider = FileProvider {
+            scope: Scope::Fixed(default_scope_dirs()),
+        };
         assert_eq!(provider.search("a", 0).len(), 0);
         assert_eq!(provider.search("", 0).len(), 0);
     }
 
     #[test]
     fn an_empty_scope_returns_no_candidates() {
-        let provider = FileProvider { scope: Scope::Fixed(Vec::new()) };
+        let provider = FileProvider {
+            scope: Scope::Fixed(Vec::new()),
+        };
         assert_eq!(provider.search("readme", 0).len(), 0);
     }
 
     #[test]
     fn provider_search_sets_generic_row_fields() {
-        let candidate = build_candidate(1.0, PathBuf::from("/Users/x/Documents/report.pdf"), "report.pdf".to_string());
+        let candidate = build_candidate(
+            1.0,
+            PathBuf::from("/Users/x/Documents/report.pdf"),
+            "report.pdf".to_string(),
+        );
         assert_eq!(candidate.item.kind, "file");
         assert_eq!(candidate.item.section_label, "Files");
         assert_eq!(candidate.item.action_label, "Open  ↵");

@@ -81,10 +81,13 @@ pub fn ready(state: &Snapshot, task: &Task) -> bool {
                         .get(*i)
                         .and_then(|p| p.task_id.as_ref())
                         .is_some_and(|id| {
-                            state
-                                .tasks
-                                .iter()
-                                .any(|t| &t.id == id && matches!(t.status, TaskStatus::ReadyForReview | TaskStatus::Completed))
+                            state.tasks.iter().any(|t| {
+                                &t.id == id
+                                    && matches!(
+                                        t.status,
+                                        TaskStatus::ReadyForReview | TaskStatus::Completed
+                                    )
+                            })
                         })
                 });
         }

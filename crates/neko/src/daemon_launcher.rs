@@ -11,7 +11,8 @@ pub fn ensure_daemon_running() {
         return;
     };
     let mut command = Command::new(&daemon_path);
-    command.stdin(Stdio::null())
+    command
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
     if let Err(e) = launch_and_reap(command) {
@@ -21,14 +22,18 @@ pub fn ensure_daemon_running() {
 
 /// Spawn inside the waiter so failure to create a thread cannot orphan a
 /// previously spawned child. Waiting never blocks GPUI's foreground executor.
-fn launch_and_reap(mut command: Command) -> std::io::Result<std::thread::JoinHandle<std::io::Result<std::process::ExitStatus>>> {
-    std::thread::Builder::new().name("neko-daemon-reaper".into()).spawn(move || {
-        let result = command.spawn().and_then(|mut child| child.wait());
-        if let Err(error) = &result {
-            eprintln!("neko: daemon launch/wait failed: {error}");
-        }
-        result
-    })
+fn launch_and_reap(
+    mut command: Command,
+) -> std::io::Result<std::thread::JoinHandle<std::io::Result<std::process::ExitStatus>>> {
+    std::thread::Builder::new()
+        .name("neko-daemon-reaper".into())
+        .spawn(move || {
+            let result = command.spawn().and_then(|mut child| child.wait());
+            if let Err(error) = &result {
+                eprintln!("neko: daemon launch/wait failed: {error}");
+            }
+            result
+        })
 }
 
 fn daemon_binary_path() -> Option<std::path::PathBuf> {

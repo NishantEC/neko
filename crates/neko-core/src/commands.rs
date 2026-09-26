@@ -68,7 +68,13 @@ const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         id: "themes",
         title: "Themes",
-        aliases: &["Themes", "Theme", "Colour Theme", "Color Theme", "Appearance"],
+        aliases: &[
+            "Themes",
+            "Theme",
+            "Colour Theme",
+            "Color Theme",
+            "Appearance",
+        ],
         mode: "theme",
         glyph: Glyph::Palette,
     },
@@ -101,7 +107,12 @@ const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         id: "new-codex-task",
         title: "New Codex task",
-        aliases: &["New Codex task", "Start Codex task", "New Codex", "Start Codex"],
+        aliases: &[
+            "New Codex task",
+            "Start Codex task",
+            "New Codex",
+            "Start Codex",
+        ],
         mode: "new-codex-task",
         glyph: Glyph::Agent,
     },
@@ -150,7 +161,13 @@ const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         id: "preferences",
         title: "Preferences",
-        aliases: &["Preferences", "Settings", "neko Settings", "Options", "Configure"],
+        aliases: &[
+            "Preferences",
+            "Settings",
+            "neko Settings",
+            "Options",
+            "Configure",
+        ],
         mode: "preference",
         glyph: Glyph::Sliders,
     },
@@ -160,13 +177,17 @@ const COMMANDS: &[CommandSpec] = &[
 /// compiled-in table (see [`COMMANDS`]), not something scanned or
 /// persisted, since "what commands exist" is a build-time fact today (no
 /// extension host yet — see `AGENTS.md`'s "Seams for follow-up work").
-pub struct CommandsProvider { standalone: bool }
+pub struct CommandsProvider {
+    standalone: bool,
+}
 
 impl CommandsProvider {
     pub fn new() -> Self {
         Self { standalone: false }
     }
-    pub fn standalone() -> Self { Self { standalone: true } }
+    pub fn standalone() -> Self {
+        Self { standalone: true }
+    }
 }
 
 impl Default for CommandsProvider {
@@ -186,13 +207,25 @@ impl Provider for CommandsProvider {
 
     fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
         const WORKSPACE: CommandSpec = CommandSpec {
-            id: "workspace", title: "Open Neko Workspace",
-            aliases: &["Neko", "Workspace", "Tasks", "Agents", "Inbox", "Linear", "New Task"],
-            mode: "workspace", glyph: Glyph::Agent,
+            id: "workspace",
+            title: "Open Neko Workspace",
+            aliases: &[
+                "Neko",
+                "Workspace",
+                "Tasks",
+                "Agents",
+                "Inbox",
+                "Linear",
+                "New Task",
+            ],
+            mode: "workspace",
+            glyph: Glyph::Agent,
         };
         COMMANDS
             .iter()
-            .filter(|cmd| !self.standalone || matches!(cmd.id,"clipboard-history"|"themes"|"preferences"))
+            .filter(|cmd| {
+                !self.standalone || matches!(cmd.id, "clipboard-history" | "themes" | "preferences")
+            })
             .chain(self.standalone.then_some(&WORKSPACE))
             .filter_map(|cmd| {
                 // An empty query lists every command — the state the slash
@@ -206,7 +239,9 @@ impl Provider for CommandsProvider {
                     cmd.aliases
                         .iter()
                         .filter_map(|alias| fuzzy_score(query, alias))
-                        .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?
+                        .fold(None, |best: Option<f32>, s| {
+                            Some(best.map_or(s, |b| b.max(s)))
+                        })?
                 };
                 Some(Candidate {
                     score,
@@ -256,9 +291,15 @@ mod tests {
     #[test]
     fn standalone_commands_do_not_depend_on_other_agent_apps() {
         use crate::provider::Provider;
-        let rows=super::CommandsProvider::standalone().search("",0);
-        assert!(rows.iter().any(|r|r.item.enters_mode.as_deref()==Some("workspace")));
-        assert!(!rows.iter().any(|r|matches!(r.item.enters_mode.as_deref(),Some("new-agent"|"new-codex-task"|"agent"|"schedule"|"ask"|"terminal"))));
+        let rows = super::CommandsProvider::standalone().search("", 0);
+        assert!(
+            rows.iter()
+                .any(|r| r.item.enters_mode.as_deref() == Some("workspace"))
+        );
+        assert!(!rows.iter().any(|r| matches!(
+            r.item.enters_mode.as_deref(),
+            Some("new-agent" | "new-codex-task" | "agent" | "schedule" | "ask" | "terminal")
+        )));
     }
     use super::*;
 
@@ -298,7 +339,13 @@ mod tests {
         // the others do (`fuzzy_score` is a strict in-order subsequence over
         // *one* string), so each of these passes only because of an alias.
         let provider = CommandsProvider::new();
-        for query in ["theme", "themes", "color theme", "colour theme", "appearance"] {
+        for query in [
+            "theme",
+            "themes",
+            "color theme",
+            "colour theme",
+            "appearance",
+        ] {
             let results = provider.search(query, 0);
             assert!(
                 results.iter().any(|c| c.item.id == "themes"),
@@ -311,7 +358,10 @@ mod tests {
     fn the_themes_command_enters_the_theme_mode_and_carries_its_own_glyph() {
         let provider = CommandsProvider::new();
         let results = provider.search("themes", 0);
-        let themes = results.iter().find(|c| c.item.id == "themes").expect("Themes must match");
+        let themes = results
+            .iter()
+            .find(|c| c.item.id == "themes")
+            .expect("Themes must match");
         assert_eq!(themes.item.title, "Themes");
         assert_eq!(themes.item.enters_mode.as_deref(), Some("theme"));
         assert_eq!(themes.item.badge.as_deref(), Some("COMMAND"));
@@ -335,7 +385,15 @@ mod tests {
         // match through aliases, and "claude"/"codex" are there because that
         // is what the captain calls the thing he is starting.
         let provider = CommandsProvider::new();
-        for query in ["new agent", "start agent", "run agent", "spawn", "claude", "codex", "paseo"] {
+        for query in [
+            "new agent",
+            "start agent",
+            "run agent",
+            "spawn",
+            "claude",
+            "codex",
+            "paseo",
+        ] {
             let results = provider.search(query, 0);
             assert!(
                 results.iter().any(|c| c.item.id == "new-agent"),
@@ -348,7 +406,10 @@ mod tests {
     fn the_new_agent_command_enters_the_new_agent_mode() {
         let provider = CommandsProvider::new();
         let results = provider.search("new agent", 0);
-        let row = results.iter().find(|c| c.item.id == "new-agent").expect("New Agent must match");
+        let row = results
+            .iter()
+            .find(|c| c.item.id == "new-agent")
+            .expect("New Agent must match");
         assert_eq!(row.item.title, "New Agent");
         assert_eq!(row.item.enters_mode.as_deref(), Some("new-agent"));
         assert_eq!(row.item.badge.as_deref(), Some("COMMAND"));
@@ -403,7 +464,11 @@ mod slash_palette_tests {
     #[test]
     fn an_empty_query_lists_every_command() {
         let found = CommandsProvider::new().search("", 0);
-        assert_eq!(found.len(), COMMANDS.len(), "the slash palette opens on the full list");
+        assert_eq!(
+            found.len(),
+            COMMANDS.len(),
+            "the slash palette opens on the full list"
+        );
     }
 
     #[test]

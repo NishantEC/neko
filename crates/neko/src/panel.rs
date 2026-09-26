@@ -37,8 +37,8 @@ use std::sync::{Arc, OnceLock};
 
 use gpui::{
     Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, DispatchPhase, Entity, FocusHandle,
-    Focusable, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, ScrollHandle, SharedString,
-    FontFeatures, Window, actions, anchored, canvas, deferred, div, img, point, prelude::*, px,
+    Focusable, FontFeatures, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, ScrollHandle,
+    SharedString, Window, actions, anchored, canvas, deferred, div, img, point, prelude::*, px,
     svg,
 };
 use neko_client::NekoClient;
@@ -46,17 +46,26 @@ use neko_protocol::{Glyph, Icon, ItemAction, Meter, MeterStat, Request, Response
 
 use crate::accessibility::AccessibilityChecker;
 use crate::assets::{glyph_icon, icon};
-use crate::edge_fade::scroll_edge_fade;
 use crate::components::scroll::with_scrollbar;
-use crate::motion::HoverWash as _;
+use crate::edge_fade::scroll_edge_fade;
 use crate::menu_frost::sync_menu_frost;
 use crate::modes::{self, ModeChrome, TaskRef};
 use crate::motion;
+use crate::motion::HoverWash as _;
 use crate::text_field::{ContentChanged, DEFAULT_PLACEHOLDER, TextField};
 use crate::theme;
 use crate::window_drag::PanelDrag;
 
-actions!(panel, [SelectNext, SelectPrevious, Confirm, OpenActionsMenu, OpenInPaseo]);
+actions!(
+    panel,
+    [
+        SelectNext,
+        SelectPrevious,
+        Confirm,
+        OpenActionsMenu,
+        OpenInPaseo
+    ]
+);
 
 /// `neko_core::commands::CommandsProvider::id()`. Named here because the
 /// slash palette scopes to it by name, the one place the client has to know
@@ -104,8 +113,7 @@ pub const CONTENT_AREA_MIN_HEIGHT_PX: f32 = theme::RESULT_ROW_HEIGHT_PX * 10.0;
 /// rather than something to discover at runtime.
 const _: () = assert!(theme::AGENT_GRID_HEIGHT_PX < CONTENT_AREA_MIN_HEIGHT_PX);
 
-pub const PANEL_HEIGHT_PX: f32 =
-    theme::INPUT_ROW_HEIGHT_PX + CONTENT_AREA_MIN_HEIGHT_PX;
+pub const PANEL_HEIGHT_PX: f32 = theme::INPUT_ROW_HEIGHT_PX + CONTENT_AREA_MIN_HEIGHT_PX;
 
 pub struct Root {
     text_field: Entity<TextField>,
@@ -413,7 +421,16 @@ impl Root {
         cx: &mut App,
     ) -> Entity<Self> {
         cx.new(|cx| {
-            Self::build(client, accessibility, translucent, menu_frost, appearance_setter, open_preferences, drag, cx)
+            Self::build(
+                client,
+                accessibility,
+                translucent,
+                menu_frost,
+                appearance_setter,
+                open_preferences,
+                drag,
+                cx,
+            )
         })
     }
 
@@ -445,9 +462,12 @@ impl Root {
         // blink (a render concern), and `cx.observe` cannot
         // distinguish that from a real edit. Search must only re-run on
         // an actual query change. See `ContentChanged`'s doc comment.
-        cx.subscribe(&text_field, |root: &mut Root, _field, _event: &ContentChanged, cx| {
-            root.run_search(cx);
-        })
+        cx.subscribe(
+            &text_field,
+            |root: &mut Root, _field, _event: &ContentChanged, cx| {
+                root.run_search(cx);
+            },
+        )
         .detach();
         let mut root = Self {
             text_field,
@@ -547,7 +567,9 @@ impl Root {
         self.expanded_tool_output.clear();
         self.grid_selected = None;
         if self.active_mode.take().is_some() {
-            self.text_field.update(cx, |field, cx| field.set_placeholder(DEFAULT_PLACEHOLDER, cx));
+            self.text_field.update(cx, |field, cx| {
+                field.set_placeholder(DEFAULT_PLACEHOLDER, cx)
+            });
             self.mode_scroll.set_offset(point(px(0.), px(0.)));
         }
         self.text_field.update(cx, |field, cx| field.clear(cx));
@@ -590,7 +612,8 @@ impl Root {
     /// search through the same `ContentChanged` path a keystroke would),
     /// for `evidence.rs`'s `NEKO_SHOW_QUERY` hook.
     pub fn set_query_for_evidence(&mut self, query: &str, cx: &mut Context<Self>) {
-        self.text_field.update(cx, |field, cx| field.set_content_for_evidence(query, cx));
+        self.text_field
+            .update(cx, |field, cx| field.set_content_for_evidence(query, cx));
     }
 
     /// Evidence/verification-only — reads the search field's current
@@ -608,7 +631,8 @@ impl Root {
     /// for `evidence.rs`'s `NEKO_SHOW_SELECTION` hook. Same "no synthetic OS
     /// input" reasoning as `set_query_for_evidence` above.
     pub fn select_query_for_evidence(&mut self, cx: &mut Context<Self>) {
-        self.text_field.update(cx, |field, cx| field.select_all_for_evidence(cx));
+        self.text_field
+            .update(cx, |field, cx| field.select_all_for_evidence(cx));
     }
 
     /// Evidence/verification-only — drives the exact same `confirm()` path
@@ -683,7 +707,11 @@ impl Root {
         let client = self.client.clone();
         cx.spawn(async move |this, cx| {
             let response = client.request(Request::GetOnboardingState).await;
-            let Ok(Response::OnboardingState { accessibility_banner_dismissed, .. }) = response else {
+            let Ok(Response::OnboardingState {
+                accessibility_banner_dismissed,
+                ..
+            }) = response
+            else {
                 return;
             };
             let _ = this.update(cx, |root, cx| {
@@ -698,11 +726,21 @@ impl Root {
         self.accessibility_banner_dismissed == Some(false) && !self.accessibility.is_trusted()
     }
 
-    fn open_accessibility_settings(&mut self, _: &ClickEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn open_accessibility_settings(
+        &mut self,
+        _: &ClickEvent,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
         crate::accessibility::open_accessibility_settings();
     }
 
-    fn dismiss_accessibility_banner(&mut self, _: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn dismiss_accessibility_banner(
+        &mut self,
+        _: &ClickEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.accessibility_banner_dismissed = Some(true);
         let client = self.client.clone();
         cx.spawn(async move |_this, _cx| {
@@ -792,7 +830,11 @@ impl Root {
             // `AGENTS.md`'s "Two-phase search" section. A mode's own
             // provider-scoped search is always a single complete frame; the
             // loop below handles both shapes without branching on which.
-            let mut stream = client.request_streaming(Request::Search { query, limit, provider: mode_provider });
+            let mut stream = client.request_streaming(Request::Search {
+                query,
+                limit,
+                provider: mode_provider,
+            });
             while let Some(response) = stream.next().await {
                 // A request error (including a dead connection) is
                 // deliberately *not* surfaced here — `results`/`selected`
@@ -803,7 +845,9 @@ impl Root {
                 // having been attempted at all — see that method's doc
                 // comment for why a request failing here is the wrong place
                 // to decide connection state.
-                let Response::SearchResults { items, complete } = response else { continue };
+                let Response::SearchResults { items, complete } = response else {
+                    continue;
+                };
                 let applied = this.update(cx, |root, cx| {
                     if root.generation != generation {
                         return;
@@ -822,7 +866,9 @@ impl Root {
             // nothing else ever turns it back off for a generation that
             // never produces a complete frame.
             let _ = this.update(cx, |root, cx| {
-                if root.generation == generation && root.pending_search_generation == Some(generation) {
+                if root.generation == generation
+                    && root.pending_search_generation == Some(generation)
+                {
                     root.searching = false;
                     root.pending_search_generation = None;
                     cx.notify();
@@ -840,8 +886,12 @@ impl Root {
         // against a deliberately-still-pending generation without needing a
         // request that hangs for real wall-clock time.
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(std::time::Duration::from_millis(SEARCHING_TELL_DELAY_MS)).await;
-            let _ = this.update(cx, |root, cx| root.reveal_searching_tell_if_still_pending(generation, cx));
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(SEARCHING_TELL_DELAY_MS))
+                .await;
+            let _ = this.update(cx, |root, cx| {
+                root.reveal_searching_tell_if_still_pending(generation, cx)
+            });
         })
         .detach();
     }
@@ -859,7 +909,13 @@ impl Root {
     /// decisive file match can legitimately sort *above* the Applications
     /// section that was already on screen. See [`merge_late_results`] for
     /// the rule that replaces that reshuffle.
-    fn apply_search_results(&mut self, items: Vec<SearchItem>, complete: bool, generation: u64, cx: &mut Context<Self>) {
+    fn apply_search_results(
+        &mut self,
+        items: Vec<SearchItem>,
+        complete: bool,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) {
         if complete {
             self.searching = false;
             self.pending_search_generation = None;
@@ -876,7 +932,10 @@ impl Root {
         // went out: between a partial frame and the complete one the
         // captain may have pressed Down, so "what is highlighted right now"
         // is the only correct thing for `resolve_selection` to follow.
-        let previously_selected = self.results.get(self.selected).map(|item| (item.kind.clone(), item.id.clone()));
+        let previously_selected = self
+            .results
+            .get(self.selected)
+            .map(|item| (item.kind.clone(), item.id.clone()));
         // For the transcript's stick-to-bottom rule below: whether the *view*
         // was parked at the end before this frame replaced the list. Read
         // from the scroll handle rather than from `selected`, which no longer
@@ -952,7 +1011,9 @@ impl Root {
         // the saturating subtraction rather than a difference.
         self.hidden_rows = offered.saturating_sub(self.results.len());
 
-        let previous = previously_selected.as_ref().map(|(kind, id)| (kind.as_str(), id.as_str()));
+        let previous = previously_selected
+            .as_ref()
+            .map(|(kind, id)| (kind.as_str(), id.as_str()));
         self.selected = resolve_selection(previous, &self.results);
         // A re-search can move the selection by identity; the view has to
         // follow it there too, not only on an arrow key.
@@ -977,7 +1038,11 @@ impl Root {
         // row *is* a theme, `resolve_selection`'s ordinary follow-the-row
         // rule takes over, and previewing the top match is the point.
         let entering_the_theme_mode = previous.is_none_or(|(kind, _)| kind != "theme");
-        if entering_the_theme_mode && self.active_mode().is_some_and(|m| m.chrome.provider_id == "theme") {
+        if entering_the_theme_mode
+            && self
+                .active_mode()
+                .is_some_and(|m| m.chrome.provider_id == "theme")
+        {
             let active = theme::active_theme().id;
             if let Some(index) = self.results.iter().position(|item| item.id == active) {
                 self.selected = index;
@@ -1024,7 +1089,9 @@ impl Root {
         if !crate::evidence::log_search_latency() {
             return;
         }
-        let Some((dispatched_generation, dispatched_at)) = self.search_dispatched_at else { return };
+        let Some((dispatched_generation, dispatched_at)) = self.search_dispatched_at else {
+            return;
+        };
         if dispatched_generation != generation {
             return;
         }
@@ -1087,8 +1154,7 @@ impl Root {
             return;
         }
         let handle = self.root_scroll.clone();
-        let index =
-            root_list_child_index(&self.results, target, self.leading_banner_count());
+        let index = root_list_child_index(&self.results, target, self.leading_banner_count());
         self.glide_to_item(handle, index);
     }
 
@@ -1200,7 +1266,9 @@ impl Root {
     /// that is the one place that runs exactly once per frame and only while
     /// the panel is actually on screen.
     fn advance_scroll_glide(&mut self) -> bool {
-        let Some((handle, glide)) = &mut self.scroll_glide else { return false };
+        let Some((handle, glide)) = &mut self.scroll_glide else {
+            return false;
+        };
         // **Overtaken.** A wheel gesture or a fresh search moved the handle out
         // from under this glide, and continuing would drag the view back to a
         // destination nobody wants any more — the same rule that makes a
@@ -1276,7 +1344,12 @@ impl Root {
         }
     }
 
-    fn select_previous(&mut self, _: &SelectPrevious, _window: &mut Window, cx: &mut Context<Self>) {
+    fn select_previous(
+        &mut self,
+        _: &SelectPrevious,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // **A chat is scrolled, not stepped through.** Every other surface
         // here is a list where the arrow keys move a cursor and Enter acts on
         // what it lands on; a transcript has no such cursor — Enter belongs to
@@ -1341,7 +1414,8 @@ impl Root {
             let Some(request) = self.transcript_send_request(cx) else {
                 return;
             };
-            self.text_field.update(cx, |field, cx| field.set_content("", cx));
+            self.text_field
+                .update(cx, |field, cx| field.set_content("", cx));
             self.perform_activation(request, false, None, cx);
             return;
         }
@@ -1401,10 +1475,18 @@ impl Root {
             }
             if mode_id == "codex-task" {
                 self.pending_task_mode = Some((
-                    TaskRef { backend: "codex".to_string(), id: item.id.clone() },
+                    TaskRef {
+                        backend: "codex".to_string(),
+                        id: item.id.clone(),
+                    },
                     item.clone(),
                 ));
-                self.perform_activation(self.primary_activation_request(&item, cx), false, Some("codex-task"), cx);
+                self.perform_activation(
+                    self.primary_activation_request(&item, cx),
+                    false,
+                    Some("codex-task"),
+                    cx,
+                );
                 return;
             }
             // **A conversation is about the row that opened it**, so the
@@ -1488,12 +1570,15 @@ impl Root {
             });
         }
         let item = self.highlighted_item()?;
-        item.actions.iter().any(|a| a.id == OPEN_IN_PASEO).then(|| Request::Activate {
-            kind: item.kind.clone(),
-            id: item.id.clone(),
-            action: Some(OPEN_IN_PASEO.to_string()),
-            query: String::new(),
-        })
+        item.actions
+            .iter()
+            .any(|a| a.id == OPEN_IN_PASEO)
+            .then(|| Request::Activate {
+                kind: item.kind.clone(),
+                id: item.id.clone(),
+                action: Some(OPEN_IN_PASEO.to_string()),
+                query: String::new(),
+            })
     }
 
     /// The composer's send, or `None` when there is nothing to send.
@@ -1650,7 +1735,8 @@ impl Root {
             // the placeholder freezes at whatever phase it happened to mount
             // on, which reads as stuck rather than loading.
             || (self.results.is_empty() && self.awaiting_first_rows()));
-        self.pulse.update(cx, |clock, cx| clock.set_running(wanted, cx));
+        self.pulse
+            .update(cx, |clock, cx| clock.set_running(wanted, cx));
         gpui::Empty
     }
 
@@ -1658,7 +1744,11 @@ impl Root {
     /// the rows below it do not have. Zero when there is nothing to show, so
     /// a machine with no agents running loses no space at all.
     fn agent_grid_height(&self) -> f32 {
-        if self.agent_tiles.is_empty() { 0.0 } else { theme::AGENT_GRID_HEIGHT_PX }
+        if self.agent_tiles.is_empty() {
+            0.0
+        } else {
+            theme::AGENT_GRID_HEIGHT_PX
+        }
     }
 
     /// The grid of running agents, above the search field.
@@ -1679,7 +1769,10 @@ impl Root {
             // attempt at this was grabbed, and the one place that was not a
             // grab area. The tiles inside stop propagation (below), so a
             // press on a tile still activates it instead of dragging.
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::begin_window_drag))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(Self::begin_window_drag),
+            )
             .flex()
             .flex_wrap()
             .gap(px(theme::AGENT_GRID_GAP_PX))
@@ -1712,9 +1805,7 @@ impl Root {
                     // text is not separately hoverable at this size.
                     .tooltip({
                         let full = agent_tile_tooltip(item);
-                        move |_window, cx| {
-                            cx.new(|_| TextTooltip { text: full.clone() }).into()
-                        }
+                        move |_window, cx| cx.new(|_| TextTooltip { text: full.clone() }).into()
                     })
                     .relative()
                     .flex()
@@ -1766,7 +1857,9 @@ impl Root {
                         )
                     })
                     .cursor_pointer()
-                    .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| cx.stop_propagation())
+                    .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation()
+                    })
                     .on_click(cx.listener(move |root, _event, window, cx| {
                         // The same shared path Enter takes — see `act_on_item`
                         // for the divergence this closes.
@@ -1830,7 +1923,8 @@ impl Root {
                                             .h(px(8.))
                                             .text_color(theme::active().text_secondary)
                                             .into_any_element(),
-                                        None => SharedString::from(tool_initial(&tool)).into_any_element(),
+                                        None => SharedString::from(tool_initial(&tool))
+                                            .into_any_element(),
                                     })
                             })),
                     )
@@ -1849,7 +1943,14 @@ impl Root {
                                     .h(px(19.))
                                     .overflow_hidden()
                                     .when(live, |el| {
-                                        el.child(div().w(px(6.)).h(px(6.)).rounded(px(3.)).bg(dot).flex_shrink_0())
+                                        el.child(
+                                            div()
+                                                .w(px(6.))
+                                                .h(px(6.))
+                                                .rounded(px(3.))
+                                                .bg(dot)
+                                                .flex_shrink_0(),
+                                        )
                                     })
                                     .child(
                                         div()
@@ -1894,7 +1995,7 @@ impl Root {
                                     .text_color(theme::active().text_tertiary)
                                     .child(SharedString::from(subtitle))
                             })),
-                    )
+                    ),
             );
         }
         grid
@@ -1990,9 +2091,9 @@ impl Root {
                         .await;
                     let still_reading = this
                         .update(cx, |root, cx| {
-                            let live = root.active_mode().is_some_and(|m| {
-                                m.chrome.transcript && m.subject == subject_now
-                            });
+                            let live = root
+                                .active_mode()
+                                .is_some_and(|m| m.chrome.transcript && m.subject == subject_now);
                             if live {
                                 root.run_search(cx);
                             }
@@ -2104,17 +2205,26 @@ impl Root {
     /// full-window repaint (rather than the `cx.notify()` they were already
     /// doing) can ask for one.
     fn preview_selected_theme(&self) -> bool {
-        let Some(mode) = self.active_mode() else { return false };
+        let Some(mode) = self.active_mode() else {
+            return false;
+        };
         if mode.chrome.provider_id != "theme" {
             return false;
         }
-        let Some(item) = self.results.get(self.selected) else { return false };
+        let Some(item) = self.results.get(self.selected) else {
+            return false;
+        };
         if item.id == theme::active_theme().id {
             return false;
         }
         self.apply_theme(&item.id)
     }
-    fn open_actions_menu(&mut self, _: &OpenActionsMenu, _window: &mut Window, cx: &mut Context<Self>) {
+    fn open_actions_menu(
+        &mut self,
+        _: &OpenActionsMenu,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.open_actions_menu_for_selected_row(cx);
     }
 
@@ -2178,7 +2288,12 @@ impl Root {
     /// of those sits in paint order (the menu card is `deferred`, painted
     /// after the ordinary tree, but capture already visited this ancestor
     /// before recursing into any child either way).
-    fn note_actions_menu_mouse_down(&mut self, _event: &MouseDownEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn note_actions_menu_mouse_down(
+        &mut self,
+        _event: &MouseDownEvent,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
         self.menu_open_before_this_press = self.actions_menu.is_some();
     }
 
@@ -2189,13 +2304,17 @@ impl Root {
     /// panel fills the whole window with no margin, so every click the
     /// window receives is a click inside the panel by construction — there
     /// is no separate margin dismiss path to reason about any more.
-    fn close_actions_menu_from_outside_click(&mut self, _event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn close_actions_menu_from_outside_click(
+        &mut self,
+        _event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.actions_menu.is_some() {
             self.close_actions_menu(window);
             cx.notify();
         }
     }
-
 
     /// Enter, while the actions menu is open. A destructive action
     /// (`ItemAction::destructive`) needs a *second* Enter to actually run —
@@ -2205,7 +2324,9 @@ impl Root {
     /// selection at all (`select_next`/`select_previous`) disarms it again,
     /// so the confirmation can't survive being scrolled past and back.
     fn confirm_menu_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(menu) = &mut self.actions_menu else { return };
+        let Some(menu) = &mut self.actions_menu else {
+            return;
+        };
         let Some(action) = menu.actions.get(menu.selected).cloned() else {
             self.close_actions_menu(window);
             cx.notify();
@@ -2229,13 +2350,21 @@ impl Root {
                 .cloned()
         {
             self.pending_task_mode = Some((
-                TaskRef { backend: "codex".to_string(), id: id.clone() },
+                TaskRef {
+                    backend: "codex".to_string(),
+                    id: id.clone(),
+                },
                 item,
             ));
         }
         self.close_actions_menu(window);
         cx.notify();
-        let request = Request::Activate { kind, id, action: Some(action.id), query: self.query(cx) };
+        let request = Request::Activate {
+            kind,
+            id,
+            action: Some(action.id),
+            query: self.query(cx),
+        };
         self.perform_activation(request, false, enter_mode_on_success, cx);
     }
 
@@ -2271,7 +2400,12 @@ impl Root {
     /// re-propagating — the two are equivalent for that one case, and
     /// keeping this one call site self-contained is clearer than routing
     /// back through the global handler.
-    fn handle_dismiss(&mut self, _: &crate::DismissWindow, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_dismiss(
+        &mut self,
+        _: &crate::DismissWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Ahead of every other branch, including the menu: while the panel is
         // physically being moved, Escape can only sensibly mean "put it
         // back". Hiding the panel mid-gesture would leave AppKit's implicit
@@ -2361,7 +2495,8 @@ impl Render for Root {
                 theme::active().surface_panel
             })
             .when(!self.translucent, |el| {
-                el.border_1().border_color(theme::active().border_hairline_strong)
+                el.border_1()
+                    .border_color(theme::active().border_hairline_strong)
             })
             .rounded(px(theme::PANEL_RADIUS_PX))
             // **Deliberately no drawn shadow here — this used to be
@@ -2386,10 +2521,11 @@ impl Render for Root {
             // the list is its result. Same entity either way; only the child
             // order changes, so focus, editing and the caret carry over.
             .map(|el| {
-                let composer_at_bottom =
-                    self.active_mode().is_some_and(|m| m.chrome.transcript);
-                let hairline =
-                    div().h(px(1.)).flex_shrink_0().bg(theme::active().border_hairline);
+                let composer_at_bottom = self.active_mode().is_some_and(|m| m.chrome.transcript);
+                let hairline = div()
+                    .h(px(1.))
+                    .flex_shrink_0()
+                    .bg(theme::active().border_hairline);
                 if composer_at_bottom {
                     el
                 } else {
@@ -2417,17 +2553,24 @@ impl Render for Root {
             // grid is simply the first thing in the content area, and the
             // selection runs through it in reading order before reaching the
             // rows.
-            .when(!self.agent_tiles.is_empty(), |el| el.child(self.render_agent_grid(cx)))
+            .when(!self.agent_tiles.is_empty(), |el| {
+                el.child(self.render_agent_grid(cx))
+            })
             .child(match self.active_mode() {
                 Some(mode) => self.render_mode_content(mode, cx),
-                None => self.render_content_area(cx, query_is_empty).into_any_element(),
+                None => self
+                    .render_content_area(cx, query_is_empty)
+                    .into_any_element(),
             })
             // The transcript mode's composer — the same input row, below the
             // exchange. See the top of this chain for the inversion rule.
             .map(|el| {
                 if self.active_mode().is_some_and(|m| m.chrome.transcript) {
                     el.child(
-                        div().h(px(1.)).flex_shrink_0().bg(theme::active().border_hairline),
+                        div()
+                            .h(px(1.))
+                            .flex_shrink_0()
+                            .bg(theme::active().border_hairline),
                     )
                     .child(self.render_input_row(cx))
                 } else {
@@ -2455,7 +2598,12 @@ impl Root {
     /// click costs nothing — `start` only records where the cursor grabbed,
     /// and no guide window is opened until a snap target is actually within
     /// reach.
-    fn begin_window_drag(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn begin_window_drag(
+        &mut self,
+        _: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.dragging {
             return;
         }
@@ -2476,7 +2624,12 @@ impl Root {
     /// `NSEvent.mouseLocation` — absolute — on every tick instead, which also
     /// means a dropped or coalesced tick has no cost: the next one places the
     /// panel exactly where it belongs regardless of how many were missed.
-    fn window_drag_moved(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn window_drag_moved(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.dragging {
             return;
         }
@@ -2490,7 +2643,12 @@ impl Root {
         self.drag.update(window, cx);
     }
 
-    fn window_drag_ended(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn window_drag_ended(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.dragging || event.button != gpui::MouseButton::Left {
             return;
         }
@@ -2570,7 +2728,10 @@ impl Root {
             // `TextField`'s own mouse-down calls `stop_propagation`, so
             // dragging to select text no longer drags the whole panel across
             // the screen.
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(Self::begin_window_drag))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(Self::begin_window_drag),
+            )
             .h(px(theme::INPUT_ROW_HEIGHT_PX))
             .px_5()
             .gap_3()
@@ -2580,9 +2741,7 @@ impl Root {
                 // In a transcript mode the header carries the back arrow and
                 // the session's own name, so the composer stays a composer —
                 // a bar that is half navigation chrome is neither.
-                Some(mode) if mode.chrome.transcript => {
-                    div().w(px(2.)).into_any_element()
-                }
+                Some(mode) if mode.chrome.transcript => div().w(px(2.)).into_any_element(),
                 // The back affordance the launch brief asks for: "a back
                 // arrow in place of the search glyph." Clickable — exits
                 // the mode the same way Escape does, sharing `exit_mode`
@@ -2594,7 +2753,11 @@ impl Root {
                     // mode; missing it costs a person the whole surface.
                     .p(px(5.))
                     .rounded(px(theme::ROW_RADIUS_PX))
-                    .hover_bg("mode-back", theme::TRANSPARENT, theme::active().row_icon_socket_bg)
+                    .hover_bg(
+                        "mode-back",
+                        theme::TRANSPARENT,
+                        theme::active().row_icon_socket_bg,
+                    )
                     .cursor(CursorStyle::PointingHand)
                     // **And it has to swallow mouse-*down*.** The input row
                     // starts a window drag on mouse-down; `on_click` is
@@ -2605,7 +2768,9 @@ impl Root {
                     .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation()
                     })
-                    .on_click(cx.listener(|root, _: &ClickEvent, window, cx| root.exit_mode(window, cx)))
+                    .on_click(
+                        cx.listener(|root, _: &ClickEvent, window, cx| root.exit_mode(window, cx)),
+                    )
                     .child(back_glyph())
                     .into_any_element(),
                 None => search_glyph().into_any_element(),
@@ -2616,17 +2781,21 @@ impl Root {
             // moment anybody types. A chip beside the field is the shape a
             // launcher uses for this, and it is the one place with room that
             // the query cannot overwrite.
-            .children(self.active_mode().filter(|m| !m.chrome.transcript).map(|mode| {
-                div()
-                    .flex_shrink_0()
-                    .px(px(8.))
-                    .py(px(3.))
-                    .rounded(px(theme::CHIP_RADIUS_PX))
-                    .bg(theme::active().surface_selected)
-                    .text_size(px(12.))
-                    .text_color(theme::active().text_secondary)
-                    .child(mode.chrome.title)
-            }))
+            .children(
+                self.active_mode()
+                    .filter(|m| !m.chrome.transcript)
+                    .map(|mode| {
+                        div()
+                            .flex_shrink_0()
+                            .px(px(8.))
+                            .py(px(3.))
+                            .rounded(px(theme::CHIP_RADIUS_PX))
+                            .bg(theme::active().surface_selected)
+                            .text_size(px(12.))
+                            .text_color(theme::active().text_secondary)
+                            .child(mode.chrome.title)
+                    }),
+            )
             .child(div().flex_1().child(self.text_field.clone()))
             .children(self.render_searching_tell())
             // **Every failure in the app was silent, and this is where it
@@ -2738,7 +2907,8 @@ impl Root {
     /// Gates the hint so it only appears where the keystroke does something
     /// — a menu hint on a row with no menu is worse than no hint.
     fn selected_row_has_actions(&self) -> bool {
-        self.highlighted_item().is_some_and(|item| !item.actions.is_empty())
+        self.highlighted_item()
+            .is_some_and(|item| !item.actions.is_empty())
     }
 
     /// The "still searching" tell for a query that hasn't returned yet —
@@ -2829,7 +2999,9 @@ impl Root {
         }
 
         if self.results.is_empty() {
-            return container.child(render_empty_state(query_is_empty)).into_any_element();
+            return container
+                .child(render_empty_state(query_is_empty))
+                .into_any_element();
         }
 
         // A header per contiguous run of the same `kind` — every provider's
@@ -2871,7 +3043,9 @@ impl Root {
                 .px_3()
                 .text_size(px(11.))
                 .text_color(theme::active().text_tertiary)
-                .child(SharedString::from(format!("+{n} more \u{2014} keep typing to narrow")))
+                .child(SharedString::from(format!(
+                    "+{n} more \u{2014} keep typing to narrow"
+                )))
         }));
 
         // **The bottom fade, which needs real content behind it to work.**
@@ -3057,10 +3231,8 @@ impl Root {
         let lit = (fraction * theme::METER_TICK_COUNT as f32).round() as usize;
         let reached = theme::ramp(empty, full, fraction);
 
-        let ticks = div()
-            .flex()
-            .gap(px(theme::METER_TICK_GAP_PX))
-            .children((0..theme::METER_TICK_COUNT).map(|i| {
+        let ticks = div().flex().gap(px(theme::METER_TICK_GAP_PX)).children(
+            (0..theme::METER_TICK_COUNT).map(|i| {
                 div()
                     .flex_1()
                     .h(px(theme::METER_TICK_HEIGHT_PX))
@@ -3072,9 +3244,13 @@ impl Root {
                     } else {
                         theme::active().row_icon_socket_bg
                     })
-            }));
+            }),
+        );
 
-        let (reading, qualifiers) = meter.stats.split_first().map_or((None, &[][..]), |(a, b)| (Some(a), b));
+        let (reading, qualifiers) = meter
+            .stats
+            .split_first()
+            .map_or((None, &[][..]), |(a, b)| (Some(a), b));
         let stat = |s: &MeterStat| SharedString::from(format!("{} {}", s.value, s.label));
 
         div()
@@ -3144,7 +3320,9 @@ impl Root {
                             .text_size(px(11.))
                             .children(reading.map(|s| div().text_color(reached).child(stat(s))))
                             .children(qualifiers.iter().map(|s| {
-                                div().text_color(theme::active().text_tertiary).child(stat(s))
+                                div()
+                                    .text_color(theme::active().text_tertiary)
+                                    .child(stat(s))
                             })),
                     ),
             )
@@ -3277,7 +3455,11 @@ impl Root {
                 // this element never animates itself, which is the rule that
                 // keeps a repeating animation from pinning the window.
                 let live = badge == "LIVE";
-                let intensity = if live { self.pulse.read(cx).intensity() } else { 1.0 };
+                let intensity = if live {
+                    self.pulse.read(cx).intensity()
+                } else {
+                    1.0
+                };
                 let (bg, fg) = if live {
                     // Interpolating alpha rather than swapping colours, so
                     // the pulse reads as one thing brightening instead of
@@ -3288,7 +3470,10 @@ impl Root {
                     fg.a = 0.72 + 0.28 * intensity;
                     (bg, fg)
                 } else {
-                    (theme::active().row_icon_socket_bg, theme::active().text_tertiary)
+                    (
+                        theme::active().row_icon_socket_bg,
+                        theme::active().text_tertiary,
+                    )
                 };
                 div()
                     .flex_shrink_0()
@@ -3300,13 +3485,18 @@ impl Root {
                     .text_color(fg)
                     .child(SharedString::from(badge))
             }))
-            .children(item.accessory.clone().filter(|_| !compact).map(|accessory| {
-                div()
-                    .flex_shrink_0()
-                    .text_size(px(11.))
-                    .text_color(subtitle_color)
-                    .child(SharedString::from(accessory))
-            }))
+            .children(
+                item.accessory
+                    .clone()
+                    .filter(|_| !compact)
+                    .map(|accessory| {
+                        div()
+                            .flex_shrink_0()
+                            .text_size(px(11.))
+                            .text_color(subtitle_color)
+                            .child(SharedString::from(accessory))
+                    }),
+            )
             // **What Enter will do, on the row Enter would do it to.**
             //
             // Every provider has always set `SearchItem::action_label` and
@@ -3364,7 +3554,9 @@ impl Root {
                     el.child(self.render_transcript(mode, cx))
                 } else {
                     el.child(self.render_mode_list(mode.chrome.has_detail, cx))
-                        .when(mode.chrome.has_detail, |el| el.child(self.render_mode_detail()))
+                        .when(mode.chrome.has_detail, |el| {
+                            el.child(self.render_mode_detail())
+                        })
                 }
             });
         // A one-shot opacity reveal on entry, not a width/geometry
@@ -3441,12 +3633,12 @@ impl Root {
                     column,
                 ),
             ))
-        // **Without this every turn overflows the right edge.** The wrapper
-        // sits in `render_mode_content`'s flex *row*, where flexbox's
-        // `min-width: auto` sizes a child by its content — and a paragraph's
-        // content width is the unwrapped line. Seen in the first capture as
-        // bubbles running past the window; `min_w(0)` is what makes the
-        // column's width the container's, so text wraps instead of escaping.
+            // **Without this every turn overflows the right edge.** The wrapper
+            // sits in `render_mode_content`'s flex *row*, where flexbox's
+            // `min-width: auto` sizes a child by its content — and a paragraph's
+            // content width is the unwrapped line. Seen in the first capture as
+            // bubbles running past the window; `min_w(0)` is what makes the
+            // column's width the container's, so text wraps instead of escaping.
             .min_w(px(0.))
             .into_any_element()
     }
@@ -3483,12 +3675,18 @@ impl Root {
                     .id("transcript-back")
                     .p(px(5.))
                     .rounded(px(theme::ROW_RADIUS_PX))
-                    .hover_bg("transcript-back", theme::TRANSPARENT, theme::active().row_icon_socket_bg)
+                    .hover_bg(
+                        "transcript-back",
+                        theme::TRANSPARENT,
+                        theme::active().row_icon_socket_bg,
+                    )
                     .cursor(CursorStyle::PointingHand)
                     .on_mouse_down(gpui::MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation()
                     })
-                    .on_click(cx.listener(|root, _: &ClickEvent, window, cx| root.exit_mode(window, cx)))
+                    .on_click(
+                        cx.listener(|root, _: &ClickEvent, window, cx| root.exit_mode(window, cx)),
+                    )
                     .child(back_glyph()),
             )
             .child(
@@ -3593,8 +3791,7 @@ impl Root {
                                 // One waveform, three phases — the classic
                                 // travelling ripple, driven off the single
                                 // 12.5Hz clock.
-                                let phase =
-                                    (intensity + i as f32 * 0.33).rem_euclid(1.0);
+                                let phase = (intensity + i as f32 * 0.33).rem_euclid(1.0);
                                 let mut dot = theme::active().text_secondary;
                                 dot.a = 0.25 + 0.6 * (1.0 - (phase - 0.5).abs() * 2.0);
                                 div().size(px(6.)).rounded_full().bg(dot)
@@ -3732,7 +3929,8 @@ impl Root {
             .hover(|el| el.bg(theme::active().row_icon_socket_bg))
             .on_click(cx.listener({
                 let id = item.id.clone();
-                let toggles_output = item.speaker.as_deref() == Some("tool") && item.preview.is_some();
+                let toggles_output =
+                    item.speaker.as_deref() == Some("tool") && item.preview.is_some();
                 move |root, _: &ClickEvent, _window, cx| {
                     root.selected = idx;
                     root.grid_selected = None;
@@ -3825,12 +4023,18 @@ impl Root {
                 }
                 container = container.child(match &item.meter {
                     Some(meter) => self.render_meter(idx, item, meter, cx),
-                    None => self.render_row(idx, item, has_detail, cx).into_any_element(),
+                    None => self
+                        .render_row(idx, item, has_detail, cx)
+                        .into_any_element(),
                 });
             }
         }
 
-        let fade_color = if self.translucent { theme::active().surface_panel_translucent } else { theme::active().surface_panel };
+        let fade_color = if self.translucent {
+            theme::active().surface_panel_translucent
+        } else {
+            theme::active().surface_panel
+        };
         with_scrollbar(
             &self.mode_scroll,
             "mode-list-scrollbar",
@@ -3862,9 +4066,22 @@ impl Root {
     /// `title` — the whole point of a detail pane is showing what the list
     /// row had to compress.
     fn render_mode_detail(&self) -> impl IntoElement {
-        let col = div().flex().flex_col().flex_1().min_w(px(0.)).min_h(px(0.)).gap_4().px_5().py_5();
-        if self.active_mode().is_some_and(|mode| mode.chrome.id == "codex-task") {
-            let task = self.active_mode().and_then(|mode| mode.subject_item.as_ref());
+        let col = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w(px(0.))
+            .min_h(px(0.))
+            .gap_4()
+            .px_5()
+            .py_5();
+        if self
+            .active_mode()
+            .is_some_and(|mode| mode.chrome.id == "codex-task")
+        {
+            let task = self
+                .active_mode()
+                .and_then(|mode| mode.subject_item.as_ref());
             let title = task.map(|item| item.title.as_str()).unwrap_or("Codex task");
             let metadata = task
                 .and_then(|item| item.subtitle.as_deref())
@@ -3881,11 +4098,7 @@ impl Root {
                     "Codex exposed no recent visible turns for this task.",
                     None,
                 ),
-                Some(item) => (
-                    "Visible activity",
-                    item.title.as_str(),
-                    None,
-                ),
+                Some(item) => ("Visible activity", item.title.as_str(), None),
                 None => (
                     "Task details unavailable",
                     "Codex did not expose any readable task content.",
@@ -3893,19 +4106,54 @@ impl Root {
                 ),
             };
             return col
-                .child(div().text_size(px(15.)).text_color(theme::active().text_primary).child(SharedString::from(title.to_owned())))
-                .child(div().text_size(px(11.5)).text_color(theme::active().text_tertiary).child(SharedString::from(metadata.to_owned())))
                 .child(
-                    div().flex().flex_col().flex_1().min_h(px(0.)).overflow_hidden().p_3().gap(px(10.))
-                        .rounded(px(theme::ROW_RADIUS_PX)).bg(theme::active().surface_input)
-                        .border_1().border_color(theme::active().border_hairline)
-                        .child(div().text_size(px(11.)).text_color(theme::active().text_tertiary).child(label))
-                        .child(div().text_size(px(13.)).text_color(theme::active().text_primary).whitespace_normal().child(SharedString::from(content.to_owned())))
+                    div()
+                        .text_size(px(15.))
+                        .text_color(theme::active().text_primary)
+                        .child(SharedString::from(title.to_owned())),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.5))
+                        .text_color(theme::active().text_tertiary)
+                        .child(SharedString::from(metadata.to_owned())),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_h(px(0.))
+                        .overflow_hidden()
+                        .p_3()
+                        .gap(px(10.))
+                        .rounded(px(theme::ROW_RADIUS_PX))
+                        .bg(theme::active().surface_input)
+                        .border_1()
+                        .border_color(theme::active().border_hairline)
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(theme::active().text_tertiary)
+                                .child(label),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .text_color(theme::active().text_primary)
+                                .whitespace_normal()
+                                .child(SharedString::from(content.to_owned())),
+                        )
                         .children(availability.map(|availability| {
-                            div().mt(px(6.)).pt(px(10.)).border_t_1()
+                            div()
+                                .mt(px(6.))
+                                .pt(px(10.))
+                                .border_t_1()
                                 .border_color(theme::active().border_hairline)
-                                .text_size(px(11.5)).text_color(theme::active().text_secondary)
-                                .whitespace_normal().child(availability)
+                                .text_size(px(11.5))
+                                .text_color(theme::active().text_secondary)
+                                .whitespace_normal()
+                                .child(availability)
                         })),
                 );
         }
@@ -3944,7 +4192,8 @@ impl Root {
                 let markdown = crate::evidence::force_preview_markdown() || item.preview_markdown;
                 let text = item.preview.clone().unwrap_or_else(|| item.id.clone());
                 if markdown {
-                    el.text_size(px(12.)).child(crate::markdown::render_cached(&text))
+                    el.text_size(px(12.))
+                        .child(crate::markdown::render_cached(&text))
                 } else if item.preview.is_some() {
                     el.font_family(theme::MONOSPACE_FAMILY)
                         .text_size(px(theme::PREVIEW_MONOSPACE_SIZE_PX))
@@ -4053,7 +4302,11 @@ impl Root {
             // fully-opaque fill, the same honest-fallback shape
             // `Render::render`'s own panel background already uses for
             // `translucent`. See `theme::active().menu_glass_tint`'s own doc comment.
-            .bg(if self.menu_frost { theme::active().menu_glass_tint } else { theme::active().surface_raised })
+            .bg(if self.menu_frost {
+                theme::active().menu_glass_tint
+            } else {
+                theme::active().surface_raised
+            })
             .border_1()
             .border_color(theme::active().border_hairline_strong)
             .shadow_lg()
@@ -4065,7 +4318,11 @@ impl Root {
                 } else {
                     action.label.clone().into()
                 };
-                let color = if action.destructive { theme::active().state_danger } else { theme::active().text_primary };
+                let color = if action.destructive {
+                    theme::active().state_danger
+                } else {
+                    theme::active().text_primary
+                };
                 div()
                     .id(("actions-menu-row", idx))
                     .flex()
@@ -4183,7 +4440,11 @@ fn transcript_at_bottom(scrolled: f32, max: f32) -> bool {
 
 fn resolve_selection(previous: Option<(&str, &str)>, results: &[SearchItem]) -> usize {
     previous
-        .and_then(|(kind, id)| results.iter().position(|item| item.kind == kind && item.id == id))
+        .and_then(|(kind, id)| {
+            results
+                .iter()
+                .position(|item| item.kind == kind && item.id == id)
+        })
         .unwrap_or(0)
 }
 
@@ -4229,21 +4490,27 @@ fn merge_late_results(
     selected: usize,
 ) -> Vec<SearchItem> {
     let already_shown = |item: &SearchItem| {
-        anchor.iter().any(|shown| shown.kind == item.kind && shown.id == item.id)
+        anchor
+            .iter()
+            .any(|shown| shown.kind == item.kind && shown.id == item.id)
     };
-    let late: Vec<SearchItem> = authoritative.into_iter().filter(|item| !already_shown(item)).collect();
+    let late: Vec<SearchItem> = authoritative
+        .into_iter()
+        .filter(|item| !already_shown(item))
+        .collect();
     if late.is_empty() {
         return anchor;
     }
 
-    let selected_item = anchor.get(selected).map(|item| (item.kind.clone(), item.id.clone()));
+    let selected_item = anchor
+        .get(selected)
+        .map(|item| (item.kind.clone(), item.id.clone()));
     let mut merged = anchor.clone();
     merged.extend(late);
     let fitted = fit_within_budget(merged, budget_px);
 
-    let selection_survived = selected_item.is_none_or(|(kind, id)| {
-        fitted.iter().any(|item| item.kind == kind && item.id == id)
-    });
+    let selection_survived = selected_item
+        .is_none_or(|(kind, id)| fitted.iter().any(|item| item.kind == kind && item.id == id));
     if selection_survived { fitted } else { anchor }
 }
 
@@ -4298,7 +4565,10 @@ fn merge_late_results(
 ///
 /// Order is preserved on both sides, so the rows that stay keep whatever
 /// section ordering `search::allocate` decided.
-fn split_agent_tiles(results: Vec<SearchItem>, query_is_empty: bool) -> (Vec<SearchItem>, Vec<SearchItem>) {
+fn split_agent_tiles(
+    results: Vec<SearchItem>,
+    query_is_empty: bool,
+) -> (Vec<SearchItem>, Vec<SearchItem>) {
     let mut tiles = Vec::new();
     let mut rows = Vec::new();
     for item in results {
@@ -4352,7 +4622,9 @@ fn group_into_sections(results: Vec<SearchItem>) -> Vec<Vec<SearchItem>> {
     let mut sections: Vec<Vec<SearchItem>> = Vec::new();
     for item in results {
         match sections.last_mut() {
-            Some(section) if section.last().is_some_and(|last| last.kind == item.kind) => section.push(item),
+            Some(section) if section.last().is_some_and(|last| last.kind == item.kind) => {
+                section.push(item)
+            }
             _ => sections.push(vec![item]),
         }
     }
@@ -4367,10 +4639,14 @@ fn fit_section(items: &[SearchItem], budget_px: f32) -> (usize, f32) {
     if items.is_empty() || budget_px < header_and_one_row {
         return (0, 0.0);
     }
-    let rows_that_fit =
-        ((budget_px - theme::SECTION_HEADER_HEIGHT_PX) / theme::RESULT_ROW_HEIGHT_PX).floor() as usize;
+    let rows_that_fit = ((budget_px - theme::SECTION_HEADER_HEIGHT_PX)
+        / theme::RESULT_ROW_HEIGHT_PX)
+        .floor() as usize;
     let kept = rows_that_fit.min(items.len());
-    (kept, theme::SECTION_HEADER_HEIGHT_PX + kept as f32 * theme::RESULT_ROW_HEIGHT_PX)
+    (
+        kept,
+        theme::SECTION_HEADER_HEIGHT_PX + kept as f32 * theme::RESULT_ROW_HEIGHT_PX,
+    )
 }
 
 /// `tnum` — fixed-width digits.
@@ -4382,7 +4658,9 @@ fn fit_section(items: &[SearchItem], budget_px: f32) -> (usize, f32) {
 /// allocation.
 fn tabular_numerals() -> FontFeatures {
     static TABULAR: OnceLock<FontFeatures> = OnceLock::new();
-    TABULAR.get_or_init(|| FontFeatures(Arc::new(vec![("tnum".to_string(), 1)]))).clone()
+    TABULAR
+        .get_or_init(|| FontFeatures(Arc::new(vec![("tnum".to_string(), 1)])))
+        .clone()
 }
 
 /// Which way the selection just moved, so the view can leave a row of
@@ -4419,11 +4697,7 @@ impl ScrollBias {
 /// accessibility banner and a section header for each new `kind` are all
 /// interleaved ahead of the rows. Counting them is the whole job, and it is a
 /// pure function so the arithmetic is testable without a live `Window`.
-fn root_list_child_index(
-    results: &[SearchItem],
-    target: usize,
-    leading_banners: usize,
-) -> usize {
+fn root_list_child_index(results: &[SearchItem], target: usize, leading_banners: usize) -> usize {
     let mut child_index = leading_banners;
     let mut current_section: Option<&str> = None;
     for (idx, item) in results.iter().enumerate() {
@@ -4580,7 +4854,11 @@ const COMPACT_ROW_TEXT_BUDGET_CHARS: usize = 30;
 
 /// Whether a row's text is long enough that `truncate()` has probably clipped it.
 fn row_text_may_be_clipped(item: &SearchItem, compact: bool) -> bool {
-    let budget = if compact { COMPACT_ROW_TEXT_BUDGET_CHARS } else { ROW_TEXT_BUDGET_CHARS };
+    let budget = if compact {
+        COMPACT_ROW_TEXT_BUDGET_CHARS
+    } else {
+        ROW_TEXT_BUDGET_CHARS
+    };
     let mut used = item.title.chars().count();
     if !compact {
         // The subtitle shares the same flex line, so it spends the same budget.
@@ -4656,7 +4934,10 @@ fn app_icon_placeholder_glyph() -> AnyElement {
 /// The one character a 12px badge can hold: the tool's own initial,
 /// uppercased. `"claude"` → `"C"`, `"gpt"` → `"G"`.
 fn tool_initial(tool: &str) -> String {
-    tool.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default()
+    tool.chars()
+        .next()
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_default()
 }
 
 /// One icon slot, shared by result rows and agent tiles so the two can never
@@ -4680,7 +4961,10 @@ fn icon_element(icon: &Icon, row_id: &str) -> AnyElement {
 }
 
 fn glyph_element(glyph: Glyph, row_id: &str) -> AnyElement {
-    let slot = div().w(px(theme::ROW_ICON_PX)).h(px(theme::ROW_ICON_PX)).flex_shrink_0();
+    let slot = div()
+        .w(px(theme::ROW_ICON_PX))
+        .h(px(theme::ROW_ICON_PX))
+        .flex_shrink_0();
 
     // `Glyph::Palette` is the one mark in this vocabulary that has no
     // single-colour form, so it is the one that stays painted — permanently,
@@ -4711,7 +4995,12 @@ fn glyph_element(glyph: Glyph, row_id: &str) -> AnyElement {
         .flex()
         .items_center()
         .justify_center()
-        .child(svg().path(path).size(px(theme::ROW_ICON_GLYPH_PX)).text_color(tint));
+        .child(
+            svg()
+                .path(path)
+                .size(px(theme::ROW_ICON_GLYPH_PX))
+                .text_color(tint),
+        );
 
     match glyph {
         Glyph::Agent | Glyph::AgentLive => mark
@@ -4758,7 +5047,13 @@ fn palette_glyph(slot: gpui::Div, row_id: &str) -> AnyElement {
         // The four tokens that actually identify a palette at 8px: what the
         // panel is, what a selected row is, what text is, and its one state
         // colour.
-        .child(div().flex().gap(px(2.)).child(swatch(t.surface_panel)).child(swatch(t.text_primary)))
+        .child(
+            div()
+                .flex()
+                .gap(px(2.))
+                .child(swatch(t.surface_panel))
+                .child(swatch(t.text_primary)),
+        )
         .child(
             div()
                 .flex()
@@ -4781,7 +5076,10 @@ fn palette_glyph(slot: gpui::Div, row_id: &str) -> AnyElement {
 /// not reliably rendered here) is still honoured — this is a vendored asset,
 /// not a font character.
 fn search_glyph() -> impl IntoElement {
-    svg().path(icon::SEARCH).size(px(15.)).text_color(theme::active().text_tertiary)
+    svg()
+        .path(icon::SEARCH)
+        .size(px(15.))
+        .text_color(theme::active().text_tertiary)
 }
 
 /// The mode input row's back affordance — "a back arrow in place of the
@@ -4795,7 +5093,10 @@ fn search_glyph() -> impl IntoElement {
 /// modifier symbol is not in any general-purpose icon set, and the wordmark
 /// is neko's own identity rather than an icon.
 fn back_glyph() -> impl IntoElement {
-    svg().path(icon::CHEVRON_LEFT).size(px(15.)).text_color(theme::active().text_tertiary)
+    svg()
+        .path(icon::CHEVRON_LEFT)
+        .size(px(15.))
+        .text_color(theme::active().text_tertiary)
 }
 
 /// The detail pane's one repeated row shape: a label on the left, the
@@ -4808,8 +5109,19 @@ fn detail_info_row(label: &str, value: String) -> impl IntoElement {
         .justify_between()
         .gap_3()
         .text_size(px(12.))
-        .child(div().flex_shrink_0().text_color(theme::active().text_tertiary).child(SharedString::from(label.to_string())))
-        .child(div().overflow_hidden().truncate().text_color(theme::active().text_secondary).child(SharedString::from(value)))
+        .child(
+            div()
+                .flex_shrink_0()
+                .text_color(theme::active().text_tertiary)
+                .child(SharedString::from(label.to_string())),
+        )
+        .child(
+            div()
+                .overflow_hidden()
+                .truncate()
+                .text_color(theme::active().text_secondary)
+                .child(SharedString::from(value)),
+        )
 }
 
 /// Translates a row badge's already-uppercase wire value (`"TEXT"`,
@@ -4830,7 +5142,6 @@ fn title_case_badge(badge: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     fn item_with_text(title: &str, subtitle: Option<&str>) -> SearchItem {
         SearchItem {
@@ -4879,7 +5190,6 @@ mod tests {
         assert_eq!(row_tooltip_text(&without).as_ref(), "Title");
     }
 
-
     fn item(kind: &str) -> SearchItem {
         item_with_id(kind, "x")
     }
@@ -4913,8 +5223,9 @@ mod tests {
     /// same tokens `fit_section` uses rather than hard-coded, so these
     /// tests stay honest if the geometry ever changes.
     fn rows_that_fit_in_one_section() -> usize {
-        ((CONTENT_AREA_MIN_HEIGHT_PX - theme::SECTION_HEADER_HEIGHT_PX) / theme::RESULT_ROW_HEIGHT_PX).floor()
-            as usize
+        ((CONTENT_AREA_MIN_HEIGHT_PX - theme::SECTION_HEADER_HEIGHT_PX)
+            / theme::RESULT_ROW_HEIGHT_PX)
+            .floor() as usize
     }
 
     #[test]
@@ -4932,10 +5243,17 @@ mod tests {
 
         let merged = merge_late_results(anchor, authoritative, CONTENT_AREA_MIN_HEIGHT_PX, 0);
 
-        let order: Vec<(&str, &str)> = merged.iter().map(|i| (i.kind.as_str(), i.id.as_str())).collect();
+        let order: Vec<(&str, &str)> = merged
+            .iter()
+            .map(|i| (i.kind.as_str(), i.id.as_str()))
+            .collect();
         assert_eq!(
             order,
-            vec![("app", "safari"), ("app", "notes"), ("file", "safari-notes.md")],
+            vec![
+                ("app", "safari"),
+                ("app", "notes"),
+                ("file", "safari-notes.md")
+            ],
             "the anchor keeps its exact order and the late row lands after it"
         );
     }
@@ -4950,7 +5268,9 @@ mod tests {
         // dropping the highlighted item and snapping the selection to the
         // top.
         let rows = rows_that_fit_in_one_section();
-        let anchor: Vec<SearchItem> = (0..rows).map(|i| item_with_id("app", &format!("app{i}"))).collect();
+        let anchor: Vec<SearchItem> = (0..rows)
+            .map(|i| item_with_id("app", &format!("app{i}")))
+            .collect();
         let selected = rows - 1;
         let authoritative = {
             let mut items = anchor.clone();
@@ -4958,9 +5278,17 @@ mod tests {
             items
         };
 
-        let merged = merge_late_results(anchor.clone(), authoritative, CONTENT_AREA_MIN_HEIGHT_PX, selected);
+        let merged = merge_late_results(
+            anchor.clone(),
+            authoritative,
+            CONTENT_AREA_MIN_HEIGHT_PX,
+            selected,
+        );
 
-        assert_eq!(merged, anchor, "nothing changed on screen — not one row moved, not one row dropped");
+        assert_eq!(
+            merged, anchor,
+            "nothing changed on screen — not one row moved, not one row dropped"
+        );
         assert_eq!(
             resolve_selection(Some(("app", &format!("app{selected}"))), &merged),
             selected,
@@ -4975,7 +5303,9 @@ mod tests {
         // room for the Files section comes from rows the captain is not
         // pointing at, and the file row must actually appear.
         let rows = rows_that_fit_in_one_section();
-        let anchor: Vec<SearchItem> = (0..rows).map(|i| item_with_id("app", &format!("app{i}"))).collect();
+        let anchor: Vec<SearchItem> = (0..rows)
+            .map(|i| item_with_id("app", &format!("app{i}")))
+            .collect();
         let authoritative = {
             let mut items = anchor.clone();
             items.push(item_with_id("file", "late.txt"));
@@ -4984,8 +5314,14 @@ mod tests {
 
         let merged = merge_late_results(anchor, authoritative, CONTENT_AREA_MIN_HEIGHT_PX, 0);
 
-        assert!(merged.iter().any(|i| i.kind == "file"), "the late file row is shown");
-        assert_eq!(merged[0].id, "app0", "and the row under the highlight did not move");
+        assert!(
+            merged.iter().any(|i| i.kind == "file"),
+            "the late file row is shown"
+        );
+        assert_eq!(
+            merged[0].id, "app0",
+            "and the row under the highlight did not move"
+        );
     }
 
     #[test]
@@ -4993,8 +5329,16 @@ mod tests {
         // The common shape when file search matched nothing: the complete
         // frame carries exactly what the partial one did. Not one row may
         // be rebuilt, re-ordered, or re-fitted for it.
-        let anchor = vec![item_with_id("app", "safari"), item_with_id("clipboard", "note")];
-        let merged = merge_late_results(anchor.clone(), anchor.clone(), CONTENT_AREA_MIN_HEIGHT_PX, 1);
+        let anchor = vec![
+            item_with_id("app", "safari"),
+            item_with_id("clipboard", "note"),
+        ];
+        let merged = merge_late_results(
+            anchor.clone(),
+            anchor.clone(),
+            CONTENT_AREA_MIN_HEIGHT_PX,
+            1,
+        );
         assert_eq!(merged, anchor);
     }
 
@@ -5003,7 +5347,12 @@ mod tests {
         // Nothing matched in the fast phase — there is no order to
         // preserve, so the authoritative answer is used as-is.
         let authoritative = vec![item_with_id("file", "budget.xlsx")];
-        let merged = merge_late_results(Vec::new(), authoritative.clone(), CONTENT_AREA_MIN_HEIGHT_PX, 0);
+        let merged = merge_late_results(
+            Vec::new(),
+            authoritative.clone(),
+            CONTENT_AREA_MIN_HEIGHT_PX,
+            0,
+        );
         assert_eq!(merged, authoritative);
     }
 
@@ -5066,8 +5415,14 @@ mod tests {
 
         let apps_kept = fitted.iter().filter(|i| i.kind == "app").count();
         let clipboard_kept = fitted.iter().filter(|i| i.kind == "clipboard").count();
-        assert_eq!(clipboard_kept, 1, "the top clipboard result must always be visible when one matched");
-        assert_eq!(apps_kept, 5, "apps give up one row to make room, not zero clipboard rows");
+        assert_eq!(
+            clipboard_kept, 1,
+            "the top clipboard result must always be visible when one matched"
+        );
+        assert_eq!(
+            apps_kept, 5,
+            "apps give up one row to make room, not zero clipboard rows"
+        );
         // Still no partial row and no dangling header: total height fits.
         let total_height = theme::SECTION_HEADER_HEIGHT_PX * 2.0
             + (apps_kept + clipboard_kept) as f32 * theme::RESULT_ROW_HEIGHT_PX;
@@ -5119,7 +5474,10 @@ mod tests {
 
     #[test]
     fn empty_results_stay_empty() {
-        assert_eq!(fit_within_budget(Vec::new(), CONTENT_AREA_MIN_HEIGHT_PX), Vec::new());
+        assert_eq!(
+            fit_within_budget(Vec::new(), CONTENT_AREA_MIN_HEIGHT_PX),
+            Vec::new()
+        );
     }
 
     #[test]
@@ -5135,8 +5493,14 @@ mod tests {
 
         let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
 
-        assert!(fitted.iter().any(|i| i.kind == "file"), "file's reservation must survive");
-        assert!(fitted.iter().any(|i| i.kind == "clipboard"), "clipboard's reservation must survive");
+        assert!(
+            fitted.iter().any(|i| i.kind == "file"),
+            "file's reservation must survive"
+        );
+        assert!(
+            fitted.iter().any(|i| i.kind == "clipboard"),
+            "clipboard's reservation must survive"
+        );
         // Section order preserved: app, then file, then clipboard.
         let kinds: Vec<&str> = fitted.iter().map(|i| i.kind.as_str()).collect();
         let first_file = kinds.iter().position(|&k| k == "file").unwrap();
@@ -5161,10 +5525,19 @@ mod tests {
 
         let fitted = fit_within_budget(results, CONTENT_AREA_MIN_HEIGHT_PX);
 
-        assert!(fitted.iter().any(|i| i.kind == "command"), "the leading section's own reservation must survive");
-        assert!(fitted.iter().any(|i| i.kind == "settings"), "the trailing section must never be crowded out either");
+        assert!(
+            fitted.iter().any(|i| i.kind == "command"),
+            "the leading section's own reservation must survive"
+        );
+        assert!(
+            fitted.iter().any(|i| i.kind == "settings"),
+            "the trailing section must never be crowded out either"
+        );
         let kinds: Vec<&str> = fitted.iter().map(|i| i.kind.as_str()).collect();
-        assert_eq!(kinds[0], "command", "the daemon's own section order must be preserved verbatim, not re-sorted here");
+        assert_eq!(
+            kinds[0], "command",
+            "the daemon's own section order must be preserved verbatim, not re-sorted here"
+        );
     }
 
     // --- Commands and modes: mode_list_child_index (the mode list now
@@ -5175,12 +5548,19 @@ mod tests {
     // space `ScrollHandle::scroll_to_item` operates in.) ---
 
     fn mode_item(group: Option<&str>, id: &str) -> SearchItem {
-        SearchItem { group_label: group.map(str::to_string), ..item_with_id("clipboard", id) }
+        SearchItem {
+            group_label: group.map(str::to_string),
+            ..item_with_id("clipboard", id)
+        }
     }
 
     #[test]
     fn mode_list_child_index_with_no_groups_is_the_identity() {
-        let items = vec![mode_item(None, "a"), mode_item(None, "b"), mode_item(None, "c")];
+        let items = vec![
+            mode_item(None, "a"),
+            mode_item(None, "b"),
+            mode_item(None, "c"),
+        ];
         assert_eq!(mode_list_child_index(&items, 0), 0);
         assert_eq!(mode_list_child_index(&items, 2), 2);
     }
@@ -5202,7 +5582,11 @@ mod tests {
             mode_item(Some("Yesterday"), "d"),
         ];
         // 0: Today header, 1: a, 2: b, 3: Yesterday header, 4: c, 5: d
-        assert_eq!(mode_list_child_index(&items, 2), 4, "row c comes after both Today rows and the Yesterday header");
+        assert_eq!(
+            mode_list_child_index(&items, 2),
+            4,
+            "row c comes after both Today rows and the Yesterday header"
+        );
         assert_eq!(mode_list_child_index(&items, 3), 5);
     }
 
@@ -5218,7 +5602,8 @@ mod tests {
         // effect queue flushes at the end of this block.
         window
             .update(cx, |root, _window, cx| {
-                root.text_field.update(cx, |field, cx| field.set_content("/the", cx));
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("/the", cx));
             })
             .unwrap();
         cx.run_until_parked();
@@ -5240,7 +5625,8 @@ mod tests {
                 root.enter_mode_about("clipboard", None, window, cx);
                 // A mode is already scoped, and somebody typing a path there
                 // means the character.
-                root.text_field.update(cx, |field, cx| field.set_content("/Users", cx));
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("/Users", cx));
                 assert_eq!(
                     root.active_mode().map(|m| m.chrome.provider_id),
                     Some("clipboard"),
@@ -5254,11 +5640,22 @@ mod tests {
     fn confirming_the_preferences_command_opens_the_window_instead_of_entering_a_mode(
         cx: &mut TestAppContext,
     ) {
-        let (client, _events) = NekoClient::connect(std::path::PathBuf::from("/tmp/neko-prefs-test.sock"));
-        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        let (client, _events) =
+            NekoClient::connect(std::path::PathBuf::from("/tmp/neko-prefs-test.sock"));
+        let accessibility: Rc<dyn AccessibilityChecker> =
+            Rc::new(FakeAccessibilityChecker::new(true));
         let (opener, opened) = recording_preferences_opener();
         let window = cx.add_window(|_window, cx| {
-            Root::build(client, accessibility, true, true, no_appearance_setter(), opener, crate::window_drag::disabled(), cx)
+            Root::build(
+                client,
+                accessibility,
+                true,
+                true,
+                no_appearance_setter(),
+                opener,
+                crate::window_drag::disabled(),
+                cx,
+            )
         });
         window
             .update(cx, |root, window, cx| {
@@ -5276,32 +5673,47 @@ mod tests {
     }
 
     #[gpui::test]
-    fn ime_enter_does_not_activate_a_result_and_native_commit_replaces_candidate(cx: &mut TestAppContext) {
+    fn ime_enter_does_not_activate_a_result_and_native_commit_replaces_candidate(
+        cx: &mut TestAppContext,
+    ) {
         use gpui::EntityInputHandler;
-        let (client, _events) = NekoClient::connect(std::path::PathBuf::from("/tmp/neko-ime-test.sock"));
-        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        let (client, _events) =
+            NekoClient::connect(std::path::PathBuf::from("/tmp/neko-ime-test.sock"));
+        let accessibility: Rc<dyn AccessibilityChecker> =
+            Rc::new(FakeAccessibilityChecker::new(true));
         let (opener, opened) = recording_preferences_opener();
         let window = cx.add_window(|_window, cx| {
-            Root::build(client, accessibility, true, true, no_appearance_setter(), opener, crate::window_drag::disabled(), cx)
+            Root::build(
+                client,
+                accessibility,
+                true,
+                true,
+                no_appearance_setter(),
+                opener,
+                crate::window_drag::disabled(),
+                cx,
+            )
         });
-        window.update(cx, |root, window, cx| {
-            root.results = vec![preferences_command_row()];
-            root.selected = 0;
-            root.text_field.update(cx, |field, cx| {
-                field.replace_and_mark_text_in_range(None, "に", Some(1..1), window, cx);
-                field.replace_and_mark_text_in_range(None, "日本", Some(2..2), window, cx);
-                assert_eq!(field.content(), "日本");
-            });
-            root.confirm(&Confirm, window, cx);
-            assert_eq!(opened.get(), 0);
-            root.text_field.update(cx, |field, cx| {
-                field.replace_text_in_range(None, "日本語", window, cx);
-                assert_eq!(field.content(), "日本語");
-                assert!(!field.is_composing());
-            });
-            root.confirm(&Confirm, window, cx);
-            assert_eq!(opened.get(), 1);
-        }).unwrap();
+        window
+            .update(cx, |root, window, cx| {
+                root.results = vec![preferences_command_row()];
+                root.selected = 0;
+                root.text_field.update(cx, |field, cx| {
+                    field.replace_and_mark_text_in_range(None, "に", Some(1..1), window, cx);
+                    field.replace_and_mark_text_in_range(None, "日本", Some(2..2), window, cx);
+                    assert_eq!(field.content(), "日本");
+                });
+                root.confirm(&Confirm, window, cx);
+                assert_eq!(opened.get(), 0);
+                root.text_field.update(cx, |field, cx| {
+                    field.replace_text_in_range(None, "日本語", window, cx);
+                    assert_eq!(field.content(), "日本語");
+                    assert!(!field.is_composing());
+                });
+                root.confirm(&Confirm, window, cx);
+                assert_eq!(opened.get(), 1);
+            })
+            .unwrap();
     }
 
     #[gpui::test]
@@ -5346,7 +5758,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_focused_tile_and_a_list_row_are_never_highlighted_at_the_same_time(cx: &mut TestAppContext) {
+    fn a_focused_tile_and_a_list_row_are_never_highlighted_at_the_same_time(
+        cx: &mut TestAppContext,
+    ) {
         let window = test_root(cx);
         window
             .update(cx, |root, _window, _cx| {
@@ -5358,16 +5772,24 @@ mod tests {
                 // — which is correct, and is exactly why the row must not
                 // paint a highlight for it.
                 root.grid_selected = Some(0);
-                assert!(!root.row_is_highlighted(0), "the grid has focus, so no row is selected");
+                assert!(
+                    !root.row_is_highlighted(0),
+                    "the grid has focus, so no row is selected"
+                );
 
                 root.grid_selected = None;
-                assert!(root.row_is_highlighted(0), "focus back in the list, the row highlights again");
+                assert!(
+                    root.row_is_highlighted(0),
+                    "focus back in the list, the row highlights again"
+                );
             })
             .unwrap();
     }
 
     #[gpui::test]
-    fn down_runs_through_the_tiles_in_reading_order_before_reaching_the_rows(cx: &mut TestAppContext) {
+    fn down_runs_through_the_tiles_in_reading_order_before_reaching_the_rows(
+        cx: &mut TestAppContext,
+    ) {
         let window = test_root(cx);
         window
             .update(cx, |root, window, cx| {
@@ -5380,10 +5802,17 @@ mod tests {
 
                 for expected in [1, 2, 3] {
                     root.select_next(&SelectNext, window, cx);
-                    assert_eq!(root.grid_selected, Some(expected), "tiles run 1,2,3,4 in order");
+                    assert_eq!(
+                        root.grid_selected,
+                        Some(expected),
+                        "tiles run 1,2,3,4 in order"
+                    );
                 }
                 root.select_next(&SelectNext, window, cx);
-                assert_eq!(root.grid_selected, None, "past the last tile is the first row");
+                assert_eq!(
+                    root.grid_selected, None,
+                    "past the last tile is the first row"
+                );
                 assert_eq!(root.selected, 0);
 
                 // And exactly back again.
@@ -5420,7 +5849,10 @@ mod tests {
                 root.select_next(&SelectNext, window, cx);
                 assert_eq!(root.grid_selected, Some(1));
                 root.select_next(&SelectNext, window, cx);
-                assert_eq!(root.grid_selected, None, "off the last tile is back into the list");
+                assert_eq!(
+                    root.grid_selected, None,
+                    "off the last tile is back into the list"
+                );
                 assert_eq!(root.selected, 0);
             })
             .unwrap();
@@ -5475,7 +5907,10 @@ mod tests {
     }
 
     fn tile(id: &str) -> SearchItem {
-        SearchItem { badge: Some("LIVE".to_string()), ..agent_row(id) }
+        SearchItem {
+            badge: Some("LIVE".to_string()),
+            ..agent_row(id)
+        }
     }
 
     #[gpui::test]
@@ -5512,7 +5947,8 @@ mod tests {
         // Control: plain enter (the composer's send) through the same tree.
         window
             .update(cx, |root, _window, cx| {
-                root.text_field.update(cx, |field, cx| field.set_content("control draft", cx));
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("control draft", cx));
             })
             .unwrap();
         cx.simulate_keystrokes(window.into(), "enter");
@@ -5553,7 +5989,9 @@ mod tests {
                 root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
                 let request = root.open_in_paseo_request().expect("a subject to open");
                 match request {
-                    Request::Activate { kind, id, action, .. } => {
+                    Request::Activate {
+                        kind, id, action, ..
+                    } => {
                         assert_eq!(kind, "conversation");
                         assert_eq!(id, "the-agent");
                         assert_eq!(action.as_deref(), Some("open-in-paseo"));
@@ -5587,7 +6025,10 @@ mod tests {
                         if kind == "agent" && action.as_deref() == Some("open-in-paseo")
                 ));
                 root.selected = 1;
-                assert!(root.open_in_paseo_request().is_none(), "an app row means nothing");
+                assert!(
+                    root.open_in_paseo_request().is_none(),
+                    "an app row means nothing"
+                );
             })
             .unwrap();
     }
@@ -5625,7 +6066,10 @@ mod tests {
                 root.toggle_tool_output("a#3");
                 assert!(root.expanded_tool_output.contains("a#3"));
                 root.toggle_tool_output("a#3");
-                assert!(!root.expanded_tool_output.contains("a#3"), "a second click folds it back");
+                assert!(
+                    !root.expanded_tool_output.contains("a#3"),
+                    "a second click folds it back"
+                );
             })
             .unwrap();
     }
@@ -5648,9 +6092,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn enter_in_a_transcript_sends_the_draft_to_the_subject_not_the_turn(
-        cx: &mut TestAppContext,
-    ) {
+    fn enter_in_a_transcript_sends_the_draft_to_the_subject_not_the_turn(cx: &mut TestAppContext) {
         // The selected row is whatever turn happens to be highlighted; the
         // message goes to the *agent*. Building the request off the row would
         // send the prompt to "agent#7", which the daemon would refuse — or
@@ -5661,10 +6103,16 @@ mod tests {
                 root.results = vec![agent_row("the-agent")];
                 root.selected = 0;
                 root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
-                root.text_field.update(cx, |field, cx| field.set_content("run the tests", cx));
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("run the tests", cx));
                 let request = root.transcript_send_request(cx).expect("a draft to send");
                 match request {
-                    Request::Activate { kind, id, action, query } => {
+                    Request::Activate {
+                        kind,
+                        id,
+                        action,
+                        query,
+                    } => {
                         assert_eq!(kind, "conversation");
                         assert_eq!(id, "the-agent", "the subject, never the selected turn");
                         assert_eq!(action, None);
@@ -5686,7 +6134,10 @@ mod tests {
                 root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
                 assert!(root.transcript_send_request(cx).is_none());
                 root.confirm(&Confirm, window, cx);
-                assert!(!root.activating, "nothing was sent and nothing was activated");
+                assert!(
+                    !root.activating,
+                    "nothing was sent and nothing was activated"
+                );
             })
             .unwrap();
     }
@@ -5699,7 +6150,8 @@ mod tests {
                 root.results = vec![agent_row("the-agent")];
                 root.selected = 0;
                 root.enter_mode_about("conversation", Some("the-agent".into()), window, cx);
-                root.text_field.update(cx, |field, cx| field.set_content("hello there", cx));
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("hello there", cx));
                 root.confirm(&Confirm, window, cx);
                 assert_eq!(root.text_field.read(cx).content(), "", "cleared on send");
                 assert!(root.activating, "and the send is in flight");
@@ -5708,9 +6160,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn an_empty_list_says_nothing_until_the_search_has_actually_finished(
-        cx: &mut TestAppContext,
-    ) {
+    fn an_empty_list_says_nothing_until_the_search_has_actually_finished(cx: &mut TestAppContext) {
         // "No providers signed in" is a statement about a *finished* search.
         // Usage fans out to three vendor APIs, so asserting it during the
         // fetch was a claim the panel then contradicted a moment later.
@@ -5719,7 +6169,10 @@ mod tests {
             .update(cx, |root, _window, _cx| {
                 root.results.clear();
                 root.searching = true;
-                assert!(root.awaiting_first_rows(), "mid-fetch: a skeleton, not a verdict");
+                assert!(
+                    root.awaiting_first_rows(),
+                    "mid-fetch: a skeleton, not a verdict"
+                );
                 root.searching = false;
                 assert!(!root.awaiting_first_rows(), "answered and empty: say so");
             })
@@ -5765,10 +6218,7 @@ mod tests {
                 root.apply_search_results(turns, true, root.generation, cx);
                 let before = root.selected;
                 root.select_previous(&SelectPrevious, window, cx);
-                assert_eq!(
-                    root.selected, before,
-                    "Up moved the view, not a selection"
-                );
+                assert_eq!(root.selected, before, "Up moved the view, not a selection");
                 root.select_next(&SelectNext, window, cx);
                 assert_eq!(root.selected, before, "and Down likewise");
             })
@@ -5868,9 +6318,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn command_k_follows_the_focused_tile_not_the_list_s_remembered_row(
-        cx: &mut TestAppContext,
-    ) {
+    fn command_k_follows_the_focused_tile_not_the_list_s_remembered_row(cx: &mut TestAppContext) {
         // `selected` deliberately keeps its value while the keyboard is up in
         // the grid, so reading `results[selected]` opened the menu for a row
         // nobody could see was chosen — on the surface where ⌘K's actions
@@ -5895,9 +6343,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn the_command_k_hint_describes_the_same_thing_the_menu_would_open(
-        cx: &mut TestAppContext,
-    ) {
+    fn the_command_k_hint_describes_the_same_thing_the_menu_would_open(cx: &mut TestAppContext) {
         // Two callers doing this lookup separately is how they came apart in
         // the first place; both go through `highlighted_item` now.
         let window = test_root(cx);
@@ -5940,8 +6386,14 @@ mod tests {
                 root.close_actions_menu(window);
 
                 root.handle_actions_menu_trigger_click(&ClickEvent::default(), window, cx);
-                assert!(root.actions_menu.is_none(), "the dismiss click stays a dismiss");
-                assert!(!root.menu_open_before_this_press, "and the snapshot is consumed");
+                assert!(
+                    root.actions_menu.is_none(),
+                    "the dismiss click stays a dismiss"
+                );
+                assert!(
+                    !root.menu_open_before_this_press,
+                    "and the snapshot is consumed"
+                );
             })
             .unwrap();
     }
@@ -5964,9 +6416,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn an_activation_in_flight_says_so_and_outranks_the_search_tell(
-        cx: &mut TestAppContext,
-    ) {
+    fn an_activation_in_flight_says_so_and_outranks_the_search_tell(cx: &mut TestAppContext) {
         // Enter on a New Agent row shells out to a CLI whose Electron boot
         // alone is ~1s. For that whole window the panel deliberately stays
         // open — that is what makes an inline failure possible — and used to
@@ -6012,26 +6462,57 @@ mod tests {
         assert_eq!(tool_initial("claude"), "C");
         assert_eq!(tool_initial("gpt"), "G");
         assert_eq!(tool_initial("Codex"), "C");
-        assert_eq!(tool_initial(""), "", "no tool, no badge — never an empty circle");
+        assert_eq!(
+            tool_initial(""),
+            "",
+            "no tool, no badge — never an empty circle"
+        );
     }
 
     #[test]
     fn at_rest_the_grid_takes_recent_agents_too_not_only_the_live_ones() {
-        let live = SearchItem { badge: Some("LIVE".to_string()), ..agent_row("live-1") };
-        let idle = SearchItem { badge: None, ..agent_row("idle-1") };
-        let app = SearchItem { kind: "app".to_string(), ..agent_row("Finder") };
+        let live = SearchItem {
+            badge: Some("LIVE".to_string()),
+            ..agent_row("live-1")
+        };
+        let idle = SearchItem {
+            badge: None,
+            ..agent_row("idle-1")
+        };
+        let app = SearchItem {
+            kind: "app".to_string(),
+            ..agent_row("Finder")
+        };
         let (tiles, rows) = split_agent_tiles(vec![app, live, idle], true);
-        assert_eq!(tiles.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["live-1", "idle-1"]);
-        assert_eq!(rows.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["Finder"]);
+        assert_eq!(
+            tiles.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            vec!["live-1", "idle-1"]
+        );
+        assert_eq!(
+            rows.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            vec!["Finder"]
+        );
     }
 
     #[test]
     fn during_a_search_only_live_agents_are_lifted_so_typing_never_reshuffles_the_grid() {
-        let live = SearchItem { badge: Some("LIVE".to_string()), ..agent_row("live-1") };
-        let idle = SearchItem { badge: None, ..agent_row("idle-1") };
+        let live = SearchItem {
+            badge: Some("LIVE".to_string()),
+            ..agent_row("live-1")
+        };
+        let idle = SearchItem {
+            badge: None,
+            ..agent_row("idle-1")
+        };
         let (tiles, rows) = split_agent_tiles(vec![live, idle], false);
-        assert_eq!(tiles.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["live-1"]);
-        assert_eq!(rows.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["idle-1"]);
+        assert_eq!(
+            tiles.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            vec!["live-1"]
+        );
+        assert_eq!(
+            rows.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            vec!["idle-1"]
+        );
     }
 
     #[test]
@@ -6062,8 +6543,16 @@ mod tests {
     fn the_grid_never_takes_more_than_it_can_draw() {
         let many: Vec<SearchItem> = (0..9).map(|i| agent_row(&format!("a{i}"))).collect();
         let (tiles, rows) = split_agent_tiles(many, true);
-        assert_eq!(tiles.len(), AGENT_GRID_CAPACITY, "the grid has a fixed height; extras must not be clipped");
-        assert_eq!(rows.len(), 9 - AGENT_GRID_CAPACITY, "the overflow stays reachable as rows");
+        assert_eq!(
+            tiles.len(),
+            AGENT_GRID_CAPACITY,
+            "the grid has a fixed height; extras must not be clipped"
+        );
+        assert_eq!(
+            rows.len(),
+            9 - AGENT_GRID_CAPACITY,
+            "the overflow stays reachable as rows"
+        );
     }
 
     #[test]
@@ -6083,10 +6572,16 @@ mod tests {
 
     #[test]
     fn an_agent_never_appears_both_as_a_tile_and_as_a_row() {
-        let live = SearchItem { badge: Some("LIVE".to_string()), ..agent_row("a") };
+        let live = SearchItem {
+            badge: Some("LIVE".to_string()),
+            ..agent_row("a")
+        };
         let (tiles, rows) = split_agent_tiles(vec![live], true);
         assert_eq!(tiles.len(), 1);
-        assert!(rows.is_empty(), "a tile is a move, not a copy — two rows for one agent is two Enters");
+        assert!(
+            rows.is_empty(),
+            "a tile is a move, not a copy — two rows for one agent is two Enters"
+        );
     }
 
     #[test]
@@ -6100,8 +6595,15 @@ mod tests {
 
             let (tiles, rows) = split_agent_tiles(vec![codex_task], false);
 
-            assert_eq!(tiles.len(), 1, "{badge} Codex task belongs in the tile strip");
-            assert!(rows.is_empty(), "a Codex task tile must not be duplicated as a row");
+            assert_eq!(
+                tiles.len(),
+                1,
+                "{badge} Codex task belongs in the tile strip"
+            );
+            assert!(
+                rows.is_empty(),
+                "a Codex task tile must not be duplicated as a row"
+            );
         }
     }
 
@@ -6110,7 +6612,10 @@ mod tests {
         let unavailable = SearchItem {
             kind: "codex-task".to_string(),
             badge: Some("WAITING".to_string()),
-            subtitle: Some(format!("openai · /{}", "work/very-long-directory-name/".repeat(16))),
+            subtitle: Some(format!(
+                "openai · /{}",
+                "work/very-long-directory-name/".repeat(16)
+            )),
             accessory: Some("Codex unavailable".to_string()),
             ..agent_row("codex-task")
         };
@@ -6118,12 +6623,19 @@ mod tests {
         let (tiles, rows) = split_agent_tiles(vec![unavailable], false);
 
         assert!(rows.is_empty());
-        assert!(tiles[0].subtitle.as_ref().is_some_and(|subtitle| subtitle.len() > 150));
+        assert!(
+            tiles[0]
+                .subtitle
+                .as_ref()
+                .is_some_and(|subtitle| subtitle.len() > 150)
+        );
         assert_eq!(agent_tile_status_label(&tiles[0]), Some("UNAVAILABLE"));
     }
 
     #[gpui::test]
-    fn reviewing_a_codex_task_waits_for_daemon_success_before_entering_its_scoped_mode(cx: &mut TestAppContext) {
+    fn reviewing_a_codex_task_waits_for_daemon_success_before_entering_its_scoped_mode(
+        cx: &mut TestAppContext,
+    ) {
         let window = test_root(cx);
         window
             .update(cx, |root, window, cx| {
@@ -6139,8 +6651,14 @@ mod tests {
                 }];
                 root.open_actions_menu_for_selected_row(cx);
                 root.confirm_menu_action(window, cx);
-                assert!(root.active_mode().is_none(), "the mode waits for daemon validation");
-                assert!(root.activating, "the Review click dispatches Request::Activate before it can enter");
+                assert!(
+                    root.active_mode().is_none(),
+                    "the mode waits for daemon validation"
+                );
+                assert!(
+                    root.activating,
+                    "the Review click dispatches Request::Activate before it can enter"
+                );
             })
             .unwrap();
     }
@@ -6151,7 +6669,10 @@ mod tests {
         window
             .update(cx, |root, _window, cx| {
                 root.finish_activation(None, false, Some("codex-task"), cx);
-                assert_eq!(root.active_mode().map(|mode| mode.chrome.id), Some("codex-task"));
+                assert_eq!(
+                    root.active_mode().map(|mode| mode.chrome.id),
+                    Some("codex-task")
+                );
             })
             .unwrap();
     }
@@ -6169,11 +6690,17 @@ mod tests {
                     ..agent_row("thr-1")
                 };
                 root.pending_task_mode = Some((
-                    TaskRef { backend: "codex".into(), id: "thr-1".into() },
+                    TaskRef {
+                        backend: "codex".into(),
+                        id: "thr-1".into(),
+                    },
                     task,
                 ));
                 root.finish_activation(None, false, Some("codex-task"), cx);
-                let task = root.active_mode().and_then(|mode| mode.task_ref.as_ref()).expect("qualified task subject");
+                let task = root
+                    .active_mode()
+                    .and_then(|mode| mode.task_ref.as_ref())
+                    .expect("qualified task subject");
                 assert_eq!(task.provider_id(), "codex-task");
                 assert_eq!(task.id, "thr-1");
             })
@@ -6201,7 +6728,10 @@ mod tests {
         window
             .update(cx, |root, _window, _cx| {
                 assert_eq!(root.agent_grid_height(), 0.0, "no agents, no space taken");
-                root.agent_tiles = vec![SearchItem { badge: Some("LIVE".into()), ..agent_row("a") }];
+                root.agent_tiles = vec![SearchItem {
+                    badge: Some("LIVE".into()),
+                    ..agent_row("a")
+                }];
                 assert_eq!(root.agent_grid_height(), theme::AGENT_GRID_HEIGHT_PX);
             })
             .unwrap();
@@ -6255,10 +6785,25 @@ mod tests {
         let (client, _events) = NekoClient::connect(std::path::PathBuf::from(format!(
             "/tmp/neko-panel-test-{}-{}.sock",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         )));
-        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
-        cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, no_appearance_setter(), no_preferences_opener(), crate::window_drag::disabled(), cx))
+        let accessibility: Rc<dyn AccessibilityChecker> =
+            Rc::new(FakeAccessibilityChecker::new(true));
+        cx.add_window(|_window, cx| {
+            Root::build(
+                client,
+                accessibility,
+                true,
+                true,
+                no_appearance_setter(),
+                no_preferences_opener(),
+                crate::window_drag::disabled(),
+                cx,
+            )
+        })
     }
 
     /// A headless stand-in for `material::set_window_appearance` — GPUI's own
@@ -6287,18 +6832,41 @@ mod tests {
     fn recording_appearance_setter() -> (AppearanceSetter, AppearanceLog) {
         let log: AppearanceLog = Rc::new(std::cell::RefCell::new(Vec::new()));
         let sink = log.clone();
-        (Rc::new(move |_window, appearance| { sink.borrow_mut().push(appearance); Ok(()) }), log)
+        (
+            Rc::new(move |_window, appearance| {
+                sink.borrow_mut().push(appearance);
+                Ok(())
+            }),
+            log,
+        )
     }
 
-    fn test_root_recording_appearance(cx: &mut TestAppContext) -> (gpui::WindowHandle<Root>, AppearanceLog) {
+    fn test_root_recording_appearance(
+        cx: &mut TestAppContext,
+    ) -> (gpui::WindowHandle<Root>, AppearanceLog) {
         let (client, _events) = NekoClient::connect(std::path::PathBuf::from(format!(
             "/tmp/neko-panel-test-{}-{}.sock",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         )));
-        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        let accessibility: Rc<dyn AccessibilityChecker> =
+            Rc::new(FakeAccessibilityChecker::new(true));
         let (setter, log) = recording_appearance_setter();
-        let window = cx.add_window(|_window, cx| Root::build(client, accessibility, true, true, setter, no_preferences_opener(), crate::window_drag::disabled(), cx));
+        let window = cx.add_window(|_window, cx| {
+            Root::build(
+                client,
+                accessibility,
+                true,
+                true,
+                setter,
+                no_preferences_opener(),
+                crate::window_drag::disabled(),
+                cx,
+            )
+        });
         (window, log)
     }
 
@@ -6347,18 +6915,27 @@ mod tests {
     }
 
     #[gpui::test]
-    fn entering_the_theme_mode_lands_on_the_theme_already_in_use_and_changes_nothing(cx: &mut TestAppContext) {
+    fn entering_the_theme_mode_lands_on_the_theme_already_in_use_and_changes_nothing(
+        cx: &mut TestAppContext,
+    ) {
         let _guard = theme::test_lock();
         theme::set_active("gruvbox-dark");
         let window = test_root(cx);
         enter_theme_mode(
             &window,
             cx,
-            vec![theme_item("neutral"), theme_item("dracula"), theme_item("gruvbox-dark")],
+            vec![
+                theme_item("neutral"),
+                theme_item("dracula"),
+                theme_item("gruvbox-dark"),
+            ],
         );
         window
             .update(cx, |root, _window, _cx| {
-                assert_eq!(root.selected, 2, "the highlight must start on the theme in use, not on whatever sorts first");
+                assert_eq!(
+                    root.selected, 2,
+                    "the highlight must start on the theme in use, not on whatever sorts first"
+                );
                 assert_eq!(
                     theme::active_theme().id,
                     "gruvbox-dark",
@@ -6374,14 +6951,26 @@ mod tests {
         let _guard = theme::test_lock();
         theme::set_active("neutral");
         let window = test_root(cx);
-        enter_theme_mode(&window, cx, vec![theme_item("neutral"), theme_item("catppuccin-latte")]);
+        enter_theme_mode(
+            &window,
+            cx,
+            vec![theme_item("neutral"), theme_item("catppuccin-latte")],
+        );
         window
             .update(cx, |root, window, cx| {
                 assert_eq!(theme::active_theme().id, "neutral");
                 root.select_next(&SelectNext, window, cx);
-                assert_eq!(theme::active_theme().id, "catppuccin-latte", "moving the selection must apply the palette, not just highlight its name");
+                assert_eq!(
+                    theme::active_theme().id,
+                    "catppuccin-latte",
+                    "moving the selection must apply the palette, not just highlight its name"
+                );
                 root.select_previous(&SelectPrevious, window, cx);
-                assert_eq!(theme::active_theme().id, "neutral", "arrowing back must come back too");
+                assert_eq!(
+                    theme::active_theme().id,
+                    "neutral",
+                    "arrowing back must come back too"
+                );
             })
             .unwrap();
         theme::set_active(theme::DEFAULT_THEME_ID);
@@ -6392,7 +6981,15 @@ mod tests {
         let _guard = theme::test_lock();
         theme::set_active("nord");
         let window = test_root(cx);
-        enter_theme_mode(&window, cx, vec![theme_item("nord"), theme_item("solarized-light"), theme_item("ember")]);
+        enter_theme_mode(
+            &window,
+            cx,
+            vec![
+                theme_item("nord"),
+                theme_item("solarized-light"),
+                theme_item("ember"),
+            ],
+        );
         window
             .update(cx, |root, window, cx| {
                 root.select_next(&SelectNext, window, cx);
@@ -6400,7 +6997,11 @@ mod tests {
                 assert_eq!(theme::active_theme().id, "ember");
                 root.handle_dismiss(&crate::DismissWindow, window, cx);
                 assert!(root.active_mode().is_none());
-                assert_eq!(theme::active_theme().id, "nord", "Escape must put back the theme that was in use before the mode opened");
+                assert_eq!(
+                    theme::active_theme().id,
+                    "nord",
+                    "Escape must put back the theme that was in use before the mode opened"
+                );
             })
             .unwrap();
         theme::set_active(theme::DEFAULT_THEME_ID);
@@ -6411,7 +7012,11 @@ mod tests {
         let _guard = theme::test_lock();
         theme::set_active("neutral");
         let window = test_root(cx);
-        enter_theme_mode(&window, cx, vec![theme_item("neutral"), theme_item("rose-pine")]);
+        enter_theme_mode(
+            &window,
+            cx,
+            vec![theme_item("neutral"), theme_item("rose-pine")],
+        );
         window
             .update(cx, |root, window, cx| {
                 root.select_next(&SelectNext, window, cx);
@@ -6423,7 +7028,11 @@ mod tests {
                 // rather than snapping back.
                 root.confirm(&Confirm, window, cx);
                 root.exit_mode(window, cx);
-                assert_eq!(theme::active_theme().id, "rose-pine", "a confirmed theme must not be reverted by leaving the mode afterwards");
+                assert_eq!(
+                    theme::active_theme().id,
+                    "rose-pine",
+                    "a confirmed theme must not be reverted by leaving the mode afterwards"
+                );
             })
             .unwrap();
         theme::set_active(theme::DEFAULT_THEME_ID);
@@ -6434,7 +7043,11 @@ mod tests {
         let _guard = theme::test_lock();
         theme::set_active("neutral");
         let window = test_root(cx);
-        enter_theme_mode(&window, cx, vec![theme_item("neutral"), theme_item("dracula")]);
+        enter_theme_mode(
+            &window,
+            cx,
+            vec![theme_item("neutral"), theme_item("dracula")],
+        );
         window
             .update(cx, |root, _window, cx| {
                 // What a keystroke's scoped search response looks like: a
@@ -6442,7 +7055,11 @@ mod tests {
                 root.selected = 0;
                 root.results.clear();
                 root.apply_search_results(vec![theme_item("dracula")], true, root.generation, cx);
-                assert_eq!(theme::active_theme().id, "dracula", "typing to filter moves the selection, so it previews too");
+                assert_eq!(
+                    theme::active_theme().id,
+                    "dracula",
+                    "typing to filter moves the selection, so it previews too"
+                );
             })
             .unwrap();
         theme::set_active(theme::DEFAULT_THEME_ID);
@@ -6461,25 +7078,35 @@ mod tests {
                 root.selected = 0;
                 root.select_next(&SelectNext, window, cx);
                 assert_eq!(root.selected, 1);
-                assert_eq!(theme::active_theme().id, "neutral", "previewing belongs to the theme mode, not to a theme row");
+                assert_eq!(
+                    theme::active_theme().id,
+                    "neutral",
+                    "previewing belongs to the theme mode, not to a theme row"
+                );
             })
             .unwrap();
         theme::set_active(theme::DEFAULT_THEME_ID);
     }
 
     #[gpui::test]
-    fn a_light_theme_puts_the_window_into_the_light_appearance_and_a_dark_one_takes_it_back(cx: &mut TestAppContext) {
+    fn a_light_theme_puts_the_window_into_the_light_appearance_and_a_dark_one_takes_it_back(
+        cx: &mut TestAppContext,
+    ) {
         let _guard = theme::test_lock();
         theme::set_active("neutral");
         let (window, log) = test_root_recording_appearance(cx);
         // `render` calls this on every frame; driving it directly is the
         // same call without needing a real draw (GPUI's test window cannot
         // paint one).
-        window.update(cx, |root, window, _cx| root.sync_window_appearance(window)).unwrap();
+        window
+            .update(cx, |root, window, _cx| root.sync_window_appearance(window))
+            .unwrap();
         assert_eq!(log.borrow().last(), Some(&theme::Appearance::Dark));
 
         theme::set_active("catppuccin-latte");
-        window.update(cx, |root, window, _cx| root.sync_window_appearance(window)).unwrap();
+        window
+            .update(cx, |root, window, _cx| root.sync_window_appearance(window))
+            .unwrap();
         assert_eq!(
             log.borrow().last(),
             Some(&theme::Appearance::Light),
@@ -6487,21 +7114,34 @@ mod tests {
         );
 
         let before = log.borrow().len();
-        window.update(cx, |root, window, _cx| root.sync_window_appearance(window)).unwrap();
-        assert_eq!(log.borrow().len(), before, "an unchanged appearance must not make an AppKit call every frame");
+        window
+            .update(cx, |root, window, _cx| root.sync_window_appearance(window))
+            .unwrap();
+        assert_eq!(
+            log.borrow().len(),
+            before,
+            "an unchanged appearance must not make an AppKit call every frame"
+        );
 
         theme::set_active("gruvbox-dark");
-        window.update(cx, |root, window, _cx| root.sync_window_appearance(window)).unwrap();
+        window
+            .update(cx, |root, window, _cx| root.sync_window_appearance(window))
+            .unwrap();
         assert_eq!(log.borrow().last(), Some(&theme::Appearance::Dark));
         theme::set_active(theme::DEFAULT_THEME_ID);
     }
 
     fn command_item(mode: &str) -> SearchItem {
-        SearchItem { enters_mode: Some(mode.to_string()), ..item_with_id("command", "clipboard-history") }
+        SearchItem {
+            enters_mode: Some(mode.to_string()),
+            ..item_with_id("command", "clipboard-history")
+        }
     }
 
     #[gpui::test]
-    fn a_late_complete_frame_never_moves_the_row_the_captain_arrowed_down_to(cx: &mut TestAppContext) {
+    fn a_late_complete_frame_never_moves_the_row_the_captain_arrowed_down_to(
+        cx: &mut TestAppContext,
+    ) {
         // The same guarantee `a_late_result_that_would_displace_the_selected_row_is_not_shown_at_all`
         // pins on the pure merge, driven through `Root`'s own real frame
         // handling instead — including the case the pure test cannot
@@ -6512,7 +7152,9 @@ mod tests {
         cx.run_until_parked();
 
         let rows = rows_that_fit_in_one_section();
-        let partial: Vec<SearchItem> = (0..rows).map(|i| item_with_id("app", &format!("app{i}"))).collect();
+        let partial: Vec<SearchItem> = (0..rows)
+            .map(|i| item_with_id("app", &format!("app{i}")))
+            .collect();
         let complete = {
             let mut items = partial.clone();
             items.insert(0, item_with_id("file", "late.txt"));
@@ -6536,7 +7178,11 @@ mod tests {
         // The captain arrows all the way down to the last visible row while
         // file search is still running.
         for _ in 0..rows {
-            window.update(cx, |root, window, cx| root.select_next(&SelectNext, window, cx)).unwrap();
+            window
+                .update(cx, |root, window, cx| {
+                    root.select_next(&SelectNext, window, cx)
+                })
+                .unwrap();
         }
         let selected_id = window
             .update(cx, |root, _window, _cx| {
@@ -6546,22 +7192,39 @@ mod tests {
             .unwrap();
 
         window
-            .update(cx, |root, _window, cx| root.apply_search_results(complete, true, 1, cx))
+            .update(cx, |root, _window, cx| {
+                root.apply_search_results(complete, true, 1, cx)
+            })
             .unwrap();
 
         window
             .update(cx, |root, _window, _cx| {
-                assert_eq!(root.results, partial, "not one row moved when the late frame landed");
-                assert_eq!(root.selected, rows - 1, "the highlight stayed on the same index");
-                assert_eq!(root.results[root.selected].id, selected_id, "and on the same item");
-                assert!(!root.searching, "the tell clears the moment the complete frame lands");
+                assert_eq!(
+                    root.results, partial,
+                    "not one row moved when the late frame landed"
+                );
+                assert_eq!(
+                    root.selected,
+                    rows - 1,
+                    "the highlight stayed on the same index"
+                );
+                assert_eq!(
+                    root.results[root.selected].id, selected_id,
+                    "and on the same item"
+                );
+                assert!(
+                    !root.searching,
+                    "the tell clears the moment the complete frame lands"
+                );
                 assert_eq!(root.pending_search_generation, None);
             })
             .unwrap();
     }
 
     #[gpui::test]
-    fn the_still_searching_tell_tracks_the_real_deferred_phase_not_a_bare_timer(cx: &mut TestAppContext) {
+    fn the_still_searching_tell_tracks_the_real_deferred_phase_not_a_bare_timer(
+        cx: &mut TestAppContext,
+    ) {
         // `reveal_searching_tell_if_still_pending` must only ever describe
         // a query that genuinely still has a provider running — the tell is
         // this state made visible, not a guess made from elapsed time.
@@ -6573,12 +7236,22 @@ mod tests {
                 root.generation = 4;
                 root.pending_search_generation = Some(4);
                 root.apply_search_results(vec![item_with_id("app", "safari")], false, 4, cx);
-                assert_eq!(root.partial_generation, Some(4), "the partial frame records that more is coming");
+                assert_eq!(
+                    root.partial_generation,
+                    Some(4),
+                    "the partial frame records that more is coming"
+                );
                 root.reveal_searching_tell_if_still_pending(4, cx);
-                assert!(root.searching, "with the deferred provider still running, the tell is honest");
+                assert!(
+                    root.searching,
+                    "with the deferred provider still running, the tell is honest"
+                );
 
                 root.apply_search_results(vec![item_with_id("app", "safari")], true, 4, cx);
-                assert!(!root.searching, "and clears as soon as the complete frame lands");
+                assert!(
+                    !root.searching,
+                    "and clears as soon as the complete frame lands"
+                );
 
                 // A stale reveal for the same, now-resolved generation must
                 // not turn it back on.
@@ -6595,7 +7268,8 @@ mod tests {
 
         window
             .update(cx, |root, _window, cx| {
-                root.text_field.update(cx, |field, cx| field.set_content("safari", cx));
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("safari", cx));
             })
             .unwrap();
         cx.run_until_parked();
@@ -6614,9 +7288,14 @@ mod tests {
 
         window
             .update(cx, |root, _window, _cx| {
-                let mode = root.active_mode().expect("confirming a command row must enter a mode");
+                let mode = root
+                    .active_mode()
+                    .expect("confirming a command row must enter a mode");
                 assert_eq!(mode.chrome.id, "clipboard");
-                assert_eq!(mode.saved_query, "safari", "the query typed before entering the mode must be saved");
+                assert_eq!(
+                    mode.saved_query, "safari",
+                    "the query typed before entering the mode must be saved"
+                );
             })
             .unwrap();
     }
@@ -6634,21 +7313,30 @@ mod tests {
 
         window
             .update(cx, |root, _window, cx| {
-                root.text_field.update(cx, |field, cx| field.set_content("new agent", cx));
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("new agent", cx));
                 root.results = vec![command_item("new-agent")];
                 root.selected = 0;
             })
             .unwrap();
-        window.update(cx, |root, window, cx| root.confirm(&Confirm, window, cx)).unwrap();
+        window
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
         cx.run_until_parked();
 
         window
             .update(cx, |root, _window, cx| {
-                let mode = root.active_mode().expect("the New Agent command must enter a mode");
+                let mode = root
+                    .active_mode()
+                    .expect("the New Agent command must enter a mode");
                 assert_eq!(mode.chrome.id, "new-agent");
                 assert_eq!(mode.chrome.provider_id, "new-agent");
                 assert_eq!(mode.saved_query, "new agent");
-                assert_eq!(root.query(cx), "", "the prompt starts blank, not with the command's own query");
+                assert_eq!(
+                    root.query(cx),
+                    "",
+                    "the prompt starts blank, not with the command's own query"
+                );
             })
             .unwrap();
     }
@@ -6675,7 +7363,11 @@ mod tests {
             .update(cx, |root, _window, cx| {
                 let mode = root.active_mode().expect("the command enters its mode");
                 assert_eq!(mode.chrome.provider_id, "new-codex-task");
-                assert_eq!(root.query(cx), "", "the prompt starts empty after finding the command");
+                assert_eq!(
+                    root.query(cx),
+                    "",
+                    "the prompt starts empty after finding the command"
+                );
             })
             .unwrap();
     }
@@ -6691,7 +7383,8 @@ mod tests {
 
         window
             .update(cx, |root, _window, cx| {
-                root.text_field.update(cx, |field, cx| field.set_content("fix the parser", cx));
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("fix the parser", cx));
             })
             .unwrap();
         cx.run_until_parked();
@@ -6700,7 +7393,12 @@ mod tests {
             .update(cx, |root, _window, cx| {
                 let row = item_with_id("new-agent", "/Users/someone/Documents/neko");
                 match root.primary_activation_request(&row, cx) {
-                    Request::Activate { kind, id, action, query } => {
+                    Request::Activate {
+                        kind,
+                        id,
+                        action,
+                        query,
+                    } => {
                         assert_eq!(kind, "new-agent");
                         assert_eq!(id, "/Users/someone/Documents/neko");
                         assert_eq!(action, None);
@@ -6719,7 +7417,8 @@ mod tests {
 
         window
             .update(cx, |root, _window, cx| {
-                root.text_field.update(cx, |field, cx| field.set_content("safari", cx));
+                root.text_field
+                    .update(cx, |field, cx| field.set_content("safari", cx));
                 root.results = vec![command_item("clipboard")];
                 root.selected = 0;
             })
@@ -6729,7 +7428,12 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         window
-            .update(cx, |root, _window, _cx| assert!(root.active_mode().is_some(), "must be in the mode before exiting it"))
+            .update(cx, |root, _window, _cx| {
+                assert!(
+                    root.active_mode().is_some(),
+                    "must be in the mode before exiting it"
+                )
+            })
             .unwrap();
 
         window
@@ -6740,7 +7444,11 @@ mod tests {
         window
             .update(cx, |root, _window, cx| {
                 assert!(root.active_mode().is_none());
-                assert_eq!(root.text_field.read(cx).content(), "safari", "exiting must restore the pre-entry query");
+                assert_eq!(
+                    root.text_field.read(cx).content(),
+                    "safari",
+                    "exiting must restore the pre-entry query"
+                );
             })
             .unwrap();
     }
@@ -6769,10 +7477,16 @@ mod tests {
         cx.run_until_parked();
 
         window
-            .update(cx, |root, window, cx| root.handle_dismiss(&crate::DismissWindow, window, cx))
+            .update(cx, |root, window, cx| {
+                root.handle_dismiss(&crate::DismissWindow, window, cx)
+            })
             .unwrap();
 
-        window.update(cx, |root, _window, _cx| assert!(root.active_mode().is_none())).unwrap();
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.active_mode().is_none())
+            })
+            .unwrap();
     }
 
     #[gpui::test]
@@ -6787,10 +7501,16 @@ mod tests {
             .unwrap();
 
         window
-            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .update(cx, |root, window, cx| {
+                root.open_actions_menu(&OpenActionsMenu, window, cx)
+            })
             .unwrap();
 
-        window.update(cx, |root, _window, _cx| assert!(root.actions_menu.is_none())).unwrap();
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.actions_menu.is_none())
+            })
+            .unwrap();
     }
 
     #[gpui::test]
@@ -6799,8 +7519,16 @@ mod tests {
         cx.run_until_parked();
         let mut clipboard_row = item_with_id("clipboard", "hello");
         clipboard_row.actions = vec![
-            ItemAction { id: "paste".into(), label: "Paste".into(), destructive: false },
-            ItemAction { id: "delete".into(), label: "Delete".into(), destructive: true },
+            ItemAction {
+                id: "paste".into(),
+                label: "Paste".into(),
+                destructive: false,
+            },
+            ItemAction {
+                id: "delete".into(),
+                label: "Delete".into(),
+                destructive: true,
+            },
         ];
         window
             .update(cx, |root, _window, _cx| {
@@ -6810,12 +7538,17 @@ mod tests {
             .unwrap();
 
         window
-            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .update(cx, |root, window, cx| {
+                root.open_actions_menu(&OpenActionsMenu, window, cx)
+            })
             .unwrap();
 
         window
             .update(cx, |root, _window, _cx| {
-                let menu = root.actions_menu.as_ref().expect("a row with actions must open the menu");
+                let menu = root
+                    .actions_menu
+                    .as_ref()
+                    .expect("a row with actions must open the menu");
                 assert_eq!(menu.actions.len(), 2);
                 assert_eq!(menu.id, "hello");
             })
@@ -6823,7 +7556,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_destructive_menu_action_requires_a_second_confirm_before_it_ever_sends_a_request(cx: &mut TestAppContext) {
+    fn a_destructive_menu_action_requires_a_second_confirm_before_it_ever_sends_a_request(
+        cx: &mut TestAppContext,
+    ) {
         // The mis-keyed-delete guard: the very first Enter on "Delete" must
         // only arm it, never perform it — proven here by checking the menu
         // is still open (and therefore no request was dispatched to close
@@ -6831,7 +7566,11 @@ mod tests {
         let window = test_root(cx);
         cx.run_until_parked();
         let mut clipboard_row = item_with_id("clipboard", "hello");
-        clipboard_row.actions = vec![ItemAction { id: "delete".into(), label: "Delete".into(), destructive: true }];
+        clipboard_row.actions = vec![ItemAction {
+            id: "delete".into(),
+            label: "Delete".into(),
+            destructive: true,
+        }];
         window
             .update(cx, |root, _window, _cx| {
                 root.results = vec![clipboard_row];
@@ -6839,15 +7578,22 @@ mod tests {
             })
             .unwrap();
         window
-            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .update(cx, |root, window, cx| {
+                root.open_actions_menu(&OpenActionsMenu, window, cx)
+            })
             .unwrap();
 
-        window.update(cx, |root, window, cx| root.confirm(&Confirm, window, cx)).unwrap();
+        window
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
         cx.run_until_parked();
 
         window
             .update(cx, |root, _window, _cx| {
-                let menu = root.actions_menu.as_ref().expect("one Enter on a destructive action must only arm it");
+                let menu = root
+                    .actions_menu
+                    .as_ref()
+                    .expect("one Enter on a destructive action must only arm it");
                 assert!(menu.confirm_armed);
             })
             .unwrap();
@@ -6856,18 +7602,34 @@ mod tests {
         // request itself fails against the disconnected test client, but
         // `perform_activation` closes the menu synchronously before it
         // even sends the request — see that method's own body).
-        window.update(cx, |root, window, cx| root.confirm(&Confirm, window, cx)).unwrap();
-        window.update(cx, |root, _window, _cx| assert!(root.actions_menu.is_none())).unwrap();
+        window
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.actions_menu.is_none())
+            })
+            .unwrap();
     }
 
     #[gpui::test]
-    fn moving_the_menu_selection_disarms_a_pending_destructive_confirmation(cx: &mut TestAppContext) {
+    fn moving_the_menu_selection_disarms_a_pending_destructive_confirmation(
+        cx: &mut TestAppContext,
+    ) {
         let window = test_root(cx);
         cx.run_until_parked();
         let mut clipboard_row = item_with_id("clipboard", "hello");
         clipboard_row.actions = vec![
-            ItemAction { id: "delete".into(), label: "Delete".into(), destructive: true },
-            ItemAction { id: "paste".into(), label: "Paste".into(), destructive: false },
+            ItemAction {
+                id: "delete".into(),
+                label: "Delete".into(),
+                destructive: true,
+            },
+            ItemAction {
+                id: "paste".into(),
+                label: "Paste".into(),
+                destructive: false,
+            },
         ];
         window
             .update(cx, |root, _window, _cx| {
@@ -6876,20 +7638,31 @@ mod tests {
             })
             .unwrap();
         window
-            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .update(cx, |root, window, cx| {
+                root.open_actions_menu(&OpenActionsMenu, window, cx)
+            })
             .unwrap();
-        window.update(cx, |root, window, cx| root.confirm(&Confirm, window, cx)).unwrap();
         window
-            .update(cx, |root, _window, _cx| assert!(root.actions_menu.as_ref().unwrap().confirm_armed))
+            .update(cx, |root, window, cx| root.confirm(&Confirm, window, cx))
+            .unwrap();
+        window
+            .update(cx, |root, _window, _cx| {
+                assert!(root.actions_menu.as_ref().unwrap().confirm_armed)
+            })
             .unwrap();
 
         window
-            .update(cx, |root, window, cx| root.select_next(&SelectNext, window, cx))
+            .update(cx, |root, window, cx| {
+                root.select_next(&SelectNext, window, cx)
+            })
             .unwrap();
 
         window
             .update(cx, |root, _window, _cx| {
-                assert!(!root.actions_menu.as_ref().unwrap().confirm_armed, "moving off the armed action must disarm it");
+                assert!(
+                    !root.actions_menu.as_ref().unwrap().confirm_armed,
+                    "moving off the armed action must disarm it"
+                );
             })
             .unwrap();
     }
@@ -6900,10 +7673,13 @@ mod tests {
 
     fn clipboard_row_with_a_paste_action(id: &str) -> SearchItem {
         let mut row = item_with_id("clipboard", id);
-        row.actions = vec![ItemAction { id: "paste".into(), label: "Paste".into(), destructive: false }];
+        row.actions = vec![ItemAction {
+            id: "paste".into(),
+            label: "Paste".into(),
+            destructive: false,
+        }];
         row
     }
-
 
     #[gpui::test]
     fn escape_closes_the_actions_menu_before_exiting_an_active_mode(cx: &mut TestAppContext) {
@@ -6936,37 +7712,60 @@ mod tests {
             })
             .unwrap();
         window
-            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .update(cx, |root, window, cx| {
+                root.open_actions_menu(&OpenActionsMenu, window, cx)
+            })
             .unwrap();
         window
             .update(cx, |root, _window, _cx| {
-                assert!(root.actions_menu.is_some(), "setup: the menu must be open before Escape");
-                assert!(root.active_mode().is_some(), "setup: still inside the mode before Escape");
+                assert!(
+                    root.actions_menu.is_some(),
+                    "setup: the menu must be open before Escape"
+                );
+                assert!(
+                    root.active_mode().is_some(),
+                    "setup: still inside the mode before Escape"
+                );
             })
             .unwrap();
 
         window
-            .update(cx, |root, window, cx| root.handle_dismiss(&crate::DismissWindow, window, cx))
+            .update(cx, |root, window, cx| {
+                root.handle_dismiss(&crate::DismissWindow, window, cx)
+            })
             .unwrap();
         window
             .update(cx, |root, _window, _cx| {
-                assert!(root.actions_menu.is_none(), "the first Escape must close the menu");
-                assert!(root.active_mode().is_some(), "the first Escape must not also exit the mode in the same press");
+                assert!(
+                    root.actions_menu.is_none(),
+                    "the first Escape must close the menu"
+                );
+                assert!(
+                    root.active_mode().is_some(),
+                    "the first Escape must not also exit the mode in the same press"
+                );
             })
             .unwrap();
 
         window
-            .update(cx, |root, window, cx| root.handle_dismiss(&crate::DismissWindow, window, cx))
+            .update(cx, |root, window, cx| {
+                root.handle_dismiss(&crate::DismissWindow, window, cx)
+            })
             .unwrap();
         window
             .update(cx, |root, _window, _cx| {
-                assert!(root.active_mode().is_none(), "the second Escape, with the menu already closed, must exit the mode");
+                assert!(
+                    root.active_mode().is_none(),
+                    "the second Escape, with the menu already closed, must exit the mode"
+                );
             })
             .unwrap();
     }
 
     #[gpui::test]
-    fn reset_for_summon_closes_a_stale_open_actions_menu_even_with_no_mode_active(cx: &mut TestAppContext) {
+    fn reset_for_summon_closes_a_stale_open_actions_menu_even_with_no_mode_active(
+        cx: &mut TestAppContext,
+    ) {
         // The gap this task closed in `reset_for_summon`: the window losing
         // activation (`main.rs`'s `cx.observe_window_activation`) hides the
         // whole panel without ever routing through `handle_dismiss`'s own
@@ -6982,17 +7781,26 @@ mod tests {
             })
             .unwrap();
         window
-            .update(cx, |root, window, cx| root.open_actions_menu(&OpenActionsMenu, window, cx))
+            .update(cx, |root, window, cx| {
+                root.open_actions_menu(&OpenActionsMenu, window, cx)
+            })
             .unwrap();
         window
-            .update(cx, |root, _window, _cx| assert!(root.actions_menu.is_some(), "setup"))
+            .update(cx, |root, _window, _cx| {
+                assert!(root.actions_menu.is_some(), "setup")
+            })
             .unwrap();
 
-        window.update(cx, |root, window, cx| root.reset_for_summon(window, cx)).unwrap();
+        window
+            .update(cx, |root, window, cx| root.reset_for_summon(window, cx))
+            .unwrap();
 
         window
             .update(cx, |root, _window, _cx| {
-                assert!(root.actions_menu.is_none(), "a fresh summon must never resume a stale open actions menu");
+                assert!(
+                    root.actions_menu.is_none(),
+                    "a fresh summon must never resume a stale open actions menu"
+                );
             })
             .unwrap();
     }
@@ -7020,13 +7828,18 @@ mod tests {
 
         window
             .update(cx, |root, _window, _cx| {
-                assert!(root.searching, "a generation still marked pending must show the tell");
+                assert!(
+                    root.searching,
+                    "a generation still marked pending must show the tell"
+                );
             })
             .unwrap();
     }
 
     #[gpui::test]
-    fn an_already_resolved_generation_never_shows_the_searching_tell_later(cx: &mut TestAppContext) {
+    fn an_already_resolved_generation_never_shows_the_searching_tell_later(
+        cx: &mut TestAppContext,
+    ) {
         // The bug `pending_search_generation` exists to prevent: without
         // it, a response that lands well within the delay (the common,
         // fast case) would still see the delayed-reveal task fire later for
@@ -7047,7 +7860,10 @@ mod tests {
 
         window
             .update(cx, |root, _window, _cx| {
-                assert!(!root.searching, "an already-resolved generation must not have the tell flip on later");
+                assert!(
+                    !root.searching,
+                    "an already-resolved generation must not have the tell flip on later"
+                );
             })
             .unwrap();
     }
@@ -7086,32 +7902,58 @@ mod tests {
         }
     }
 
-    fn test_root_recording_drag(cx: &mut TestAppContext) -> (gpui::WindowHandle<Root>, Rc<DragLog>) {
+    fn test_root_recording_drag(
+        cx: &mut TestAppContext,
+    ) -> (gpui::WindowHandle<Root>, Rc<DragLog>) {
         let (client, _events) = NekoClient::connect(std::path::PathBuf::from(format!(
             "/tmp/neko-panel-test-{}-{}.sock",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         )));
-        let accessibility: Rc<dyn AccessibilityChecker> = Rc::new(FakeAccessibilityChecker::new(true));
+        let accessibility: Rc<dyn AccessibilityChecker> =
+            Rc::new(FakeAccessibilityChecker::new(true));
         let log = Rc::new(DragLog::default());
         log.start_succeeds.set(true);
         let drag: Rc<dyn crate::window_drag::PanelDrag> = Rc::new(RecordingDrag(log.clone()));
         let window = cx.add_window(|_window, cx| {
-            Root::build(client, accessibility, true, true, no_appearance_setter(), no_preferences_opener(), drag, cx)
+            Root::build(
+                client,
+                accessibility,
+                true,
+                true,
+                no_appearance_setter(),
+                no_preferences_opener(),
+                drag,
+                cx,
+            )
         });
         (window, log)
     }
 
     fn press() -> MouseDownEvent {
-        MouseDownEvent { button: gpui::MouseButton::Left, click_count: 1, ..Default::default() }
+        MouseDownEvent {
+            button: gpui::MouseButton::Left,
+            click_count: 1,
+            ..Default::default()
+        }
     }
 
     fn drag_to() -> MouseMoveEvent {
-        MouseMoveEvent { pressed_button: Some(gpui::MouseButton::Left), ..Default::default() }
+        MouseMoveEvent {
+            pressed_button: Some(gpui::MouseButton::Left),
+            ..Default::default()
+        }
     }
 
     fn release() -> MouseUpEvent {
-        MouseUpEvent { button: gpui::MouseButton::Left, click_count: 1, ..Default::default() }
+        MouseUpEvent {
+            button: gpui::MouseButton::Left,
+            click_count: 1,
+            ..Default::default()
+        }
     }
 
     #[gpui::test]
@@ -7200,7 +8042,10 @@ mod tests {
                 root.begin_window_drag(&press(), window, cx);
                 root.handle_dismiss(&crate::DismissWindow, window, cx);
                 assert!(!root.dragging);
-                assert!(root.active_mode().is_some(), "cancelling a drag must not also leave the mode");
+                assert!(
+                    root.active_mode().is_some(),
+                    "cancelling a drag must not also leave the mode"
+                );
             })
             .unwrap();
         assert_eq!(*log.calls.borrow(), ["start", "cancel"]);
@@ -7222,7 +8067,9 @@ mod tests {
     #[gpui::test]
     fn a_summon_with_no_drag_in_progress_does_not_touch_the_drag_at_all(cx: &mut TestAppContext) {
         let (window, log) = test_root_recording_drag(cx);
-        window.update(cx, |root, window, cx| root.reset_for_summon(window, cx)).unwrap();
+        window
+            .update(cx, |root, window, cx| root.reset_for_summon(window, cx))
+            .unwrap();
         assert!(log.calls.borrow().is_empty());
     }
 
@@ -7232,19 +8079,28 @@ mod tests {
         // budget-fit and simply stops, so this is the only signal that
         // anything was left out. Before it, two rows and forty-that-became-
         // seven rendered identically.
-        let few: Vec<SearchItem> = (0..2).map(|i| item_with_id("app", &format!("a{i}"))).collect();
+        let few: Vec<SearchItem> = (0..2)
+            .map(|i| item_with_id("app", &format!("a{i}")))
+            .collect();
         let fitted = fit_within_budget(few.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
         assert_eq!(fitted.len(), few.len(), "two rows always fit");
 
-        let many: Vec<SearchItem> = (0..40).map(|i| item_with_id("app", &format!("a{i}"))).collect();
+        let many: Vec<SearchItem> = (0..40)
+            .map(|i| item_with_id("app", &format!("a{i}")))
+            .collect();
         let fitted = fit_within_budget(many.clone(), CONTENT_AREA_MIN_HEIGHT_PX);
-        assert!(fitted.len() < many.len(), "forty rows cannot fit a fixed area");
+        assert!(
+            fitted.len() < many.len(),
+            "forty rows cannot fit a fixed area"
+        );
 
         // And the cue has to pay for itself: refitting against the smaller
         // budget must never leave more rows than the full budget allowed,
         // or the cue would push its own last row out.
-        let with_cue =
-            fit_within_budget(many.clone(), CONTENT_AREA_MIN_HEIGHT_PX - theme::TRUNCATION_CUE_HEIGHT_PX);
+        let with_cue = fit_within_budget(
+            many.clone(),
+            CONTENT_AREA_MIN_HEIGHT_PX - theme::TRUNCATION_CUE_HEIGHT_PX,
+        );
         assert!(with_cue.len() <= fitted.len());
     }
 
@@ -7260,7 +8116,6 @@ mod tests {
         row.subtitle = None;
         assert_eq!(agent_tile_tooltip(&row).to_string(), "feat/doctors-maps");
     }
-
 
     #[test]
     fn the_scroll_target_counts_the_headers_and_banners_above_a_row() {
@@ -7284,8 +8139,9 @@ mod tests {
 
     #[test]
     fn a_single_section_needs_exactly_one_header_counted() {
-        let results: Vec<SearchItem> =
-            (0..5).map(|i| item_with_id("app", &format!("a{i}"))).collect();
+        let results: Vec<SearchItem> = (0..5)
+            .map(|i| item_with_id("app", &format!("a{i}")))
+            .collect();
         for (row, expected) in (0..5).zip(1..=5) {
             assert_eq!(root_list_child_index(&results, row, 0), expected);
         }
@@ -7299,7 +8155,6 @@ mod tests {
         assert_eq!(root_list_child_index(&results, 99, 0), 2);
         assert_eq!(root_list_child_index(&[], 0, 0), 0);
     }
-
 
     #[test]
     fn scrolling_leaves_one_row_of_lookahead_in_the_direction_of_travel() {
@@ -7323,5 +8178,4 @@ mod tests {
         assert_eq!(ScrollBias::Down.target(0, 0), 0);
         assert_eq!(ScrollBias::Up.target(0, 0), 0);
     }
-
 }

@@ -50,7 +50,11 @@ pub fn save_pasted_image(bytes: &[u8]) -> Option<String> {
     let dir = attachments_dir()?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     bytes.hash(&mut hasher);
-    let extension = if bytes.starts_with(b"\x89PNG") { "png" } else { "tiff" };
+    let extension = if bytes.starts_with(b"\x89PNG") {
+        "png"
+    } else {
+        "tiff"
+    };
     let path = dir.join(format!("{:016x}.{extension}", hasher.finish()));
     if !path.exists() {
         std::fs::create_dir_all(&dir).ok()?;
@@ -67,7 +71,9 @@ pub fn markdown_reference(path: &std::path::Path) -> String {
 }
 
 fn prune(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
         .flatten()
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
@@ -96,12 +102,23 @@ mod tests {
     #[test]
     fn the_same_image_pasted_twice_is_one_file() {
         let bytes = b"\x89PNG\r\n\x1a\nfixture-bytes";
-        let Some(first) = save_pasted_image(bytes) else { return };
+        let Some(first) = save_pasted_image(bytes) else {
+            return;
+        };
         let second = save_pasted_image(bytes).expect("second paste");
-        assert_eq!(first, second, "keyed by content, so a repeat writes nothing new");
-        if let Some(path) = first.strip_prefix("![Image](file://").and_then(|s| s.strip_suffix(")")) {
+        assert_eq!(
+            first, second,
+            "keyed by content, so a repeat writes nothing new"
+        );
+        if let Some(path) = first
+            .strip_prefix("![Image](file://")
+            .and_then(|s| s.strip_suffix(")"))
+        {
             assert!(std::path::Path::new(path).exists());
-            assert!(path.ends_with(".png"), "the extension follows the bytes' own magic");
+            assert!(
+                path.ends_with(".png"),
+                "the extension follows the bytes' own magic"
+            );
             let _ = std::fs::remove_file(path);
         }
     }

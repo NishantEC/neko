@@ -9,6 +9,12 @@ arbitrary; several of these decisions cost days to learn.
 `neko-protocol::workbench` supplies typed commands and snapshots. The GPUI
 `workspace.rs` window is a client only. `neko-core::workbench` stores bounded,
 validated snapshots atomically in the daemon-owned SQLite settings table.
+Workspace identity is a canonical existing folder, including a non-Git folder.
+Creating or planning a code task separately validates that the folder belongs
+to a Git repository, because execution requires an isolated worktree. Import
+review places dated Codex output, Neko smoke fixtures and linked Git worktrees
+under an optional **Other folders** disclosure; classification does not remove
+their selection capability.
 `neko-daemon::workbench` supervises up to three tasks globally and two per
 workspace without holding the
 database mutex during model/network calls. A two-second supervisor heartbeat

@@ -427,23 +427,23 @@ fn discover_bounded(roots: &[Root], remaining: &mut usize) -> Vec<Skill> {
                 .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
             {
                 if let Ok(body) = read(&file) {
-                let Ok(file) = file.canonicalize() else {
+                    let Ok(file) = file.canonicalize() else {
+                        continue;
+                    };
+                    let fallback = directory
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("Skill");
+                    let (name, description) = metadata(&body, fallback);
+                    found.push(Skill {
+                        path: file.to_string_lossy().into_owned(),
+                        name,
+                        description,
+                        source: root.source.clone(),
+                        workspace_id: root.workspace_id.clone(),
+                        content_hash: hash(&body),
+                    });
                     continue;
-                };
-                let fallback = directory
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("Skill");
-                let (name, description) = metadata(&body, fallback);
-                found.push(Skill {
-                    path: file.to_string_lossy().into_owned(),
-                    name,
-                    description,
-                    source: root.source.clone(),
-                    workspace_id: root.workspace_id.clone(),
-                    content_hash: hash(&body),
-                });
-                continue;
                 }
             }
             if depth >= 4 {
@@ -459,9 +459,9 @@ fn discover_bounded(roots: &[Root], remaining: &mut usize) -> Vec<Skill> {
                 *remaining -= 1;
                 if let Ok(entry) = entry {
                     let path = entry.path();
-                    if fs::symlink_metadata(&path)
-                        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
-                    {
+                    if fs::symlink_metadata(&path).is_ok_and(|metadata| {
+                        metadata.is_dir() && !metadata.file_type().is_symlink()
+                    }) {
                         children.push(path);
                     }
                 }

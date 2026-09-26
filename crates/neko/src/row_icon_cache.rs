@@ -100,7 +100,10 @@ struct RecencyOrder {
 
 impl RecencyOrder {
     fn new(capacity: usize) -> Self {
-        Self { capacity, order: Vec::with_capacity(capacity) }
+        Self {
+            capacity,
+            order: Vec::with_capacity(capacity),
+        }
     }
 
     /// Marks `key` as most-recently-used. A key that was already tracked
@@ -114,7 +117,11 @@ impl RecencyOrder {
             return None;
         }
         self.order.insert(0, key);
-        if self.order.len() > self.capacity { self.order.pop() } else { None }
+        if self.order.len() > self.capacity {
+            self.order.pop()
+        } else {
+            None
+        }
     }
 
     #[cfg(test)]
@@ -179,7 +186,11 @@ impl RowIconCache {
     /// (also handy from a debugger), not part of the `ImageCache` contract.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
-        debug_assert_eq!(self.recency.len(), self.entries.len(), "recency order and entries must stay in sync");
+        debug_assert_eq!(
+            self.recency.len(),
+            self.entries.len(),
+            "recency order and entries must stay in sync"
+        );
         self.entries.len()
     }
 
@@ -190,7 +201,9 @@ impl RowIconCache {
     /// `ImageCache::load` itself.
     #[cfg(test)]
     pub(crate) fn is_resolved(&mut self, resource: &Resource) -> Option<bool> {
-        self.entries.get_mut(&hash(resource)).map(|item| item.get().is_some())
+        self.entries
+            .get_mut(&hash(resource))
+            .map(|item| item.get().is_some())
     }
 }
 
@@ -220,7 +233,8 @@ impl ImageCache for RowIconCache {
             cx.drop_image(image, Some(window));
         }
 
-        self.entries.insert(key, ImageCacheItem::Loading(task.clone()));
+        self.entries
+            .insert(key, ImageCacheItem::Loading(task.clone()));
 
         let entity = window.current_view();
         window
@@ -263,8 +277,16 @@ mod tests {
         order.touch(1);
         order.touch(2);
         // 1 is now the least-recently-used of the two.
-        assert_eq!(order.touch(3), Some(1), "the oldest untouched key must be the one evicted");
-        assert_eq!(order.len(), 2, "the bound must never be exceeded, no matter how many distinct keys are requested");
+        assert_eq!(
+            order.touch(3),
+            Some(1),
+            "the oldest untouched key must be the one evicted"
+        );
+        assert_eq!(
+            order.len(),
+            2,
+            "the bound must never be exceeded, no matter how many distinct keys are requested"
+        );
     }
 
     #[test]
@@ -275,7 +297,11 @@ mod tests {
         // Re-touching 1 (a cache hit) must not evict anything, and must
         // protect 1 from the next real eviction.
         assert_eq!(order.touch(1), None);
-        assert_eq!(order.touch(3), Some(2), "1 was refreshed by the re-touch above, so 2 (now the oldest) is evicted instead");
+        assert_eq!(
+            order.touch(3),
+            Some(2),
+            "1 was refreshed by the re-touch above, so 2 (now the oldest) is evicted instead"
+        );
     }
 
     #[test]
@@ -283,7 +309,10 @@ mod tests {
         let mut order = RecencyOrder::new(4);
         for key in 0..64u64 {
             order.touch(key);
-            assert!(order.len() <= 4, "capacity must hold under sustained pressure, not just for one insert");
+            assert!(
+                order.len() <= 4,
+                "capacity must hold under sustained pressure, not just for one insert"
+            );
         }
         assert_eq!(order.len(), 4);
     }
@@ -297,7 +326,11 @@ mod tests {
         // Re-requesting 1 (e.g. a row that scrolled back into view) must
         // succeed as an ordinary new key, not be treated as already
         // present or otherwise wedged.
-        assert_eq!(order.touch(1), Some(2), "1 is genuinely new again, so it evicts the current oldest (2)");
+        assert_eq!(
+            order.touch(1),
+            Some(2),
+            "1 is genuinely new again, so it evicts the current oldest (2)"
+        );
         assert_eq!(order.len(), 2);
     }
 
@@ -340,7 +373,10 @@ mod tests {
         // late-arriving icon still renders" at this layer: the daemon, not
         // this cache, is what guarantees a real row's path exists on disk
         // (`AppsProvider::search`, see `AGENTS.md`'s "Icons" section).
-        PathBuf::from(format!("/tmp/neko-row-icon-cache-test-{label}-{}.png", std::process::id()))
+        PathBuf::from(format!(
+            "/tmp/neko-row-icon-cache-test-{label}-{}.png",
+            std::process::id()
+        ))
     }
 
     #[gpui::test]
@@ -373,9 +409,13 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         let cache = cx.update(|cx| RowIconCache::with_capacity(3, cx));
-        let resources: Vec<PathBuf> =
-            (0..8).map(|n| nonexistent_path(&format!("bound-{n}"))).collect();
-        let view = cx.add_window(|_window, _cx| ProbeView { cache: cache.clone(), resources });
+        let resources: Vec<PathBuf> = (0..8)
+            .map(|n| nonexistent_path(&format!("bound-{n}")))
+            .collect();
+        let view = cx.add_window(|_window, _cx| ProbeView {
+            cache: cache.clone(),
+            resources,
+        });
         let _ = view;
 
         cx.run_until_parked();

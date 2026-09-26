@@ -19,19 +19,38 @@ fn main() {
         std::thread::sleep(Duration::from_millis(50));
     }
     if !client.is_connected() {
-        eprintln!("could not connect to daemon at {:?}", neko_protocol::socket_path());
+        eprintln!(
+            "could not connect to daemon at {:?}",
+            neko_protocol::socket_path()
+        );
         std::process::exit(1);
     }
 
-    let queries = ["sound", "storage", "appearance", "wallpaper", "accessibility", "displays", "bluetooth"];
+    let queries = [
+        "sound",
+        "storage",
+        "appearance",
+        "wallpaper",
+        "accessibility",
+        "displays",
+        "bluetooth",
+    ];
 
     for q in queries {
-        let request = Request::Search { query: q.to_string(), limit: 10, provider: None };
+        let request = Request::Search {
+            query: q.to_string(),
+            limit: 10,
+            provider: None,
+        };
         let response = futures::executor::block_on(client.request(request));
         match response {
             Ok(Response::SearchResults { items, .. }) => {
                 let kinds: Vec<String> = items.iter().map(|i| i.kind.clone()).collect();
-                let settings_titles: Vec<&str> = items.iter().filter(|i| i.kind == "settings").map(|i| i.title.as_str()).collect();
+                let settings_titles: Vec<&str> = items
+                    .iter()
+                    .filter(|i| i.kind == "settings")
+                    .map(|i| i.title.as_str())
+                    .collect();
                 println!("{q:15} kinds={kinds:?} settings_titles={settings_titles:?}");
             }
             other => println!("{q:15} unexpected response: {other:?}"),

@@ -66,7 +66,13 @@ const ROWS: &[RowSpec] = &[
     RowSpec {
         id: ROW_HOTKEY,
         title: "Summon Hotkey",
-        aliases: &["Summon Hotkey", "Hotkey", "Shortcut", "Keyboard Shortcut", "Summon"],
+        aliases: &[
+            "Summon Hotkey",
+            "Hotkey",
+            "Shortcut",
+            "Keyboard Shortcut",
+            "Summon",
+        ],
         subtitle: "The key combination that opens neko",
         enters_mode: Some(MODE_HOTKEY),
         action_label: "Change  ↵",
@@ -75,7 +81,13 @@ const ROWS: &[RowSpec] = &[
     RowSpec {
         id: ROW_LAUNCH_AT_LOGIN,
         title: "Launch at Login",
-        aliases: &["Launch at Login", "Login", "Startup", "Start at Login", "Autostart"],
+        aliases: &[
+            "Launch at Login",
+            "Login",
+            "Startup",
+            "Start at Login",
+            "Autostart",
+        ],
         subtitle: "Start neko automatically when you log in",
         enters_mode: None,
         action_label: "Toggle  ↵",
@@ -84,7 +96,13 @@ const ROWS: &[RowSpec] = &[
     RowSpec {
         id: ROW_SEARCH_FOLDERS,
         title: "Search Folders",
-        aliases: &["Search Folders", "Folders", "File Search Scope", "Directories", "Scope"],
+        aliases: &[
+            "Search Folders",
+            "Folders",
+            "File Search Scope",
+            "Directories",
+            "Scope",
+        ],
         subtitle: "Where file search looks",
         enters_mode: Some(MODE_FOLDERS),
         action_label: "Edit  ↵",
@@ -225,7 +243,11 @@ pub mod launch_agent {
 
     pub fn plist_path() -> Option<PathBuf> {
         let home = std::env::var_os("HOME")?;
-        Some(PathBuf::from(home).join("Library/LaunchAgents").join(format!("{LABEL}.plist")))
+        Some(
+            PathBuf::from(home)
+                .join("Library/LaunchAgents")
+                .join(format!("{LABEL}.plist")),
+        )
     }
 
     /// The client binary to launch — the sibling `neko` next to whichever
@@ -236,7 +258,9 @@ pub mod launch_agent {
     /// while starting the daemon alone would leave no window to summon.
     pub fn client_binary_path() -> Result<PathBuf, String> {
         let exe = std::env::current_exe().map_err(|e| format!("couldn't locate neko: {e}"))?;
-        let dir = exe.parent().ok_or_else(|| "couldn't locate neko's directory".to_string())?;
+        let dir = exe
+            .parent()
+            .ok_or_else(|| "couldn't locate neko's directory".to_string())?;
         let candidate = dir.join("neko");
         if candidate.is_file() {
             return Ok(candidate);
@@ -246,7 +270,10 @@ pub mod launch_agent {
         if exe.file_name().is_some_and(|n| n == "neko") {
             return Ok(exe);
         }
-        Err(format!("couldn't find the neko binary next to {}", dir.display()))
+        Err(format!(
+            "couldn't find the neko binary next to {}",
+            dir.display()
+        ))
     }
 
     pub fn is_installed() -> bool {
@@ -257,20 +284,30 @@ pub mod launch_agent {
         let binary = client_binary_path()?;
         let path = plist_path().ok_or_else(|| "no HOME set".to_string())?;
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("couldn't create {}: {e}", parent.display()))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("couldn't create {}: {e}", parent.display()))?;
         }
-        std::fs::write(&path, plist_contents(&binary)).map_err(|e| format!("couldn't write {}: {e}", path.display()))?;
+        std::fs::write(&path, plist_contents(&binary))
+            .map_err(|e| format!("couldn't write {}: {e}", path.display()))?;
         // Best-effort: the plist alone is enough for the *next* login, which
         // is what the setting promises. `bootstrap` only additionally makes
         // it live in this session, and legitimately fails if it is already
         // loaded — never a reason to report the setting as failed.
-        let _ = std::process::Command::new("/bin/launchctl").arg("load").arg("-w").arg(&path).output();
+        let _ = std::process::Command::new("/bin/launchctl")
+            .arg("load")
+            .arg("-w")
+            .arg(&path)
+            .output();
         Ok(())
     }
 
     pub fn remove() -> Result<(), String> {
         let path = plist_path().ok_or_else(|| "no HOME set".to_string())?;
-        let _ = std::process::Command::new("/bin/launchctl").arg("unload").arg("-w").arg(&path).output();
+        let _ = std::process::Command::new("/bin/launchctl")
+            .arg("unload")
+            .arg("-w")
+            .arg(&path)
+            .output();
         match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),
             // Already absent is the desired end state, not a failure.
@@ -305,7 +342,9 @@ pub mod launch_agent {
     }
 
     fn xml_escape(raw: &str) -> String {
-        raw.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+        raw.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
     }
 }
 
@@ -330,19 +369,38 @@ impl PreferencesProvider {
             // row must show the new combination the very next time it is
             // rendered, not after a restart.
             ROW_HOTKEY => Some(crate::hotkey::get_hotkey(&db).ok()?.combo.display()),
-            ROW_LAUNCH_AT_LOGIN => {
-                Some(if get_launch_at_login(&db).unwrap_or(false) { "On" } else { "Off" }.to_string())
-            }
+            ROW_LAUNCH_AT_LOGIN => Some(
+                if get_launch_at_login(&db).unwrap_or(false) {
+                    "On"
+                } else {
+                    "Off"
+                }
+                .to_string(),
+            ),
             ROW_SEARCH_FOLDERS => {
                 let n = get_search_folders(&db).len();
-                Some(if n == 1 { "1 folder".to_string() } else { format!("{n} folders") })
+                Some(if n == 1 {
+                    "1 folder".to_string()
+                } else {
+                    format!("{n} folders")
+                })
             }
-            ROW_AGENTS_ENABLED => {
-                Some(if crate::agents::agents_enabled(&db) { "On" } else { "Off" }.to_string())
-            }
-            ROW_AGENTS_INCLUDE_IDLE => {
-                Some(if crate::agents::include_idle(&db) { "On" } else { "Off" }.to_string())
-            }
+            ROW_AGENTS_ENABLED => Some(
+                if crate::agents::agents_enabled(&db) {
+                    "On"
+                } else {
+                    "Off"
+                }
+                .to_string(),
+            ),
+            ROW_AGENTS_INCLUDE_IDLE => Some(
+                if crate::agents::include_idle(&db) {
+                    "On"
+                } else {
+                    "Off"
+                }
+                .to_string(),
+            ),
             _ => None,
         }
     }
@@ -378,7 +436,9 @@ impl Provider for PreferencesProvider {
                     row.aliases
                         .iter()
                         .filter_map(|alias| fuzzy_score(query, alias))
-                        .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))
+                        .fold(None, |best: Option<f32>, s| {
+                            Some(best.map_or(s, |b| b.max(s)))
+                        })
                 }?;
                 Some(Candidate {
                     score,
@@ -430,9 +490,9 @@ impl Provider for PreferencesProvider {
                 crate::agents::set_include_idle(&db, !now)
                     .map_err(|e| ProviderError(format!("couldn't save the setting: {e}")))
             }
-            ROW_HOTKEY | ROW_SEARCH_FOLDERS => {
-                Err(ProviderError(format!("{id} opens its own screen; it has no direct action")))
-            }
+            ROW_HOTKEY | ROW_SEARCH_FOLDERS => Err(ProviderError(format!(
+                "{id} opens its own screen; it has no direct action"
+            ))),
             other => Err(ProviderError(format!("no such preference: {other}"))),
         }
     }
@@ -521,7 +581,9 @@ impl Provider for FolderScopeProvider {
     /// else to do to a configured path from here.
     fn activate(&self, id: &str) -> Result<(), ProviderError> {
         let db = self.db.lock().unwrap();
-        remove_search_folder(&db, id).map(|_| ()).map_err(ProviderError)
+        remove_search_folder(&db, id)
+            .map(|_| ())
+            .map_err(ProviderError)
     }
 
     fn perform_action(&self, id: &str, action_id: &str) -> Result<(), ProviderError> {
@@ -531,7 +593,9 @@ impl Provider for FolderScopeProvider {
             // exist in the list. Validation lives in `add_search_folder`, so
             // a typo comes back as a message the panel can show inline
             // rather than silently adding a folder that is not there.
-            "add" => add_search_folder(&self.db.lock().unwrap(), id).map(|_| ()).map_err(ProviderError),
+            "add" => add_search_folder(&self.db.lock().unwrap(), id)
+                .map(|_| ())
+                .map_err(ProviderError),
             "remove" => self.activate(id),
             other => Err(ProviderError(format!("no action '{other}' on this row"))),
         }
@@ -556,13 +620,17 @@ mod tests {
     fn a_persisted_empty_list_is_honoured_rather_than_falling_back() {
         let db = db();
         set_search_folders(&db, &[]).unwrap();
-        assert!(get_search_folders(&db).is_empty(), "an explicit empty scope is a real choice");
+        assert!(
+            get_search_folders(&db).is_empty(),
+            "an explicit empty scope is a real choice"
+        );
     }
 
     #[test]
     fn a_corrupted_scope_setting_degrades_to_the_default_instead_of_erroring() {
         let db = db();
-        db.set_setting(SEARCH_FOLDERS_KEY, "not json at all").unwrap();
+        db.set_setting(SEARCH_FOLDERS_KEY, "not json at all")
+            .unwrap();
         assert_eq!(get_search_folders(&db), crate::files::default_scope_dirs());
     }
 
@@ -582,7 +650,11 @@ mod tests {
         let tmp = std::env::temp_dir();
         add_search_folder(&db, &tmp.display().to_string()).unwrap();
         let after = add_search_folder(&db, &tmp.display().to_string()).unwrap();
-        assert_eq!(after.len(), 1, "a repeat add is a no-op, not an error and not a duplicate");
+        assert_eq!(
+            after.len(),
+            1,
+            "a repeat add is a no-op, not an error and not a duplicate"
+        );
     }
 
     #[test]
@@ -597,7 +669,10 @@ mod tests {
     #[test]
     fn tilde_expands_against_home_and_a_bare_path_is_left_alone() {
         let home = std::env::var("HOME").expect("HOME");
-        assert_eq!(expand_tilde("~/Documents"), PathBuf::from(&home).join("Documents"));
+        assert_eq!(
+            expand_tilde("~/Documents"),
+            PathBuf::from(&home).join("Documents")
+        );
         assert_eq!(expand_tilde("~"), PathBuf::from(&home));
         assert_eq!(expand_tilde("/usr/local"), PathBuf::from("/usr/local"));
         assert_eq!(expand_tilde("  /usr/local  "), PathBuf::from("/usr/local"));
@@ -620,15 +695,20 @@ mod tests {
     #[test]
     fn every_preference_row_is_searchable_by_a_word_a_person_would_actually_type() {
         let provider = PreferencesProvider::new(Arc::new(Mutex::new(db())));
-        for (query, expected) in
-            [("shortcut", ROW_HOTKEY), ("startup", ROW_LAUNCH_AT_LOGIN), ("folders", ROW_SEARCH_FOLDERS)]
-        {
+        for (query, expected) in [
+            ("shortcut", ROW_HOTKEY),
+            ("startup", ROW_LAUNCH_AT_LOGIN),
+            ("folders", ROW_SEARCH_FOLDERS),
+        ] {
             let found = provider.search(query, 0);
             let top = found
                 .iter()
                 .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
                 .unwrap_or_else(|| panic!("{query} matched nothing"));
-            assert_eq!(top.item.id, expected, "query {query:?} should find {expected}");
+            assert_eq!(
+                top.item.id, expected,
+                "query {query:?} should find {expected}"
+            );
         }
     }
 
@@ -647,7 +727,10 @@ mod tests {
         let rows = provider.search("", 0);
         let by_id = |id: &str| rows.iter().find(|c| c.item.id == id).unwrap().item.clone();
         assert_eq!(by_id(ROW_HOTKEY).enters_mode.as_deref(), Some(MODE_HOTKEY));
-        assert_eq!(by_id(ROW_SEARCH_FOLDERS).enters_mode.as_deref(), Some(MODE_FOLDERS));
+        assert_eq!(
+            by_id(ROW_SEARCH_FOLDERS).enters_mode.as_deref(),
+            Some(MODE_FOLDERS)
+        );
         assert_eq!(by_id(ROW_LAUNCH_AT_LOGIN).enters_mode, None);
     }
 
@@ -662,7 +745,11 @@ mod tests {
     #[test]
     fn the_folder_scope_list_shows_every_configured_folder_regardless_of_the_typed_query() {
         let db = Arc::new(Mutex::new(db()));
-        set_search_folders(&db.lock().unwrap(), &[PathBuf::from("/usr"), PathBuf::from("/tmp")]).unwrap();
+        set_search_folders(
+            &db.lock().unwrap(),
+            &[PathBuf::from("/usr"), PathBuf::from("/tmp")],
+        )
+        .unwrap();
         let provider = FolderScopeProvider::new(db);
         // The query in this mode is a path being typed to *add*, so it must
         // not filter the existing list away underneath it.

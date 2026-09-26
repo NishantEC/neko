@@ -18,7 +18,9 @@
 #[cfg(target_os = "macos")]
 use objc2::rc::autoreleasepool;
 #[cfg(target_os = "macos")]
-use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeString, NSPasteboardTypeTIFF};
+use objc2_app_kit::{
+    NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeString, NSPasteboardTypeTIFF,
+};
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSString;
 
@@ -108,4 +110,3 @@ pub fn read_string() -> Option<String> {
 pub fn read_image() -> Option<Vec<u8>> {
     None
 }
-

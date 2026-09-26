@@ -26,9 +26,7 @@ pub fn launch_app(app_path: &Path) -> Result<(), LaunchError> {
     if status.success() {
         Ok(())
     } else {
-        Err(LaunchError(format!(
-            "/usr/bin/open exited with {status}"
-        )))
+        Err(LaunchError(format!("/usr/bin/open exited with {status}")))
     }
 }
 
@@ -67,8 +65,6 @@ pub fn open_url(url: &str) -> Result<(), LaunchError> {
     if status.success() {
         Ok(())
     } else {
-        Err(LaunchError(format!(
-            "/usr/bin/open exited with {status}"
-        )))
+        Err(LaunchError(format!("/usr/bin/open exited with {status}")))
     }
 }

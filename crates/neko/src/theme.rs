@@ -121,7 +121,12 @@ pub fn ramp(from: Rgba, to: Rgba, t: f32) -> Rgba {
     }
     let lerp = |x: f32, y: f32| x + (y - x) * t;
     let (r, g, bl) = oklch_to_srgb_u8(lerp(a.0, b.0), lerp(a.1, b.1), a.2 + dh * t);
-    Rgba { r: r as f32 / 255.0, g: g as f32 / 255.0, b: bl as f32 / 255.0, a: lerp(from.a, to.a) }
+    Rgba {
+        r: r as f32 / 255.0,
+        g: g as f32 / 255.0,
+        b: bl as f32 / 255.0,
+        a: lerp(from.a, to.a),
+    }
 }
 
 /// The inverse of [`oklch_to_srgb_u8`], so a ramp can start and end exactly
@@ -129,7 +134,11 @@ pub fn ramp(from: Rgba, to: Rgba, t: f32) -> Rgba {
 #[allow(clippy::excessive_precision)]
 fn oklch_from_rgba(c: Rgba) -> (f32, f32, f32) {
     let lin = |v: f32| {
-        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
     };
     let (r, g, b) = (lin(c.r), lin(c.g), lin(c.b));
 
@@ -171,7 +180,6 @@ pub const PALETTE_TOKEN_COUNT: usize = 23;
 /// Twice `icon_socket_alpha`'s usual weight: a tile is a surface a person
 /// clicks, where the icon socket is a plate behind artwork.
 pub const TILE_ALPHA: f32 = 0.12;
-
 
 /// Whether a theme reads as light or dark **to AppKit**, not just to a person.
 ///
@@ -845,7 +853,12 @@ pub const SNAP_GUIDE_THICKNESS_PX: f32 = 4.0;
 /// that "nothing" carries no hue of its own into the blend. Named here rather
 /// than written out at each call site so there is one thing to point at when
 /// somebody asks what a wash starts from.
-pub const TRANSPARENT: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+pub const TRANSPARENT: Rgba = Rgba {
+    r: 0.0,
+    g: 0.0,
+    b: 0.0,
+    a: 0.0,
+};
 
 /// How large a picture in a chat bubble may be drawn.
 ///
@@ -1097,7 +1110,9 @@ mod tests {
     /// disagree; that's the "report it" case, not a silent-fix case.
     #[test]
     fn base_palette_matches_the_frozen_oklch_table() {
-        let p = theme_by_id("neutral").expect("the default theme must exist").palette;
+        let p = theme_by_id("neutral")
+            .expect("the default theme must exist")
+            .palette;
         let table: &[(&str, f32, f32, f32, Rgba)] = &[
             ("surface_panel", 0.16, 0.0, 255.0, p.surface_panel),
             ("surface_raised", 0.20, 0.0, 255.0, p.surface_raised),
@@ -1136,28 +1151,148 @@ mod tests {
         let ember = theme_by_id("ember").expect("ember must exist").palette;
         let catnap = theme_by_id("catnap").expect("catnap must exist").palette;
         let table: &[(&str, f32, f32, f32, Rgba)] = &[
-            ("ember/surface_panel", 0.225, 0.070, 8.0, ember.surface_panel),
-            ("ember/surface_raised", 0.285, 0.075, 15.0, ember.surface_raised),
-            ("ember/surface_input", 0.175, 0.055, 5.0, ember.surface_input),
-            ("ember/surface_selected", 0.425, 0.100, 40.0, ember.surface_selected),
+            (
+                "ember/surface_panel",
+                0.225,
+                0.070,
+                8.0,
+                ember.surface_panel,
+            ),
+            (
+                "ember/surface_raised",
+                0.285,
+                0.075,
+                15.0,
+                ember.surface_raised,
+            ),
+            (
+                "ember/surface_input",
+                0.175,
+                0.055,
+                5.0,
+                ember.surface_input,
+            ),
+            (
+                "ember/surface_selected",
+                0.425,
+                0.100,
+                40.0,
+                ember.surface_selected,
+            ),
             ("ember/text_primary", 0.955, 0.022, 75.0, ember.text_primary),
-            ("ember/text_secondary", 0.805, 0.032, 68.0, ember.text_secondary),
-            ("ember/text_tertiary", 0.680, 0.040, 60.0, ember.text_tertiary),
-            ("ember/text_on_light", 0.200, 0.045, 40.0, ember.text_on_light),
-            ("ember/keycap_shell_bg", 0.310, 0.075, 25.0, ember.keycap_shell_bg),
-            ("ember/state_success", 0.760, 0.140, 150.0, ember.state_success),
+            (
+                "ember/text_secondary",
+                0.805,
+                0.032,
+                68.0,
+                ember.text_secondary,
+            ),
+            (
+                "ember/text_tertiary",
+                0.680,
+                0.040,
+                60.0,
+                ember.text_tertiary,
+            ),
+            (
+                "ember/text_on_light",
+                0.200,
+                0.045,
+                40.0,
+                ember.text_on_light,
+            ),
+            (
+                "ember/keycap_shell_bg",
+                0.310,
+                0.075,
+                25.0,
+                ember.keycap_shell_bg,
+            ),
+            (
+                "ember/state_success",
+                0.760,
+                0.140,
+                150.0,
+                ember.state_success,
+            ),
             ("ember/state_danger", 0.700, 0.165, 32.0, ember.state_danger),
-            ("catnap/surface_panel", 0.315, 0.130, 318.0, catnap.surface_panel),
-            ("catnap/surface_raised", 0.375, 0.135, 320.0, catnap.surface_raised),
-            ("catnap/surface_input", 0.245, 0.105, 315.0, catnap.surface_input),
-            ("catnap/surface_selected", 0.478, 0.185, 348.0, catnap.surface_selected),
-            ("catnap/text_primary", 0.975, 0.020, 330.0, catnap.text_primary),
-            ("catnap/text_secondary", 0.865, 0.045, 330.0, catnap.text_secondary),
-            ("catnap/text_tertiary", 0.760, 0.060, 330.0, catnap.text_tertiary),
-            ("catnap/text_on_light", 0.230, 0.090, 320.0, catnap.text_on_light),
-            ("catnap/keycap_shell_bg", 0.400, 0.130, 322.0, catnap.keycap_shell_bg),
-            ("catnap/state_success", 0.800, 0.155, 160.0, catnap.state_success),
-            ("catnap/state_danger", 0.740, 0.155, 25.0, catnap.state_danger),
+            (
+                "catnap/surface_panel",
+                0.315,
+                0.130,
+                318.0,
+                catnap.surface_panel,
+            ),
+            (
+                "catnap/surface_raised",
+                0.375,
+                0.135,
+                320.0,
+                catnap.surface_raised,
+            ),
+            (
+                "catnap/surface_input",
+                0.245,
+                0.105,
+                315.0,
+                catnap.surface_input,
+            ),
+            (
+                "catnap/surface_selected",
+                0.478,
+                0.185,
+                348.0,
+                catnap.surface_selected,
+            ),
+            (
+                "catnap/text_primary",
+                0.975,
+                0.020,
+                330.0,
+                catnap.text_primary,
+            ),
+            (
+                "catnap/text_secondary",
+                0.865,
+                0.045,
+                330.0,
+                catnap.text_secondary,
+            ),
+            (
+                "catnap/text_tertiary",
+                0.760,
+                0.060,
+                330.0,
+                catnap.text_tertiary,
+            ),
+            (
+                "catnap/text_on_light",
+                0.230,
+                0.090,
+                320.0,
+                catnap.text_on_light,
+            ),
+            (
+                "catnap/keycap_shell_bg",
+                0.400,
+                0.130,
+                322.0,
+                catnap.keycap_shell_bg,
+            ),
+            (
+                "catnap/state_success",
+                0.800,
+                0.155,
+                160.0,
+                catnap.state_success,
+            ),
+            (
+                "catnap/state_danger",
+                0.740,
+                0.155,
+                25.0,
+                catnap.state_danger,
+            ),
         ];
         for (name, l, c, h, token) in table {
             assert_eq!(
@@ -1184,23 +1319,278 @@ mod tests {
         /// `(token name, the hex upstream publishes, the hex neko ships)`.
         type PinnedToken = (&'static str, u32, u32);
         let table: &[(&str, &[PinnedToken])] = &[
-        ("neutral", &[("surface_panel", 0x0d0d0d, 0x0d0d0d), ("surface_raised", 0x161616, 0x161616), ("surface_input", 0x070707, 0x070707), ("surface_selected", 0x3a3a3a, 0x2f2f2f), ("text_primary", 0xe8e8e8, 0xe8e8e8), ("text_secondary", 0xa9a9a9, 0xa9a9a9), ("text_tertiary", 0x848484, 0x848484), ("text_on_light", 0x0f0f0f, 0x0f0f0f), ("keycap_shell_bg", 0x232323, 0x232323), ("state_success", 0x61bd67, 0x61bd67), ("state_danger", 0xe96e50, 0xe96e50)]),
-        ("ember", &[("surface_panel", 0x350915, 0x350915), ("surface_raised", 0x48171e, 0x48171e), ("surface_input", 0x23040d, 0x23040d), ("surface_selected", 0x7b3820, 0x7b3820), ("text_primary", 0xf9eee0, 0xf9eee0), ("text_secondary", 0xcebcaa, 0xcebcaa), ("text_tertiary", 0xab9380, 0xab9380), ("text_on_light", 0x270e06, 0x270e06), ("keycap_shell_bg", 0x501e1c, 0x501e1c), ("state_success", 0x68ca80, 0x68ca80), ("state_danger", 0xf3715a, 0xf3715a)]),
-        ("catnap", &[("surface_panel", 0x4b115b, 0x4b115b), ("surface_raised", 0x5f216c, 0x5f216c), ("surface_input", 0x320842, 0x320842), ("surface_selected", 0xa0186f, 0xa0186f), ("text_primary", 0xfff2fd, 0xfff2fd), ("text_secondary", 0xe4c9e1, 0xe4c9e1), ("text_tertiary", 0xc8a4c3, 0xc8a4c3), ("text_on_light", 0x2e0936, 0x2e0936), ("keycap_shell_bg", 0x672970, 0x672970), ("state_success", 0x4bdc9b, 0x4bdc9b), ("state_danger", 0xfe7f78, 0xfe7f78)]),
-        ("catppuccin-mocha", &[("surface_panel", 0x1e1e2e, 0x1e1e2e), ("surface_raised", 0x313244, 0x313244), ("surface_input", 0x181825, 0x181825), ("surface_selected", 0x45475a, 0x45475a), ("text_primary", 0xcdd6f4, 0xcdd6f4), ("text_secondary", 0xbac2de, 0xbac2de), ("text_tertiary", 0xa6adc8, 0xa6adc8), ("text_on_light", 0x11111b, 0x11111b), ("keycap_shell_bg", 0x45475a, 0x45475a), ("state_success", 0xa6e3a1, 0xa6e3a1), ("state_danger", 0xf38ba8, 0xf38ba8)]),
-        ("catppuccin-macchiato", &[("surface_panel", 0x24273a, 0x24273a), ("surface_raised", 0x363a4f, 0x363a4f), ("surface_input", 0x1e2030, 0x1e2030), ("surface_selected", 0x494d64, 0x494d64), ("text_primary", 0xcad3f5, 0xcad3f5), ("text_secondary", 0xb8c0e0, 0xb8c0e0), ("text_tertiary", 0xa5adcb, 0xa5adcb), ("text_on_light", 0x181926, 0x181926), ("keycap_shell_bg", 0x494d64, 0x494d64), ("state_success", 0xa6da95, 0xa6da95), ("state_danger", 0xed8796, 0xed8796)]),
-        ("catppuccin-frappe", &[("surface_panel", 0x303446, 0x303446), ("surface_raised", 0x414559, 0x414559), ("surface_input", 0x292c3c, 0x292c3c), ("surface_selected", 0x51576d, 0x51576d), ("text_primary", 0xc6d0f5, 0xc6d0f5), ("text_secondary", 0xb5bfe2, 0xc7cfe9), ("text_tertiary", 0xa5adce, 0xa5adce), ("text_on_light", 0x232634, 0x232634), ("keycap_shell_bg", 0x51576d, 0x51576d), ("state_success", 0xa6d189, 0xa6d189), ("state_danger", 0xe78284, 0xe78284)]),
-        ("catppuccin-latte", &[("surface_panel", 0xeff1f5, 0xeff1f5), ("surface_raised", 0xe6e9ef, 0xe6e9ef), ("surface_input", 0xe6e9ef, 0xe6e9ef), ("surface_selected", 0xccd0da, 0xccd0da), ("text_primary", 0x4c4f69, 0x4c4f69), ("text_secondary", 0x5c5f77, 0x53566b), ("text_tertiary", 0x6c6f85, 0x676a7f), ("text_on_light", 0xdce0e8, 0xdce0e8), ("keycap_shell_bg", 0xccd0da, 0xccd0da), ("state_success", 0x40a02b, 0x327c21), ("state_danger", 0xd20f39, 0xd20f39)]),
-        ("gruvbox-dark", &[("surface_panel", 0x282828, 0x282828), ("surface_raised", 0x3c3836, 0x3c3836), ("surface_input", 0x1d2021, 0x1d2021), ("surface_selected", 0x504945, 0x504945), ("text_primary", 0xfbf1c7, 0xfbf1c7), ("text_secondary", 0xebdbb2, 0xebdbb2), ("text_tertiary", 0xbdae93, 0xbdae93), ("text_on_light", 0x282828, 0x282828), ("keycap_shell_bg", 0x3c3836, 0x3c3836), ("state_success", 0xb8bb26, 0xb8bb26), ("state_danger", 0xfb4934, 0xfb5643)]),
-        ("gruvbox-light", &[("surface_panel", 0xfbf1c7, 0xfbf1c7), ("surface_raised", 0xf9f5d7, 0xf9f5d7), ("surface_input", 0xf2e5bc, 0xf2e5bc), ("surface_selected", 0xd5c4a1, 0xd5c4a1), ("text_primary", 0x282828, 0x282828), ("text_secondary", 0x3c3836, 0x3c3836), ("text_tertiary", 0x665c54, 0x665c54), ("text_on_light", 0xfbf1c7, 0xfbf1c7), ("keycap_shell_bg", 0xebdbb2, 0xebdbb2), ("state_success", 0x79740e, 0x74700d), ("state_danger", 0x9d0006, 0x9d0006)]),
-        ("solarized-dark", &[("surface_panel", 0x002b36, 0x002b36), ("surface_raised", 0x073642, 0x073642), ("surface_input", 0x001f28, 0x001f28), ("surface_selected", 0x0d4553, 0x0d4553), ("text_primary", 0xfdf6e3, 0xfdf6e3), ("text_secondary", 0x93a1a1, 0xa1adad), ("text_tertiary", 0x839496, 0x839496), ("text_on_light", 0x002b36, 0x002b36), ("keycap_shell_bg", 0x073642, 0x073642), ("state_success", 0x859900, 0x859900), ("state_danger", 0xdc322f, 0xe56663)]),
-        ("solarized-light", &[("surface_panel", 0xfdf6e3, 0xfdf6e3), ("surface_raised", 0xfffbf0, 0xfffbf0), ("surface_input", 0xeee8d5, 0xeee8d5), ("surface_selected", 0xd9d2ba, 0xd9d2ba), ("text_primary", 0x002b36, 0x002b36), ("text_secondary", 0x073642, 0x073642), ("text_tertiary", 0x586e75, 0x586e75), ("text_on_light", 0xfdf6e3, 0xfdf6e3), ("keycap_shell_bg", 0xeee8d5, 0xeee8d5), ("state_success", 0x859900, 0x667500), ("state_danger", 0xdc322f, 0xd72724)]),
-        ("nord", &[("surface_panel", 0x2e3440, 0x2e3440), ("surface_raised", 0x3b4252, 0x3b4252), ("surface_input", 0x272c36, 0x272c36), ("surface_selected", 0x434c5e, 0x434c5e), ("text_primary", 0xeceff4, 0xeceff4), ("text_secondary", 0xe5e9f0, 0xe5e9f0), ("text_tertiary", 0xd8dee9, 0xd8dee9), ("text_on_light", 0x2e3440, 0x2e3440), ("keycap_shell_bg", 0x4c566a, 0x4c566a), ("state_success", 0xa3be8c, 0xa3be8c), ("state_danger", 0xbf616a, 0xd18d93)]),
-        ("tokyo-night", &[("surface_panel", 0x24283b, 0x24283b), ("surface_raised", 0x1f2335, 0x1f2335), ("surface_input", 0x1b1e2e, 0x1b1e2e), ("surface_selected", 0x3b4261, 0x3b4261), ("text_primary", 0xc0caf5, 0xc0caf5), ("text_secondary", 0xa9b1d6, 0xa9b1d6), ("text_tertiary", 0x9aa5ce, 0x9aa5ce), ("text_on_light", 0x1b1e2e, 0x1b1e2e), ("keycap_shell_bg", 0x2c324a, 0x2c324a), ("state_success", 0x73daca, 0x73daca), ("state_danger", 0xf7768e, 0xf7768e)]),
-        ("rose-pine", &[("surface_panel", 0x191724, 0x191724), ("surface_raised", 0x1f1d2e, 0x1f1d2e), ("surface_input", 0x21202e, 0x21202e), ("surface_selected", 0x403d52, 0x403d52), ("text_primary", 0xe0def4, 0xe0def4), ("text_secondary", 0x908caa, 0xaca9c0), ("text_tertiary", 0x6e6a86, 0x837f9a), ("text_on_light", 0x191724, 0x191724), ("keycap_shell_bg", 0x26233a, 0x26233a), ("state_success", 0x9ccfd8, 0x9ccfd8), ("state_danger", 0xeb6f92, 0xeb6f92)]),
-        ("rose-pine-dawn", &[("surface_panel", 0xfaf4ed, 0xfaf4ed), ("surface_raised", 0xfffaf3, 0xfffaf3), ("surface_input", 0xf4ede8, 0xf4ede8), ("surface_selected", 0xcecacd, 0xcecacd), ("text_primary", 0x575279, 0x555076), ("text_secondary", 0x797593, 0x55526a), ("text_tertiary", 0x9893a5, 0x716b80), ("text_on_light", 0xfaf4ed, 0xfaf4ed), ("keycap_shell_bg", 0xf2e9e1, 0xf2e9e1), ("state_success", 0x286983, 0x286983), ("state_danger", 0xb4637a, 0xab526c)]),
-        ("dracula", &[("surface_panel", 0x282a36, 0x282a36), ("surface_raised", 0x343746, 0x343746), ("surface_input", 0x21222c, 0x21222c), ("surface_selected", 0x44475a, 0x44475a), ("text_primary", 0xf8f8f2, 0xf8f8f2), ("text_secondary", 0xbfbfc4, 0xbfbfc4), ("text_tertiary", 0x6272a4, 0x8692b9), ("text_on_light", 0x282a36, 0x282a36), ("keycap_shell_bg", 0x343746, 0x343746), ("state_success", 0x50fa7b, 0x50fa7b), ("state_danger", 0xff5555, 0xff5555)]),
-        ("everforest-dark", &[("surface_panel", 0x2d353b, 0x2d353b), ("surface_raised", 0x343f44, 0x343f44), ("surface_input", 0x232a2e, 0x232a2e), ("surface_selected", 0x3d484d, 0x3d484d), ("text_primary", 0xd3c6aa, 0xd3c6aa), ("text_secondary", 0x9da9a0, 0xaeb7b0), ("text_tertiary", 0x859289, 0x95a099), ("text_on_light", 0x2d353b, 0x2d353b), ("keycap_shell_bg", 0x475258, 0x475258), ("state_success", 0xa7c080, 0xa7c080), ("state_danger", 0xe67e80, 0xe67e80)]),
+            (
+                "neutral",
+                &[
+                    ("surface_panel", 0x0d0d0d, 0x0d0d0d),
+                    ("surface_raised", 0x161616, 0x161616),
+                    ("surface_input", 0x070707, 0x070707),
+                    ("surface_selected", 0x3a3a3a, 0x2f2f2f),
+                    ("text_primary", 0xe8e8e8, 0xe8e8e8),
+                    ("text_secondary", 0xa9a9a9, 0xa9a9a9),
+                    ("text_tertiary", 0x848484, 0x848484),
+                    ("text_on_light", 0x0f0f0f, 0x0f0f0f),
+                    ("keycap_shell_bg", 0x232323, 0x232323),
+                    ("state_success", 0x61bd67, 0x61bd67),
+                    ("state_danger", 0xe96e50, 0xe96e50),
+                ],
+            ),
+            (
+                "ember",
+                &[
+                    ("surface_panel", 0x350915, 0x350915),
+                    ("surface_raised", 0x48171e, 0x48171e),
+                    ("surface_input", 0x23040d, 0x23040d),
+                    ("surface_selected", 0x7b3820, 0x7b3820),
+                    ("text_primary", 0xf9eee0, 0xf9eee0),
+                    ("text_secondary", 0xcebcaa, 0xcebcaa),
+                    ("text_tertiary", 0xab9380, 0xab9380),
+                    ("text_on_light", 0x270e06, 0x270e06),
+                    ("keycap_shell_bg", 0x501e1c, 0x501e1c),
+                    ("state_success", 0x68ca80, 0x68ca80),
+                    ("state_danger", 0xf3715a, 0xf3715a),
+                ],
+            ),
+            (
+                "catnap",
+                &[
+                    ("surface_panel", 0x4b115b, 0x4b115b),
+                    ("surface_raised", 0x5f216c, 0x5f216c),
+                    ("surface_input", 0x320842, 0x320842),
+                    ("surface_selected", 0xa0186f, 0xa0186f),
+                    ("text_primary", 0xfff2fd, 0xfff2fd),
+                    ("text_secondary", 0xe4c9e1, 0xe4c9e1),
+                    ("text_tertiary", 0xc8a4c3, 0xc8a4c3),
+                    ("text_on_light", 0x2e0936, 0x2e0936),
+                    ("keycap_shell_bg", 0x672970, 0x672970),
+                    ("state_success", 0x4bdc9b, 0x4bdc9b),
+                    ("state_danger", 0xfe7f78, 0xfe7f78),
+                ],
+            ),
+            (
+                "catppuccin-mocha",
+                &[
+                    ("surface_panel", 0x1e1e2e, 0x1e1e2e),
+                    ("surface_raised", 0x313244, 0x313244),
+                    ("surface_input", 0x181825, 0x181825),
+                    ("surface_selected", 0x45475a, 0x45475a),
+                    ("text_primary", 0xcdd6f4, 0xcdd6f4),
+                    ("text_secondary", 0xbac2de, 0xbac2de),
+                    ("text_tertiary", 0xa6adc8, 0xa6adc8),
+                    ("text_on_light", 0x11111b, 0x11111b),
+                    ("keycap_shell_bg", 0x45475a, 0x45475a),
+                    ("state_success", 0xa6e3a1, 0xa6e3a1),
+                    ("state_danger", 0xf38ba8, 0xf38ba8),
+                ],
+            ),
+            (
+                "catppuccin-macchiato",
+                &[
+                    ("surface_panel", 0x24273a, 0x24273a),
+                    ("surface_raised", 0x363a4f, 0x363a4f),
+                    ("surface_input", 0x1e2030, 0x1e2030),
+                    ("surface_selected", 0x494d64, 0x494d64),
+                    ("text_primary", 0xcad3f5, 0xcad3f5),
+                    ("text_secondary", 0xb8c0e0, 0xb8c0e0),
+                    ("text_tertiary", 0xa5adcb, 0xa5adcb),
+                    ("text_on_light", 0x181926, 0x181926),
+                    ("keycap_shell_bg", 0x494d64, 0x494d64),
+                    ("state_success", 0xa6da95, 0xa6da95),
+                    ("state_danger", 0xed8796, 0xed8796),
+                ],
+            ),
+            (
+                "catppuccin-frappe",
+                &[
+                    ("surface_panel", 0x303446, 0x303446),
+                    ("surface_raised", 0x414559, 0x414559),
+                    ("surface_input", 0x292c3c, 0x292c3c),
+                    ("surface_selected", 0x51576d, 0x51576d),
+                    ("text_primary", 0xc6d0f5, 0xc6d0f5),
+                    ("text_secondary", 0xb5bfe2, 0xc7cfe9),
+                    ("text_tertiary", 0xa5adce, 0xa5adce),
+                    ("text_on_light", 0x232634, 0x232634),
+                    ("keycap_shell_bg", 0x51576d, 0x51576d),
+                    ("state_success", 0xa6d189, 0xa6d189),
+                    ("state_danger", 0xe78284, 0xe78284),
+                ],
+            ),
+            (
+                "catppuccin-latte",
+                &[
+                    ("surface_panel", 0xeff1f5, 0xeff1f5),
+                    ("surface_raised", 0xe6e9ef, 0xe6e9ef),
+                    ("surface_input", 0xe6e9ef, 0xe6e9ef),
+                    ("surface_selected", 0xccd0da, 0xccd0da),
+                    ("text_primary", 0x4c4f69, 0x4c4f69),
+                    ("text_secondary", 0x5c5f77, 0x53566b),
+                    ("text_tertiary", 0x6c6f85, 0x676a7f),
+                    ("text_on_light", 0xdce0e8, 0xdce0e8),
+                    ("keycap_shell_bg", 0xccd0da, 0xccd0da),
+                    ("state_success", 0x40a02b, 0x327c21),
+                    ("state_danger", 0xd20f39, 0xd20f39),
+                ],
+            ),
+            (
+                "gruvbox-dark",
+                &[
+                    ("surface_panel", 0x282828, 0x282828),
+                    ("surface_raised", 0x3c3836, 0x3c3836),
+                    ("surface_input", 0x1d2021, 0x1d2021),
+                    ("surface_selected", 0x504945, 0x504945),
+                    ("text_primary", 0xfbf1c7, 0xfbf1c7),
+                    ("text_secondary", 0xebdbb2, 0xebdbb2),
+                    ("text_tertiary", 0xbdae93, 0xbdae93),
+                    ("text_on_light", 0x282828, 0x282828),
+                    ("keycap_shell_bg", 0x3c3836, 0x3c3836),
+                    ("state_success", 0xb8bb26, 0xb8bb26),
+                    ("state_danger", 0xfb4934, 0xfb5643),
+                ],
+            ),
+            (
+                "gruvbox-light",
+                &[
+                    ("surface_panel", 0xfbf1c7, 0xfbf1c7),
+                    ("surface_raised", 0xf9f5d7, 0xf9f5d7),
+                    ("surface_input", 0xf2e5bc, 0xf2e5bc),
+                    ("surface_selected", 0xd5c4a1, 0xd5c4a1),
+                    ("text_primary", 0x282828, 0x282828),
+                    ("text_secondary", 0x3c3836, 0x3c3836),
+                    ("text_tertiary", 0x665c54, 0x665c54),
+                    ("text_on_light", 0xfbf1c7, 0xfbf1c7),
+                    ("keycap_shell_bg", 0xebdbb2, 0xebdbb2),
+                    ("state_success", 0x79740e, 0x74700d),
+                    ("state_danger", 0x9d0006, 0x9d0006),
+                ],
+            ),
+            (
+                "solarized-dark",
+                &[
+                    ("surface_panel", 0x002b36, 0x002b36),
+                    ("surface_raised", 0x073642, 0x073642),
+                    ("surface_input", 0x001f28, 0x001f28),
+                    ("surface_selected", 0x0d4553, 0x0d4553),
+                    ("text_primary", 0xfdf6e3, 0xfdf6e3),
+                    ("text_secondary", 0x93a1a1, 0xa1adad),
+                    ("text_tertiary", 0x839496, 0x839496),
+                    ("text_on_light", 0x002b36, 0x002b36),
+                    ("keycap_shell_bg", 0x073642, 0x073642),
+                    ("state_success", 0x859900, 0x859900),
+                    ("state_danger", 0xdc322f, 0xe56663),
+                ],
+            ),
+            (
+                "solarized-light",
+                &[
+                    ("surface_panel", 0xfdf6e3, 0xfdf6e3),
+                    ("surface_raised", 0xfffbf0, 0xfffbf0),
+                    ("surface_input", 0xeee8d5, 0xeee8d5),
+                    ("surface_selected", 0xd9d2ba, 0xd9d2ba),
+                    ("text_primary", 0x002b36, 0x002b36),
+                    ("text_secondary", 0x073642, 0x073642),
+                    ("text_tertiary", 0x586e75, 0x586e75),
+                    ("text_on_light", 0xfdf6e3, 0xfdf6e3),
+                    ("keycap_shell_bg", 0xeee8d5, 0xeee8d5),
+                    ("state_success", 0x859900, 0x667500),
+                    ("state_danger", 0xdc322f, 0xd72724),
+                ],
+            ),
+            (
+                "nord",
+                &[
+                    ("surface_panel", 0x2e3440, 0x2e3440),
+                    ("surface_raised", 0x3b4252, 0x3b4252),
+                    ("surface_input", 0x272c36, 0x272c36),
+                    ("surface_selected", 0x434c5e, 0x434c5e),
+                    ("text_primary", 0xeceff4, 0xeceff4),
+                    ("text_secondary", 0xe5e9f0, 0xe5e9f0),
+                    ("text_tertiary", 0xd8dee9, 0xd8dee9),
+                    ("text_on_light", 0x2e3440, 0x2e3440),
+                    ("keycap_shell_bg", 0x4c566a, 0x4c566a),
+                    ("state_success", 0xa3be8c, 0xa3be8c),
+                    ("state_danger", 0xbf616a, 0xd18d93),
+                ],
+            ),
+            (
+                "tokyo-night",
+                &[
+                    ("surface_panel", 0x24283b, 0x24283b),
+                    ("surface_raised", 0x1f2335, 0x1f2335),
+                    ("surface_input", 0x1b1e2e, 0x1b1e2e),
+                    ("surface_selected", 0x3b4261, 0x3b4261),
+                    ("text_primary", 0xc0caf5, 0xc0caf5),
+                    ("text_secondary", 0xa9b1d6, 0xa9b1d6),
+                    ("text_tertiary", 0x9aa5ce, 0x9aa5ce),
+                    ("text_on_light", 0x1b1e2e, 0x1b1e2e),
+                    ("keycap_shell_bg", 0x2c324a, 0x2c324a),
+                    ("state_success", 0x73daca, 0x73daca),
+                    ("state_danger", 0xf7768e, 0xf7768e),
+                ],
+            ),
+            (
+                "rose-pine",
+                &[
+                    ("surface_panel", 0x191724, 0x191724),
+                    ("surface_raised", 0x1f1d2e, 0x1f1d2e),
+                    ("surface_input", 0x21202e, 0x21202e),
+                    ("surface_selected", 0x403d52, 0x403d52),
+                    ("text_primary", 0xe0def4, 0xe0def4),
+                    ("text_secondary", 0x908caa, 0xaca9c0),
+                    ("text_tertiary", 0x6e6a86, 0x837f9a),
+                    ("text_on_light", 0x191724, 0x191724),
+                    ("keycap_shell_bg", 0x26233a, 0x26233a),
+                    ("state_success", 0x9ccfd8, 0x9ccfd8),
+                    ("state_danger", 0xeb6f92, 0xeb6f92),
+                ],
+            ),
+            (
+                "rose-pine-dawn",
+                &[
+                    ("surface_panel", 0xfaf4ed, 0xfaf4ed),
+                    ("surface_raised", 0xfffaf3, 0xfffaf3),
+                    ("surface_input", 0xf4ede8, 0xf4ede8),
+                    ("surface_selected", 0xcecacd, 0xcecacd),
+                    ("text_primary", 0x575279, 0x555076),
+                    ("text_secondary", 0x797593, 0x55526a),
+                    ("text_tertiary", 0x9893a5, 0x716b80),
+                    ("text_on_light", 0xfaf4ed, 0xfaf4ed),
+                    ("keycap_shell_bg", 0xf2e9e1, 0xf2e9e1),
+                    ("state_success", 0x286983, 0x286983),
+                    ("state_danger", 0xb4637a, 0xab526c),
+                ],
+            ),
+            (
+                "dracula",
+                &[
+                    ("surface_panel", 0x282a36, 0x282a36),
+                    ("surface_raised", 0x343746, 0x343746),
+                    ("surface_input", 0x21222c, 0x21222c),
+                    ("surface_selected", 0x44475a, 0x44475a),
+                    ("text_primary", 0xf8f8f2, 0xf8f8f2),
+                    ("text_secondary", 0xbfbfc4, 0xbfbfc4),
+                    ("text_tertiary", 0x6272a4, 0x8692b9),
+                    ("text_on_light", 0x282a36, 0x282a36),
+                    ("keycap_shell_bg", 0x343746, 0x343746),
+                    ("state_success", 0x50fa7b, 0x50fa7b),
+                    ("state_danger", 0xff5555, 0xff5555),
+                ],
+            ),
+            (
+                "everforest-dark",
+                &[
+                    ("surface_panel", 0x2d353b, 0x2d353b),
+                    ("surface_raised", 0x343f44, 0x343f44),
+                    ("surface_input", 0x232a2e, 0x232a2e),
+                    ("surface_selected", 0x3d484d, 0x3d484d),
+                    ("text_primary", 0xd3c6aa, 0xd3c6aa),
+                    ("text_secondary", 0x9da9a0, 0xaeb7b0),
+                    ("text_tertiary", 0x859289, 0x95a099),
+                    ("text_on_light", 0x2d353b, 0x2d353b),
+                    ("keycap_shell_bg", 0x475258, 0x475258),
+                    ("state_success", 0xa7c080, 0xa7c080),
+                    ("state_danger", 0xe67e80, 0xe67e80),
+                ],
+            ),
         ];
         let mut corrections = 0usize;
         for (theme_id, tokens) in table {
@@ -1254,40 +1644,105 @@ mod tests {
             let id = t.id;
 
             // The translucent panel fill is the panel colour, only thinner.
-            assert_eq!(rgba_to_u8(p.surface_panel_translucent), rgba_to_u8(p.surface_panel), "{id}: translucent panel is a different colour");
-            assert!(p.surface_panel_translucent.a < 1.0, "{id}: panel fill is opaque, discarding the native material");
-            assert_eq!(p.surface_panel.a, 1.0, "{id}: the base panel colour must be opaque");
+            assert_eq!(
+                rgba_to_u8(p.surface_panel_translucent),
+                rgba_to_u8(p.surface_panel),
+                "{id}: translucent panel is a different colour"
+            );
+            assert!(
+                p.surface_panel_translucent.a < 1.0,
+                "{id}: panel fill is opaque, discarding the native material"
+            );
+            assert_eq!(
+                p.surface_panel.a, 1.0,
+                "{id}: the base panel colour must be opaque"
+            );
 
             // The menu tint is the raised colour, only thinner — and more
             // opaque than the panel, per `menu_glass_tint`'s own reasoning.
-            assert_eq!(rgba_to_u8(p.menu_glass_tint), rgba_to_u8(p.surface_raised), "{id}: menu tint is a different colour");
+            assert_eq!(
+                rgba_to_u8(p.menu_glass_tint),
+                rgba_to_u8(p.surface_raised),
+                "{id}: menu tint is a different colour"
+            );
             assert!(p.menu_glass_tint.a < 1.0, "{id}: menu tint is opaque");
 
             // The promotion rule, not a colour choice.
-            assert_eq!(p.text_tertiary_on_selected, p.text_secondary, "{id}: the tertiary-on-selected promotion was decoupled from text_secondary");
+            assert_eq!(
+                p.text_tertiary_on_selected, p.text_secondary,
+                "{id}: the tertiary-on-selected promotion was decoupled from text_secondary"
+            );
 
             // One hairline hue, two weights, strong is exactly double.
-            assert_eq!(rgba_to_u8(p.border_hairline), rgba_to_u8(p.border_hairline_strong), "{id}: the two hairline weights are different colours");
-            assert!((p.border_hairline_strong.a - p.border_hairline.a * 2.0).abs() < 1e-6, "{id}: border_hairline_strong is not twice border_hairline");
-            assert!(p.border_hairline_strong.a <= 1.0, "{id}: doubled hairline alpha overflowed");
+            assert_eq!(
+                rgba_to_u8(p.border_hairline),
+                rgba_to_u8(p.border_hairline_strong),
+                "{id}: the two hairline weights are different colours"
+            );
+            assert!(
+                (p.border_hairline_strong.a - p.border_hairline.a * 2.0).abs() < 1e-6,
+                "{id}: border_hairline_strong is not twice border_hairline"
+            );
+            assert!(
+                p.border_hairline_strong.a <= 1.0,
+                "{id}: doubled hairline alpha overflowed"
+            );
 
             // State-derived tokens keep their state colour's hue.
-            assert_eq!(rgba_to_u8(p.banner_danger_bg), rgba_to_u8(p.state_danger), "{id}: the danger banner is not built from state_danger");
-            assert_eq!(p.banner_danger_bg.a, BANNER_ALPHA, "{id}: banner alpha drifted");
-            assert_eq!(rgba_to_u8(p.state_danger_border), rgba_to_u8(p.state_danger), "{id}: the danger border is not built from state_danger");
-            assert_eq!(rgba_to_u8(p.state_success_border), rgba_to_u8(p.state_success), "{id}: the success border is not built from state_success");
-            assert_eq!(p.state_danger_border.a, STATE_BORDER_ALPHA, "{id}: danger border alpha drifted");
-            assert_eq!(p.state_success_border.a, STATE_BORDER_ALPHA, "{id}: success border alpha drifted");
+            assert_eq!(
+                rgba_to_u8(p.banner_danger_bg),
+                rgba_to_u8(p.state_danger),
+                "{id}: the danger banner is not built from state_danger"
+            );
+            assert_eq!(
+                p.banner_danger_bg.a, BANNER_ALPHA,
+                "{id}: banner alpha drifted"
+            );
+            assert_eq!(
+                rgba_to_u8(p.state_danger_border),
+                rgba_to_u8(p.state_danger),
+                "{id}: the danger border is not built from state_danger"
+            );
+            assert_eq!(
+                rgba_to_u8(p.state_success_border),
+                rgba_to_u8(p.state_success),
+                "{id}: the success border is not built from state_success"
+            );
+            assert_eq!(
+                p.state_danger_border.a, STATE_BORDER_ALPHA,
+                "{id}: danger border alpha drifted"
+            );
+            assert_eq!(
+                p.state_success_border.a, STATE_BORDER_ALPHA,
+                "{id}: success border alpha drifted"
+            );
 
             // One guide hue, two weights, muted is exactly half — the same
             // relationship the two hairlines have, in the other direction.
-            assert_eq!(rgba_to_u8(p.snap_guide), rgba_to_u8(p.text_primary), "{id}: the drag guide is not built from text_primary");
-            assert_eq!(rgba_to_u8(p.snap_guide_muted), rgba_to_u8(p.snap_guide), "{id}: the two guide weights are different colours");
-            assert!((p.snap_guide_muted.a - p.snap_guide.a / 2.0).abs() < 1e-6, "{id}: snap_guide_muted is not half snap_guide");
-            assert_eq!(p.snap_guide.a, SNAP_GUIDE_ALPHA, "{id}: guide alpha drifted");
+            assert_eq!(
+                rgba_to_u8(p.snap_guide),
+                rgba_to_u8(p.text_primary),
+                "{id}: the drag guide is not built from text_primary"
+            );
+            assert_eq!(
+                rgba_to_u8(p.snap_guide_muted),
+                rgba_to_u8(p.snap_guide),
+                "{id}: the two guide weights are different colours"
+            );
+            assert!(
+                (p.snap_guide_muted.a - p.snap_guide.a / 2.0).abs() < 1e-6,
+                "{id}: snap_guide_muted is not half snap_guide"
+            );
+            assert_eq!(
+                p.snap_guide.a, SNAP_GUIDE_ALPHA,
+                "{id}: guide alpha drifted"
+            );
 
             // The icon plate is always a low-alpha film, never opaque chrome.
-            assert!(p.row_icon_socket_bg.a > 0.0 && p.row_icon_socket_bg.a < 0.5, "{id}: the row-icon socket is not a low-alpha plate");
+            assert!(
+                p.row_icon_socket_bg.a > 0.0 && p.row_icon_socket_bg.a < 0.5,
+                "{id}: the row-icon socket is not a low-alpha plate"
+            );
         }
     }
 
@@ -1303,8 +1758,16 @@ mod tests {
             let panel = relative_luminance(t.palette.surface_panel);
             let plate = relative_luminance(t.palette.row_icon_socket_bg);
             match t.appearance {
-                Appearance::Dark => assert!(plate > panel, "{}: a dark theme needs a lighter icon plate than its panel (panel {panel:.3}, plate {plate:.3})", t.id),
-                Appearance::Light => assert!(plate < panel, "{}: a light theme needs a *darker* icon plate than its panel — a pale film vanishes on a pale surface (panel {panel:.3}, plate {plate:.3})", t.id),
+                Appearance::Dark => assert!(
+                    plate > panel,
+                    "{}: a dark theme needs a lighter icon plate than its panel (panel {panel:.3}, plate {plate:.3})",
+                    t.id
+                ),
+                Appearance::Light => assert!(
+                    plate < panel,
+                    "{}: a light theme needs a *darker* icon plate than its panel — a pale film vanishes on a pale surface (panel {panel:.3}, plate {plate:.3})",
+                    t.id
+                ),
             }
         }
     }
@@ -1392,14 +1855,21 @@ mod tests {
                     .map(|step| {
                         let f = step as f32 / 20.0;
                         let l = |x: f32, y: f32| x + (y - x) * f;
-                        let mixed =
-                            Rgba { r: l(a.r, b.r), g: l(a.g, b.g), b: l(a.b, b.b), a: 1.0 };
+                        let mixed = Rgba {
+                            r: l(a.r, b.r),
+                            g: l(a.g, b.g),
+                            b: l(a.b, b.b),
+                            a: 1.0,
+                        };
                         oklch_from_rgba(mixed).1 / floor
                     })
                     .fold(f32::INFINITY, f32::min)
             })
             .fold(f32::INFINITY, f32::min);
-        assert!(worst < RAMP_CHROMA_FLOOR, "an RGB mix kept {worst}, clearing the bound");
+        assert!(
+            worst < RAMP_CHROMA_FLOOR,
+            "an RGB mix kept {worst}, clearing the bound"
+        );
     }
 
     #[test]
@@ -1412,10 +1882,16 @@ mod tests {
             let (a, b) = (t.palette.state_success, t.palette.state_danger);
             for (f, expected) in [(0.0, a), (1.0, b)] {
                 let got = ramp(a, b, f);
-                for (channel, x, y) in
-                    [("r", got.r, expected.r), ("g", got.g, expected.g), ("b", got.b, expected.b)]
-                {
-                    assert!((x - y).abs() < 0.01, "{}: ramp({f}).{channel} {x} != {y}", t.id);
+                for (channel, x, y) in [
+                    ("r", got.r, expected.r),
+                    ("g", got.g, expected.g),
+                    ("b", got.b, expected.b),
+                ] {
+                    assert!(
+                        (x - y).abs() < 0.01,
+                        "{}: ramp({f}).{channel} {x} != {y}",
+                        t.id
+                    );
                 }
             }
         }
@@ -1445,8 +1921,11 @@ mod tests {
         // here rather than enforced.
         for t in THEMES {
             let panel = t.palette.surface_panel;
-            let backdrop =
-                if relative_luminance(panel) < 0.5 { rgb_const(0xffffff) } else { rgb_const(0) };
+            let backdrop = if relative_luminance(panel) < 0.5 {
+                rgb_const(0xffffff)
+            } else {
+                rgb_const(0)
+            };
             let alpha = t.palette.surface_panel_translucent.a;
             let composited = Rgba {
                 r: panel.r * alpha + backdrop.r * (1.0 - alpha),
@@ -1471,17 +1950,72 @@ mod tests {
         for t in THEMES {
             let p = &t.palette;
             let pairs: &[(&str, Rgba, &str, Rgba)] = &[
-                ("text_primary", p.text_primary, "surface_panel", p.surface_panel),
-                ("text_secondary", p.text_secondary, "surface_panel", p.surface_panel),
-                ("text_tertiary", p.text_tertiary, "surface_panel", p.surface_panel),
-                ("text_primary", p.text_primary, "surface_raised", p.surface_raised),
-                ("text_secondary", p.text_secondary, "surface_raised", p.surface_raised),
-                ("text_primary", p.text_primary, "surface_input", p.surface_input),
-                ("text_primary", p.text_primary, "surface_selected", p.surface_selected),
-                ("text_secondary", p.text_secondary, "surface_selected", p.surface_selected),
-                ("state_success", p.state_success, "surface_panel", p.surface_panel),
-                ("state_danger", p.state_danger, "surface_panel", p.surface_panel),
-                ("text_on_light", p.text_on_light, "text_primary", p.text_primary),
+                (
+                    "text_primary",
+                    p.text_primary,
+                    "surface_panel",
+                    p.surface_panel,
+                ),
+                (
+                    "text_secondary",
+                    p.text_secondary,
+                    "surface_panel",
+                    p.surface_panel,
+                ),
+                (
+                    "text_tertiary",
+                    p.text_tertiary,
+                    "surface_panel",
+                    p.surface_panel,
+                ),
+                (
+                    "text_primary",
+                    p.text_primary,
+                    "surface_raised",
+                    p.surface_raised,
+                ),
+                (
+                    "text_secondary",
+                    p.text_secondary,
+                    "surface_raised",
+                    p.surface_raised,
+                ),
+                (
+                    "text_primary",
+                    p.text_primary,
+                    "surface_input",
+                    p.surface_input,
+                ),
+                (
+                    "text_primary",
+                    p.text_primary,
+                    "surface_selected",
+                    p.surface_selected,
+                ),
+                (
+                    "text_secondary",
+                    p.text_secondary,
+                    "surface_selected",
+                    p.surface_selected,
+                ),
+                (
+                    "state_success",
+                    p.state_success,
+                    "surface_panel",
+                    p.surface_panel,
+                ),
+                (
+                    "state_danger",
+                    p.state_danger,
+                    "surface_panel",
+                    p.surface_panel,
+                ),
+                (
+                    "text_on_light",
+                    p.text_on_light,
+                    "text_primary",
+                    p.text_primary,
+                ),
             ];
             for (fg_name, fg, bg_name, bg) in pairs {
                 let ratio = contrast(*fg, *bg);
@@ -1490,7 +2024,11 @@ mod tests {
                 }
             }
         }
-        assert!(failures.is_empty(), "themes below WCAG AA 4.5:1:\n  {}", failures.join("\n  "));
+        assert!(
+            failures.is_empty(),
+            "themes below WCAG AA 4.5:1:\n  {}",
+            failures.join("\n  ")
+        );
     }
 
     /// A selected row has to be *visible* as a selected row. Contrast tuning
@@ -1501,7 +2039,11 @@ mod tests {
     fn every_theme_has_a_visible_selection_step_away_from_its_panel() {
         for t in THEMES {
             let step = contrast(t.palette.surface_selected, t.palette.surface_panel);
-            assert!(step >= 1.30, "{}: selected row is only {step:.2}:1 away from the panel — effectively invisible", t.id);
+            assert!(
+                step >= 1.30,
+                "{}: selected row is only {step:.2}:1 away from the panel — effectively invisible",
+                t.id
+            );
         }
     }
 
@@ -1536,12 +2078,29 @@ mod tests {
             snap_guide_muted,
         } = THEMES[0].palette;
         let all = [
-            surface_panel, surface_panel_translucent, surface_raised, menu_glass_tint,
-            surface_input, surface_selected, text_primary, text_secondary, text_tertiary,
-            text_tertiary_on_selected, text_on_light, keycap_shell_bg, state_success,
-            state_danger, state_success_border, state_danger_border, banner_danger_bg,
-            border_hairline, border_hairline_strong, row_icon_socket_bg, surface_tile,
-            snap_guide, snap_guide_muted,
+            surface_panel,
+            surface_panel_translucent,
+            surface_raised,
+            menu_glass_tint,
+            surface_input,
+            surface_selected,
+            text_primary,
+            text_secondary,
+            text_tertiary,
+            text_tertiary_on_selected,
+            text_on_light,
+            keycap_shell_bg,
+            state_success,
+            state_danger,
+            state_success_border,
+            state_danger_border,
+            banner_danger_bg,
+            border_hairline,
+            border_hairline_strong,
+            row_icon_socket_bg,
+            surface_tile,
+            snap_guide,
+            snap_guide_muted,
         ];
         assert_eq!(all.len(), PALETTE_TOKEN_COUNT);
     }
@@ -1556,11 +2115,21 @@ mod tests {
         let mut theirs: Vec<&str> = neko_protocol::BUILTIN_THEMES.iter().map(|t| t.id).collect();
         ours.sort_unstable();
         theirs.sort_unstable();
-        assert_eq!(ours, theirs, "theme.rs and neko_protocol::BUILTIN_THEMES disagree about which themes exist");
+        assert_eq!(
+            ours, theirs,
+            "theme.rs and neko_protocol::BUILTIN_THEMES disagree about which themes exist"
+        );
 
         for t in THEMES {
-            let listed = neko_protocol::BUILTIN_THEMES.iter().find(|b| b.id == t.id).unwrap();
-            assert_eq!(listed.name, t.name, "{}: display name differs between the two registries", t.id);
+            let listed = neko_protocol::BUILTIN_THEMES
+                .iter()
+                .find(|b| b.id == t.id)
+                .unwrap();
+            assert_eq!(
+                listed.name, t.name,
+                "{}: display name differs between the two registries",
+                t.id
+            );
         }
         assert!(theme_by_id(neko_protocol::DEFAULT_THEME_ID).is_some());
         assert_eq!(DEFAULT_THEME_ID, neko_protocol::DEFAULT_THEME_ID);
@@ -1601,14 +2170,22 @@ mod tests {
         let _guard = test_lock();
         set_active("catppuccin-mocha");
         assert!(!set_active("no-such-theme"));
-        assert_eq!(active_theme().id, "catppuccin-mocha", "a bad persisted id must leave the live palette alone");
+        assert_eq!(
+            active_theme().id,
+            "catppuccin-mocha",
+            "a bad persisted id must leave the live palette alone"
+        );
         set_active(DEFAULT_THEME_ID);
     }
 
     #[test]
     fn every_theme_keeps_the_native_material_visible() {
         for t in THEMES {
-            assert!(t.keeps_translucency(), "{}: an opaque theme discards the native window material", t.id);
+            assert!(
+                t.keeps_translucency(),
+                "{}: an opaque theme discards the native window material",
+                t.id
+            );
         }
     }
 }

@@ -140,8 +140,10 @@ const MAX_CANDIDATES: usize = 10;
 /// See this module's doc comment, "Display names" section — the two real,
 /// verified exceptions where no localized name exists anywhere in the
 /// bundle.
-const DISPLAY_NAME_OVERRIDES: &[(&str, &str)] =
-    &[("com.apple.Battery-Settings.extension", "Battery"), ("com.apple.HeadphoneSettings", "Headphones")];
+const DISPLAY_NAME_OVERRIDES: &[(&str, &str)] = &[
+    ("com.apple.Battery-Settings.extension", "Battery"),
+    ("com.apple.HeadphoneSettings", "Headphones"),
+];
 
 /// One enumerated pane: a stable identifier (also the `x-apple.
 /// systempreferences:` URL target — see this module's doc comment) and its
@@ -159,16 +161,32 @@ fn read_plist_dict(path: &Path) -> Option<plist::Dictionary> {
 /// See this module's doc comment, "Display names" section.
 fn localized_display_name(appex_dir: &Path) -> Option<String> {
     let loctable = read_plist_dict(&appex_dir.join("Contents/Resources/InfoPlist.loctable"))?;
-    let name = loctable.get("en")?.as_dictionary()?.get("CFBundleDisplayName")?.as_string()?.trim();
+    let name = loctable
+        .get("en")?
+        .as_dictionary()?
+        .get("CFBundleDisplayName")?
+        .as_string()?
+        .trim();
     (!name.is_empty()).then(|| name.to_string())
 }
 
 fn display_name(bundle_id: &str, appex_dir: &Path, info: &plist::Dictionary) -> Option<String> {
-    if let Some((_, name)) = DISPLAY_NAME_OVERRIDES.iter().find(|(id, _)| *id == bundle_id) {
+    if let Some((_, name)) = DISPLAY_NAME_OVERRIDES
+        .iter()
+        .find(|(id, _)| *id == bundle_id)
+    {
         return Some((*name).to_string());
     }
-    let from_key = |key: &str| info.get(key).and_then(|v| v.as_string()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
-    localized_display_name(appex_dir).or_else(|| from_key("CFBundleDisplayName")).or_else(|| from_key("CFBundleName"))
+    let from_key = |key: &str| {
+        info.get(key)
+            .and_then(|v| v.as_string())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    localized_display_name(appex_dir)
+        .or_else(|| from_key("CFBundleDisplayName"))
+        .or_else(|| from_key("CFBundleName"))
 }
 
 /// Parses one `.appex` bundle into a [`SettingsPane`], or `None` if it
@@ -180,8 +198,14 @@ fn pane_from_appex(appex_dir: &Path) -> Option<SettingsPane> {
     if ext_attrs.get("EXExtensionPointIdentifier")?.as_string()? != SETTINGS_EXTENSION_POINT {
         return None;
     }
-    let settings_attrs = ext_attrs.get("SettingsExtensionAttributes")?.as_dictionary()?;
-    if !settings_attrs.get("allowsXAppleSystemPreferencesURLScheme").and_then(|v| v.as_boolean()).unwrap_or(false) {
+    let settings_attrs = ext_attrs
+        .get("SettingsExtensionAttributes")?
+        .as_dictionary()?;
+    if !settings_attrs
+        .get("allowsXAppleSystemPreferencesURLScheme")
+        .and_then(|v| v.as_boolean())
+        .unwrap_or(false)
+    {
         return None;
     }
     let bundle_id = info.get("CFBundleIdentifier")?.as_string()?.to_string();
@@ -199,14 +223,20 @@ pub fn enumerate_panes() -> Vec<SettingsPane> {
 /// scan — testable against a fabricated fixture directory rather than the
 /// real, OS-version-dependent `/System/Library/ExtensionKit/Extensions`.
 fn enumerate_panes_in(dir: &Path) -> Vec<SettingsPane> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     let mut panes: Vec<SettingsPane> = entries
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "appex"))
         .filter_map(|path| pane_from_appex(&path))
         .collect();
-    panes.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.bundle_id.cmp(&b.bundle_id)));
+    panes.sort_by(|a, b| {
+        a.title
+            .cmp(&b.title)
+            .then_with(|| a.bundle_id.cmp(&b.bundle_id))
+    });
     panes.dedup_by(|a, b| a.bundle_id == b.bundle_id);
     panes
 }
@@ -247,7 +277,9 @@ pub struct SettingsProvider {
 
 impl SettingsProvider {
     pub fn new() -> Self {
-        Self { panes: enumerate_panes() }
+        Self {
+            panes: enumerate_panes(),
+        }
     }
 
     /// A provider over an explicit, fabricated pane list — for daemon-level
@@ -306,9 +338,19 @@ impl Provider for SettingsProvider {
         let mut candidates: Vec<Candidate> = self
             .panes
             .iter()
-            .filter_map(|pane| Some(build_candidate(fuzzy_score(query, &pane.title)?, pane, icon.clone())))
+            .filter_map(|pane| {
+                Some(build_candidate(
+                    fuzzy_score(query, &pane.title)?,
+                    pane,
+                    icon.clone(),
+                ))
+            })
             .collect();
-        candidates.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.item.title.cmp(&b.item.title)));
+        candidates.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.item.title.cmp(&b.item.title))
+        });
         candidates.truncate(MAX_CANDIDATES);
         candidates
     }
@@ -317,7 +359,8 @@ impl Provider for SettingsProvider {
         if !self.panes.iter().any(|p| p.bundle_id == id) {
             return Err(ProviderError(format!("no such settings pane: {id}")));
         }
-        crate::launch::open_url(&format!("x-apple.systempreferences:{id}")).map_err(|e| ProviderError(e.to_string()))
+        crate::launch::open_url(&format!("x-apple.systempreferences:{id}"))
+            .map_err(|e| ProviderError(e.to_string()))
     }
 }
 
@@ -330,7 +373,10 @@ mod tests {
         std::env::temp_dir().join(format!(
             "neko-settings-test-{}-{}-{name}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ))
     }
 
@@ -387,7 +433,13 @@ mod tests {
         );
 
         let panes = enumerate_panes_in(&dir);
-        assert_eq!(panes, vec![SettingsPane { bundle_id: "com.apple.Mouse-Settings.extension".to_string(), title: "Mouse".to_string() }]);
+        assert_eq!(
+            panes,
+            vec![SettingsPane {
+                bundle_id: "com.apple.Mouse-Settings.extension".to_string(),
+                title: "Mouse".to_string()
+            }]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -480,7 +532,9 @@ mod tests {
         // `apps.rs`'s own `scanning_the_real_machine_finds_at_least_finder_or_safari`.
         let panes = enumerate_panes();
         assert!(
-            panes.iter().any(|p| p.title == "Displays" || p.title == "Sound"),
+            panes
+                .iter()
+                .any(|p| p.title == "Displays" || p.title == "Sound"),
             "expected at least one of Displays/Sound among {} enumerated panes",
             panes.len()
         );
@@ -499,8 +553,14 @@ mod tests {
     #[test]
     fn a_query_matching_a_pane_name_ranks_it() {
         let provider = SettingsProvider::with_panes(vec![
-            SettingsPane { bundle_id: "com.apple.preference.displays".to_string(), title: "Displays".to_string() },
-            SettingsPane { bundle_id: "com.apple.preference.sound".to_string(), title: "Sound".to_string() },
+            SettingsPane {
+                bundle_id: "com.apple.preference.displays".to_string(),
+                title: "Displays".to_string(),
+            },
+            SettingsPane {
+                bundle_id: "com.apple.preference.sound".to_string(),
+                title: "Sound".to_string(),
+            },
         ]);
         let items = provider.search("displays", 0);
         assert_eq!(items.len(), 1);

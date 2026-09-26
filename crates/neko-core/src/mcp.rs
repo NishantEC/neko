@@ -99,11 +99,15 @@ impl McpClient {
         let home = std::env::home_dir().ok_or(McpError::NotRunning)?;
         let raw = std::fs::read_to_string(home.join(PID_FILE)).map_err(|_| McpError::NotRunning)?;
         let listen = listen_address(&raw).ok_or(McpError::NotRunning)?;
-        Ok(Self { endpoint: format!("http://{listen}/mcp/agents") })
+        Ok(Self {
+            endpoint: format!("http://{listen}/mcp/agents"),
+        })
     }
 
     pub fn with_endpoint(endpoint: impl Into<String>) -> Self {
-        Self { endpoint: endpoint.into() }
+        Self {
+            endpoint: endpoint.into(),
+        }
     }
 
     /// Calls one tool by name, returning its structured result.
@@ -226,7 +230,10 @@ impl McpClient {
 pub fn listen_address(raw: &str) -> Option<String> {
     let parsed: Value = serde_json::from_str(raw.trim()).ok()?;
     let listen = parsed.get("listen")?.as_str()?;
-    listen.parse::<SocketAddr>().ok().map(|addr| addr.to_string())
+    listen
+        .parse::<SocketAddr>()
+        .ok()
+        .map(|addr| addr.to_string())
 }
 
 /// Splits `--write-out`'s trailing status line off the body — the same shape
@@ -350,7 +357,8 @@ mod tests {
     fn both_framings_the_daemon_actually_uses_are_read() {
         // Verified live: the same endpoint answers one request as SSE and
         // another as a plain body.
-        let sse = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n";
+        let sse =
+            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n";
         assert_eq!(parse_frame(sse).unwrap()["result"]["ok"], json!(true));
         let plain = r#"{"jsonrpc":"2.0","id":1,"result":{"ok":true}}"#;
         assert_eq!(parse_frame(plain).unwrap()["result"]["ok"], json!(true));
@@ -371,13 +379,19 @@ mod tests {
             "isError": true,
             "content": [{"type": "text", "text": "no such agent"}]
         }});
-        assert_eq!(tool_result(&body), Err(McpError::Failed("no such agent".to_string())));
+        assert_eq!(
+            tool_result(&body),
+            Err(McpError::Failed("no such agent".to_string()))
+        );
     }
 
     #[test]
     fn a_json_rpc_error_and_a_tool_error_collapse_to_one_kind() {
         let body = json!({"error": {"code": -32602, "message": "bad arguments"}});
-        assert_eq!(tool_result(&body), Err(McpError::Failed("bad arguments".to_string())));
+        assert_eq!(
+            tool_result(&body),
+            Err(McpError::Failed("bad arguments".to_string()))
+        );
     }
 
     #[test]
@@ -426,7 +440,10 @@ mod tests {
 
     #[test]
     fn a_status_line_is_split_off_the_body() {
-        assert_eq!(split_status("{\"a\":1}\n200"), ("{\"a\":1}".to_string(), Some(200)));
+        assert_eq!(
+            split_status("{\"a\":1}\n200"),
+            ("{\"a\":1}".to_string(), Some(200))
+        );
         assert_eq!(split_status("\n401").1, Some(401));
     }
 
@@ -448,9 +465,12 @@ mod tests {
             let tools = client.list_tools().expect("tools/list");
             eprintln!("{} tools", tools.len());
             // The four groups `docs/plan-agent-control-plane.md` builds on.
-            for required in
-                ["list_agents", "list_pending_permissions", "respond_to_permission", "list_schedules"]
-            {
+            for required in [
+                "list_agents",
+                "list_pending_permissions",
+                "respond_to_permission",
+                "list_schedules",
+            ] {
                 assert!(tools.iter().any(|t| t == required), "missing {required}");
             }
         }
@@ -459,7 +479,9 @@ mod tests {
         #[ignore = "needs a running Paseo daemon"]
         fn a_real_tool_call_returns_structured_content() {
             let client = McpClient::discover().expect("a running daemon");
-            let out = client.call("list_agents", json!({"limit": 3})).expect("list_agents");
+            let out = client
+                .call("list_agents", json!({"limit": 3}))
+                .expect("list_agents");
             eprintln!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
             assert!(out.is_object() || out.is_array());
         }
@@ -469,11 +491,13 @@ mod tests {
         fn a_tool_that_fails_on_its_own_terms_surfaces_as_an_error() {
             let client = McpClient::discover().expect("a running daemon");
             let err = client
-                .call("get_agent_status", json!({"agentId": "definitely-not-an-agent"}))
+                .call(
+                    "get_agent_status",
+                    json!({"agentId": "definitely-not-an-agent"}),
+                )
                 .expect_err("a missing agent is an error");
             eprintln!("{err}");
             assert!(matches!(err, McpError::Failed(_)));
         }
     }
-
 }

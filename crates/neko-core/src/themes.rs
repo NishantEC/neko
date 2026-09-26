@@ -219,7 +219,10 @@ mod tests {
         let (_p, db) = provider();
         // Written directly, bypassing `set_theme`'s validation — this models a
         // downgrade, or a theme removed between releases, not a bad call.
-        db.lock().unwrap().set_setting(THEME_KEY, "removed-in-a-later-build").unwrap();
+        db.lock()
+            .unwrap()
+            .set_setting(THEME_KEY, "removed-in-a-later-build")
+            .unwrap();
         assert_eq!(get_theme(&db.lock().unwrap()).unwrap(), DEFAULT_THEME_ID);
     }
 
@@ -254,7 +257,10 @@ mod tests {
             assert_eq!(c.item.section_label, "Themes");
             assert_eq!(c.item.action_label, "Use Theme  ↵");
             assert!(c.item.subtitle.is_some());
-            assert_eq!(c.item.enters_mode, None, "a theme row applies a theme; it does not open another mode");
+            assert_eq!(
+                c.item.enters_mode, None,
+                "a theme row applies a theme; it does not open another mode"
+            );
         }
     }
 }

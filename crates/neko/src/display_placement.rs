@@ -49,7 +49,10 @@ use crate::snap::{self, Rect};
 /// below, so both always agree on the exact same offsets — panel geometry
 /// itself is frozen by captain decision and must not drift between the
 /// two call sites.
-pub(crate) fn upper_third_offset(display_size: Size<Pixels>, panel_size: Size<Pixels>) -> Point<Pixels> {
+pub(crate) fn upper_third_offset(
+    display_size: Size<Pixels>,
+    panel_size: Size<Pixels>,
+) -> Point<Pixels> {
     let x = (display_size.width - panel_size.width) / 2.0;
     let y = display_size.height / 3.0 - panel_size.height / 4.0;
     point(x, y)
@@ -71,12 +74,18 @@ pub(crate) fn pick_screen_for_point(screens: &[Rect], point_x: f64, point_y: f64
 }
 
 #[cfg(target_os = "macos")]
-pub fn reposition_to_cursor_display(window: &Window, panel_size: Size<Pixels>) -> Result<String, String> {
+pub fn reposition_to_cursor_display(
+    window: &Window,
+    panel_size: Size<Pixels>,
+) -> Result<String, String> {
     macos::reposition(window, panel_size)
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn reposition_to_cursor_display(_window: &Window, _panel_size: Size<Pixels>) -> Result<String, String> {
+pub fn reposition_to_cursor_display(
+    _window: &Window,
+    _panel_size: Size<Pixels>,
+) -> Result<String, String> {
     Err("multi-display repositioning is only implemented on macOS".to_string())
 }
 
@@ -233,10 +242,14 @@ mod macos {
         let mtm = MainThreadMarker::new()
             .ok_or_else(|| "display reposition attempted off the main thread".to_string())?;
         let native = native_window(window)?;
-        let screen = screen_under_cursor(mtm).ok_or_else(|| "no NSScreen is available".to_string())?;
+        let screen =
+            screen_under_cursor(mtm).ok_or_else(|| "no NSScreen is available".to_string())?;
         let frame = screen.frame();
         let offset = upper_third_offset(
-            gpui::size(gpui::px(frame.size.width as f32), gpui::px(frame.size.height as f32)),
+            gpui::size(
+                gpui::px(frame.size.width as f32),
+                gpui::px(frame.size.height as f32),
+            ),
             panel_size,
         );
         let top_left = NSPoint {
@@ -246,7 +259,12 @@ mod macos {
         native.setFrameTopLeftPoint(top_left);
         Ok(format!(
             "screen frame origin=({}, {}) size=({}, {}), top-left set to ({}, {})",
-            frame.origin.x, frame.origin.y, frame.size.width, frame.size.height, top_left.x, top_left.y
+            frame.origin.x,
+            frame.origin.y,
+            frame.size.width,
+            frame.size.height,
+            top_left.x,
+            top_left.y
         ))
     }
 
@@ -267,7 +285,8 @@ mod macos {
     pub fn cursor_screen() -> Result<super::CursorScreen, String> {
         let mtm = MainThreadMarker::new()
             .ok_or_else(|| "screen lookup attempted off the main thread".to_string())?;
-        let screen = screen_under_cursor(mtm).ok_or_else(|| "no NSScreen is available".to_string())?;
+        let screen =
+            screen_under_cursor(mtm).ok_or_else(|| "no NSScreen is available".to_string())?;
         let visible = screen.visibleFrame();
         Ok(super::CursorScreen {
             full: screen_frame(&screen),
@@ -291,7 +310,10 @@ mod macos {
     }
 
     pub fn move_window_origin(window: &Window, origin: snap::Point) -> Result<(), String> {
-        native_window(window)?.setFrameOrigin(NSPoint { x: origin.x, y: origin.y });
+        native_window(window)?.setFrameOrigin(NSPoint {
+            x: origin.x,
+            y: origin.y,
+        });
         Ok(())
     }
 }
@@ -327,8 +349,18 @@ mod tests {
         // Built-in on the left (origin 0,0), external to the right —
         // a common two-display arrangement.
         let screens = [
-            Rect { x: 0.0, y: 0.0, width: 3456.0, height: 2234.0 },
-            Rect { x: 3456.0, y: 0.0, width: 1920.0, height: 1080.0 },
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 3456.0,
+                height: 2234.0,
+            },
+            Rect {
+                x: 3456.0,
+                y: 0.0,
+                width: 1920.0,
+                height: 1080.0,
+            },
         ];
         assert_eq!(pick_screen_for_point(&screens, 100.0, 100.0), Some(0));
         assert_eq!(pick_screen_for_point(&screens, 4000.0, 500.0), Some(1));
@@ -340,15 +372,30 @@ mod tests {
         // Settings' Displays arrangement gets negative-origin coordinates
         // in AppKit's shared global space — must still resolve correctly.
         let screens = [
-            Rect { x: 0.0, y: 0.0, width: 3456.0, height: 2234.0 },
-            Rect { x: -1920.0, y: 1000.0, width: 1920.0, height: 1080.0 },
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 3456.0,
+                height: 2234.0,
+            },
+            Rect {
+                x: -1920.0,
+                y: 1000.0,
+                width: 1920.0,
+                height: 1080.0,
+            },
         ];
         assert_eq!(pick_screen_for_point(&screens, -1000.0, 1500.0), Some(1));
     }
 
     #[test]
     fn pick_screen_for_point_returns_none_when_the_cursor_is_outside_every_screen() {
-        let screens = [Rect { x: 0.0, y: 0.0, width: 3456.0, height: 2234.0 }];
+        let screens = [Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 3456.0,
+            height: 2234.0,
+        }];
         assert_eq!(pick_screen_for_point(&screens, -50.0, -50.0), None);
     }
 
@@ -359,8 +406,16 @@ mod tests {
     /// **bottom-left, y-up** one, and they must describe the same rectangle.
     #[test]
     fn home_origin_is_the_same_place_reposition_puts_a_summoned_panel() {
-        let full = Rect { x: 0.0, y: 0.0, width: 1440.0, height: 900.0 };
-        let panel = snap::Size { width: 760.0, height: 420.0 };
+        let full = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1440.0,
+            height: 900.0,
+        };
+        let panel = snap::Size {
+            width: 760.0,
+            height: 420.0,
+        };
 
         let home = home_origin(full, panel);
 
@@ -375,7 +430,11 @@ mod tests {
         let top_left_y = full.y + full.height - offset.y.to_f64();
 
         assert_eq!(home.x, top_left_x);
-        assert_eq!(home.y + panel.height, top_left_y, "home is that same top edge, measured from the bottom");
+        assert_eq!(
+            home.y + panel.height,
+            top_left_y,
+            "home is that same top edge, measured from the bottom"
+        );
     }
 
     /// The one number a display's own menu bar/Dock insets must **not** change:
@@ -383,10 +442,28 @@ mod tests {
     /// with different Dock settings still call the same place home.
     #[test]
     fn home_origin_ignores_the_visible_frame_and_tracks_the_display_it_is_given() {
-        let panel = snap::Size { width: 760.0, height: 420.0 };
-        let primary = home_origin(Rect { x: 0.0, y: 0.0, width: 1440.0, height: 900.0 }, panel);
-        let secondary =
-            home_origin(Rect { x: 1440.0, y: 0.0, width: 1440.0, height: 900.0 }, panel);
+        let panel = snap::Size {
+            width: 760.0,
+            height: 420.0,
+        };
+        let primary = home_origin(
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 1440.0,
+                height: 900.0,
+            },
+            panel,
+        );
+        let secondary = home_origin(
+            Rect {
+                x: 1440.0,
+                y: 0.0,
+                width: 1440.0,
+                height: 900.0,
+            },
+            panel,
+        );
         assert_eq!(secondary.x - primary.x, 1440.0);
         assert_eq!(secondary.y, primary.y);
     }

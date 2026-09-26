@@ -42,8 +42,13 @@ impl AccessibilityChecker for SystemAccessibilityChecker {
         // constant owned by the system framework; `wrap_under_get_rule`
         // retains it before this wrapper can release it on drop, which is
         // the documented-correct way to hold a "Get"-rule CF constant.
-        let key = unsafe { CFString::wrap_under_get_rule(accessibility_sys::kAXTrustedCheckOptionPrompt) };
-        let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), CFBoolean::true_value().as_CFType())]);
+        let key = unsafe {
+            CFString::wrap_under_get_rule(accessibility_sys::kAXTrustedCheckOptionPrompt)
+        };
+        let options = CFDictionary::from_CFType_pairs(&[(
+            key.as_CFType(),
+            CFBoolean::true_value().as_CFType(),
+        )]);
         // SAFETY: `options` is a live, correctly-typed `CFDictionaryRef` for
         // the duration of this call; `AXIsProcessTrustedWithOptions` reads
         // it synchronously and does not retain it past return.

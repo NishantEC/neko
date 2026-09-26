@@ -55,7 +55,9 @@ pub struct Layered {
 /// Wrap `child` in one atomic paint layer — see this module's own doc
 /// comment.
 pub fn layered(child: impl IntoElement) -> Layered {
-    Layered { child: child.into_any_element() }
+    Layered {
+        child: child.into_any_element(),
+    }
 }
 
 impl IntoElement for Layered {

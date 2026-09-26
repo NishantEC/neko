@@ -51,8 +51,8 @@
 //! synchronisation, no second summon path that could drift from the first,
 //! and 20ms is well under the threshold at which a person could tell.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Set by the menu bar item's click handler, cleared by whoever acts on it.
 ///
@@ -65,13 +65,19 @@ static PREFERENCES_REQUESTED: AtomicBool = AtomicBool::new(false);
 static WORKSPACE_REQUESTED: AtomicBool = AtomicBool::new(false);
 static WORKSPACE_TASK: Mutex<Option<String>> = Mutex::new(None);
 
-pub fn request_workspace() { WORKSPACE_REQUESTED.store(true, Ordering::Relaxed); }
-pub fn take_workspace_request() -> bool { WORKSPACE_REQUESTED.swap(false, Ordering::Relaxed) }
+pub fn request_workspace() {
+    WORKSPACE_REQUESTED.store(true, Ordering::Relaxed);
+}
+pub fn take_workspace_request() -> bool {
+    WORKSPACE_REQUESTED.swap(false, Ordering::Relaxed)
+}
 pub fn request_workspace_task(id: String) {
     *WORKSPACE_TASK.lock().unwrap() = Some(id);
     request_workspace();
 }
-pub fn take_workspace_task() -> Option<String> { WORKSPACE_TASK.lock().unwrap().take() }
+pub fn take_workspace_task() -> Option<String> {
+    WORKSPACE_TASK.lock().unwrap().take()
+}
 
 /// The quota the menu last heard about, and the count beside it.
 ///
@@ -89,7 +95,10 @@ pub struct MenuBarState {
 }
 
 impl MenuBarState {
-    const EMPTY: Self = Self { waiting: 0, quotas: Vec::new() };
+    const EMPTY: Self = Self {
+        waiting: 0,
+        quotas: Vec::new(),
+    };
 }
 
 /// Below this, a quota is worth interrupting somebody about.
@@ -164,7 +173,6 @@ pub fn quota_lines(state: &MenuBarState) -> Vec<String> {
 #[cfg(not(target_os = "macos"))]
 pub use stub::*;
 
-
 #[cfg(not(target_os = "macos"))]
 mod stub {
     pub fn install() -> Option<String> {
@@ -187,10 +195,9 @@ mod macos {
     use objc2::runtime::{AnyObject, Sel};
     use objc2::{AnyThread, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::{
-        NSApplication, NSBitmapImageRep, NSColor,
-        NSDeviceRGBColorSpace, NSEventMask, NSEventModifierFlags, NSEventType, NSGraphicsContext,
-        NSImage, NSMenu, NSMenuItem, NSRectFill, NSStatusBar, NSStatusItem,
-        NSVariableStatusItemLength,
+        NSApplication, NSBitmapImageRep, NSColor, NSDeviceRGBColorSpace, NSEventMask,
+        NSEventModifierFlags, NSEventType, NSGraphicsContext, NSImage, NSMenu, NSMenuItem,
+        NSRectFill, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
     };
     use objc2_foundation::{MainThreadMarker, NSObject, NSPoint, NSRect, NSSize, NSString};
 
@@ -281,7 +288,10 @@ mod macos {
                 0,
                 0,
             )?;
-            bitmap.setSize(NSSize { width: MARK_POINTS, height: MARK_POINTS });
+            bitmap.setSize(NSSize {
+                width: MARK_POINTS,
+                height: MARK_POINTS,
+            });
 
             let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&bitmap)?;
             NSGraphicsContext::saveGraphicsState_class();
@@ -291,15 +301,24 @@ mod macos {
                 // AppKit's origin is bottom-left; the grid's is top-left.
                 let flipped = MARK_BOX - y - side;
                 NSRectFill(NSRect {
-                    origin: NSPoint { x: x * scale, y: flipped * scale },
-                    size: NSSize { width: side * scale, height: side * scale },
+                    origin: NSPoint {
+                        x: x * scale,
+                        y: flipped * scale,
+                    },
+                    size: NSSize {
+                        width: side * scale,
+                        height: side * scale,
+                    },
                 });
             }
             NSGraphicsContext::restoreGraphicsState_class();
 
             let image = NSImage::initWithSize(
                 NSImage::alloc(),
-                NSSize { width: MARK_POINTS, height: MARK_POINTS },
+                NSSize {
+                    width: MARK_POINTS,
+                    height: MARK_POINTS,
+                },
             );
             image.addRepresentation(&bitmap);
             // A template image is tinted by the menu bar rather than drawn as
@@ -513,7 +532,9 @@ mod macos {
     /// signed in changes, so the *shape* changes, and rebuilding is both
     /// simpler and impossible to leave half-updated.
     fn rebuild_menu() {
-        let Some(mtm) = MainThreadMarker::new() else { return };
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
         ITEM.with(|slot| {
             // Never panic on a nested borrow; the next quota update rebuilds.
             if let Ok(mut held) = slot.try_borrow_mut()
@@ -592,7 +613,9 @@ mod macos {
 
     impl MenuBarItem {
         fn set_title(&self, label: &str) {
-            let Some(mtm) = MainThreadMarker::new() else { return };
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
             // Pooled like every other repeated AppKit call in this project —
             // `AGENTS.md`, "Clipboard capture memory".
             autoreleasepool(|_| {
@@ -627,12 +650,15 @@ mod macos {
             Some(format!(
                 "title {:?}, image {}, menu [{}]",
                 button.title().to_string(),
-                if button.image().is_some() { "set" } else { "MISSING" },
+                if button.image().is_some() {
+                    "set"
+                } else {
+                    "MISSING"
+                },
                 items.join(", ")
             ))
         }
     }
-
 }
 
 #[cfg(test)]
@@ -660,7 +686,10 @@ mod tests {
         let image = super::macos::mark_image().expect("the mark failed to draw");
         assert_eq!(image.size().width, 17.0);
         assert_eq!(image.size().height, 17.0);
-        assert!(image.isTemplate(), "not a template - the menu bar would not tint it");
+        assert!(
+            image.isTemplate(),
+            "not a template - the menu bar would not tint it"
+        );
         assert!(
             image.representations().count() > 0,
             "no representation attached, the item would be blank"
@@ -714,9 +743,15 @@ mod tests {
     fn the_count_is_honest_because_the_menu_bar_grows_to_fit_it() {
         // The Dock badge capped at "99+" because a badge is a small fixed
         // circle. This is not, so there is nothing to protect.
-        let one = MenuBarState { waiting: 1, quotas: Vec::new() };
+        let one = MenuBarState {
+            waiting: 1,
+            quotas: Vec::new(),
+        };
         assert_eq!(title_for(&one).as_deref(), Some("1"));
-        let many = MenuBarState { waiting: 250, quotas: Vec::new() };
+        let many = MenuBarState {
+            waiting: 250,
+            quotas: Vec::new(),
+        };
         assert_eq!(title_for(&many).as_deref(), Some("250"));
     }
 
@@ -741,16 +776,25 @@ mod tests {
 
     #[test]
     fn only_a_quota_past_the_line_is_worth_a_title() {
-        let plenty = MenuBarState { waiting: 0, quotas: vec![summary("claude", Some(60))] };
+        let plenty = MenuBarState {
+            waiting: 0,
+            quotas: vec![summary("claude", Some(60))],
+        };
         assert_eq!(title_for(&plenty), None, "comfortable is not news");
-        let low = MenuBarState { waiting: 0, quotas: vec![summary("claude", Some(4))] };
+        let low = MenuBarState {
+            waiting: 0,
+            quotas: vec![summary("claude", Some(4))],
+        };
         assert_eq!(title_for(&low).as_deref(), Some("4%"));
         let edge = MenuBarState {
             waiting: 0,
             quotas: vec![summary("claude", Some(QUOTA_WARN_PERCENT))],
         };
         assert!(edge.quotas[0].percent_left.is_some());
-        assert_eq!(title_for(&edge).as_deref(), Some(format!("{QUOTA_WARN_PERCENT}%").as_str()));
+        assert_eq!(
+            title_for(&edge).as_deref(),
+            Some(format!("{QUOTA_WARN_PERCENT}%").as_str())
+        );
     }
 
     #[test]
@@ -759,10 +803,17 @@ mod tests {
         // the two answers acted on most differently.
         let state = MenuBarState {
             waiting: 0,
-            quotas: vec![summary("claude", Some(70)), summary("grok", None), summary("codex", Some(5))],
+            quotas: vec![
+                summary("claude", Some(70)),
+                summary("grok", None),
+                summary("codex", Some(5)),
+            ],
         };
         assert_eq!(title_for(&state).as_deref(), Some("5%"));
-        let unreadable = MenuBarState { waiting: 0, quotas: vec![summary("grok", None)] };
+        let unreadable = MenuBarState {
+            waiting: 0,
+            quotas: vec![summary("grok", None)],
+        };
         assert_eq!(title_for(&unreadable), None);
     }
 

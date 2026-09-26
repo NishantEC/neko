@@ -183,7 +183,9 @@ fn app_category_score(query: &str, title: &str, original_score: f32) -> f32 {
 fn category_score(query: &str, title: &str, original_score: f32, bonus: f32) -> f32 {
     let query_lower = query.to_lowercase();
     let is_prefix_match = title.to_lowercase().starts_with(&query_lower)
-        || title.split_whitespace().any(|word| word.to_lowercase().starts_with(&query_lower));
+        || title
+            .split_whitespace()
+            .any(|word| word.to_lowercase().starts_with(&query_lower));
     if !is_prefix_match {
         return original_score;
     }
@@ -346,7 +348,11 @@ fn clipboard_max_slots(limit: usize) -> usize {
 ///    candidates sorts last (its top-candidate score is defined as
 ///    `f32::NEG_INFINITY`) but contributes zero rows either way, so its
 ///    exact position is unobservable.
-pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize, query: &str) -> Vec<SearchItem> {
+pub fn allocate(
+    mut providers: Vec<(&str, Vec<Candidate>)>,
+    limit: usize,
+    query: &str,
+) -> Vec<SearchItem> {
     for (id, candidates) in providers.iter_mut() {
         if *id == "app" {
             for candidate in candidates.iter_mut() {
@@ -354,10 +360,15 @@ pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize, query:
             }
         } else if *id == "settings" {
             for candidate in candidates.iter_mut() {
-                candidate.score = settings_category_score(query, &candidate.item.title, candidate.score);
+                candidate.score =
+                    settings_category_score(query, &candidate.item.title, candidate.score);
             }
         }
-        candidates.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.item.title.cmp(&b.item.title)));
+        candidates.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.item.title.cmp(&b.item.title))
+        });
     }
 
     let n = providers.len();
@@ -384,13 +395,19 @@ pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize, query:
     let clipboard_cap = providers
         .iter()
         .position(|(id, _)| *id == "clipboard")
-        .filter(|_| providers.iter().any(|(id, candidates)| *id != "clipboard" && !candidates.is_empty()))
+        .filter(|_| {
+            providers
+                .iter()
+                .any(|(id, candidates)| *id != "clipboard" && !candidates.is_empty())
+        })
         .map(|clipboard_index| (clipboard_index, clipboard_max_slots(limit)));
 
     while remaining > 0 {
         let mut best: Option<(usize, f32)> = None;
         for (i, (_, candidates)) in providers.iter().enumerate() {
-            if clipboard_cap.is_some_and(|(clipboard_index, cap)| i == clipboard_index && taken[i] >= cap) {
+            if clipboard_cap
+                .is_some_and(|(clipboard_index, cap)| i == clipboard_index && taken[i] >= cap)
+            {
                 continue;
             }
             if let Some(candidate) = candidates.get(taken[i])
@@ -417,7 +434,9 @@ pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize, query:
     order.sort_by(|&a, &b| {
         let section_rank_score = |i: usize| {
             let (id, candidates, _) = &sections[i];
-            let Some(top) = candidates.first().map(|c| c.score) else { return f32::NEG_INFINITY };
+            let Some(top) = candidates.first().map(|c| c.score) else {
+                return f32::NEG_INFINITY;
+            };
             // Clipboard's own top score already carries up to
             // `CLIPBOARD_RECENCY_BOOST_CEILING` of "just copied" freshness
             // (`ClipboardProvider::search`) on top of however well it
@@ -433,7 +452,11 @@ pub fn allocate(mut providers: Vec<(&str, Vec<Candidate>)>, limit: usize, query:
             // `candidate.score` itself, so row-level ranking is untouched)
             // means clipboard only leads a section it would have led on
             // match strength alone.
-            if *id == "clipboard" { top - clipboard::CLIPBOARD_RECENCY_BOOST_CEILING } else { top }
+            if *id == "clipboard" {
+                top - clipboard::CLIPBOARD_RECENCY_BOOST_CEILING
+            } else {
+                top
+            }
         };
         section_rank_score(b).total_cmp(&section_rank_score(a))
     });
@@ -522,7 +545,10 @@ mod tests {
 
     #[test]
     fn a_pure_primary_query_still_returns_the_full_limit() {
-        let providers = vec![("app", candidates("app", &[10.0; 10])), ("clipboard", Vec::new())];
+        let providers = vec![
+            ("app", candidates("app", &[10.0; 10])),
+            ("clipboard", Vec::new()),
+        ];
         let items = allocate(providers, 8, "");
         assert_eq!(items.len(), 8);
         assert!(items.iter().all(|i| i.kind == "app"));
@@ -530,10 +556,16 @@ mod tests {
 
     #[test]
     fn a_secondary_match_is_never_crowded_out_by_many_primary_matches() {
-        let providers = vec![("app", candidates("app", &[10.0; 10])), ("clipboard", candidates("clipboard", &[1.0]))];
+        let providers = vec![
+            ("app", candidates("app", &[10.0; 10])),
+            ("clipboard", candidates("clipboard", &[1.0])),
+        ];
         let items = allocate(providers, 8, "");
         assert_eq!(items.len(), 8);
-        assert!(items.iter().any(|i| i.kind == "clipboard"), "clipboard's one match must survive");
+        assert!(
+            items.iter().any(|i| i.kind == "clipboard"),
+            "clipboard's one match must survive"
+        );
         assert_eq!(items.iter().filter(|i| i.kind == "clipboard").count(), 1);
         assert_eq!(items.iter().filter(|i| i.kind == "app").count(), 7);
     }
@@ -547,8 +579,14 @@ mod tests {
         ];
         let items = allocate(providers, 8, "");
         assert_eq!(items.len(), 8);
-        assert!(items.iter().any(|i| i.kind == "file"), "file's reservation must survive");
-        assert!(items.iter().any(|i| i.kind == "clipboard"), "clipboard's reservation must survive");
+        assert!(
+            items.iter().any(|i| i.kind == "file"),
+            "file's reservation must survive"
+        );
+        assert!(
+            items.iter().any(|i| i.kind == "clipboard"),
+            "clipboard's reservation must survive"
+        );
     }
 
     #[test]
@@ -568,7 +606,10 @@ mod tests {
         ];
         let items = allocate(providers, 8, "");
         assert_eq!(items.len(), 8);
-        assert!(items.iter().any(|i| i.kind == "app"), "the first provider's reservation must survive too");
+        assert!(
+            items.iter().any(|i| i.kind == "app"),
+            "the first provider's reservation must survive too"
+        );
         assert!(items.iter().any(|i| i.kind == "clipboard"));
         assert!(items.iter().any(|i| i.kind == "file"));
     }
@@ -579,7 +620,10 @@ mod tests {
         // goes unused unless it rolls over to whichever provider's next
         // candidate scores highest — here that's clipboard's remaining
         // three.
-        let providers = vec![("app", candidates("app", &[10.0])), ("clipboard", candidates("clipboard", &[5.0, 4.0, 3.0]))];
+        let providers = vec![
+            ("app", candidates("app", &[10.0])),
+            ("clipboard", candidates("clipboard", &[5.0, 4.0, 3.0])),
+        ];
         let items = allocate(providers, 8, "");
         assert_eq!(items.iter().filter(|i| i.kind == "clipboard").count(), 3);
         assert_eq!(items.iter().filter(|i| i.kind == "app").count(), 1);
@@ -600,7 +644,10 @@ mod tests {
     }
 
     fn item_titled(kind: &str, id: &str, title: &str) -> SearchItem {
-        SearchItem { title: title.to_string(), ..item(kind, id, title) }
+        SearchItem {
+            title: title.to_string(),
+            ..item(kind, id, title)
+        }
     }
 
     #[test]
@@ -609,9 +656,16 @@ mod tests {
         // and docs/evidence/ranking-before-after.md): a 0.06-point spread
         // from the length penalty alone. app_category_score must turn that
         // into a decisive win.
-        let app_score = app_category_score("terminal", "Terminal", fuzzy_score("terminal", "Terminal").unwrap());
+        let app_score = app_category_score(
+            "terminal",
+            "Terminal",
+            fuzzy_score("terminal", "Terminal").unwrap(),
+        );
         let file_score = fuzzy_score("terminal", "terminal.rs").unwrap();
-        assert!(app_score > file_score + 1.0, "{app_score} should decisively beat {file_score}");
+        assert!(
+            app_score > file_score + 1.0,
+            "{app_score} should decisively beat {file_score}"
+        );
     }
 
     #[test]
@@ -619,36 +673,76 @@ mod tests {
         // fuzzy_score("chrome", "Google Chrome") = 18.24 loses to
         // fuzzy_score("chrome", "chrome.exe.txt") = 21.22 on the raw
         // scorer alone — the vendor prefix forfeits the idx==0 bonus.
-        let app_score = app_category_score("chrome", "Google Chrome", fuzzy_score("chrome", "Google Chrome").unwrap());
+        let app_score = app_category_score(
+            "chrome",
+            "Google Chrome",
+            fuzzy_score("chrome", "Google Chrome").unwrap(),
+        );
         let file_score = fuzzy_score("chrome", "chrome.exe.txt").unwrap();
-        assert!(app_score > file_score, "{app_score} should beat {file_score}");
+        assert!(
+            app_score > file_score,
+            "{app_score} should beat {file_score}"
+        );
     }
 
     #[test]
     fn allocate_ranks_the_app_above_a_same_prefixed_file_end_to_end() {
         let providers = vec![
-            ("app", vec![Candidate { score: fuzzy_score("terminal", "Terminal").unwrap(), item: item_titled("app", "app-terminal", "Terminal") }]),
+            (
+                "app",
+                vec![Candidate {
+                    score: fuzzy_score("terminal", "Terminal").unwrap(),
+                    item: item_titled("app", "app-terminal", "Terminal"),
+                }],
+            ),
             (
                 "file",
                 vec![
-                    Candidate { score: fuzzy_score("terminal", "terminal.rs").unwrap(), item: item_titled("file", "file-rs", "terminal.rs") },
-                    Candidate { score: fuzzy_score("terminal", "terminal.h").unwrap(), item: item_titled("file", "file-h", "terminal.h") },
-                    Candidate { score: fuzzy_score("terminal", "terminal.svg").unwrap(), item: item_titled("file", "file-svg", "terminal.svg") },
+                    Candidate {
+                        score: fuzzy_score("terminal", "terminal.rs").unwrap(),
+                        item: item_titled("file", "file-rs", "terminal.rs"),
+                    },
+                    Candidate {
+                        score: fuzzy_score("terminal", "terminal.h").unwrap(),
+                        item: item_titled("file", "file-h", "terminal.h"),
+                    },
+                    Candidate {
+                        score: fuzzy_score("terminal", "terminal.svg").unwrap(),
+                        item: item_titled("file", "file-svg", "terminal.svg"),
+                    },
                 ],
             ),
         ];
         let items = allocate(providers, 8, "terminal");
-        assert_eq!(items[0].id, "app-terminal", "the app must be the top result, not a same-prefixed file");
+        assert_eq!(
+            items[0].id, "app-terminal",
+            "the app must be the top result, not a same-prefixed file"
+        );
     }
 
     #[test]
     fn allocate_ranks_a_vendor_prefixed_app_above_a_same_prefixed_file_end_to_end() {
         let providers = vec![
-            ("app", vec![Candidate { score: fuzzy_score("chrome", "Google Chrome").unwrap(), item: item_titled("app", "app-chrome", "Google Chrome") }]),
-            ("file", vec![Candidate { score: fuzzy_score("chrome", "chrome.exe.txt").unwrap(), item: item_titled("file", "file-chrome", "chrome.exe.txt") }]),
+            (
+                "app",
+                vec![Candidate {
+                    score: fuzzy_score("chrome", "Google Chrome").unwrap(),
+                    item: item_titled("app", "app-chrome", "Google Chrome"),
+                }],
+            ),
+            (
+                "file",
+                vec![Candidate {
+                    score: fuzzy_score("chrome", "chrome.exe.txt").unwrap(),
+                    item: item_titled("file", "file-chrome", "chrome.exe.txt"),
+                }],
+            ),
         ];
         let items = allocate(providers, 8, "chrome");
-        assert_eq!(items[0].id, "app-chrome", "the vendor-prefixed app must still win");
+        assert_eq!(
+            items[0].id, "app-chrome",
+            "the vendor-prefixed app must still win"
+        );
     }
 
     #[test]
@@ -660,7 +754,10 @@ mod tests {
         // start with "code" — no boost, unlike a genuine prefix match.
         let raw = fuzzy_score("code", "Xcode Notary Helper").unwrap();
         let scored = app_category_score("code", "Xcode Notary Helper", raw);
-        assert_eq!(scored, raw, "a scattered non-prefix match must be left exactly as fuzzy_score scored it");
+        assert_eq!(
+            scored, raw,
+            "a scattered non-prefix match must be left exactly as fuzzy_score scored it"
+        );
     }
 
     #[test]
@@ -670,7 +767,10 @@ mod tests {
         // category advantage, same as a single-word title would.
         let raw = fuzzy_score("code", "T3 Code (Alpha)").unwrap();
         let scored = app_category_score("code", "T3 Code (Alpha)", raw);
-        assert!(scored > raw, "a genuine significant-word prefix match must still be boosted");
+        assert!(
+            scored > raw,
+            "a genuine significant-word prefix match must still be boosted"
+        );
     }
 
     #[test]
@@ -687,23 +787,48 @@ mod tests {
             (
                 "app",
                 vec![
-                    Candidate { score: fuzzy_score("code", "Code").unwrap(), item: item_titled("app", "app-code", "Code") },
-                    Candidate { score: fuzzy_score("code", "Xcode").unwrap(), item: item_titled("app", "app-xcode", "Xcode") },
+                    Candidate {
+                        score: fuzzy_score("code", "Code").unwrap(),
+                        item: item_titled("app", "app-code", "Code"),
+                    },
+                    Candidate {
+                        score: fuzzy_score("code", "Xcode").unwrap(),
+                        item: item_titled("app", "app-xcode", "Xcode"),
+                    },
                 ],
             ),
             (
                 "file",
                 vec![
-                    Candidate { score: fuzzy_score("code", "CodexAdapter.ts").unwrap(), item: item_titled("file", "file-adapter", "CodexAdapter.ts") },
-                    Candidate { score: fuzzy_score("code", "CodexProvider.ts").unwrap(), item: item_titled("file", "file-provider", "CodexProvider.ts") },
-                    Candidate { score: fuzzy_score("code", "CodexDriver.ts").unwrap(), item: item_titled("file", "file-driver", "CodexDriver.ts") },
+                    Candidate {
+                        score: fuzzy_score("code", "CodexAdapter.ts").unwrap(),
+                        item: item_titled("file", "file-adapter", "CodexAdapter.ts"),
+                    },
+                    Candidate {
+                        score: fuzzy_score("code", "CodexProvider.ts").unwrap(),
+                        item: item_titled("file", "file-provider", "CodexProvider.ts"),
+                    },
+                    Candidate {
+                        score: fuzzy_score("code", "CodexDriver.ts").unwrap(),
+                        item: item_titled("file", "file-driver", "CodexDriver.ts"),
+                    },
                 ],
             ),
         ];
         let items = allocate(providers, 4, "code");
-        assert_eq!(items[0].id, "app-code", "the real app must still be the top result");
-        assert!(!items.iter().any(|i| i.id == "app-xcode"), "a scattered non-prefix match must lose every contested slot to real file matches");
-        assert_eq!(items.iter().filter(|i| i.kind == "file").count(), 3, "all three genuinely relevant files must fit instead");
+        assert_eq!(
+            items[0].id, "app-code",
+            "the real app must still be the top result"
+        );
+        assert!(
+            !items.iter().any(|i| i.id == "app-xcode"),
+            "a scattered non-prefix match must lose every contested slot to real file matches"
+        );
+        assert_eq!(
+            items.iter().filter(|i| i.kind == "file").count(),
+            3,
+            "all three genuinely relevant files must fit instead"
+        );
     }
 
     // --- Defect 1: an exact settings-pane match must outscore an
@@ -718,9 +843,13 @@ mod tests {
         // file that merely contains "sound" at a word boundary
         // ("background_sound.log", 14.1) — not the decisive win a real,
         // curated pane match deserves.
-        let settings_score = settings_category_score("sound", "Sound", fuzzy_score("sound", "Sound").unwrap());
+        let settings_score =
+            settings_category_score("sound", "Sound", fuzzy_score("sound", "Sound").unwrap());
         let file_score = fuzzy_score("sound", "background_sound.log").unwrap();
-        assert!(settings_score > file_score + 1.0, "{settings_score} should decisively beat {file_score}");
+        assert!(
+            settings_score > file_score + 1.0,
+            "{settings_score} should decisively beat {file_score}"
+        );
     }
 
     #[test]
@@ -729,9 +858,20 @@ mod tests {
         // keep "Bluetooth File Exchange" (the real app) above the
         // "Bluetooth" pane. Both get the identical per-word rescore for
         // this query, so this pins the bonus gap directly.
-        let settings_score = settings_category_score("bluetooth", "Bluetooth", fuzzy_score("bluetooth", "Bluetooth").unwrap());
-        let app_score = app_category_score("bluetooth", "Bluetooth File Exchange", fuzzy_score("bluetooth", "Bluetooth File Exchange").unwrap());
-        assert!(app_score > settings_score, "the real app ({app_score}) must still beat the pane ({settings_score})");
+        let settings_score = settings_category_score(
+            "bluetooth",
+            "Bluetooth",
+            fuzzy_score("bluetooth", "Bluetooth").unwrap(),
+        );
+        let app_score = app_category_score(
+            "bluetooth",
+            "Bluetooth File Exchange",
+            fuzzy_score("bluetooth", "Bluetooth File Exchange").unwrap(),
+        );
+        assert!(
+            app_score > settings_score,
+            "the real app ({app_score}) must still beat the pane ({settings_score})"
+        );
     }
 
     #[test]
@@ -740,7 +880,10 @@ mod tests {
         // non-prefix hit inside a pane title gets no category advantage.
         let raw = fuzzy_score("play", "Displays").unwrap();
         let scored = settings_category_score("play", "Displays", raw);
-        assert_eq!(scored, raw, "a scattered non-prefix match must be left exactly as fuzzy_score scored it");
+        assert_eq!(
+            scored, raw,
+            "a scattered non-prefix match must be left exactly as fuzzy_score scored it"
+        );
     }
 
     #[test]
@@ -758,20 +901,40 @@ mod tests {
             (
                 "file",
                 vec![
-                    Candidate { score: 15.0, item: item_titled("file", "file-a", "soundboard.app") },
-                    Candidate { score: 12.0, item: item_titled("file", "file-b", "sound_test.wav") },
+                    Candidate {
+                        score: 15.0,
+                        item: item_titled("file", "file-a", "soundboard.app"),
+                    },
+                    Candidate {
+                        score: 12.0,
+                        item: item_titled("file", "file-b", "sound_test.wav"),
+                    },
                 ],
             ),
             (
                 "settings",
                 vec![
-                    Candidate { score: 12.0, item: item_titled("settings", "com.apple.preference.sound", "Sound") },
-                    Candidate { score: 11.0, item: item_titled("settings", "com.apple.preference.sound-effects", "Sound Effects") },
+                    Candidate {
+                        score: 12.0,
+                        item: item_titled("settings", "com.apple.preference.sound", "Sound"),
+                    },
+                    Candidate {
+                        score: 11.0,
+                        item: item_titled(
+                            "settings",
+                            "com.apple.preference.sound-effects",
+                            "Sound Effects",
+                        ),
+                    },
                 ],
             ),
         ];
         let items = allocate(providers, 3, "sound");
-        assert_eq!(items.iter().filter(|i| i.kind == "settings").count(), 2, "the bonus must let the pane's second match win the contested slot");
+        assert_eq!(
+            items.iter().filter(|i| i.kind == "settings").count(),
+            2,
+            "the bonus must let the pane's second match win the contested slot"
+        );
         assert_eq!(items.iter().filter(|i| i.kind == "file").count(), 1);
     }
 
@@ -798,8 +961,15 @@ mod tests {
         ];
         let items = allocate(providers, 10, "");
         let clipboard_count = items.iter().filter(|i| i.kind == "clipboard").count();
-        assert!(clipboard_count <= 5, "clipboard took {clipboard_count} of 10 rows even though another provider had a match");
-        assert_eq!(items.iter().filter(|i| i.kind == "settings").count(), 1, "the other provider's reservation must still survive");
+        assert!(
+            clipboard_count <= 5,
+            "clipboard took {clipboard_count} of 10 rows even though another provider had a match"
+        );
+        assert_eq!(
+            items.iter().filter(|i| i.kind == "settings").count(),
+            1,
+            "the other provider's reservation must still survive"
+        );
     }
 
     #[test]
@@ -807,7 +977,10 @@ mod tests {
         // If nothing else matched this query, there's no reason to shorten
         // the list — the cap only exists to make room for other real
         // matches, not as a blanket ceiling on clipboard.
-        let providers = vec![("clipboard", candidates("clipboard", &[20.0; 9])), ("settings", Vec::new())];
+        let providers = vec![
+            ("clipboard", candidates("clipboard", &[20.0; 9])),
+            ("settings", Vec::new()),
+        ];
         let items = allocate(providers, 10, "");
         assert_eq!(items.iter().filter(|i| i.kind == "clipboard").count(), 9);
     }
@@ -819,9 +992,16 @@ mod tests {
         // above) must keep holding for clipboard specifically, in whichever
         // role — here as the *primary*, capped provider, not the crowded
         // secondary.
-        let providers = vec![("clipboard", candidates("clipboard", &[10.0; 10])), ("app", candidates("app", &[1.0]))];
+        let providers = vec![
+            ("clipboard", candidates("clipboard", &[10.0; 10])),
+            ("app", candidates("app", &[1.0])),
+        ];
         let items = allocate(providers, 8, "");
-        assert_eq!(items.iter().filter(|i| i.kind == "app").count(), 1, "app's one real match must still survive");
+        assert_eq!(
+            items.iter().filter(|i| i.kind == "app").count(),
+            1,
+            "app's one real match must still survive"
+        );
         assert!(items.iter().filter(|i| i.kind == "clipboard").count() <= clipboard_max_slots(8));
     }
 
@@ -844,20 +1024,34 @@ mod tests {
         // score.
         let providers = vec![
             ("clipboard", candidates("clipboard", &[3.0, 2.5, 2.0, 1.5])),
-            ("command", vec![Candidate { score: 20.0, item: item_titled("command", "clipboard-history", "Clipboard History") }]),
+            (
+                "command",
+                vec![Candidate {
+                    score: 20.0,
+                    item: item_titled("command", "clipboard-history", "Clipboard History"),
+                }],
+            ),
         ];
         let items = allocate(providers, 8, "clipboard history");
         let first_kind = items.first().map(|i| i.kind.as_str());
-        assert_eq!(first_kind, Some("command"), "the stronger section (command) must render first, not the weaker one that merely registered earlier");
+        assert_eq!(
+            first_kind,
+            Some("command"),
+            "the stronger section (command) must render first, not the weaker one that merely registered earlier"
+        );
         // Every clipboard row must still come after every command row —
         // section order is a hard grouping change, not just "the top row."
         let command_end = items.iter().rposition(|i| i.kind == "command").unwrap();
         let clipboard_start = items.iter().position(|i| i.kind == "clipboard").unwrap();
-        assert!(command_end < clipboard_start, "no clipboard row may render above the command section");
+        assert!(
+            command_end < clipboard_start,
+            "no clipboard row may render above the command section"
+        );
     }
 
     #[test]
-    fn section_order_is_not_fooled_by_a_freshly_copied_clipboard_entry_outscoring_a_decisive_command_match() {
+    fn section_order_is_not_fooled_by_a_freshly_copied_clipboard_entry_outscoring_a_decisive_command_match()
+     {
         // Caught live during this task, not assumed: a synthetic
         // "clipboard history"-shaped repro (isolated daemon, seeded
         // fixtures) showed a clipboard entry copied moments ago, which
@@ -874,13 +1068,27 @@ mod tests {
                 "clipboard",
                 vec![Candidate {
                     score: 20.0 + clipboard::CLIPBOARD_RECENCY_BOOST_CEILING,
-                    item: item_titled("clipboard", "clip-fresh", "clipboard history feature test note"),
+                    item: item_titled(
+                        "clipboard",
+                        "clip-fresh",
+                        "clipboard history feature test note",
+                    ),
                 }],
             ),
-            ("command", vec![Candidate { score: 22.0, item: item_titled("command", "clipboard-history", "Clipboard History") }]),
+            (
+                "command",
+                vec![Candidate {
+                    score: 22.0,
+                    item: item_titled("command", "clipboard-history", "Clipboard History"),
+                }],
+            ),
         ];
         let items = allocate(providers, 8, "clipboard history");
-        assert_eq!(items.first().map(|i| i.kind.as_str()), Some("command"), "a merely-fresh clipboard entry must not out-rank a more decisive command match for section order");
+        assert_eq!(
+            items.first().map(|i| i.kind.as_str()),
+            Some("command"),
+            "a merely-fresh clipboard entry must not out-rank a more decisive command match for section order"
+        );
     }
 
     #[test]
@@ -893,13 +1101,27 @@ mod tests {
                 "clipboard",
                 vec![Candidate {
                     score: 50.0 + clipboard::CLIPBOARD_RECENCY_BOOST_CEILING,
-                    item: item_titled("clipboard", "clip-strong", "clipboard history feature test note"),
+                    item: item_titled(
+                        "clipboard",
+                        "clip-strong",
+                        "clipboard history feature test note",
+                    ),
                 }],
             ),
-            ("command", vec![Candidate { score: 22.0, item: item_titled("command", "clipboard-history", "Clipboard History") }]),
+            (
+                "command",
+                vec![Candidate {
+                    score: 22.0,
+                    item: item_titled("command", "clipboard-history", "Clipboard History"),
+                }],
+            ),
         ];
         let items = allocate(providers, 8, "clipboard history");
-        assert_eq!(items.first().map(|i| i.kind.as_str()), Some("clipboard"), "a genuinely stronger clipboard match must still be allowed to lead");
+        assert_eq!(
+            items.first().map(|i| i.kind.as_str()),
+            Some("clipboard"),
+            "a genuinely stronger clipboard match must still be allowed to lead"
+        );
     }
 
     #[test]
@@ -911,13 +1133,21 @@ mod tests {
             (
                 "settings",
                 vec![Candidate {
-                    score: settings_category_score("displays", "Displays", fuzzy_score("displays", "Displays").unwrap()),
+                    score: settings_category_score(
+                        "displays",
+                        "Displays",
+                        fuzzy_score("displays", "Displays").unwrap(),
+                    ),
                     item: item_titled("settings", "com.apple.preference.displays", "Displays"),
                 }],
             ),
         ];
         let items = allocate(providers, 8, "displays");
-        assert_eq!(items.first().map(|i| i.kind.as_str()), Some("settings"), "the pane's own section must lead, not the file section");
+        assert_eq!(
+            items.first().map(|i| i.kind.as_str()),
+            Some("settings"),
+            "the pane's own section must lead, not the file section"
+        );
     }
 
     #[test]
@@ -932,13 +1162,35 @@ mod tests {
         // ever runs, either of which would turn an intended tie into a real
         // score difference and defeat the point of this test.
         let providers = vec![
-            ("file", vec![Candidate { score: 5.0, item: item_titled("file", "file-a", "match") }]),
-            ("command", vec![Candidate { score: 5.0, item: item_titled("command", "command-a", "match") }]),
-            ("widget", vec![Candidate { score: 5.0, item: item_titled("widget", "widget-a", "match") }]),
+            (
+                "file",
+                vec![Candidate {
+                    score: 5.0,
+                    item: item_titled("file", "file-a", "match"),
+                }],
+            ),
+            (
+                "command",
+                vec![Candidate {
+                    score: 5.0,
+                    item: item_titled("command", "command-a", "match"),
+                }],
+            ),
+            (
+                "widget",
+                vec![Candidate {
+                    score: 5.0,
+                    item: item_titled("widget", "widget-a", "match"),
+                }],
+            ),
         ];
         let items = allocate(providers, 8, "");
         let kinds: Vec<&str> = items.iter().map(|i| i.kind.as_str()).collect();
-        assert_eq!(kinds, vec!["file", "command", "widget"], "a three-way tie must resolve to registration order every time");
+        assert_eq!(
+            kinds,
+            vec!["file", "command", "widget"],
+            "a three-way tie must resolve to registration order every time"
+        );
     }
 
     #[test]
@@ -948,14 +1200,35 @@ mod tests {
         // or anything else that could vary run to run.
         let build = || {
             vec![
-                ("command", vec![Candidate { score: 5.0, item: item_titled("command", "command-a", "match") }]),
-                ("file", vec![Candidate { score: 5.0, item: item_titled("file", "file-a", "match") }]),
+                (
+                    "command",
+                    vec![Candidate {
+                        score: 5.0,
+                        item: item_titled("command", "command-a", "match"),
+                    }],
+                ),
+                (
+                    "file",
+                    vec![Candidate {
+                        score: 5.0,
+                        item: item_titled("file", "file-a", "match"),
+                    }],
+                ),
             ]
         };
-        let first: Vec<String> = allocate(build(), 8, "").iter().map(|i| i.kind.clone()).collect();
-        let second: Vec<String> = allocate(build(), 8, "").iter().map(|i| i.kind.clone()).collect();
+        let first: Vec<String> = allocate(build(), 8, "")
+            .iter()
+            .map(|i| i.kind.clone())
+            .collect();
+        let second: Vec<String> = allocate(build(), 8, "")
+            .iter()
+            .map(|i| i.kind.clone())
+            .collect();
         assert_eq!(first, second);
-        assert_eq!(first, vec!["command", "file"], "registration order (command before file here) must be the stable tiebreak");
+        assert_eq!(
+            first,
+            vec!["command", "file"],
+            "registration order (command before file here) must be the stable tiebreak"
+        );
     }
 }
-

@@ -181,7 +181,11 @@ impl Plan {
             return Err(AskError::OutsideCatalog(tool.to_string()));
         }
         let arguments = block.get("input").cloned().unwrap_or_else(|| json!({}));
-        Ok(Plan { summary: describe(tool, &arguments), tool: tool.to_string(), arguments })
+        Ok(Plan {
+            summary: describe(tool, &arguments),
+            tool: tool.to_string(),
+            arguments,
+        })
     }
 }
 
@@ -192,7 +196,13 @@ impl Plan {
 /// whole safety story is that the row and the call are the same thing. Built
 /// from the arguments, so it cannot drift from them.
 pub fn describe(tool: &str, arguments: &Value) -> String {
-    let arg = |key: &str| arguments.get(key).and_then(Value::as_str).unwrap_or("?").to_string();
+    let arg = |key: &str| {
+        arguments
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("?")
+            .to_string()
+    };
     match tool {
         "cancel_agent" => format!("Cancel the run in agent {}", short(&arg("agentId"))),
         "archive_agent" => format!("Archive agent {}", short(&arg("agentId"))),
@@ -200,7 +210,11 @@ pub fn describe(tool: &str, arguments: &Value) -> String {
             format!("Tell agent {}: {}", short(&arg("agentId")), arg("prompt"))
         }
         "set_agent_mode" => {
-            format!("Put agent {} in {} mode", short(&arg("agentId")), arg("modeId"))
+            format!(
+                "Put agent {} in {} mode",
+                short(&arg("agentId")),
+                arg("modeId")
+            )
         }
         "pause_schedule" => format!("Pause schedule {}", short(&arg("id"))),
         "resume_schedule" => format!("Resume schedule {}", short(&arg("id"))),
@@ -292,7 +306,10 @@ pub fn plan(question: &str, context: &str) -> Result<Plan, AskError> {
         .and_then(Value::as_array)
         .ok_or_else(|| AskError::Failed("the model's reply was unreadable".to_string()))?;
 
-    if let Some(block) = content.iter().find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use")) {
+    if let Some(block) = content
+        .iter()
+        .find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+    {
         return Plan::from_tool_use(block);
     }
     let said = content
@@ -312,7 +329,14 @@ pub fn plan(question: &str, context: &str) -> Result<Plan, AskError> {
 /// transport independently.
 fn request(token: &str, body: &Value) -> Result<Value, AskError> {
     let mut child = Command::new("/usr/bin/curl")
-        .args(["--silent", "--show-error", "--config", "-", "--write-out", "\n%{http_code}"])
+        .args([
+            "--silent",
+            "--show-error",
+            "--config",
+            "-",
+            "--write-out",
+            "\n%{http_code}",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -338,14 +362,18 @@ fn request(token: &str, body: &Value) -> Result<Value, AskError> {
         .write_all(config.as_bytes())
         .map_err(|e| AskError::Failed(format!("couldn't send the request: {e}")))?;
 
-    let out = child.wait_with_output().map_err(|e| AskError::Failed(format!("curl failed: {e}")))?;
+    let out = child
+        .wait_with_output()
+        .map_err(|e| AskError::Failed(format!("curl failed: {e}")))?;
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let (payload, status) = crate::usage::split_status(&stdout);
     match status {
         Some(200) => serde_json::from_str(&payload)
             .map_err(|_| AskError::Failed("the model's reply was unreadable".to_string())),
         Some(401 | 403) => Err(AskError::NeedsAuth),
-        Some(429) => Err(AskError::Failed("Rate limited — try again in a moment".to_string())),
+        Some(429) => Err(AskError::Failed(
+            "Rate limited — try again in a moment".to_string(),
+        )),
         Some(code) => Err(AskError::Failed(format!("The model API returned {code}"))),
         None => Err(AskError::Failed(
             String::from_utf8_lossy(&out.stderr)
@@ -456,7 +484,11 @@ impl AskProvider {
                 }
             }
         }
-        if lines.is_empty() { "Nothing is running.".to_string() } else { lines.join("\n") }
+        if lines.is_empty() {
+            "Nothing is running.".to_string()
+        } else {
+            lines.join("\n")
+        }
     }
 
     fn row(
@@ -521,20 +553,22 @@ impl Provider for AskProvider {
     fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
         let question = query.trim();
         if question.is_empty() {
-            return vec![self.row(
-                "empty",
-                // Deliberately not the placeholder's own words: the field
-                // already says "Say what you want done", and a row echoing
-                // it spends the only row on screen saying nothing new.
-                "neko will propose one tool call".to_string(),
-                Some(
-                    "It runs nothing until you confirm. Try \"stop the agent in web-app\"."
-                        .to_string(),
+            return vec![
+                self.row(
+                    "empty",
+                    // Deliberately not the placeholder's own words: the field
+                    // already says "Say what you want done", and a row echoing
+                    // it spends the only row on screen saying nothing new.
+                    "neko will propose one tool call".to_string(),
+                    Some(
+                        "It runs nothing until you confirm. Try \"stop the agent in web-app\"."
+                            .to_string(),
+                    ),
+                    "Type",
+                    true,
+                    Vec::new(),
                 ),
-                "Type",
-                true,
-                Vec::new(),
-            )];
+            ];
         }
         if let Some((asked, plan)) = PLAN.lock().unwrap().as_ref()
             && asked == question
@@ -544,7 +578,11 @@ impl Provider for AskProvider {
                 plan.summary.clone(),
                 // The exact call, next to the sentence describing it. This is
                 // the whole confirmation step: nothing runs that was not read.
-                Some(format!("{}({})", plan.tool, compact_arguments(&plan.arguments))),
+                Some(format!(
+                    "{}({})",
+                    plan.tool,
+                    compact_arguments(&plan.arguments)
+                )),
                 "Run",
                 false,
                 vec![ItemAction {
@@ -577,7 +615,9 @@ impl Provider for AskProvider {
     }
 
     fn activate(&self, _id: &str) -> Result<(), ProviderError> {
-        Err(ProviderError("that row needs the query with it".to_string()))
+        Err(ProviderError(
+            "that row needs the query with it".to_string(),
+        ))
     }
 
     /// The two steps. `plan` proposes and leaves the panel open; `run`
@@ -614,14 +654,15 @@ impl Provider for AskProvider {
                     // no longer the plan for what is typed.
                     ProviderError("that plan is stale — press \u{21b5} to plan again".to_string())
                 })?;
-                let client =
-                    McpClient::discover().map_err(|e| ProviderError(e.to_string()))?;
+                let client = McpClient::discover().map_err(|e| ProviderError(e.to_string()))?;
                 let outcome = client.call(&plan.tool, plan.arguments.clone());
                 // Cleared either way: a plan that ran must not be runnable
                 // again by pressing Enter twice, and one that failed should
                 // be re-planned against the world as it now is.
                 forget();
-                outcome.map(|_| ()).map_err(|e| ProviderError(e.to_string()))
+                outcome
+                    .map(|_| ())
+                    .map_err(|e| ProviderError(e.to_string()))
             }
             other => Err(ProviderError(format!("no such row: {other}"))),
         }
@@ -645,7 +686,9 @@ impl Provider for AskProvider {
 /// spends a third of its width on quotes and braces. The values themselves
 /// are never abbreviated, because they are the part being confirmed.
 pub fn compact_arguments(arguments: &Value) -> String {
-    let Some(object) = arguments.as_object() else { return arguments.to_string() };
+    let Some(object) = arguments.as_object() else {
+        return arguments.to_string();
+    };
     object
         .iter()
         .map(|(key, value)| match value.as_str() {
@@ -672,14 +715,16 @@ mod tests {
         );
         // And a name that exists nowhere at all.
         let block = json!({"type": "tool_use", "name": "rm_rf", "input": {}});
-        assert!(matches!(Plan::from_tool_use(&block), Err(AskError::OutsideCatalog(_))));
+        assert!(matches!(
+            Plan::from_tool_use(&block),
+            Err(AskError::OutsideCatalog(_))
+        ));
     }
 
     #[test]
     fn a_catalog_tool_becomes_a_plan_that_describes_itself() {
         // Real shape, from a live Messages API reply.
-        let block =
-            json!({"type": "tool_use", "name": "cancel_agent", "input": {"agentId": "05475348-2409-4eca"}});
+        let block = json!({"type": "tool_use", "name": "cancel_agent", "input": {"agentId": "05475348-2409-4eca"}});
         let plan = Plan::from_tool_use(&block).expect("in the catalog");
         assert_eq!(plan.tool, "cancel_agent");
         assert_eq!(plan.arguments["agentId"], json!("05475348-2409-4eca"));
@@ -702,7 +747,10 @@ mod tests {
     #[test]
     fn a_tool_use_with_no_name_is_an_error_not_an_empty_call() {
         let block = json!({"type": "tool_use", "input": {}});
-        assert!(matches!(Plan::from_tool_use(&block), Err(AskError::Failed(_))));
+        assert!(matches!(
+            Plan::from_tool_use(&block),
+            Err(AskError::Failed(_))
+        ));
     }
 
     #[test]
@@ -712,9 +760,17 @@ mod tests {
         for spec in CATALOG {
             let schema = (spec.schema)();
             assert_eq!(schema["type"], json!("object"), "{}", spec.name);
-            assert!(schema["required"].as_array().is_some_and(|r| !r.is_empty()), "{}", spec.name);
+            assert!(
+                schema["required"].as_array().is_some_and(|r| !r.is_empty()),
+                "{}",
+                spec.name
+            );
             assert!(!spec.name.starts_with("list_"), "{} is a read", spec.name);
-            assert!(!spec.name.starts_with("browser_"), "{} drives a browser", spec.name);
+            assert!(
+                !spec.name.starts_with("browser_"),
+                "{} drives a browser",
+                spec.name
+            );
         }
     }
 
@@ -732,8 +788,7 @@ mod tests {
         #[ignore = "spends a real model call against the Keychain credential"]
         fn a_sentence_becomes_the_tool_call_a_person_meant() {
             let context = "Agents:\n  - id 05475348-2409-4eca, workspace main, repo neko, running";
-            let plan = plan("stop whatever the neko agent is doing", context)
-                .expect("a plan");
+            let plan = plan("stop whatever the neko agent is doing", context).expect("a plan");
             eprintln!("{} {}\n  {}", plan.tool, plan.arguments, plan.summary);
             assert_eq!(plan.tool, "cancel_agent");
             assert_eq!(plan.arguments["agentId"], json!("05475348-2409-4eca"));

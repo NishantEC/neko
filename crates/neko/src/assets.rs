@@ -83,17 +83,50 @@ use neko_protocol::Glyph;
 /// `THIRD_PARTY_LICENSES/lucide-ISC.txt` and
 /// `crates/neko/src/components/vendor/MANIFEST.md`.
 const ICONS: &[(&str, &[u8])] = &[
-    (icon::CHEVRON_LEFT, include_bytes!("../assets/icons/lucide/chevron-left.svg")),
-    (icon::CLIPBOARD, include_bytes!("../assets/icons/lucide/clipboard.svg")),
-    (icon::FILE, include_bytes!("../assets/icons/lucide/file.svg")),
-    (icon::FOLDER, include_bytes!("../assets/icons/lucide/folder.svg")),
-    (icon::LINK, include_bytes!("../assets/icons/lucide/link.svg")),
-    (icon::SEARCH, include_bytes!("../assets/icons/lucide/search.svg")),
-    (icon::SLIDERS, include_bytes!("../assets/icons/lucide/sliders-horizontal.svg")),
-    (icon::TERMINAL, include_bytes!("../assets/icons/lucide/square-terminal.svg")),
-    (icon::TEXT_LINES, include_bytes!("../assets/icons/lucide/text-align-start.svg")),
-    (icon::TOOL_CLAUDE, include_bytes!("../assets/icons/simple-icons/claude.svg")),
-    (icon::TOOL_GEMINI, include_bytes!("../assets/icons/simple-icons/googlegemini.svg")),
+    (
+        icon::CHEVRON_LEFT,
+        include_bytes!("../assets/icons/lucide/chevron-left.svg"),
+    ),
+    (
+        icon::CLIPBOARD,
+        include_bytes!("../assets/icons/lucide/clipboard.svg"),
+    ),
+    (
+        icon::FILE,
+        include_bytes!("../assets/icons/lucide/file.svg"),
+    ),
+    (
+        icon::FOLDER,
+        include_bytes!("../assets/icons/lucide/folder.svg"),
+    ),
+    (
+        icon::LINK,
+        include_bytes!("../assets/icons/lucide/link.svg"),
+    ),
+    (
+        icon::SEARCH,
+        include_bytes!("../assets/icons/lucide/search.svg"),
+    ),
+    (
+        icon::SLIDERS,
+        include_bytes!("../assets/icons/lucide/sliders-horizontal.svg"),
+    ),
+    (
+        icon::TERMINAL,
+        include_bytes!("../assets/icons/lucide/square-terminal.svg"),
+    ),
+    (
+        icon::TEXT_LINES,
+        include_bytes!("../assets/icons/lucide/text-align-start.svg"),
+    ),
+    (
+        icon::TOOL_CLAUDE,
+        include_bytes!("../assets/icons/simple-icons/claude.svg"),
+    ),
+    (
+        icon::TOOL_GEMINI,
+        include_bytes!("../assets/icons/simple-icons/googlegemini.svg"),
+    ),
     (icon::MARK, include_bytes!("../assets/icons/neko/mark.svg")),
 ];
 
@@ -242,7 +275,11 @@ mod tests {
                 | Glyph::Palette => {}
             }
         }
-        assert_eq!(ALL_GLYPHS.len(), 9, "a Glyph variant was added without extending ALL_GLYPHS");
+        assert_eq!(
+            ALL_GLYPHS.len(),
+            9,
+            "a Glyph variant was added without extending ALL_GLYPHS"
+        );
     }
 
     /// The one that matters: a path named by [`glyph_icon`] that the asset
@@ -294,7 +331,10 @@ mod tests {
             .chain([icon::MARK])
             .collect();
         for (path, _) in ICONS {
-            assert!(named.contains(path), "{path} is vendored but nothing names it");
+            assert!(
+                named.contains(path),
+                "{path} is vendored but nothing names it"
+            );
         }
     }
 
@@ -330,19 +370,32 @@ mod tests {
             (icon::TOOL_GEMINI, 401),
             (icon::MARK, 1455),
         ];
-        assert_eq!(pinned.len(), ICONS.len(), "an icon was vendored without pinning its length");
+        assert_eq!(
+            pinned.len(),
+            ICONS.len(),
+            "an icon was vendored without pinning its length"
+        );
 
         for (path, bytes) in ICONS {
             let text = std::str::from_utf8(bytes).unwrap_or_else(|_| panic!("{path} is not UTF-8"));
-            assert!(text.trim_start().starts_with("<svg"), "{path} is not an SVG document");
-            assert!(text.contains(r#"viewBox="0 0 24 24""#), "{path} is not on the 24x24 grid");
+            assert!(
+                text.trim_start().starts_with("<svg"),
+                "{path} is not an SVG document"
+            );
+            assert!(
+                text.contains(r#"viewBox="0 0 24 24""#),
+                "{path} is not on the 24x24 grid"
+            );
             // **Two sets, two rules, and the difference is deliberate.**
             // Lucide's UI icons must stay stroke-only: gpui renders an SVG to
             // an alpha mask, so a *filled* UI icon would come out a solid
             // blob. A brand mark is the opposite — it *is* a silhouette, and
             // filled is the only way it reads at badge size.
             if path.starts_with("icons/lucide/") {
-                assert!(text.contains(r#"fill="none""#), "{path} is a UI icon and must be stroke-only");
+                assert!(
+                    text.contains(r#"fill="none""#),
+                    "{path} is a UI icon and must be stroke-only"
+                );
             } else {
                 assert!(
                     !text.contains(r#"fill="none""#),
@@ -354,7 +407,11 @@ mod tests {
                 .find(|(p, _)| p == path)
                 .map(|(_, len)| *len)
                 .unwrap_or_else(|| panic!("{path} has no pinned length"));
-            assert_eq!(bytes.len(), expected, "{path} differs from its pinned length");
+            assert_eq!(
+                bytes.len(),
+                expected,
+                "{path} differs from its pinned length"
+            );
         }
     }
 
@@ -380,7 +437,10 @@ mod tests {
                 .render_single_frame(bytes, 1.0)
                 .unwrap_or_else(|e| panic!("{path} failed to rasterise: {e}"));
             let size = image.size(0);
-            assert!(size.width.0 > 0 && size.height.0 > 0, "{path} rasterised to nothing");
+            assert!(
+                size.width.0 > 0 && size.height.0 > 0,
+                "{path} rasterised to nothing"
+            );
             // BGRA. Every 4th byte is alpha; a mark that draws must cover at
             // least one pixel.
             let painted = image
@@ -394,7 +454,12 @@ mod tests {
 
     #[test]
     fn an_unknown_path_resolves_to_nothing_rather_than_erroring() {
-        assert!(NekoAssets.load("icons/lucide/not-a-real-icon.svg").unwrap().is_none());
+        assert!(
+            NekoAssets
+                .load("icons/lucide/not-a-real-icon.svg")
+                .unwrap()
+                .is_none()
+        );
         assert!(NekoAssets.load("").unwrap().is_none());
     }
 
@@ -409,7 +474,10 @@ mod tests {
             "every file must sit under one of the three prefixes"
         );
         assert!(brands > 0, "the brand marks are a separate set on purpose");
-        assert!(own > 0, "neko's own mark is a third set: drawn here, not vendored");
+        assert!(
+            own > 0,
+            "neko's own mark is a third set: drawn here, not vendored"
+        );
         assert!(NekoAssets.list("fonts/").unwrap().is_empty());
     }
 

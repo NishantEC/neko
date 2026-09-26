@@ -29,7 +29,8 @@
 
 use gpui::{
     AnyElement, App, Bounds, Element, GlobalElementId, Hsla, InspectorElementId, IntoElement,
-    LayoutId, Pixels, ScrollHandle, Window, fill, linear_color_stop, linear_gradient, point, px, size,
+    LayoutId, Pixels, ScrollHandle, Window, fill, linear_color_stop, linear_gradient, point, px,
+    size,
 };
 
 /// Wraps `child` (expected to already be `.overflow_y_scroll().track_scroll(scroll)`)
@@ -146,10 +147,17 @@ impl Element for ScrollEdgeFade {
         let band = px(self.band_px.min(f32::from(bounds.size.height)));
         let transparent = self.fade_color.opacity(0.0);
         if show_top {
-            let quad_bounds = Bounds { origin: bounds.origin, size: size(bounds.size.width, band) };
+            let quad_bounds = Bounds {
+                origin: bounds.origin,
+                size: size(bounds.size.width, band),
+            };
             window.paint_quad(fill(
                 quad_bounds,
-                linear_gradient(180.0, linear_color_stop(self.fade_color, 0.0), linear_color_stop(transparent, 1.0)),
+                linear_gradient(
+                    180.0,
+                    linear_color_stop(self.fade_color, 0.0),
+                    linear_color_stop(transparent, 1.0),
+                ),
             ));
         }
         if show_bottom && self.bottom {
@@ -159,7 +167,11 @@ impl Element for ScrollEdgeFade {
             };
             window.paint_quad(fill(
                 quad_bounds,
-                linear_gradient(180.0, linear_color_stop(transparent, 0.0), linear_color_stop(self.fade_color, 1.0)),
+                linear_gradient(
+                    180.0,
+                    linear_color_stop(transparent, 0.0),
+                    linear_color_stop(self.fade_color, 1.0),
+                ),
             ));
         }
     }
@@ -200,12 +212,9 @@ mod tests {
         let scroll = gpui::ScrollHandle::new();
         let default = scroll_edge_fade(scroll.clone(), gpui::white(), 24.0, gpui::div());
         assert!(default.bottom, "a fade still fades by default");
-        let edge = scroll_edge_fade(scroll, gpui::white(), 24.0, gpui::div())
-            .without_bottom_fade();
+        let edge = scroll_edge_fade(scroll, gpui::white(), 24.0, gpui::div()).without_bottom_fade();
         assert!(!edge.bottom);
     }
-
-
 
     #[test]
     fn a_short_list_that_never_scrolls_shows_no_fade_at_either_edge() {

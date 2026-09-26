@@ -14,12 +14,17 @@ impl Controller {
                     controller.recover_learning_startup(&mut startup)?;
                     controller.learning_tick(&mut owned)
                 })) {
-                    Ok(Err(error)) => { failures = failures.saturating_add(1); eprintln!("neko learning: {error}"); },
+                    Ok(Err(error)) => {
+                        failures = failures.saturating_add(1);
+                        eprintln!("neko learning: {error}");
+                    }
                     Err(_) => {
                         failures = failures.saturating_add(1);
                         eprintln!("neko learning worker panicked; interrupted job will retry");
                     }
-                    Ok(Ok(())) => { failures = 0; }
+                    Ok(Ok(())) => {
+                        failures = 0;
+                    }
                 }
                 std::thread::sleep(Duration::from_secs((2_u64 << failures.min(4)).min(30)));
             }
@@ -28,7 +33,10 @@ impl Controller {
 
     fn recover_learning_startup(&self, pending: &mut bool) -> Result<(), String> {
         if *pending {
-            let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db = self
+                .db
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             learning::recover(&db)?;
             self.db.clear_poison();
             *pending = false;
@@ -38,7 +46,10 @@ impl Controller {
 
     fn recover_owned_attempt(&self, owned: &mut Option<learning::Job>) -> Result<(), String> {
         if let Some(job) = owned.as_ref() {
-            let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db = self
+                .db
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             learning::retry_owned(&db, job, store::now_ms())?;
             self.db.clear_poison();
             *owned = None;
@@ -65,8 +76,15 @@ impl Controller {
             (job, snapshot, authority)
         };
         if !job.needs_memory() {
-            let result = self.finish_followup(&job, authority.as_ref(), Ok(String::new()), propose_ticket_skill);
-            if result.is_ok() { *owned = None; }
+            let result = self.finish_followup(
+                &job,
+                authority.as_ref(),
+                Ok(String::new()),
+                propose_ticket_skill,
+            );
+            if result.is_ok() {
+                *owned = None;
+            }
             return result;
         }
         // Every extractor gets its own empty directory, including scoped work.
@@ -87,7 +105,9 @@ impl Controller {
         })();
         let _ = std::fs::remove_dir(&scratch);
         let result = self.finish_followup(&job, authority.as_ref(), result, propose_ticket_skill);
-        if result.is_ok() { *owned = None; }
+        if result.is_ok() {
+            *owned = None;
+        }
         result
     }
 
@@ -98,11 +118,15 @@ impl Controller {
         result: Result<String, String>,
         propose_skill: impl FnOnce(&Arc<Mutex<Db>>, &Task, &learning::Job) -> Result<(), String>,
     ) -> Result<(), String> {
-        let committed = if job.needs_memory() { self.commit_learning(
-            job,
-            authority,
-            result.as_deref().unwrap_or("{\"memories\":[]}"),
-        )? } else { job.memory_outcome() }; // Storage failures stop dependent work.
+        let committed = if job.needs_memory() {
+            self.commit_learning(
+                job,
+                authority,
+                result.as_deref().unwrap_or("{\"memories\":[]}"),
+            )?
+        } else {
+            job.memory_outcome()
+        }; // Storage failures stop dependent work.
         // Preserve existing skill learning, now behind the same one-worker cap.
         if committed != learning::FinishOutcome::Stale
             && let learning::Source::Ticket(id) = &job.source
@@ -120,17 +144,24 @@ impl Controller {
                     store::append_event(
                         task,
                         "learning",
-                        if result.is_err() || matches!(committed, learning::FinishOutcome::Rejected(_)) {
+                        if result.is_err()
+                            || matches!(committed, learning::FinishOutcome::Rejected(_))
+                        {
                             "Memory extraction could not finish. This ticket remains complete; no inferred memory was saved. Any skill proposal still requires review."
                         } else {
                             "Checked for reusable learning. Review suggested memories on Memory and skills in Tools & skills; nothing inferred was activated automatically."
                         },
                     );
-                    db.atomic(|| { store::save(&db, &after)?; learning::finish_skill(&db, job) })?;
+                    db.atomic(|| {
+                        store::save(&db, &after)?;
+                        learning::finish_skill(&db, job)
+                    })?;
                 }
             }
         }
-        if let learning::FinishOutcome::Rejected(reason) = committed { return Err(reason); }
+        if let learning::FinishOutcome::Rejected(reason) = committed {
+            return Err(reason);
+        }
         result.map(|_| ())
     }
 
@@ -153,13 +184,27 @@ impl Controller {
 
 /// Proposal creation and source completion are one durable operation. Accepting
 /// or rejecting the proposal after a crash cannot make its source run again.
-pub(super) fn commit_ticket_skill(db: &Arc<Mutex<Db>>, task: &Task, job: &learning::Job, body: Option<&str>) -> Result<(), String> {
+pub(super) fn commit_ticket_skill(
+    db: &Arc<Mutex<Db>>,
+    task: &Task,
+    job: &learning::Job,
+    body: Option<&str>,
+) -> Result<(), String> {
     let db = db.lock().map_err(|_| "Learning storage unavailable")?;
     let snapshot = store::load(&db)?;
-    if !learning::valid(job, &snapshot) || !learning::owns_skill(&db, job)? { return Err("Skill learning source or attempt changed; no proposal saved".into()); }
+    if !learning::valid(job, &snapshot) || !learning::owns_skill(&db, job)? {
+        return Err("Skill learning source or attempt changed; no proposal saved".into());
+    }
     db.atomic(|| {
         if let Some(body) = body {
-            neko_core::skills::propose(&db, &task.workspace_id, &format!("Learning from {}", task.title), body, &format!("Completed ticket {}", task.id), None)?;
+            neko_core::skills::propose(
+                &db,
+                &task.workspace_id,
+                &format!("Learning from {}", task.title),
+                body,
+                &format!("Completed ticket {}", task.id),
+                None,
+            )?;
         }
         learning::finish_skill(&db, job)
     })
@@ -167,13 +212,31 @@ pub(super) fn commit_ticket_skill(db: &Arc<Mutex<Db>>, task: &Task, job: &learni
 
 /// Model/format failures are terminal once this receipt commits. Storage errors
 /// remain retryable; a failed write cannot masquerade as successful completion.
-pub(super) fn fail_ticket_skill(db: &Arc<Mutex<Db>>, task: &Task, job: &learning::Job, reason: &str) -> Result<(), String> {
+pub(super) fn fail_ticket_skill(
+    db: &Arc<Mutex<Db>>,
+    task: &Task,
+    job: &learning::Job,
+    reason: &str,
+) -> Result<(), String> {
     let db = db.lock().map_err(|_| "Learning storage unavailable")?;
     let mut snapshot = store::load(&db)?;
-    if !learning::valid(job, &snapshot) || !learning::owns_skill(&db, job)? { return Err("Skill learning source or attempt changed".into()); }
-    let current = snapshot.tasks.iter_mut().find(|t| t.id == task.id).ok_or("Completed ticket no longer exists")?;
-    store::append_event(current, "learning", "Skill extraction could not finish. The ticket is complete; no skill was installed. Any memory proposal still requires review.");
-    db.atomic(|| { store::save(&db, &snapshot)?; learning::finish_skill(&db, job) })?;
+    if !learning::valid(job, &snapshot) || !learning::owns_skill(&db, job)? {
+        return Err("Skill learning source or attempt changed".into());
+    }
+    let current = snapshot
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == task.id)
+        .ok_or("Completed ticket no longer exists")?;
+    store::append_event(
+        current,
+        "learning",
+        "Skill extraction could not finish. The ticket is complete; no skill was installed. Any memory proposal still requires review.",
+    );
+    db.atomic(|| {
+        store::save(&db, &snapshot)?;
+        learning::finish_skill(&db, job)
+    })?;
     Err(reason.into())
 }
 
@@ -193,11 +256,18 @@ mod tests {
         let mut pending = true;
         assert!(controller.recover_learning_startup(&mut pending).is_err());
         assert!(pending);
-        controller.db.lock().unwrap().set_setting("memory_learning_v1", &json).unwrap();
+        controller
+            .db
+            .lock()
+            .unwrap()
+            .set_setting("memory_learning_v1", &json)
+            .unwrap();
         controller.recover_learning_startup(&mut pending).unwrap();
         assert!(!pending);
         let db = controller.db.lock().unwrap();
-        let recovered = learning::claim(&db, &store::load(&db).unwrap()).unwrap().unwrap();
+        let recovered = learning::claim(&db, &store::load(&db).unwrap())
+            .unwrap()
+            .unwrap();
         assert_eq!(recovered.source, job.source);
         assert!(recovered.needs_memory());
     }
@@ -206,16 +276,24 @@ mod tests {
     fn skill_model_failure_is_terminal_and_does_not_repeat_extraction() {
         let controller = super::super::tests::controller_with_task(TaskStatus::Completed);
         let (job, authority) = completed_job(&controller);
-        let result = controller.finish_followup(&job, Some(&authority), Ok("{\"memories\":[]}".into()), |db, task, job| {
-            fail_ticket_skill(db, task, job, "Malformed skill output")
-        });
+        let result = controller.finish_followup(
+            &job,
+            Some(&authority),
+            Ok("{\"memories\":[]}".into()),
+            |db, task, job| fail_ticket_skill(db, task, job, "Malformed skill output"),
+        );
         assert_eq!(result.unwrap_err(), "Malformed skill output");
         let db = controller.db.lock().unwrap();
         learning::retry_owned(&db, &job, store::now_ms()).unwrap();
         learning::recover(&db).unwrap();
         let state = store::load(&db).unwrap();
         assert!(learning::claim(&db, &state).unwrap().is_none());
-        assert!(state.tasks[0].events.iter().any(|event| event.message.contains("Skill extraction could not finish")));
+        assert!(
+            state.tasks[0]
+                .events
+                .iter()
+                .any(|event| event.message.contains("Skill extraction could not finish"))
+        );
         assert!(neko_core::skills::load(&db).unwrap().proposals.is_empty());
     }
 
@@ -227,21 +305,33 @@ mod tests {
         let json = {
             let db = controller.db.lock().unwrap();
             let json = db.get_setting("memory_learning_v1").unwrap().unwrap();
-            db.set_setting("memory_learning_v1", "corrupt").unwrap(); json
+            db.set_setting("memory_learning_v1", "corrupt").unwrap();
+            json
         };
         assert!(controller.recover_owned_attempt(&mut owned).is_err());
         assert!(owned.is_some());
-        controller.db.lock().unwrap().set_setting("memory_learning_v1", &json).unwrap();
+        controller
+            .db
+            .lock()
+            .unwrap()
+            .set_setting("memory_learning_v1", &json)
+            .unwrap();
         controller.recover_owned_attempt(&mut owned).unwrap();
         assert!(owned.is_none());
         let db = controller.db.lock().unwrap();
         let state = store::load(&db).unwrap();
-        assert!(learning::claim(&db, &state).unwrap().is_none(), "Recovered attempt honors backoff");
+        assert!(
+            learning::claim(&db, &state).unwrap().is_none(),
+            "Recovered attempt honors backoff"
+        );
         let id = neko_chat::begin_turn(&db, "another source").unwrap();
         neko_chat::finish_turn(&db, &id, "reply", vec![], false).unwrap();
         let state = store::load(&db).unwrap();
         learning::enqueue(&db, &state, learning::Source::Chat(id.clone())).unwrap();
-        assert_eq!(learning::claim(&db, &state).unwrap().unwrap().source, learning::Source::Chat(id));
+        assert_eq!(
+            learning::claim(&db, &state).unwrap().unwrap().source,
+            learning::Source::Chat(id)
+        );
     }
 
     #[test]
@@ -249,13 +339,20 @@ mod tests {
         let controller = super::super::tests::controller_with_task(TaskStatus::Completed);
         let (job, authority) = completed_job(&controller);
         let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            controller.finish_followup(&job, Some(&authority), Ok("invalid JSON".into()), |_, _, _| panic!("interrupted skill phase"))
+            controller.finish_followup(
+                &job,
+                Some(&authority),
+                Ok("invalid JSON".into()),
+                |_, _, _| panic!("interrupted skill phase"),
+            )
         }));
         assert!(panicked.is_err());
         let recovered = {
             let db = controller.db.lock().unwrap();
             learning::recover(&db).unwrap();
-            learning::claim(&db, &store::load(&db).unwrap()).unwrap().unwrap()
+            learning::claim(&db, &store::load(&db).unwrap())
+                .unwrap()
+                .unwrap()
         };
         assert!(!recovered.needs_memory());
         let result = controller.finish_followup(&recovered, Some(&authority), Ok("must never be parsed again".into()), |db, task, current| {
@@ -267,10 +364,21 @@ mod tests {
         let proposal = &state.skills.proposals[0];
         // The user rejects the source's proposal before a subsequent restart.
         let db = controller.db.lock().unwrap();
-        neko_core::skills::decide(&db, std::path::Path::new("/unused"), &proposal.id, &proposal.content_hash, false).unwrap();
+        neko_core::skills::decide(
+            &db,
+            std::path::Path::new("/unused"),
+            &proposal.id,
+            &proposal.content_hash,
+            false,
+        )
+        .unwrap();
         learning::recover(&db).unwrap();
         learning::retry_owned(&db, &recovered, store::now_ms()).unwrap();
-        assert!(learning::claim(&db, &store::load(&db).unwrap()).unwrap().is_none());
+        assert!(
+            learning::claim(&db, &store::load(&db).unwrap())
+                .unwrap()
+                .is_none()
+        );
         assert!(neko_core::skills::load(&db).unwrap().proposals.is_empty());
     }
     fn completed_job(controller: &Controller) -> (learning::Job, responsibilities::RunAuthority) {
@@ -278,7 +386,10 @@ mod tests {
         let state = store::load(&db).unwrap();
         learning::enqueue(&db, &state, learning::Source::Ticket("t".into())).unwrap();
         let job = learning::claim(&db, &state).unwrap().unwrap();
-        (job, responsibilities::RunAuthority::for_learning(&state, "w").unwrap())
+        (
+            job,
+            responsibilities::RunAuthority::for_learning(&state, "w").unwrap(),
+        )
     }
 
     #[test]
@@ -286,15 +397,28 @@ mod tests {
         let controller = super::super::tests::controller_with_task(TaskStatus::Completed);
         let (job, authority) = completed_job(&controller);
         let mut called = false;
-        let result = controller.finish_followup(&job, Some(&authority), Ok("not JSON".into()), |_, task, captured| {
-            assert_eq!(task.id, "t"); assert_eq!(captured.id, job.id);
-            called = true; Ok(())
-        });
-        assert!(called, "Invalid memory output must not suppress independent skills");
+        let result = controller.finish_followup(
+            &job,
+            Some(&authority),
+            Ok("not JSON".into()),
+            |_, task, captured| {
+                assert_eq!(task.id, "t");
+                assert_eq!(captured.id, job.id);
+                called = true;
+                Ok(())
+            },
+        );
+        assert!(
+            called,
+            "Invalid memory output must not suppress independent skills"
+        );
         assert!(result.unwrap_err().contains("Invalid memory extraction"));
         let state = controller.command(Command::Snapshot).unwrap();
         assert!(state.memory_proposals.is_empty());
-        assert!(state.tasks[0].events.iter().any(|e| e.role == "learning" && e.message.contains("Memory extraction could not finish")));
+        assert!(
+            state.tasks[0].events.iter().any(|e| e.role == "learning"
+                && e.message.contains("Memory extraction could not finish"))
+        );
     }
 
     #[test]
@@ -304,11 +428,25 @@ mod tests {
             let (job, authority) = completed_job(&controller);
             {
                 let db = controller.db.lock().unwrap();
-                if corrupt { db.set_setting("memory_learning_v1", "not valid JSON").unwrap(); }
-                else { let mut state = store::load(&db).unwrap(); state.agent_profiles.revision += 1; store::save(&db, &state).unwrap(); }
+                if corrupt {
+                    db.set_setting("memory_learning_v1", "not valid JSON")
+                        .unwrap();
+                } else {
+                    let mut state = store::load(&db).unwrap();
+                    state.agent_profiles.revision += 1;
+                    store::save(&db, &state).unwrap();
+                }
             }
             let mut called = false;
-            let result = controller.finish_followup(&job, Some(&authority), Ok("not JSON".into()), |_, _, _| { called = true; Ok(()) });
+            let result = controller.finish_followup(
+                &job,
+                Some(&authority),
+                Ok("not JSON".into()),
+                |_, _, _| {
+                    called = true;
+                    Ok(())
+                },
+            );
             assert!(!called);
             assert_eq!(result.is_err(), corrupt);
         }
@@ -325,17 +463,47 @@ mod tests {
                 let state = store::load(&db).unwrap();
                 learning::enqueue(&db, &state, learning::Source::Chat(id)).unwrap();
                 let job = learning::claim(&db, &state).unwrap().unwrap();
-                let memories: Vec<_> = (0..if i == 21 {1} else {3}).map(|n| serde_json::json!({"text":format!("Fact {i}-{n}"),"kind":"profile"})).collect();
-                assert_eq!(learning::finish(&db, &state, &job, &serde_json::json!({"memories":memories}).to_string()).unwrap(), learning::FinishOutcome::Committed);
+                let memories: Vec<_> = (0..if i == 21 { 1 } else { 3 })
+                    .map(|n| serde_json::json!({"text":format!("Fact {i}-{n}"),"kind":"profile"}))
+                    .collect();
+                assert_eq!(
+                    learning::finish(
+                        &db,
+                        &state,
+                        &job,
+                        &serde_json::json!({"memories":memories}).to_string()
+                    )
+                    .unwrap(),
+                    learning::FinishOutcome::Committed
+                );
             }
             assert_eq!(store::load(&db).unwrap().memory_proposals.len(), 64);
         }
         let (job, authority) = completed_job(&controller);
         let mut called = false;
-        let result = controller.finish_followup(&job, Some(&authority), Ok(r#"{"memories":[{"text":"Ticket fact","kind":"workspace"}]}"#.into()), |_, _, _| { called = true; Ok(()) });
+        let result = controller.finish_followup(
+            &job,
+            Some(&authority),
+            Ok(r#"{"memories":[{"text":"Ticket fact","kind":"workspace"}]}"#.into()),
+            |_, _, _| {
+                called = true;
+                Ok(())
+            },
+        );
         assert!(called);
-        assert!(result.unwrap_err().contains("Review existing memory proposals"));
-        assert_eq!(controller.command(Command::Snapshot).unwrap().memory_proposals.len(), 64);
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Review existing memory proposals")
+        );
+        assert_eq!(
+            controller
+                .command(Command::Snapshot)
+                .unwrap()
+                .memory_proposals
+                .len(),
+            64
+        );
     }
     #[test]
     fn full_learning_queue_never_discards_a_successful_chat_reply() {
@@ -344,10 +512,27 @@ mod tests {
             let guard = db.lock().unwrap();
             let id = neko_chat::begin_turn(&guard, "Evidence").unwrap();
             neko_chat::finish_turn(&guard, &id, "Answered", vec![], false).unwrap();
-            learning::enqueue(&guard, &store::load(&guard).unwrap(), learning::Source::Chat(id)).unwrap();
+            learning::enqueue(
+                &guard,
+                &store::load(&guard).unwrap(),
+                learning::Source::Chat(id),
+            )
+            .unwrap();
         }
         let id = neko_chat::begin_turn(&db.lock().unwrap(), "One more").unwrap();
-        complete_chat_reply(&db, &AtomicBool::new(false), &id, "One more", None, neko_chat::Reply { text: "Your answer".into(), tickets: vec![], memories: vec![] }).unwrap();
+        complete_chat_reply(
+            &db,
+            &AtomicBool::new(false),
+            &id,
+            "One more",
+            None,
+            neko_chat::Reply {
+                text: "Your answer".into(),
+                tickets: vec![],
+                memories: vec![],
+            },
+        )
+        .unwrap();
         let state = store::load(&db.lock().unwrap()).unwrap();
         let reply = state.conversation.last().unwrap();
         assert!(!reply.pending && !reply.failed);

@@ -248,7 +248,9 @@ impl Controller {
             .lock()
             .map_err(|_| "Workspace storage unavailable")?;
         let state = store::load(&db)?;
-        if state.agent_profiles.revision != claim.profile_revision { return Ok(()); }
+        if state.agent_profiles.revision != claim.profile_revision {
+            return Ok(());
+        }
         let Some(index) = state.mcp.responsibilities.iter().position(|r| {
             same_responsibility(&claim.responsibility, r)
                 && r.last_attempt_ms == claim.responsibility.last_attempt_ms
@@ -293,7 +295,9 @@ impl Controller {
                     .lock()
                     .map_err(|_| "Workspace storage unavailable")?,
             )?;
-            if state.agent_profiles.revision != claim.profile_revision { return Err("Agent settings changed before responsibility started".into()); }
+            if state.agent_profiles.revision != claim.profile_revision {
+                return Err("Agent settings changed before responsibility started".into());
+            }
             let authority = RunAuthority::new(
                 &state,
                 &claim.workspace.id,
@@ -367,9 +371,12 @@ impl Controller {
         if !authority.valid(&state) {
             return Err("Run authority changed before launch".into());
         }
-        let lease = self
-            .mcp
-            .lease(run_id, &authority.workspace, authority.connections.clone(), authority.profile_revision)?;
+        let lease = self.mcp.lease(
+            run_id,
+            &authority.workspace,
+            authority.connections.clone(),
+            authority.profile_revision,
+        )?;
         let bridge = native_runner::BridgeConfig {
             executable: std::env::current_exe().map_err(|_| "Cannot locate Neko MCP bridge")?,
             socket: neko_protocol::socket_path(),
@@ -387,7 +394,12 @@ impl Controller {
                 while !finished.load(Ordering::Acquire) {
                     let revision = store::revision();
                     if revision != seen {
-                        let loaded = store::load(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+                        let loaded = store::load(
+                            &self
+                                .db
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner),
+                        );
                         if let Ok(state) = loaded {
                             valid = authority.valid(&state);
                             seen = revision;
@@ -397,7 +409,10 @@ impl Controller {
                         cancel.store(true, Ordering::Release);
                         // Dropping the lease marks the Host's Scope.cancelled,
                         // including any tool call already inside its watchdog.
-                        lease.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+                        lease
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .take();
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(20));
@@ -421,7 +436,10 @@ impl Controller {
                 cancel.store(true, Ordering::Release);
             }
             finished.store(true, Ordering::Release);
-            lease.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+            lease
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             if cancel.load(Ordering::Acquire) {
                 Err("Cancelled: task or tool authority changed".into())
             } else {
@@ -436,7 +454,10 @@ mod tests {
     use super::*;
     fn configured() -> Controller {
         let controller = super::super::tests::controller_with_task(TaskStatus::Completed);
-        let db = controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let db = controller
+            .db
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut state = store::load(&db).unwrap();
         state
             .mcp
@@ -517,20 +538,52 @@ mod tests {
             let mut state = store::load(&db).unwrap();
             state.workspaces[0].repository = temp.to_string_lossy().into_owned();
             store::save(&db, &state).unwrap();
-            let available = neko_core::skills::discover(&[neko_core::skills::Root { path: folder, source: "Test".into(), workspace_id: Some("w".into()) }]);
+            let available = neko_core::skills::discover(&[neko_core::skills::Root {
+                path: folder,
+                source: "Test".into(),
+                workspace_id: Some("w".into()),
+            }]);
             let skill = &available[0];
-            neko_core::skills::set_enabled(&db, &available, &["w".into()], "w", &skill.path, &skill.content_hash, true).unwrap();
+            neko_core::skills::set_enabled(
+                &db,
+                &available,
+                &["w".into()],
+                "w",
+                &skill.path,
+                &skill.content_hash,
+                true,
+            )
+            .unwrap();
             state
         };
-        assert!(controller.responsibility_skills(&state, "w").unwrap().contains("RESPONSIBILITY_SKILL_SENTINEL"));
-        assert!(controller.responsibility_skills(&state, "other").unwrap().is_empty());
+        assert!(
+            controller
+                .responsibility_skills(&state, "w")
+                .unwrap()
+                .contains("RESPONSIBILITY_SKILL_SENTINEL")
+        );
+        assert!(
+            controller
+                .responsibility_skills(&state, "other")
+                .unwrap()
+                .is_empty()
+        );
         std::fs::write(&path, "Changed instructions").unwrap();
         controller.responsibility_tick().unwrap();
         let failed = controller.command(Command::Snapshot).unwrap();
-        assert!(failed.mcp.responsibilities[0].last_result.contains("changed"));
+        assert!(
+            failed.mcp.responsibilities[0]
+                .last_result
+                .contains("changed")
+        );
         assert_eq!(failed.mcp.responsibilities[0].failures, 1);
         std::fs::remove_file(path).unwrap();
-        assert!(controller.responsibility_skills(&state, "w").unwrap_err().contains("unavailable"));
+        assert!(
+            controller
+                .responsibility_skills(&state, "w")
+                .unwrap_err()
+                .contains("unavailable")
+        );
         std::fs::remove_dir_all(temp).unwrap();
     }
     #[test]
@@ -548,7 +601,10 @@ mod tests {
         let controller = configured();
         let claim = controller.claim_due(100).unwrap().unwrap();
         {
-            let db = controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db = controller
+                .db
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state.mcp.responsibilities[0].enabled = false;
             store::save(&db, &state).unwrap();
@@ -616,7 +672,10 @@ mod tests {
     fn cancelling_task_revokes_the_same_active_bridge() {
         let controller = configured();
         {
-            let db = controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db = controller
+                .db
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state.tasks[0].status = TaskStatus::Planning;
             store::save(&db, &state).unwrap();
@@ -624,10 +683,14 @@ mod tests {
         let state = controller.command(Command::Snapshot).unwrap();
         let authority = RunAuthority::for_task(&state, &state.tasks[0]).unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
-        controller.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(Active {
-            task_id: "t".into(),
-            cancelled: cancel.clone(),
-        });
+        controller
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(Active {
+                task_id: "t".into(),
+                cancelled: cancel.clone(),
+            });
         let result = controller.with_lease("task-run", &authority, &cancel, |bridge| {
             controller
                 .command(Command::CancelTask {
@@ -659,7 +722,10 @@ mod tests {
         )
         .unwrap();
         {
-            let db = controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db = controller
+                .db
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state.mcp.grants.clear();
             store::save(&db, &state).unwrap();
@@ -679,7 +745,10 @@ mod tests {
             let now = store::now_ms();
             let claim = controller.claim_due(now).unwrap().unwrap();
             {
-                let db = controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let db = controller
+                    .db
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let mut state = store::load(&db).unwrap();
                 state
                     .mcp
@@ -719,7 +788,14 @@ mod tests {
                     state.mcp.receipts[0].at_ms = 1;
                 }
             }
-            store::save(&controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &state).unwrap();
+            store::save(
+                &controller
+                    .db
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                &state,
+            )
+            .unwrap();
             assert!(
                 controller
                     .with_lease("builder", &authority, &AtomicBool::new(false), |_| panic!(
@@ -737,10 +813,24 @@ mod tests {
 
             // Reproduce revocation during a slow checkout. The returned path
             // is synthetic: the post-checkout guard must stop before any model.
-            store::save(&controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &original).unwrap();
+            store::save(
+                &controller
+                    .db
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                &original,
+            )
+            .unwrap();
             let error = controller
                 .execute_with_worktree(&task_claim, &AtomicBool::new(false), |_, _, _| {
-                    store::save(&controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &state).unwrap();
+                    store::save(
+                        &controller
+                            .db
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner),
+                        &state,
+                    )
+                    .unwrap();
                     Ok(std::path::PathBuf::from(
                         "/synthetic/worktree-never-executed",
                     ))
@@ -764,7 +854,10 @@ mod tests {
         let controller = configured();
         let claim = controller.claim_due(100).unwrap().unwrap();
         {
-            let db = controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db = controller
+                .db
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state
                 .mcp
@@ -799,7 +892,10 @@ mod tests {
         let controller = configured();
         let claim = controller.claim_due(100).unwrap().unwrap();
         {
-            let db = controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db = controller
+                .db
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state
                 .mcp

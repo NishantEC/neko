@@ -45,6 +45,10 @@ pub struct ImportConnection {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ImportPreview {
     #[serde(default)]
+    pub sources: Vec<ImportSourceInfo>,
+    #[serde(default)]
+    pub active_source: Option<String>,
+    #[serde(default)]
     pub candidates: Vec<ImportCandidate>,
     #[serde(default)]
     pub schedules: Vec<ImportSchedule>,
@@ -56,6 +60,12 @@ pub struct ImportPreview {
     pub repositories: Vec<String>,
     #[serde(default)]
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImportSourceInfo {
+    pub id: String,
+    pub name: String,
 }
 
 /// Portable source content only; source authority is deliberately absent.
@@ -74,8 +84,11 @@ pub struct ImportSchedule {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ImportCommand {
+    ListSources,
     Discover {
         repositories: Vec<String>,
+        #[serde(default)]
+        source_id: Option<String>,
     },
     Apply {
         #[serde(default)]
@@ -86,6 +99,10 @@ pub enum ImportCommand {
         workspace_ids: Vec<String>,
         preview_id: String,
         connection_ids: Vec<String>,
+        /// Explicitly keep these selected workspace-scoped definitions as
+        /// global, paused connections when their source workspace is absent.
+        #[serde(default)]
+        global_connection_ids: Vec<String>,
         repositories: Vec<String>,
         include_credentials: bool,
         trust_local_processes: bool,

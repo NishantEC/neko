@@ -64,7 +64,13 @@ pub fn cached_icon_path(app_id: &str) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     let sanitized: String = app_id
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     Some(
         PathBuf::from(home)
@@ -85,7 +91,9 @@ pub fn cached_icon_path(app_id: &str) -> Option<PathBuf> {
 /// disk forever rather than having them replaced. Never descends into or
 /// touches the current generation's own subdirectory.
 pub fn purge_stale_icon_cache() {
-    let Some(home) = std::env::var_os("HOME") else { return };
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
     purge_stale_icon_cache_at(&PathBuf::from(home).join("Library/Caches/neko/icons"));
 }
 
@@ -93,7 +101,9 @@ pub fn purge_stale_icon_cache() {
 /// testable without touching the real `$HOME` cache — see
 /// `purge_stale_icon_cache`'s own doc comment for what this does and why.
 fn purge_stale_icon_cache_at(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("png") {
@@ -206,7 +216,8 @@ fn extract_icon_png(app_path: &std::path::Path) -> Option<Vec<u8>> {
             NSGraphicsContext::restoreGraphicsState_class();
 
             let properties = NSDictionary::new();
-            let png = bitmap.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)?;
+            let png = bitmap
+                .representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)?;
             Some(png.to_vec())
         }
     })
@@ -232,14 +243,22 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(CACHE_GENERATION)).unwrap();
-        std::fs::write(dir.join(CACHE_GENERATION).join("com.apple.Safari.png"), b"current").unwrap();
+        std::fs::write(
+            dir.join(CACHE_GENERATION).join("com.apple.Safari.png"),
+            b"current",
+        )
+        .unwrap();
         std::fs::create_dir_all(dir.join("v2-64px")).unwrap();
         std::fs::write(dir.join("v2-64px").join("com.apple.Safari.png"), b"stale").unwrap();
         std::fs::write(dir.join("loose-unversioned.png"), b"pre-versioning").unwrap();
 
         purge_stale_icon_cache_at(&dir);
 
-        assert!(dir.join(CACHE_GENERATION).join("com.apple.Safari.png").exists());
+        assert!(
+            dir.join(CACHE_GENERATION)
+                .join("com.apple.Safari.png")
+                .exists()
+        );
         assert!(!dir.join("v2-64px").exists());
         assert!(!dir.join("loose-unversioned.png").exists());
 
@@ -249,7 +268,10 @@ mod tests {
     #[test]
     #[cfg_attr(not(target_os = "macos"), ignore)]
     fn extracting_finders_icon_produces_a_cached_png() {
-        let path = ensure_cached_icon("com.apple.finder", std::path::Path::new("/System/Library/CoreServices/Finder.app"));
+        let path = ensure_cached_icon(
+            "com.apple.finder",
+            std::path::Path::new("/System/Library/CoreServices/Finder.app"),
+        );
         let Some(path) = path else {
             // Sandboxed CI environments sometimes can't resolve Finder's
             // icon; don't fail the suite over an environment quirk the

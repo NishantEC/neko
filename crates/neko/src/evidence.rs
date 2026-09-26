@@ -272,7 +272,9 @@ pub fn show_query() -> Option<String> {
 /// capture-only rendering shortcut. Focus-neutral: it touches no window
 /// state at all.
 pub fn show_theme() -> Option<String> {
-    std::env::var(SHOW_THEME_ENV_VAR).ok().filter(|id| !id.is_empty())
+    std::env::var(SHOW_THEME_ENV_VAR)
+        .ok()
+        .filter(|id| !id.is_empty())
 }
 
 pub fn show_confirm_requested() -> bool {
@@ -297,7 +299,9 @@ pub fn show_drag_guides_requested() -> bool {
 /// `NEKO_BENCH_SEARCH=<query>` — the keystroke-to-first-render benchmark.
 /// See [`run_search_bench`].
 pub fn bench_search_query() -> Option<String> {
-    std::env::var(BENCH_SEARCH_ENV_VAR).ok().filter(|q| !q.is_empty())
+    std::env::var(BENCH_SEARCH_ENV_VAR)
+        .ok()
+        .filter(|q| !q.is_empty())
 }
 
 /// Whether `panel::Root` should print a `neko: search-latency` line for
@@ -332,7 +336,11 @@ pub fn show_selection_requested() -> bool {
 /// So the proof is a native readback instead, printed next to the value that
 /// was set. Focus-neutral: it touches no window state at all.
 pub fn menu_bar_count() -> Option<usize> {
-    std::env::var("NEKO_MENU_BAR_COUNT").ok()?.trim().parse().ok()
+    std::env::var("NEKO_MENU_BAR_COUNT")
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// How many times to press Down before capturing. See `show_once`.
@@ -342,7 +350,9 @@ pub fn select_down_steps() -> Option<usize> {
 
 /// Text to type once a mode is already open. See `show_once`.
 pub fn mode_query() -> Option<String> {
-    std::env::var("NEKO_MODE_QUERY").ok().filter(|t| !t.is_empty())
+    std::env::var("NEKO_MODE_QUERY")
+        .ok()
+        .filter(|t| !t.is_empty())
 }
 
 /// Whether to press Enter again on whatever `NEKO_MODE_QUERY` produced.
@@ -378,7 +388,11 @@ pub fn force_preview_markdown() -> bool {
 
 /// Which Preferences control to park the focus ring on, if any.
 pub fn preferences_focus() -> Option<usize> {
-    std::env::var("NEKO_SHOW_PREFERENCES").ok()?.trim().parse().ok()
+    std::env::var("NEKO_SHOW_PREFERENCES")
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 pub fn activation_opt_in() -> bool {
@@ -445,7 +459,10 @@ pub fn backdrop_image_path() -> Option<PathBuf> {
 }
 
 pub fn real_cycles_before_show() -> Option<u32> {
-    std::env::var(REAL_CYCLES_BEFORE_SHOW_ENV_VAR).ok()?.parse().ok()
+    std::env::var(REAL_CYCLES_BEFORE_SHOW_ENV_VAR)
+        .ok()?
+        .parse()
+        .ok()
 }
 
 /// Opens the full-display backdrop window described in this module's own
@@ -468,7 +485,11 @@ pub fn open_backdrop_window(cx: &mut App, image_path: PathBuf) {
             show: true,
             ..Default::default()
         },
-        move |_window, cx| cx.new(|_cx| Backdrop { image_path: image_path.clone() }),
+        move |_window, cx| {
+            cx.new(|_cx| Backdrop {
+                image_path: image_path.clone(),
+            })
+        },
     );
 }
 
@@ -512,13 +533,17 @@ async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncA
     // The real window is always `PANEL_WIDTH_WITH_DETAIL_PX` now (`AGENTS.md`,
     // "Mode view resize seam") — this is only ever used to compute the
     // window's own on-screen *position*, never a resize.
-    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX), gpui::px(PANEL_HEIGHT_PX));
+    let panel_size = gpui::size(
+        gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX),
+        gpui::px(PANEL_HEIGHT_PX),
+    );
     for i in 0..cycles {
         eprintln!("neko: real-cycles-before-show cycle {i} activating");
         cx.update(|cx| {
             let _ = window.update(cx, |root, window, cx| {
                 root.reset_for_summon(window, cx);
-                if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
+                if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size)
+                {
                     eprintln!("neko: real-cycles-before-show reposition failed: {e}");
                 }
                 let _ = material::order_front_regardless(window);
@@ -526,14 +551,18 @@ async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncA
         });
         // Long enough for a real frame to actually paint at `PANEL_WIDTH_PX`
         // before the next step.
-        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(300))
+            .await;
         eprintln!("neko: real-cycles-before-show cycle {i} activated");
         cx.update(|cx| {
             let _ = window.update(cx, |_root, window, _cx| {
                 let _ = material::order_out(window);
             });
         });
-        cx.background_executor().timer(std::time::Duration::from_millis(200)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(200))
+            .await;
         eprintln!("neko: real-cycles-before-show cycle {i} hidden");
     }
 }
@@ -570,7 +599,9 @@ async fn run_real_cycles_before_show(window: WindowHandle<Root>, cx: &mut AsyncA
 /// reachable today with `NEKO_EVIDENCE_ACTIVATE=1`, which is exactly the
 /// kind of deliberate, stated intent the safety rule asks for.)
 fn prove_typing_text() -> Option<String> {
-    std::env::var(PROVE_TYPING_ENV_VAR).ok().filter(|v| !v.is_empty())
+    std::env::var(PROVE_TYPING_ENV_VAR)
+        .ok()
+        .filter(|v| !v.is_empty())
 }
 
 /// `NEKO_PROVE_TYPING=<text>`: type `<text>` into the search field one
@@ -614,9 +645,13 @@ async fn prove_typing(text: &str, window: WindowHandle<Root>, cx: &mut AsyncApp)
                 eprintln!("neko: typing proof — {ch:?} is not a parseable keystroke, skipped");
             }
         });
-        cx.background_executor().timer(std::time::Duration::from_millis(40)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(40))
+            .await;
     }
-    cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+    cx.background_executor()
+        .timer(std::time::Duration::from_millis(400))
+        .await;
     cx.update(|cx| {
         let _ = window.update(cx, |root, window, cx| {
             let got = root.query_for_evidence(cx);
@@ -625,16 +660,22 @@ async fn prove_typing(text: &str, window: WindowHandle<Root>, cx: &mut AsyncApp)
                 Err(e) => eprintln!("neko: typing proof — could not read first responder: {e}"),
             }
             if got == text {
-                eprintln!("neko: typing proof PASSED — sent {text:?}, search field contains {got:?}");
+                eprintln!(
+                    "neko: typing proof PASSED — sent {text:?}, search field contains {got:?}"
+                );
             } else {
-                eprintln!("neko: typing proof FAILED — sent {text:?}, search field contains {got:?}");
+                eprintln!(
+                    "neko: typing proof FAILED — sent {text:?}, search field contains {got:?}"
+                );
             }
         });
     });
 }
 
 pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp) {
-    let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
+    let _ = client
+        .request(Request::SetOnboardingComplete { completed: true })
+        .await;
     // Before the window is ever ordered front, so the very first painted
     // frame is already in the requested palette — a capture must never race a
     // theme swap. Applied here rather than after `reset_for_summon` for the
@@ -657,9 +698,13 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // deterministic "go" signal instead of guessing a sleep against
         // this process's own startup time.
         eprintln!("neko: ready for evidence setup");
-        cx.background_executor().timer(std::time::Duration::from_millis(2000)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(2000))
+            .await;
     } else {
-        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(300))
+            .await;
     }
     let activate = activation_opt_in();
     if activate {
@@ -706,7 +751,9 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // comfortably past that so the window-number line below (an
         // outside script's "now capture" signal) isn't printed before the
         // row this evidence run exists to show has actually rendered.
-        cx.background_executor().timer(std::time::Duration::from_millis(3500)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(3500))
+            .await;
     }
     if let Some(text) = prove_typing_text() {
         prove_typing(&text, window, cx).await;
@@ -729,27 +776,35 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // mode-entry search specifically under real concurrent load from
         // other agents' own processes (a genuinely local SQLite query, but
         // not exempt from real scheduling contention).
-        cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(1500))
+            .await;
         if cycle_mode_once_requested() {
             cx.update(|cx| {
                 let _ = window.update(cx, |root, window, cx| {
                     root.dismiss_for_evidence(window, cx);
                 });
             });
-            cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(400))
+                .await;
             let requery = query.clone().unwrap_or_default();
             cx.update(|cx| {
                 let _ = window.update(cx, |root, _window, cx| {
                     root.set_query_for_evidence(&requery, cx);
                 });
             });
-            cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(1500))
+                .await;
             cx.update(|cx| {
                 let _ = window.update(cx, |root, window, cx| {
                     root.confirm_for_evidence(window, cx);
                 });
             });
-            cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(800))
+                .await;
         }
         // **Typing *inside* a mode, and optionally confirming again.**
         // Every hook above stops at the moment a mode opens, which is
@@ -762,7 +817,9 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                     root.set_query_for_evidence(&text, cx);
                 });
             });
-            cx.background_executor().timer(std::time::Duration::from_millis(1200)).await;
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(1200))
+                .await;
             if mode_confirm_requested() {
                 cx.update(|cx| {
                     let _ = window.update(cx, |root, window, cx| {
@@ -772,7 +829,9 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                 // Longer than the mode-entry settle above: this one can be
                 // a real model round trip (`neko_core::ask`), which is
                 // seconds rather than a local query.
-                cx.background_executor().timer(std::time::Duration::from_millis(9000)).await;
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(9000))
+                    .await;
             }
         }
         if scroll_mode_list_to_bottom_requested() {
@@ -786,7 +845,9 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             // paint (which is what actually reads the corrected offset —
             // see `edge_fade.rs`'s own doc comment on paint-time gating)
             // has genuinely happened before the window-number line below.
-            cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(150))
+                .await;
         }
     }
     if let Some(bench_query) = bench_search_query() {
@@ -800,18 +861,24 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // swallows however many presses had already happened. That is a
         // harness race, not a product one, and it produced two different
         // capture results from the same command before it was found.
-        cx.background_executor().timer(std::time::Duration::from_millis(2500)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(2500))
+            .await;
         for _ in 0..steps {
             cx.update(|cx| {
                 let _ = window.update(cx, |root, window, cx| {
                     root.select_next_for_evidence(window, cx);
                 });
             });
-            cx.background_executor().timer(std::time::Duration::from_millis(40)).await;
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(40))
+                .await;
         }
         // One settle frame: `scroll_to_item` takes effect on the next paint,
         // which is the frame the capture has to be after.
-        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(300))
+            .await;
     }
     if hold_skeleton() {
         cx.update(|cx| {
@@ -819,7 +886,9 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                 root.hold_skeleton_for_evidence(cx);
             });
         });
-        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(300))
+            .await;
     }
     if show_actions_menu_requested() {
         cx.update(|cx| {
@@ -830,7 +899,9 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         // A synchronous state transition (no daemon round-trip), but give
         // the next frame a beat to actually paint the open fade-in before
         // the window-number "now capture" line below prints.
-        cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(300))
+            .await;
     }
     if show_selection_requested() {
         cx.update(|cx| {
@@ -840,24 +911,29 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
         });
         // A synchronous, local state change (no daemon round-trip) — same
         // one-frame settle beat as the actions-menu branch above.
-        cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(150))
+            .await;
     }
     if show_drag_guides_requested() {
         cx.update(|cx| {
-            let _ = window.update(cx, |_root, window, cx| {
-                match crate::window_drag::demo_overlay(window, cx) {
+            let _ = window.update(
+                cx,
+                |_root, window, cx| match crate::window_drag::demo_overlay(window, cx) {
                     Ok(overlay) => eprintln!(
                         "neko: drag-guide overlay window number {} ({} guides, opened in {:?})\n{}",
                         overlay.window_number, overlay.guides, overlay.open_took, overlay.detail
                     ),
                     Err(e) => eprintln!("neko: could not open the drag-guide overlay: {e}"),
-                }
-            });
+                },
+            );
         });
         // One settle beat for the overlay's own first paint, the same shape
         // as the actions-menu branch above — it is a second real window, and
         // the "now capture" line below is what an outside script waits for.
-        cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(400))
+            .await;
     }
     // A real, if rare, failure mode confirmed live on a shared machine
     // while capturing this task's own evidence: this window's activation
@@ -881,7 +957,9 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
             let _ = material::order_front_regardless(window);
         });
     });
-    cx.background_executor().timer(std::time::Duration::from_millis(200)).await;
+    cx.background_executor()
+        .timer(std::time::Duration::from_millis(200))
+        .await;
     cx.update(|cx| {
         let _ = window.update(cx, |root, window, _cx| {
             if let Ok(number) = material::window_number(window) {
@@ -934,7 +1012,10 @@ pub async fn show_once(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
 /// the pile-up case is a different experiment, and one this task's own
 /// cancellation change deliberately makes rare.
 pub async fn run_search_bench(query: &str, window: WindowHandle<Root>, cx: &mut AsyncApp) {
-    eprintln!("neko: search bench over {} keystrokes of {query:?}", query.chars().count());
+    eprintln!(
+        "neko: search bench over {} keystrokes of {query:?}",
+        query.chars().count()
+    );
     let mut typed = String::new();
     for ch in query.chars() {
         typed.push(ch);
@@ -944,7 +1025,9 @@ pub async fn run_search_bench(query: &str, window: WindowHandle<Root>, cx: &mut 
                 root.set_query_for_evidence(&so_far, cx);
             });
         });
-        cx.background_executor().timer(std::time::Duration::from_millis(2500)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(2500))
+            .await;
     }
     eprintln!("neko: search bench complete");
 }
@@ -978,21 +1061,34 @@ pub async fn run_search_bench(query: &str, window: WindowHandle<Root>, cx: &mut 
 /// the real path (`window.activate_window()` + `cx.activate(true)` /
 /// `cx.hide()`, which this mode still does not exercise) is the next
 /// divergence point, covered by `run_bench_real` below.
-pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp, iterations: u32) {
-    let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
-    cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+pub async fn run_bench(
+    client: &NekoClient,
+    window: WindowHandle<Root>,
+    cx: &mut AsyncApp,
+    iterations: u32,
+) {
+    let _ = client
+        .request(Request::SetOnboardingComplete { completed: true })
+        .await;
+    cx.background_executor()
+        .timer(std::time::Duration::from_millis(300))
+        .await;
 
     // The real window is always `PANEL_WIDTH_WITH_DETAIL_PX` now
     // (`AGENTS.md`, "Mode view resize seam") — only ever used here to
     // compute the window's own on-screen position, never a resize.
-    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX), gpui::px(PANEL_HEIGHT_PX));
+    let panel_size = gpui::size(
+        gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX),
+        gpui::px(PANEL_HEIGHT_PX),
+    );
 
     for i in 0..iterations {
         let started = Instant::now();
         cx.update(|cx| {
             let _ = window.update(cx, |root, window, cx| {
                 root.reset_for_summon(window, cx);
-                if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
+                if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size)
+                {
                     eprintln!("neko: bench reposition failed: {e}");
                 }
                 let _ = material::order_front_regardless(window);
@@ -1004,13 +1100,17 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
                 });
             });
         });
-        cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(150))
+            .await;
         cx.update(|cx| {
             let _ = window.update(cx, |_root, window, _cx| {
                 let _ = material::order_out(window);
             });
         });
-        cx.background_executor().timer(std::time::Duration::from_millis(80)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(80))
+            .await;
     }
 
     eprintln!("neko: bench complete ({iterations} summons)");
@@ -1055,7 +1155,12 @@ pub async fn run_bench(client: &NekoClient, window: WindowHandle<Root>, cx: &mut
 /// by accident it **refuses to run without `NEKO_EVIDENCE_ACTIVATE=1`**:
 /// setting `NEKO_BENCH_REAL` alone prints why and exits without ever
 /// activating. Do not run it on a machine someone is using.
-pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx: &mut AsyncApp, iterations: u32) {
+pub async fn run_bench_real(
+    client: &NekoClient,
+    window: WindowHandle<Root>,
+    cx: &mut AsyncApp,
+    iterations: u32,
+) {
     if !activation_opt_in() {
         eprintln!(
             "neko: NEKO_BENCH_REAL measures the real activate_window() summon path, which makes \
@@ -1065,18 +1170,25 @@ pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx:
         );
         std::process::exit(2);
     }
-    let _ = client.request(Request::SetOnboardingComplete { completed: true }).await;
+    let _ = client
+        .request(Request::SetOnboardingComplete { completed: true })
+        .await;
     eprintln!("neko: real-bench pid {}", std::process::id());
     eprintln!(
         "neko: real-bench WILL take real keyboard focus for {iterations} cycles \
          (NEKO_EVIDENCE_ACTIVATE is set)."
     );
-    cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+    cx.background_executor()
+        .timer(std::time::Duration::from_millis(300))
+        .await;
 
     // The real window is always `PANEL_WIDTH_WITH_DETAIL_PX` now
     // (`AGENTS.md`, "Mode view resize seam") — only ever used here to
     // compute the window's own on-screen position, never a resize.
-    let panel_size = gpui::size(gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX), gpui::px(PANEL_HEIGHT_PX));
+    let panel_size = gpui::size(
+        gpui::px(theme::PANEL_WIDTH_WITH_DETAIL_PX),
+        gpui::px(PANEL_HEIGHT_PX),
+    );
 
     for i in 0..iterations {
         eprintln!("neko: real-bench cycle {i} activating");
@@ -1084,13 +1196,17 @@ pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx:
         cx.update(|cx| {
             let _ = window.update(cx, |root, window, cx| {
                 root.reset_for_summon(window, cx);
-                if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
+                if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size)
+                {
                     eprintln!("neko: real-bench reposition failed: {e}");
                 }
                 window.activate_window();
                 window.focus(&root.focus_handle(cx), cx);
                 window.on_next_frame(move |_, _| {
-                    eprintln!("neko: real-bench cycle {i} frame latency {:?}", started.elapsed());
+                    eprintln!(
+                        "neko: real-bench cycle {i} frame latency {:?}",
+                        started.elapsed()
+                    );
                 });
             });
             cx.activate(true);
@@ -1099,20 +1215,28 @@ pub async fn run_bench_real(client: &NekoClient, window: WindowHandle<Root>, cx:
         // completion-handler window (this function's own doc comment)
         // before printing `activated` — the moment an outside script should
         // sample.
-        cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(400))
+            .await;
         cx.update(|cx| {
             let _ = window.update(cx, |_root, window, _cx| {
                 report_key_window(window, "real-bench activated")
             });
         });
         eprintln!("neko: real-bench cycle {i} activated");
-        cx.background_executor().timer(std::time::Duration::from_millis(900)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(900))
+            .await;
 
         eprintln!("neko: real-bench cycle {i} hiding");
         cx.update(|cx| cx.hide());
-        cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(400))
+            .await;
         eprintln!("neko: real-bench cycle {i} hidden");
-        cx.background_executor().timer(std::time::Duration::from_millis(900)).await;
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(900))
+            .await;
     }
 
     eprintln!("neko: real-bench complete ({iterations} cycles)");
