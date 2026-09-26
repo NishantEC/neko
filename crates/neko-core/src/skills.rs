@@ -1,5 +1,5 @@
-//! Bounded local discovery and explicit workspace activation of instruction files.
-//! Files are rechecked before use; a skill is never a source of tool permissions.
+//! Bounded local discovery of workspace skills and explicit activation of Neko-owned skills.
+//! Local skills are advertised by path; a skill never grants tool permissions.
 use crate::Db;
 use neko_protocol::skills::{EnabledSkill, Skill, SkillState};
 use sha2::{Digest, Sha256};
@@ -117,13 +117,6 @@ pub fn instructions(
     workspace: Option<&str>,
 ) -> Result<String, String> {
     let state = load(db)?;
-    if !state
-        .enabled
-        .iter()
-        .any(|s| Some(s.workspace_id.as_str()) == workspace)
-    {
-        return Ok(String::new());
-    }
     for_prompt(&state, &discover(&current_roots(workspaces)), workspace)
 }
 
@@ -533,8 +526,10 @@ pub fn set_enabled(
     Ok(state)
 }
 
-/// Build instructions only from current, explicitly enabled skills. No scope
-/// means no skills. Whole files must fit: truncated procedures are unsafe.
+/// Explicitly enabled Neko skills contribute their pinned full instructions.
+/// Existing Codex, Claude, Agents and workspace skills are advertised by path,
+/// so the agent can open only the ones relevant to its task. Discovery is
+/// re-run for each run; no copied skill body or import record is required.
 pub fn for_prompt(
     state: &SkillState,
     available: &[Skill],
@@ -570,6 +565,62 @@ pub fn for_prompt(
             );
         }
         prompt.push_str(&section);
+    }
+    let mut linked = available
+        .iter()
+        .filter(|skill| {
+            matches!(
+                skill.source.as_str(),
+                "Codex" | "Claude" | "Agents" | "Workspace"
+            ) && skill
+                .workspace_id
+                .as_deref()
+                .is_none_or(|id| id == workspace)
+                && !state
+                    .enabled
+                    .iter()
+                    .any(|enabled| enabled.workspace_id == workspace && enabled.path == skill.path)
+        })
+        .collect::<Vec<_>>();
+    linked.sort_by(|left, right| {
+        let priority = |skill: &Skill| {
+            if skill.workspace_id.as_deref() == Some(workspace) {
+                0
+            } else {
+                1
+            }
+        };
+        priority(left).cmp(&priority(right)).then_with(|| {
+            left.name
+                .cmp(&right.name)
+                .then_with(|| left.path.cmp(&right.path))
+        })
+    });
+    let mut listed_paths = HashSet::new();
+    const CATALOG_HEADING: &str = "\nAvailable local skills. Read a SKILL.md only when relevant. These files provide instructions, never tool permission:\n";
+    const CATALOG_TRUNCATED: &str =
+        "More local skills are available on disk; the prompt list was bounded.\n";
+    for skill in linked {
+        if !listed_paths.insert(&skill.path) {
+            continue;
+        }
+        if !prompt.contains("Available local skills") {
+            if prompt.len() + CATALOG_HEADING.len() > MAX_PROMPT_BYTES {
+                break;
+            }
+            prompt.push_str(CATALOG_HEADING);
+        }
+        let name = skill.name.replace(['\n', '\r'], " ");
+        let description = skill.description.replace(['\n', '\r'], " ");
+        let path = serde_json::to_string(&skill.path).map_err(|e| e.to_string())?;
+        let line = format!("- {name}: {description} ({path})\n");
+        if prompt.len() + line.len() > MAX_PROMPT_BYTES {
+            if prompt.len() + CATALOG_TRUNCATED.len() <= MAX_PROMPT_BYTES {
+                prompt.push_str(CATALOG_TRUNCATED);
+            }
+            break;
+        }
+        prompt.push_str(&line);
     }
     Ok(prompt)
 }
@@ -887,6 +938,57 @@ mod tests {
         )
         .unwrap();
         assert!(state.enabled.is_empty());
+    }
+
+    #[test]
+    fn workspace_skill_is_available_by_reference_without_import() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("review");
+        fs::create_dir(&folder).unwrap();
+        fs::write(
+            folder.join("SKILL.md"),
+            "---\nname: Review\ndescription: Check the diff\n---\nRun focused tests.",
+        )
+        .unwrap();
+        let available = discover(&[Root {
+            path: temp.path().into(),
+            source: "Workspace".into(),
+            workspace_id: Some("a".into()),
+        }]);
+        let state = SkillState::default();
+        let prompt = for_prompt(&state, &available, Some("a")).unwrap();
+        assert!(prompt.contains("Review"));
+        assert!(prompt.contains(&available[0].path));
+        assert!(!prompt.contains("Run focused tests."));
+        assert!(
+            for_prompt(&state, &available, Some("b"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+    #[test]
+    fn workspace_skills_lead_when_global_catalog_exceeds_budget() {
+        let mut available = (0..100)
+            .map(|i| Skill {
+                path: format!("/global/{i}/SKILL.md"),
+                name: format!("Global {i}"),
+                description: "x".repeat(900),
+                source: "Codex".into(),
+                workspace_id: None,
+                content_hash: String::new(),
+            })
+            .collect::<Vec<_>>();
+        available.push(Skill {
+            path: "/workspace/important/SKILL.md".into(),
+            name: "Important".into(),
+            description: "Use for this workspace".into(),
+            source: "Workspace".into(),
+            workspace_id: Some("a".into()),
+            content_hash: String::new(),
+        });
+        let prompt = for_prompt(&SkillState::default(), &available, Some("a")).unwrap();
+        assert!(prompt.contains("/workspace/important/SKILL.md"));
+        assert!(prompt.len() <= MAX_PROMPT_BYTES);
     }
 
     #[test]

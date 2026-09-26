@@ -2721,7 +2721,7 @@ mod tests {
         let (client, _events) = neko_client::NekoClient::connect(std::env::temp_dir().join(
             format!("neko-no-socket-{}-memory-routing", std::process::id()),
         ));
-        let root = cx.update(|cx| cx.new(|cx| WorkspaceRoot::new(client, cx)));
+        let root = cx.update(|cx| cx.new(|cx| WorkspaceRoot::new(client, None, cx)));
         root.update(cx,|root,cx| {
             root.busy=true;root.refreshing=true;
             let original=MemoryEntry{agent_profile_id:"work".into(),id:"memory-1".into(),kind:MemoryKind::Workspace,workspace_id:Some("a".into()),text:"before".into(),source:"chat".into(),created_at_ms:10,updated_at_ms:20};

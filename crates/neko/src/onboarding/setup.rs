@@ -1,10 +1,10 @@
-//! Six visible setup steps; permission asks remain substates, not extra screens.
+//! Three visible setup steps; permission asks remain substates, not extra screens.
 use super::*;
 use crate::text_field::TextField;
 use neko_protocol::{
     mcp_host::{McpCommand, Responsibility},
     setup_import::{ImportCandidateKind, ImportCommand},
-    workbench::{ChatRole, Command, Snapshot},
+    workbench::{ChatRole, Command, Snapshot, Workspace},
 };
 #[cfg(test)]
 use std::collections::BTreeMap;
@@ -16,7 +16,7 @@ pub(super) fn evidence() -> bool {
 fn evidence_step(value: Option<&str>) -> SetupStep {
     value
         .and_then(|s| s.parse::<usize>().ok())
-        .filter(|i| (1..=6).contains(i))
+        .filter(|i| (1..=3).contains(i))
         .map(|i| SetupStep::ALL[i - 1])
         .unwrap_or(SetupStep::Welcome)
 }
@@ -28,7 +28,7 @@ pub(super) struct Setup {
     pub notice: Option<String>,
     clipboard_ready: bool,
     snapshot: Snapshot,
-    workspace: Option<String>,
+    pub(super) workspace: Option<String>,
     repository: Entity<TextField>,
     responsibility: Entity<TextField>,
     server_name: Entity<TextField>,
@@ -174,19 +174,12 @@ pub(super) enum SetupStep {
     Sweep,
 }
 impl SetupStep {
-    pub(super) const ALL: [Self; 6] = [
-        Self::Welcome,
-        Self::Mac,
-        Self::Import,
-        Self::Tools,
-        Self::Responsibility,
-        Self::Sweep,
-    ];
+    pub(super) const ALL: [Self; 3] = [Self::Welcome, Self::Mac, Self::Import];
     pub(super) fn index(self) -> usize {
         Self::ALL.iter().position(|s| *s == self).unwrap()
     }
     pub(super) fn next(self) -> Self {
-        Self::ALL[(self.index() + 1).min(5)]
+        Self::ALL[(self.index() + 1).min(Self::ALL.len() - 1)]
     }
     pub(super) fn back(self) -> Self {
         Self::ALL[self.index().saturating_sub(1)]
@@ -368,7 +361,170 @@ fn recording_after_navigation(step: SetupStep, recording: RecordingState) -> Rec
     }
 }
 
+enum FolderChoice {
+    Existing(String),
+    New(Workspace),
+}
+
+fn folder_choice(path: &std::path::Path, workspaces: &[Workspace]) -> Result<FolderChoice, String> {
+    let directory = path
+        .canonicalize()
+        .map_err(|_| "That folder is no longer available".to_owned())?;
+    if !directory.is_dir() {
+        return Err("Choose a folder, not a file".into());
+    }
+    let repository = directory
+        .to_str()
+        .ok_or("This folder path cannot be read")?
+        .to_owned();
+    if let Some(existing) = workspaces.iter().find(|w| w.repository == repository) {
+        return Ok(FolderChoice::Existing(existing.id.clone()));
+    }
+    let name = directory
+        .file_name()
+        .and_then(|part| part.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or("Choose a project folder, not a filesystem root")?
+        .to_owned();
+    Ok(FolderChoice::New(Workspace {
+        id: String::new(),
+        name,
+        repository,
+        instructions: String::new(),
+        away_enabled: false,
+    }))
+}
+
 impl OnboardingRoot {
+    fn setup_select_folder(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        match folder_choice(&path, &self.setup.snapshot.workspaces) {
+            Ok(FolderChoice::Existing(id)) => {
+                self.setup.workspace = Some(id);
+                self.setup.error = None;
+                self.setup.notice = Some("Workspace ready. Open Neko to start there.".into());
+                cx.notify();
+            }
+            Ok(FolderChoice::New(workspace)) => {
+                self.setup_request(Command::SaveWorkspace { workspace }, cx);
+            }
+            Err(error) => {
+                self.setup.error = Some(error);
+                cx.notify();
+            }
+        }
+    }
+
+    fn setup_choose_folder(&mut self, cx: &mut Context<Self>) {
+        if self.setup.busy || evidence() {
+            return;
+        }
+        self.setup.busy = true;
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose workspace".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let result = receiver.await;
+            let _ = this.update(cx, |root, cx| {
+                root.setup.busy = false;
+                match result {
+                    Ok(Ok(Some(paths))) => {
+                        if let Some(path) = paths.into_iter().next() {
+                            root.setup_select_folder(path, cx);
+                        }
+                    }
+                    Ok(Ok(None)) => {}
+                    Ok(Err(error)) => root.setup.error = Some(error.to_string()),
+                    Err(_) => root.setup.error = Some("Folder chooser closed unexpectedly".into()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn setup_workspace_view(&self, cx: &mut Context<Self>) -> gpui::Div {
+        let mut body = div().flex().flex_col().gap(px(20.));
+        if !self.setup.snapshot.workspaces.is_empty() {
+            body = body.child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .child("Your workspaces")
+                    .child(note(format!(
+                        "{} available",
+                        self.setup.snapshot.workspaces.len()
+                    ))),
+            );
+            let mut cards = div().flex().flex_wrap().gap(px(14.));
+            for workspace in self.setup.snapshot.workspaces.iter().take(6) {
+                let id = workspace.id.clone();
+                let selected = self.setup.workspace.as_ref() == Some(&id);
+                cards = cards.child(
+                    div()
+                        .id(format!("setup-folder-{id}"))
+                        .tab_index(0)
+                        .tab_stop(!self.setup.busy)
+                        .w(px(300.))
+                        .h(px(180.))
+                        .p(px(20.))
+                        .rounded(px(12.))
+                        .border_1()
+                        .border_color(if selected {
+                            theme::active().text_primary
+                        } else {
+                            theme::active().border_hairline_strong
+                        })
+                        .bg(theme::active().surface_panel)
+                        .cursor_pointer()
+                        .hover(|style| style.bg(theme::active().surface_raised))
+                        .on_click(cx.listener(move |root, _, _, cx| {
+                            root.setup.workspace = Some(id.clone());
+                            root.setup.error = None;
+                            cx.notify();
+                        }))
+                        .flex()
+                        .flex_col()
+                        .justify_between()
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(8.))
+                                .child(
+                                    div()
+                                        .text_size(px(18.))
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .child(workspace.name.clone()),
+                                )
+                                .child(note(workspace.repository.clone())),
+                        )
+                        .child(note(if selected {
+                            "Selected"
+                        } else {
+                            "Select workspace →"
+                        })),
+                );
+            }
+            body = body.child(cards);
+        } else {
+            body = body.child(note(
+                "Choose one folder where you work. Neko will leave its files and setup in place.",
+            ));
+        }
+        body.child(button(
+            "setup-choose-folder",
+            "Choose another folder…",
+            !self.setup.busy && !evidence(),
+            cx,
+            |root, _, cx| root.setup_choose_folder(cx),
+        ))
+        .child(note("Neko reads available workspace guidance when you work there. External tools still require your approval before use."))
+    }
+
     fn setup_discover_import(&mut self, cx: &mut Context<Self>, force: bool) {
         if !begin_import_discovery(
             self.setup.busy,
@@ -429,11 +585,7 @@ impl OnboardingRoot {
 
     pub(super) fn setup_start(&mut self, cx: &mut Context<Self>) {
         self.flow.accessibility_granted = self.accessibility.is_trusted();
-        if self.setup.step == SetupStep::Import {
-            self.setup_discover_import(cx, false);
-        } else {
-            self.setup_read_clipboard(cx);
-        }
+        self.setup_read_clipboard(cx);
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(2)).await;
@@ -474,6 +626,10 @@ impl OnboardingRoot {
         let list_sources = matches!(command, Command::SetupImport(ImportCommand::ListSources));
         let apply = matches!(command, Command::SetupImport(ImportCommand::Apply { .. }));
         let brief = matches!(command, Command::SendMessage { .. });
+        let saved_repository = match &command {
+            Command::SaveWorkspace { workspace } => Some(workspace.repository.clone()),
+            _ => None,
+        };
         let connection_io = matches!(
             command,
             Command::Mcp(
@@ -524,15 +680,16 @@ impl OnboardingRoot {
                         }
                         if list_sources { root.setup.notice = None; root.setup.import_view = ImportView::Sources; }
                         if brief { root.setup.brief_turn = snapshot.conversation.iter().rev().find(|m| m.role == ChatRole::Neko && m.pending).map(|m| m.id.clone()); }
+                        if let Some(repository) = saved_repository.as_deref() {
+                            root.setup.workspace = snapshot.workspaces.iter().find(|w| w.repository == repository).map(|w| w.id.clone());
+                            root.setup.notice = Some("Workspace added. Neko will use what is already in that folder.".into());
+                        }
                         root.setup.snapshot = snapshot;
                         if list_sources && evidence() {
                             if let Ok(source_id) = std::env::var("NEKO_IMPORT_PREVIEW_SOURCE") {
                                 root.setup_scan_source(source_id, cx);
                                 return;
                             }
-                        }
-                        if poll && root.setup.step == SetupStep::Import && !root.setup.import_discovery_started {
-                            root.setup_discover_import(cx, false);
                         }
                     }
                     Ok(Response::Error { message }) => {
@@ -564,50 +721,15 @@ impl OnboardingRoot {
         if self.setup.busy || matches!(self.flow.hotkey_recording, RecordingState::Recording) {
             return;
         }
-        if self.setup.step == SetupStep::Sweep {
+        if self.setup.step == SetupStep::Import {
             self.close_and_persist_completion(window, cx);
             return;
         }
-        if self.setup.step == SetupStep::Import {
-            match self.setup.import_view {
-                ImportView::Sources => {}
-                ImportView::Scanning => return,
-                ImportView::Items(_) => {
-                    self.setup.import_view = ImportView::Overview;
-                    cx.notify();
-                    return;
-                }
-                ImportView::Overview => {
-                    if self.setup.selected_connections.is_empty()
-                        && self.setup.selected_skills.is_empty()
-                        && self.setup.selected_workspaces.is_empty()
-                        && self.setup.selected_schedules.is_empty()
-                    {
-                        self.setup.import_view = ImportView::Sources;
-                        cx.notify();
-                    } else {
-                        self.setup_apply_import(cx);
-                    }
-                    return;
-                }
-            }
-        }
-        let previous = self.setup.step;
         self.setup.step = self.setup.step.next();
         self.flow.hotkey_recording =
             recording_after_navigation(self.setup.step, self.flow.hotkey_recording.clone());
         self.setup.error = None;
         self.setup.notice = None;
-        if previous == SetupStep::Import && self.setup.step != SetupStep::Import {
-            self.setup.import_discovery_started = false;
-        }
-        if should_start_import_discovery(
-            self.setup.step,
-            self.setup.busy,
-            self.setup.import_discovery_started,
-        ) {
-            self.setup_discover_import(cx, false);
-        }
         cx.notify();
     }
 
@@ -1705,7 +1827,7 @@ impl OnboardingRoot {
         let titles = [
             "While you’re away,\nsomeone should be you.",
             "Let Neko work on your Mac",
-            "Bring your setup with you",
+            "Choose a workspace",
             "Your tools, your boundaries",
             "What should I look after?",
             "Your first look, grounded in real work",
@@ -1713,23 +1835,11 @@ impl OnboardingRoot {
         let subtitles = [
             "One Neko to talk to. A quick panel when you need it. Your work stays yours.",
             "Each permission is optional. You can always open the full app without a shortcut.",
-            "Choose a source, then select only the items you want. Source files stay untouched.",
+            "Neko works with what is already in that folder. Nothing is copied or enabled.",
             "Global definitions are available everywhere; permissions are granted per workspace.",
             "Start with one clear responsibility. Tool access stays limited to what you grant.",
             "Neko reads the selected workspace and granted tools, then prepares a useful brief.",
         ];
-        let import_title = match self.setup.import_view {
-            ImportView::Sources => "What do you already use?".to_owned(),
-            ImportView::Scanning => String::new(),
-            ImportView::Overview => format!("Bring over from {}", self.setup.import_source_name),
-            ImportView::Items(_) => "Choose what comes over".to_owned(),
-        };
-        let import_subtitle = match self.setup.import_view {
-            ImportView::Sources => "Choose one source to look through. Neko won’t change it or import anything until you review.".to_owned(),
-            ImportView::Scanning => String::new(),
-            ImportView::Overview => "Here’s what I found. Choose what Neko should keep; nothing is enabled yet.".to_owned(),
-            ImportView::Items(_) => "Pick individual items. Everywhere follows you; a workspace item stays inside that folder.".to_owned(),
-        };
         let mut progress = div().flex().gap(px(6.)).items_center();
         for (index, label) in labels.iter().enumerate() {
             let _ = label;
@@ -1762,44 +1872,34 @@ impl OnboardingRoot {
                     .text_color(theme::active().text_primary),
             );
         }
-        if stage == SetupStep::Import && self.setup.import_view != ImportView::Scanning {
+        if stage == SetupStep::Import {
             body = body.child(
                 div()
                     .text_size(px(12.))
                     .font_weight(gpui::FontWeight::BOLD)
                     .text_color(gpui::rgb(0x92969d))
-                    .child("BRING YOUR SETUP"),
+                    .child("WORK WHERE YOU ALREADY WORK"),
             );
         }
-        if stage != SetupStep::Import || self.setup.import_view != ImportView::Scanning {
-            body = body
-                .child(
-                    div()
-                        .text_size(px(if stage == SetupStep::Welcome {
-                            48.
-                        } else if stage == SetupStep::Import {
-                            34.
-                        } else {
-                            30.
-                        }))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .line_height(px(if stage == SetupStep::Welcome {
-                            54.
-                        } else {
-                            38.
-                        }))
-                        .child(if stage == SetupStep::Import {
-                            import_title.clone()
-                        } else {
-                            titles[stage.index()].to_owned()
-                        }),
-                )
-                .child(note(if stage == SetupStep::Import {
-                    import_subtitle.clone()
-                } else {
-                    subtitles[stage.index()].to_owned()
-                }));
-        }
+        body = body
+            .child(
+                div()
+                    .text_size(px(if stage == SetupStep::Welcome {
+                        48.
+                    } else if stage == SetupStep::Import {
+                        34.
+                    } else {
+                        30.
+                    }))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .line_height(px(if stage == SetupStep::Welcome {
+                        54.
+                    } else {
+                        38.
+                    }))
+                    .child(titles[stage.index()].to_owned()),
+            )
+            .child(note(subtitles[stage.index()].to_owned()));
         match stage {
             SetupStep::Welcome => {
                 body=body.child(div().mt(px(18.)).child(button("setup-get-started","Get started",!self.setup.busy,cx,|r,w,cx|r.setup_next(w,cx))))
@@ -1826,7 +1926,7 @@ impl OnboardingRoot {
                 }
             }
             SetupStep::Import => {
-                body = body.child(self.setup_import_view(cx));
+                body = body.child(self.setup_workspace_view(cx));
             }
             SetupStep::Tools => {
                 body = body.child(self.setup_tools_view(cx));
@@ -1880,36 +1980,9 @@ impl OnboardingRoot {
                 !self.setup.busy && stage != SetupStep::Welcome,
                 cx,
                 |r, _, cx| {
-                    if r.setup.step == SetupStep::Import {
-                        match r.setup.import_view {
-                            ImportView::Items(_) => {
-                                r.setup.import_view = ImportView::Overview;
-                                cx.notify();
-                                return;
-                            }
-                            ImportView::Overview | ImportView::Scanning => {
-                                r.setup.import_view = ImportView::Sources;
-                                cx.notify();
-                                return;
-                            }
-                            ImportView::Sources => {}
-                        }
-                    }
-                    let previous = r.setup.step;
                     r.setup.step = r.setup.step.back();
-                    r.setup.advance_after_import = false;
                     r.flow.hotkey_recording =
                         recording_after_navigation(r.setup.step, r.flow.hotkey_recording.clone());
-                    if previous == SetupStep::Import && r.setup.step != SetupStep::Import {
-                        r.setup.import_discovery_started = false;
-                    }
-                    if should_start_import_discovery(
-                        r.setup.step,
-                        r.setup.busy,
-                        r.setup.import_discovery_started,
-                    ) {
-                        r.setup_discover_import(cx, false);
-                    }
                     cx.notify();
                 },
             ))
@@ -1927,32 +2000,13 @@ impl OnboardingRoot {
                             |r, w, cx| r.close_and_persist_completion(w, cx),
                         ))
                     })
-                    .when(
-                        stage == SetupStep::Import
-                            && matches!(
-                                self.setup.import_view,
-                                ImportView::Overview | ImportView::Items(_)
-                            ),
-                        |actions| {
-                            let selected = self.setup.selected_connections.len()
-                                + self.setup.selected_skills.len()
-                                + self.setup.selected_workspaces.len()
-                                + self.setup.selected_schedules.len();
-                            actions.child(note(format!("{selected} items selected")))
-                        },
-                    )
                     .child(button(
                         "setup-next",
-                        if stage == SetupStep::Sweep {
-                            "Open Neko".to_owned()
-                        } else if stage == SetupStep::Import {
-                            match self.setup.import_view {
-                                ImportView::Sources => "I'll do this later →".to_owned(),
-                                ImportView::Scanning => "Reading…".to_owned(),
-                                ImportView::Overview => {
-                                    format!("Import from {} →", self.setup.import_source_name)
-                                }
-                                ImportView::Items(_) => "Save choices →".to_owned(),
+                        if stage == SetupStep::Import {
+                            if self.setup.workspace.is_some() {
+                                "Open Neko →".to_owned()
+                            } else {
+                                "I'll do this later →".to_owned()
                             }
                         } else {
                             "Continue".to_owned()
@@ -1985,7 +2039,7 @@ impl OnboardingRoot {
                         .text_align(gpui::TextAlign::Right)
                         .text_size(px(12.))
                         .text_color(gpui::rgb(0x92949a))
-                        .child("Setup · 3 of 6"),
+                        .child("Setup · 3 of 3"),
                 )
         } else {
             div()
@@ -2357,27 +2411,59 @@ mod tests {
     #[test]
     fn evidence_steps_are_one_based_and_invalid_values_start_at_welcome() {
         assert_eq!(evidence_step(Some("1")), SetupStep::Welcome);
-        assert_eq!(evidence_step(Some("6")), SetupStep::Sweep);
-        for value in [None, Some("0"), Some("7"), Some("oops")] {
+        assert_eq!(evidence_step(Some("3")), SetupStep::Import);
+        for value in [None, Some("0"), Some("4"), Some("6"), Some("oops")] {
             assert_eq!(evidence_step(value), SetupStep::Welcome);
         }
     }
     #[test]
-    fn six_steps_have_bounded_back_and_next() {
+    fn first_run_has_only_three_visible_steps() {
+        assert_eq!(SetupStep::ALL.len(), 3);
+        assert_eq!(SetupStep::Mac.next(), SetupStep::Import);
+        assert_eq!(SetupStep::Import.next(), SetupStep::Import);
+    }
+    #[test]
+    fn three_steps_have_bounded_back_and_next() {
         let mut step = SetupStep::Welcome;
         assert_eq!(step.back(), SetupStep::Welcome);
-        for expected in [
-            SetupStep::Mac,
-            SetupStep::Import,
-            SetupStep::Tools,
-            SetupStep::Responsibility,
-            SetupStep::Sweep,
-        ] {
+        for expected in [SetupStep::Mac, SetupStep::Import] {
             step = step.next();
             assert_eq!(step, expected);
         }
-        assert_eq!(step.next(), SetupStep::Sweep);
-        assert_eq!(step.back(), SetupStep::Responsibility);
+        assert_eq!(step.next(), SetupStep::Import);
+        assert_eq!(step.back(), SetupStep::Mac);
+    }
+    #[test]
+    fn choosing_an_existing_folder_reuses_its_workspace() {
+        let folder = std::env::temp_dir().canonicalize().unwrap();
+        let existing = Workspace {
+            id: "existing".into(),
+            name: "Existing".into(),
+            repository: folder.to_string_lossy().into_owned(),
+            instructions: String::new(),
+            away_enabled: false,
+        };
+        assert!(matches!(
+            folder_choice(&folder, &[existing]),
+            Ok(FolderChoice::Existing(id)) if id == "existing"
+        ));
+    }
+    #[test]
+    fn choosing_a_new_folder_registers_only_a_workspace() {
+        let folder = std::env::temp_dir().canonicalize().unwrap();
+        let result = folder_choice(&folder, &[]).unwrap();
+        let FolderChoice::New(workspace) = result else {
+            panic!("expected a new workspace");
+        };
+        assert!(workspace.id.is_empty());
+        assert_eq!(workspace.repository, folder.to_string_lossy());
+        assert!(workspace.instructions.is_empty());
+        assert!(!workspace.away_enabled);
+    }
+    #[test]
+    fn choosing_a_file_does_not_register_a_workspace() {
+        let file = std::env::current_exe().unwrap();
+        assert!(folder_choice(&file, &[]).is_err());
     }
     #[test]
     fn import_discovery_starts_once_on_entry_but_can_retry_after_error() {
