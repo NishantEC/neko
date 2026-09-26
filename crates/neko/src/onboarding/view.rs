@@ -414,7 +414,11 @@ impl OnboardingRoot {
                     }) => {
                         *root.slot.borrow_mut() = None;
                         let _ = handle.update(cx, |_, window, _| window.remove_window());
-                        crate::workspace::open(root.client.clone(), cx);
+                        crate::workspace::open_selected(
+                            root.client.clone(),
+                            root.setup.workspace.clone(),
+                            cx,
+                        );
                     }
                     Ok(_) => {
                         root.setup.error =

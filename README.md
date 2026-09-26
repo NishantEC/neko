@@ -105,18 +105,16 @@ cargo build -p neko-daemon --bin neko-daemon
 node scripts/smoke-workbench.mjs
 ```
 
-First-run Import performs one bounded, read-only local scan for Codex, Claude,
-portable Paseo-compatible project metadata, global/workspace skills, MCP
-definitions, and documented schedules. The review ledger records source and
-scope without secrets or skill bodies. Applying selected items creates
-workspaces idempotently, stores skills as disabled review proposals, keeps MCP
-definitions disabled with no grants/tools, and saves schedules paused. It does
-not silently widen a workspace-scoped MCP: if its workspace is unavailable,
-the review can explicitly keep that definition global and paused for later
-workspace-specific grants. It still does
-not launch local tools, read Keychain credentials, import transcripts, or
-enable provider/live authority. Unsupported metadata is shown as a warning or
-problem for review. Verify the credential-free path with:
+First run no longer asks you to import another app's setup. Choose an existing
+local folder with the native folder picker; Neko registers that folder as a
+workspace without copying its files. Codex, Claude, Agents and workspace
+SKILL.md files are listed by reference to Neko's agents in that workspace.
+Agents open a skill only when relevant; a skill never grants tool authority.
+Neko-installed skills still require separate activation. Existing MCP
+definitions are not silently made executable: add or approve connections and
+individual tools in **Tools & skills**. The legacy import protocol remains
+available for migration fixtures and existing data; it is no longer a first-run
+screen. Verify that legacy protocol with:
 
 ```sh
 cargo build -p neko-daemon --bin neko-daemon
@@ -242,10 +240,8 @@ patch itself fixes a ~30ms warm-summon regression in the fork; see
 Run it once more from a clean shell to confirm — it is idempotent and prints
 `nothing to do` when the checkout is already current.
 
-The first launch has six setup steps: welcome, optional Mac permissions and
-shortcut, selected import, workspace-scoped tools and skills, a responsibility,
-and a real read-only first brief. Imported schedules are paused; credentials
-are copied only with explicit consent. The workspace remains a normal app
+The first launch has three setup steps: welcome, optional Mac permissions and
+shortcut, and choosing a workspace folder. The workspace remains a normal app
 window independently of the shortcut. Setup can be skipped without granting
 tools or running a sweep. To replay onboarding:
 

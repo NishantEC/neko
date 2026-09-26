@@ -562,11 +562,13 @@ mod tests {
                 .unwrap()
                 .contains("RESPONSIBILITY_SKILL_SENTINEL")
         );
+        // Global local skills may be advertised in every workspace, but the
+        // enabled body from this workspace must not leak into another one.
         assert!(
-            controller
+            !controller
                 .responsibility_skills(&state, "other")
                 .unwrap()
-                .is_empty()
+                .contains("RESPONSIBILITY_SKILL_SENTINEL")
         );
         std::fs::write(&path, "Changed instructions").unwrap();
         controller.responsibility_tick().unwrap();

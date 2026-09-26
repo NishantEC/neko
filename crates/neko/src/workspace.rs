@@ -29,10 +29,21 @@ impl Global for WorkspaceWindow {}
 /// Open or focus the persistent app window. Closing it leaves the daemon's
 /// work running; opening again fetches its authoritative snapshot.
 pub fn open(client: NekoClient, cx: &mut App) {
+    open_selected(client, None, cx);
+}
+
+/// Open Today in the workspace chosen during setup, without changing the
+/// default behavior of Dock/menu-bar opens.
+pub fn open_selected(client: NekoClient, selected: Option<String>, cx: &mut App) {
     let evidence = workspace_evidence();
     if let Some(existing) = cx.try_global::<WorkspaceWindow>().and_then(|slot| slot.0) {
         if existing
-            .update(cx, |_, window, _| {
+            .update(cx, |root, window, cx| {
+                if let Some(id) = selected.as_ref() {
+                    root.selection.select_workspace(id.clone());
+                    root.view = View::Today;
+                    root.request(Command::Snapshot, cx);
+                }
                 if evidence {
                     show_evidence_window(window);
                 } else {
@@ -66,7 +77,7 @@ pub fn open(client: NekoClient, cx: &mut App) {
             window_background: crate::material::window_background(),
             ..Default::default()
         },
-        move |_, cx| cx.new(|cx| WorkspaceRoot::new(client, cx)),
+        move |_, cx| cx.new(|cx| WorkspaceRoot::new(client, selected, cx)),
     ) {
         Ok(window) => {
             cx.set_global(WorkspaceWindow(Some(window)));
@@ -226,7 +237,7 @@ pub struct WorkspaceRoot {
 }
 
 impl WorkspaceRoot {
-    fn new(client: NekoClient, cx: &mut Context<Self>) -> Self {
+    fn new(client: NekoClient, selected: Option<String>, cx: &mut Context<Self>) -> Self {
         let api_key = input("Optional credential JSON (stored in Keychain)", cx);
         let skill_filter = input("Find a skill by name, description or source", cx);
         let initial_snapshot_client = client.clone();
@@ -274,7 +285,10 @@ impl WorkspaceRoot {
             schedule_form: schedules::Form::new(cx),
             client,
             snapshot: Snapshot::default(),
-            selection: Selection::default(),
+            selection: Selection {
+                workspace: selected,
+                task: None,
+            },
             pending_task: if workspace_evidence() {
                 std::env::var("NEKO_WORKSPACE_TASK")
                     .ok()
