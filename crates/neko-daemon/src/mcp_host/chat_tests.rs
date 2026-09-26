@@ -36,6 +36,7 @@ fn fixture(read_only: bool) -> (Arc<Host>, String, Lease, String) {
                     ),
                     if read_only { "readonly" } else { "normal" }.into(),
                 ],
+                cwd: None,
             },
             trust_local_process: true,
             credentials: None,
@@ -82,8 +83,14 @@ fn global_tool_dispatch_keeps_workspace_grants_separate() {
         state.mcp.connections[0].workspace_id.clear();
         store::save(&db, &state).unwrap();
     }
-    assert!(call(&host, &lease_a, &connection).unwrap().contains("proof"));
-    let lease_b = host.lease("ungranted-b", "b", vec![connection.clone()], 0).unwrap();
+    assert!(
+        call(&host, &lease_a, &connection)
+            .unwrap()
+            .contains("proof")
+    );
+    let lease_b = host
+        .lease("ungranted-b", "b", vec![connection.clone()], 0)
+        .unwrap();
     assert!(call(&host, &lease_b, &connection).is_err());
     let state = store::load(&host.db.lock().unwrap()).unwrap();
     assert_eq!(state.mcp.receipts.len(), 1);

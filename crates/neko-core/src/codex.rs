@@ -1758,8 +1758,15 @@ mod tests {
             Arc::new(TaskControl::default()),
         );
 
-        let row = provider.search("thr-1", 0).pop().expect("indexed task row").item;
-        assert_eq!(row.preview.as_deref(), Some("can you read paseo agent b74478f7"));
+        let row = provider
+            .search("thr-1", 0)
+            .pop()
+            .expect("indexed task row")
+            .item;
+        assert_eq!(
+            row.preview.as_deref(),
+            Some("can you read paseo agent b74478f7")
+        );
         assert_eq!(
             row.subtitle.as_deref(),
             Some("Codex has not exposed this task's history.")

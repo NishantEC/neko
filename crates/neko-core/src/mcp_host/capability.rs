@@ -25,7 +25,9 @@ impl Registry {
                 if scope.run_id == run_id {
                     scope.cancelled.store(true, Ordering::Release);
                     false
-                } else { true }
+                } else {
+                    true
+                }
             });
         }
     }

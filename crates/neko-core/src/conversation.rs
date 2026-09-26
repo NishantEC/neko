@@ -166,8 +166,12 @@ fn session_ref(agent_id: &str) -> Option<SessionRef> {
     let workspaces = std::fs::read_dir(root).ok()?;
     for workspace in workspaces.flatten() {
         let doc_path = workspace.path().join(format!("{agent_id}.json"));
-        let Ok(raw) = std::fs::read_to_string(&doc_path) else { continue };
-        let Ok(doc) = serde_json::from_str::<Value>(&raw) else { continue };
+        let Ok(raw) = std::fs::read_to_string(&doc_path) else {
+            continue;
+        };
+        let Ok(doc) = serde_json::from_str::<Value>(&raw) else {
+            continue;
+        };
         let provider = doc.get("provider").and_then(Value::as_str)?.to_string();
         let cwd = doc.get("cwd").and_then(Value::as_str)?.to_string();
         let session_id = doc
@@ -176,7 +180,12 @@ fn session_ref(agent_id: &str) -> Option<SessionRef> {
             .and_then(Value::as_str)?
             .to_string();
         let running = doc.get("lastStatus").and_then(Value::as_str) == Some("running");
-        return Some(SessionRef { provider, session_id, cwd, running });
+        return Some(SessionRef {
+            provider,
+            session_id,
+            cwd,
+            running,
+        });
     }
     None
 }
@@ -188,7 +197,9 @@ fn session_ref(agent_id: &str) -> Option<SessionRef> {
 /// `-Users-example--openclaw-workspace` (both verified against the real
 /// directory listing, not inferred).
 pub fn munge_cwd(cwd: &str) -> String {
-    cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 fn transcript_path(session: &SessionRef) -> Option<std::path::PathBuf> {
@@ -275,7 +286,9 @@ fn cache_image(media_type: &str, data: &str) -> Option<String> {
     if path.exists() {
         return Some(path.to_string_lossy().to_string());
     }
-    let bytes = base64::engine::general_purpose::STANDARD.decode(data).ok()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .ok()?;
     std::fs::create_dir_all(&dir).ok()?;
     std::fs::write(&path, bytes).ok()?;
     prune_image_cache(&dir);
@@ -288,7 +301,9 @@ fn cache_image(media_type: &str, data: &str) -> Option<String> {
 /// poll tick over a conversation whose images are all cached — never reads the
 /// directory at all.
 fn prune_image_cache(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
         .flatten()
         .filter_map(|entry| {
@@ -320,7 +335,15 @@ fn is_user_noise(text: &str) -> bool {
 /// probed in preference order — a `description` reads better than a raw
 /// command, a `command` better than nothing.
 fn tool_line(input: &Value) -> Option<String> {
-    for key in ["description", "command", "file_path", "prompt", "pattern", "query", "url"] {
+    for key in [
+        "description",
+        "command",
+        "file_path",
+        "prompt",
+        "pattern",
+        "query",
+        "url",
+    ] {
         if let Some(v) = input.get(key).and_then(Value::as_str) {
             let mut line = v.trim().replace('\n', " ");
             if line.chars().count() > 90 {
@@ -346,7 +369,9 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
     // whole window before any turn is built.
     let mut results: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for line in tail.lines() {
-        let Ok(doc) = serde_json::from_str::<Value>(line.trim()) else { continue };
+        let Ok(doc) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
         let Some(Value::Array(blocks)) = doc.get("message").and_then(|m| m.get("content")) else {
             continue;
         };
@@ -354,7 +379,9 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
             if block.get("type").and_then(Value::as_str) != Some("tool_result") {
                 continue;
             }
-            let Some(id) = block.get("tool_use_id").and_then(Value::as_str) else { continue };
+            let Some(id) = block.get("tool_use_id").and_then(Value::as_str) else {
+                continue;
+            };
             let text = match block.get("content") {
                 Some(Value::String(text)) => text.clone(),
                 Some(Value::Array(parts)) => parts
@@ -385,11 +412,7 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
         if *steps > 0 {
             turns.push(Turn {
                 speaker: Speaker::Tool,
-                text: format!(
-                    "{} step{}",
-                    steps,
-                    if *steps == 1 { "" } else { "s" }
-                ),
+                text: format!("{} step{}", steps, if *steps == 1 { "" } else { "s" }),
                 tool: Some("Subagent".to_string()),
                 result: None,
                 images: Vec::new(),
@@ -402,8 +425,14 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
         if line.is_empty() {
             continue;
         }
-        let Ok(doc) = serde_json::from_str::<Value>(line) else { continue };
-        if doc.get("isSidechain").and_then(Value::as_bool).unwrap_or(false) {
+        let Ok(doc) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if doc
+            .get("isSidechain")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             // Only the subagent's own moves count as steps; its incoming
             // tool results would double every one.
             if doc.get("type").and_then(Value::as_str) == Some("assistant") {
@@ -414,16 +443,19 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
         if doc.get("isMeta").and_then(Value::as_bool).unwrap_or(false) {
             continue;
         }
-        let Some(message) = doc.get("message") else { continue };
+        let Some(message) = doc.get("message") else {
+            continue;
+        };
         match doc.get("type").and_then(Value::as_str) {
             Some("user") => {
                 let mut images: Vec<String> = Vec::new();
                 let text = match message.get("content") {
                     Some(Value::String(text)) => text.clone(),
                     Some(Value::Array(blocks)) => {
-                        if blocks.iter().any(|b| {
-                            b.get("type").and_then(Value::as_str) == Some("tool_result")
-                        }) {
+                        if blocks
+                            .iter()
+                            .any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
+                        {
                             continue;
                         }
                         let mut text = String::new();
@@ -489,7 +521,9 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                 });
             }
             Some("assistant") => {
-                let Some(Value::Array(blocks)) = message.get("content") else { continue };
+                let Some(Value::Array(blocks)) = message.get("content") else {
+                    continue;
+                };
                 for block in blocks {
                     match block.get("type").and_then(Value::as_str) {
                         Some("text") => {
@@ -517,10 +551,7 @@ pub fn parse_transcript_tail(tail: &str) -> Vec<Turn> {
                                 .and_then(Value::as_str)
                                 .unwrap_or("tool")
                                 .to_string();
-                            let text = block
-                                .get("input")
-                                .and_then(tool_line)
-                                .unwrap_or_default();
+                            let text = block.get("input").and_then(tool_line).unwrap_or_default();
                             let result = block
                                 .get("id")
                                 .and_then(Value::as_str)
@@ -590,10 +621,14 @@ fn fetch_turns(agent_id: &str) -> (Vec<Turn>, bool) {
             return (turns, running);
         }
     }
-    let Ok(client) = McpClient::discover() else { return (Vec::new(), running) };
-    (turns_from_entries(fetch(&client, agent_id).unwrap_or_default()), running)
+    let Ok(client) = McpClient::discover() else {
+        return (Vec::new(), running);
+    };
+    (
+        turns_from_entries(fetch(&client, agent_id).unwrap_or_default()),
+        running,
+    )
 }
-
 
 /// Splits the daemon's `content` blob into readable entries.
 ///
@@ -636,9 +671,14 @@ pub fn split_tool(headline: &str) -> Option<(&str, &str)> {
 }
 
 fn fetch(client: &McpClient, agent_id: &str) -> Result<Vec<Entry>, McpError> {
-    let value =
-        client.call("get_agent_activity", json!({"agentId": agent_id, "limit": ACTIVITY_LIMIT}))?;
-    let content = value.get("content").and_then(Value::as_str).unwrap_or_default();
+    let value = client.call(
+        "get_agent_activity",
+        json!({"agentId": agent_id, "limit": ACTIVITY_LIMIT}),
+    )?;
+    let content = value
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     Ok(parse_activity(content))
 }
 
@@ -706,8 +746,13 @@ impl Provider for ConversationProvider {
             .iter()
             .enumerate()
             .map(|(rank, turn)| {
-                let first_line =
-                    turn.text.lines().next().unwrap_or_default().trim().to_string();
+                let first_line = turn
+                    .text
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
                 Candidate {
                     // **Chronological, oldest first** — a chat reads downward
                     // into the present. The daemon's scoped branch sorts by
@@ -815,10 +860,12 @@ impl Provider for ConversationProvider {
         if prompt.is_empty() {
             return Err(ProviderError("type a message first".to_string()));
         }
-        let client = McpClient::discover()
-            .map_err(|e| ProviderError(e.to_string()))?;
+        let client = McpClient::discover().map_err(|e| ProviderError(e.to_string()))?;
         client
-            .call("send_agent_prompt", crate::agents::send_prompt_arguments(id, prompt))
+            .call(
+                "send_agent_prompt",
+                crate::agents::send_prompt_arguments(id, prompt),
+            )
             .map_err(|e| ProviderError(e.to_string()))?;
         // The sent message lands in the transcript the moment the harness
         // writes it; a cache serving the pre-send read for another two
@@ -877,12 +924,14 @@ mod tests {
         if let Some(path) = png {
             assert!(path.ends_with(".png"));
             let jpeg = cache_image("image/jpeg", "aGVsbG8=").unwrap();
-            assert!(jpeg.ends_with(".jpg"), "the extension follows the media type");
+            assert!(
+                jpeg.ends_with(".jpg"),
+                "the extension follows the media type"
+            );
             let _ = std::fs::remove_file(path);
             let _ = std::fs::remove_file(jpeg);
         }
     }
-
 
     #[test]
     fn a_tools_answer_is_joined_to_its_call_by_id() {
@@ -891,7 +940,11 @@ mod tests {
             r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"call-1","content":"src\nlib.rs"}]}}"#,
         ]);
         let turns = parse_transcript_tail(&tail);
-        assert_eq!(turns.len(), 1, "the result attaches, it does not add a turn");
+        assert_eq!(
+            turns.len(),
+            1,
+            "the result attaches, it does not add a turn"
+        );
         assert_eq!(turns[0].result.as_deref(), Some("src\nlib.rs"));
     }
 
@@ -900,11 +953,16 @@ mod tests {
         let big = "x".repeat(RESULT_LIMIT_CHARS * 3);
         let tail = jsonl(&[
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"c","name":"Bash","input":{"command":"cat log"}}]}}"#,
-            &format!(r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"c","content":"{big}"}}]}}}}"#),
+            &format!(
+                r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"c","content":"{big}"}}]}}}}"#
+            ),
         ]);
         let turns = parse_transcript_tail(&tail);
         let result = turns[0].result.as_ref().unwrap();
-        assert!(result.chars().count() <= RESULT_LIMIT_CHARS + 1, "bounded, ellipsis included");
+        assert!(
+            result.chars().count() <= RESULT_LIMIT_CHARS + 1,
+            "bounded, ellipsis included"
+        );
     }
 
     #[test]
@@ -921,8 +979,10 @@ mod tests {
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]}}"#,
         ]);
         let turns = parse_transcript_tail(&tail);
-        let shape: Vec<(&str, Option<&str>)> =
-            turns.iter().map(|t| (t.text.as_str(), t.tool.as_deref())).collect();
+        let shape: Vec<(&str, Option<&str>)> = turns
+            .iter()
+            .map(|t| (t.text.as_str(), t.tool.as_deref()))
+            .collect();
         assert_eq!(
             shape,
             vec![
@@ -933,7 +993,6 @@ mod tests {
             "the subagent's incoming results are not counted as its steps"
         );
     }
-
 
     /// Real line shapes from a live session file, values swapped for fixtures.
     fn jsonl(lines: &[&str]) -> String {
@@ -1011,13 +1070,20 @@ mod tests {
     #[test]
     fn the_cwd_munge_matches_claude_codes_own_directory_names() {
         // Both verified against the real ~/.claude/projects listing.
-        assert_eq!(munge_cwd("/Users/example/Documents/neko"), "-Users-example-Documents-neko");
-        assert_eq!(munge_cwd("/Users/example/.openclaw/workspace"), "-Users-example--openclaw-workspace");
+        assert_eq!(
+            munge_cwd("/Users/example/Documents/neko"),
+            "-Users-example-Documents-neko"
+        );
+        assert_eq!(
+            munge_cwd("/Users/example/.openclaw/workspace"),
+            "-Users-example--openclaw-workspace"
+        );
     }
 
     #[test]
     fn a_tool_call_line_prefers_the_most_human_argument() {
-        let input = serde_json::json!({"command": "cargo test -p neko", "description": "Run the tests"});
+        let input =
+            serde_json::json!({"command": "cargo test -p neko", "description": "Run the tests"});
         assert_eq!(tool_line(&input).as_deref(), Some("Run the tests"));
         let bare = serde_json::json!({"file_path": "/a/b.rs"});
         assert_eq!(tool_line(&bare).as_deref(), Some("/a/b.rs"));
@@ -1028,14 +1094,19 @@ mod tests {
         // The feed arrives newest-first; the chat reads downward into the
         // present, so the fallback must flip it.
         let entries = vec![
-            Entry { headline: "newest prose".into(), body: None },
-            Entry { headline: "[Shell] older command".into(), body: None },
+            Entry {
+                headline: "newest prose".into(),
+                body: None,
+            },
+            Entry {
+                headline: "[Shell] older command".into(),
+                body: None,
+            },
         ];
         let turns = turns_from_entries(entries);
         assert_eq!(turns[0].speaker, Speaker::Tool);
         assert_eq!(turns[1].text, "newest prose");
     }
-
 
     /// Verbatim from a live `get_agent_activity` on this machine, trimmed.
     const REAL: &str = "Showing 6 of 1046 activities (limited to 6)\n\n\
@@ -1062,7 +1133,10 @@ mod tests {
             split_tool("[Write] /Users/example/a.md"),
             Some(("Write", "/Users/example/a.md"))
         );
-        assert_eq!(split_tool("[Shell] git status"), Some(("Shell", "git status")));
+        assert_eq!(
+            split_tool("[Shell] git status"),
+            Some(("Shell", "git status"))
+        );
         // Prose is most of what is worth reading, and is not a tool call.
         assert_eq!(split_tool("Drive KB ingestion is done."), None);
         assert_eq!(split_tool("[] nothing"), None);
@@ -1071,8 +1145,14 @@ mod tests {
     #[test]
     fn a_multi_line_entry_keeps_its_body_for_the_detail_pane() {
         let entries = parse_activity(REAL);
-        assert_eq!(entries[0].headline, "[Write] /Users/example/Documents/project/granth/data/drive/protab.md");
-        assert_eq!(entries[0].body.as_deref(), Some("All 60 documents now written. Verifying completion."));
+        assert_eq!(
+            entries[0].headline,
+            "[Write] /Users/example/Documents/project/granth/data/drive/protab.md"
+        );
+        assert_eq!(
+            entries[0].body.as_deref(),
+            Some("All 60 documents now written. Verifying completion.")
+        );
         // A single-line entry has no body rather than an empty one.
         assert!(entries[1].body.is_none());
     }

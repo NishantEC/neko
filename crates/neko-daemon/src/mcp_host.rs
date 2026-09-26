@@ -31,8 +31,15 @@ struct AuthAttempt {
 }
 impl Drop for AuthAttempt {
     fn drop(&mut self) {
-        let mut attempts = self.host.auth.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if attempts.get(&self.id).is_some_and(|current| Arc::ptr_eq(current, &self.cancel)) {
+        let mut attempts = self
+            .host
+            .auth
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if attempts
+            .get(&self.id)
+            .is_some_and(|current| Arc::ptr_eq(current, &self.cancel))
+        {
             attempts.remove(&self.id);
         }
     }
@@ -42,7 +49,9 @@ impl Drop for AuthAttempt {
 struct PendingCredential(Option<String>);
 impl Drop for PendingCredential {
     fn drop(&mut self) {
-        if let Some(id) = &self.0 { credentials::remove(id); }
+        if let Some(id) = &self.0 {
+            credentials::remove(id);
+        }
     }
 }
 impl Host {
@@ -50,19 +59,46 @@ impl Host {
         self.registry.cancel_run(&format!("chat:{turn_id}"));
     }
 
-    fn chat_approval(&self, scope: &Scope, connection_id: &str, tool: &McpTool, arguments_json: &str, timeout: std::time::Duration) -> Result<Option<String>, String> {
+    fn chat_approval(
+        &self,
+        scope: &Scope,
+        connection_id: &str,
+        tool: &McpTool,
+        arguments_json: &str,
+        timeout: std::time::Duration,
+    ) -> Result<Option<String>, String> {
         use neko_protocol::workbench::{ChatToolCall, ChatToolStatus};
-        let Some(turn_id) = scope.run_id.strip_prefix("chat:") else { return Ok(None); };
-        if arguments_json.len() > 16 * 1024 { return Err("Chat tool arguments exceed 16 KB".into()); }
-        serde_json::from_str::<serde_json::Value>(arguments_json).map_err(|_| "Invalid tool arguments")?;
+        let Some(turn_id) = scope.run_id.strip_prefix("chat:") else {
+            return Ok(None);
+        };
+        if arguments_json.len() > 16 * 1024 {
+            return Err("Chat tool arguments exceed 16 KB".into());
+        }
+        serde_json::from_str::<serde_json::Value>(arguments_json)
+            .map_err(|_| "Invalid tool arguments")?;
         let id = store::new_id();
-        neko_core::neko_chat::record_call(&*self.db.lock().map_err(|_| "Chat storage unavailable")?, turn_id, ChatToolCall {
-            id: id.clone(), workspace_id: scope.workspace_id.clone(), connection_id: connection_id.into(), tool_name: tool.name.clone(), arguments_json: arguments_json.into(),
-            status: if tool.read_only { ChatToolStatus::Running } else { ChatToolStatus::AwaitingApproval },
-        })?;
+        neko_core::neko_chat::record_call(
+            &*self.db.lock().map_err(|_| "Chat storage unavailable")?,
+            turn_id,
+            ChatToolCall {
+                id: id.clone(),
+                workspace_id: scope.workspace_id.clone(),
+                connection_id: connection_id.into(),
+                tool_name: tool.name.clone(),
+                arguments_json: arguments_json.into(),
+                status: if tool.read_only {
+                    ChatToolStatus::Running
+                } else {
+                    ChatToolStatus::AwaitingApproval
+                },
+            },
+        )?;
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            if scope.cancelled.load(Ordering::Acquire) || std::time::Instant::now() >= deadline || !self.current_call_allowed(scope, connection_id, &tool.name, &tool.schema_hash) {
+            if scope.cancelled.load(Ordering::Acquire)
+                || std::time::Instant::now() >= deadline
+                || !self.current_call_allowed(scope, connection_id, &tool.name, &tool.schema_hash)
+            {
                 let _ = self.finish_chat_call(scope, &id, false);
                 return Err("Chat tool approval expired or permission was revoked".into());
             }
@@ -70,10 +106,15 @@ impl Host {
             match neko_core::neko_chat::call_status(&db, turn_id, &id)? {
                 ChatToolStatus::Running if tool.read_only => return Ok(Some(id)),
                 ChatToolStatus::Approved => {
-                    neko_core::neko_chat::set_call_status(&db, turn_id, &id, ChatToolStatus::Running)?;
+                    neko_core::neko_chat::set_call_status(
+                        &db,
+                        turn_id,
+                        &id,
+                        ChatToolStatus::Running,
+                    )?;
                     return Ok(Some(id));
                 }
-                ChatToolStatus::AwaitingApproval => {},
+                ChatToolStatus::AwaitingApproval => {}
                 _ => return Err("Tool call was denied or cancelled".into()),
             }
             drop(db);
@@ -84,7 +125,16 @@ impl Host {
     fn finish_chat_call(&self, scope: &Scope, call_id: &str, success: bool) -> Result<(), String> {
         use neko_protocol::workbench::ChatToolStatus;
         let turn_id = scope.run_id.strip_prefix("chat:").ok_or("Not a chat run")?;
-        neko_core::neko_chat::set_call_status(&*self.db.lock().map_err(|_| "Chat storage unavailable")?, turn_id, call_id, if success { ChatToolStatus::Succeeded } else { ChatToolStatus::Failed })
+        neko_core::neko_chat::set_call_status(
+            &*self.db.lock().map_err(|_| "Chat storage unavailable")?,
+            turn_id,
+            call_id,
+            if success {
+                ChatToolStatus::Succeeded
+            } else {
+                ChatToolStatus::Failed
+            },
+        )
     }
     pub fn new(db: Arc<Mutex<Db>>) -> Self {
         Self {
@@ -140,43 +190,50 @@ impl Host {
                 auth.insert(connection_id.clone(), cancel.clone());
                 drop(auth);
                 let host = self.clone();
-                let attempt = AuthAttempt { host: host.clone(), id: connection_id.clone(), cancel: cancel.clone() };
-                std::thread::Builder::new().name("neko-oauth".into()).spawn(move || {
-                    let _attempt = attempt;
-                    let result = neko_core::mcp_host::oauth::authorize(
-                        &connection_id,
-                        &url,
-                        client_id.as_deref(),
-                        &cancel,
-                        |url| {
-                            let _ = std::process::Command::new("/usr/bin/open")
-                                .arg(url)
-                                .status();
-                        },
-                    );
-                    if let Ok(db) = host.db.lock() {
-                        if let Ok(mut state) = store::load(&db) {
-                            if let Some(c) = state
-                                .mcp
-                                .connections
-                                .iter_mut()
-                                .find(|c| c.id == connection_id)
-                            {
-                                if c.enabled && !cancel.load(Ordering::Acquire) {
-                                    match result {
-                                        Ok(()) => {
-                                            c.oauth = true;
-                                            c.has_credentials = true;
-                                            c.error = None;
+                let attempt = AuthAttempt {
+                    host: host.clone(),
+                    id: connection_id.clone(),
+                    cancel: cancel.clone(),
+                };
+                std::thread::Builder::new()
+                    .name("neko-oauth".into())
+                    .spawn(move || {
+                        let _attempt = attempt;
+                        let result = neko_core::mcp_host::oauth::authorize(
+                            &connection_id,
+                            &url,
+                            client_id.as_deref(),
+                            &cancel,
+                            |url| {
+                                let _ = std::process::Command::new("/usr/bin/open")
+                                    .arg(url)
+                                    .status();
+                            },
+                        );
+                        if let Ok(db) = host.db.lock() {
+                            if let Ok(mut state) = store::load(&db) {
+                                if let Some(c) = state
+                                    .mcp
+                                    .connections
+                                    .iter_mut()
+                                    .find(|c| c.id == connection_id)
+                                {
+                                    if c.enabled && !cancel.load(Ordering::Acquire) {
+                                        match result {
+                                            Ok(()) => {
+                                                c.oauth = true;
+                                                c.has_credentials = true;
+                                                c.error = None;
+                                            }
+                                            Err(error) => c.error = Some(error),
                                         }
-                                        Err(error) => c.error = Some(error),
+                                        let _ = store::save(&db, &state);
                                     }
-                                    let _ = store::save(&db, &state);
                                 }
                             }
                         }
-                    }
-                }).map_err(|e| format!("Cannot start browser sign-in: {e}"))?;
+                    })
+                    .map_err(|e| format!("Cannot start browser sign-in: {e}"))?;
                 store::load(
                     &*self
                         .db
@@ -190,9 +247,17 @@ impl Host {
                 config,
                 trust_local_process,
                 credentials: secret,
-            } => {
-                self.add_connection(workspace_id, label, config, trust_local_process, secret, true).map(|(_, snapshot)| snapshot)
-            }
+            } => self
+                .add_connection(
+                    workspace_id,
+                    label,
+                    config,
+                    trust_local_process,
+                    secret,
+                    true,
+                    false,
+                )
+                .map(|(_, snapshot)| snapshot),
             McpCommand::Discover { connection_id } => {
                 let _slot = self
                     .call_slot
@@ -263,30 +328,59 @@ impl Host {
 
     /// Import chooses the initial enabled state in the same durable write as
     /// creation. The returned ID is unambiguous even during concurrent adds.
-    pub(crate) fn add_connection(&self, workspace_id: String, label: String, config: ServerConfig, trust_local_process: bool, secret: Option<neko_protocol::workbench::Secret>, enabled: bool) -> Result<(String, Snapshot), String> {
+    pub(crate) fn add_connection(
+        &self,
+        workspace_id: String,
+        label: String,
+        config: ServerConfig,
+        trust_local_process: bool,
+        secret: Option<neko_protocol::workbench::Secret>,
+        enabled: bool,
+        allow_untrusted_local_definition: bool,
+    ) -> Result<(String, Snapshot), String> {
         policy::validate_config(&config)?;
-        if matches!(config, ServerConfig::Stdio { .. }) && !trust_local_process {
+        let is_local_process = matches!(config, ServerConfig::Stdio { .. });
+        if is_local_process && !trust_local_process && !allow_untrusted_local_definition {
             return Err("Explicitly trust this local process before adding it".into());
         }
         let id = store::new_id();
         let connection = McpConnection {
-            oauth: false, id: id.clone(), workspace_id, label: label.trim().into(), config,
-            enabled, trusted: true, has_credentials: secret.is_some(), tools: vec![], discovered_ms: None, error: None,
+            oauth: false,
+            id: id.clone(),
+            workspace_id,
+            label: label.trim().into(),
+            config,
+            enabled,
+            trusted: !is_local_process || trust_local_process,
+            has_credentials: secret.is_some(),
+            tools: vec![],
+            discovered_ms: None,
+            error: None,
         };
         {
-            let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+            let db = self
+                .db
+                .lock()
+                .map_err(|_| "Workspace storage unavailable")?;
             let mut state = store::load(&db)?;
             state.mcp.connections.push(connection.clone());
             policy::validate(&state)?;
             if let Some(secret) = &secret {
-                db.delete_clipboard_entry(&secret.0).map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
-                db.delete_clipboard_entry(secret.0.trim()).map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
+                db.delete_clipboard_entry(&secret.0)
+                    .map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
+                db.delete_clipboard_entry(secret.0.trim())
+                    .map_err(|_| "Cannot remove a pasted credential from clipboard history")?;
             }
         }
         let mut pending = PendingCredential(secret.as_ref().map(|_| id.clone()));
         // Keychain can prompt; never hold the database while contacting it.
-        if let Some(secret) = &secret { credentials::store(&id, &secret.0)?; }
-        let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+        if let Some(secret) = &secret {
+            credentials::store(&id, &secret.0)?;
+        }
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| "Workspace storage unavailable")?;
         let mut state = store::load(&db)?;
         state.mcp.connections.push(connection);
         policy::validate(&state)?;
@@ -350,8 +444,9 @@ impl Host {
                 .ok()
                 .and_then(|db| store::load(&db).ok())
                 .is_some_and(|s| {
-                    s.agent_profiles.revision == scope.profile_revision && policy::authorize(&s, &scope.workspace_id, connection, tool)
-                        .is_ok_and(|t| t.schema_hash == hash)
+                    s.agent_profiles.revision == scope.profile_revision
+                        && policy::authorize(&s, &scope.workspace_id, connection, tool)
+                            .is_ok_and(|t| t.schema_hash == hash)
                 })
     }
 
@@ -383,16 +478,24 @@ impl Host {
         // Validate the actor's captured revision and issue its capability in
         // one DB critical section. Never upgrade a stale worker to whatever
         // profile authority happens to be current when it reaches the host.
-        let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| "Workspace storage unavailable")?;
         let state = store::load(&db)?;
         if state.agent_profiles.revision != expected_profile_revision {
             return Err("Agent profile authority changed before lease issuance".into());
         }
         if let Some(turn_id) = run_id.strip_prefix("chat:") {
-            let turn = state.conversation.iter().find(|m| m.id == turn_id && m.pending).ok_or("Chat turn is no longer active")?;
+            let turn = state
+                .conversation
+                .iter()
+                .find(|m| m.id == turn_id && m.pending)
+                .ok_or("Chat turn is no longer active")?;
             if turn.agent_profile_revision != state.agent_profiles.revision
                 || turn.workspace_id.as_deref() != Some(workspace_id)
-                || turn.agent_profile_id != state.agent_profiles.owner(workspace_id) {
+                || turn.agent_profile_id != state.agent_profiles.owner(workspace_id)
+            {
                 return Err("Chat agent profile authority changed before launch".into());
             }
         }
@@ -471,7 +574,13 @@ impl Host {
                     .find(|c| c.id == connection_id)
                     .ok_or("Connection missing")?
                     .clone();
-                let chat_call = self.chat_approval(&scope, &connection_id, &tool, &arguments_json, std::time::Duration::from_secs(120))?;
+                let chat_call = self.chat_approval(
+                    &scope,
+                    &connection_id,
+                    &tool,
+                    &arguments_json,
+                    std::time::Duration::from_secs(120),
+                )?;
                 let stop = AtomicBool::new(false);
                 let cancelled = AtomicBool::new(false);
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -543,7 +652,9 @@ impl Host {
                     serde_json::from_str::<serde_json::Value>(raw)
                         .is_ok_and(|v| v.get("isError").and_then(|v| v.as_bool()) != Some(true))
                 });
-                if let Some(call_id) = &chat_call { let _ = self.finish_chat_call(&scope, call_id, success); }
+                if let Some(call_id) = &chat_call {
+                    let _ = self.finish_chat_call(&scope, call_id, success);
+                }
                 {
                     let db = self
                         .db
@@ -614,10 +725,50 @@ mod tests {
     #[test]
     fn imported_disabled_connection_is_created_disabled_without_touching_other_connections() {
         let h = host();
-        let (first, _) = h.add_connection("w".into(), "Existing".into(), ServerConfig::Http { url:"https://example.org/mcp".into() }, false, None, true).unwrap();
-        let (imported, state) = h.add_connection(String::new(), "Imported".into(), ServerConfig::Http { url:"https://example.org/mcp".into() }, false, None, false).unwrap();
-        assert!(state.mcp.connections.iter().find(|c| c.id == first).unwrap().enabled);
-        assert!(!state.mcp.connections.iter().find(|c| c.id == imported).unwrap().enabled);
+        let (first, _) = h
+            .add_connection(
+                "w".into(),
+                "Existing".into(),
+                ServerConfig::Http {
+                    url: "https://example.org/mcp".into(),
+                },
+                false,
+                None,
+                true,
+                false,
+            )
+            .unwrap();
+        let (imported, state) = h
+            .add_connection(
+                String::new(),
+                "Imported".into(),
+                ServerConfig::Http {
+                    url: "https://example.org/mcp".into(),
+                },
+                false,
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        assert!(
+            state
+                .mcp
+                .connections
+                .iter()
+                .find(|c| c.id == first)
+                .unwrap()
+                .enabled
+        );
+        assert!(
+            !state
+                .mcp
+                .connections
+                .iter()
+                .find(|c| c.id == imported)
+                .unwrap()
+                .enabled
+        );
         assert!(state.mcp.grants.is_empty());
     }
 
@@ -625,12 +776,29 @@ mod tests {
     fn profile_changes_revoke_old_bridge_capabilities() {
         let h = host();
         let lease = h.lease("profile-test", "w", vec![], 0).unwrap();
-        let request = || BridgeRequest { token: neko_protocol::workbench::Secret(lease.token().into()), action: BridgeAction::List };
+        let request = || BridgeRequest {
+            token: neko_protocol::workbench::Secret(lease.token().into()),
+            action: BridgeAction::List,
+        };
         assert_eq!(h.bridge(request()).unwrap(), "[]");
         let db = h.db.lock().unwrap();
-        store::apply(&db, Command::AgentProfiles(neko_protocol::agent_profiles::ProfileCommand::Save { profile: neko_protocol::agent_profiles::AgentProfile { id: "default".into(), name: "Work".into(), instructions: "Updated instructions".into() } })).unwrap();
+        store::apply(
+            &db,
+            Command::AgentProfiles(neko_protocol::agent_profiles::ProfileCommand::Save {
+                profile: neko_protocol::agent_profiles::AgentProfile {
+                    id: "default".into(),
+                    name: "Work".into(),
+                    instructions: "Updated instructions".into(),
+                },
+            }),
+        )
+        .unwrap();
         drop(db);
-        assert!(h.bridge(request()).unwrap_err().contains("authority changed"));
+        assert!(
+            h.bridge(request())
+                .unwrap_err()
+                .contains("authority changed")
+        );
     }
 
     #[test]
@@ -638,15 +806,31 @@ mod tests {
         let h = host();
         // Deterministically place the edit between the worker's snapshot read
         // and Host::lease's own reload. No watchdog timing or sleeps involved.
-        let claimed_revision = store::load(&h.db.lock().unwrap()).unwrap().agent_profiles.revision;
+        let claimed_revision = store::load(&h.db.lock().unwrap())
+            .unwrap()
+            .agent_profiles
+            .revision;
         let db = h.db.lock().unwrap();
-        let newer = store::apply(&db, Command::AgentProfiles(neko_protocol::agent_profiles::ProfileCommand::Save {
-            profile: neko_protocol::agent_profiles::AgentProfile { id: "default".into(), name: "Work".into(), instructions: "Changed after claim".into() },
-        })).unwrap().agent_profiles.revision;
+        let newer = store::apply(
+            &db,
+            Command::AgentProfiles(neko_protocol::agent_profiles::ProfileCommand::Save {
+                profile: neko_protocol::agent_profiles::AgentProfile {
+                    id: "default".into(),
+                    name: "Work".into(),
+                    instructions: "Changed after claim".into(),
+                },
+            }),
+        )
+        .unwrap()
+        .agent_profiles
+        .revision;
         drop(db);
         assert_ne!(claimed_revision, newer);
         let stale = h.lease("task:old-claim", "w", vec![], claimed_revision);
-        assert!(stale.is_err(), "An old actor received a fresh capability after its authority changed");
+        assert!(
+            stale.is_err(),
+            "An old actor received a fresh capability after its authority changed"
+        );
         assert!(h.lease("task:new-claim", "w", vec![], newer).is_ok());
     }
 
@@ -654,18 +838,35 @@ mod tests {
     fn authentication_attempt_cleans_up_on_unwind_without_removing_a_replacement() {
         let host = host();
         let cancel = Arc::new(AtomicBool::new(false));
-        host.auth.lock().unwrap().insert("connection".into(), cancel.clone());
+        host.auth
+            .lock()
+            .unwrap()
+            .insert("connection".into(), cancel.clone());
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _attempt = AuthAttempt { host: host.clone(), id: "connection".into(), cancel: cancel.clone() };
+            let _attempt = AuthAttempt {
+                host: host.clone(),
+                id: "connection".into(),
+                cancel: cancel.clone(),
+            };
             panic!("fixture failure");
         }));
         assert!(result.is_err());
         assert!(!host.auth.lock().unwrap().contains_key("connection"));
-        let attempt = AuthAttempt { host: host.clone(), id: "connection".into(), cancel };
+        let attempt = AuthAttempt {
+            host: host.clone(),
+            id: "connection".into(),
+            cancel,
+        };
         let replacement = Arc::new(AtomicBool::new(false));
-        host.auth.lock().unwrap().insert("connection".into(), replacement.clone());
+        host.auth
+            .lock()
+            .unwrap()
+            .insert("connection".into(), replacement.clone());
         drop(attempt);
-        assert!(Arc::ptr_eq(host.auth.lock().unwrap().get("connection").unwrap(), &replacement));
+        assert!(Arc::ptr_eq(
+            host.auth.lock().unwrap().get("connection").unwrap(),
+            &replacement
+        ));
     }
 
     #[test]
@@ -678,6 +879,7 @@ mod tests {
                 config: ServerConfig::Stdio {
                     command: "/does/not/exist".into(),
                     args: vec![],
+                    cwd: None,
                 },
                 trust_local_process: true,
                 credentials: None,
@@ -696,7 +898,8 @@ mod tests {
                 label: "Untrusted".into(),
                 config: ServerConfig::Stdio {
                     command: "/bin/sh".into(),
-                    args: vec![]
+                    args: vec![],
+                    cwd: None,
                 },
                 trust_local_process: false,
                 credentials: None
@@ -704,18 +907,24 @@ mod tests {
             .is_err()
         );
         assert!(
-            store::load(&h.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
-                .unwrap()
-                .mcp
-                .connections
-                .is_empty()
+            store::load(
+                &h.db
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            )
+            .unwrap()
+            .mcp
+            .connections
+            .is_empty()
         );
     }
     #[test]
     fn revocation_during_preparation_prevents_dispatch() {
         let h = host();
         {
-            let db = h.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db =
+                h.db.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state.mcp.connections.push(McpConnection {
                 oauth: false,
@@ -835,7 +1044,9 @@ mod tests {
             serde_json::json!([])
         );
         {
-            let db = h.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db =
+                h.db.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut state = store::load(&db).unwrap();
             state.mcp.connections[0].tools.push(McpTool {
                 read_only: false,

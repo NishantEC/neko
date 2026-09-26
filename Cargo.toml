@@ -35,6 +35,8 @@ serde_json = "1"
 
 [profile.dev]
 opt-level = 0
+debug = "line-tables-only"
+incremental = false
 
 # Fixes a real ~30ms warm-summon regression in the pinned gpui fork rev (see
 # `AGENTS.md`'s "Summon latency" section and `patches/gpui-0001-*.patch`) —

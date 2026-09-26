@@ -85,19 +85,45 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
             schema_hash,
             allowed,
         } => {
-            let workspace_id = state.mcp.connections.iter().find(|c| c.id == connection_id)
-                .ok_or("MCP connection missing")?.workspace_id.clone();
-            if workspace_id.is_empty() { return Err("Choose a workspace for this global connection's tool grant".into()); }
-            return apply_command(state, McpCommand::SetWorkspaceToolGrant { workspace_id, connection_id, tool_name, schema_hash, allowed }, now);
+            let workspace_id = state
+                .mcp
+                .connections
+                .iter()
+                .find(|c| c.id == connection_id)
+                .ok_or("MCP connection missing")?
+                .workspace_id
+                .clone();
+            if workspace_id.is_empty() {
+                return Err("Choose a workspace for this global connection's tool grant".into());
+            }
+            return apply_command(
+                state,
+                McpCommand::SetWorkspaceToolGrant {
+                    workspace_id,
+                    connection_id,
+                    tool_name,
+                    schema_hash,
+                    allowed,
+                },
+                now,
+            );
         }
-        McpCommand::SetWorkspaceToolGrant { workspace_id, connection_id, tool_name, schema_hash, allowed } => {
+        McpCommand::SetWorkspaceToolGrant {
+            workspace_id,
+            connection_id,
+            tool_name,
+            schema_hash,
+            allowed,
+        } => {
             let c = state
                 .mcp
                 .connections
                 .iter()
                 .find(|c| c.id == connection_id)
                 .ok_or("MCP connection missing")?;
-            if !c.available_in(&workspace_id) || !state.workspaces.iter().any(|w| w.id == workspace_id) {
+            if !c.available_in(&workspace_id)
+                || !state.workspaces.iter().any(|w| w.id == workspace_id)
+            {
                 return Err("MCP connection is unavailable in this workspace".into());
             }
             if allowed
@@ -111,10 +137,11 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
             {
                 return Err("Discover the current tool schema before granting access".into());
             }
-            state
-                .mcp
-                .grants
-                .retain(|g| !(g.connection_id == connection_id && g.tool_name == tool_name && g.workspace_id == workspace_id));
+            state.mcp.grants.retain(|g| {
+                !(g.connection_id == connection_id
+                    && g.tool_name == tool_name
+                    && g.workspace_id == workspace_id)
+            });
             if allowed {
                 state.mcp.grants.push(ToolGrant {
                     connection_id,
@@ -185,13 +212,19 @@ fn text(value: &str, max: usize, required: bool) -> Result<(), String> {
 }
 pub fn validate_config(config: &ServerConfig) -> Result<(), String> {
     match config {
-        ServerConfig::Stdio { command, args } => {
+        ServerConfig::Stdio { command, args, cwd } => {
             text(command, 4096, true)?;
             if !std::path::Path::new(command).is_absolute() || args.len() > 64 {
                 return Err("Use an absolute executable path and at most 64 arguments".into());
             }
             for arg in args {
                 text(arg, 4096, false)?;
+            }
+            if let Some(cwd) = cwd {
+                text(cwd, 4096, true)?;
+                if !std::path::Path::new(cwd).is_absolute() {
+                    return Err("MCP working directory must be absolute".into());
+                }
             }
         }
         ServerConfig::Http { url } => {
@@ -254,7 +287,10 @@ pub fn validate(state: &Snapshot) -> Result<(), String> {
     for c in &state.mcp.connections {
         text(&c.id, 256, true)?;
         text(&c.label, 256, true)?;
-        if !ids.insert(&c.id) || (!c.workspace_id.is_empty() && !state.workspaces.iter().any(|w| w.id == c.workspace_id)) {
+        if !ids.insert(&c.id)
+            || (!c.workspace_id.is_empty()
+                && !state.workspaces.iter().any(|w| w.id == c.workspace_id))
+        {
             return Err("MCP connection identity or workspace is invalid".into());
         }
         validate_config(&c.config)?;
@@ -380,13 +416,18 @@ mod tests {
     fn global_definitions_require_separate_workspace_grants() {
         let mut state = state();
         let mut second = state.workspaces[0].clone();
-        second.id = "b".into(); second.repository = "/tmp/b".into();
+        second.id = "b".into();
+        second.repository = "/tmp/b".into();
         state.workspaces.push(second);
         state.mcp.connections[0].workspace_id.clear();
         assert!(validate(&state).is_ok());
         assert!(authorize(&state, "a", "c", "lookup").is_err());
         let grant = |workspace: &str, allowed| McpCommand::SetWorkspaceToolGrant {
-            workspace_id: workspace.into(), connection_id: "c".into(), tool_name: "lookup".into(), schema_hash: "v1".into(), allowed,
+            workspace_id: workspace.into(),
+            connection_id: "c".into(),
+            tool_name: "lookup".into(),
+            schema_hash: "v1".into(),
+            allowed,
         };
         apply_command(&mut state, grant("a", true), 1).unwrap();
         assert!(authorize(&state, "a", "c", "lookup").is_ok());
@@ -485,11 +526,13 @@ mod tests {
         state.mcp.connections[0].config = ServerConfig::Stdio {
             command: "node".into(),
             args: vec![],
+            cwd: None,
         };
         assert!(validate(&state).is_err());
         state.mcp.connections[0].config = ServerConfig::Stdio {
             command: "/usr/bin/node".into(),
             args: vec![],
+            cwd: None,
         };
         assert!(validate(&state).is_ok());
         state.mcp.connections[0].tools[0].input_schema = "x".repeat(33_000);

@@ -54,7 +54,10 @@ impl Schedule {
             self.next_run_at
                 .as_deref()
                 .and_then(epoch_from_rfc3339)
-                .map_or_else(|| "Not scheduled".to_string(), |at| next_run_label(at, now_unix_ms))
+                .map_or_else(
+                    || "Not scheduled".to_string(),
+                    |at| next_run_label(at, now_unix_ms),
+                )
         };
         match &self.cron {
             Some(cron) => format!("{when} \u{b7} {cron}"),
@@ -103,7 +106,10 @@ pub fn parse_schedules(value: &Value) -> Vec<Schedule> {
                     .pointer("/cadence/expression")
                     .and_then(Value::as_str)
                     .map(str::to_string),
-                next_run_at: entry.get("nextRunAt").and_then(Value::as_str).map(str::to_string),
+                next_run_at: entry
+                    .get("nextRunAt")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
                 // Both are checked: `status` is the field that means it, and
                 // `pausedAt` is the one that proves it. A daemon that grows a
                 // third status neko does not know still reports the timestamp.
@@ -138,7 +144,9 @@ impl SchedulesProvider {
     }
 
     fn list(&self) -> Vec<Schedule> {
-        let Ok(client) = self.client() else { return Vec::new() };
+        let Ok(client) = self.client() else {
+            return Vec::new();
+        };
         client
             .call("list_schedules", json!({}))
             .map(|value| parse_schedules(&value))
@@ -182,7 +190,9 @@ impl Provider for SchedulesProvider {
                     [&schedule.title, &cadence]
                         .into_iter()
                         .filter_map(|hay| crate::search::fuzzy_score(trimmed, hay))
-                        .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?
+                        .fold(None, |best: Option<f32>, s| {
+                            Some(best.map_or(s, |b| b.max(s)))
+                        })?
                 };
                 Some(Candidate {
                     score,
@@ -261,7 +271,14 @@ impl Provider for SchedulesProvider {
             .find(|s| s.id == id)
             .map(|s| s.paused)
             .ok_or_else(|| ProviderError("that schedule is gone".to_string()))?;
-        self.call(if paused { "resume_schedule" } else { "pause_schedule" }, id)
+        self.call(
+            if paused {
+                "resume_schedule"
+            } else {
+                "pause_schedule"
+            },
+            id,
+        )
     }
 
     fn perform_action(&self, id: &str, action: &str) -> Result<(), ProviderError> {
@@ -327,7 +344,10 @@ mod tests {
         let parsed = parse_schedules(&fixture());
         let line = parsed[1].cadence_line(NOW_MS);
         assert!(line.starts_with("Paused"), "{line}");
-        assert!(line.contains("0 9 * * 1"), "the cadence is still worth showing: {line}");
+        assert!(
+            line.contains("0 9 * * 1"),
+            "the cadence is still worth showing: {line}"
+        );
         assert!(!line.contains("in "), "{line}");
     }
 
@@ -357,7 +377,10 @@ mod tests {
         // A future non-cron cadence would carry no expression, and a row
         // that cannot say *when* is still worth showing.
         let value = json!({"schedules": [{"id": "x", "name": "n", "status": "active"}]});
-        assert_eq!(parse_schedules(&value)[0].cadence_line(NOW_MS), "Not scheduled");
+        assert_eq!(
+            parse_schedules(&value)[0].cadence_line(NOW_MS),
+            "Not scheduled"
+        );
     }
 
     #[test]
@@ -384,7 +407,10 @@ mod tests {
         // A label reading "Pause" on an already-paused schedule is the one
         // thing a person could not recover from misreading.
         let provider = SchedulesProvider::disabled();
-        assert!(provider.search("", NOW_MS).is_empty(), "a disabled provider reaches nothing");
+        assert!(
+            provider.search("", NOW_MS).is_empty(),
+            "a disabled provider reaches nothing"
+        );
     }
 
     #[test]
@@ -397,7 +423,9 @@ mod tests {
         // has to report *itself* — "that schedule is gone" would be telling
         // somebody their thing was deleted when it was not.
         let err = provider.activate("gone").expect_err("no daemon");
-        assert!(format!("{err:?}").contains("Paseo isn't running"), "{err:?}");
+        assert!(
+            format!("{err:?}").contains("Paseo isn't running"),
+            "{err:?}"
+        );
     }
-
 }

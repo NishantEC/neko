@@ -59,7 +59,9 @@ pub fn play_attention_chime() {
             }
             return;
         }
-        let _ = std::process::Command::new("/usr/bin/afplay").arg(CHIME_PATH).status();
+        let _ = std::process::Command::new("/usr/bin/afplay")
+            .arg(CHIME_PATH)
+            .status();
     });
 }
 
@@ -93,6 +95,9 @@ mod tests {
         // `scanning_the_real_machine_excludes_a_verified_background_agent`:
         // this repo only builds on macOS, and a path that stopped existing
         // should fail a test rather than silently muting the feature forever.
-        assert!(std::path::Path::new(CHIME_PATH).exists(), "{CHIME_PATH} is gone");
+        assert!(
+            std::path::Path::new(CHIME_PATH).exists(),
+            "{CHIME_PATH} is gone"
+        );
     }
 }

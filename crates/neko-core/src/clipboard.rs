@@ -156,7 +156,11 @@ pub fn record_entry(
 ) -> rusqlite::Result<()> {
     // Connection secrets commonly arrive via copy/paste. This recognizes
     // Neko's credential JSON, not every possible credential in arbitrary text.
-    let mcp_credentials = content.len() <= 32_768 && serde_json::from_str::<serde_json::Value>(content).is_ok_and(|v| v.as_object().is_some_and(|o| o.contains_key("bearer") || o.contains_key("environment")));
+    let mcp_credentials = content.len() <= 32_768
+        && serde_json::from_str::<serde_json::Value>(content).is_ok_and(|v| {
+            v.as_object()
+                .is_some_and(|o| o.contains_key("bearer") || o.contains_key("environment"))
+        });
     if content.trim().starts_with("lin_api_") || mcp_credentials {
         return db.delete_clipboard_entry(content);
     }
@@ -183,12 +187,14 @@ pub fn entries(db: &crate::Db) -> rusqlite::Result<Vec<ClipboardEntry>> {
     Ok(db
         .clipboard_entries(MAX_MATCHED_BYTES)?
         .into_iter()
-        .map(|(content, kind, source_app, copied_at_unix_ms)| ClipboardEntry {
-            content,
-            content_kind: content_kind_from_db(&kind),
-            source_app,
-            copied_at_unix_ms,
-        })
+        .map(
+            |(content, kind, source_app, copied_at_unix_ms)| ClipboardEntry {
+                content,
+                content_kind: content_kind_from_db(&kind),
+                source_app,
+                copied_at_unix_ms,
+            },
+        )
         .collect())
 }
 
@@ -284,9 +290,21 @@ fn day_bucket_label(now_unix_ms: i64, copied_at_unix_ms: i64) -> String {
 /// because a captain reaching for "Copy" shouldn't have to know that.
 fn clipboard_item_actions() -> Vec<neko_protocol::ItemAction> {
     vec![
-        neko_protocol::ItemAction { id: "paste".to_string(), label: "Paste".to_string(), destructive: false },
-        neko_protocol::ItemAction { id: "copy".to_string(), label: "Copy".to_string(), destructive: false },
-        neko_protocol::ItemAction { id: "delete".to_string(), label: "Delete".to_string(), destructive: true },
+        neko_protocol::ItemAction {
+            id: "paste".to_string(),
+            label: "Paste".to_string(),
+            destructive: false,
+        },
+        neko_protocol::ItemAction {
+            id: "copy".to_string(),
+            label: "Copy".to_string(),
+            destructive: false,
+        },
+        neko_protocol::ItemAction {
+            id: "delete".to_string(),
+            label: "Delete".to_string(),
+            destructive: true,
+        },
     ]
 }
 
@@ -303,15 +321,24 @@ pub struct ClipboardProvider {
 
 impl ClipboardProvider {
     pub fn new(db: Arc<Mutex<crate::Db>>) -> Self {
-        Self { db, cache: Mutex::new(None) }
+        Self {
+            db,
+            cache: Mutex::new(None),
+        }
     }
 
     fn cached_entries(&self) -> Arc<Vec<ClipboardEntry>> {
         // Always take the database before the cache. Capture and deletion only
         // take the database, so they cannot invert this order.
-        let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let db = self
+            .db
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let revision = db.clipboard_revision();
-        let mut cache = self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some((cached_revision, entries)) = &*cache {
             if *cached_revision == revision {
                 return Arc::clone(entries);
@@ -363,7 +390,8 @@ impl Provider for ClipboardProvider {
             .iter()
             .filter_map(|entry| {
                 let raw_score = fuzzy_score(query, &entry.content)?;
-                let mut score = raw_score * clipboard_length_normalization(entry.content.chars().count());
+                let mut score =
+                    raw_score * clipboard_length_normalization(entry.content.chars().count());
                 score += clipboard_recency_boost(entry.copied_at_unix_ms, now_unix_ms);
                 let (badge, glyph) = match entry.content_kind {
                     ClipboardContentKind::Text => ("TEXT", Glyph::Text),
@@ -375,7 +403,10 @@ impl Provider for ClipboardProvider {
                         id: entry.content.clone(),
                         kind: "clipboard".to_string(),
                         title: preview(&entry.content, entry.content_kind),
-                        subtitle: entry.source_app.as_ref().map(|app| format!("Copied from {app}")),
+                        subtitle: entry
+                            .source_app
+                            .as_ref()
+                            .map(|app| format!("Copied from {app}")),
                         icon: Icon::Glyph(glyph),
                         section_label: "Clipboard".to_string(),
                         action_label: "Paste  ↵".to_string(),
@@ -401,7 +432,9 @@ impl Provider for ClipboardProvider {
         if write_to_pasteboard(id) {
             Ok(())
         } else {
-            Err(ProviderError("failed to write to the pasteboard".to_string()))
+            Err(ProviderError(
+                "failed to write to the pasteboard".to_string(),
+            ))
         }
     }
 
@@ -416,8 +449,12 @@ impl Provider for ClipboardProvider {
         match action_id {
             "paste" | "copy" => self.activate(id),
             "delete" => {
-                let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                db.delete_clipboard_entry(id).map_err(|e| ProviderError(e.to_string()))
+                let db = self
+                    .db
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                db.delete_clipboard_entry(id)
+                    .map_err(|e| ProviderError(e.to_string()))
             }
             other => Err(ProviderError(format!("no action '{other}' on this row"))),
         }
@@ -635,7 +672,13 @@ fn poll_once(db: &std::sync::Mutex<crate::Db>, last_change_count: &mut i64) {
     }
     let kind = classify(&content, has_url_type);
     let db = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Err(e) = record_entry(&db, &content, kind, tick.source_app.as_deref(), crate::now_unix_ms()) {
+    if let Err(e) = record_entry(
+        &db,
+        &content,
+        kind,
+        tick.source_app.as_deref(),
+        crate::now_unix_ms(),
+    ) {
         eprintln!("neko-daemon: failed to record clipboard entry: {e}");
     }
 }
@@ -684,7 +727,9 @@ mod tests {
 
     #[test]
     fn prose_does_not_look_like_a_url() {
-        assert!(!looks_like_url("the difference is ownership, not a longer name"));
+        assert!(!looks_like_url(
+            "the difference is ownership, not a longer name"
+        ));
         assert!(!looks_like_url("check out https://example.com for details"));
     }
 
@@ -695,14 +740,24 @@ mod tests {
 
     #[test]
     fn classify_falls_back_to_the_heuristic_without_a_url_type() {
-        assert_eq!(classify("https://example.com", false), ClipboardContentKind::Link);
-        assert_eq!(classify("just some text", false), ClipboardContentKind::Text);
+        assert_eq!(
+            classify("https://example.com", false),
+            ClipboardContentKind::Link
+        );
+        assert_eq!(
+            classify("just some text", false),
+            ClipboardContentKind::Text
+        );
     }
 
     #[test]
     fn concealed_and_transient_markers_are_privacy_marked() {
-        assert!(is_privacy_marked(&["org.nspasteboard.ConcealedType".to_string()]));
-        assert!(is_privacy_marked(&["org.nspasteboard.TransientType".to_string()]));
+        assert!(is_privacy_marked(&[
+            "org.nspasteboard.ConcealedType".to_string()
+        ]));
+        assert!(is_privacy_marked(&[
+            "org.nspasteboard.TransientType".to_string()
+        ]));
         assert!(is_privacy_marked(&[
             "public.utf8-plain-text".to_string(),
             "org.nspasteboard.ConcealedType".to_string(),
@@ -743,7 +798,14 @@ mod tests {
     #[test]
     fn record_entry_and_read_back_round_trips_through_db() {
         let db = crate::Db::open_in_memory().unwrap();
-        record_entry(&db, "hello", ClipboardContentKind::Text, Some("Terminal"), 100).unwrap();
+        record_entry(
+            &db,
+            "hello",
+            ClipboardContentKind::Text,
+            Some("Terminal"),
+            100,
+        )
+        .unwrap();
         let entries = entries(&db).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].content, "hello");
@@ -755,17 +817,34 @@ mod tests {
     #[test]
     fn linear_personal_keys_are_not_kept_in_clipboard_history() {
         let db = crate::Db::open_in_memory().unwrap();
-        record_entry(&db, "lin_api_private_test_credential", ClipboardContentKind::Text, None, 100).unwrap();
+        record_entry(
+            &db,
+            "lin_api_private_test_credential",
+            ClipboardContentKind::Text,
+            None,
+            100,
+        )
+        .unwrap();
         assert!(entries(&db).unwrap().is_empty());
     }
     #[test]
     fn mcp_credential_json_is_not_kept_in_clipboard_history() {
         let db = crate::Db::open_in_memory().unwrap();
-        for secret in [r#"{"bearer":"test-only-secret"}"#, r#"{"environment":{"TOKEN":"test-only-secret"}}"#] {
+        for secret in [
+            r#"{"bearer":"test-only-secret"}"#,
+            r#"{"environment":{"TOKEN":"test-only-secret"}}"#,
+        ] {
             record_entry(&db, secret, ClipboardContentKind::Text, None, 100).unwrap();
         }
         assert!(entries(&db).unwrap().is_empty());
-        record_entry(&db, r#"{"regular":"configuration"}"#, ClipboardContentKind::Text, None, 101).unwrap();
+        record_entry(
+            &db,
+            r#"{"regular":"configuration"}"#,
+            ClipboardContentKind::Text,
+            None,
+            101,
+        )
+        .unwrap();
         assert_eq!(entries(&db).unwrap().len(), 1);
     }
 
@@ -782,14 +861,18 @@ mod tests {
         assert!(Arc::ptr_eq(&first, &provider.cached_entries()));
         {
             let db = db.lock().unwrap();
-            db.record_clipboard_entry("one", "text", None, 1, 2).unwrap();
-            db.record_clipboard_entry("two", "text", None, 2, 2).unwrap();
+            db.record_clipboard_entry("one", "text", None, 1, 2)
+                .unwrap();
+            db.record_clipboard_entry("two", "text", None, 2, 2)
+                .unwrap();
         }
         assert_eq!(provider.search("", 3).len(), 2);
         {
             let db = db.lock().unwrap();
-            db.record_clipboard_entry("one", "text", Some("Notes"), 3, 2).unwrap();
-            db.record_clipboard_entry("three", "text", None, 4, 2).unwrap();
+            db.record_clipboard_entry("one", "text", Some("Notes"), 3, 2)
+                .unwrap();
+            db.record_clipboard_entry("three", "text", None, 4, 2)
+                .unwrap();
         }
         let refreshed = provider.cached_entries();
         assert_eq!(refreshed.len(), 2);
@@ -805,7 +888,14 @@ mod tests {
     #[test]
     fn provider_search_filters_by_content_and_carries_the_badge_and_verb() {
         let db = crate::Db::open_in_memory().unwrap();
-        record_entry(&db, "hello world", ClipboardContentKind::Text, Some("Terminal"), 100).unwrap();
+        record_entry(
+            &db,
+            "hello world",
+            ClipboardContentKind::Text,
+            Some("Terminal"),
+            100,
+        )
+        .unwrap();
         record_entry(&db, "goodbye", ClipboardContentKind::Text, None, 200).unwrap();
         let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
 
@@ -829,14 +919,24 @@ mod tests {
         record_entry(&db, "newer", ClipboardContentKind::Text, None, 900).unwrap();
         let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
         let results = provider.search("", 1000);
-        let best = results.iter().max_by(|a, b| a.score.total_cmp(&b.score)).unwrap();
+        let best = results
+            .iter()
+            .max_by(|a, b| a.score.total_cmp(&b.score))
+            .unwrap();
         assert_eq!(best.item.id, "newer");
     }
 
     #[test]
     fn provider_search_tags_a_link_entry_with_the_link_glyph_and_badge() {
         let db = crate::Db::open_in_memory().unwrap();
-        record_entry(&db, "https://example.com", ClipboardContentKind::Link, None, 100).unwrap();
+        record_entry(
+            &db,
+            "https://example.com",
+            ClipboardContentKind::Link,
+            None,
+            100,
+        )
+        .unwrap();
         let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
         let results = provider.search("example", 1000);
         assert_eq!(results[0].item.badge.as_deref(), Some("LINK"));
@@ -850,31 +950,46 @@ mod tests {
     #[test]
     fn short_entries_are_left_exactly_as_fuzzy_score_scored_them() {
         assert_eq!(clipboard_length_normalization(10), 1.0);
-        assert_eq!(clipboard_length_normalization(CLIPBOARD_TITLE_LIKE_CHARS), 1.0);
+        assert_eq!(
+            clipboard_length_normalization(CLIPBOARD_TITLE_LIKE_CHARS),
+            1.0
+        );
     }
 
     #[test]
     fn long_entries_are_scaled_down_proportionally_to_their_length() {
         let factor = clipboard_length_normalization(CLIPBOARD_TITLE_LIKE_CHARS * 10);
-        assert!((factor - 0.1).abs() < 0.001, "a 10x-over-threshold entry should score at ~10% of its raw match");
+        assert!(
+            (factor - 0.1).abs() < 0.001,
+            "a 10x-over-threshold entry should score at ~10% of its raw match"
+        );
     }
 
     #[test]
-    fn a_short_exact_match_outscores_a_long_paragraph_that_merely_contains_the_query_at_the_same_age() {
+    fn a_short_exact_match_outscores_a_long_paragraph_that_merely_contains_the_query_at_the_same_age()
+     {
         let db = crate::Db::open_in_memory().unwrap();
         let paragraph = format!(
             "{}wallpaper{}",
             "filler text ".repeat(20),
             " more unrelated filler content padding this out well past the title-like length threshold".repeat(2)
         );
-        assert!(paragraph.chars().count() > CLIPBOARD_TITLE_LIKE_CHARS * 3, "fixture paragraph must be clearly long");
+        assert!(
+            paragraph.chars().count() > CLIPBOARD_TITLE_LIKE_CHARS * 3,
+            "fixture paragraph must be clearly long"
+        );
         record_entry(&db, &paragraph, ClipboardContentKind::Text, None, 1000).unwrap();
         record_entry(&db, "wallpaper", ClipboardContentKind::Text, None, 1000).unwrap();
         let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
         let results = provider.search("wallpaper", 1000);
         let short = results.iter().find(|c| c.item.id == "wallpaper").unwrap();
         let long = results.iter().find(|c| c.item.id == paragraph).unwrap();
-        assert!(short.score > long.score, "short exact match ({}) should beat the long paragraph ({})", short.score, long.score);
+        assert!(
+            short.score > long.score,
+            "short exact match ({}) should beat the long paragraph ({})",
+            short.score,
+            long.score
+        );
     }
 
     // --- Commands and modes: group_label, actions, perform_action, source ---
@@ -900,7 +1015,14 @@ mod tests {
     #[test]
     fn search_results_carry_a_group_label_and_the_standard_action_set() {
         let db = crate::Db::open_in_memory().unwrap();
-        record_entry(&db, "hello", ClipboardContentKind::Text, Some("Terminal"), 1000).unwrap();
+        record_entry(
+            &db,
+            "hello",
+            ClipboardContentKind::Text,
+            Some("Terminal"),
+            1000,
+        )
+        .unwrap();
         let provider = ClipboardProvider::new(Arc::new(Mutex::new(db)));
         let results = provider.search("hello", 1000);
         let item = &results[0].item;
@@ -908,18 +1030,42 @@ mod tests {
         assert_eq!(item.source.as_deref(), Some("Terminal"));
         let action_ids: Vec<&str> = item.actions.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(action_ids, vec!["paste", "copy", "delete"]);
-        assert!(item.actions.iter().find(|a| a.id == "delete").unwrap().destructive);
-        assert!(!item.actions.iter().find(|a| a.id == "paste").unwrap().destructive);
+        assert!(
+            item.actions
+                .iter()
+                .find(|a| a.id == "delete")
+                .unwrap()
+                .destructive
+        );
+        assert!(
+            !item
+                .actions
+                .iter()
+                .find(|a| a.id == "paste")
+                .unwrap()
+                .destructive
+        );
         assert!(item.enters_mode.is_none());
     }
 
     #[test]
     fn perform_action_delete_removes_the_entry_from_history() {
         let db = Arc::new(Mutex::new(crate::Db::open_in_memory().unwrap()));
-        record_entry(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), "gone soon", ClipboardContentKind::Text, None, 100).unwrap();
+        record_entry(
+            &db.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+            "gone soon",
+            ClipboardContentKind::Text,
+            None,
+            100,
+        )
+        .unwrap();
         let provider = ClipboardProvider::new(db.clone());
         assert!(provider.perform_action("gone soon", "delete").is_ok());
-        assert!(entries(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).unwrap().is_empty());
+        assert!(
+            entries(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     // Deliberately no test calls `perform_action` with `"copy"`/`"paste"`

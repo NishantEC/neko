@@ -27,29 +27,54 @@ pub struct NativeTasksProvider {
 }
 impl NativeTasksProvider {
     pub fn new(db: Arc<Mutex<Db>>) -> Self {
-        Self { db, cache: Mutex::new((0, Arc::new(Vec::new()))) }
+        Self {
+            db,
+            cache: Mutex::new((0, Arc::new(Vec::new()))),
+        }
     }
 
     fn rows(&self) -> Arc<Vec<Row>> {
         let revision = workbench::revision();
         {
-            let cache = self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let cache = self
+                .cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if cache.0 == revision {
                 return cache.1.clone();
             }
         }
-        let loaded = workbench::load(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        let loaded = workbench::load(
+            &self
+                .db
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         let rows = Arc::new(match loaded {
             Ok(snapshot) => build_rows(&snapshot),
-            Err(_) => return self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).1.clone(),
+            Err(_) => {
+                return self
+                    .cache
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .1
+                    .clone();
+            }
         });
-        *self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = (revision, rows.clone());
+        *self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (revision, rows.clone());
         rows
     }
 }
 
 fn build_rows(snapshot: &Snapshot) -> Vec<Row> {
-    let Some(template) = crate::commands::CommandsProvider::standalone().search("Neko", 0).into_iter().next() else {
+    let Some(template) = crate::commands::CommandsProvider::standalone()
+        .search("Neko", 0)
+        .into_iter()
+        .next()
+    else {
         return vec![];
     };
     snapshot
@@ -63,11 +88,23 @@ fn build_rows(snapshot: &Snapshot) -> Vec<Row> {
             item.title = task.title.clone();
             item.section_label = "Tickets".into();
             item.badge = Some(badge(task.status).into());
-            item.subtitle = snapshot.workspaces.iter().find(|w| w.id == task.workspace_id).map(|w| w.name.clone());
-            let preview = if task.plan.is_empty() { &task.goal } else { &task.plan };
+            item.subtitle = snapshot
+                .workspaces
+                .iter()
+                .find(|w| w.id == task.workspace_id)
+                .map(|w| w.name.clone());
+            let preview = if task.plan.is_empty() {
+                &task.goal
+            } else {
+                &task.plan
+            };
             item.preview = Some(shorten(preview, PREVIEW_BYTES));
             item.preview_markdown = true;
-            Row { status: task.status, title: task.title.clone(), item }
+            Row {
+                status: task.status,
+                title: task.title.clone(),
+                item,
+            }
         })
         .collect()
 }
@@ -95,11 +132,20 @@ impl Provider for NativeTasksProvider {
         let mut candidates: Vec<Candidate> = rows
             .iter()
             .filter_map(|row| {
-                if query.is_empty() && matches!(row.status, TaskStatus::Cancelled | TaskStatus::Completed) {
+                if query.is_empty()
+                    && matches!(row.status, TaskStatus::Cancelled | TaskStatus::Completed)
+                {
                     return None;
                 }
-                let score = if query.is_empty() { 1.0 } else { fuzzy_score(query, &row.title)? };
-                Some(Candidate { score: score + priority(row.status), item: row.item.clone() })
+                let score = if query.is_empty() {
+                    1.0
+                } else {
+                    fuzzy_score(query, &row.title)?
+                };
+                Some(Candidate {
+                    score: score + priority(row.status),
+                    item: row.item.clone(),
+                })
             })
             .collect();
         // Rank every match first, then cut: a strong match deep in history
@@ -109,7 +155,9 @@ impl Provider for NativeTasksProvider {
         candidates
     }
     fn activate(&self, _id: &str) -> Result<(), ProviderError> {
-        Err(ProviderError("Open this ticket in the Neko workspace".into()))
+        Err(ProviderError(
+            "Open this ticket in the Neko workspace".into(),
+        ))
     }
 }
 
@@ -132,7 +180,10 @@ pub fn badge(status: TaskStatus) -> &'static str {
 fn priority(status: TaskStatus) -> f32 {
     match status {
         TaskStatus::AwaitingApproval | TaskStatus::ReadyForReview | TaskStatus::Failed => 100.0,
-        TaskStatus::Queued | TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing => 50.0,
+        TaskStatus::Queued
+        | TaskStatus::Planning
+        | TaskStatus::Building
+        | TaskStatus::Reviewing => 50.0,
         TaskStatus::Completed | TaskStatus::Cancelled => 0.0,
     }
 }
@@ -159,17 +210,34 @@ mod tests {
         use neko_protocol::workbench::Workspace;
         let db = Db::open_in_memory().unwrap();
         let mut snapshot = Snapshot::default();
-        snapshot.workspaces.push(Workspace { id: "w".into(), name: "hme".into(), repository: "/tmp".into(), instructions: String::new(), away_enabled: false });
-        snapshot.tasks.push(workbench::create_task("w".into(), None, "zebra crossing".into(), "g".into()).unwrap());
+        snapshot.workspaces.push(Workspace {
+            id: "w".into(),
+            name: "hme".into(),
+            repository: "/tmp".into(),
+            instructions: String::new(),
+            away_enabled: false,
+        });
+        snapshot.tasks.push(
+            workbench::create_task("w".into(), None, "zebra crossing".into(), "g".into()).unwrap(),
+        );
         for i in 0..120 {
-            let mut filler = workbench::create_task("w".into(), None, format!("zeta item {i} with a long name"), "g".into()).unwrap();
+            let mut filler = workbench::create_task(
+                "w".into(),
+                None,
+                format!("zeta item {i} with a long name"),
+                "g".into(),
+            )
+            .unwrap();
             filler.status = TaskStatus::Completed;
             snapshot.tasks.push(filler);
         }
         workbench::save(&db, &snapshot).unwrap();
         let provider = NativeTasksProvider::new(Arc::new(Mutex::new(db)));
         let results = provider.search("zebra", 0);
-        assert_eq!(results.first().map(|c| c.item.title.as_str()), Some("zebra crossing"));
+        assert_eq!(
+            results.first().map(|c| c.item.title.as_str()),
+            Some("zebra crossing")
+        );
         assert!(provider.search("", 0).len() <= MAX_RESULTS);
     }
 }

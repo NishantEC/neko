@@ -443,12 +443,18 @@ pub fn install_menu_overlay(_window: &Window) -> Result<Installed, String> {
 /// for the whole-window material. Called unconditionally by `main.rs` right
 /// after a successful `install_menu_overlay`.
 #[cfg(target_os = "macos")]
-pub fn verify_menu_overlay_installed(window: &Window, installed: Installed) -> Result<String, String> {
+pub fn verify_menu_overlay_installed(
+    window: &Window,
+    installed: Installed,
+) -> Result<String, String> {
     macos::verify_menu_overlay_installed(window, installed)
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn verify_menu_overlay_installed(_window: &Window, _installed: Installed) -> Result<String, String> {
+pub fn verify_menu_overlay_installed(
+    _window: &Window,
+    _installed: Installed,
+) -> Result<String, String> {
     Err("native window material is only implemented on macOS".to_string())
 }
 
@@ -470,7 +476,13 @@ pub fn verify_menu_overlay_installed(_window: &Window, _installed: Installed) ->
 /// overlay not installed) is logged by the caller and otherwise ignored, the
 /// same as every other native call in this module.
 #[cfg(target_os = "macos")]
-pub fn show_menu_overlay(window: &Window, x_px: f32, y_px: f32, width_px: f32, height_px: f32) -> Result<(), String> {
+pub fn show_menu_overlay(
+    window: &Window,
+    x_px: f32,
+    y_px: f32,
+    width_px: f32,
+    height_px: f32,
+) -> Result<(), String> {
     macos::show_menu_overlay(window, x_px, y_px, width_px, height_px)
 }
 
@@ -507,17 +519,15 @@ mod macos {
     use objc2::runtime::AnyClass;
     use objc2_app_kit::{
         NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-        NSAutoresizingMaskOptions, NSGlassEffectView, NSGlassEffectViewStyle, NSView, NSWindow,
+        NSAutoresizingMaskOptions, NSGlassEffectView, NSGlassEffectViewStyle, NSView,
         NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
-        NSVisualEffectView, NSWindowOrderingMode, NSWindowStyleMask,
+        NSVisualEffectView, NSWindow, NSWindowOrderingMode, NSWindowStyleMask,
     };
     use objc2_foundation::{NSPoint, NSRect, NSSize};
     use objc2_quartz_core::kCACornerCurveContinuous;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-    use super::{
-        Installed, Window, style_mask_is_untitled_panel, style_mask_without_titled,
-    };
+    use super::{Installed, Window, style_mask_is_untitled_panel, style_mask_without_titled};
 
     /// Matches the design token (`theme::PANEL_RADIUS_PX`) — the
     /// background view's own rounding has to agree with GPUI's
@@ -663,7 +673,8 @@ mod macos {
     }
 
     pub fn order_below(window: &Window, other_window_number: isize) -> Result<(), String> {
-        native_window(window)?.orderWindow_relativeTo(NSWindowOrderingMode::Below, other_window_number);
+        native_window(window)?
+            .orderWindow_relativeTo(NSWindowOrderingMode::Below, other_window_number);
         Ok(())
     }
 
@@ -694,7 +705,8 @@ mod macos {
     fn install_glass(content_view: &NSView, mtm: MainThreadMarker) {
         let glass = make_glass_view(mtm, content_view.bounds(), CORNER_RADIUS_PT);
         glass.setAutoresizingMask(
-            NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
         content_view.addSubview_positioned_relativeTo(&glass, NSWindowOrderingMode::Below, None);
     }
@@ -702,12 +714,21 @@ mod macos {
     fn install_popover(content_view: &NSView, mtm: MainThreadMarker) {
         let effect_view = make_popover_view(mtm, content_view.bounds(), CORNER_RADIUS_PT);
         effect_view.setAutoresizingMask(
-            NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
-        content_view.addSubview_positioned_relativeTo(&effect_view, NSWindowOrderingMode::Below, None);
+        content_view.addSubview_positioned_relativeTo(
+            &effect_view,
+            NSWindowOrderingMode::Below,
+            None,
+        );
     }
 
-    fn make_glass_view(mtm: MainThreadMarker, frame: NSRect, corner_radius: f64) -> Retained<NSGlassEffectView> {
+    fn make_glass_view(
+        mtm: MainThreadMarker,
+        frame: NSRect,
+        corner_radius: f64,
+    ) -> Retained<NSGlassEffectView> {
         let glass = NSGlassEffectView::new(mtm);
         glass.setFrame(frame);
         // **`.regular`, the heavier frost.** This API offers exactly two
@@ -725,7 +746,11 @@ mod macos {
         glass
     }
 
-    fn make_popover_view(mtm: MainThreadMarker, frame: NSRect, corner_radius: f64) -> Retained<NSVisualEffectView> {
+    fn make_popover_view(
+        mtm: MainThreadMarker,
+        frame: NSRect,
+        corner_radius: f64,
+    ) -> Retained<NSVisualEffectView> {
         let effect_view = NSVisualEffectView::new(mtm);
         effect_view.setFrame(frame);
         // `.popover`, not the better-measuring `.sidebar`/
@@ -754,26 +779,43 @@ mod macos {
             .ok_or_else(|| "menu overlay install attempted off the main thread".to_string())?;
         let content_view = root_content_view(window)?;
         let subviews = content_view.subviews().to_vec();
-        let background = subviews
-            .first()
-            .ok_or_else(|| "contentView has no subviews — whole-window material not installed yet".to_string())?;
+        let background = subviews.first().ok_or_else(|| {
+            "contentView has no subviews — whole-window material not installed yet".to_string()
+        })?;
 
-        let zero_frame = NSRect { origin: NSPoint { x: 0.0, y: 0.0 }, size: NSSize { width: 0.0, height: 0.0 } };
+        let zero_frame = NSRect {
+            origin: NSPoint { x: 0.0, y: 0.0 },
+            size: NSSize {
+                width: 0.0,
+                height: 0.0,
+            },
+        };
         if forced_fallback() != Some(ForcedFallback::Popover) && glass_class_available() {
             let glass = make_glass_view(mtm, zero_frame, MENU_CORNER_RADIUS_PT);
             glass.setHidden(true);
-            content_view.addSubview_positioned_relativeTo(&glass, NSWindowOrderingMode::Above, Some(background));
+            content_view.addSubview_positioned_relativeTo(
+                &glass,
+                NSWindowOrderingMode::Above,
+                Some(background),
+            );
             Ok(Installed::Glass)
         } else {
             let effect_view = make_popover_view(mtm, zero_frame, MENU_CORNER_RADIUS_PT);
             effect_view.setHidden(true);
-            content_view.addSubview_positioned_relativeTo(&effect_view, NSWindowOrderingMode::Above, Some(background));
+            content_view.addSubview_positioned_relativeTo(
+                &effect_view,
+                NSWindowOrderingMode::Above,
+                Some(background),
+            );
             Ok(Installed::Popover)
         }
     }
 
     /// See `super::verify_menu_overlay_installed`'s doc comment.
-    pub fn verify_menu_overlay_installed(window: &Window, installed: Installed) -> Result<String, String> {
+    pub fn verify_menu_overlay_installed(
+        window: &Window,
+        installed: Installed,
+    ) -> Result<String, String> {
         let content_view = root_content_view(window)?;
         let subviews = content_view.subviews().to_vec();
         if subviews.len() < 3 {
@@ -786,7 +828,10 @@ mod macos {
         let overlay = subviews[1].clone();
         let hidden = overlay.isHidden();
         if !hidden {
-            return Err("expected the freshly-installed menu overlay to start hidden, readback visible".to_string());
+            return Err(
+                "expected the freshly-installed menu overlay to start hidden, readback visible"
+                    .to_string(),
+            );
         }
         match installed {
             Installed::Glass => {
@@ -798,9 +843,13 @@ mod macos {
                 })?;
                 let radius = glass.cornerRadius();
                 if (radius - MENU_CORNER_RADIUS_PT).abs() > 0.01 {
-                    return Err(format!("expected menu overlay cornerRadius {MENU_CORNER_RADIUS_PT}, readback {radius}"));
+                    return Err(format!(
+                        "expected menu overlay cornerRadius {MENU_CORNER_RADIUS_PT}, readback {radius}"
+                    ));
                 }
-                Ok(format!("NSGlassEffectView menu overlay at contentView.subviews()[1], hidden, cornerRadius={radius}"))
+                Ok(format!(
+                    "NSGlassEffectView menu overlay at contentView.subviews()[1], hidden, cornerRadius={radius}"
+                ))
             }
             Installed::Popover => {
                 let effect = overlay.downcast::<NSVisualEffectView>().map_err(|v| {
@@ -810,13 +859,20 @@ mod macos {
                     )
                 })?;
                 let Some(layer) = effect.layer() else {
-                    return Err("expected the menu overlay to have a backing CALayer, found none".to_string());
+                    return Err(
+                        "expected the menu overlay to have a backing CALayer, found none"
+                            .to_string(),
+                    );
                 };
                 let radius = layer.cornerRadius();
                 if (radius - MENU_CORNER_RADIUS_PT).abs() > 0.01 {
-                    return Err(format!("expected menu overlay layer.cornerRadius {MENU_CORNER_RADIUS_PT}, readback {radius}"));
+                    return Err(format!(
+                        "expected menu overlay layer.cornerRadius {MENU_CORNER_RADIUS_PT}, readback {radius}"
+                    ));
                 }
-                Ok(format!("NSVisualEffectView menu overlay at contentView.subviews()[1], hidden, layer.cornerRadius={radius}"))
+                Ok(format!(
+                    "NSVisualEffectView menu overlay at contentView.subviews()[1], hidden, layer.cornerRadius={radius}"
+                ))
             }
         }
     }
@@ -830,19 +886,31 @@ mod macos {
     /// never needed this conversion, since it always spans the *entire*
     /// content height (`y_px` and `content_height - height_px` are always
     /// both `0` there); a sub-rectangle genuinely needs it.
-    pub fn show_menu_overlay(window: &Window, x_px: f32, y_px: f32, width_px: f32, height_px: f32) -> Result<(), String> {
+    pub fn show_menu_overlay(
+        window: &Window,
+        x_px: f32,
+        y_px: f32,
+        width_px: f32,
+        height_px: f32,
+    ) -> Result<(), String> {
         let _mtm = MainThreadMarker::new()
             .ok_or_else(|| "menu overlay frame update attempted off the main thread".to_string())?;
         let content_view = root_content_view(window)?;
         let subviews = content_view.subviews().to_vec();
-        let overlay = subviews
-            .get(1)
-            .ok_or_else(|| "contentView has fewer than 2 subviews — menu overlay not installed yet".to_string())?;
+        let overlay = subviews.get(1).ok_or_else(|| {
+            "contentView has fewer than 2 subviews — menu overlay not installed yet".to_string()
+        })?;
         let content_height = content_view.bounds().size.height as f32;
         let appkit_y = content_height - (y_px + height_px);
         overlay.setFrame(NSRect {
-            origin: NSPoint { x: x_px as f64, y: appkit_y as f64 },
-            size: NSSize { width: width_px as f64, height: height_px as f64 },
+            origin: NSPoint {
+                x: x_px as f64,
+                y: appkit_y as f64,
+            },
+            size: NSSize {
+                width: width_px as f64,
+                height: height_px as f64,
+            },
         });
         overlay.setHidden(false);
         Ok(())
@@ -859,9 +927,9 @@ mod macos {
             .ok_or_else(|| "menu overlay hide attempted off the main thread".to_string())?;
         let content_view = root_content_view(window)?;
         let subviews = content_view.subviews().to_vec();
-        let overlay = subviews
-            .get(1)
-            .ok_or_else(|| "contentView has fewer than 2 subviews — menu overlay not installed yet".to_string())?;
+        let overlay = subviews.get(1).ok_or_else(|| {
+            "contentView has fewer than 2 subviews — menu overlay not installed yet".to_string()
+        })?;
         overlay.setHidden(true);
         Ok(())
     }
@@ -917,7 +985,9 @@ mod macos {
                     return Err(format!("expected style .regular, readback {style:?}"));
                 }
                 if (radius - CORNER_RADIUS_PT).abs() > 0.01 {
-                    return Err(format!("expected cornerRadius {CORNER_RADIUS_PT}, readback {radius}"));
+                    return Err(format!(
+                        "expected cornerRadius {CORNER_RADIUS_PT}, readback {radius}"
+                    ));
                 }
                 // **The frame, not just the radius.** A rounded view whose
                 // bottom sits below the window's own content has its rounded
@@ -956,13 +1026,18 @@ mod macos {
                     return Err(format!("expected material .popover, readback {material:?}"));
                 }
                 if blending != NSVisualEffectBlendingMode::BehindWindow {
-                    return Err(format!("expected blendingMode .behindWindow, readback {blending:?}"));
+                    return Err(format!(
+                        "expected blendingMode .behindWindow, readback {blending:?}"
+                    ));
                 }
                 if state != NSVisualEffectState::Active {
                     return Err(format!("expected state .active, readback {state:?}"));
                 }
                 let Some(layer) = effect.layer() else {
-                    return Err("expected a backing CALayer (setWantsLayer(true) was called), found none".to_string());
+                    return Err(
+                        "expected a backing CALayer (setWantsLayer(true) was called), found none"
+                            .to_string(),
+                    );
                 };
                 let layer_radius = layer.cornerRadius();
                 let masks = layer.masksToBounds();
@@ -1042,9 +1117,7 @@ mod macos {
             // (which would rebuild the frame view) made for no reason.
             return Ok(());
         }
-        native.setStyleMask(NSWindowStyleMask::from_bits_retain(
-            wanted as usize as _,
-        ));
+        native.setStyleMask(NSWindowStyleMask::from_bits_retain(wanted as usize as _));
 
         // `setStyleMask:` makes AppKit rebuild the window's frame view, and
         // that **resets the window's first responder** — measured live, not
@@ -1083,7 +1156,9 @@ mod macos {
         let is_rendering_view = responder
             .as_deref()
             .zip(rendering_view(window).ok().as_deref())
-            .is_some_and(|(a, b)| std::ptr::eq(a as *const _ as *const (), b as *const _ as *const ()));
+            .is_some_and(|(a, b)| {
+                std::ptr::eq(a as *const _ as *const (), b as *const _ as *const ())
+            });
         if !is_rendering_view {
             return Err(format!(
                 "expected GPUI's rendering view to be the window's first responder after                  the style-mask change, found {:?} — keyboard input would not reach the                  search field",
@@ -1111,9 +1186,10 @@ mod macos {
 
     /// See `super::first_responder_name`'s doc comment.
     pub fn first_responder_name(window: &Window) -> Result<String, String> {
-        Ok(native_window(window)?
-            .firstResponder()
-            .map_or_else(|| "<none>".to_string(), |r| r.class().name().to_string_lossy().into_owned()))
+        Ok(native_window(window)?.firstResponder().map_or_else(
+            || "<none>".to_string(),
+            |r| r.class().name().to_string_lossy().into_owned(),
+        ))
     }
 
     #[cfg(test)]
@@ -1127,8 +1203,14 @@ mod macos {
 
         #[test]
         fn recognizes_both_forced_branches() {
-            assert_eq!(parse_forced_fallback(Some("popover")), Some(ForcedFallback::Popover));
-            assert_eq!(parse_forced_fallback(Some("opaque")), Some(ForcedFallback::Opaque));
+            assert_eq!(
+                parse_forced_fallback(Some("popover")),
+                Some(ForcedFallback::Popover)
+            );
+            assert_eq!(
+                parse_forced_fallback(Some("opaque")),
+                Some(ForcedFallback::Opaque)
+            );
         }
 
         #[test]
@@ -1168,7 +1250,9 @@ mod style_mask_tests {
     #[test]
     fn the_observed_mask_is_rejected_before_the_fix_and_accepted_after() {
         assert!(!style_mask_is_untitled_panel(OBSERVED_MASK));
-        assert!(style_mask_is_untitled_panel(style_mask_without_titled(OBSERVED_MASK)));
+        assert!(style_mask_is_untitled_panel(style_mask_without_titled(
+            OBSERVED_MASK
+        )));
     }
 
     #[test]

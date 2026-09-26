@@ -170,7 +170,10 @@ impl PanelDrag for NativeDrag {
             }
         };
         *self.session.borrow_mut() = Some(Session {
-            grab: snap::Point { x: cursor.x - frame.x, y: cursor.y - frame.y },
+            grab: snap::Point {
+                x: cursor.x - frame.x,
+                y: cursor.y - frame.y,
+            },
             start_origin: frame.origin(),
             overlay: None,
         });
@@ -200,7 +203,10 @@ impl PanelDrag for NativeDrag {
             panel,
             home: crate::display_placement::home_origin(screen.full, panel),
         };
-        let desired = snap::Point { x: cursor.x - session.grab.x, y: cursor.y - session.grab.y };
+        let desired = snap::Point {
+            x: cursor.x - session.grab.x,
+            y: cursor.y - session.grab.y,
+        };
         let resolved = snap::resolve(&geometry, desired);
 
         if let Err(e) = crate::display_placement::move_window_origin(window, resolved.origin) {
@@ -262,13 +268,17 @@ fn sync_overlay(
 
     if let Some(overlay) = &session.overlay {
         let local = local_guides(screen, guides);
-        let _ = overlay.handle.update(cx, |view, _window, cx| view.set_guides(local, cx));
+        let _ = overlay
+            .handle
+            .update(cx, |view, _window, cx| view.set_guides(local, cx));
     }
 }
 
 fn close_overlay(overlay: Option<Overlay>, cx: &mut App) {
     if let Some(overlay) = overlay {
-        let _ = overlay.handle.update(cx, |_view, window, _cx| window.remove_window());
+        let _ = overlay
+            .handle
+            .update(cx, |_view, window, _cx| window.remove_window());
     }
 }
 
@@ -317,7 +327,10 @@ fn open_overlay(
             |_window, cx| {
                 cx.new(|_cx| GuideOverlay {
                     guides: local,
-                    size: snap::Size { width: screen.width, height: screen.height },
+                    size: snap::Size {
+                        width: screen.width,
+                        height: screen.height,
+                    },
                 })
             },
         )
@@ -424,33 +437,42 @@ impl gpui::Render for GuideOverlay {
         let width = self.size.width as f32;
         let height = self.size.height as f32;
 
-        div().size_full().relative().children(self.guides.iter().map(|guide| {
-            // A guide sitting exactly on a screen edge would otherwise be
-            // drawn half outside the window and clipped to a hairline.
-            let start = |along: f32, extent: f32| (along - thickness / 2.0).clamp(0.0, extent - thickness);
-            let line = div()
-                .absolute()
-                .bg(if guide.active { palette.snap_guide } else { palette.snap_guide_muted })
-                // The panel's own surface colour as a hairline outline, so a
-                // light theme's guide still reads against a light wallpaper
-                // and a dark theme's against a dark one. Reuses an existing
-                // token rather than inventing a third guide colour.
-                .border_1()
-                .border_color(palette.surface_panel)
-                .rounded_full();
-            match guide.axis {
-                GuideAxis::Vertical => line
-                    .top_0()
-                    .h(px(height))
-                    .left(px(start(guide.position, width)))
-                    .w(px(thickness)),
-                GuideAxis::Horizontal => line
-                    .left_0()
-                    .w(px(width))
-                    .top(px(start(guide.position, height)))
-                    .h(px(thickness)),
-            }
-        }))
+        div()
+            .size_full()
+            .relative()
+            .children(self.guides.iter().map(|guide| {
+                // A guide sitting exactly on a screen edge would otherwise be
+                // drawn half outside the window and clipped to a hairline.
+                let start = |along: f32, extent: f32| {
+                    (along - thickness / 2.0).clamp(0.0, extent - thickness)
+                };
+                let line = div()
+                    .absolute()
+                    .bg(if guide.active {
+                        palette.snap_guide
+                    } else {
+                        palette.snap_guide_muted
+                    })
+                    // The panel's own surface colour as a hairline outline, so a
+                    // light theme's guide still reads against a light wallpaper
+                    // and a dark theme's against a dark one. Reuses an existing
+                    // token rather than inventing a third guide colour.
+                    .border_1()
+                    .border_color(palette.surface_panel)
+                    .rounded_full();
+                match guide.axis {
+                    GuideAxis::Vertical => line
+                        .top_0()
+                        .h(px(height))
+                        .left(px(start(guide.position, width)))
+                        .w(px(thickness)),
+                    GuideAxis::Horizontal => line
+                        .left_0()
+                        .w(px(width))
+                        .top(px(start(guide.position, height)))
+                        .h(px(thickness)),
+                }
+            }))
     }
 }
 
@@ -494,7 +516,10 @@ pub fn demo_overlay(panel_window: &Window, cx: &mut App) -> Result<DemoOverlay, 
     };
     let resolved = snap::resolve(
         &geometry,
-        snap::Point { x: screen.visible.x + 4.0, y: geometry.home.y - 5.0 },
+        snap::Point {
+            x: screen.visible.x + 4.0,
+            y: geometry.home.y - 5.0,
+        },
     );
 
     let started = std::time::Instant::now();
@@ -503,21 +528,32 @@ pub fn demo_overlay(panel_window: &Window, cx: &mut App) -> Result<DemoOverlay, 
 
     let window_number = overlay
         .handle
-        .update(cx, |_view, window, _cx| crate::material::window_number(window))
+        .update(cx, |_view, window, _cx| {
+            crate::material::window_number(window)
+        })
         .map_err(|e| format!("could not read the overlay's window number: {e}"))??;
 
     let mut detail = format!(
         "visible={:?} panel={:?} home={:?} desired-origin snapped to {:?}",
         geometry.visible, panel, geometry.home, resolved.origin
     );
-    for (guide, local) in resolved.guides.iter().zip(local_guides(screen.visible, &resolved.guides)) {
+    for (guide, local) in resolved
+        .guides
+        .iter()
+        .zip(local_guides(screen.visible, &resolved.guides))
+    {
         detail.push_str(&format!(
             "\n  guide {:?} {:?} global={:.1} local={:.1} active={}",
             guide.target, guide.axis, guide.position, local.position, guide.active
         ));
     }
 
-    Ok(DemoOverlay { window_number, guides: resolved.guides.len(), open_took, detail })
+    Ok(DemoOverlay {
+        window_number,
+        guides: resolved.guides.len(),
+        open_took,
+        detail,
+    })
 }
 
 #[cfg(test)]
@@ -525,7 +561,12 @@ mod tests {
     use super::*;
 
     fn screen() -> snap::Rect {
-        snap::Rect { x: 100.0, y: 50.0, width: 1440.0, height: 800.0 }
+        snap::Rect {
+            x: 100.0,
+            y: 50.0,
+            width: 1440.0,
+            height: 800.0,
+        }
     }
 
     #[test]
@@ -546,8 +587,14 @@ mod tests {
             },
         ];
         let local = local_guides(screen, &guides);
-        assert_eq!(local[0].position, 0.0, "the screen's left edge is the overlay's own left edge");
-        assert_eq!(local[1].position, 0.0, "the screen's *top* edge is y=0 in gpui's own y-down space");
+        assert_eq!(
+            local[0].position, 0.0,
+            "the screen's left edge is the overlay's own left edge"
+        );
+        assert_eq!(
+            local[1].position, 0.0,
+            "the screen's *top* edge is y=0 in gpui's own y-down space"
+        );
         assert!(local[0].active && !local[1].active);
     }
 

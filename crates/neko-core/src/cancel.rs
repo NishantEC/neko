@@ -71,7 +71,10 @@ mod tests {
         let clone = token.clone();
         assert!(!clone.is_cancelled());
         token.cancel();
-        assert!(clone.is_cancelled(), "clones share one signal, they are not independent copies");
+        assert!(
+            clone.is_cancelled(),
+            "clones share one signal, they are not independent copies"
+        );
     }
 
     #[test]

@@ -14,7 +14,10 @@ impl Db {
     /// Commit related settings together. Dropping the transaction rolls back
     /// every write when the operation or commit fails.
     pub fn atomic<T>(&self, operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-        let transaction = self.conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let transaction = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
         let value = operation()?;
         transaction.commit().map_err(|e| e.to_string())?;
         Ok(value)
@@ -26,7 +29,10 @@ impl Db {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", true)?;
-        let db = Self { conn, clipboard_revision: std::cell::Cell::new(0) };
+        let db = Self {
+            conn,
+            clipboard_revision: std::cell::Cell::new(0),
+        };
         db.migrate()?;
         Ok(db)
     }
@@ -66,11 +72,9 @@ impl Db {
 
     pub fn get_setting(&self, key: &str) -> rusqlite::Result<Option<String>> {
         self.conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                [key],
-                |row| row.get(0),
-            )
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
             .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
@@ -134,7 +138,8 @@ impl Db {
             (content, content_kind, source_app, copied_at_unix_ms),
         )?;
         // Invalidate even if pruning fails after the successful insert.
-        self.clipboard_revision.set(self.clipboard_revision.get().wrapping_add(1));
+        self.clipboard_revision
+            .set(self.clipboard_revision.get().wrapping_add(1));
         self.conn.execute(
             "DELETE FROM clipboard_entries
              WHERE content NOT IN (
@@ -154,8 +159,12 @@ impl Db {
     /// not an error: the end state ("this content is not in history") is
     /// already what the caller wanted.
     pub fn delete_clipboard_entry(&self, content: &str) -> rusqlite::Result<()> {
-        self.conn.execute("DELETE FROM clipboard_entries WHERE content = ?1", [content])?;
-        self.clipboard_revision.set(self.clipboard_revision.get().wrapping_add(1));
+        self.conn.execute(
+            "DELETE FROM clipboard_entries WHERE content = ?1",
+            [content],
+        )?;
+        self.clipboard_revision
+            .set(self.clipboard_revision.get().wrapping_add(1));
         Ok(())
     }
 
@@ -206,18 +215,26 @@ mod tests {
         use crate::provider::Provider;
         use std::sync::{Arc, Mutex};
         let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
-        db.lock().unwrap().record_clipboard_entry("private", "text", None, 1, 200).unwrap();
+        db.lock()
+            .unwrap()
+            .record_clipboard_entry("private", "text", None, 1, 200)
+            .unwrap();
         let provider = crate::clipboard::ClipboardProvider::new(Arc::clone(&db));
         assert_eq!(provider.search("private", 2).len(), 1);
         {
             let db = db.lock().unwrap();
             db.delete_clipboard_entry("private").unwrap();
-            db.conn.execute_batch("DROP TABLE clipboard_entries").unwrap();
+            db.conn
+                .execute_batch("DROP TABLE clipboard_entries")
+                .unwrap();
         }
         assert!(provider.search("private", 3).is_empty());
         assert!(provider.search("private", 4).is_empty());
         db.lock().unwrap().migrate().unwrap();
-        db.lock().unwrap().record_clipboard_entry("new", "text", None, 5, 200).unwrap();
+        db.lock()
+            .unwrap()
+            .record_clipboard_entry("new", "text", None, 5, 200)
+            .unwrap();
         assert_eq!(provider.search("new", 6).len(), 1);
     }
 
@@ -226,7 +243,10 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         assert_eq!(db.get_setting("hotkey").unwrap(), None);
         db.set_setting("hotkey", "alt+space").unwrap();
-        assert_eq!(db.get_setting("hotkey").unwrap().as_deref(), Some("alt+space"));
+        assert_eq!(
+            db.get_setting("hotkey").unwrap().as_deref(),
+            Some("alt+space")
+        );
         db.set_setting("hotkey", "cmd+shift+space").unwrap();
         assert_eq!(
             db.get_setting("hotkey").unwrap().as_deref(),
@@ -250,21 +270,32 @@ mod tests {
             .unwrap();
         db.record_clipboard_entry("hello", "text", Some("Notes"), 200, 200)
             .unwrap();
-        let entries = db.clipboard_entries(crate::clipboard::MAX_MATCHED_BYTES).unwrap();
+        let entries = db
+            .clipboard_entries(crate::clipboard::MAX_MATCHED_BYTES)
+            .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0],
-            ("hello".to_string(), "text".to_string(), Some("Notes".to_string()), 200)
+            (
+                "hello".to_string(),
+                "text".to_string(),
+                Some("Notes".to_string()),
+                200
+            )
         );
     }
 
     #[test]
     fn deleting_a_clipboard_entry_removes_only_that_one() {
         let db = Db::open_in_memory().unwrap();
-        db.record_clipboard_entry("keep", "text", None, 100, 200).unwrap();
-        db.record_clipboard_entry("drop", "text", None, 200, 200).unwrap();
+        db.record_clipboard_entry("keep", "text", None, 100, 200)
+            .unwrap();
+        db.record_clipboard_entry("drop", "text", None, 200, 200)
+            .unwrap();
         db.delete_clipboard_entry("drop").unwrap();
-        let entries = db.clipboard_entries(crate::clipboard::MAX_MATCHED_BYTES).unwrap();
+        let entries = db
+            .clipboard_entries(crate::clipboard::MAX_MATCHED_BYTES)
+            .unwrap();
         let contents: Vec<&str> = entries.iter().map(|(c, ..)| c.as_str()).collect();
         assert_eq!(contents, vec!["keep"]);
     }
@@ -282,7 +313,9 @@ mod tests {
             db.record_clipboard_entry(&format!("entry-{i}"), "text", None, i, 3)
                 .unwrap();
         }
-        let entries = db.clipboard_entries(crate::clipboard::MAX_MATCHED_BYTES).unwrap();
+        let entries = db
+            .clipboard_entries(crate::clipboard::MAX_MATCHED_BYTES)
+            .unwrap();
         assert_eq!(entries.len(), 3);
         let contents: Vec<&str> = entries.iter().map(|(c, ..)| c.as_str()).collect();
         assert_eq!(contents, vec!["entry-4", "entry-3", "entry-2"]);
@@ -295,13 +328,18 @@ mod tests {
         // 1.6 GB across thirty one-character searches.
         let db = Db::open_in_memory().unwrap();
         let huge = "x".repeat(200_000);
-        db.record_clipboard_entry(&huge, "text", None, 100, 200).unwrap();
+        db.record_clipboard_entry(&huge, "text", None, 100, 200)
+            .unwrap();
         let entries = db.clipboard_entries(1024).unwrap();
-        assert_eq!(entries[0].0.len(), 1024, "SQLite truncates, not this process");
+        assert_eq!(
+            entries[0].0.len(),
+            1024,
+            "SQLite truncates, not this process"
+        );
         // And a short entry is untouched by the bound.
-        db.record_clipboard_entry("short", "text", None, 200, 200).unwrap();
+        db.record_clipboard_entry("short", "text", None, 200, 200)
+            .unwrap();
         let entries = db.clipboard_entries(1024).unwrap();
         assert!(entries.iter().any(|e| e.0 == "short"));
     }
-
 }

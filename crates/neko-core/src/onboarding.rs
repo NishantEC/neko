@@ -30,7 +30,10 @@ pub fn get_onboarding_state(db: &crate::Db) -> rusqlite::Result<OnboardingState>
     })
 }
 
-pub fn set_onboarding_completed(db: &crate::Db, completed: bool) -> rusqlite::Result<OnboardingState> {
+pub fn set_onboarding_completed(
+    db: &crate::Db,
+    completed: bool,
+) -> rusqlite::Result<OnboardingState> {
     set_bool(db, ONBOARDING_COMPLETED_KEY, completed)?;
     get_onboarding_state(db)
 }

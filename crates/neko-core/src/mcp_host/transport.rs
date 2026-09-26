@@ -159,8 +159,11 @@ fn run(
         .map_err(|_| "MCP runtime unavailable")?;
     runtime.block_on(async {
         match config {
-            ServerConfig::Stdio { command, args } => {
+            ServerConfig::Stdio { command, args, cwd } => {
                 let mut cmd = tokio::process::Command::new(command);
+                if let Some(cwd) = cwd {
+                    cmd.current_dir(cwd);
+                }
                 cmd.args(args)
                     .env_clear()
                     .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
@@ -526,14 +529,19 @@ async fn operate(
                     if !seen.insert(name.clone()) {
                         return Err("MCP server returned duplicate tool names".into());
                     }
-                    let read_only = tool.annotations.as_ref().and_then(|a| a.read_only_hint).unwrap_or(false);
+                    let read_only = tool
+                        .annotations
+                        .as_ref()
+                        .and_then(|a| a.read_only_hint)
+                        .unwrap_or(false);
                     // Preserve existing grants for conservative/unknown tools;
                     // declaring read-only changes identity and needs a regrant.
                     let identity = if read_only {
                         serde_json::to_vec(&(&name, &description, &input_schema, true))
                     } else {
                         serde_json::to_vec(&(&name, &description, &input_schema))
-                    }.map_err(|_| "Invalid MCP tool")?;
+                    }
+                    .map_err(|_| "Invalid MCP tool")?;
                     let schema_hash = format!("{:x}", Sha256::digest(identity));
                     tools.push(McpTool {
                         read_only,
@@ -591,6 +599,7 @@ mod tests {
         ServerConfig::Stdio {
             command: "/usr/bin/false".into(),
             args: vec![],
+            cwd: None,
         }
     }
     #[test]
@@ -605,11 +614,25 @@ mod tests {
         let c = ServerConfig::Stdio {
             command: "node".into(),
             args: vec![],
+            cwd: None,
         };
         assert!(
             discover(&c, &Credentials::default(), &AtomicBool::new(false))
                 .unwrap_err()
                 .contains("absolute")
+        );
+    }
+    #[test]
+    fn stdio_server_starts_in_configured_working_directory() {
+        let mut config = fixture("normal");
+        if let ServerConfig::Stdio { args, cwd, .. } = &mut config {
+            args[0] = "scripts/fixtures/mcp-host.mjs".into();
+            *cwd = Some(format!("{}/../..", env!("CARGO_MANIFEST_DIR")));
+        }
+        assert!(
+            !discover(&config, &Credentials::default(), &AtomicBool::new(false))
+                .unwrap()
+                .is_empty()
         );
     }
     #[test]
@@ -702,6 +725,7 @@ mod tests {
                 ),
                 mode.into(),
             ],
+            cwd: None,
         }
     }
     #[test]
@@ -719,7 +743,10 @@ mod tests {
         assert_ne!(tools[0].schema_hash, changed[0].schema_hash);
         let readonly = discover(&fixture("readonly"), &credentials, &cancel).unwrap();
         assert!(!tools[0].read_only && readonly[0].read_only);
-        assert_ne!(tools[0].schema_hash, readonly[0].schema_hash, "Changing a tool's effect declaration requires a fresh grant");
+        assert_ne!(
+            tools[0].schema_hash, readonly[0].schema_hash,
+            "Changing a tool's effect declaration requires a fresh grant"
+        );
         let response = call(
             &fixture("normal"),
             &credentials,

@@ -115,11 +115,17 @@ impl Rect {
     }
 
     pub fn size(&self) -> Size {
-        Size { width: self.width, height: self.height }
+        Size {
+            width: self.width,
+            height: self.height,
+        }
     }
 
     pub fn origin(&self) -> Point {
-        Point { x: self.x, y: self.y }
+        Point {
+            x: self.x,
+            y: self.y,
+        }
     }
 
     /// Whether `(x, y)` falls inside this rectangle, half-open at the far
@@ -167,9 +173,10 @@ pub enum Target {
 impl Target {
     pub fn axis(self) -> GuideAxis {
         match self {
-            Target::LeftEdge | Target::HorizontalCenter | Target::RightEdge | Target::HomeCenter => {
-                GuideAxis::Vertical
-            }
+            Target::LeftEdge
+            | Target::HorizontalCenter
+            | Target::RightEdge
+            | Target::HomeCenter => GuideAxis::Vertical,
             Target::BottomEdge | Target::VerticalCenter | Target::TopEdge | Target::HomeTop => {
                 GuideAxis::Horizontal
             }
@@ -245,8 +252,16 @@ pub struct Resolution {
 ///    stays exactly where the cursor put it is the common case, not an edge
 ///    case.
 pub fn resolve(geometry: &Geometry, desired: Point) -> Resolution {
-    let (min_x, max_x) = axis_range(geometry.visible.x, geometry.visible.width, geometry.panel.width);
-    let (min_y, max_y) = axis_range(geometry.visible.y, geometry.visible.height, geometry.panel.height);
+    let (min_x, max_x) = axis_range(
+        geometry.visible.x,
+        geometry.visible.width,
+        geometry.panel.width,
+    );
+    let (min_y, max_y) = axis_range(
+        geometry.visible.y,
+        geometry.visible.height,
+        geometry.panel.height,
+    );
 
     let desired = Point {
         x: desired.x.clamp(min_x, max_x),
@@ -260,7 +275,10 @@ pub fn resolve(geometry: &Geometry, desired: Point) -> Resolution {
                 Target::HorizontalCenter,
                 geometry.visible.x + (geometry.visible.width - geometry.panel.width) / 2.0,
             ),
-            (Target::RightEdge, geometry.visible.max_x() - geometry.panel.width),
+            (
+                Target::RightEdge,
+                geometry.visible.max_x() - geometry.panel.width,
+            ),
             (Target::HomeCenter, geometry.home.x),
         ],
         min_x,
@@ -273,7 +291,10 @@ pub fn resolve(geometry: &Geometry, desired: Point) -> Resolution {
                 Target::VerticalCenter,
                 geometry.visible.y + (geometry.visible.height - geometry.panel.height) / 2.0,
             ),
-            (Target::TopEdge, geometry.visible.max_y() - geometry.panel.height),
+            (
+                Target::TopEdge,
+                geometry.visible.max_y() - geometry.panel.height,
+            ),
             (Target::HomeTop, geometry.home.y),
         ],
         min_y,
@@ -284,7 +305,10 @@ pub fn resolve(geometry: &Geometry, desired: Point) -> Resolution {
     let (y, y_guides) = snap_axis(desired.y, &y_candidates, geometry.panel.height);
     guides.extend(y_guides);
 
-    Resolution { origin: Point { x, y }, guides }
+    Resolution {
+        origin: Point { x, y },
+        guides,
+    }
 }
 
 /// The inclusive range an origin may take along one axis so the panel stays
@@ -313,7 +337,10 @@ fn candidates(raw: [(Target, f64); 4], min: f64, max: f64) -> Vec<(Target, f64)>
         let origin = origin.clamp(min, max);
         // Half a point: below anything a person could see or a display could
         // render, so two targets this close are one target with two names.
-        if out.iter().any(|(_, existing)| (existing - origin).abs() < 0.5) {
+        if out
+            .iter()
+            .any(|(_, existing)| (existing - origin).abs() < 0.5)
+        {
             continue;
         }
         out.push((target, origin));
@@ -364,17 +391,36 @@ mod tests {
     /// this app's real panel size — the shape almost every assertion below is
     /// made against.
     fn geometry() -> Geometry {
-        let visible = Rect { x: 0.0, y: 70.0, width: 1440.0, height: 805.0 };
-        let panel = Size { width: 760.0, height: 420.0 };
+        let visible = Rect {
+            x: 0.0,
+            y: 70.0,
+            width: 1440.0,
+            height: 805.0,
+        };
+        let panel = Size {
+            width: 760.0,
+            height: 420.0,
+        };
         // What `display_placement::upper_third_offset` produces for the full
         // 1440×900 frame: centred horizontally, `900/3 − 420/4 = 195` down
         // from the top, expressed as a y-up bottom-left origin.
-        let home = Point { x: (1440.0 - 760.0) / 2.0, y: 900.0 - 195.0 - 420.0 };
-        Geometry { visible, panel, home }
+        let home = Point {
+            x: (1440.0 - 760.0) / 2.0,
+            y: 900.0 - 195.0 - 420.0,
+        };
+        Geometry {
+            visible,
+            panel,
+            home,
+        }
     }
 
     fn active(resolution: &Resolution, axis: GuideAxis) -> Option<Guide> {
-        resolution.guides.iter().copied().find(|g| g.axis == axis && g.active)
+        resolution
+            .guides
+            .iter()
+            .copied()
+            .find(|g| g.axis == axis && g.active)
     }
 
     #[test]
@@ -383,19 +429,34 @@ mod tests {
         let desired = Point { x: 300.0, y: 200.0 };
         let resolved = resolve(&g, desired);
         assert_eq!(resolved.origin, desired);
-        assert!(resolved.guides.is_empty(), "no target is in reach, so nothing should be drawn");
+        assert!(
+            resolved.guides.is_empty(),
+            "no target is in reach, so nothing should be drawn"
+        );
     }
 
     #[test]
     fn approaching_the_left_edge_snaps_to_it_and_draws_one_guide_along_the_panel_edge() {
         let g = geometry();
-        let resolved = resolve(&g, Point { x: g.visible.x + 9.0, y: 200.0 });
+        let resolved = resolve(
+            &g,
+            Point {
+                x: g.visible.x + 9.0,
+                y: 200.0,
+            },
+        );
         assert_eq!(resolved.origin.x, g.visible.x);
-        assert_eq!(resolved.origin.y, 200.0, "the y axis is untouched by an x snap");
+        assert_eq!(
+            resolved.origin.y, 200.0,
+            "the y axis is untouched by an x snap"
+        );
 
         let guide = active(&resolved, GuideAxis::Vertical).expect("an active vertical guide");
         assert_eq!(guide.target, Target::LeftEdge);
-        assert_eq!(guide.position, g.visible.x, "the line marks the panel's own left edge");
+        assert_eq!(
+            guide.position, g.visible.x,
+            "the line marks the panel's own left edge"
+        );
         assert_eq!(resolved.guides.len(), 1);
     }
 
@@ -403,7 +464,13 @@ mod tests {
     fn approaching_the_right_edge_snaps_the_panels_right_edge_to_the_screens() {
         let g = geometry();
         let right_origin = g.visible.max_x() - g.panel.width;
-        let resolved = resolve(&g, Point { x: right_origin - 5.0, y: 200.0 });
+        let resolved = resolve(
+            &g,
+            Point {
+                x: right_origin - 5.0,
+                y: 200.0,
+            },
+        );
         assert_eq!(resolved.origin.x, right_origin);
 
         let guide = active(&resolved, GuideAxis::Vertical).unwrap();
@@ -415,7 +482,13 @@ mod tests {
     fn the_centre_guide_marks_the_panels_centre_line_not_its_edge() {
         let g = geometry();
         let centre_origin = g.visible.x + (g.visible.width - g.panel.width) / 2.0;
-        let resolved = resolve(&g, Point { x: centre_origin + 4.0, y: 200.0 });
+        let resolved = resolve(
+            &g,
+            Point {
+                x: centre_origin + 4.0,
+                y: 200.0,
+            },
+        );
         assert_eq!(resolved.origin.x, centre_origin);
 
         let guide = active(&resolved, GuideAxis::Vertical).unwrap();
@@ -425,7 +498,13 @@ mod tests {
     #[test]
     fn home_is_reachable_again_after_a_drag_and_its_guide_runs_along_the_panels_top_edge() {
         let g = geometry();
-        let resolved = resolve(&g, Point { x: 300.0, y: g.home.y - 7.0 });
+        let resolved = resolve(
+            &g,
+            Point {
+                x: 300.0,
+                y: g.home.y - 7.0,
+            },
+        );
         assert_eq!(resolved.origin.y, g.home.y);
 
         let guide = active(&resolved, GuideAxis::Horizontal).unwrap();
@@ -438,9 +517,18 @@ mod tests {
         // The common case: one guide, not two stacked on the same pixel.
         let g = geometry();
         let centre_origin = g.visible.x + (g.visible.width - g.panel.width) / 2.0;
-        assert_eq!(g.home.x, centre_origin, "the fixture itself must have them coincide");
+        assert_eq!(
+            g.home.x, centre_origin,
+            "the fixture itself must have them coincide"
+        );
 
-        let resolved = resolve(&g, Point { x: centre_origin + 2.0, y: 200.0 });
+        let resolved = resolve(
+            &g,
+            Point {
+                x: centre_origin + 2.0,
+                y: 200.0,
+            },
+        );
         assert_eq!(resolved.guides.len(), 1);
         assert_eq!(resolved.guides[0].target, Target::HorizontalCenter);
     }
@@ -451,18 +539,42 @@ mod tests {
         // centre is 32pt right of the display's own centre, which is where a
         // summon actually puts the panel.
         let g = Geometry {
-            visible: Rect { x: 64.0, y: 0.0, width: 1440.0 - 64.0, height: 875.0 },
-            panel: Size { width: 760.0, height: 420.0 },
-            home: Point { x: (1440.0 - 760.0) / 2.0, y: 900.0 - 195.0 - 420.0 },
+            visible: Rect {
+                x: 64.0,
+                y: 0.0,
+                width: 1440.0 - 64.0,
+                height: 875.0,
+            },
+            panel: Size {
+                width: 760.0,
+                height: 420.0,
+            },
+            home: Point {
+                x: (1440.0 - 760.0) / 2.0,
+                y: 900.0 - 195.0 - 420.0,
+            },
         };
         let visible_centre = g.visible.x + (g.visible.width - g.panel.width) / 2.0;
-        assert!((visible_centre - g.home.x).abs() > 0.5, "the fixture must actually separate them");
+        assert!(
+            (visible_centre - g.home.x).abs() > 0.5,
+            "the fixture must actually separate them"
+        );
 
         // Halfway between the two, and both are inside the threshold.
         let between = (visible_centre + g.home.x) / 2.0;
-        let resolved = resolve(&g, Point { x: between, y: 200.0 });
-        let vertical: Vec<Target> =
-            resolved.guides.iter().filter(|g| g.axis == GuideAxis::Vertical).map(|g| g.target).collect();
+        let resolved = resolve(
+            &g,
+            Point {
+                x: between,
+                y: 200.0,
+            },
+        );
+        let vertical: Vec<Target> = resolved
+            .guides
+            .iter()
+            .filter(|g| g.axis == GuideAxis::Vertical)
+            .map(|g| g.target)
+            .collect();
         assert_eq!(vertical.len(), 2, "both are in reach, so both are drawn");
         assert!(vertical.contains(&Target::HomeCenter));
     }
@@ -473,17 +585,38 @@ mod tests {
         // home and the vertical centre are 28.3pt apart, so a cursor between
         // them is within reach of both.
         let g = Geometry {
-            visible: Rect { x: 0.0, y: 0.0, width: 1280.0, height: 800.0 },
-            panel: Size { width: 760.0, height: 420.0 },
-            home: Point { x: (1280.0 - 760.0) / 2.0, y: 800.0 - (800.0 / 3.0 - 105.0) - 420.0 },
+            visible: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 1280.0,
+                height: 800.0,
+            },
+            panel: Size {
+                width: 760.0,
+                height: 420.0,
+            },
+            home: Point {
+                x: (1280.0 - 760.0) / 2.0,
+                y: 800.0 - (800.0 / 3.0 - 105.0) - 420.0,
+            },
         };
         let centre_origin = (800.0 - 420.0) / 2.0;
         assert!((g.home.y - centre_origin).abs() < 2.0 * SNAP_THRESHOLD_PT);
 
         let between = (g.home.y + centre_origin) / 2.0;
-        let resolved = resolve(&g, Point { x: 300.0, y: between + 1.0 });
-        let horizontal: Vec<Guide> =
-            resolved.guides.iter().copied().filter(|g| g.axis == GuideAxis::Horizontal).collect();
+        let resolved = resolve(
+            &g,
+            Point {
+                x: 300.0,
+                y: between + 1.0,
+            },
+        );
+        let horizontal: Vec<Guide> = resolved
+            .guides
+            .iter()
+            .copied()
+            .filter(|g| g.axis == GuideAxis::Horizontal)
+            .collect();
         assert_eq!(horizontal.len(), 2);
         assert_eq!(horizontal.iter().filter(|g| g.active).count(), 1);
         // Nudged toward home, so home is the one that takes it.
@@ -493,10 +626,25 @@ mod tests {
     #[test]
     fn the_threshold_is_inclusive_at_its_own_boundary_and_dead_one_point_past_it() {
         let g = geometry();
-        let at = resolve(&g, Point { x: g.visible.x + SNAP_THRESHOLD_PT, y: 200.0 });
-        assert_eq!(at.origin.x, g.visible.x, "exactly at the threshold still snaps");
+        let at = resolve(
+            &g,
+            Point {
+                x: g.visible.x + SNAP_THRESHOLD_PT,
+                y: 200.0,
+            },
+        );
+        assert_eq!(
+            at.origin.x, g.visible.x,
+            "exactly at the threshold still snaps"
+        );
 
-        let past = resolve(&g, Point { x: g.visible.x + SNAP_THRESHOLD_PT + 1.0, y: 200.0 });
+        let past = resolve(
+            &g,
+            Point {
+                x: g.visible.x + SNAP_THRESHOLD_PT + 1.0,
+                y: 200.0,
+            },
+        );
         assert_eq!(past.origin.x, g.visible.x + SNAP_THRESHOLD_PT + 1.0);
         assert!(past.guides.is_empty());
     }
@@ -504,21 +652,50 @@ mod tests {
     #[test]
     fn a_drag_that_runs_off_the_screen_leaves_the_panel_fully_on_it() {
         let g = geometry();
-        let far_off = resolve(&g, Point { x: -5000.0, y: -5000.0 });
-        assert_eq!(far_off.origin, Point { x: g.visible.x, y: g.visible.y });
+        let far_off = resolve(
+            &g,
+            Point {
+                x: -5000.0,
+                y: -5000.0,
+            },
+        );
+        assert_eq!(
+            far_off.origin,
+            Point {
+                x: g.visible.x,
+                y: g.visible.y
+            }
+        );
 
-        let far_off_other_way = resolve(&g, Point { x: 9000.0, y: 9000.0 });
+        let far_off_other_way = resolve(
+            &g,
+            Point {
+                x: 9000.0,
+                y: 9000.0,
+            },
+        );
         assert_eq!(
             far_off_other_way.origin,
-            Point { x: g.visible.max_x() - g.panel.width, y: g.visible.max_y() - g.panel.height }
+            Point {
+                x: g.visible.max_x() - g.panel.width,
+                y: g.visible.max_y() - g.panel.height
+            }
         );
     }
 
     #[test]
     fn a_panel_bigger_than_the_screen_pins_to_the_origin_rather_than_producing_an_inverted_range() {
         let g = Geometry {
-            visible: Rect { x: 100.0, y: 50.0, width: 600.0, height: 300.0 },
-            panel: Size { width: 760.0, height: 420.0 },
+            visible: Rect {
+                x: 100.0,
+                y: 50.0,
+                width: 600.0,
+                height: 300.0,
+            },
+            panel: Size {
+                width: 760.0,
+                height: 420.0,
+            },
             home: Point { x: 100.0, y: 50.0 },
         };
         let resolved = resolve(&g, Point { x: 400.0, y: 400.0 });
@@ -529,8 +706,20 @@ mod tests {
     #[test]
     fn both_axes_can_snap_at_once_and_each_reports_its_own_guide() {
         let g = geometry();
-        let resolved = resolve(&g, Point { x: g.visible.x + 3.0, y: g.visible.y + 3.0 });
-        assert_eq!(resolved.origin, Point { x: g.visible.x, y: g.visible.y });
+        let resolved = resolve(
+            &g,
+            Point {
+                x: g.visible.x + 3.0,
+                y: g.visible.y + 3.0,
+            },
+        );
+        assert_eq!(
+            resolved.origin,
+            Point {
+                x: g.visible.x,
+                y: g.visible.y
+            }
+        );
         assert!(active(&resolved, GuideAxis::Vertical).is_some());
         assert!(active(&resolved, GuideAxis::Horizontal).is_some());
         assert_eq!(resolved.guides.len(), 2);
@@ -540,8 +729,18 @@ mod tests {
     fn a_rect_owns_a_cursor_on_its_low_edge_but_not_its_high_one() {
         // Two abutting displays must never both claim the same cursor, which
         // is what `pick_screen_for_point` relies on.
-        let left = Rect { x: 0.0, y: 0.0, width: 1440.0, height: 900.0 };
-        let right = Rect { x: 1440.0, y: 0.0, width: 1920.0, height: 1080.0 };
+        let left = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1440.0,
+            height: 900.0,
+        };
+        let right = Rect {
+            x: 1440.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
         assert!(left.contains(0.0, 0.0));
         assert!(!left.contains(1440.0, 0.0));
         assert!(right.contains(1440.0, 0.0));

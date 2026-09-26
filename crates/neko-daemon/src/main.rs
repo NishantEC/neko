@@ -1,7 +1,7 @@
 mod codex;
+mod mcp_host;
 mod server;
 mod workbench;
-mod mcp_host;
 
 use std::sync::Arc;
 
@@ -9,8 +9,12 @@ use neko_core::Db;
 use server::AppState;
 
 fn main() {
-    if neko_core::mcp_host::bridge::run_if_requested() { return; }
-    if neko_core::native_runner::run_guard_if_requested() { return; }
+    if neko_core::mcp_host::bridge::run_if_requested() {
+        return;
+    }
+    if neko_core::native_runner::run_guard_if_requested() {
+        return;
+    }
     let socket_path = neko_protocol::socket_path();
     let db_path = neko_protocol::database_path();
 
@@ -27,7 +31,10 @@ fn main() {
     };
 
     let db = Db::open(&db_path).unwrap_or_else(|e| {
-        eprintln!("neko-daemon: failed to open database at {}: {e}", db_path.display());
+        eprintln!(
+            "neko-daemon: failed to open database at {}: {e}",
+            db_path.display()
+        );
         std::process::exit(1);
     });
 
@@ -56,7 +63,10 @@ fn main() {
             // cache; a single `NSWorkspace.iconForFile` call is a few tens
             // of ms, not the "tens of ms *times 146 apps*" cost the rest of
             // this pass exists to keep off the daemon's own startup path.
-            neko_core::icons::ensure_cached_icon(neko_core::settings::SETTINGS_APP_ICON_ID, std::path::Path::new(neko_core::settings::SETTINGS_APP_PATH));
+            neko_core::icons::ensure_cached_icon(
+                neko_core::settings::SETTINGS_APP_ICON_ID,
+                std::path::Path::new(neko_core::settings::SETTINGS_APP_PATH),
+            );
             // Verification-only, unset (0ms) in normal operation — the
             // real per-app extraction cost is small enough on real
             // hardware that a fresh index finishes in well under a second,
@@ -113,31 +123,31 @@ fn main() {
 
     state.workbench.start();
     {
-        let state=state.clone();
+        let state = state.clone();
         std::thread::spawn(move || server::run_native_attention_poll(state));
     }
 
     // Historical task browsers are available only when explicitly opted in.
     // Normal Neko operation owns its own tasks and never opens those stores.
     if std::env::var_os("NEKO_LEGACY_AGENTS").is_some() {
-    codex::spawn(state.codex.clone(), state.clone());
+        codex::spawn(state.codex.clone(), state.clone());
 
-    {
-        // Ambient awareness: keeps the permission inbox warm so the panel
-        // already knows when it opens, and pushes the count to every client
-        // so an agent that blocks while the panel is hidden still shows up —
-        // on the Dock tile. See `server::run_attention_poll`.
-        let state = state.clone();
-        std::thread::spawn(move || server::run_attention_poll(state));
-    }
+        {
+            // Ambient awareness: keeps the permission inbox warm so the panel
+            // already knows when it opens, and pushes the count to every client
+            // so an agent that blocks while the panel is hidden still shows up —
+            // on the Dock tile. See `server::run_attention_poll`.
+            let state = state.clone();
+            std::thread::spawn(move || server::run_attention_poll(state));
+        }
 
-    {
-        // The other half of ambient awareness: what is left to spend. Its own
-        // thread and its own cadence — see `server::run_quota_poll` for why
-        // this cannot ride along with the attention poll above.
-        let state = state.clone();
-        std::thread::spawn(move || server::run_quota_poll(state));
-    }
+        {
+            // The other half of ambient awareness: what is left to spend. Its own
+            // thread and its own cadence — see `server::run_quota_poll` for why
+            // this cannot ride along with the attention poll above.
+            let state = state.clone();
+            std::thread::spawn(move || server::run_quota_poll(state));
+        }
     }
 
     eprintln!("neko-daemon: listening on {}", socket_path.display());

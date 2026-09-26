@@ -1,26 +1,26 @@
 mod accessibility;
-mod attachments;
 mod assets;
+mod attachments;
 mod components;
 mod daemon_launcher;
 mod display_placement;
-mod menu_bar;
 mod edge_fade;
 mod evidence;
 mod hotkey_client;
+mod markdown;
 mod material;
+mod menu_bar;
 mod menu_frost;
 mod modes;
-mod markdown;
 mod motion;
-mod singleton;
-mod sound;
 mod onboarding;
-mod preferences;
 mod panel;
 mod pasteboard;
+mod preferences;
 mod row_icon_cache;
+mod singleton;
 mod snap;
+mod sound;
 mod spaces;
 mod text_field;
 mod theme;
@@ -64,7 +64,9 @@ impl gpui::Global for ReopenTargets {}
 /// Dismiss only the launcher, never the persistent workspace window.
 fn hide_palette(cx: &mut App) {
     if let Some(panel) = cx.try_global::<ReopenTargets>().map(|t| t.window) {
-        let _ = panel.update(cx, |_, window, _| { let _ = material::order_out(window); });
+        let _ = panel.update(cx, |_, window, _| {
+            let _ = material::order_out(window);
+        });
     }
 }
 
@@ -89,39 +91,39 @@ fn main() {
     // the builder, before `run`, and not from inside it. Without it every
     // `svg()` in this app would resolve to nothing and paint nothing —
     // silently, since an unresolvable asset path is not an error anywhere.
-/// Bring neko forward from something that is not the hotkey.
-///
-/// **Two callers, and they must not drift.** `App::on_reopen` fires on a
-/// Dock-icon click; `crate::menu_bar` records a click on the menu bar item
-/// and the summon loop polls for it. Both mean the same thing — "I want
-/// neko, and I might not have a working hotkey" — so they run the same code
-/// rather than two summon paths that could diverge. Since
-/// `menu_bar::hide_from_dock` there is no Dock icon, which makes the second
-/// caller the one that actually runs; the first is kept because it costs
-/// nothing and would come back to life the day neko ships as a bundle.
-fn summon_from_outside(cx: &mut App) {
-    let Some((window, active_onboarding)) = cx
-        .try_global::<ReopenTargets>()
-        .map(|t| (t.window, t.active_onboarding.clone()))
-    else {
-        return;
-    };
-    if let Some(onboarding_window) = *active_onboarding.borrow() {
-        let _ = onboarding_window.update(cx, |_root, window, _cx| {
+    /// Bring neko forward from something that is not the hotkey.
+    ///
+    /// **Two callers, and they must not drift.** `App::on_reopen` fires on a
+    /// Dock-icon click; `crate::menu_bar` records a click on the menu bar item
+    /// and the summon loop polls for it. Both mean the same thing — "I want
+    /// neko, and I might not have a working hotkey" — so they run the same code
+    /// rather than two summon paths that could diverge. Since
+    /// `menu_bar::hide_from_dock` there is no Dock icon, which makes the second
+    /// caller the one that actually runs; the first is kept because it costs
+    /// nothing and would come back to life the day neko ships as a bundle.
+    fn summon_from_outside(cx: &mut App) {
+        let Some((window, active_onboarding)) = cx
+            .try_global::<ReopenTargets>()
+            .map(|t| (t.window, t.active_onboarding.clone()))
+        else {
+            return;
+        };
+        if let Some(onboarding_window) = *active_onboarding.borrow() {
+            let _ = onboarding_window.update(cx, |_root, window, _cx| {
+                window.activate_window();
+            });
+            return;
+        }
+        // Works whether or not the global hotkey is live, so declining
+        // Accessibility never leaves neko unreachable.
+        let _ = window.update(cx, |root, window, cx| {
+            root.reset_for_summon(window, cx);
+            reposition_to_cursor_display(window);
             window.activate_window();
+            window.focus(&root.focus_handle(cx), cx);
         });
-        return;
+        cx.activate(true);
     }
-    // Works whether or not the global hotkey is live, so declining
-    // Accessibility never leaves neko unreachable.
-    let _ = window.update(cx, |root, window, cx| {
-        root.reset_for_summon(window, cx);
-        reposition_to_cursor_display(window);
-        window.activate_window();
-        window.focus(&root.focus_handle(cx), cx);
-    });
-    cx.activate(true);
-}
 
     // See `assets.rs`.
     let app = gpui_platform::application().with_assets(assets::NekoAssets);
@@ -130,8 +132,6 @@ fn summon_from_outside(cx: &mut App) {
             workspace::open(client, cx);
         }
     });
-
-
 
     app.run(move |cx: &mut App| {
         eprintln!(
@@ -450,10 +450,6 @@ fn summon_from_outside(cx: &mut App) {
             window,
             active_onboarding: active_onboarding.clone(),
         });
-        if !evidence::evidence_run_active() || std::env::var_os("NEKO_SHOW_WORKSPACE").is_some() {
-            workspace::open(client.clone(), cx);
-        }
-
         // Evidence/verification-only, both inert unless their env var is
         // set — see `evidence.rs`'s own doc comment.
         if let Some(iterations) = evidence::bench_iterations() {
@@ -604,7 +600,15 @@ fn summon_from_outside(cx: &mut App) {
                         active_onboarding.clone(),
                     );
                 });
-            } else if !evidence::evidence_run_active() && should_summon_without_hotkey(
+            } else if should_open_workspace_at_startup(
+                onboarding_state.completed,
+                evidence::evidence_run_active(),
+                std::env::var_os("NEKO_SHOW_WORKSPACE").is_some(),
+            ) {
+                cx.update(|cx| workspace::open(client.clone(), cx));
+            }
+
+            if !evidence::evidence_run_active() && should_summon_without_hotkey(
                 onboarding_state.completed,
                 controller.borrow().current_hotkey_id().is_some(),
             ) {
@@ -811,9 +815,13 @@ async fn fetch_persisted_theme(client: &NekoClient, cx: &AsyncApp) -> String {
         if let Ok(Response::Theme { id }) = client.request(Request::GetTheme).await {
             return id;
         }
-        cx.background_executor().timer(Duration::from_millis(40)).await;
+        cx.background_executor()
+            .timer(Duration::from_millis(40))
+            .await;
     }
-    eprintln!("neko: could not reach neko-daemon for the persisted theme in time, using the default");
+    eprintln!(
+        "neko: could not reach neko-daemon for the persisted theme in time, using the default"
+    );
     neko_protocol::DEFAULT_THEME_ID.to_string()
 }
 
@@ -825,7 +833,10 @@ struct ControllerRebinder(onboarding::SharedHotkeyController);
 
 impl hotkey_client::HotkeyRebinder for ControllerRebinder {
     fn rebind(&self, candidate: HotkeyCombo) -> Result<(), String> {
-        self.0.borrow_mut().rebind(candidate).map_err(|e| e.to_string())
+        self.0
+            .borrow_mut()
+            .rebind(candidate)
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -839,9 +850,13 @@ async fn fetch_initial_hotkey(client: &NekoClient, cx: &AsyncApp) -> HotkeyConfi
         if let Ok(Response::Hotkey { config }) = client.request(Request::GetHotkey).await {
             return config;
         }
-        cx.background_executor().timer(Duration::from_millis(40)).await;
+        cx.background_executor()
+            .timer(Duration::from_millis(40))
+            .await;
     }
-    eprintln!("neko: could not reach neko-daemon for the configured hotkey in time, using the default");
+    eprintln!(
+        "neko: could not reach neko-daemon for the configured hotkey in time, using the default"
+    );
     HotkeyConfig {
         combo: HotkeyCombo::default_summon(),
         updated_at_unix_ms: 0,
@@ -860,6 +875,16 @@ fn should_summon_without_hotkey(onboarding_completed: bool, summon_hotkey_is_liv
     onboarding_completed && !summon_hotkey_is_live
 }
 
+/// The setup window owns first run. Opening the regular workspace before the
+/// daemon confirms completion produces two competing app windows.
+fn should_open_workspace_at_startup(
+    onboarding_completed: bool,
+    evidence_run: bool,
+    show_workspace_evidence: bool,
+) -> bool {
+    (onboarding_completed && !evidence_run) || show_workspace_evidence
+}
+
 /// Register exactly once when System Settings grants Accessibility after the
 /// app has launched. `HotkeyController::apply_initial` owns the actual OS
 /// call; this predicate keeps the polling loop from repeatedly trying a
@@ -874,24 +899,43 @@ fn should_register_hotkey_after_accessibility_grant(
 
 async fn fetch_onboarding_state(client: &NekoClient, cx: &AsyncApp) -> OnboardingStateSnapshot {
     if std::env::var_os(RESET_ONBOARDING_ENV_VAR).is_some() {
-        let _ = client.request(Request::SetOnboardingComplete { completed: false }).await;
+        let _ = client
+            .request(Request::SetOnboardingComplete { completed: false })
+            .await;
     }
     for _ in 0..25 {
-        if let Ok(Response::OnboardingState { completed, .. }) = client.request(Request::GetOnboardingState).await {
+        if let Ok(Response::OnboardingState { completed, .. }) =
+            client.request(Request::GetOnboardingState).await
+        {
             return OnboardingStateSnapshot { completed };
         }
-        cx.background_executor().timer(Duration::from_millis(40)).await;
+        cx.background_executor()
+            .timer(Duration::from_millis(40))
+            .await;
     }
     // Fail toward *not* re-showing onboarding: a daemon that's merely slow
     // to answer shouldn't force a captain who already finished onboarding
     // through it again.
-    eprintln!("neko: could not reach neko-daemon for onboarding state in time, assuming already completed");
+    eprintln!(
+        "neko: could not reach neko-daemon for onboarding state in time, assuming already completed"
+    );
     OnboardingStateSnapshot { completed: true }
 }
 
 #[cfg(test)]
 mod startup_tests {
-    use super::{should_register_hotkey_after_accessibility_grant, should_summon_without_hotkey};
+    use super::{
+        should_open_workspace_at_startup, should_register_hotkey_after_accessibility_grant,
+        should_summon_without_hotkey,
+    };
+
+    #[test]
+    fn incomplete_setup_never_opens_the_workspace_behind_onboarding() {
+        assert!(!should_open_workspace_at_startup(false, false, false));
+        assert!(should_open_workspace_at_startup(true, false, false));
+        assert!(!should_open_workspace_at_startup(true, true, false));
+        assert!(should_open_workspace_at_startup(false, true, true));
+    }
 
     #[test]
     fn completed_setup_without_a_live_hotkey_opens_a_reachable_panel() {
@@ -906,21 +950,33 @@ mod startup_tests {
 
     #[test]
     fn granting_accessibility_after_launch_retries_a_missing_hotkey() {
-        assert!(should_register_hotkey_after_accessibility_grant(false, true, false));
+        assert!(should_register_hotkey_after_accessibility_grant(
+            false, true, false
+        ));
     }
 
     #[test]
     fn a_stable_grant_or_existing_hotkey_does_not_repeat_registration() {
-        assert!(!should_register_hotkey_after_accessibility_grant(false, false, false));
-        assert!(!should_register_hotkey_after_accessibility_grant(true, true, false));
-        assert!(!should_register_hotkey_after_accessibility_grant(false, true, true));
+        assert!(!should_register_hotkey_after_accessibility_grant(
+            false, false, false
+        ));
+        assert!(!should_register_hotkey_after_accessibility_grant(
+            true, true, false
+        ));
+        assert!(!should_register_hotkey_after_accessibility_grant(
+            false, true, true
+        ));
     }
 }
 
 /// The design report's §2 panel geometry: "positioned upper-third, not
 /// vertically centered" — a true screen-center reads as a modal interrupting;
 /// an upper placement reads as a tool summoned into view.
-fn upper_third(display_id: Option<gpui::DisplayId>, panel_size: gpui::Size<gpui::Pixels>, cx: &App) -> Bounds<gpui::Pixels> {
+fn upper_third(
+    display_id: Option<gpui::DisplayId>,
+    panel_size: gpui::Size<gpui::Pixels>,
+    cx: &App,
+) -> Bounds<gpui::Pixels> {
     let display = display_id
         .and_then(|id| cx.find_display(id))
         .or_else(|| cx.primary_display());
@@ -935,7 +991,10 @@ fn upper_third(display_id: Option<gpui::DisplayId>, panel_size: gpui::Size<gpui:
     let display_bounds = display.bounds();
     let offset = display_placement::upper_third_offset(display_bounds.size, panel_size);
     Bounds {
-        origin: point(display_bounds.origin.x + offset.x, display_bounds.origin.y + offset.y),
+        origin: point(
+            display_bounds.origin.x + offset.x,
+            display_bounds.origin.y + offset.y,
+        ),
         size: panel_size,
     }
 }
@@ -952,9 +1011,14 @@ fn reposition_to_cursor_display(window: &gpui::Window) {
     // (`AGENTS.md`, "Mode view resize seam"), not whichever mode the panel
     // happens to be in; `upper_third_offset` positions the window itself,
     // and the window never changes size.
-    let panel_size = size(px(theme::PANEL_WIDTH_WITH_DETAIL_PX), px(panel::PANEL_HEIGHT_PX));
+    let panel_size = size(
+        px(theme::PANEL_WIDTH_WITH_DETAIL_PX),
+        px(panel::PANEL_HEIGHT_PX),
+    );
     if let Err(e) = display_placement::reposition_to_cursor_display(window, panel_size) {
-        eprintln!("neko: could not reposition the summon window to the display under the cursor: {e}");
+        eprintln!(
+            "neko: could not reposition the summon window to the display under the cursor: {e}"
+        );
     }
 }
 

@@ -129,17 +129,31 @@ impl TextField {
     }
 
     fn display_content(&self) -> String {
-        if self.masked { "•".repeat(self.content.chars().count()) } else { self.content.clone() }
+        if self.masked {
+            "•".repeat(self.content.chars().count())
+        } else {
+            self.content.clone()
+        }
     }
 
     fn display_offset(&self, content_offset: usize) -> usize {
-        if self.masked { self.content[..content_offset].chars().count() * "•".len() } else { content_offset }
+        if self.masked {
+            self.content[..content_offset].chars().count() * "•".len()
+        } else {
+            content_offset
+        }
     }
 
     fn content_offset(&self, display_offset: usize) -> usize {
         if self.masked {
-            self.content.char_indices().nth(display_offset / "•".len()).map(|(index, _)| index).unwrap_or(self.content.len())
-        } else { display_offset }
+            self.content
+                .char_indices()
+                .nth(display_offset / "•".len())
+                .map(|(index, _)| index)
+                .unwrap_or(self.content.len())
+        } else {
+            display_offset
+        }
     }
 
     /// Reset to empty with the cursor at the start — used when a launch
@@ -210,9 +224,17 @@ impl TextField {
         cx.emit(ContentChanged);
     }
 
-    fn compose(&mut self, range_utf16: Option<Range<usize>>, text: &str, selection_utf16: Option<Range<usize>>, cx: &mut Context<Self>) {
-        let range = range_utf16.map(|r| self.range_from_utf16(&r))
-            .or_else(|| self.marked_range.clone()).unwrap_or_else(|| self.edit_target_range());
+    fn compose(
+        &mut self,
+        range_utf16: Option<Range<usize>>,
+        text: &str,
+        selection_utf16: Option<Range<usize>>,
+        cx: &mut Context<Self>,
+    ) {
+        let range = range_utf16
+            .map(|r| self.range_from_utf16(&r))
+            .or_else(|| self.marked_range.clone())
+            .unwrap_or_else(|| self.edit_target_range());
         let start = range.start;
         self.commit_edit(range, text, cx);
         if !text.is_empty() {
@@ -220,7 +242,9 @@ impl TextField {
             self.marked_range = Some(start..end);
             if let Some(selection) = selection_utf16 {
                 let base = self.utf16_offset_for_byte(start);
-                let selected = self.range_from_utf16(&(base.saturating_add(selection.start)..base.saturating_add(selection.end)));
+                let selected = self.range_from_utf16(
+                    &(base.saturating_add(selection.start)..base.saturating_add(selection.end)),
+                );
                 self.selection_anchor = Some(selected.start.clamp(start, end));
                 self.cursor = selected.end.clamp(start, end);
             }
@@ -263,7 +287,11 @@ impl TextField {
     /// filter entries…"), distinct from the root list's default. Purely
     /// cosmetic (no content change, no `ContentChanged`), so this alone
     /// never re-runs a search.
-    pub fn set_placeholder(&mut self, placeholder: impl Into<SharedString>, cx: &mut Context<Self>) {
+    pub fn set_placeholder(
+        &mut self,
+        placeholder: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
         self.placeholder = placeholder.into();
         cx.notify();
     }
@@ -305,21 +333,41 @@ impl TextField {
         self.extend_selection_to(new_cursor, cx);
     }
 
-    fn on_select_word_left(&mut self, _: &SelectWordLeft, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_select_word_left(
+        &mut self,
+        _: &SelectWordLeft,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let new_cursor = self.word_start_before(self.cursor);
         self.extend_selection_to(new_cursor, cx);
     }
 
-    fn on_select_word_right(&mut self, _: &SelectWordRight, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_select_word_right(
+        &mut self,
+        _: &SelectWordRight,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let new_cursor = self.word_end_after(self.cursor);
         self.extend_selection_to(new_cursor, cx);
     }
 
-    fn on_select_line_start(&mut self, _: &SelectLineStart, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_select_line_start(
+        &mut self,
+        _: &SelectLineStart,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.extend_selection_to(0, cx);
     }
 
-    fn on_select_line_end(&mut self, _: &SelectLineEnd, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_select_line_end(
+        &mut self,
+        _: &SelectLineEnd,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let end = self.content.len();
         self.extend_selection_to(end, cx);
     }
@@ -356,7 +404,9 @@ impl TextField {
     /// so (unlike every edit path) this never calls `commit_edit` and never
     /// emits `ContentChanged`.
     fn on_copy(&mut self, _: &Copy, _window: &mut Window, _cx: &mut Context<Self>) {
-        if self.masked { return; }
+        if self.masked {
+            return;
+        }
         if let Some(range) = self.selection_range() {
             pasteboard::write_string(&self.content[range]);
         }
@@ -367,7 +417,9 @@ impl TextField {
     /// nothing selected does nothing, it doesn't fall back to deleting one
     /// character.
     fn on_cut(&mut self, _: &Cut, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.masked { return; }
+        if self.masked {
+            return;
+        }
         let Some(range) = self.selection_range() else {
             return;
         };
@@ -415,7 +467,12 @@ impl TextField {
     // with a selection active removes the selection, not one word/line past
     // it.
 
-    fn on_delete_line_start(&mut self, _: &DeleteLineStart, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_delete_line_start(
+        &mut self,
+        _: &DeleteLineStart,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(range) = self.selection_range() {
             self.commit_edit(range, "", cx);
             return;
@@ -427,7 +484,12 @@ impl TextField {
         self.commit_edit(removed, "", cx);
     }
 
-    fn on_delete_line_end(&mut self, _: &DeleteLineEnd, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_delete_line_end(
+        &mut self,
+        _: &DeleteLineEnd,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(range) = self.selection_range() {
             self.commit_edit(range, "", cx);
             return;
@@ -439,7 +501,12 @@ impl TextField {
         self.commit_edit(removed, "", cx);
     }
 
-    fn on_delete_word_backward(&mut self, _: &DeleteWordBackward, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_delete_word_backward(
+        &mut self,
+        _: &DeleteWordBackward,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(range) = self.selection_range() {
             self.commit_edit(range, "", cx);
             return;
@@ -452,7 +519,12 @@ impl TextField {
         self.commit_edit(removed, "", cx);
     }
 
-    fn on_delete_word_forward(&mut self, _: &DeleteWordForward, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_delete_word_forward(
+        &mut self,
+        _: &DeleteWordForward,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(range) = self.selection_range() {
             self.commit_edit(range, "", cx);
             return;
@@ -532,7 +604,10 @@ impl TextField {
         if local >= layout.width {
             return Some(self.content.len());
         }
-        layout.index_for_x(local).map(|index| self.content_offset(index)).or(Some(self.content.len()))
+        layout
+            .index_for_x(local)
+            .map(|index| self.content_offset(index))
+            .or(Some(self.content.len()))
     }
 
     /// What a press at `index` should select, given how many clicks it is.
@@ -551,7 +626,11 @@ impl TextField {
                 // A double-click past the last word has nothing to take; leave
                 // a caret rather than an empty selection that renders as a
                 // one-pixel highlight nobody asked for.
-                if start == end { (None, start) } else { (Some(start), end) }
+                if start == end {
+                    (None, start)
+                } else {
+                    (Some(start), end)
+                }
             }
             _ => (None, index),
         }
@@ -570,7 +649,9 @@ impl TextField {
         click_count: usize,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(index) = self.byte_index_for_x(position.x) else { return false };
+        let Some(index) = self.byte_index_for_x(position.x) else {
+            return false;
+        };
         let (anchor, cursor) = self.selection_for_click(index, click_count);
         self.selection_anchor = anchor;
         self.cursor = cursor;
@@ -589,7 +670,9 @@ impl TextField {
         if !self.mouse_selecting {
             return;
         }
-        let Some(index) = self.byte_index_for_x(position.x) else { return };
+        let Some(index) = self.byte_index_for_x(position.x) else {
+            return;
+        };
         if index == self.cursor {
             return;
         }
@@ -675,7 +758,9 @@ impl EntityInputHandler for TextField {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<String> {
-        if self.masked { return None; }
+        if self.masked {
+            return None;
+        }
         let range = self.range_from_utf16(&range_utf16);
         actual_range.replace(self.range_to_utf16(&range));
         Some(self.content[range].to_string())
@@ -703,7 +788,9 @@ impl EntityInputHandler for TextField {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Range<usize>> {
-        self.marked_range.as_ref().map(|range| self.range_to_utf16(range))
+        self.marked_range
+            .as_ref()
+            .map(|range| self.range_to_utf16(range))
     }
 
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -820,7 +907,10 @@ impl gpui::Element for TextFieldElement {
         let field = self.field.read(cx);
         let text_style = window.text_style();
         let (display_text, color) = if field.content.is_empty() {
-            (field.placeholder.clone(), theme::active().text_tertiary.into())
+            (
+                field.placeholder.clone(),
+                theme::active().text_tertiary.into(),
+            )
         } else {
             (field.display_content().into(), text_style.color)
         };
@@ -871,7 +961,11 @@ impl gpui::Element for TextFieldElement {
             None
         };
 
-        PrepaintState { line, selection, cursor }
+        PrepaintState {
+            line,
+            selection,
+            cursor,
+        }
     }
 
     fn paint(
@@ -895,7 +989,14 @@ impl gpui::Element for TextFieldElement {
         }
         prepaint
             .line
-            .paint(bounds.origin, window.line_height(), gpui::TextAlign::Left, None, window, cx)
+            .paint(
+                bounds.origin,
+                window.line_height(),
+                gpui::TextAlign::Left,
+                None,
+                window,
+                cx,
+            )
             .ok();
         if let Some(cursor) = prepaint.cursor.take() {
             window.paint_quad(cursor);
@@ -992,7 +1093,9 @@ mod tests {
     use super::*;
 
     #[gpui::test]
-    fn masked_field_never_exposes_display_content_and_maps_unicode_offsets(cx: &mut TestAppContext) {
+    fn masked_field_never_exposes_display_content_and_maps_unicode_offsets(
+        cx: &mut TestAppContext,
+    ) {
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.set_content("key-東京", cx);
@@ -1102,7 +1205,9 @@ mod tests {
     // layer, which needs a live `Window` these entity-only tests don't open.
 
     #[gpui::test]
-    fn ime_candidates_replace_previous_candidates_and_keep_utf16_selection(cx: &mut TestAppContext) {
+    fn ime_candidates_replace_previous_candidates_and_keep_utf16_selection(
+        cx: &mut TestAppContext,
+    ) {
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.set_content("Hi ", cx);
@@ -1252,7 +1357,11 @@ mod tests {
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "café 東京 test", cx);
-            assert_eq!(field.word_end_after(0), "café".len(), "café is one word, accents included");
+            assert_eq!(
+                field.word_end_after(0),
+                "café".len(),
+                "café is one word, accents included"
+            );
             let after_cafe = "café ".len();
             let after_first_ideograph = field.word_end_after(after_cafe);
             assert_eq!(
@@ -1288,14 +1397,26 @@ mod tests {
             .detach();
         });
 
-        field.update(cx, |field, cx| field.set_placeholder("Type to filter entries…", cx));
+        field.update(cx, |field, cx| {
+            field.set_placeholder("Type to filter entries…", cx)
+        });
         cx.run_until_parked();
-        assert_eq!(content_changed_count.get(), 0, "a placeholder swap is cosmetic, not a content edit");
-        field.read_with(cx, |field, _| assert_eq!(field.placeholder.as_ref(), "Type to filter entries…"));
+        assert_eq!(
+            content_changed_count.get(),
+            0,
+            "a placeholder swap is cosmetic, not a content edit"
+        );
+        field.read_with(cx, |field, _| {
+            assert_eq!(field.placeholder.as_ref(), "Type to filter entries…")
+        });
 
         field.update(cx, |field, cx| field.set_content("clipboard", cx));
         cx.run_until_parked();
-        assert_eq!(content_changed_count.get(), 1, "set_content is a real edit and must trigger a re-search");
+        assert_eq!(
+            content_changed_count.get(),
+            1,
+            "set_content is a real edit and must trigger a re-search"
+        );
         field.read_with(cx, |field, _| assert_eq!(field.content(), "clipboard"));
     }
 
@@ -1382,7 +1503,11 @@ mod tests {
             // clear the anchor.
             field.cursor = field.next_char_boundary(field.cursor);
             field.selection_anchor = None;
-            assert_eq!(field.selection_range(), None, "a plain arrow key must clear the selection");
+            assert_eq!(
+                field.selection_range(),
+                None,
+                "a plain arrow key must clear the selection"
+            );
         });
     }
 
@@ -1394,7 +1519,11 @@ mod tests {
             field.cursor = 0;
             let end = field.word_end_after(field.cursor);
             field.extend_selection_to(end, cx);
-            assert_eq!(field.selection_range(), Some(0..5), "extends to the end of \"hello\"");
+            assert_eq!(
+                field.selection_range(),
+                Some(0..5),
+                "extends to the end of \"hello\""
+            );
         });
     }
 
@@ -1406,7 +1535,11 @@ mod tests {
             field.cursor = field.content.len();
             let start = field.word_start_before(field.cursor);
             field.extend_selection_to(start, cx);
-            assert_eq!(field.selection_range(), Some(6..11), "extends back to \"world\"'s own start");
+            assert_eq!(
+                field.selection_range(),
+                Some(6..11),
+                "extends back to \"world\"'s own start"
+            );
         });
     }
 
@@ -1454,7 +1587,11 @@ mod tests {
             field.selection_anchor = Some(0);
             field.cursor = field.content.len();
             field.touch_cursor(cx);
-            assert_eq!(field.selection_range(), None, "0..0 is an empty selection, same as no selection");
+            assert_eq!(
+                field.selection_range(),
+                None,
+                "0..0 is an empty selection, same as no selection"
+            );
         });
     }
 
@@ -1469,7 +1606,11 @@ mod tests {
             field.commit_edit(range, "goodbye", cx);
             assert_eq!(field.content, "goodbye world");
             assert_eq!(field.cursor, "goodbye".len());
-            assert_eq!(field.selection_range(), None, "committing an edit must clear the selection");
+            assert_eq!(
+                field.selection_range(),
+                None,
+                "committing an edit must clear the selection"
+            );
         });
     }
 
@@ -1488,7 +1629,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn delete_word_backward_with_a_selection_deletes_the_selection_not_a_whole_word(cx: &mut TestAppContext) {
+    fn delete_word_backward_with_a_selection_deletes_the_selection_not_a_whole_word(
+        cx: &mut TestAppContext,
+    ) {
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "hello world", cx);
@@ -1496,7 +1639,10 @@ mod tests {
             field.cursor = 4; // "ll" selected, well inside "hello"
             let range = field.selection_range().expect("a selection is active");
             field.commit_edit(range, "", cx);
-            assert_eq!(field.content, "heo world", "must delete exactly the selection, not the whole word");
+            assert_eq!(
+                field.content, "heo world",
+                "must delete exactly the selection, not the whole word"
+            );
         });
     }
 
@@ -1554,7 +1700,11 @@ mod tests {
         field.update(cx, |field, cx| {
             field.commit_edit(0..0, "unchanged", cx);
             field.cursor = 3;
-            assert_eq!(field.selection_range(), None, "nothing selected — on_cut's own guard would return early here");
+            assert_eq!(
+                field.selection_range(),
+                None,
+                "nothing selected — on_cut's own guard would return early here"
+            );
             assert_eq!(field.content, "unchanged");
             assert_eq!(field.cursor, 3);
         });
@@ -1654,7 +1804,11 @@ mod tests {
         let field = cx.update(TextField::new);
         field.update(cx, |field, cx| {
             field.set_content("   ", cx);
-            assert_eq!(field.selection_for_click(2, 2), (Some(0), 3), "spaces select the run");
+            assert_eq!(
+                field.selection_for_click(2, 2),
+                (Some(0), 3),
+                "spaces select the run"
+            );
             field.set_content("", cx);
             assert_eq!(field.selection_for_click(0, 2), (None, 0));
         });
@@ -1699,7 +1853,10 @@ mod tests {
             field.mouse_selecting = true;
             field.on_mouse_up(cx);
             assert_eq!(field.selection_range(), None);
-            assert_eq!(field.selection_anchor, None, "a zero-width anchor is cleared");
+            assert_eq!(
+                field.selection_anchor, None,
+                "a zero-width anchor is cleared"
+            );
         });
     }
 }

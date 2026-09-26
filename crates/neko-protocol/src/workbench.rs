@@ -267,7 +267,14 @@ pub struct ChatToolCall {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ChatToolStatus { AwaitingApproval, Approved, Running, Succeeded, Failed, Denied }
+pub enum ChatToolStatus {
+    AwaitingApproval,
+    Approved,
+    Running,
+    Succeeded,
+    Failed,
+    Denied,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
@@ -275,10 +282,18 @@ pub enum Command {
     Schedules(crate::scheduled_plans::ScheduleCommand),
     SetupImport(crate::setup_import::ImportCommand),
     /// Read-only proposal; approval remains a separate explicit command.
-    ProposeSplit { task_id: String },
+    ProposeSplit {
+        task_id: String,
+    },
     Skills(crate::skills::SkillCommand),
-    DecideChatTool { turn_id: String, call_id: String, approve: bool },
-    CancelChat { turn_id: String },
+    DecideChatTool {
+        turn_id: String,
+        call_id: String,
+        approve: bool,
+    },
+    CancelChat {
+        turn_id: String,
+    },
     Mcp(crate::mcp_host::McpCommand),
     Snapshot,
     SaveWorkspace {

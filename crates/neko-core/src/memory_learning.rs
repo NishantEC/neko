@@ -49,9 +49,14 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn needs_memory(&self) -> bool { self.phase == Phase::Memory }
+    pub fn needs_memory(&self) -> bool {
+        self.phase == Phase::Memory
+    }
     pub fn memory_outcome(&self) -> FinishOutcome {
-        self.memory_rejection.clone().map(FinishOutcome::Rejected).unwrap_or(FinishOutcome::Committed)
+        self.memory_rejection
+            .clone()
+            .map(FinishOutcome::Rejected)
+            .unwrap_or(FinishOutcome::Committed)
     }
 }
 
@@ -195,7 +200,11 @@ pub fn valid(job: &Job, snapshot: &Snapshot) -> bool {
 
 /// Intake can degrade visibly without preventing the user's primary action.
 pub fn has_capacity(db: &Db) -> Result<bool, String> {
-    Ok(load(db)?.iter().filter(|j| j.state != JobState::Finished).count() < MAX_PENDING)
+    Ok(load(db)?
+        .iter()
+        .filter(|j| j.state != JobState::Finished)
+        .count()
+        < MAX_PENDING)
 }
 
 pub fn enqueue(db: &Db, snapshot: &Snapshot, source: Source) -> Result<(), String> {
@@ -309,11 +318,19 @@ pub enum FinishOutcome {
 
 /// Caller holds the database lock across fresh snapshot validation and commit.
 /// Err means persistence failed; independent follow-ups must not proceed then.
-pub fn finish(db: &Db, snapshot: &Snapshot, claimed: &Job, answer: &str) -> Result<FinishOutcome, String> {
+pub fn finish(
+    db: &Db,
+    snapshot: &Snapshot,
+    claimed: &Job,
+    answer: &str,
+) -> Result<FinishOutcome, String> {
     let mut jobs = load(db)?;
     let count = jobs.iter().map(|j| j.proposals.len()).sum::<usize>();
     let Some(job) = jobs.iter_mut().find(|j| {
-        j.id == claimed.id && j.state == JobState::Running && j.attempt == claimed.attempt && j.phase == Phase::Memory
+        j.id == claimed.id
+            && j.state == JobState::Running
+            && j.attempt == claimed.attempt
+            && j.phase == Phase::Memory
     }) else {
         return Ok(FinishOutcome::Stale);
     };
@@ -409,7 +426,11 @@ pub fn recover(db: &Db) -> Result<(), String> {
 /// executing model. The attempt token prevents a late owner resetting a retry.
 pub fn retry_owned(db: &Db, claimed: &Job, now: i64) -> Result<(), String> {
     let mut jobs = load(db)?;
-    let Some(job) = jobs.iter_mut().find(|j| j.id == claimed.id && j.attempt == claimed.attempt && j.state == JobState::Running) else { return Ok(()); };
+    let Some(job) = jobs.iter_mut().find(|j| {
+        j.id == claimed.id && j.attempt == claimed.attempt && j.state == JobState::Running
+    }) else {
+        return Ok(());
+    };
     job.failures = job.failures.saturating_add(1);
     job.attempt.clear();
     if job.failures >= 3 {
@@ -423,14 +444,26 @@ pub fn retry_owned(db: &Db, claimed: &Job, now: i64) -> Result<(), String> {
 }
 
 pub fn owns_skill(db: &Db, claimed: &Job) -> Result<bool, String> {
-    Ok(load(db)?.iter().any(|j| j.id == claimed.id && j.attempt == claimed.attempt && j.state == JobState::Running && j.phase == Phase::Skill))
+    Ok(load(db)?.iter().any(|j| {
+        j.id == claimed.id
+            && j.attempt == claimed.attempt
+            && j.state == JobState::Running
+            && j.phase == Phase::Skill
+    }))
 }
 
 /// Persist together with the skill proposal under Db::atomic. A restart or
 /// subsequent user rejection can then never resurrect that source's proposal.
 pub fn finish_skill(db: &Db, claimed: &Job) -> Result<(), String> {
     let mut jobs = load(db)?;
-    let Some(job) = jobs.iter_mut().find(|j| j.id == claimed.id && j.attempt == claimed.attempt && j.state == JobState::Running && j.phase == Phase::Skill) else { return Ok(()); };
+    let Some(job) = jobs.iter_mut().find(|j| {
+        j.id == claimed.id
+            && j.attempt == claimed.attempt
+            && j.state == JobState::Running
+            && j.phase == Phase::Skill
+    }) else {
+        return Ok(());
+    };
     job.state = JobState::Finished;
     save(db, &jobs)
 }
@@ -499,8 +532,13 @@ mod tests {
         let (state, source) = chat(&db);
         enqueue(&db, &state, source).unwrap();
         retry_owned(&db, &old, crate::now_unix_ms()).unwrap();
-        let next = claim(&db, &state).unwrap().expect("A failed attempt must not wedge all later jobs");
-        assert_ne!(next.id, old.id, "The failing job backs off while another runs");
+        let next = claim(&db, &state)
+            .unwrap()
+            .expect("A failed attempt must not wedge all later jobs");
+        assert_ne!(
+            next.id, old.id,
+            "The failing job backs off while another runs"
+        );
     }
     #[test]
     fn retries_back_off_are_bounded_and_old_tokens_cannot_reset_new_attempts() {
@@ -512,29 +550,51 @@ mod tests {
         assert!(claim_at(&db, &state, 2099).unwrap().is_none());
         let second = claim_at(&db, &state, 2100).unwrap().unwrap();
         retry_owned(&db, &first, 2200).unwrap();
-        assert!(claim_at(&db, &state, 100_000).unwrap().is_none(), "Old owner cannot release an active newer attempt");
+        assert!(
+            claim_at(&db, &state, 100_000).unwrap().is_none(),
+            "Old owner cannot release an active newer attempt"
+        );
         retry_owned(&db, &second, 2100).unwrap();
         assert!(claim_at(&db, &state, 6099).unwrap().is_none());
         let third = claim_at(&db, &state, 6100).unwrap().unwrap();
         retry_owned(&db, &third, 6100).unwrap();
-        assert!(claim_at(&db, &state, 1_000_000).unwrap().is_none(), "Three failed attempts exhaust this phase");
+        assert!(
+            claim_at(&db, &state, 1_000_000).unwrap().is_none(),
+            "Three failed attempts exhaust this phase"
+        );
     }
     #[test]
     fn completed_ticket_retains_a_recoverable_skill_phase() {
         let db = Db::open_in_memory().unwrap();
         let mut state = Snapshot::default();
-        state.workspaces.push(Workspace { id: "w".into(), name: "Work".into(), repository: "/repo".into(), instructions: String::new(), away_enabled: false });
-        let mut task = crate::workbench::create_task("w".into(), None, "Ticket".into(), "Evidence".into()).unwrap();
+        state.workspaces.push(Workspace {
+            id: "w".into(),
+            name: "Work".into(),
+            repository: "/repo".into(),
+            instructions: String::new(),
+            away_enabled: false,
+        });
+        let mut task =
+            crate::workbench::create_task("w".into(), None, "Ticket".into(), "Evidence".into())
+                .unwrap();
         task.status = TaskStatus::Completed;
         state.tasks.push(task.clone());
         enqueue(&db, &state, Source::Ticket(task.id)).unwrap();
         let job = claim(&db, &state).unwrap().unwrap();
         finish(&db, &state, &job, "invalid memory JSON").unwrap();
         recover(&db).unwrap();
-        let recovered = claim(&db, &state).unwrap().expect("Memory rejection must preserve the pending skill phase across restart");
+        let recovered = claim(&db, &state)
+            .unwrap()
+            .expect("Memory rejection must preserve the pending skill phase across restart");
         assert!(!recovered.needs_memory());
-        assert!(matches!(recovered.memory_outcome(), FinishOutcome::Rejected(_)));
-        assert_eq!(finish(&db, &state, &recovered, "must not rerun").unwrap(), FinishOutcome::Stale);
+        assert!(matches!(
+            recovered.memory_outcome(),
+            FinishOutcome::Rejected(_)
+        ));
+        assert_eq!(
+            finish(&db, &state, &recovered, "must not rerun").unwrap(),
+            FinishOutcome::Stale
+        );
     }
     #[test]
     fn malformed_extraction_is_not_a_storage_failure() {
@@ -542,7 +602,10 @@ mod tests {
         let (state, source) = chat(&db);
         enqueue(&db, &state, source).unwrap();
         let job = claim(&db, &state).unwrap().unwrap();
-        assert!(finish(&db, &state, &job, "malformed JSON").is_ok(), "A durably rejected extraction must not suppress independent skill learning");
+        assert!(
+            finish(&db, &state, &job, "malformed JSON").is_ok(),
+            "A durably rejected extraction must not suppress independent skill learning"
+        );
         assert!(claim(&db, &state).unwrap().is_none());
     }
     fn chat(db: &Db) -> (Snapshot, Source) {
@@ -640,7 +703,10 @@ mod tests {
             let (state, source) = chat(&db);
             enqueue(&db, &state, source).unwrap();
             let job = claim(&db, &state).unwrap().unwrap();
-            assert!(matches!(finish(&db, &state, &job, &answer).unwrap(), FinishOutcome::Rejected(_)));
+            assert!(matches!(
+                finish(&db, &state, &job, &answer).unwrap(),
+                FinishOutcome::Rejected(_)
+            ));
             assert!(proposals(&db, &state).unwrap().is_empty());
             assert!(claim(&db, &state).unwrap().is_none());
         }

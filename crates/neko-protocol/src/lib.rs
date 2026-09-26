@@ -10,12 +10,12 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-pub mod workbench;
 pub mod agent_profiles;
 pub mod mcp_host;
-pub mod skills;
-pub mod setup_import;
 pub mod scheduled_plans;
+pub mod setup_import;
+pub mod skills;
+pub mod workbench;
 
 /// A modifier key in a hotkey combination, independent of any particular
 /// hotkey-registration crate's own enum so this type can stay in the pure
@@ -98,23 +98,91 @@ pub struct BuiltinTheme {
 /// (there is no user-supplied-palette loading, and no extension host yet — see
 /// `AGENTS.md`'s "Seams for follow-up work").
 pub const BUILTIN_THEMES: &[BuiltinTheme] = &[
-    BuiltinTheme { id: "neutral", name: "Neko Neutral", description: "Dark · neutral grey · translucent" },
-    BuiltinTheme { id: "ember", name: "Ember", description: "Dark · aubergine to rust · translucent" },
-    BuiltinTheme { id: "catnap", name: "Catnap", description: "Dark · violet and magenta · translucent" },
-    BuiltinTheme { id: "catppuccin-mocha", name: "Catppuccin Mocha", description: "Dark · Catppuccin · translucent" },
-    BuiltinTheme { id: "catppuccin-macchiato", name: "Catppuccin Macchiato", description: "Dark · Catppuccin · translucent" },
-    BuiltinTheme { id: "catppuccin-frappe", name: "Catppuccin Frappé", description: "Dark · Catppuccin · translucent" },
-    BuiltinTheme { id: "catppuccin-latte", name: "Catppuccin Latte", description: "Light · Catppuccin · translucent" },
-    BuiltinTheme { id: "gruvbox-dark", name: "Gruvbox Dark", description: "Dark · Gruvbox · translucent" },
-    BuiltinTheme { id: "gruvbox-light", name: "Gruvbox Light", description: "Light · Gruvbox · translucent" },
-    BuiltinTheme { id: "solarized-dark", name: "Solarized Dark", description: "Dark · Solarized · translucent" },
-    BuiltinTheme { id: "solarized-light", name: "Solarized Light", description: "Light · Solarized · translucent" },
-    BuiltinTheme { id: "nord", name: "Nord", description: "Dark · Nord · translucent" },
-    BuiltinTheme { id: "tokyo-night", name: "Tokyo Night", description: "Dark · Tokyo Night Storm · translucent" },
-    BuiltinTheme { id: "rose-pine", name: "Rosé Pine", description: "Dark · Rosé Pine · translucent" },
-    BuiltinTheme { id: "rose-pine-dawn", name: "Rosé Pine Dawn", description: "Light · Rosé Pine Dawn · translucent" },
-    BuiltinTheme { id: "dracula", name: "Dracula", description: "Dark · Dracula · translucent" },
-    BuiltinTheme { id: "everforest-dark", name: "Everforest Dark", description: "Dark · Everforest · translucent" },
+    BuiltinTheme {
+        id: "neutral",
+        name: "Neko Neutral",
+        description: "Dark · neutral grey · translucent",
+    },
+    BuiltinTheme {
+        id: "ember",
+        name: "Ember",
+        description: "Dark · aubergine to rust · translucent",
+    },
+    BuiltinTheme {
+        id: "catnap",
+        name: "Catnap",
+        description: "Dark · violet and magenta · translucent",
+    },
+    BuiltinTheme {
+        id: "catppuccin-mocha",
+        name: "Catppuccin Mocha",
+        description: "Dark · Catppuccin · translucent",
+    },
+    BuiltinTheme {
+        id: "catppuccin-macchiato",
+        name: "Catppuccin Macchiato",
+        description: "Dark · Catppuccin · translucent",
+    },
+    BuiltinTheme {
+        id: "catppuccin-frappe",
+        name: "Catppuccin Frappé",
+        description: "Dark · Catppuccin · translucent",
+    },
+    BuiltinTheme {
+        id: "catppuccin-latte",
+        name: "Catppuccin Latte",
+        description: "Light · Catppuccin · translucent",
+    },
+    BuiltinTheme {
+        id: "gruvbox-dark",
+        name: "Gruvbox Dark",
+        description: "Dark · Gruvbox · translucent",
+    },
+    BuiltinTheme {
+        id: "gruvbox-light",
+        name: "Gruvbox Light",
+        description: "Light · Gruvbox · translucent",
+    },
+    BuiltinTheme {
+        id: "solarized-dark",
+        name: "Solarized Dark",
+        description: "Dark · Solarized · translucent",
+    },
+    BuiltinTheme {
+        id: "solarized-light",
+        name: "Solarized Light",
+        description: "Light · Solarized · translucent",
+    },
+    BuiltinTheme {
+        id: "nord",
+        name: "Nord",
+        description: "Dark · Nord · translucent",
+    },
+    BuiltinTheme {
+        id: "tokyo-night",
+        name: "Tokyo Night",
+        description: "Dark · Tokyo Night Storm · translucent",
+    },
+    BuiltinTheme {
+        id: "rose-pine",
+        name: "Rosé Pine",
+        description: "Dark · Rosé Pine · translucent",
+    },
+    BuiltinTheme {
+        id: "rose-pine-dawn",
+        name: "Rosé Pine Dawn",
+        description: "Light · Rosé Pine Dawn · translucent",
+    },
+    BuiltinTheme {
+        id: "dracula",
+        name: "Dracula",
+        description: "Dark · Dracula · translucent",
+    },
+    BuiltinTheme {
+        id: "everforest-dark",
+        name: "Everforest Dark",
+        description: "Dark · Everforest · translucent",
+    },
 ];
 
 /// The theme a fresh install renders, and the fallback for a persisted id that
@@ -122,9 +190,9 @@ pub const BUILTIN_THEMES: &[BuiltinTheme] = &[
 /// must not change how anybody's app looks without them asking.
 pub const DEFAULT_THEME_ID: &str = "neutral";
 
-pub fn builtin_theme(id: &str) -> Option<&'static BuiltinTheme> {{
-    BUILTIN_THEMES.iter().find(|t| t.id == id)
-}}
+pub fn builtin_theme(id: &str) -> Option<&'static BuiltinTheme> {
+    { BUILTIN_THEMES.iter().find(|t| t.id == id) }
+}
 
 /// A row's icon slot content. Closed by design, unlike `SearchItem::kind`
 /// below — this is a bounded set of things the client actually knows how to
@@ -372,7 +440,11 @@ pub enum Request {
     /// consider, not the shared root-list budget. `None` (every call site
     /// before this field existed) is the ordinary merged root-list search,
     /// completely unchanged.
-    Search { query: String, limit: usize, provider: Option<String> },
+    Search {
+        query: String,
+        limit: usize,
+        provider: Option<String>,
+    },
     /// Perform a `SearchItem`'s action — launch an app, write the
     /// pasteboard, open a file, or (when `action` is set) one of a
     /// provider's own secondary actions (`Provider::perform_action`) —
@@ -409,24 +481,36 @@ pub enum Request {
     /// documented out-of-order request completion (`handle_connection`),
     /// which can leave a stale prompt behind. Both failures are silent and
     /// both produce a *wrong action*, not a visible error.
-    Activate { kind: String, id: String, action: Option<String>, #[serde(default)] query: String },
+    Activate {
+        kind: String,
+        id: String,
+        action: Option<String>,
+        #[serde(default)]
+        query: String,
+    },
     GetHotkey,
     /// Fast, side-effect-free check against known OS/third-party reserved
     /// combinations (Spotlight, Mission Control, ...). Does not persist
     /// anything and does not prove the combo is free at the OS level — only
     /// a live registration attempt (client-side) can prove that.
-    CheckHotkeyConflict { candidate: HotkeyCombo },
+    CheckHotkeyConflict {
+        candidate: HotkeyCombo,
+    },
     /// Persist a candidate the client has already live-registered
     /// successfully. The daemon trusts the caller on the OS-level part of
     /// the conflict check and only owns storage + fan-out.
-    CommitHotkey { candidate: HotkeyCombo },
+    CommitHotkey {
+        candidate: HotkeyCombo,
+    },
     /// Whether the first-run onboarding arc has been completed, and whether
     /// the accessibility-refused banner (design report §3, step 08) has
     /// been dismissed.
     GetOnboardingState,
     /// Mark onboarding finished (or, for test/reset purposes, un-finished —
     /// see `neko`'s `NEKO_RESET_ONBOARDING` env var).
-    SetOnboardingComplete { completed: bool },
+    SetOnboardingComplete {
+        completed: bool,
+    },
     /// Dismiss the "accessibility is off" banner shown in the summoned
     /// panel after onboarding, once seen. Never re-shown once dismissed,
     /// unless accessibility is later re-declined after being re-granted.
@@ -436,7 +520,9 @@ pub enum Request {
     /// neko's own setting, not an OS grant. The seam a parallel clipboard-
     /// history watcher reads before it starts watching `NSPasteboard`.
     GetClipboardHistoryEnabled,
-    SetClipboardHistoryEnabled { enabled: bool },
+    SetClipboardHistoryEnabled {
+        enabled: bool,
+    },
     /// The persisted theme id (see [`BUILTIN_THEMES`]). The client asks once at
     /// startup, before its first frame, so the very first summon already
     /// renders in the chosen palette rather than flashing the default.
@@ -450,7 +536,9 @@ pub enum Request {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Response {
-    McpBridge { json: String },
+    McpBridge {
+        json: String,
+    },
     Workbench(workbench::Snapshot),
     Pong,
     /// One search reply. **A single `Request::Search` can be answered by
@@ -470,14 +558,30 @@ pub enum Response {
     /// (which is what happens whenever no registered provider defers for
     /// this query — a short query, or a build with no slow provider
     /// registered at all).
-    SearchResults { items: Vec<SearchItem>, complete: bool },
+    SearchResults {
+        items: Vec<SearchItem>,
+        complete: bool,
+    },
     Activated,
-    Hotkey { config: HotkeyConfig },
-    HotkeyConflict { reason: Option<String> },
-    OnboardingState { completed: bool, accessibility_banner_dismissed: bool },
-    ClipboardHistoryEnabled { enabled: bool },
-    Theme { id: String },
-    Error { message: String },
+    Hotkey {
+        config: HotkeyConfig,
+    },
+    HotkeyConflict {
+        reason: Option<String>,
+    },
+    OnboardingState {
+        completed: bool,
+        accessibility_banner_dismissed: bool,
+    },
+    ClipboardHistoryEnabled {
+        enabled: bool,
+    },
+    Theme {
+        id: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 impl Response {
@@ -488,7 +592,13 @@ impl Response {
     /// retire a request's correlation entry without re-deriving the rule
     /// from the payload shape at each call site.
     pub fn ends_request(&self) -> bool {
-        !matches!(self, Response::SearchResults { complete: false, .. })
+        !matches!(
+            self,
+            Response::SearchResults {
+                complete: false,
+                ..
+            }
+        )
     }
 }
 
@@ -515,7 +625,9 @@ pub struct QuotaSummary {
 /// replies but not correlated to a request id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
-    HotkeyChanged { config: HotkeyConfig },
+    HotkeyChanged {
+        config: HotkeyConfig,
+    },
     /// A batch of background icon extraction finished — at least one
     /// `SearchItem::icon_path` a client already has may now resolve where
     /// it previously didn't. Icon extraction runs on the daemon's own
@@ -536,11 +648,15 @@ pub enum Event {
     /// cross — and the menu bar is not a search surface, so there is no
     /// request it could ride in on. Same shape as `AttentionChanged`: the
     /// daemon watches, the client renders.
-    QuotaChanged { quotas: Vec<QuotaSummary> },
+    QuotaChanged {
+        quotas: Vec<QuotaSummary>,
+    },
     /// A client committed a theme. Broadcast so every *other* connected client
     /// repaints too — the committing one has already applied it locally (live
     /// preview means it was applied before the round-trip even started).
-    ThemeChanged { id: String },
+    ThemeChanged {
+        id: String,
+    },
     /// How many agents are stopped, waiting for a person — broadcast when
     /// the number *changes*, not on every poll.
     ///
@@ -549,7 +665,9 @@ pub enum Event {
     /// hidden. neko is resident and invisible almost all of the time, and an
     /// agent that blocks while it is hidden would otherwise wait until the
     /// next summon to be noticed. The client puts this on the Dock tile.
-    AttentionChanged { count: usize },
+    AttentionChanged {
+        count: usize,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -573,7 +691,10 @@ pub fn database_path() -> PathBuf {
 }
 
 pub fn support_dir() -> PathBuf {
-    if let Some(path) = std::env::var_os("NEKO_DATA_DIR").map(PathBuf::from).filter(|p|p.is_absolute()) {
+    if let Some(path) = std::env::var_os("NEKO_DATA_DIR")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+    {
         return path;
     }
     let home = std::env::var_os("HOME")
@@ -588,7 +709,10 @@ pub fn support_dir() -> PathBuf {
 pub fn write_frame<W: Write>(mut w: W, frame: &Frame) -> io::Result<()> {
     let payload = serde_json::to_vec(frame).map_err(io::Error::other)?;
     if payload.len() > 16 * 1024 * 1024 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "IPC frame exceeds 16 MiB"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "IPC frame exceeds 16 MiB",
+        ));
     }
     let len = u32::try_from(payload.len()).map_err(io::Error::other)?;
     w.write_all(&len.to_le_bytes())?;
@@ -607,7 +731,10 @@ pub fn read_frame<R: Read>(mut r: R) -> io::Result<Option<Frame>> {
     }
     let len = u32::from_le_bytes(len_bytes) as usize;
     if len > 16 * 1024 * 1024 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "IPC frame exceeds 16 MiB"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "IPC frame exceeds 16 MiB",
+        ));
     }
     let mut payload = vec![0u8; len];
     r.read_exact(&mut payload)?;
@@ -622,7 +749,10 @@ mod tests {
     #[test]
     fn oversized_frame_is_rejected_before_allocating_payload() {
         let length = (16_u32 * 1024 * 1024 + 1).to_le_bytes();
-        assert_eq!(read_frame(&length[..]).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            read_frame(&length[..]).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 
     #[test]
@@ -639,7 +769,15 @@ mod tests {
         write_frame(&mut buf, &frame).unwrap();
         let decoded = read_frame(&buf[..]).unwrap().unwrap();
         match decoded {
-            Frame::Request { id, request: Request::Search { query, limit, provider } } => {
+            Frame::Request {
+                id,
+                request:
+                    Request::Search {
+                        query,
+                        limit,
+                        provider,
+                    },
+            } => {
                 assert_eq!(id, 7);
                 assert_eq!(query, "fin");
                 assert_eq!(limit, 8);
@@ -657,10 +795,27 @@ mod tests {
 
     #[test]
     fn a_partial_search_result_does_not_end_its_request_but_everything_else_does() {
-        assert!(!Response::SearchResults { items: Vec::new(), complete: false }.ends_request());
-        assert!(Response::SearchResults { items: Vec::new(), complete: true }.ends_request());
+        assert!(
+            !Response::SearchResults {
+                items: Vec::new(),
+                complete: false
+            }
+            .ends_request()
+        );
+        assert!(
+            Response::SearchResults {
+                items: Vec::new(),
+                complete: true
+            }
+            .ends_request()
+        );
         assert!(Response::Pong.ends_request());
-        assert!(Response::Error { message: "x".into() }.ends_request());
+        assert!(
+            Response::Error {
+                message: "x".into()
+            }
+            .ends_request()
+        );
     }
 
     #[test]

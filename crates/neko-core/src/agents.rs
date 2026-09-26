@@ -28,9 +28,9 @@
 //! That is its own task, and it is a history feature rather than a live one.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use neko_protocol::{Glyph, Icon, ItemAction, SearchItem};
 use serde::Deserialize;
@@ -96,7 +96,11 @@ pub fn agents_enabled(db: &crate::Db) -> bool {
 /// to one on a real machine (53 idle, 2 running), so including them by
 /// default would make a query for a live agent worse, not better.
 pub fn include_idle(db: &crate::Db) -> bool {
-    db.get_setting(AGENTS_INCLUDE_IDLE_KEY).ok().flatten().as_deref() == Some("true")
+    db.get_setting(AGENTS_INCLUDE_IDLE_KEY)
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true")
 }
 
 pub fn set_agents_enabled(db: &crate::Db, enabled: bool) -> rusqlite::Result<()> {
@@ -104,14 +108,19 @@ pub fn set_agents_enabled(db: &crate::Db, enabled: bool) -> rusqlite::Result<()>
 }
 
 pub fn set_include_idle(db: &crate::Db, include: bool) -> rusqlite::Result<()> {
-    db.set_setting(AGENTS_INCLUDE_IDLE_KEY, if include { "true" } else { "false" })
+    db.set_setting(
+        AGENTS_INCLUDE_IDLE_KEY,
+        if include { "true" } else { "false" },
+    )
 }
 
 /// How many agents each backend can currently see, for the Preferences tab.
 /// Reported as (running, idle) so the tab can say something true and
 /// specific rather than "configured".
 pub fn backend_census(backend: Backend) -> (usize, usize) {
-    let Some(root) = backend.root() else { return (0, 0) };
+    let Some(root) = backend.root() else {
+        return (0, 0);
+    };
     let agents = read_agents(&root);
     let running = agents.iter().filter(|a| a.is_running()).count();
     (running, agents.len() - running)
@@ -193,7 +202,11 @@ impl PaseoAgent {
         }
         self.cwd
             .as_deref()
-            .and_then(|cwd| Path::new(cwd).file_name().map(|n| n.to_string_lossy().to_string()))
+            .and_then(|cwd| {
+                Path::new(cwd)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+            })
             .or_else(|| self.prompt())
             .unwrap_or_else(|| "Agent".to_string())
     }
@@ -231,13 +244,20 @@ impl PaseoAgent {
     }
 
     fn names(&self, names: &HashMap<String, WorkspaceName>) -> WorkspaceName {
-        self.workspace_id.as_deref().and_then(|id| names.get(id)).cloned().unwrap_or_default()
+        self.workspace_id
+            .as_deref()
+            .and_then(|id| names.get(id))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// The first prompt, tidied — searchable, never shown. See
     /// [`WorkspaceName`].
     fn prompt(&self) -> Option<String> {
-        self.title.as_deref().map(title_from_prompt).filter(|t| !t.is_empty())
+        self.title
+            .as_deref()
+            .map(title_from_prompt)
+            .filter(|t| !t.is_empty())
     }
 
     /// Which tool is running the agent — `"claude"`, `"codex"` — for the
@@ -248,16 +268,26 @@ impl PaseoAgent {
     /// the distinction that survives being reduced to one. The model is still
     /// searchable through this provider's own `search`.
     fn provider_mark(&self) -> Option<String> {
-        let provider = self.provider.as_deref().map(short_provider).filter(|p| !p.is_empty());
+        let provider = self
+            .provider
+            .as_deref()
+            .map(short_provider)
+            .filter(|p| !p.is_empty());
         provider.or_else(|| {
             // No `provider` field, but the model usually names its family.
             let model = self.config.model.as_deref()?;
-            model.split(['-', '/']).next().map(str::to_string).filter(|p| !p.is_empty())
+            model
+                .split(['-', '/'])
+                .next()
+                .map(str::to_string)
+                .filter(|p| !p.is_empty())
         })
     }
 
     fn activity_at(&self) -> Option<&str> {
-        self.last_activity_at.as_deref().or(self.updated_at.as_deref())
+        self.last_activity_at
+            .as_deref()
+            .or(self.updated_at.as_deref())
     }
 }
 
@@ -284,7 +314,10 @@ fn short_provider(raw: &str) -> String {
 fn title_from_prompt(raw: &str) -> String {
     let line = raw.lines().next().unwrap_or(raw).trim();
     let line = line.trim_start_matches(|c: char| {
-        matches!(c, '\u{258e}' | '>' | '#' | '-' | '*' | '`' | '"' | '\'' | ' ' | '\t')
+        matches!(
+            c,
+            '\u{258e}' | '>' | '#' | '-' | '*' | '`' | '"' | '\'' | ' ' | '\t'
+        )
     });
     if let Some(compact) = compact_url(line) {
         return compact;
@@ -308,18 +341,26 @@ fn title_from_prompt(raw: &str) -> String {
 /// page (`pull/4501`, `Care-Comms`) while the head repeats across every
 /// link from the same place.
 fn compact_url(raw: &str) -> Option<String> {
-    let rest = raw.strip_prefix("https://").or_else(|| raw.strip_prefix("http://"))?;
+    let rest = raw
+        .strip_prefix("https://")
+        .or_else(|| raw.strip_prefix("http://"))?;
     if rest.split_whitespace().count() != 1 || rest.is_empty() {
         return None;
     }
     // Query strings and fragments are routing, never a name.
-    let rest = rest.split(['?', '#']).next().unwrap_or(rest).trim_end_matches('/');
+    let rest = rest
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(rest)
+        .trim_end_matches('/');
     let mut parts = rest.split('/');
     let host = parts.next()?.trim_start_matches("www.");
     if host.is_empty() {
         return None;
     }
-    let segments: Vec<&str> = parts.filter(|s| !s.is_empty() && !is_opaque_id(s)).collect();
+    let segments: Vec<&str> = parts
+        .filter(|s| !s.is_empty() && !is_opaque_id(s))
+        .collect();
     Some(match segments.len() {
         0 => host.to_string(),
         n if n <= 2 => format!("{host}/{}", segments.join("/")),
@@ -410,7 +451,10 @@ pub fn read_workspace_names(agents_root: &Path) -> HashMap<String, WorkspaceName
             .unwrap_or_default()
     };
     let name_of = |v: &serde_json::Value| -> Option<String> {
-        v.get("displayName")?.as_str().map(str::to_string).filter(|s| !s.is_empty())
+        v.get("displayName")?
+            .as_str()
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
     };
     let projects: HashMap<String, String> = list("projects.json")
         .iter()
@@ -424,13 +468,22 @@ pub fn read_workspace_names(agents_root: &Path) -> HashMap<String, WorkspaceName
                 .get("projectId")
                 .and_then(serde_json::Value::as_str)
                 .and_then(|id| projects.get(id).cloned());
-            Some((id, WorkspaceName { workspace: name_of(w), project }))
+            Some((
+                id,
+                WorkspaceName {
+                    workspace: name_of(w),
+                    project,
+                },
+            ))
         })
         .collect()
 }
 
 fn read_agents(root: &Path) -> Vec<PaseoAgent> {
-    read_agent_documents(root).into_iter().filter(|agent| !agent.is_closed()).collect()
+    read_agent_documents(root)
+        .into_iter()
+        .filter(|agent| !agent.is_closed())
+        .collect()
 }
 
 /// Every non-internal agent document under `root`, **closed ones included**.
@@ -454,8 +507,12 @@ fn read_agent_documents(root: &Path) -> Vec<PaseoAgent> {
             if path.extension().is_none_or(|ext| ext != "json") {
                 continue;
             }
-            let Ok(raw) = std::fs::read_to_string(&path) else { continue };
-            let Ok(agent) = serde_json::from_str::<PaseoAgent>(&raw) else { continue };
+            let Ok(raw) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(agent) = serde_json::from_str::<PaseoAgent>(&raw) else {
+                continue;
+            };
             if agent.internal {
                 continue;
             }
@@ -493,7 +550,11 @@ pub fn provider_usage(root: &Path) -> Vec<ProviderUse> {
     let mut uses: Vec<ProviderUse> = read_agent_documents(root)
         .into_iter()
         .filter_map(|agent| {
-            let provider = agent.provider.as_deref().map(short_provider).filter(|p| !p.is_empty())?;
+            let provider = agent
+                .provider
+                .as_deref()
+                .map(short_provider)
+                .filter(|p| !p.is_empty())?;
             let cwd = agent.cwd.as_deref().map(PathBuf::from)?;
             let at = agent.activity_at().unwrap_or_default().to_string();
             Some(ProviderUse { provider, cwd, at })
@@ -512,21 +573,29 @@ pub struct AgentsProvider {
 
 impl AgentsProvider {
     pub fn new(db: Arc<Mutex<crate::Db>>) -> Self {
-        Self { root: agents_root(), db: Some(db) }
+        Self {
+            root: agents_root(),
+            db: Some(db),
+        }
     }
 
     /// A provider that reads a specific directory — for tests, which must
     /// never depend on whatever agents happen to exist on the machine
     /// running the suite.
     pub fn with_root(root: PathBuf) -> Self {
-        Self { root: Some(root), db: None }
+        Self {
+            root: Some(root),
+            db: None,
+        }
     }
 
     /// Settings are re-read per search rather than cached, so a toggle in
     /// Preferences takes effect on the next keystroke — the same choice, for
     /// the same reason, as `files::FileProvider`'s configured scope.
     fn settings(&self) -> (bool, bool) {
-        let Some(db) = &self.db else { return (true, false) };
+        let Some(db) = &self.db else {
+            return (true, false);
+        };
         let db = db.lock().unwrap();
         (agents_enabled(&db), include_idle(&db))
     }
@@ -595,15 +664,27 @@ impl Provider for AgentsProvider {
                         .into_iter()
                         .flatten()
                         .filter_map(|hay| fuzzy_score(trimmed, &hay))
-                        .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?;
+                        .fold(None, |best: Option<f32>, s| {
+                            Some(best.map_or(s, |b| b.max(s)))
+                        })?;
                     if running { best + RUNNING_BONUS } else { best }
                 };
-                Some((agent.activity_at().unwrap_or("").to_string(), running, Candidate { score, item: to_item(&agent, running, &names) }))
+                Some((
+                    agent.activity_at().unwrap_or("").to_string(),
+                    running,
+                    Candidate {
+                        score,
+                        item: to_item(&agent, running, &names),
+                    },
+                ))
             })
             .collect::<Vec<_>>();
 
         if !trimmed.is_empty() {
-            return scored.into_iter().map(|(_, _, candidate)| candidate).collect();
+            return scored
+                .into_iter()
+                .map(|(_, _, candidate)| candidate)
+                .collect();
         }
 
         // The grid's own ordering: every running agent first, then the rest
@@ -646,8 +727,7 @@ impl Provider for AgentsProvider {
             "archive" => "archive_agent",
             other => return Err(ProviderError(format!("no action '{other}' on this row"))),
         };
-        let client =
-            crate::mcp::McpClient::discover().map_err(|e| ProviderError(e.to_string()))?;
+        let client = crate::mcp::McpClient::discover().map_err(|e| ProviderError(e.to_string()))?;
         client
             .call(tool, serde_json::json!({ "agentId": id }))
             .map(|_| ())
@@ -719,7 +799,8 @@ fn host_icon() -> Option<&'static PathBuf> {
     static ICON: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     ICON.get_or_init(|| {
         let app = PathBuf::from("/Applications/Paseo.app");
-        app.is_dir().then(|| crate::icons::ensure_cached_icon("com.paseo.app", &app))?
+        app.is_dir()
+            .then(|| crate::icons::ensure_cached_icon("com.paseo.app", &app))?
     })
     .as_ref()
 }
@@ -750,13 +831,25 @@ fn agent_actions(running: bool) -> Vec<ItemAction> {
         return actions;
     }
     actions.extend([
-        ItemAction { id: "cancel".to_string(), label: "Cancel run".to_string(), destructive: false },
-        ItemAction { id: "archive".to_string(), label: "Archive".to_string(), destructive: true },
+        ItemAction {
+            id: "cancel".to_string(),
+            label: "Cancel run".to_string(),
+            destructive: false,
+        },
+        ItemAction {
+            id: "archive".to_string(),
+            label: "Archive".to_string(),
+            destructive: true,
+        },
     ]);
     actions
 }
 
-fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceName>) -> SearchItem {
+fn to_item(
+    agent: &PaseoAgent,
+    running: bool,
+    names: &HashMap<String, WorkspaceName>,
+) -> SearchItem {
     SearchItem {
         id: agent.id.clone(),
         kind: "agent".to_string(),
@@ -767,7 +860,11 @@ fn to_item(agent: &PaseoAgent, running: bool, names: &HashMap<String, WorkspaceN
         // to the painted glyph when the app is not installed where expected,
         // which is also what a future non-Paseo backend gets for free.
         icon: host_icon().map_or(
-            Icon::Glyph(if running { Glyph::AgentLive } else { Glyph::Agent }),
+            Icon::Glyph(if running {
+                Glyph::AgentLive
+            } else {
+                Glyph::Agent
+            }),
             |path| Icon::Image(path.display().to_string()),
         ),
         section_label: "Agents".to_string(),
@@ -865,7 +962,9 @@ pub fn parse_provider_modes(value: &serde_json::Value) -> ProviderModes {
         return found;
     };
     for provider in providers {
-        let Some(id) = provider.get("id").and_then(serde_json::Value::as_str) else { continue };
+        let Some(id) = provider.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
         let modes: Vec<(String, String)> = provider
             .get("modes")
             .and_then(serde_json::Value::as_array)
@@ -919,7 +1018,9 @@ pub struct AgentControlProvider {
 
 impl AgentControlProvider {
     pub fn new() -> Self {
-        Self { root: agents_root() }
+        Self {
+            root: agents_root(),
+        }
     }
 
     pub fn with_root(root: PathBuf) -> Self {
@@ -951,7 +1052,9 @@ impl Provider for AgentControlProvider {
     /// the task, and the row you were aiming at would move out from under
     /// the selection mid-sentence. Same rule `new_agent` follows.
     fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
-        let Some(root) = &self.root else { return Vec::new() };
+        let Some(root) = &self.root else {
+            return Vec::new();
+        };
         // **The verb has to know whether there is a prompt yet.** Entering
         // this mode clears the field, so the first thing anybody presses is
         // Enter on a row labelled "Send ↵" — and `activate_with_query`
@@ -959,17 +1062,24 @@ impl Provider for AgentControlProvider {
         // labelling the row for what it needs next; this does the same.
         let has_prompt = !query.trim().is_empty();
         let names = read_workspace_names(root);
-        let modes = self.client().map(|c| provider_modes(&c)).unwrap_or_default();
+        let modes = self
+            .client()
+            .map(|c| provider_modes(&c))
+            .unwrap_or_default();
 
-        let mut agents: Vec<PaseoAgent> =
-            read_agents(root).into_iter().filter(|a| !a.is_closed()).collect();
+        let mut agents: Vec<PaseoAgent> = read_agents(root)
+            .into_iter()
+            .filter(|a| !a.is_closed())
+            .collect();
         // Running first, then most recent — the same order the grid uses, and
         // for the same reason: what is happening now outranks what happened
         // last.
         agents.sort_by(|a, b| {
-            b.is_running()
-                .cmp(&a.is_running())
-                .then_with(|| b.activity_at().unwrap_or("").cmp(a.activity_at().unwrap_or("")))
+            b.is_running().cmp(&a.is_running()).then_with(|| {
+                b.activity_at()
+                    .unwrap_or("")
+                    .cmp(a.activity_at().unwrap_or(""))
+            })
         });
 
         let count = agents.len();
@@ -1005,7 +1115,11 @@ impl Provider for AgentControlProvider {
                         kind: "agent-control".to_string(),
                         title,
                         subtitle,
-                        icon: Icon::Glyph(if running { Glyph::AgentLive } else { Glyph::Agent }),
+                        icon: Icon::Glyph(if running {
+                            Glyph::AgentLive
+                        } else {
+                            Glyph::Agent
+                        }),
                         section_label: "Agents".to_string(),
                         action_label: if has_prompt {
                             "Send  \u{21b5}".to_string()
@@ -1061,7 +1175,10 @@ impl Provider for AgentControlProvider {
         if let Some(mode_id) = action.strip_prefix("mode:") {
             return self
                 .client()?
-                .call("set_agent_mode", serde_json::json!({ "agentId": id, "modeId": mode_id }))
+                .call(
+                    "set_agent_mode",
+                    serde_json::json!({ "agentId": id, "modeId": mode_id }),
+                )
                 .map(|_| ())
                 .map_err(|e| ProviderError(e.to_string()));
         }
@@ -1113,7 +1230,12 @@ mod tests {
             "closed-1",
             r#"{"id":"closed-1","title":"old work","provider":"claude","lastStatus":"closed"}"#,
         );
-        write_agent(&root, "other", "internal-1", r#"{"id":"internal-1","lastStatus":"running","internal":true}"#);
+        write_agent(
+            &root,
+            "other",
+            "internal-1",
+            r#"{"id":"internal-1","lastStatus":"running","internal":true}"#,
+        );
         let provider = AgentsProvider::with_root(root);
         (dir, provider)
     }
@@ -1129,7 +1251,10 @@ mod tests {
             vec!["run-1", "idle-1"]
         );
         assert_eq!(found[0].item.badge.as_deref(), Some("LIVE"));
-        assert!(found[0].score > found[1].score, "allocate orders by score, so the order must survive as one");
+        assert!(
+            found[0].score > found[1].score,
+            "allocate orders by score, so the order must survive as one"
+        );
     }
 
     #[test]
@@ -1170,20 +1295,38 @@ mod tests {
         );
         let provider = AgentsProvider::with_root(dir.path().to_path_buf());
         let found = provider.search("", 0);
-        assert_eq!(found[0].item.id, "old-running", "running outranks recency, not the other way round");
+        assert_eq!(
+            found[0].item.id, "old-running",
+            "running outranks recency, not the other way round"
+        );
     }
 
     #[test]
     fn a_closed_agent_is_never_returned_even_by_an_exact_query() {
         let (_dir, provider) = fixture_root();
-        assert!(provider.search("old work", 0).iter().all(|c| c.item.id != "closed-1"));
+        assert!(
+            provider
+                .search("old work", 0)
+                .iter()
+                .all(|c| c.item.id != "closed-1")
+        );
     }
 
     #[test]
     fn paseos_own_internal_agents_are_never_shown() {
         let (_dir, provider) = fixture_root();
-        assert!(provider.search("", 0).iter().all(|c| c.item.id != "internal-1"));
-        assert!(provider.search("agent", 0).iter().all(|c| c.item.id != "internal-1"));
+        assert!(
+            provider
+                .search("", 0)
+                .iter()
+                .all(|c| c.item.id != "internal-1")
+        );
+        assert!(
+            provider
+                .search("agent", 0)
+                .iter()
+                .all(|c| c.item.id != "internal-1")
+        );
     }
 
     #[test]
@@ -1192,7 +1335,10 @@ mod tests {
         // Both match "agent" only through the shared alias, so the ordering
         // is decided purely by whether one of them is live.
         let found = provider.search("agent", 0);
-        let top = found.iter().max_by(|a, b| a.score.partial_cmp(&b.score).unwrap()).unwrap();
+        let top = found
+            .iter()
+            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
+            .unwrap();
         assert_eq!(top.item.id, "run-1");
     }
 
@@ -1201,7 +1347,10 @@ mod tests {
         let (_dir, provider) = fixture_root();
         // "neko" appears only in the running agent's cwd, never in its title.
         let found = provider.search("neko", 0);
-        assert!(found.iter().any(|c| c.item.id == "run-1"), "cwd must be searchable");
+        assert!(
+            found.iter().any(|c| c.item.id == "run-1"),
+            "cwd must be searchable"
+        );
     }
 
     #[test]
@@ -1223,9 +1372,15 @@ mod tests {
             "idle-2",
             r#"{"id":"idle-2","title":"fix the parser","lastStatus":"idle","cwd":"/tmp/parser"}"#,
         );
-        let with_idle =
-            AgentsProvider { root: Some(dir.path().to_path_buf()), db: Some(Arc::new(Mutex::new(db))) };
-        assert_eq!(with_idle.search("parser", 0).len(), 1, "turning the setting on must include them");
+        let with_idle = AgentsProvider {
+            root: Some(dir.path().to_path_buf()),
+            db: Some(Arc::new(Mutex::new(db))),
+        };
+        assert_eq!(
+            with_idle.search("parser", 0).len(),
+            1,
+            "turning the setting on must include them"
+        );
     }
 
     #[test]
@@ -1233,9 +1388,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::Db::open_in_memory().unwrap();
         set_agents_enabled(&db, false).unwrap();
-        write_agent(dir.path(), "w", "a", r#"{"id":"a","title":"hi","lastStatus":"running"}"#);
-        let provider =
-            AgentsProvider { root: Some(dir.path().to_path_buf()), db: Some(Arc::new(Mutex::new(db))) };
+        write_agent(
+            dir.path(),
+            "w",
+            "a",
+            r#"{"id":"a","title":"hi","lastStatus":"running"}"#,
+        );
+        let provider = AgentsProvider {
+            root: Some(dir.path().to_path_buf()),
+            db: Some(Arc::new(Mutex::new(db))),
+        };
         assert!(provider.search("", 0).is_empty());
         assert!(provider.search("hi", 0).is_empty());
     }
@@ -1245,7 +1407,11 @@ mod tests {
         let (dir, provider) = fixture_root();
         let before = provider.search("", 0).len();
         write_agent(dir.path(), "broken", "bad", "{ this is not json");
-        assert_eq!(provider.search("", 0).len(), before, "one unreadable file must not shrink the list");
+        assert_eq!(
+            provider.search("", 0).len(),
+            before,
+            "one unreadable file must not shrink the list"
+        );
     }
 
     #[test]
@@ -1271,7 +1437,11 @@ mod tests {
             r#"{"id":"a","title":"first line\nsecond line\nthird","lastStatus":"running"}"#,
         );
         let provider = AgentsProvider::with_root(dir.path().to_path_buf());
-        assert_eq!(provider.search("", 0)[0].item.title, "first line", "a row is one line tall");
+        assert_eq!(
+            provider.search("", 0)[0].item.title,
+            "first line",
+            "a row is one line tall"
+        );
     }
 
     #[test]
@@ -1286,8 +1456,16 @@ mod tests {
         );
         let provider = AgentsProvider::with_root(dir.path().to_path_buf());
         let item = provider.search("", 0).remove(0).item;
-        assert_eq!(item.source.as_deref(), Some("claude"), "the badge names the tool, not the model");
-        assert_eq!(item.subtitle.as_deref(), Some("/tmp/w"), "the line under the title is the workspace");
+        assert_eq!(
+            item.source.as_deref(),
+            Some("claude"),
+            "the badge names the tool, not the model"
+        );
+        assert_eq!(
+            item.subtitle.as_deref(),
+            Some("/tmp/w"),
+            "the line under the title is the workspace"
+        );
     }
 
     #[test]
@@ -1300,7 +1478,10 @@ mod tests {
             r#"{"id":"a","title":"x","lastStatus":"running","config":{"model":"gpt-5-codex"}}"#,
         );
         let provider = AgentsProvider::with_root(dir.path().to_path_buf());
-        assert_eq!(provider.search("", 0)[0].item.source.as_deref(), Some("gpt"));
+        assert_eq!(
+            provider.search("", 0)[0].item.source.as_deref(),
+            Some("gpt")
+        );
     }
 
     #[test]
@@ -1314,7 +1495,10 @@ mod tests {
                 "lastActivityAt":"2026-08-23T01:48:18.912Z"}"#,
         );
         let provider = AgentsProvider::with_root(dir.path().to_path_buf());
-        assert_eq!(provider.search("", 0)[0].item.accessory.as_deref(), Some("Needs you"));
+        assert_eq!(
+            provider.search("", 0)[0].item.accessory.as_deref(),
+            Some("Needs you")
+        );
     }
 
     #[test]
@@ -1324,7 +1508,9 @@ mod tests {
         // The exact conditions `parseAgentDeepLink` applies: `h` must be the
         // host, and the path must be exactly three segments with "agent" in
         // the middle. A single-slash URL fails the first and the third.
-        let rest = link.strip_prefix("paseo://h/").expect("`h` must be the host, not a path segment");
+        let rest = link
+            .strip_prefix("paseo://h/")
+            .expect("`h` must be the host, not a path segment");
         let segments: Vec<&str> = rest.split('/').collect();
         assert_eq!(segments, vec!["srv_abc", "agent", "agent-1"]);
     }
@@ -1362,13 +1548,14 @@ mod tests {
         // Figma puts a 22-character file key in the middle of the path; it
         // is the least informative run of characters in the URL.
         assert_eq!(
-            title_from_prompt(
-                "https://www.figma.com/design/ihcBLzmf4sBM0KJCMo8ryO/Care-Comms"
-            ),
+            title_from_prompt("https://www.figma.com/design/ihcBLzmf4sBM0KJCMo8ryO/Care-Comms"),
             "figma.com/design/Care-Comms"
         );
         assert_eq!(title_from_prompt("https://example.com/"), "example.com");
-        assert_eq!(title_from_prompt("https://example.com/a/b?x=1#frag"), "example.com/a/b");
+        assert_eq!(
+            title_from_prompt("https://example.com/a/b?x=1#frag"),
+            "example.com/a/b"
+        );
     }
 
     #[test]
@@ -1412,7 +1599,6 @@ mod tests {
         // A PR number is short and is the whole point of the link.
         assert!(!is_opaque_id("4501"));
     }
-
 
     /// Lays out a real `~/.paseo` shape: `agents/` and its **sibling**
     /// `projects/`, which is the relationship `read_workspace_names` has to
@@ -1472,7 +1658,13 @@ mod tests {
         // No project for this workspace, so the path is still better than
         // nothing. Asserted by suffix because `tildify` reads the real
         // `$HOME`, which is not this fixture's `/Users/x`.
-        assert!(items[0].subtitle.as_deref().unwrap().ends_with("Documents/neko"));
+        assert!(
+            items[0]
+                .subtitle
+                .as_deref()
+                .unwrap()
+                .ends_with("Documents/neko")
+        );
     }
 
     #[test]
@@ -1486,9 +1678,18 @@ mod tests {
             r#"{"id":"a3","title":"fix the parser","workspaceId":"wks_missing",
                 "cwd":"/Users/x/Documents/parser","lastStatus":"running"}"#,
         );
-        write_agent(&root, "gone", "a4", r#"{"id":"a4","title":"fix the parser","lastStatus":"running"}"#);
+        write_agent(
+            &root,
+            "gone",
+            "a4",
+            r#"{"id":"a4","title":"fix the parser","lastStatus":"running"}"#,
+        );
         let provider = AgentsProvider::with_root(root);
-        let titles: Vec<_> = provider.search("", 0).into_iter().map(|c| c.item.title).collect();
+        let titles: Vec<_> = provider
+            .search("", 0)
+            .into_iter()
+            .map(|c| c.item.title)
+            .collect();
         assert!(titles.contains(&"parser".to_string()), "{titles:?}");
         assert!(titles.contains(&"fix the parser".to_string()), "{titles:?}");
     }
@@ -1511,7 +1712,6 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].item.title, "feat/doctors-maps");
     }
-
 
     #[test]
     fn a_second_line_that_would_repeat_the_title_carries_the_prompt_instead() {
@@ -1554,10 +1754,19 @@ mod tests {
             .map(|c| (c.item.title, c.item.subtitle.unwrap_or_default()))
             .collect();
         seen.sort();
-        assert_eq!(seen, vec![
-            ("hme".to_string(), "So we've been working on testimonials".to_string()),
-            ("hme".to_string(), "github.com/\u{2026}/pull/4501".to_string()),
-        ]);
+        assert_eq!(
+            seen,
+            vec![
+                (
+                    "hme".to_string(),
+                    "So we've been working on testimonials".to_string()
+                ),
+                (
+                    "hme".to_string(),
+                    "github.com/\u{2026}/pull/4501".to_string()
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -1578,7 +1787,6 @@ mod tests {
         assert_eq!(item.title, "feat/doctors-maps");
         assert_eq!(item.subtitle.as_deref(), Some("acme-corp/web-app"));
     }
-
 
     #[test]
     fn a_prompt_is_always_sent_in_the_background() {
@@ -1615,17 +1823,22 @@ mod tests {
             {"id": "no-modes", "modes": []}
         ]});
         let parsed = parse_provider_modes(&value);
-        assert_eq!(parsed["claude"], vec![
-            ("plan".to_string(), "Plan Mode".to_string()),
-            ("bypassPermissions".to_string(), "Bypass".to_string()),
-        ]);
+        assert_eq!(
+            parsed["claude"],
+            vec![
+                ("plan".to_string(), "Plan Mode".to_string()),
+                ("bypassPermissions".to_string(), "Bypass".to_string()),
+            ]
+        );
         // A mode with no label falls back to its id rather than rendering
         // an empty menu entry.
-        assert_eq!(parsed["codex"], vec![("auto".to_string(), "auto".to_string())]);
+        assert_eq!(
+            parsed["codex"],
+            vec![("auto".to_string(), "auto".to_string())]
+        );
         // A provider with no modes contributes no menu at all.
         assert!(!parsed.contains_key("no-modes"));
     }
-
 
     #[test]
     fn an_empty_provider_mode_map_is_never_cached() {
@@ -1638,7 +1851,9 @@ mod tests {
         // The guard lives in `provider_modes`; this pins the property it
         // protects — an empty parse must stay empty rather than becoming a
         // cached answer.
-        assert!(MODES.lock().unwrap().is_none(), "nothing was cached from a failure");
+        assert!(
+            MODES.lock().unwrap().is_none(),
+            "nothing was cached from a failure"
+        );
     }
-
 }

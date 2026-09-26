@@ -38,7 +38,8 @@ use gpui::Window;
 pub(crate) fn joins_all_spaces_and_fullscreen_auxiliary(collection_behavior_bits: u64) -> bool {
     const CAN_JOIN_ALL_SPACES: u64 = 1 << 0;
     const FULL_SCREEN_AUXILIARY: u64 = 1 << 8;
-    collection_behavior_bits & CAN_JOIN_ALL_SPACES != 0 && collection_behavior_bits & FULL_SCREEN_AUXILIARY != 0
+    collection_behavior_bits & CAN_JOIN_ALL_SPACES != 0
+        && collection_behavior_bits & FULL_SCREEN_AUXILIARY != 0
 }
 
 #[cfg(target_os = "macos")]
@@ -48,7 +49,10 @@ pub fn verify(window: &Window) -> Result<String, String> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn verify(_window: &Window) -> Result<String, String> {
-    Err("Spaces/full-screen collection-behavior verification is only implemented on macOS".to_string())
+    Err(
+        "Spaces/full-screen collection-behavior verification is only implemented on macOS"
+            .to_string(),
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -91,7 +95,9 @@ mod macos {
                  and/or hidden behind a full-screen app"
             ));
         }
-        Ok(format!("readback bits={bits:#x} ({behavior:?}) — reachable from every Space and over full-screen apps"))
+        Ok(format!(
+            "readback bits={bits:#x} ({behavior:?}) — reachable from every Space and over full-screen apps"
+        ))
     }
 }
 
@@ -112,12 +118,16 @@ mod tests {
 
     #[test]
     fn missing_can_join_all_spaces_fails() {
-        assert!(!joins_all_spaces_and_fullscreen_auxiliary(FULL_SCREEN_AUXILIARY));
+        assert!(!joins_all_spaces_and_fullscreen_auxiliary(
+            FULL_SCREEN_AUXILIARY
+        ));
     }
 
     #[test]
     fn missing_full_screen_auxiliary_fails() {
-        assert!(!joins_all_spaces_and_fullscreen_auxiliary(CAN_JOIN_ALL_SPACES));
+        assert!(!joins_all_spaces_and_fullscreen_auxiliary(
+            CAN_JOIN_ALL_SPACES
+        ));
     }
 
     #[test]
@@ -130,6 +140,8 @@ mod tests {
         // e.g. `.moveToActiveSpace` alone (a different, narrower behavior:
         // moves the window to whatever Space is active *at creation time*,
         // not "visible on every Space" going forward) must not pass.
-        assert!(!joins_all_spaces_and_fullscreen_auxiliary(MOVE_TO_ACTIVE_SPACE));
+        assert!(!joins_all_spaces_and_fullscreen_auxiliary(
+            MOVE_TO_ACTIVE_SPACE
+        ));
     }
 }

@@ -1,6 +1,9 @@
 //! Durable Neko-owned work. The daemon serializes access to this store.
 use crate::Db;
-use neko_protocol::workbench::{Command, Snapshot, Task, TaskEvent, TaskStatus, TaskSplit, SupervisorDecision, SupervisorAction, Risk};
+use neko_protocol::workbench::{
+    Command, Risk, Snapshot, SupervisorAction, SupervisorDecision, Task, TaskEvent, TaskSplit,
+    TaskStatus,
+};
 use std::collections::HashSet;
 
 const SETTING: &str = "workbench_snapshot_v1";
@@ -42,7 +45,10 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
         // One upsert atomically disables old authority without deleting evidence.
         let json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
         if json.len() > MAX_SNAPSHOT_BYTES {
-            return Err("Migration needs storage headroom; original workspace data has not been changed".into());
+            return Err(
+                "Migration needs storage headroom; original workspace data has not been changed"
+                    .into(),
+            );
         }
         db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
         bump_revision();
@@ -162,19 +168,32 @@ fn reserved_capacity(snapshot: &Snapshot) -> Result<usize, String> {
             .unwrap_or(0);
         bytes += (4096_usize * 6).saturating_sub(occupied);
         bytes += 512; // status/timestamps and optional-path representation
-        let occupied = serde_json::to_vec(&task.supervision).map_err(|e| e.to_string())?.len();
+        let occupied = serde_json::to_vec(&task.supervision)
+            .map_err(|e| e.to_string())?
+            .len();
         bytes += crate::supervision::MAX_DECISION_BYTES.saturating_sub(occupied);
     }
     Ok(bytes)
 }
 
 pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
-    if matches!(command, Command::Snapshot) { return load(db); }
-    let completed = match &command { Command::CompleteTask { task_id } => Some(task_id.clone()), _ => None };
+    if matches!(command, Command::Snapshot) {
+        return load(db);
+    }
+    let completed = match &command {
+        Command::CompleteTask { task_id } => Some(task_id.clone()),
+        _ => None,
+    };
     let decision = match &command {
         Command::ApproveTask { task_id } => Some((task_id.clone(), "approval", None)),
-        Command::CancelTask { task_id } => Some((task_id.clone(), "cancellation", Some("Cancelled this task.".to_owned()))),
-        Command::AddTicketNote { task_id, text } => Some((task_id.clone(), "note", Some(text.trim().to_owned()))),
+        Command::CancelTask { task_id } => Some((
+            task_id.clone(),
+            "cancellation",
+            Some("Cancelled this task.".to_owned()),
+        )),
+        Command::AddTicketNote { task_id, text } => {
+            Some((task_id.clone(), "note", Some(text.trim().to_owned())))
+        }
         _ => None,
     };
     db.atomic(|| {
@@ -213,9 +232,13 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
     let mut snapshot = load(db)?;
     match command {
         Command::AgentProfiles(command) => crate::agent_profiles::apply(&mut snapshot, command)?,
-        Command::Schedules(neko_protocol::scheduled_plans::ScheduleCommand::List) => return Ok(snapshot),
+        Command::Schedules(neko_protocol::scheduled_plans::ScheduleCommand::List) => {
+            return Ok(snapshot);
+        }
         Command::Schedules(command) => crate::scheduled_plans::apply(&mut snapshot, command)?,
-        Command::Mcp(command) => crate::mcp_host::store::apply_command(&mut snapshot, command, now_ms())?,
+        Command::Mcp(command) => {
+            crate::mcp_host::store::apply_command(&mut snapshot, command, now_ms())?
+        }
         Command::Skills(_) => return Err("Skill commands must be handled by the daemon".into()),
         Command::Snapshot => return Ok(snapshot),
         Command::SaveWorkspace { mut workspace } => {
@@ -226,7 +249,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 &workspace.instructions,
                 MAX_CONTENT_BYTES,
             )?;
-            workspace.repository = canonical_repository(&workspace.repository)?;
+            workspace.repository = canonical_workspace_directory(&workspace.repository)?;
             if workspace.id.is_empty() {
                 workspace.id = new_id();
                 snapshot.workspaces.push(workspace);
@@ -252,9 +275,13 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             title,
             goal,
         } => {
-            if !snapshot.workspaces.iter().any(|w| w.id == workspace_id) {
-                return Err("Workspace no longer exists".into());
-            }
+            let workspace = snapshot
+                .workspaces
+                .iter()
+                .find(|w| w.id == workspace_id)
+                .ok_or("Workspace no longer exists")?;
+            canonical_repository(&workspace.repository)
+                .map_err(|_| "Code tasks require a Git repository")?;
             snapshot
                 .tasks
                 .push(create_task(workspace_id, None, title, goal)?);
@@ -272,6 +299,13 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             {
                 return Ok(snapshot);
             }
+            let workspace = snapshot
+                .workspaces
+                .iter()
+                .find(|w| w.id == issue.workspace_id)
+                .ok_or("Workspace no longer exists")?;
+            canonical_repository(&workspace.repository)
+                .map_err(|_| "Code tasks require a Git repository")?;
             let goal = if issue.description.trim().is_empty() {
                 issue.title.clone()
             } else {
@@ -287,33 +321,84 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             snapshot.tasks.push(task);
         }
         Command::ProposeSplit { task_id } => {
-            let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).ok_or("Task missing")?;
-            if task.status != TaskStatus::AwaitingApproval || snapshot.splits.iter().any(|s| s.parent_id == task_id || s.subtasks.iter().any(|p| p.task_id.as_deref() == Some(&task_id))) {
+            let task = snapshot
+                .tasks
+                .iter_mut()
+                .find(|t| t.id == task_id)
+                .ok_or("Task missing")?;
+            if task.status != TaskStatus::AwaitingApproval
+                || snapshot.splits.iter().any(|s| {
+                    s.parent_id == task_id
+                        || s.subtasks
+                            .iter()
+                            .any(|p| p.task_id.as_deref() == Some(&task_id))
+                })
+            {
                 return Err("Only an unsplit plan awaiting approval can request a split".into());
             }
             task.status = TaskStatus::Queued;
             task.supervision = None;
-            snapshot.splits.push(TaskSplit { parent_id:task_id, subtasks:vec![], approved:false, integrated:false, base:None });
+            snapshot.splits.push(TaskSplit {
+                parent_id: task_id,
+                subtasks: vec![],
+                approved: false,
+                integrated: false,
+                base: None,
+            });
         }
         Command::ApproveTask { task_id } => {
             if let Some(index) = snapshot.splits.iter().position(|s| s.parent_id == task_id) {
                 let split = snapshot.splits[index].clone();
-                if split.approved { return Err("Split already approved; retry the parent after failure".into()); }
+                if split.approved {
+                    return Err("Split already approved; retry the parent after failure".into());
+                }
                 crate::decomposition::validate(&split.subtasks)?;
-                let parent = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("Parent missing")?.clone();
-                if parent.status != TaskStatus::AwaitingApproval { return Err("Split proposal is not ready for approval".into()); }
+                let parent = snapshot
+                    .tasks
+                    .iter()
+                    .find(|t| t.id == task_id)
+                    .ok_or("Parent missing")?
+                    .clone();
+                if parent.status != TaskStatus::AwaitingApproval {
+                    return Err("Split proposal is not ready for approval".into());
+                }
                 for (i, plan) in split.subtasks.iter().enumerate() {
-                    let mut child = create_task(parent.workspace_id.clone(), None, plan.title.clone(), plan.goal.clone())?;
-                    child.plan = format!("{}\nFiles: {}\nRequired checks: {}", plan.goal, plan.files.join(", "), plan.tests.join("; "));
+                    let mut child = create_task(
+                        parent.workspace_id.clone(),
+                        None,
+                        plan.title.clone(),
+                        plan.goal.clone(),
+                    )?;
+                    child.plan = format!(
+                        "{}\nFiles: {}\nRequired checks: {}",
+                        plan.goal,
+                        plan.files.join(", "),
+                        plan.tests.join("; ")
+                    );
                     child.status = TaskStatus::Building;
-                    child.supervision = Some(SupervisorDecision { action:SupervisorAction::PrepareFix, risk:Risk::Low, is_bug:false, reason:"User approved this subtask and its scope".into(), evidence:vec![parent.id.clone()], files:plan.files.clone(), tests:plan.tests.clone(), sensitive_areas:vec![], uncertainties:vec![], plan:child.plan.clone() });
+                    child.supervision = Some(SupervisorDecision {
+                        action: SupervisorAction::PrepareFix,
+                        risk: Risk::Low,
+                        is_bug: false,
+                        reason: "User approved this subtask and its scope".into(),
+                        evidence: vec![parent.id.clone()],
+                        files: plan.files.clone(),
+                        tests: plan.tests.clone(),
+                        sensitive_areas: vec![],
+                        uncertainties: vec![],
+                        plan: child.plan.clone(),
+                    });
                     snapshot.splits[index].subtasks[i].task_id = Some(child.id.clone());
                     snapshot.tasks.push(child);
                 }
                 snapshot.splits[index].approved = true;
                 let parent = snapshot.tasks.iter_mut().find(|t| t.id == task_id).unwrap();
                 parent.status = TaskStatus::Reviewing;
-                append_event(parent, "user", "Approved subtask plans. Children use isolated worktrees; integration stays in this parent worktree.");
+                append_event(
+                    parent,
+                    "user",
+                    "Approved subtask plans. Children use isolated worktrees; integration stays in this parent worktree.",
+                );
                 save(db, &snapshot)?;
                 return load(db);
             }
@@ -329,8 +414,24 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             append_event(task, "user", "Approved the plan for a local build.");
         }
         Command::CancelTask { task_id } => {
-            let children: Vec<String> = snapshot.splits.iter().filter(|s| s.parent_id == task_id).flat_map(|s| s.subtasks.iter().filter_map(|p| p.task_id.clone())).collect();
-            for child in snapshot.tasks.iter_mut().filter(|t| children.contains(&t.id) && !terminal(t.status)) { child.status = TaskStatus::Cancelled; append_event(child, "supervisor", "Parent cancelled; child worktree preserved."); }
+            let children: Vec<String> = snapshot
+                .splits
+                .iter()
+                .filter(|s| s.parent_id == task_id)
+                .flat_map(|s| s.subtasks.iter().filter_map(|p| p.task_id.clone()))
+                .collect();
+            for child in snapshot
+                .tasks
+                .iter_mut()
+                .filter(|t| children.contains(&t.id) && !terminal(t.status))
+            {
+                child.status = TaskStatus::Cancelled;
+                append_event(
+                    child,
+                    "supervisor",
+                    "Parent cancelled; child worktree preserved.",
+                );
+            }
             let task = snapshot
                 .tasks
                 .iter_mut()
@@ -359,8 +460,18 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             );
         }
         Command::RetryTask { task_id } => {
-            if snapshot.splits.iter().any(|s| s.subtasks.iter().any(|p| p.task_id.as_deref() == Some(&task_id))) { return Err("Retry the parent ticket to propose a fresh bounded split".into()); }
-            if let Some(split) = snapshot.splits.iter_mut().find(|s| s.parent_id == task_id) { split.approved = false; split.integrated = false; split.subtasks.clear(); }
+            if snapshot.splits.iter().any(|s| {
+                s.subtasks
+                    .iter()
+                    .any(|p| p.task_id.as_deref() == Some(&task_id))
+            }) {
+                return Err("Retry the parent ticket to propose a fresh bounded split".into());
+            }
+            if let Some(split) = snapshot.splits.iter_mut().find(|s| s.parent_id == task_id) {
+                split.approved = false;
+                split.integrated = false;
+                split.subtasks.clear();
+            }
             let task = snapshot
                 .tasks
                 .iter_mut()
@@ -392,7 +503,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             return Err("This command requires the workbench orchestrator".into());
         }
         Command::SetupImport(_) => return Err("Import requires the daemon".into()),
-        Command::SendMessage { .. } | Command::DecideChatTool { .. } | Command::CancelChat { .. } => {
+        Command::SendMessage { .. }
+        | Command::DecideChatTool { .. }
+        | Command::CancelChat { .. } => {
             return Err("Talking to Neko requires the daemon".into());
         }
         Command::AddTicketNote { task_id, text } => {
@@ -421,7 +534,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::DecideMemoryProposal { id, accept } => {
             crate::memory_learning::decide(db, &snapshot, &id, accept)?;
             return load(db);
-        },
+        }
     }
     save(db, &snapshot)?;
     load(db)
@@ -463,7 +576,11 @@ pub fn append_event(task: &mut Task, role: &str, message: &str) {
     // Evict the oldest progress events first. The user's notes are direction
     // for future runs and go only when nothing else is left to evict.
     while task.events.len() > MAX_EVENTS {
-        let index = task.events.iter().position(|e| e.role != NOTE_ROLE).unwrap_or(0);
+        let index = task
+            .events
+            .iter()
+            .position(|e| e.role != NOTE_ROLE)
+            .unwrap_or(0);
         task.events.remove(index);
     }
     task.updated_at_ms = at_ms;
@@ -536,7 +653,25 @@ pub fn create_task(
     Ok(task)
 }
 
-fn canonical_repository(path: &str) -> Result<String, String> {
+/// Validate a workspace path without changing workbench state. Import uses
+/// this to preflight every selected workspace before writing any of them.
+pub fn canonical_workspace_directory(path: &str) -> Result<String, String> {
+    required("Workspace folder", path, 4096)?;
+    let directory = std::path::Path::new(path)
+        .canonicalize()
+        .map_err(|_| "Workspace folder does not exist")?;
+    if !directory.is_dir() {
+        return Err("Workspace folder must be a directory".into());
+    }
+    directory
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "Workspace folder path must be valid UTF-8".into())
+}
+
+/// Code-changing tasks require a Git checkout, even though workspace context
+/// itself may be any existing local folder.
+pub fn canonical_repository(path: &str) -> Result<String, String> {
     required("Repository path", path, 4096)?;
     let path = std::path::Path::new(path)
         .canonicalize()
@@ -611,16 +746,31 @@ fn unique_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Result<HashSet<&'a str>
 fn validate(snapshot: &Snapshot) -> Result<(), String> {
     crate::agent_profiles::validate(snapshot)?;
     crate::scheduled_plans::validate(snapshot)?;
-    if snapshot.splits.len() > snapshot.tasks.len() { return Err("Split history exceeds task history".into()); }
+    if snapshot.splits.len() > snapshot.tasks.len() {
+        return Err("Split history exceeds task history".into());
+    }
     let mut parents = HashSet::new();
     let mut children = HashSet::new();
     for split in &snapshot.splits {
-        if !parents.insert(&split.parent_id) || !snapshot.tasks.iter().any(|t| t.id == split.parent_id) { return Err("Invalid split parent".into()); }
-        if !split.subtasks.is_empty() { crate::decomposition::validate(&split.subtasks)?; }
-        if split.approved && split.subtasks.is_empty() { return Err("Approved split has no subtasks".into()); }
+        if !parents.insert(&split.parent_id)
+            || !snapshot.tasks.iter().any(|t| t.id == split.parent_id)
+        {
+            return Err("Invalid split parent".into());
+        }
+        if !split.subtasks.is_empty() {
+            crate::decomposition::validate(&split.subtasks)?;
+        }
+        if split.approved && split.subtasks.is_empty() {
+            return Err("Approved split has no subtasks".into());
+        }
         for p in &split.subtasks {
-            if let Some(id) = &p.task_id { if !children.insert(id) || !snapshot.tasks.iter().any(|t| &t.id == id) { return Err("Invalid or duplicate subtask claim".into()); } }
-            else if split.approved { return Err("Approved subtask missing its ticket".into()); }
+            if let Some(id) = &p.task_id {
+                if !children.insert(id) || !snapshot.tasks.iter().any(|t| &t.id == id) {
+                    return Err("Invalid or duplicate subtask claim".into());
+                }
+            } else if split.approved {
+                return Err("Approved subtask missing its ticket".into());
+            }
         }
     }
     crate::mcp_host::store::validate(snapshot)?;
@@ -734,13 +884,33 @@ mod tests {
         let ticket = task(&db, &ws);
         let mut state = load(&db).unwrap();
         state.tasks[0].status = TaskStatus::AwaitingApproval;
-        state.tasks[0].events = (0..MAX_EVENTS).map(|i| TaskEvent { at_ms: i as i64, role: NOTE_ROLE.into(), message: format!("Retained note {i}") }).collect();
+        state.tasks[0].events = (0..MAX_EVENTS)
+            .map(|i| TaskEvent {
+                at_ms: i as i64,
+                role: NOTE_ROLE.into(),
+                message: format!("Retained note {i}"),
+            })
+            .collect();
         save(&db, &state).unwrap();
-        let approved = apply(&db, Command::ApproveTask { task_id: ticket.id.clone() }).unwrap();
-        let decision = approved.memory.iter().find(|m| m.source.contains(":approval:")).unwrap();
+        let approved = apply(
+            &db,
+            Command::ApproveTask {
+                task_id: ticket.id.clone(),
+            },
+        )
+        .unwrap();
+        let decision = approved
+            .memory
+            .iter()
+            .find(|m| m.source.contains(":approval:"))
+            .unwrap();
         assert_eq!(decision.text, "Approved the plan for a local build.");
         let cancelled = apply(&db, Command::CancelTask { task_id: ticket.id }).unwrap();
-        let decision = cancelled.memory.iter().find(|m| m.source.contains(":cancellation:")).unwrap();
+        let decision = cancelled
+            .memory
+            .iter()
+            .find(|m| m.source.contains(":cancellation:"))
+            .unwrap();
         assert_eq!(decision.text, "Cancelled this task.");
     }
     #[test]
@@ -749,7 +919,12 @@ mod tests {
         for _ in 0..32 {
             let id = crate::neko_chat::begin_turn(&db, "Evidence").unwrap();
             crate::neko_chat::finish_turn(&db, &id, "Answer", vec![], false).unwrap();
-            crate::memory_learning::enqueue(&db, &load(&db).unwrap(), crate::memory_learning::Source::Chat(id)).unwrap();
+            crate::memory_learning::enqueue(
+                &db,
+                &load(&db).unwrap(),
+                crate::memory_learning::Source::Chat(id),
+            )
+            .unwrap();
         }
         let repo = repository();
         let ws = workspace(&db, repo.path());
@@ -759,7 +934,12 @@ mod tests {
         save(&db, &state).unwrap();
         let state = apply(&db, Command::CompleteTask { task_id: ticket.id }).unwrap();
         assert_eq!(state.tasks[0].status, TaskStatus::Completed);
-        assert!(state.tasks[0].events.iter().any(|e| e.role == "learning" && e.message.contains("queue is full")));
+        assert!(
+            state.tasks[0]
+                .events
+                .iter()
+                .any(|e| e.role == "learning" && e.message.contains("queue is full"))
+        );
     }
     #[test]
     fn successful_ticket_steering_is_a_durable_exact_decision() {
@@ -767,10 +947,35 @@ mod tests {
         let repo = repository();
         let ws = workspace(&db, repo.path());
         let task = task(&db, &ws);
-        let noted = apply(&db, Command::AddTicketNote { task_id: task.id.clone(), text: "Use the existing parser".into() }).unwrap();
-        assert!(noted.memory.iter().any(|m| m.kind == neko_protocol::workbench::MemoryKind::Decision && m.text.contains("Use the existing parser") && m.source.contains(&task.id)));
-        let cancelled = apply(&db, Command::CancelTask { task_id: task.id.clone() }).unwrap();
-        assert!(cancelled.memory.iter().any(|m| m.text == "Cancelled this task."));
+        let noted = apply(
+            &db,
+            Command::AddTicketNote {
+                task_id: task.id.clone(),
+                text: "Use the existing parser".into(),
+            },
+        )
+        .unwrap();
+        assert!(
+            noted
+                .memory
+                .iter()
+                .any(|m| m.kind == neko_protocol::workbench::MemoryKind::Decision
+                    && m.text.contains("Use the existing parser")
+                    && m.source.contains(&task.id))
+        );
+        let cancelled = apply(
+            &db,
+            Command::CancelTask {
+                task_id: task.id.clone(),
+            },
+        )
+        .unwrap();
+        assert!(
+            cancelled
+                .memory
+                .iter()
+                .any(|m| m.text == "Cancelled this task.")
+        );
         let count = cancelled.memory.len();
         assert!(apply(&db, Command::CancelTask { task_id: task.id }).is_err());
         assert_eq!(load(&db).unwrap().memory.len(), count);
@@ -782,7 +987,13 @@ mod tests {
     fn migration_never_writes_a_snapshot_that_exceeds_the_read_limit() {
         let db = Db::open_in_memory().unwrap();
         let mut snapshot = Snapshot::default();
-        snapshot.workspaces.push(Workspace { id: "w".into(), name: "W".into(), repository: "/tmp/w".into(), instructions: String::new(), away_enabled: true });
+        snapshot.workspaces.push(Workspace {
+            id: "w".into(),
+            name: "W".into(),
+            repository: "/tmp/w".into(),
+            instructions: String::new(),
+            away_enabled: true,
+        });
         for _ in 0..64 {
             let mut task = create_task("w".into(), None, "Keep".into(), "Keep".into()).unwrap();
             task.status = TaskStatus::Completed;
@@ -801,7 +1012,10 @@ mod tests {
         let raw = serde_json::to_string(&legacy).unwrap();
         assert_eq!(raw.len(), target);
         db.set_setting(SETTING, &raw).unwrap();
-        assert!(load(&db).is_err(), "migration must reject growth before committing");
+        assert!(
+            load(&db).is_err(),
+            "migration must reject growth before committing"
+        );
         assert_eq!(db.get_setting(SETTING).unwrap().unwrap(), raw);
     }
 
@@ -809,14 +1023,50 @@ mod tests {
     fn durable_legacy_migration_preserves_task_artifacts_and_is_idempotent() {
         let db = Db::open_in_memory().unwrap();
         let mut snapshot = Snapshot::default();
-        snapshot.workspaces.push(Workspace { id: "w".into(), name: "W".into(), repository: "/tmp/w".into(), instructions: String::new(), away_enabled: true });
-        let mut task = create_task("w".into(), None, "Keep task".into(), "Keep goal".into()).unwrap();
-        task.plan = "Keep plan".into(); task.result = "Keep result".into(); task.worktree = Some("/tmp/keep-worktree".into()); task.status = TaskStatus::Completed;
+        snapshot.workspaces.push(Workspace {
+            id: "w".into(),
+            name: "W".into(),
+            repository: "/tmp/w".into(),
+            instructions: String::new(),
+            away_enabled: true,
+        });
+        let mut task =
+            create_task("w".into(), None, "Keep task".into(), "Keep goal".into()).unwrap();
+        task.plan = "Keep plan".into();
+        task.result = "Keep result".into();
+        task.worktree = Some("/tmp/keep-worktree".into());
+        task.status = TaskStatus::Completed;
         snapshot.tasks.push(task.clone());
-        snapshot.connections.push(LinearConnection { id: "old".into(), workspace_id: "w".into(), name: "Old".into(), organization_id: "org".into(), viewer_id: "viewer".into(), team_ids: vec!["team".into()], project_ids: vec![], enabled: true, last_sync_ms: Some(1), error: None, intake_notice: None });
-        snapshot.issues.push(Issue { id: "i".into(), connection_id: "old".into(), workspace_id: "w".into(), external_id: "external".into(), identifier: "OLD-1".into(), title: "Evidence".into(), description: "Preserve source".into(), url: "https://example.com/issue".into(), priority: 1, updated_at: "rev".into(), assigned: true });
-        let mut legacy = serde_json::to_value(&snapshot).unwrap(); legacy.as_object_mut().unwrap().remove("mcp");
-        db.set_setting(SETTING, &serde_json::to_string(&legacy).unwrap()).unwrap();
+        snapshot.connections.push(LinearConnection {
+            id: "old".into(),
+            workspace_id: "w".into(),
+            name: "Old".into(),
+            organization_id: "org".into(),
+            viewer_id: "viewer".into(),
+            team_ids: vec!["team".into()],
+            project_ids: vec![],
+            enabled: true,
+            last_sync_ms: Some(1),
+            error: None,
+            intake_notice: None,
+        });
+        snapshot.issues.push(Issue {
+            id: "i".into(),
+            connection_id: "old".into(),
+            workspace_id: "w".into(),
+            external_id: "external".into(),
+            identifier: "OLD-1".into(),
+            title: "Evidence".into(),
+            description: "Preserve source".into(),
+            url: "https://example.com/issue".into(),
+            priority: 1,
+            updated_at: "rev".into(),
+            assigned: true,
+        });
+        let mut legacy = serde_json::to_value(&snapshot).unwrap();
+        legacy.as_object_mut().unwrap().remove("mcp");
+        db.set_setting(SETTING, &serde_json::to_string(&legacy).unwrap())
+            .unwrap();
         let migrated = load(&db).unwrap();
         assert_eq!(migrated.tasks[0], task);
         assert_eq!(migrated.issues[0].description, "Preserve source");
@@ -825,8 +1075,10 @@ mod tests {
         assert_eq!(migrated.connections[0].id, "old"); // original Keychain identity preserved
         assert!(!migrated.workspaces[0].away_enabled);
         assert_eq!(load(&db).unwrap(), migrated);
-        let mut future = migrated; future.mcp.version = 999;
-        let raw = serde_json::to_string(&future).unwrap(); db.set_setting(SETTING, &raw).unwrap();
+        let mut future = migrated;
+        future.mcp.version = 999;
+        let raw = serde_json::to_string(&future).unwrap();
+        db.set_setting(SETTING, &raw).unwrap();
         assert!(load(&db).is_err());
         assert_eq!(db.get_setting(SETTING).unwrap().unwrap(), raw);
     }
@@ -1223,13 +1475,13 @@ mod tests {
     }
 
     #[test]
-    fn invalid_repositories_and_empty_names_are_rejected() {
+    fn missing_folders_and_empty_names_are_rejected() {
         let db = Db::open_in_memory().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let invalid = Workspace {
             id: String::new(),
             name: "Project".into(),
-            repository: dir.path().to_string_lossy().into(),
+            repository: dir.path().join("missing").to_string_lossy().into(),
             instructions: String::new(),
             away_enabled: false,
         };
@@ -1268,7 +1520,7 @@ mod tests {
         let ws = workspace(&db, &subdir);
         assert_eq!(
             std::path::Path::new(&ws.repository),
-            repo.path().canonicalize().unwrap()
+            subdir.canonicalize().unwrap()
         );
         task(&db, &ws);
         let other = repository();
@@ -1285,6 +1537,56 @@ mod tests {
             .is_err()
         );
         assert_eq!(load(&db).unwrap().workspaces[0], ws);
+    }
+
+    #[test]
+    fn folder_workspace_saves_without_git_but_cannot_start_a_code_task() {
+        let db = Db::open_in_memory().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let saved = apply(
+            &db,
+            Command::SaveWorkspace {
+                workspace: Workspace {
+                    id: String::new(),
+                    name: "Notes".into(),
+                    repository: folder.path().to_string_lossy().into(),
+                    instructions: String::new(),
+                    away_enabled: false,
+                },
+            },
+        )
+        .unwrap();
+        let workspace = &saved.workspaces[0];
+        assert_eq!(
+            workspace.repository,
+            folder.path().canonicalize().unwrap().to_string_lossy()
+        );
+        assert_eq!(
+            apply(
+                &db,
+                Command::CreateTask {
+                    workspace_id: workspace.id.clone(),
+                    title: "Fix".into(),
+                    goal: "Fix".into(),
+                },
+            )
+            .unwrap_err(),
+            "Code tasks require a Git repository",
+        );
+        assert!(load(&db).unwrap().tasks.is_empty());
+    }
+
+    #[test]
+    fn non_git_workspace_cannot_queue_an_issue_code_task() {
+        let db = Db::open_in_memory().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let workspace = workspace(&db, folder.path());
+        let issue = issue(&db, &workspace);
+        assert_eq!(
+            apply(&db, Command::PlanIssue { issue_id: issue.id }).unwrap_err(),
+            "Code tasks require a Git repository",
+        );
+        assert!(load(&db).unwrap().tasks.is_empty());
     }
 
     #[test]

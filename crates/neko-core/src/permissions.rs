@@ -116,7 +116,11 @@ pub fn inbox(client: &McpClient) -> Inbox {
 /// With `neko-daemon`'s poller running the cache is warm essentially always,
 /// so the deferred path is really only the cold-start case.
 pub fn is_warm() -> bool {
-    CACHE.lock().unwrap().as_ref().is_some_and(|(at, _)| at.elapsed() < CACHE_TTL)
+    CACHE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|(at, _)| at.elapsed() < CACHE_TTL)
 }
 
 /// How many agents are waiting, without fetching. `None` when nothing is
@@ -178,8 +182,11 @@ pub fn parse_inbox(value: &Value) -> Inbox {
             let request = entry.get("request")?;
             let agent_id = entry.get("agentId")?.as_str()?.to_string();
             let request_id = request.get("id")?.as_str()?.to_string();
-            let kind =
-                request.get("kind").and_then(Value::as_str).unwrap_or("other").to_string();
+            let kind = request
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("other")
+                .to_string();
             let title = ["title", "name"]
                 .iter()
                 .find_map(|key| request.get(*key)?.as_str().filter(|s| !s.is_empty()))
@@ -198,7 +205,11 @@ pub fn parse_inbox(value: &Value) -> Inbox {
             })
         })
         .collect();
-    if pending.is_empty() { Inbox::Clear } else { Inbox::Pending(pending) }
+    if pending.is_empty() {
+        Inbox::Clear
+    } else {
+        Inbox::Pending(pending)
+    }
 }
 
 /// `"<agentId>:<requestId>"` — the row's own id, and what `activate` takes
@@ -294,8 +305,12 @@ impl Provider for PermissionsProvider {
     }
 
     fn search(&self, query: &str, _now_unix_ms: i64) -> Vec<Candidate> {
-        let Some(client) = self.client() else { return Vec::new() };
-        let Inbox::Pending(pending) = inbox(&client) else { return Vec::new() };
+        let Some(client) = self.client() else {
+            return Vec::new();
+        };
+        let Inbox::Pending(pending) = inbox(&client) else {
+            return Vec::new();
+        };
 
         let trimmed = query.trim();
         pending
@@ -308,11 +323,17 @@ impl Provider for PermissionsProvider {
                 let score = if trimmed.is_empty() {
                     ATTENTION_BONUS
                 } else {
-                    let best = [Some(headline.clone()), p.detail.clone(), Some("needs you".into())]
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|hay| crate::search::fuzzy_score(trimmed, &hay))
-                        .fold(None, |best: Option<f32>, s| Some(best.map_or(s, |b| b.max(s))))?;
+                    let best = [
+                        Some(headline.clone()),
+                        p.detail.clone(),
+                        Some("needs you".into()),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|hay| crate::search::fuzzy_score(trimmed, &hay))
+                    .fold(None, |best: Option<f32>, s| {
+                        Some(best.map_or(s, |b| b.max(s)))
+                    })?;
                     best + ATTENTION_BONUS
                 };
                 Some(Candidate {
@@ -420,7 +441,9 @@ mod tests {
 
     #[test]
     fn a_pending_request_becomes_a_row_a_person_can_read() {
-        let Inbox::Pending(pending) = parse_inbox(&fixture()) else { panic!("expected pending") };
+        let Inbox::Pending(pending) = parse_inbox(&fixture()) else {
+            panic!("expected pending")
+        };
         assert_eq!(pending.len(), 2);
         // "Bash" alone is a tool name, not a sentence.
         assert_eq!(pending[0].headline(), "Run Bash");
@@ -443,7 +466,9 @@ mod tests {
         let value = json!({"permissions": [
             {"agentId": "a", "status": "waiting", "request": {"id": "r", "kind": "question"}}
         ]});
-        let Inbox::Pending(pending) = parse_inbox(&value) else { panic!("expected pending") };
+        let Inbox::Pending(pending) = parse_inbox(&value) else {
+            panic!("expected pending")
+        };
         assert_eq!(pending[0].title, "question");
         assert!(pending[0].detail.is_none());
     }
@@ -478,6 +503,9 @@ mod tests {
 
     #[test]
     fn a_second_colon_belongs_to_the_request_not_the_agent() {
-        assert_eq!(split_row_id("agent:req:extra"), Some(("agent", "req:extra")));
+        assert_eq!(
+            split_row_id("agent:req:extra"),
+            Some(("agent", "req:extra"))
+        );
     }
 }

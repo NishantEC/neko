@@ -142,7 +142,10 @@ pub struct PaseoCli {
 
 impl Default for PaseoCli {
     fn default() -> Self {
-        Self { executable: resolve_executable(), timeout: CONFIRM_TIMEOUT }
+        Self {
+            executable: resolve_executable(),
+            timeout: CONFIRM_TIMEOUT,
+        }
     }
 }
 
@@ -299,7 +302,8 @@ impl AgentSpawner for PaseoCli {
     /// the agent had started.
     fn spawn(&self, cwd: &Path, prompt: &str, provider: &str) -> Result<SpawnedAgent, String> {
         let executable = self.executable.clone().ok_or_else(|| {
-            "the paseo CLI was not found (looked in ~/.local/bin and /Applications/Paseo.app)".to_string()
+            "the paseo CLI was not found (looked in ~/.local/bin and /Applications/Paseo.app)"
+                .to_string()
         })?;
 
         let child = paseo_command(&executable, cwd, prompt, provider)
@@ -318,7 +322,9 @@ impl AgentSpawner for PaseoCli {
         match rx.recv_timeout(self.timeout) {
             Ok(Ok(output)) if output.status.success() => {
                 let _ = waiter.join();
-                Ok(SpawnedAgent { id: parse_agent_id(&String::from_utf8_lossy(&output.stdout)) })
+                Ok(SpawnedAgent {
+                    id: parse_agent_id(&String::from_utf8_lossy(&output.stdout)),
+                })
             }
             Ok(Ok(output)) => {
                 let _ = waiter.join();
@@ -380,7 +386,12 @@ fn json_error_message(stdout: &str) -> Option<String> {
 
 /// Whatever a stream said, as one line — `None` if it said nothing.
 fn flatten(raw: &str) -> Option<String> {
-    let joined = raw.lines().map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>().join(" ");
+    let joined = raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
     (!joined.is_empty()).then_some(joined)
 }
 
@@ -394,7 +405,11 @@ fn parse_agent_id(stdout: &str) -> Option<String> {
         if let Some(id) = value.get(key).and_then(|v| v.as_str()) {
             return Some(id.to_string());
         }
-        if let Some(id) = value.get("agent").and_then(|a| a.get(key)).and_then(|v| v.as_str()) {
+        if let Some(id) = value
+            .get("agent")
+            .and_then(|a| a.get(key))
+            .and_then(|v| v.as_str())
+        {
             return Some(id.to_string());
         }
     }
@@ -462,10 +477,18 @@ fn read_projects(path: &Path) -> Vec<Project> {
     let mut live: Vec<&PaseoProject> = entries
         .iter()
         .filter(|p| p.archived_at.is_none())
-        .filter(|p| p.root_path.as_deref().map(str::trim).is_some_and(|root| !root.is_empty()))
+        .filter(|p| {
+            p.root_path
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|root| !root.is_empty())
+        })
         .collect();
     live.sort_by(|a, b| {
-        b.updated_at.as_deref().unwrap_or("").cmp(a.updated_at.as_deref().unwrap_or(""))
+        b.updated_at
+            .as_deref()
+            .unwrap_or("")
+            .cmp(a.updated_at.as_deref().unwrap_or(""))
     });
 
     let mut seen: Vec<PathBuf> = Vec::new();
@@ -483,8 +506,10 @@ fn read_projects(path: &Path) -> Vec<Project> {
             .filter(|name| !name.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| {
-                root.file_name()
-                    .map_or_else(|| root.to_string_lossy().to_string(), |n| n.to_string_lossy().to_string())
+                root.file_name().map_or_else(
+                    || root.to_string_lossy().to_string(),
+                    |n| n.to_string_lossy().to_string(),
+                )
             });
         projects.push(Project { root, name });
     }
@@ -548,7 +573,11 @@ fn provider_actions(current: Option<&str>) -> Vec<ItemAction> {
                 Some(left) => format!("Start with {} — {}% left", vendor.name(), left.floor()),
                 None => format!("Start with {}", vendor.name()),
             };
-            ItemAction { id: format!("provider:{}", vendor.id()), label, destructive: false }
+            ItemAction {
+                id: format!("provider:{}", vendor.id()),
+                label,
+                destructive: false,
+            }
         })
         .collect()
 }
@@ -597,7 +626,11 @@ impl NewAgentProvider {
         agents_root: PathBuf,
         spawner: Arc<dyn AgentSpawner>,
     ) -> Self {
-        Self { projects_file: Some(projects_file), agents_root: Some(agents_root), spawner }
+        Self {
+            projects_file: Some(projects_file),
+            agents_root: Some(agents_root),
+            spawner,
+        }
     }
 
     /// The tool each project's next agent would be started with, resolved once
@@ -605,7 +638,10 @@ impl NewAgentProvider {
     /// the same read `agents::AgentsProvider` already makes on every root-list
     /// search.
     fn usage(&self) -> Vec<agents::ProviderUse> {
-        self.agents_root.as_deref().map(agents::provider_usage).unwrap_or_default()
+        self.agents_root
+            .as_deref()
+            .map(agents::provider_usage)
+            .unwrap_or_default()
     }
 }
 
@@ -684,7 +720,9 @@ impl Provider for NewAgentProvider {
     fn activate_with_query(&self, id: &str, query: &str) -> Result<(), ProviderError> {
         let prompt = query.trim();
         if prompt.is_empty() {
-            return Err(ProviderError("type the task for the agent first".to_string()));
+            return Err(ProviderError(
+                "type the task for the agent first".to_string(),
+            ));
         }
         let cwd = PathBuf::from(id);
         if !cwd.is_dir() {
@@ -715,11 +753,15 @@ impl Provider for NewAgentProvider {
         query: &str,
     ) -> Result<(), ProviderError> {
         let Some(provider) = action_id.strip_prefix("provider:") else {
-            return Err(ProviderError(format!("no action '{action_id}' on this row")));
+            return Err(ProviderError(format!(
+                "no action '{action_id}' on this row"
+            )));
         };
         let prompt = query.trim();
         if prompt.is_empty() {
-            return Err(ProviderError("type the task for the agent first".to_string()));
+            return Err(ProviderError(
+                "type the task for the agent first".to_string(),
+            ));
         }
         let cwd = PathBuf::from(id);
         if !cwd.is_dir() {
@@ -735,7 +777,10 @@ impl Provider for NewAgentProvider {
 
 impl NewAgentProvider {
     fn spawn_with(&self, cwd: &Path, prompt: &str, provider: &str) -> Result<(), ProviderError> {
-        self.spawner.spawn(cwd, prompt, provider).map(|_| ()).map_err(ProviderError)
+        self.spawner
+            .spawn(cwd, prompt, provider)
+            .map(|_| ())
+            .map_err(ProviderError)
     }
 }
 
@@ -800,13 +845,19 @@ mod tests {
     fn a_machine_with_no_history_still_gets_every_choice() {
         // Enter refuses without history because it has to infer a tool. This
         // path was told which one, so it is the way out of that state.
-        assert_eq!(provider_actions(None).len(), crate::usage::Vendor::ALL.len());
+        assert_eq!(
+            provider_actions(None).len(),
+            crate::usage::Vendor::ALL.len()
+        );
     }
 
     #[test]
     fn a_switch_action_names_the_vendor_it_switches_to() {
         for action in provider_actions(Some("claude")) {
-            let vendor = action.id.strip_prefix("provider:").expect("a provider action");
+            let vendor = action
+                .id
+                .strip_prefix("provider:")
+                .expect("a provider action");
             assert!(
                 action.label.to_lowercase().contains(vendor),
                 "{:?} does not name {vendor}",
@@ -831,7 +882,10 @@ mod tests {
 
     impl RecordingSpawner {
         fn failing(message: &str) -> Self {
-            Self { calls: Mutex::new(Vec::new()), fail_with: Some(message.to_string()) }
+            Self {
+                calls: Mutex::new(Vec::new()),
+                fail_with: Some(message.to_string()),
+            }
         }
         fn calls(&self) -> Vec<(PathBuf, String, String)> {
             self.calls.lock().unwrap().clone()
@@ -840,10 +894,16 @@ mod tests {
 
     impl AgentSpawner for RecordingSpawner {
         fn spawn(&self, cwd: &Path, prompt: &str, provider: &str) -> Result<SpawnedAgent, String> {
-            self.calls.lock().unwrap().push((cwd.to_path_buf(), prompt.to_string(), provider.to_string()));
+            self.calls.lock().unwrap().push((
+                cwd.to_path_buf(),
+                prompt.to_string(),
+                provider.to_string(),
+            ));
             match &self.fail_with {
                 Some(message) => Err(message.clone()),
-                None => Ok(SpawnedAgent { id: Some("agent-1".to_string()) }),
+                None => Ok(SpawnedAgent {
+                    id: Some("agent-1".to_string()),
+                }),
             }
         }
     }
@@ -922,9 +982,31 @@ mod tests {
         // Deliberately every one of these is `closed`: on the real machine 172
         // of 227 agent documents are, and a finished agent is the best evidence
         // of which tool is actually used somewhere.
-        write_agent(&agents_root, "neko", "a1", "codex/gpt-5.4", &neko, "2026-08-22T09:00:00.000Z");
-        write_agent(&agents_root, "hush", "a2", "claude", &notes_app, "2026-08-10T09:00:00.000Z");
-        Fixture { _dir: dir, projects, agents_root, neko, notes_app, fresh, gone }
+        write_agent(
+            &agents_root,
+            "neko",
+            "a1",
+            "codex/gpt-5.4",
+            &neko,
+            "2026-08-22T09:00:00.000Z",
+        );
+        write_agent(
+            &agents_root,
+            "hush",
+            "a2",
+            "claude",
+            &notes_app,
+            "2026-08-10T09:00:00.000Z",
+        );
+        Fixture {
+            _dir: dir,
+            projects,
+            agents_root,
+            neko,
+            notes_app,
+            fresh,
+            gone,
+        }
     }
 
     fn provider_for_fixture(fixture: &Fixture, spawner: Arc<RecordingSpawner>) -> NewAgentProvider {
@@ -940,11 +1022,7 @@ mod tests {
         let fixture = fixture();
         let (provider, spawner) = recording(&fixture);
         let err = provider
-            .perform_action_with_query(
-                &fixture.neko.to_string_lossy(),
-                "archive",
-                "do the thing",
-            )
+            .perform_action_with_query(&fixture.neko.to_string_lossy(), "archive", "do the thing")
             .expect_err("not a provider action");
         assert!(err.0.contains("no action"), "{}", err.0);
         assert!(spawner.calls().is_empty(), "and nothing was started");
@@ -970,7 +1048,10 @@ mod tests {
             ],
             "recency order, and nothing else"
         );
-        assert!(found[0].score > found[1].score, "the daemon sorts a scoped search by score");
+        assert!(
+            found[0].score > found[1].score,
+            "the daemon sorts a scoped search by score"
+        );
     }
 
     #[test]
@@ -992,9 +1073,16 @@ mod tests {
         // prompts return the identical rows, with identical ids.
         let fixture = fixture();
         let (provider, _) = recording(&fixture);
-        let one: Vec<String> = provider.search("neko", 0).iter().map(|c| c.item.id.clone()).collect();
-        let two: Vec<String> =
-            provider.search("zzz nothing matches this", 0).iter().map(|c| c.item.id.clone()).collect();
+        let one: Vec<String> = provider
+            .search("neko", 0)
+            .iter()
+            .map(|c| c.item.id.clone())
+            .collect();
+        let two: Vec<String> = provider
+            .search("zzz nothing matches this", 0)
+            .iter()
+            .map(|c| c.item.id.clone())
+            .collect();
         assert_eq!(one, two);
         assert_eq!(one.len(), 3);
     }
@@ -1008,7 +1096,11 @@ mod tests {
         let fixture = fixture();
         let (provider, _) = recording(&fixture);
         let ids = |query: &str| -> Vec<String> {
-            provider.search(query, 0).iter().map(|c| c.item.id.clone()).collect()
+            provider
+                .search(query, 0)
+                .iter()
+                .map(|c| c.item.id.clone())
+                .collect()
         };
         assert_eq!(ids("f"), ids("fi"));
         assert_eq!(ids("fi"), ids("fix the parser"));
@@ -1018,9 +1110,18 @@ mod tests {
     fn a_row_says_to_type_the_task_first_until_something_is_typed() {
         let fixture = fixture();
         let (provider, _) = recording(&fixture);
-        assert_eq!(provider.search("", 0)[0].item.action_label, NEEDS_PROMPT_LABEL);
-        assert_eq!(provider.search("   ", 0)[0].item.action_label, NEEDS_PROMPT_LABEL);
-        assert_eq!(provider.search("do the thing", 0)[0].item.action_label, START_LABEL);
+        assert_eq!(
+            provider.search("", 0)[0].item.action_label,
+            NEEDS_PROMPT_LABEL
+        );
+        assert_eq!(
+            provider.search("   ", 0)[0].item.action_label,
+            NEEDS_PROMPT_LABEL
+        );
+        assert_eq!(
+            provider.search("do the thing", 0)[0].item.action_label,
+            START_LABEL
+        );
     }
 
     #[test]
@@ -1032,10 +1133,35 @@ mod tests {
         let fixture = fixture();
         let (provider, _) = recording(&fixture);
         let found = provider.search("task", 0);
-        assert_eq!(found[0].item.subtitle.as_deref().unwrap().split(" · ").next(), Some("codex"));
-        assert_eq!(found[1].item.subtitle.as_deref().unwrap().split(" · ").next(), Some("claude"));
+        assert_eq!(
+            found[0]
+                .item
+                .subtitle
+                .as_deref()
+                .unwrap()
+                .split(" · ")
+                .next(),
+            Some("codex")
+        );
+        assert_eq!(
+            found[1]
+                .item
+                .subtitle
+                .as_deref()
+                .unwrap()
+                .split(" · ")
+                .next(),
+            Some("claude")
+        );
         // …and the directory is still stated in full, never implied.
-        assert!(found[1].item.subtitle.as_deref().unwrap().ends_with(&fixture.notes_app.to_string_lossy().to_string()));
+        assert!(
+            found[1]
+                .item
+                .subtitle
+                .as_deref()
+                .unwrap()
+                .ends_with(&fixture.notes_app.to_string_lossy().to_string())
+        );
     }
 
     #[test]
@@ -1047,9 +1173,14 @@ mod tests {
             .into_iter()
             .find(|c| c.item.id == fixture.fresh.to_string_lossy())
             .expect("a project with no agents yet is still somewhere to start one");
-        assert_eq!(fresh.item.subtitle.as_deref().unwrap().split(" · ").next(), Some("codex"));
+        assert_eq!(
+            fresh.item.subtitle.as_deref().unwrap().split(" · ").next(),
+            Some("codex")
+        );
 
-        provider.activate_with_query(&fixture.fresh.to_string_lossy(), "task").unwrap();
+        provider
+            .activate_with_query(&fixture.fresh.to_string_lossy(), "task")
+            .unwrap();
         assert_eq!(spawner.calls()[0].2, "codex");
     }
 
@@ -1070,11 +1201,22 @@ mod tests {
 
         let row = &provider.search("task", 0)[0];
         assert_eq!(row.item.action_label, NEEDS_HISTORY_LABEL);
-        assert!(!row.item.subtitle.as_deref().unwrap().contains(" · "), "no tool to name");
+        assert!(
+            !row.item.subtitle.as_deref().unwrap().contains(" · "),
+            "no tool to name"
+        );
 
-        let refused = provider.activate_with_query(&fixture.neko.to_string_lossy(), "task").unwrap_err();
-        assert!(refused.to_string().contains("no agent provider"), "got {refused}");
-        assert!(spawner.calls().is_empty(), "nothing may reach the CLI without a provider to pass it");
+        let refused = provider
+            .activate_with_query(&fixture.neko.to_string_lossy(), "task")
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("no agent provider"),
+            "got {refused}"
+        );
+        assert!(
+            spawner.calls().is_empty(),
+            "nothing may reach the CLI without a provider to pass it"
+        );
     }
 
     #[test]
@@ -1083,10 +1225,16 @@ mod tests {
         let (provider, spawner) = recording(&fixture);
         // Deliberately the *second* row: a bug that always used the first
         // project would pass against the first one.
-        provider.activate_with_query(&fixture.notes_app.to_string_lossy(), "  fix the parser  ").unwrap();
+        provider
+            .activate_with_query(&fixture.notes_app.to_string_lossy(), "  fix the parser  ")
+            .unwrap();
         assert_eq!(
             spawner.calls(),
-            vec![(fixture.notes_app.clone(), "fix the parser".to_string(), "claude".to_string())]
+            vec![(
+                fixture.notes_app.clone(),
+                "fix the parser".to_string(),
+                "claude".to_string()
+            )]
         );
     }
 
@@ -1096,7 +1244,10 @@ mod tests {
         let (provider, spawner) = recording(&fixture);
         for prompt in ["", "   ", "\n\t"] {
             let refused = provider.activate_with_query(&fixture.neko.to_string_lossy(), prompt);
-            assert!(refused.is_err(), "prompt {prompt:?} must not start an agent");
+            assert!(
+                refused.is_err(),
+                "prompt {prompt:?} must not start an agent"
+            );
         }
         assert!(spawner.calls().is_empty(), "nothing may reach the spawner");
     }
@@ -1105,7 +1256,9 @@ mod tests {
     fn a_directory_that_disappeared_between_the_search_and_the_enter_is_refused() {
         let fixture = fixture();
         let (provider, spawner) = recording(&fixture);
-        let refused = provider.activate_with_query(&fixture.gone.to_string_lossy(), "task").unwrap_err();
+        let refused = provider
+            .activate_with_query(&fixture.gone.to_string_lossy(), "task")
+            .unwrap_err();
         assert!(refused.to_string().contains("no longer a folder"));
         assert!(spawner.calls().is_empty());
     }
@@ -1115,9 +1268,13 @@ mod tests {
         let fixture = fixture();
         let provider = provider_for_fixture(
             &fixture,
-            Arc::new(RecordingSpawner::failing("paseo run failed: no such workspace")),
+            Arc::new(RecordingSpawner::failing(
+                "paseo run failed: no such workspace",
+            )),
         );
-        let error = provider.activate_with_query(&fixture.neko.to_string_lossy(), "task").unwrap_err();
+        let error = provider
+            .activate_with_query(&fixture.neko.to_string_lossy(), "task")
+            .unwrap_err();
         assert_eq!(error.to_string(), "paseo run failed: no such workspace");
     }
 
@@ -1157,7 +1314,10 @@ mod tests {
         let file = fixture._dir.path().join("unnamed.json");
         std::fs::write(
             &file,
-            format!(r#"[{{"rootPath":"{}","updatedAt":"2026-01-01T00:00:00.000Z"}}]"#, root.display()),
+            format!(
+                r#"[{{"rootPath":"{}","updatedAt":"2026-01-01T00:00:00.000Z"}}]"#,
+                root.display()
+            ),
         )
         .unwrap();
         let provider = NewAgentProvider::with_sources_and_spawner(
@@ -1197,23 +1357,40 @@ mod tests {
         // the agent in the *calling* agent's workspace. `Command::get_envs`
         // reports a removal as `(key, None)`, which is exactly what must be
         // true of both scoping variables.
-        let command = paseo_command(Path::new("/bin/paseo"), Path::new("/tmp/project"), "task", "codex");
+        let command = paseo_command(
+            Path::new("/bin/paseo"),
+            Path::new("/tmp/project"),
+            "task",
+            "codex",
+        );
         let removed: Vec<String> = command
             .get_envs()
             .filter(|(_, value)| value.is_none())
             .map(|(key, _)| key.to_string_lossy().to_string())
             .collect();
         for scoping in AGENT_SCOPING_ENV {
-            assert!(removed.contains(&scoping.to_string()), "{scoping} must not reach the CLI, got {removed:?}");
+            assert!(
+                removed.contains(&scoping.to_string()),
+                "{scoping} must not reach the CLI, got {removed:?}"
+            );
         }
         assert_eq!(command.get_current_dir(), Some(Path::new("/tmp/project")));
     }
 
     #[test]
     fn the_agent_id_is_read_from_paseos_own_json_and_a_shape_change_is_not_a_failure() {
-        assert_eq!(parse_agent_id(r#"{"id":"abc-123"}"#), Some("abc-123".to_string()));
-        assert_eq!(parse_agent_id(r#"{"agentId":"abc-123"}"#), Some("abc-123".to_string()));
-        assert_eq!(parse_agent_id(r#"{"agent":{"id":"abc-123"}}"#), Some("abc-123".to_string()));
+        assert_eq!(
+            parse_agent_id(r#"{"id":"abc-123"}"#),
+            Some("abc-123".to_string())
+        );
+        assert_eq!(
+            parse_agent_id(r#"{"agentId":"abc-123"}"#),
+            Some("abc-123".to_string())
+        );
+        assert_eq!(
+            parse_agent_id(r#"{"agent":{"id":"abc-123"}}"#),
+            Some("abc-123".to_string())
+        );
         assert_eq!(parse_agent_id("not json"), None);
         assert_eq!(parse_agent_id(r#"{"created":true}"#), None);
     }
@@ -1228,11 +1405,23 @@ mod tests {
             describe_failure(Some(1), real, ""),
             "paseo run failed: Provider is required — Pass --provider <provider>"
         );
-        assert_eq!(describe_failure(Some(1), "", "boom\n\n"), "paseo run failed: boom");
-        assert_eq!(describe_failure(Some(2), "   ", "   "), "paseo run exited with status 2");
-        assert_eq!(describe_failure(None, "", ""), "paseo run was terminated by a signal");
+        assert_eq!(
+            describe_failure(Some(1), "", "boom\n\n"),
+            "paseo run failed: boom"
+        );
+        assert_eq!(
+            describe_failure(Some(2), "   ", "   "),
+            "paseo run exited with status 2"
+        );
+        assert_eq!(
+            describe_failure(None, "", ""),
+            "paseo run was terminated by a signal"
+        );
         let long = "x".repeat(MAX_ERROR_CHARS * 2);
-        assert!(describe_failure(Some(1), "", &long).chars().count() <= MAX_ERROR_CHARS + "paseo run failed: ".len());
+        assert!(
+            describe_failure(Some(1), "", &long).chars().count()
+                <= MAX_ERROR_CHARS + "paseo run failed: ".len()
+        );
     }
 
     #[test]
@@ -1248,8 +1437,13 @@ mod tests {
     fn a_missing_paseo_executable_is_reported_as_such_rather_than_as_a_generic_failure() {
         // Hermetic: with no executable there is nothing to run, so this
         // exercises the real `spawn` without any process being created.
-        let spawner = PaseoCli { executable: None, timeout: Duration::from_millis(10) };
-        let error = spawner.spawn(Path::new("/tmp"), "task", "codex").unwrap_err();
+        let spawner = PaseoCli {
+            executable: None,
+            timeout: Duration::from_millis(10),
+        };
+        let error = spawner
+            .spawn(Path::new("/tmp"), "task", "codex")
+            .unwrap_err();
         assert!(error.contains("paseo CLI was not found"), "got {error:?}");
     }
 }

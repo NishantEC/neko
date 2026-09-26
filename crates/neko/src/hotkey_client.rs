@@ -81,7 +81,9 @@ pub enum RebindError {
 impl std::fmt::Display for RebindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RebindError::OsRejected(reason) => write!(f, "macOS rejected this combination: {reason}"),
+            RebindError::OsRejected(reason) => {
+                write!(f, "macOS rejected this combination: {reason}")
+            }
             RebindError::Unparseable(reason) => write!(f, "not a valid key combination: {reason}"),
         }
     }

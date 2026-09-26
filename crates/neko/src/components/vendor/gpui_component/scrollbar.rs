@@ -40,8 +40,8 @@ use gpui::{
     App, Axis, BorderStyle, Bounds, ContentMask, CursorStyle, Edges, Element, ElementId,
     GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, IsZero,
     LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window,
-    fill, point, px, relative, size,
+    Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window, fill,
+    point, px, relative, size,
 };
 
 /// The width of the scrollbar (THUMB_ACTIVE_INSET * 2 + THUMB_ACTIVE_WIDTH)
@@ -992,10 +992,16 @@ impl Element for Scrollbar {
 /// The fork has no `Corner`, and this is the whole of what that function did:
 /// a bounds whose *top-right* sits at `corner` starts one width to the left.
 fn bounds_anchored_top_right(corner: Point<Pixels>, size: Size<Pixels>) -> Bounds<Pixels> {
-    Bounds { origin: point(corner.x - size.width, corner.y), size }
+    Bounds {
+        origin: point(corner.x - size.width, corner.y),
+        size,
+    }
 }
 
 /// `Bounds::from_corner_and_size(Corner::BottomLeft, ..)`, written out.
 fn bounds_anchored_bottom_left(corner: Point<Pixels>, size: Size<Pixels>) -> Bounds<Pixels> {
-    Bounds { origin: point(corner.x, corner.y - size.height), size }
+    Bounds {
+        origin: point(corner.x, corner.y - size.height),
+        size,
+    }
 }

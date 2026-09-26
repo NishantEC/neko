@@ -3,9 +3,11 @@ use super::*;
 use crate::text_field::TextField;
 use neko_protocol::{
     mcp_host::{McpCommand, Responsibility},
-    setup_import::ImportCommand,
-    workbench::{ChatRole, Command, Snapshot, Workspace},
+    setup_import::{ImportCandidateKind, ImportCommand},
+    workbench::{ChatRole, Command, Snapshot},
 };
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 pub(super) fn evidence() -> bool {
@@ -27,7 +29,6 @@ pub(super) struct Setup {
     clipboard_ready: bool,
     snapshot: Snapshot,
     workspace: Option<String>,
-    name: Entity<TextField>,
     repository: Entity<TextField>,
     responsibility: Entity<TextField>,
     server_name: Entity<TextField>,
@@ -37,16 +38,30 @@ pub(super) struct Setup {
     server_global: bool,
     server_trust: bool,
     selected_connections: HashSet<String>,
+    global_connection_ids: HashSet<String>,
     selected_repositories: HashSet<String>,
     selected_skills: HashSet<String>,
     selected_workspaces: HashSet<String>,
     selected_schedules: HashSet<String>,
+    import_view: ImportView,
+    import_source_name: String,
+    show_new_workspace: bool,
+    show_other_folders: bool,
     import_discovery_started: bool,
+    advance_after_import: bool,
     credentials: bool,
     trust: bool,
     brief_turn: Option<String>,
 }
 impl Setup {
+    fn item_selected(&self, item: &neko_protocol::setup_import::ImportCandidate) -> bool {
+        match item.kind {
+            ImportCandidateKind::Connection => self.selected_connections.contains(&item.id),
+            ImportCandidateKind::Skill => self.selected_skills.contains(&item.id),
+            ImportCandidateKind::Workspace => self.selected_workspaces.contains(&item.id),
+            ImportCandidateKind::Schedule => self.selected_schedules.contains(&item.id),
+        }
+    }
     fn reset_import_consent(&mut self) {
         self.credentials = false;
         self.trust = false;
@@ -81,8 +96,7 @@ impl Setup {
             notice: None,
             snapshot: Snapshot::default(),
             workspace: None,
-            name: input("Workspace name", cx),
-            repository: input("/Users/you/Projects/repository", cx),
+            repository: input("/Users/you/Projects/folder", cx),
             responsibility: input("What should Neko keep an eye on?", cx),
             server_name: input("Connection name", cx),
             server_target,
@@ -91,16 +105,63 @@ impl Setup {
             server_global: false,
             server_trust: false,
             selected_connections: HashSet::new(),
+            global_connection_ids: HashSet::new(),
             selected_repositories: HashSet::new(),
             selected_skills: HashSet::new(),
             selected_workspaces: HashSet::new(),
             selected_schedules: HashSet::new(),
+            import_view: ImportView::Sources,
+            import_source_name: String::new(),
+            show_new_workspace: false,
+            show_other_folders: false,
             import_discovery_started: false,
+            advance_after_import: false,
             credentials: false,
             trust: false,
             brief_turn: None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ImportCategory {
+    Skills,
+    Connections,
+    Workspaces,
+    Schedules,
+}
+impl ImportCategory {
+    const ALL: [Self; 4] = [
+        Self::Skills,
+        Self::Connections,
+        Self::Workspaces,
+        Self::Schedules,
+    ];
+    fn title(self) -> &'static str {
+        match self {
+            Self::Skills => "Skills",
+            Self::Connections => "MCP connections",
+            Self::Workspaces => "Workspaces",
+            Self::Schedules => "Schedules",
+        }
+    }
+    fn matches(self, kind: &ImportCandidateKind) -> bool {
+        matches!(
+            (self, kind),
+            (Self::Skills, ImportCandidateKind::Skill)
+                | (Self::Connections, ImportCandidateKind::Connection)
+                | (Self::Workspaces, ImportCandidateKind::Workspace)
+                | (Self::Schedules, ImportCandidateKind::Schedule)
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ImportView {
+    Sources,
+    Scanning,
+    Overview,
+    Items(ImportCategory),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,14 +225,100 @@ fn candidate_is_unavailable(
     problem: Option<&str>,
     workspace: Option<&str>,
     workspace_selected: bool,
+    import_globally: bool,
 ) -> bool {
-    if matches!(kind, neko_protocol::setup_import::ImportCandidateKind::Schedule) {
+    if matches!(
+        kind,
+        neko_protocol::setup_import::ImportCandidateKind::Schedule
+    ) {
         return false;
     }
     problem.is_some()
-        || (matches!(kind, neko_protocol::setup_import::ImportCandidateKind::Connection)
-            && workspace.is_some()
-            && !workspace_selected)
+        || (workspace.is_some()
+            && !workspace_selected
+            && match kind {
+                neko_protocol::setup_import::ImportCandidateKind::Connection => !import_globally,
+                neko_protocol::setup_import::ImportCandidateKind::Skill => true,
+                _ => false,
+            })
+}
+
+fn candidate_review_badge(
+    already_in_neko: bool,
+    has_problem: bool,
+    needs_workspace: bool,
+    selected: bool,
+    different_setup: bool,
+) -> &'static str {
+    if already_in_neko {
+        "Already in Neko"
+    } else if has_problem {
+        "Review setup"
+    } else if needs_workspace {
+        "Add workspace first"
+    } else if selected {
+        "Selected"
+    } else if different_setup {
+        "Different setup"
+    } else {
+        "Add"
+    }
+}
+
+fn workspace_review_rows(
+    candidates: &[neko_protocol::setup_import::ImportCandidate],
+    show_other: bool,
+) -> Vec<&neko_protocol::setup_import::ImportCandidate> {
+    let mut rows = candidates
+        .iter()
+        .filter(|item| {
+            item.kind == ImportCandidateKind::Workspace
+                && item.metadata.get("review_group").map(String::as_str) != Some("other")
+        })
+        .collect::<Vec<_>>();
+    if show_other {
+        rows.extend(candidates.iter().filter(|item| {
+            item.kind == ImportCandidateKind::Workspace
+                && item.metadata.get("review_group").map(String::as_str) == Some("other")
+        }));
+    }
+    rows
+}
+
+fn import_candidate_label(kind: &neko_protocol::setup_import::ImportCandidateKind) -> &'static str {
+    match kind {
+        neko_protocol::setup_import::ImportCandidateKind::Connection => "MCP server",
+        neko_protocol::setup_import::ImportCandidateKind::Skill => "Skill",
+        neko_protocol::setup_import::ImportCandidateKind::Workspace => "Workspace",
+        neko_protocol::setup_import::ImportCandidateKind::Schedule => "Schedule",
+    }
+}
+
+#[cfg(test)]
+fn import_source_groups<'a>(
+    candidates: &'a [neko_protocol::setup_import::ImportCandidate],
+) -> BTreeMap<String, Vec<&'a neko_protocol::setup_import::ImportCandidate>> {
+    let mut groups: BTreeMap<String, Vec<_>> = BTreeMap::new();
+    for candidate in candidates {
+        groups
+            .entry(candidate.source.clone())
+            .or_default()
+            .push(candidate);
+    }
+    for entries in groups.values_mut() {
+        entries.sort_by(|left, right| {
+            left.workspace
+                .is_some()
+                .cmp(&right.workspace.is_some())
+                .then_with(|| left.workspace.cmp(&right.workspace))
+                .then_with(|| {
+                    import_candidate_label(&left.kind).cmp(import_candidate_label(&right.kind))
+                })
+                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+    }
+    groups
 }
 
 fn workspace_scope_selected(
@@ -198,6 +345,21 @@ fn candidate_has_credentials(metadata: &std::collections::BTreeMap<String, Strin
         .is_some_and(|value| value == "true")
 }
 
+#[derive(Default)]
+struct ImportSelection {
+    connections: HashSet<String>,
+    skills: HashSet<String>,
+    workspaces: HashSet<String>,
+    schedules: HashSet<String>,
+}
+
+/// Import is opt-in at the individual item level.
+fn default_import_selection(
+    _preview: &neko_protocol::setup_import::ImportPreview,
+) -> ImportSelection {
+    ImportSelection::default()
+}
+
 fn recording_after_navigation(step: SetupStep, recording: RecordingState) -> RecordingState {
     if step == SetupStep::Mac {
         recording
@@ -208,9 +370,28 @@ fn recording_after_navigation(step: SetupStep, recording: RecordingState) -> Rec
 
 impl OnboardingRoot {
     fn setup_discover_import(&mut self, cx: &mut Context<Self>, force: bool) {
-        if !begin_import_discovery(self.setup.busy, &mut self.setup.import_discovery_started, force) {
+        if !begin_import_discovery(
+            self.setup.busy,
+            &mut self.setup.import_discovery_started,
+            force,
+        ) {
             return;
         }
+        self.setup.import_view = ImportView::Sources;
+        self.setup_request(Command::SetupImport(ImportCommand::ListSources), cx);
+    }
+
+    fn setup_scan_source(&mut self, source_id: String, cx: &mut Context<Self>) {
+        self.setup.import_source_name = self
+            .setup
+            .snapshot
+            .import_preview
+            .sources
+            .iter()
+            .find(|source| source.id == source_id)
+            .map(|source| source.name.clone())
+            .unwrap_or_else(|| source_id.clone());
+        self.setup.import_view = ImportView::Scanning;
         let repository = self.setup.repository.read(cx).content().trim().to_owned();
         self.setup_request(
             Command::SetupImport(ImportCommand::Discover {
@@ -219,6 +400,7 @@ impl OnboardingRoot {
                 } else {
                     vec![repository]
                 },
+                source_id: Some(source_id),
             }),
             cx,
         );
@@ -247,7 +429,11 @@ impl OnboardingRoot {
 
     pub(super) fn setup_start(&mut self, cx: &mut Context<Self>) {
         self.flow.accessibility_granted = self.accessibility.is_trusted();
-        self.setup_read_clipboard(cx);
+        if self.setup.step == SetupStep::Import {
+            self.setup_discover_import(cx, false);
+        } else {
+            self.setup_read_clipboard(cx);
+        }
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(2)).await;
@@ -285,6 +471,7 @@ impl OnboardingRoot {
             command,
             Command::SetupImport(ImportCommand::Discover { .. })
         );
+        let list_sources = matches!(command, Command::SetupImport(ImportCommand::ListSources));
         let apply = matches!(command, Command::SetupImport(ImportCommand::Apply { .. }));
         let brief = matches!(command, Command::SendMessage { .. });
         let connection_io = matches!(
@@ -307,30 +494,63 @@ impl OnboardingRoot {
                     Ok(Response::Workbench(snapshot)) => {
                         if root.setup.workspace.is_none() { root.setup.workspace = snapshot.workspaces.first().map(|w| w.id.clone()); }
                         if discover {
+                            root.setup.import_view = ImportView::Overview;
+                            if evidence() {
+                                root.setup.import_view = match std::env::var("NEKO_IMPORT_PREVIEW_TAB").ok().as_deref() {
+                                    Some("skills") => ImportView::Items(ImportCategory::Skills),
+                                    Some("connections") => ImportView::Items(ImportCategory::Connections),
+                                    Some("workspaces") => ImportView::Items(ImportCategory::Workspaces),
+                                    Some("schedules") => ImportView::Items(ImportCategory::Schedules),
+                                    _ => ImportView::Overview,
+                                };
+                            }
                             root.setup.reset_import_consent();
-                            root.setup.selected_connections.clear();
+                            let selection = default_import_selection(&snapshot.import_preview);
+                            root.setup.selected_connections = selection.connections;
+                            root.setup.global_connection_ids.clear();
                             root.setup.selected_repositories.clear();
-                            root.setup.selected_skills.clear();
-                            root.setup.selected_workspaces.clear();
-                            root.setup.selected_schedules.clear();
-                            root.setup.notice = Some("Select what to bring over. Nothing runs or gains permission during import.".into());
+                            root.setup.selected_skills = selection.skills;
+                            root.setup.selected_workspaces = selection.workspaces;
+                            root.setup.selected_schedules = selection.schedules;
+                            root.setup.notice = Some("Choose each item to import. Tools and skills remain disabled until you enable them later.".into());
                         }
                         if apply {
                             root.setup.notice = Some("Import applied. MCP connections remain untrusted, skills remain disabled, and schedules stay paused until you opt in later.".into());
+                            root.setup.advance_after_import = false;
+                            root.setup.import_discovery_started = false;
+                            root.setup.snapshot = snapshot;
+                            root.setup_discover_import(cx, true);
+                            return;
                         }
+                        if list_sources { root.setup.notice = None; root.setup.import_view = ImportView::Sources; }
                         if brief { root.setup.brief_turn = snapshot.conversation.iter().rev().find(|m| m.role == ChatRole::Neko && m.pending).map(|m| m.id.clone()); }
                         root.setup.snapshot = snapshot;
+                        if list_sources && evidence() {
+                            if let Ok(source_id) = std::env::var("NEKO_IMPORT_PREVIEW_SOURCE") {
+                                root.setup_scan_source(source_id, cx);
+                                return;
+                            }
+                        }
+                        if poll && root.setup.step == SetupStep::Import && !root.setup.import_discovery_started {
+                            root.setup_discover_import(cx, false);
+                        }
                     }
                     Ok(Response::Error { message }) => {
-                        reset_import_discovery_after_failure(discover, &mut root.setup.import_discovery_started);
+                        if discover { root.setup.import_view = ImportView::Sources; }
+                        reset_import_discovery_after_failure(discover || list_sources, &mut root.setup.import_discovery_started);
+                        if apply { root.setup.advance_after_import = false; }
                         root.setup.error = Some(if connection_io {"Connection failed. Review the server setup or sign in, then retry.".into()} else {message})
                     },
                     Err(error) => {
-                        reset_import_discovery_after_failure(discover, &mut root.setup.import_discovery_started);
+                        if discover { root.setup.import_view = ImportView::Sources; }
+                        reset_import_discovery_after_failure(discover || list_sources, &mut root.setup.import_discovery_started);
+                        if apply { root.setup.advance_after_import = false; }
                         root.setup.error = Some(error.to_string())
                     },
                     _ => {
-                        reset_import_discovery_after_failure(discover, &mut root.setup.import_discovery_started);
+                        if discover { root.setup.import_view = ImportView::Sources; }
+                        reset_import_discovery_after_failure(discover || list_sources, &mut root.setup.import_discovery_started);
+                        if apply { root.setup.advance_after_import = false; }
                         root.setup.error = Some("Unexpected setup response; try again.".into())
                     },
                 }
@@ -347,6 +567,30 @@ impl OnboardingRoot {
         if self.setup.step == SetupStep::Sweep {
             self.close_and_persist_completion(window, cx);
             return;
+        }
+        if self.setup.step == SetupStep::Import {
+            match self.setup.import_view {
+                ImportView::Sources => {}
+                ImportView::Scanning => return,
+                ImportView::Items(_) => {
+                    self.setup.import_view = ImportView::Overview;
+                    cx.notify();
+                    return;
+                }
+                ImportView::Overview => {
+                    if self.setup.selected_connections.is_empty()
+                        && self.setup.selected_skills.is_empty()
+                        && self.setup.selected_workspaces.is_empty()
+                        && self.setup.selected_schedules.is_empty()
+                    {
+                        self.setup.import_view = ImportView::Sources;
+                        cx.notify();
+                    } else {
+                        self.setup_apply_import(cx);
+                    }
+                    return;
+                }
+            }
         }
         let previous = self.setup.step;
         self.setup.step = self.setup.step.next();
@@ -400,103 +644,572 @@ impl OnboardingRoot {
     }
 
     fn setup_import_view(&self, cx: &mut Context<Self>) -> gpui::Div {
-        let mut content = div().flex().flex_col().gap(px(12.)).child(note(
-            "Review local sources and scopes. Discovery is read-only: it never executes tools, starts processes, enables skills, or grants access."
-        )).child(button(
-            "setup-scan",
-            if self.setup.import_discovery_started { "Refresh discovery" } else { "Discover local setup" },
-            !self.setup.busy,
-            cx,
-            |r, _, cx| {
-                r.setup_discover_import(cx, true);
-            },
-        ));
-        let preview = &self.setup.snapshot.import_preview;
-        if !preview.candidates.is_empty() {
-            content = content.child(note("Sources and scopes"));
+        match self.setup.import_view {
+            ImportView::Sources => self.setup_import_sources_view(cx),
+            ImportView::Scanning => self.setup_import_scanning_view(),
+            ImportView::Overview => self.setup_import_overview_view(cx),
+            ImportView::Items(category) => self.setup_import_items_view(category, cx),
         }
-        for candidate in &preview.candidates {
-            let id = candidate.id.clone();
-            let candidate_kind = candidate.kind.clone();
-            let selected = match &candidate_kind {
-                neko_protocol::setup_import::ImportCandidateKind::Connection => {
-                    self.setup.selected_connections.contains(&id)
-                }
-                neko_protocol::setup_import::ImportCandidateKind::Skill => {
-                    self.setup.selected_skills.contains(&id)
-                }
-                neko_protocol::setup_import::ImportCandidateKind::Workspace => {
-                    self.setup.selected_workspaces.contains(&id)
-                }
-                neko_protocol::setup_import::ImportCandidateKind::Schedule => {
-                    self.setup.selected_schedules.contains(&id)
-                }
-            };
-            let kind = format!("{:?}", candidate.kind);
-            let source = candidate.source.clone();
-            let scope = candidate.scope.clone();
-            let credentials = candidate_has_credentials(&candidate.metadata);
-            let problem = candidate.problem.clone();
-            let selected_candidate = self.setup.selected_workspaces.iter().any(|selected| {
-                preview.candidates.iter().any(|workspace| {
-                    workspace.id == *selected && workspace.workspace == candidate.workspace
-                })
-            });
-            let existing_workspace = self.setup.snapshot.workspaces.iter().any(|workspace| {
-                candidate.workspace.as_deref() == Some(workspace.repository.as_str())
-            });
-            let workspace_selected = workspace_scope_selected(
-                candidate.workspace.as_deref(),
-                selected_candidate,
-                existing_workspace,
-            );
-            let disabled = candidate_is_unavailable(
-                &candidate_kind,
-                problem.as_deref(),
-                candidate.workspace.as_deref(),
-                workspace_selected,
-            );
-            content = content.child(button(
-                format!("setup-import-candidate-{id}"),
-                format!(
-                    "{} {kind} · {} · source:{source} · {scope}{}{}",
-                    if selected { "✓" } else { "○" },
-                    candidate.name,
-                    if credentials { " · credentials found" } else { "" },
-                    if disabled { " · unavailable" } else { "" }
-                ),
-                !self.setup.busy && !disabled,
+    }
+
+    fn setup_import_sources_view(&self, cx: &mut Context<Self>) -> gpui::Div {
+        let preview = &self.setup.snapshot.import_preview;
+        let count = preview.sources.len();
+        let columns = if count == 4 { 2 } else { 3 };
+        let tile_width = if columns == 2 { 474. } else { 312. };
+        let tile_height = if columns == 2 { 132. } else { 224. };
+        let mut tiles = div().flex().flex_wrap().gap(px(14.));
+        for source in &preview.sources {
+            let source_id = source.id.clone();
+            tiles = tiles.child(source_tile(
+                source.id.clone(),
+                source.name.clone(),
+                tile_width,
+                tile_height,
+                !self.setup.busy,
                 cx,
-                move |r, _, cx| {
-                    let set = match &candidate_kind {
-                        neko_protocol::setup_import::ImportCandidateKind::Connection => {
-                            &mut r.setup.selected_connections
-                        }
-                        neko_protocol::setup_import::ImportCandidateKind::Skill => {
-                            &mut r.setup.selected_skills
-                        }
-                        neko_protocol::setup_import::ImportCandidateKind::Workspace => {
-                            &mut r.setup.selected_workspaces
-                        }
-                        neko_protocol::setup_import::ImportCandidateKind::Schedule => {
-                            &mut r.setup.selected_schedules
-                        }
-                    };
-                    if !set.remove(&id) {
-                        set.insert(id.clone());
-                    }
-                    r.setup.reset_import_consent();
-                    cx.notify();
-                },
+                move |r, _, cx| r.setup_scan_source(source_id.clone(), cx),
             ));
-            if let Some(problem) = problem {
-                content = content.child(note(problem));
+        }
+        let mut content = div()
+            .flex()
+            .flex_col()
+            .gap(px(16.))
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .items_center()
+                    .child(
+                        div()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_size(px(14.))
+                            .child("Found on this Mac"),
+                    )
+                    .child(note(format!("{} available", count))),
+            )
+            .child(tiles);
+        if count == 0 {
+            content = content.child(note(
+                "No supported setup found yet. You can choose a folder below or continue.",
+            ));
+        }
+        content = content.child(
+            div()
+                .id("setup-another-source")
+                .tab_index(0)
+                .tab_stop(!self.setup.busy)
+                .h(px(50.))
+                .px(px(18.))
+                .flex()
+                .items_center()
+                .justify_between()
+                .rounded(px(10.))
+                .border_1()
+                .border_color(gpui::rgb(0x45474d))
+                .bg(gpui::rgb(0x222428))
+                .cursor_pointer()
+                .hover(|style| style.bg(gpui::rgb(0x2b2d32)))
+                .on_click(cx.listener(|r, _, _, cx| {
+                    r.setup.show_new_workspace = !r.setup.show_new_workspace;
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(12.))
+                        .child(
+                            div()
+                                .text_size(px(22.))
+                                .text_color(gpui::rgb(0x9da1aa))
+                                .child("+"),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.))
+                                .child(
+                                    div()
+                                        .text_size(px(13.))
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .child("Use another source"),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(11.))
+                                        .text_color(gpui::rgb(0x92969f))
+                                        .child("Choose a folder on this Mac"),
+                                ),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(gpui::rgb(0xcbd5e8))
+                        .child("Choose →"),
+                ),
+        );
+        if self.setup.show_new_workspace {
+            content = content.child(note("Enter an absolute folder path. Neko will look for local skills and workspace setup there; nothing is imported yet."))
+                .child(field("Folder path", &self.setup.repository))
+                .child(button("setup-scan-folder", "Look through folder →", !self.setup.busy, cx, |r, _, cx| {
+                    let repository = r.setup.repository.read(cx).content().trim().to_owned();
+                    if !repository.starts_with('/') {
+                        r.setup.error = Some("Enter an absolute folder path to continue.".into());
+                        cx.notify();
+                        return;
+                    }
+                    r.setup_scan_source("agents".into(), cx);
+                }));
+        }
+        content
+    }
+
+    fn setup_import_scanning_view(&self) -> gpui::Div {
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .flex_1()
+            .gap(px(18.))
+            .child(
+                div()
+                    .size(px(64.))
+                    .rounded(px(14.))
+                    .bg(gpui::rgb(0xe8e9e6))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(gpui::rgb(0x161719))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .text_size(px(30.))
+                    .child(
+                        self.setup
+                            .import_source_name
+                            .chars()
+                            .next()
+                            .unwrap_or('N')
+                            .to_string(),
+                    ),
+            )
+            .child(
+                div()
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .text_size(px(30.))
+                    .child(format!("Looking through {}", self.setup.import_source_name)),
+            )
+            .child(note(
+                "Reading local setup only. Neko won't run tools or change the source.",
+            ))
+            .child(
+                div()
+                    .w(px(400.))
+                    .h(px(4.))
+                    .rounded(px(2.))
+                    .bg(gpui::rgb(0x303136))
+                    .child(
+                        div()
+                            .w(px(230.))
+                            .h(px(4.))
+                            .rounded(px(2.))
+                            .bg(gpui::rgb(0xb6c5e3)),
+                    ),
+            )
+            .child(note("Finding tools, skills and workspaces…"))
+    }
+
+    fn setup_import_overview_view(&self, cx: &mut Context<Self>) -> gpui::Div {
+        let preview = &self.setup.snapshot.import_preview;
+        let mut categories = div()
+            .flex()
+            .flex_col()
+            .rounded(px(12.))
+            .border_1()
+            .border_color(gpui::rgb(0x44464d))
+            .overflow_hidden();
+        for category in ImportCategory::ALL {
+            let count = preview
+                .candidates
+                .iter()
+                .filter(|item| category.matches(&item.kind))
+                .count();
+            if count == 0 {
+                continue;
+            }
+            let selected = preview
+                .candidates
+                .iter()
+                .filter(|item| category.matches(&item.kind))
+                .filter(|item| self.setup.item_selected(item))
+                .count();
+            let activate = move |r: &mut OnboardingRoot, cx: &mut Context<OnboardingRoot>| {
+                r.setup.import_view = ImportView::Items(category);
+                cx.notify();
+            };
+            categories = categories.child(
+                div()
+                    .id(format!("setup-category-{:?}", category))
+                    .tab_index(0)
+                    .tab_stop(!self.setup.busy)
+                    .h(px(72.))
+                    .px(px(20.))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(gpui::rgb(0x3b3d43))
+                    .bg(gpui::rgb(0x27292e))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(gpui::rgb(0x303238)))
+                    .on_click(cx.listener(move |r, _, _, cx| activate(r, cx)))
+                    .on_key_down(cx.listener(move |r, e: &KeyDownEvent, _, cx| {
+                        if e.keystroke.modifiers == gpui::Modifiers::default()
+                            && matches!(e.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            r.setup.import_view = ImportView::Items(category);
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(5.))
+                            .child(
+                                div()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_size(px(15.))
+                                    .child(category.title()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(gpui::rgb(0xa0a3ac))
+                                    .child(format!("{count} found · {selected} selected")),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(19.))
+                            .text_color(gpui::rgb(0xa0a3ac))
+                            .child("›"),
+                    ),
+            );
+        }
+        div()
+            .flex()
+            .gap(px(24.))
+            .child(div().flex_1().min_w_0().child(categories))
+            .child(
+                div()
+                    .w(px(312.))
+                    .flex_shrink_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(18.))
+                    .p(px(22.))
+                    .rounded(px(12.))
+                    .border_1()
+                    .border_color(gpui::rgb(0x44464d))
+                    .bg(gpui::rgb(0x27292e))
+                    .child(
+                        div()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child("Before you bring it over"),
+                    )
+                    .child(note(format!(
+                        "Neko will make its own copy. Your {} setup stays untouched.",
+                        self.setup.import_source_name
+                    )))
+                    .child(note("✓  Connections start off"))
+                    .child(note("✓  Schedules stay paused"))
+                    .child(note("✓  Credentials need your approval")),
+            )
+    }
+
+    fn setup_import_items_view(
+        &self,
+        category: ImportCategory,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let preview = &self.setup.snapshot.import_preview;
+        let mut content = div().flex().flex_col().gap(px(14.));
+        let mut tabs = div()
+            .flex()
+            .gap(px(24.))
+            .border_b_1()
+            .border_color(gpui::rgb(0x44464d));
+        for tab in ImportCategory::ALL {
+            let count = preview
+                .candidates
+                .iter()
+                .filter(|item| tab.matches(&item.kind))
+                .count();
+            tabs = tabs.child(
+                div()
+                    .id(format!("setup-tab-{:?}", tab))
+                    .tab_index(0)
+                    .tab_stop(!self.setup.busy)
+                    .pb(px(12.))
+                    .pt(px(5.))
+                    .border_b_2()
+                    .border_color(if tab == category {
+                        gpui::rgb(0xe8e9e6)
+                    } else {
+                        gpui::rgb(0x1c1d20)
+                    })
+                    .text_size(px(13.))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(if tab == category {
+                        gpui::rgb(0xe8e9e6)
+                    } else {
+                        gpui::rgb(0x9699a2)
+                    })
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |r, _, _, cx| {
+                        r.setup.import_view = ImportView::Items(tab);
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(move |r, e: &KeyDownEvent, _, cx| {
+                        if e.keystroke.modifiers == gpui::Modifiers::default()
+                            && matches!(e.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            r.setup.import_view = ImportView::Items(tab);
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .child(format!("{}  {}", tab.title(), count)),
+            );
+        }
+        content = content.child(tabs);
+        if preview.candidates.is_empty() {
+            content = content.child(note("Nothing importable was found in this source. Go back and try another source, or continue."));
+        }
+        for workspace_group in [false, true] {
+            let group_candidates = if category == ImportCategory::Workspaces {
+                workspace_review_rows(&preview.candidates, self.setup.show_other_folders)
+                    .into_iter()
+                    .filter(|item| {
+                        (item.metadata.get("review_group").map(String::as_str) == Some("other"))
+                            == workspace_group
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                preview
+                    .candidates
+                    .iter()
+                    .filter(|item| {
+                        category.matches(&item.kind) && item.workspace.is_some() == workspace_group
+                    })
+                    .collect::<Vec<_>>()
+            };
+            if category == ImportCategory::Workspaces && workspace_group {
+                let other_count = preview
+                    .candidates
+                    .iter()
+                    .filter(|item| {
+                        item.kind == ImportCandidateKind::Workspace
+                            && item.metadata.get("review_group").map(String::as_str)
+                                == Some("other")
+                    })
+                    .count();
+                if other_count > 0 {
+                    let expanded = self.setup.show_other_folders;
+                    content = content.child(button(
+                        "setup-import-other-folders",
+                        format!(
+                            "{} Other folders ({other_count})",
+                            if expanded { "▾" } else { "▸" }
+                        ),
+                        !self.setup.busy,
+                        cx,
+                        move |r, _, cx| {
+                            r.setup.show_other_folders = !r.setup.show_other_folders;
+                            cx.notify();
+                        },
+                    ));
+                }
+            }
+            if !group_candidates.is_empty()
+                && !(category == ImportCategory::Workspaces && workspace_group)
+            {
+                content = content.child(
+                    div()
+                        .pt(px(10.))
+                        .text_size(px(11.))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(gpui::rgb(0x999da6))
+                        .child(if category == ImportCategory::Workspaces {
+                            "PROJECT FOLDERS"
+                        } else if workspace_group {
+                            "IN A WORKSPACE"
+                        } else {
+                            "EVERYWHERE"
+                        }),
+                );
+            }
+            for candidate in group_candidates {
+                let id = candidate.id.clone();
+                let candidate_kind = candidate.kind.clone();
+                let selected = match &candidate_kind {
+                    neko_protocol::setup_import::ImportCandidateKind::Connection => {
+                        self.setup.selected_connections.contains(&id)
+                    }
+                    neko_protocol::setup_import::ImportCandidateKind::Skill => {
+                        self.setup.selected_skills.contains(&id)
+                    }
+                    neko_protocol::setup_import::ImportCandidateKind::Workspace => {
+                        self.setup.selected_workspaces.contains(&id)
+                    }
+                    neko_protocol::setup_import::ImportCandidateKind::Schedule => {
+                        self.setup.selected_schedules.contains(&id)
+                    }
+                };
+                let kind = import_candidate_label(&candidate.kind);
+                let scope = candidate.scope.clone();
+                let credentials = candidate_has_credentials(&candidate.metadata);
+                let already_in_neko = candidate
+                    .metadata
+                    .get("already_in_neko")
+                    .is_some_and(|value| value == "true");
+                let different_setup = candidate
+                    .metadata
+                    .get("same_name_different_setup")
+                    .is_some_and(|value| value == "true");
+                let problem = candidate.problem.clone();
+                let selected_candidate = self.setup.selected_workspaces.iter().any(|selected| {
+                    preview.candidates.iter().any(|workspace| {
+                        workspace.id == *selected && workspace.workspace == candidate.workspace
+                    })
+                });
+                let existing_workspace = self.setup.snapshot.workspaces.iter().any(|workspace| {
+                    candidate.workspace.as_deref() == Some(workspace.repository.as_str())
+                });
+                let workspace_selected = workspace_scope_selected(
+                    candidate.workspace.as_deref(),
+                    selected_candidate,
+                    existing_workspace,
+                );
+                let import_globally = self.setup.global_connection_ids.contains(&id);
+                let disabled = candidate_is_unavailable(
+                    &candidate_kind,
+                    problem.as_deref(),
+                    candidate.workspace.as_deref(),
+                    workspace_selected,
+                    import_globally,
+                );
+                let show_global_fallback = candidate_kind == ImportCandidateKind::Connection
+                    && candidate.workspace.is_some()
+                    && (!workspace_selected || import_globally)
+                    && problem.is_none();
+                let subtitle = if candidate_kind == ImportCandidateKind::Workspace {
+                    candidate.workspace.clone().unwrap_or_else(|| scope.clone())
+                } else {
+                    format!(
+                        "{kind} · {scope}{}",
+                        if credentials {
+                            " · Sign-in available"
+                        } else {
+                            ""
+                        }
+                    )
+                };
+                content = content.child(import_item_button(
+                    format!("setup-import-candidate-{id}"),
+                    candidate.name.clone(),
+                    subtitle,
+                    if selected && import_globally {
+                        "Selected · global"
+                    } else if show_global_fallback {
+                        "Choose scope"
+                    } else {
+                        candidate_review_badge(
+                            already_in_neko,
+                            problem.is_some(),
+                            disabled && problem.is_none(),
+                            selected,
+                            different_setup,
+                        )
+                    },
+                    !self.setup.busy && !disabled && !already_in_neko,
+                    cx,
+                    move |r, _, cx| {
+                        let set = match &candidate_kind {
+                            neko_protocol::setup_import::ImportCandidateKind::Connection => {
+                                &mut r.setup.selected_connections
+                            }
+                            neko_protocol::setup_import::ImportCandidateKind::Skill => {
+                                &mut r.setup.selected_skills
+                            }
+                            neko_protocol::setup_import::ImportCandidateKind::Workspace => {
+                                &mut r.setup.selected_workspaces
+                            }
+                            neko_protocol::setup_import::ImportCandidateKind::Schedule => {
+                                &mut r.setup.selected_schedules
+                            }
+                        };
+                        if !set.remove(&id) {
+                            set.insert(id.clone());
+                        } else {
+                            r.setup.global_connection_ids.remove(&id);
+                        }
+                        r.setup.reset_import_consent();
+                        cx.notify();
+                    },
+                ));
+                if show_global_fallback {
+                    let fallback_id = candidate.id.clone();
+                    let fallback_selected = import_globally;
+                    content = content.child(button(
+                        format!("setup-import-global-fallback-{fallback_id}"),
+                        if fallback_selected {
+                            "Use workspace scope instead"
+                        } else {
+                            "Keep as global connection (paused)"
+                        },
+                        !self.setup.busy && !already_in_neko,
+                        cx,
+                        move |r, _, cx| {
+                            if r.setup.global_connection_ids.remove(&fallback_id) {
+                                if !workspace_selected {
+                                    r.setup.selected_connections.remove(&fallback_id);
+                                }
+                            } else {
+                                r.setup.global_connection_ids.insert(fallback_id.clone());
+                                r.setup.selected_connections.insert(fallback_id.clone());
+                            }
+                            r.setup.reset_import_consent();
+                            cx.notify();
+                        },
+                    ));
+                    if fallback_selected {
+                        content = content.child(note("Saved as a global definition only. It stays paused, with no tool grants; you can authorize it in a workspace later."));
+                    }
+                }
+                if let Some(problem) = problem {
+                    content = content.child(note(problem));
+                } else if disabled {
+                    if let Some(workspace) = candidate.workspace.as_deref() {
+                        content = content.child(note(format!(
+                            "Add {workspace} as a workspace to import this item."
+                        )));
+                    }
+                } else if candidate.kind == ImportCandidateKind::Workspace && workspace_group {
+                    if let Some(reason) = candidate.metadata.get("review_reason") {
+                        content = content.child(note(reason.clone()));
+                    }
+                }
             }
         }
         for warning in &preview.warnings {
             content = content.child(note(warning.clone()));
         }
-        if uses_legacy_import_rows(preview.candidates.len()) {
+        if preview.active_source.is_none() && uses_legacy_import_rows(preview.candidates.len()) {
             for repository in &preview.repositories {
                 let path = repository.clone();
                 content = content.child(button(
@@ -584,7 +1297,7 @@ impl OnboardingRoot {
                     )));
             }
         }
-        content=content.child(note(format!("{} local skills discovered. They stay in their source folders; enable reviewed instructions per workspace in Tools & skills.",self.setup.snapshot.skills.available.len())));
+        content=content.child(note(format!("{} items found in this source. Imported tools and skills stay off until you enable them.", preview.candidates.len())));
         if !preview.preview_id.is_empty() {
             content = content
                 .child(button(
@@ -612,23 +1325,9 @@ impl OnboardingRoot {
                         r.setup.trust = !r.setup.trust;
                         cx.notify();
                     },
-                ))
-                .child(button(
-                    "setup-import-apply",
-                    "Import selected definitions",
-                    !self.setup.busy,
-                    cx,
-                    |r, _, cx| {
-                        r.setup_apply_import(cx);
-                    },
                 ));
         }
-        content.child(note("Or create a workspace. Skills in its local folders become discoverable; nothing is enabled automatically."))
-            .child(field("Name",&self.setup.name)).child(field("Repository folder",&self.setup.repository))
-            .child(button("setup-create-workspace","Create workspace",!self.setup.busy,cx,|r,_,cx| {
-                let name=r.setup.name.read(cx).content().trim().to_owned(); let repository=r.setup.repository.read(cx).content().trim().to_owned();
-                r.setup_request(Command::SaveWorkspace{workspace:Workspace{id:String::new(),name,repository,instructions:String::new(),away_enabled:false}},cx);
-            })).child(self.setup_workspace_picker(cx))
+        content
     }
 
     fn setup_apply_import(&mut self, cx: &mut Context<Self>) {
@@ -639,6 +1338,7 @@ impl OnboardingRoot {
                 workspace_ids: self.setup.selected_workspaces.iter().cloned().collect(),
                 preview_id: self.setup.snapshot.import_preview.preview_id.clone(),
                 connection_ids: self.setup.selected_connections.iter().cloned().collect(),
+                global_connection_ids: self.setup.global_connection_ids.iter().cloned().collect(),
                 repositories: self.setup.selected_repositories.iter().cloned().collect(),
                 include_credentials: self.setup.credentials,
                 trust_local_processes: self.setup.trust,
@@ -894,7 +1594,7 @@ impl OnboardingRoot {
                 let raw=r.setup.server_args.read(cx).content().trim();
                 let args=if raw.is_empty(){Ok(vec![])}else{serde_json::from_str::<Vec<String>>(raw)};
                 let args=match args{Ok(args)=>args,Err(_)=>{r.setup.error=Some("Arguments must be a JSON list of strings.".into());cx.notify();return;}};
-                neko_protocol::mcp_host::ServerConfig::Stdio{command:target,args}
+                neko_protocol::mcp_host::ServerConfig::Stdio{command:target,args,cwd:None}
             }else{neko_protocol::mcp_host::ServerConfig::Http{url:target}};
             let workspace_id=if r.setup.server_global{String::new()}else{r.setup.workspace.clone().unwrap_or_default()};
             r.setup_request(Command::Mcp(McpCommand::AddConnection{workspace_id,label:r.setup.server_name.read(cx).content().trim().to_owned(),config,trust_local_process:r.setup.server_trust,credentials:None}),cx);
@@ -1013,11 +1713,23 @@ impl OnboardingRoot {
         let subtitles = [
             "One Neko to talk to. A quick panel when you need it. Your work stays yours.",
             "Each permission is optional. You can always open the full app without a shortcut.",
-            "Review local Codex and Claude settings. Source files stay untouched.",
+            "Choose a source, then select only the items you want. Source files stay untouched.",
             "Global definitions are available everywhere; permissions are granted per workspace.",
             "Start with one clear responsibility. Tool access stays limited to what you grant.",
             "Neko reads the selected workspace and granted tools, then prepares a useful brief.",
         ];
+        let import_title = match self.setup.import_view {
+            ImportView::Sources => "What do you already use?".to_owned(),
+            ImportView::Scanning => String::new(),
+            ImportView::Overview => format!("Bring over from {}", self.setup.import_source_name),
+            ImportView::Items(_) => "Choose what comes over".to_owned(),
+        };
+        let import_subtitle = match self.setup.import_view {
+            ImportView::Sources => "Choose one source to look through. Neko won’t change it or import anything until you review.".to_owned(),
+            ImportView::Scanning => String::new(),
+            ImportView::Overview => "Here’s what I found. Choose what Neko should keep; nothing is enabled yet.".to_owned(),
+            ImportView::Items(_) => "Pick individual items. Everywhere follows you; a workspace item stays inside that folder.".to_owned(),
+        };
         let mut progress = div().flex().gap(px(6.)).items_center();
         for (index, label) in labels.iter().enumerate() {
             let _ = label;
@@ -1034,8 +1746,8 @@ impl OnboardingRoot {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .px(px(90.))
-            .py(px(28.))
+            .px(px(if stage == SetupStep::Import { 76. } else { 90. }))
+            .py(px(if stage == SetupStep::Import { 26. } else { 28. }))
             .flex()
             .flex_col()
             .gap(px(18.))
@@ -1050,23 +1762,44 @@ impl OnboardingRoot {
                     .text_color(theme::active().text_primary),
             );
         }
-        body = body
-            .child(
+        if stage == SetupStep::Import && self.setup.import_view != ImportView::Scanning {
+            body = body.child(
                 div()
-                    .text_size(px(if stage == SetupStep::Welcome {
-                        48.
-                    } else {
-                        30.
-                    }))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .line_height(px(if stage == SetupStep::Welcome {
-                        54.
-                    } else {
-                        38.
-                    }))
-                    .child(titles[stage.index()]),
-            )
-            .child(note(subtitles[stage.index()]));
+                    .text_size(px(12.))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .text_color(gpui::rgb(0x92969d))
+                    .child("BRING YOUR SETUP"),
+            );
+        }
+        if stage != SetupStep::Import || self.setup.import_view != ImportView::Scanning {
+            body = body
+                .child(
+                    div()
+                        .text_size(px(if stage == SetupStep::Welcome {
+                            48.
+                        } else if stage == SetupStep::Import {
+                            34.
+                        } else {
+                            30.
+                        }))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .line_height(px(if stage == SetupStep::Welcome {
+                            54.
+                        } else {
+                            38.
+                        }))
+                        .child(if stage == SetupStep::Import {
+                            import_title.clone()
+                        } else {
+                            titles[stage.index()].to_owned()
+                        }),
+                )
+                .child(note(if stage == SetupStep::Import {
+                    import_subtitle.clone()
+                } else {
+                    subtitles[stage.index()].to_owned()
+                }));
+        }
         match stage {
             SetupStep::Welcome => {
                 body=body.child(div().mt(px(18.)).child(button("setup-get-started","Get started",!self.setup.busy,cx,|r,w,cx|r.setup_next(w,cx))))
@@ -1147,8 +1880,24 @@ impl OnboardingRoot {
                 !self.setup.busy && stage != SetupStep::Welcome,
                 cx,
                 |r, _, cx| {
+                    if r.setup.step == SetupStep::Import {
+                        match r.setup.import_view {
+                            ImportView::Items(_) => {
+                                r.setup.import_view = ImportView::Overview;
+                                cx.notify();
+                                return;
+                            }
+                            ImportView::Overview | ImportView::Scanning => {
+                                r.setup.import_view = ImportView::Sources;
+                                cx.notify();
+                                return;
+                            }
+                            ImportView::Sources => {}
+                        }
+                    }
                     let previous = r.setup.step;
                     r.setup.step = r.setup.step.back();
+                    r.setup.advance_after_import = false;
                     r.flow.hotkey_recording =
                         recording_after_navigation(r.setup.step, r.flow.hotkey_recording.clone());
                     if previous == SetupStep::Import && r.setup.step != SetupStep::Import {
@@ -1167,26 +1916,87 @@ impl OnboardingRoot {
             .child(
                 div()
                     .flex()
+                    .items_center()
                     .gap(px(12.))
-                    .child(button(
-                        "setup-skip",
-                        "Set up later",
-                        !self.setup.busy,
-                        cx,
-                        |r, w, cx| r.close_and_persist_completion(w, cx),
-                    ))
+                    .when(stage != SetupStep::Import, |actions| {
+                        actions.child(button(
+                            "setup-skip",
+                            "Set up later",
+                            !self.setup.busy,
+                            cx,
+                            |r, w, cx| r.close_and_persist_completion(w, cx),
+                        ))
+                    })
+                    .when(
+                        stage == SetupStep::Import
+                            && matches!(
+                                self.setup.import_view,
+                                ImportView::Overview | ImportView::Items(_)
+                            ),
+                        |actions| {
+                            let selected = self.setup.selected_connections.len()
+                                + self.setup.selected_skills.len()
+                                + self.setup.selected_workspaces.len()
+                                + self.setup.selected_schedules.len();
+                            actions.child(note(format!("{selected} items selected")))
+                        },
+                    )
                     .child(button(
                         "setup-next",
                         if stage == SetupStep::Sweep {
-                            "Open Neko"
+                            "Open Neko".to_owned()
+                        } else if stage == SetupStep::Import {
+                            match self.setup.import_view {
+                                ImportView::Sources => "I'll do this later →".to_owned(),
+                                ImportView::Scanning => "Reading…".to_owned(),
+                                ImportView::Overview => {
+                                    format!("Import from {} →", self.setup.import_source_name)
+                                }
+                                ImportView::Items(_) => "Save choices →".to_owned(),
+                            }
                         } else {
-                            "Continue"
+                            "Continue".to_owned()
                         },
                         !self.setup.busy,
                         cx,
                         |r, w, cx| r.setup_next(w, cx),
                     )),
             );
+        let header = if stage == SetupStep::Import {
+            div()
+                .h(px(54.))
+                .px(px(24.))
+                .flex()
+                .items_center()
+                .justify_between()
+                .border_b_1()
+                .border_color(gpui::rgb(0x303136))
+                .window_control_area(gpui::WindowControlArea::Drag)
+                .child(div().w(px(80.)))
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child("Neko"),
+                )
+                .child(
+                    div()
+                        .w(px(80.))
+                        .text_align(gpui::TextAlign::Right)
+                        .text_size(px(12.))
+                        .text_color(gpui::rgb(0x92949a))
+                        .child("Setup · 3 of 6"),
+                )
+        } else {
+            div()
+                .h(px(52.))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .window_control_area(gpui::WindowControlArea::Drag)
+                .child(progress)
+        };
         div()
             .id("neko-setup")
             .tab_group()
@@ -1196,18 +2006,13 @@ impl OnboardingRoot {
             .flex()
             .flex_col()
             .size_full()
-            .bg(theme::active().surface_panel)
+            .bg(if stage == SetupStep::Import {
+                gpui::rgb(0x1c1d20)
+            } else {
+                theme::active().surface_panel
+            })
             .text_color(theme::active().text_primary)
-            .child(
-                div()
-                    .h(px(52.))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .window_control_area(gpui::WindowControlArea::Drag)
-                    .child(progress),
-            )
+            .child(header)
             .child(body)
             .when(stage != SetupStep::Welcome, |view| view.child(footer))
             .into_any_element()
@@ -1287,9 +2092,242 @@ fn button(
         .child(label.into())
 }
 
+fn import_item_button(
+    id: impl Into<SharedString>,
+    name: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
+    status: impl Into<SharedString>,
+    enabled: bool,
+    cx: &mut Context<OnboardingRoot>,
+    action: impl Fn(&mut OnboardingRoot, &mut Window, &mut Context<OnboardingRoot>) + 'static,
+) -> impl IntoElement {
+    let action = Rc::new(action);
+    let keyboard = action.clone();
+    let status: SharedString = status.into();
+    let selected = status.as_ref() == "Selected";
+    let already_present = status.as_ref() == "Already in Neko";
+    div()
+        .id(id.into())
+        .tab_index(0)
+        .tab_stop(enabled)
+        .px(px(16.))
+        .py(px(12.))
+        .rounded(px(9.))
+        .border_1()
+        .border_color(gpui::rgb(0x44464d))
+        .bg(gpui::rgb(0x27292e))
+        .focus_visible(|style| style.border_color(gpui::rgb(0xcbd5e8)))
+        .when(enabled, |row| {
+            row.cursor_pointer()
+                .hover(|style| style.bg(gpui::rgb(0x303238)))
+                .on_click(cx.listener(move |root, _, window, cx| action(root, window, cx)))
+                .on_key_down(cx.listener(move |root, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.modifiers == gpui::Modifiers::default()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        keyboard(root, window, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        })
+        .child(
+            div()
+                .flex()
+                .justify_between()
+                .items_center()
+                .gap(px(12.))
+                .child(
+                    div()
+                        .size(px(18.))
+                        .flex_shrink_0()
+                        .rounded(px(5.))
+                        .border_1()
+                        .border_color(if selected {
+                            gpui::rgb(0xcbd5e8)
+                        } else {
+                            gpui::rgb(0x777b84)
+                        })
+                        .bg(if selected {
+                            gpui::rgb(0xcbd5e8)
+                        } else {
+                            gpui::rgb(0x27292e)
+                        })
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(12.))
+                        .text_color(gpui::rgb(0x1c1d20))
+                        .child(if selected { "✓" } else { "" }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(4.))
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(px(14.))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(theme::active().text_primary)
+                                .child(name.into()),
+                        )
+                        .child(note(detail)),
+                )
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .rounded(px(6.))
+                        .px(px(8.))
+                        .py(px(4.))
+                        .bg(if already_present {
+                            gpui::rgb(0x383a40)
+                        } else {
+                            gpui::rgb(0x2f3239)
+                        })
+                        .text_size(px(11.))
+                        .text_color(if already_present {
+                            gpui::rgb(0xb3b6be)
+                        } else {
+                            gpui::rgb(0xcbd5e8)
+                        })
+                        .child(status),
+                ),
+        )
+}
+
+fn source_tile(
+    id: String,
+    name: String,
+    width: f32,
+    height: f32,
+    enabled: bool,
+    cx: &mut Context<OnboardingRoot>,
+    action: impl Fn(&mut OnboardingRoot, &mut Window, &mut Context<OnboardingRoot>) + 'static,
+) -> impl IntoElement {
+    let (symbol, description, tint) = match id.as_str() {
+        "codex" => ("C", "Local agents, skills and connections", 0xe8e9e6),
+        "claude" => ("✳", "Local skills, tools and project setup", 0xc7b5e7),
+        "paseo" => ("P", "Agent projects and saved workflows", 0xd2d8e6),
+        _ => ("+", "Local skills and workspace setup", 0xd4d7dc),
+    };
+    let action = Rc::new(action);
+    let keyboard = action.clone();
+    div()
+        .id(format!("setup-source-{id}"))
+        .tab_index(0)
+        .tab_stop(enabled)
+        .w(px(width))
+        .h(px(height))
+        .p(px(if height < 160. { 16. } else { 22. }))
+        .flex()
+        .flex_col()
+        .justify_between()
+        .rounded(px(13.))
+        .border_1()
+        .border_color(gpui::rgb(0x44464d))
+        .bg(gpui::rgb(0x27292e))
+        .focus_visible(|style| style.border_color(gpui::rgb(0xb6c5e3)))
+        .when(enabled, |tile| {
+            tile.cursor_pointer()
+                .hover(|style| style.bg(gpui::rgb(0x303238)))
+                .on_click(cx.listener(move |root, _, window, cx| action(root, window, cx)))
+                .on_key_down(cx.listener(move |root, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.modifiers == gpui::Modifiers::default()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        keyboard(root, window, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        })
+        .child(
+            div()
+                .flex()
+                .justify_between()
+                .items_start()
+                .child(
+                    div()
+                        .size(px(if height < 160. { 32. } else { 42. }))
+                        .rounded(px(10.))
+                        .bg(gpui::rgb(tint))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(gpui::rgb(0x161719))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_size(px(if height < 160. { 17. } else { 22. }))
+                        .child(symbol),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(gpui::rgb(0x9ca0a9))
+                        .child("Installed"),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .child(
+                    div()
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_size(px(if height < 160. { 17. } else { 20. }))
+                        .child(name.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(if height < 160. { 11. } else { 13. }))
+                        .text_color(gpui::rgb(0xa5a9b2))
+                        .child(description),
+                ),
+        )
+        .child(
+            div()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_size(px(if height < 160. { 11. } else { 13. }))
+                .text_color(gpui::rgb(0xcedaf3))
+                .child(format!("Look through {name} →")),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn workspace_review_hides_generated_folders_until_expanded() {
+        let workspace = |id: &str, group: &str| neko_protocol::setup_import::ImportCandidate {
+            id: id.into(),
+            kind: ImportCandidateKind::Workspace,
+            source: "local".into(),
+            scope: format!("workspace:/{id}"),
+            workspace: Some(format!("/{id}")),
+            name: id.into(),
+            metadata: std::collections::BTreeMap::from([("review_group".into(), group.into())]),
+            problem: None,
+        };
+        let candidates = vec![
+            workspace("scratch", "other"),
+            workspace("project", "primary"),
+        ];
+        assert_eq!(
+            workspace_review_rows(&candidates, false)
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["project"]
+        );
+        assert_eq!(
+            workspace_review_rows(&candidates, true)
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["project", "scratch"]
+        );
+    }
     #[test]
     fn delayed_clipboard_ack_rejects_duplicate_activation() {
         let mut busy = false;
@@ -1405,26 +2443,174 @@ mod tests {
         assert!(candidate_has_credentials(&metadata));
     }
     #[test]
+    fn import_rows_name_mcp_servers_instead_of_internal_connections() {
+        use neko_protocol::setup_import::ImportCandidateKind;
+        assert_eq!(
+            import_candidate_label(&ImportCandidateKind::Connection),
+            "MCP server"
+        );
+        assert_eq!(import_candidate_label(&ImportCandidateKind::Skill), "Skill");
+    }
+    #[test]
+    fn import_source_groups_are_lexical_and_keep_combined_sources_together() {
+        use neko_protocol::setup_import::{ImportCandidate, ImportCandidateKind};
+        let candidate = |id: &str, source: &str, scope: Option<&str>, name: &str| ImportCandidate {
+            id: id.into(),
+            kind: ImportCandidateKind::Connection,
+            source: source.into(),
+            scope: scope.map_or_else(|| "global".into(), |path| format!("workspace:{path}")),
+            workspace: scope.map(str::to_owned),
+            name: name.into(),
+            metadata: Default::default(),
+            problem: None,
+        };
+        let candidates = vec![
+            candidate("z", "Codex", Some("/z"), "zeta"),
+            candidate("shared", "Claude + Codex", None, "shared"),
+            candidate("b", "Codex", None, "beta"),
+            candidate("a", "Codex", None, "alpha"),
+            candidate("claude", "Claude", None, "only Claude"),
+        ];
+        let groups = import_source_groups(&candidates);
+        assert_eq!(
+            groups.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["Claude", "Claude + Codex", "Codex"]
+        );
+        assert_eq!(
+            groups["Codex"]
+                .iter()
+                .map(|candidate| candidate.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "z"]
+        );
+        assert_eq!(groups["Claude + Codex"].len(), 1);
+    }
+    #[test]
     fn scoped_connections_wait_for_workspace_but_schedules_with_warnings_remain_selectable() {
         use neko_protocol::setup_import::ImportCandidateKind;
         assert!(candidate_is_unavailable(
             &ImportCandidateKind::Connection,
             None,
             Some("/repo"),
+            false,
             false
         ));
         assert!(!candidate_is_unavailable(
             &ImportCandidateKind::Connection,
             None,
             Some("/repo"),
-            true
+            true,
+            false
+        ));
+        assert!(candidate_is_unavailable(
+            &ImportCandidateKind::Skill,
+            None,
+            Some("/repo"),
+            false,
+            false
+        ));
+        assert!(!candidate_is_unavailable(
+            &ImportCandidateKind::Skill,
+            None,
+            Some("/repo"),
+            true,
+            false
         ));
         assert!(!candidate_is_unavailable(
             &ImportCandidateKind::Schedule,
             Some("warning"),
             None,
+            false,
             false
         ));
         assert!(workspace_scope_selected(Some("/repo"), false, true));
+    }
+
+    #[test]
+    fn explicitly_global_fallback_makes_only_a_scoped_connection_selectable() {
+        use neko_protocol::setup_import::ImportCandidateKind;
+        assert!(!candidate_is_unavailable(
+            &ImportCandidateKind::Connection,
+            None,
+            Some("/missing"),
+            false,
+            true,
+        ));
+        assert!(candidate_is_unavailable(
+            &ImportCandidateKind::Skill,
+            None,
+            Some("/missing"),
+            false,
+            true,
+        ));
+    }
+
+    #[test]
+    fn missing_workspace_is_not_reported_as_a_broken_connection() {
+        assert_eq!(
+            candidate_review_badge(false, false, true, false, false),
+            "Add workspace first"
+        );
+        assert_eq!(
+            candidate_review_badge(false, true, false, false, false),
+            "Review setup"
+        );
+    }
+
+    #[test]
+    fn discovery_requires_individual_selection() {
+        use neko_protocol::setup_import::{ImportCandidate, ImportCandidateKind, ImportPreview};
+        let preview = ImportPreview {
+            candidates: vec![
+                ImportCandidate {
+                    id: "workspace".into(),
+                    kind: ImportCandidateKind::Workspace,
+                    source: "Codex".into(),
+                    scope: "workspace:/repo".into(),
+                    workspace: Some("/repo".into()),
+                    name: "repo".into(),
+                    metadata: Default::default(),
+                    problem: None,
+                },
+                ImportCandidate {
+                    id: "connection".into(),
+                    kind: ImportCandidateKind::Connection,
+                    source: "Claude".into(),
+                    scope: "workspace:/repo".into(),
+                    workspace: Some("/repo".into()),
+                    name: "Figma".into(),
+                    metadata: Default::default(),
+                    problem: None,
+                },
+                ImportCandidate {
+                    id: "skill".into(),
+                    kind: ImportCandidateKind::Skill,
+                    source: "Codex".into(),
+                    scope: "global".into(),
+                    workspace: None,
+                    name: "Review".into(),
+                    metadata: Default::default(),
+                    problem: None,
+                },
+                ImportCandidate {
+                    id: "unavailable".into(),
+                    kind: ImportCandidateKind::Connection,
+                    source: "Claude".into(),
+                    scope: "global".into(),
+                    workspace: None,
+                    name: "Broken".into(),
+                    metadata: Default::default(),
+                    problem: Some("Invalid config".into()),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let selection = default_import_selection(&preview);
+        assert!(selection.workspaces.is_empty());
+        assert!(selection.connections.is_empty());
+        assert!(selection.skills.is_empty());
+        assert!(!selection.connections.contains("unavailable"));
+        assert!(selection.schedules.is_empty());
     }
 }

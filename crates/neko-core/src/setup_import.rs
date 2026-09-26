@@ -2,13 +2,15 @@
 //! omitted from the serializable preview. Discovery never launches a server.
 use neko_protocol::{
     mcp_host::ServerConfig,
-    setup_import::{ImportCandidate, ImportCandidateKind, ImportConnection, ImportPreview},
+    setup_import::{
+        ImportCandidate, ImportCandidateKind, ImportConnection, ImportPreview, ImportSourceInfo,
+    },
     workbench::Secret,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -17,6 +19,35 @@ use std::{
 const MAX_FILE: usize = 512 * 1024;
 const MAX_CONNECTIONS: usize = 100;
 const PREVIEW_SETTING: &str = "neko_import_preview_v1";
+
+/// A bounded presence check for the source picker. No source file is read here.
+pub fn available_sources(home: &Path) -> Vec<ImportSourceInfo> {
+    [
+        (
+            "codex",
+            "Codex",
+            &[".codex/config.toml", ".codex/skills", ".codex/automations"] as &[_],
+        ),
+        ("claude", "Claude", &[".claude.json", ".claude/skills"]),
+        (
+            "paseo",
+            "Paseo",
+            &[".paseo/projects/projects.json", ".paseo/paseo.pid"],
+        ),
+        ("agents", "Local skills", &[".agents/skills"]),
+    ]
+    .into_iter()
+    .filter(|(_, _, paths)| {
+        paths
+            .iter()
+            .any(|path| home.join(path).symlink_metadata().is_ok())
+    })
+    .map(|(id, name, _)| ImportSourceInfo {
+        id: id.into(),
+        name: name.into(),
+    })
+    .collect()
+}
 
 pub fn read_skill_for_import(path: &str, expected_hash: &str) -> Result<String, String> {
     let body = file_text(Path::new(path))?.ok_or("Skill file is unavailable")?;
@@ -133,31 +164,48 @@ pub struct Discovery {
 }
 impl Discovery {
     pub fn preview(&self) -> ImportPreview {
-        let mut ledger = self
-            .candidates
+        let mut connection_groups: Vec<Vec<&Candidate>> = Vec::new();
+        for candidate in &self.candidates {
+            if let Some(group) = connection_groups
+                .iter_mut()
+                .find(|group| same_connection_definition(group[0], candidate))
+            {
+                group.push(candidate);
+            } else {
+                connection_groups.push(vec![candidate]);
+            }
+        }
+        let mut ledger = connection_groups
             .iter()
-            .map(|candidate| ImportCandidate {
-                id: candidate.preview.id.clone(),
-                kind: ImportCandidateKind::Connection,
-                source: candidate.preview.source.clone(),
-                scope: candidate
-                    .preview
-                    .repository
-                    .as_deref()
-                    .map_or_else(|| "global".into(), |path| format!("workspace:{path}")),
-                workspace: candidate.preview.repository.clone(),
-                name: candidate.preview.name.clone(),
-                metadata: BTreeMap::from([
-                    (
-                        "enabled_at_source".into(),
-                        candidate.preview.enabled_at_source.to_string(),
+            .map(|group| {
+                let candidate = group[0];
+                ImportCandidate {
+                    id: candidate.preview.id.clone(),
+                    kind: ImportCandidateKind::Connection,
+                    source: display_sources(
+                        group
+                            .iter()
+                            .map(|candidate| candidate.preview.source.as_str()),
                     ),
-                    (
-                        "has_credentials".into(),
-                        candidate.preview.has_credentials.to_string(),
-                    ),
-                ]),
-                problem: candidate.preview.problem.clone(),
+                    scope: candidate
+                        .preview
+                        .repository
+                        .as_deref()
+                        .map_or_else(|| "global".into(), |path| format!("workspace:{path}")),
+                    workspace: candidate.preview.repository.clone(),
+                    name: candidate.preview.name.clone(),
+                    metadata: BTreeMap::from([
+                        (
+                            "enabled_at_source".into(),
+                            candidate.preview.enabled_at_source.to_string(),
+                        ),
+                        (
+                            "has_credentials".into(),
+                            candidate.preview.has_credentials.to_string(),
+                        ),
+                    ]),
+                    problem: candidate.preview.problem.clone(),
+                }
             })
             .collect::<Vec<_>>();
         ledger.extend(self.schedules.iter().map(|schedule| {
@@ -179,6 +227,7 @@ impl Discovery {
             }
         }));
         ledger.extend(self.repositories.iter().map(|path| {
+            let (review_group, review_reason, problem) = workspace_review(Path::new(path));
             ImportCandidate {
                 id: format!(
                     "workspace:{:x}",
@@ -193,11 +242,28 @@ impl Discovery {
                     .and_then(|name| name.to_str())
                     .unwrap_or(path)
                     .into(),
-                metadata: BTreeMap::new(),
-                problem: None,
+                metadata: BTreeMap::from([
+                    ("review_group".into(), review_group.into()),
+                    ("review_reason".into(), review_reason.into()),
+                ]),
+                problem,
             }
         }));
-        ledger.extend(self.skills.iter().map(|skill| {
+        let mut skill_groups: Vec<Vec<&neko_protocol::skills::Skill>> = Vec::new();
+        for skill in &self.skills {
+            if let Some(group) = skill_groups.iter_mut().find(|group| {
+                let known = group[0];
+                known.workspace_id == skill.workspace_id
+                    && known.name == skill.name
+                    && known.content_hash == skill.content_hash
+            }) {
+                group.push(skill);
+            } else {
+                skill_groups.push(vec![skill]);
+            }
+        }
+        ledger.extend(skill_groups.iter().map(|group| {
+            let skill = group[0];
             let id = format!(
                 "skill:{:x}",
                 Sha256::digest(format!("skill\0{}\0{}", skill.path, skill.content_hash).as_bytes())
@@ -210,7 +276,7 @@ impl Discovery {
             ImportCandidate {
                 id,
                 kind: ImportCandidateKind::Skill,
-                source: skill.source.clone(),
+                source: display_sources(group.iter().map(|skill| skill.source.as_str())),
                 scope,
                 workspace,
                 name: skill.name.clone(),
@@ -223,6 +289,8 @@ impl Discovery {
             }
         }));
         ImportPreview {
+            sources: Vec::new(),
+            active_source: None,
             candidates: ledger,
             schedules: self.schedules.clone(),
             preview_id: String::new(),
@@ -231,6 +299,157 @@ impl Discovery {
             warnings: self.warnings.clone(),
         }
     }
+}
+
+/// A source is provenance, not a distinct thing to install. We retain all
+/// matching labels for review while one representative is imported.
+fn display_sources<'a>(sources: impl IntoIterator<Item = &'a str>) -> String {
+    let labels = sources
+        .into_iter()
+        .map(display_source)
+        .collect::<BTreeSet<_>>();
+    labels.into_iter().collect::<Vec<_>>().join(" + ")
+}
+
+fn display_source(source: &str) -> String {
+    if source.ends_with("/.codex/config.toml") {
+        "Codex".into()
+    } else if source.ends_with("/.claude.json") {
+        "Claude".into()
+    } else if source.ends_with("/.mcp.json") {
+        "MCP config".into()
+    } else {
+        source.into()
+    }
+}
+
+fn same_connection_definition(left: &Candidate, right: &Candidate) -> bool {
+    left.preview.name == right.preview.name
+        && left.preview.repository == right.preview.repository
+        && left.config == right.config
+        && left.preview.problem == right.preview.problem
+        && match (&left.credentials, &right.credentials) {
+            (None, None) => true,
+            (Some(left), Some(right)) => left.0 == right.0,
+            _ => false,
+        }
+}
+
+fn canonical_repositories(repositories: &[PathBuf]) -> Vec<PathBuf> {
+    let mut normalized = Vec::new();
+    for repository in repositories {
+        let repository = repository
+            .canonicalize()
+            .unwrap_or_else(|_| repository.clone());
+        if !normalized.iter().any(|known| known == &repository) {
+            normalized.push(repository);
+        }
+    }
+    normalized
+}
+
+fn workspace_review(path: &Path) -> (&'static str, &'static str, Option<String>) {
+    if !path.is_dir() {
+        return (
+            "other",
+            "This folder is no longer on this Mac",
+            Some("Folder no longer exists".into()),
+        );
+    }
+    let codex_date = path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            let bytes = name.as_bytes();
+            bytes.len() == 10
+                && bytes[4] == b'-'
+                && bytes[7] == b'-'
+                && bytes
+                    .iter()
+                    .enumerate()
+                    .all(|(i, byte)| i == 4 || i == 7 || byte.is_ascii_digit())
+        });
+    let codex_parent = path
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "Codex");
+    let documents_parent = path
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "Documents");
+    if codex_date && codex_parent && documents_parent {
+        return ("other", "One-off Codex output folder", None);
+    }
+    let uuid = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            let groups: Vec<_> = name.split('-').collect();
+            groups.iter().map(|part| part.len()).collect::<Vec<_>>() == [8, 4, 4, 4, 12]
+                && groups
+                    .iter()
+                    .all(|part| part.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        });
+    let design_project = path
+        .parent()
+        .is_some_and(|parent| parent.file_name().is_some_and(|name| name == "projects"))
+        && path
+            .ancestors()
+            .nth(2)
+            .is_some_and(|parent| parent.file_name().is_some_and(|name| name == "data"))
+        && path
+            .ancestors()
+            .nth(4)
+            .is_some_and(|parent| parent.file_name().is_some_and(|name| name == "namespaces"))
+        && path
+            .ancestors()
+            .nth(5)
+            .is_some_and(|parent| parent.file_name().is_some_and(|name| name == "Open Design"))
+        && path.ancestors().nth(6).is_some_and(|parent| {
+            parent
+                .file_name()
+                .is_some_and(|name| name == "Application Support")
+        })
+        && path
+            .ancestors()
+            .nth(7)
+            .is_some_and(|parent| parent.file_name().is_some_and(|name| name == "Library"));
+    if uuid && design_project {
+        return ("other", "Generated design project folder", None);
+    }
+    let temp_root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if canonical.starts_with(temp_root)
+        && path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("neko-workbench-smoke-"))
+    {
+        return ("other", "Neko test folder", None);
+    }
+    let git_marker = path.join(".git");
+    if git_marker
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_file())
+    {
+        if let Ok(file) = fs::File::open(&git_marker) {
+            let mut marker = String::new();
+            if file.take(4096).read_to_string(&mut marker).is_ok()
+                && marker.starts_with("gitdir:")
+                && marker.contains("/worktrees/")
+            {
+                return ("other", "Git worktree for another project", None);
+            }
+        }
+    }
+    ("primary", "Project folder", None)
 }
 
 fn file_text(path: &Path) -> Result<Option<String>, String> {
@@ -314,6 +533,7 @@ fn configuration(
     paths: &[PathBuf],
     environment: &BTreeMap<String, String>,
     repository: Option<&str>,
+    home: &Path,
 ) -> Result<(ServerConfig, Option<Secret>), String> {
     fn environment_value(
         environment: &BTreeMap<String, String>,
@@ -424,12 +644,32 @@ fn configuration(
         }
         ServerConfig::Http { url }
     } else {
-        if value.get("cwd").is_some() {
-            return Err(
-                "Server working directory requires manual configuration; it was not discarded"
-                    .into(),
-            );
-        }
+        let cwd = value
+            .get("cwd")
+            .map(|value| {
+                let value = value
+                    .as_str()
+                    .ok_or("Working directory must be text".to_owned())?;
+                let value = expand(value, environment)?;
+                let path = Path::new(&value);
+                let path = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    repository.map(Path::new).unwrap_or(home).join(path)
+                };
+                path.canonicalize()
+                    .ok()
+                    .filter(|path| path.is_dir())
+                    .and_then(|path| path.to_str().map(str::to_owned))
+                    .ok_or("Server working directory is unavailable".to_owned())
+            })
+            .transpose()?
+            .or_else(|| {
+                repository
+                    .and_then(|repository| Path::new(repository).canonicalize().ok())
+                    .filter(|path| path.is_dir())
+                    .and_then(|path| path.to_str().map(str::to_owned))
+            });
         let command = value
             .get("command")
             .and_then(Value::as_str)
@@ -450,15 +690,20 @@ fn configuration(
             })
             .transpose()?
             .unwrap_or_default();
-        if repository.is_some() && !args.is_empty() {
-            return Err(
-                "Workspace server arguments require manual working-directory configuration".into(),
-            );
-        }
-        if args.iter().any(|arg| {
-            let path = arg.split_once('=').map_or(arg.as_str(), |(_, value)| value);
-            path.starts_with("./") || path.starts_with("../")
-        }) {
+        if cwd.is_none()
+            && args.iter().any(|arg| {
+                let path = arg.split_once('=').map_or(arg.as_str(), |(_, value)| value);
+                path == "."
+                    || path.starts_with("./")
+                    || path.starts_with("../")
+                    || matches!(
+                        Path::new(path)
+                            .extension()
+                            .and_then(|extension| extension.to_str()),
+                        Some("js" | "mjs" | "cjs" | "ts" | "py" | "json" | "toml" | "yaml" | "yml")
+                    ) && !Path::new(path).is_absolute()
+            })
+        {
             return Err(
                 "Relative server arguments require manual working-directory configuration".into(),
             );
@@ -481,6 +726,7 @@ fn configuration(
         ServerConfig::Stdio {
             command: executable(command, paths, repository)?,
             args,
+            cwd,
         }
     };
     crate::mcp_host::store::validate_config(&config)?;
@@ -501,6 +747,7 @@ fn add_servers(
     repository: Option<&str>,
     paths: &[PathBuf],
     environment: &BTreeMap<String, String>,
+    home: &Path,
     disabled: Option<&Value>,
 ) {
     let Some(servers) = servers.and_then(Value::as_object) else {
@@ -516,7 +763,7 @@ fn add_servers(
             "{:x}",
             Sha256::digest(format!("{source}\0{}\0{name}", repository.unwrap_or("")).as_bytes())
         );
-        let result = configuration(value, paths, environment, repository);
+        let result = configuration(value, paths, environment, repository, home);
         let (config, credentials, problem) = match result {
             Ok((c, s)) => (Some(c), s, None),
             Err(e) => (None, None, Some(e)),
@@ -549,20 +796,27 @@ fn add_servers(
 }
 
 /// Caller supplies environment and executable search roots; no shell is run.
-fn discover_codex_claude(context: &DiscoveryContext<'_>) -> Discovery {
+fn discover_codex_claude(context: &DiscoveryContext<'_>, source_filter: Option<&str>) -> Discovery {
     let home = context.home;
     let repositories = context.repositories;
     let paths = context.paths;
     let environment = context.environment;
     let mut out = Discovery::default();
-    let mut files = vec![
-        (home.join(".codex/config.toml"), None, true),
-        (home.join(".claude.json"), None, false),
-    ];
+    let mut files = Vec::new();
+    if source_filter.is_none_or(|source| source == "codex") {
+        files.push((home.join(".codex/config.toml"), None, true));
+    }
+    if source_filter.is_none_or(|source| source == "claude") {
+        files.push((home.join(".claude.json"), None, false));
+    }
     for repository in repositories.iter().take(100) {
         let scope = Some(repository.to_string_lossy().into_owned());
-        files.push((repository.join(".mcp.json"), scope.clone(), false));
-        files.push((repository.join(".codex/config.toml"), scope, true));
+        if source_filter.is_none_or(|source| source == "claude") {
+            files.push((repository.join(".mcp.json"), scope.clone(), false));
+        }
+        if source_filter.is_none_or(|source| source == "codex") {
+            files.push((repository.join(".codex/config.toml"), scope, true));
+        }
     }
     let mut cursor = 0;
     while cursor < files.len() && cursor < 202 {
@@ -599,6 +853,7 @@ fn discover_codex_claude(context: &DiscoveryContext<'_>) -> Discovery {
             repository.as_deref(),
             paths,
             environment,
+            context.home(),
             value.get("disabledMcpServers"),
         );
         if let Some(projects) = value.get("projects").and_then(Value::as_object) {
@@ -612,6 +867,9 @@ fn discover_codex_claude(context: &DiscoveryContext<'_>) -> Discovery {
                     out.repositories.push(directory.clone());
                 }
                 for (relative, is_toml) in [(".mcp.json", false), (".codex/config.toml", true)] {
+                    if source_filter.is_some_and(|filter| (filter == "codex") != is_toml) {
+                        continue;
+                    }
                     let path = Path::new(directory).join(relative);
                     if files.len() < 202 && !files.iter().any(|(p, _, _)| *p == path) {
                         files.push((path, Some(directory.clone()), is_toml));
@@ -625,6 +883,7 @@ fn discover_codex_claude(context: &DiscoveryContext<'_>) -> Discovery {
                         Some(directory),
                         paths,
                         environment,
+                        context.home(),
                         project.get("disabledMcpServers"),
                     );
                 }
@@ -636,7 +895,11 @@ fn discover_codex_claude(context: &DiscoveryContext<'_>) -> Discovery {
             }
         }
     }
-    let (schedules, warnings) = crate::schedule_import::discover(home);
+    let (schedules, warnings) = if source_filter.is_none_or(|source| source == "codex") {
+        crate::schedule_import::discover(home)
+    } else {
+        (Vec::new(), Vec::new())
+    };
     for schedule in &schedules {
         if let Some(repository) = &schedule.repository {
             if !out.repositories.contains(repository) && out.repositories.len() < 100 {
@@ -647,14 +910,6 @@ fn discover_codex_claude(context: &DiscoveryContext<'_>) -> Discovery {
     out.schedules = schedules;
     out.warnings.extend(warnings);
     out
-}
-
-struct CodexClaudeSource;
-impl ImportSource for CodexClaudeSource {
-    fn discover(&self, context: &DiscoveryContext<'_>, out: &mut Discovery) {
-        let found = discover_codex_claude(context);
-        *out = found;
-    }
 }
 
 struct PaseoSource;
@@ -707,16 +962,58 @@ pub fn discover(
     paths: &[PathBuf],
     environment: &BTreeMap<String, String>,
 ) -> Discovery {
-    let context = DiscoveryContext::new(home, repositories, paths, environment);
+    discover_filtered(home, repositories, paths, environment, None).unwrap_or_default()
+}
+
+pub fn discover_source(
+    home: &Path,
+    repositories: &[PathBuf],
+    paths: &[PathBuf],
+    environment: &BTreeMap<String, String>,
+    source: &str,
+) -> Result<Discovery, String> {
+    discover_filtered(home, repositories, paths, environment, Some(source))
+}
+
+fn discover_filtered(
+    home: &Path,
+    repositories: &[PathBuf],
+    paths: &[PathBuf],
+    environment: &BTreeMap<String, String>,
+    source: Option<&str>,
+) -> Result<Discovery, String> {
+    if source.is_some_and(|source| !matches!(source, "codex" | "claude" | "paseo" | "agents")) {
+        return Err("Unknown import source".into());
+    }
+    let repositories = canonical_repositories(repositories);
+    let context = DiscoveryContext::new(home, &repositories, paths, environment);
     let mut out = Discovery::default();
-    CodexClaudeSource.discover(&context, &mut out);
-    PaseoSource.discover(&context, &mut out);
-    for repository in repositories.iter().take(100) {
-        let path = repository.to_string_lossy().into_owned();
-        if !out.repositories.contains(&path) {
-            out.repositories.push(path.clone());
+    if source.is_none_or(|source| matches!(source, "codex" | "claude")) {
+        out = discover_codex_claude(&context, source);
+    }
+    if source.is_none_or(|source| source == "paseo") {
+        PaseoSource.discover(&context, &mut out);
+    }
+    if source.is_none() {
+        for repository in repositories.iter().take(100) {
+            let path = repository.to_string_lossy().into_owned();
+            if !out.repositories.contains(&path) {
+                out.repositories.push(path.clone());
+            }
         }
     }
+    // Sources may spell the same real directory differently (notably /var
+    // versus /private/var on macOS). Normalize after all adapters contribute
+    // before turning repositories into workspace and skill roots.
+    out.repositories = canonical_repositories(
+        &out.repositories
+            .iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>(),
+    )
+    .into_iter()
+    .map(|path| path.to_string_lossy().into_owned())
+    .collect();
     let workspace_roots = out
         .repositories
         .iter()
@@ -725,6 +1022,11 @@ pub fn discover(
             let path = PathBuf::from(repository);
             let canonical = path.canonicalize().ok()?;
             let home_root = home.canonicalize().ok()?;
+            // Home can be a workspace, but its skill directories are already
+            // scanned as global roots above. Never scan those files twice.
+            if canonical == home_root {
+                return None;
+            }
             let caller_root = repositories
                 .iter()
                 .filter_map(|root| root.canonicalize().ok())
@@ -734,14 +1036,17 @@ pub fn discover(
         })
         .collect::<Vec<_>>();
     let mut roots = Vec::new();
-    for (directory, source) in [
+    for (directory, root_source) in [
         (".codex/skills", "Codex"),
         (".agents/skills", "Agents"),
         (".claude/skills", "Claude"),
     ] {
+        if source.is_some_and(|source| !root_source.eq_ignore_ascii_case(source)) {
+            continue;
+        }
         roots.push(crate::skills::Root {
             path: home.join(directory),
-            source: source.into(),
+            source: root_source.into(),
             workspace_id: None,
         });
     }
@@ -752,6 +1057,9 @@ pub fn discover(
             ".codex/skills",
             ".neko/skills",
         ] {
+            if source.is_some_and(|source| !directory.starts_with(&format!(".{source}/"))) {
+                continue;
+            }
             roots.push(crate::skills::Root {
                 path: repository.join(directory),
                 source: "Workspace".into(),
@@ -770,13 +1078,83 @@ pub fn discover(
             allowed_roots.iter().any(|root| path.starts_with(root))
         })
         .collect();
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use neko_protocol::setup_import::ImportCandidateKind;
+
+    #[test]
+    fn source_scan_reads_only_the_selected_source() {
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir_all(home.path().join(".codex/skills/codex-only")).unwrap();
+        fs::create_dir_all(home.path().join(".claude/skills/claude-only")).unwrap();
+        fs::write(
+            home.path().join(".codex/config.toml"),
+            "[mcp_servers.codex_tool]\nurl = 'https://codex.example/mcp'\n",
+        )
+        .unwrap();
+        fs::write(
+            home.path().join(".claude.json"),
+            r#"{"mcpServers":{"claude_tool":{"url":"https://claude.example/mcp"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            home.path().join(".codex/skills/codex-only/SKILL.md"),
+            "---\nname: Codex only\ndescription: Codex skill\n---\nUse Codex.\n",
+        )
+        .unwrap();
+        fs::write(
+            home.path().join(".claude/skills/claude-only/SKILL.md"),
+            "---\nname: Claude only\ndescription: Claude skill\n---\nUse Claude.\n",
+        )
+        .unwrap();
+
+        let codex = discover_source(home.path(), &[], &[], &BTreeMap::new(), "codex")
+            .unwrap()
+            .preview();
+        let claude = discover_source(home.path(), &[], &[], &BTreeMap::new(), "claude")
+            .unwrap()
+            .preview();
+        assert!(
+            codex
+                .candidates
+                .iter()
+                .any(|item| item.name == "codex_tool")
+        );
+        assert!(
+            codex
+                .candidates
+                .iter()
+                .any(|item| item.name == "Codex only")
+        );
+        assert!(
+            !codex
+                .candidates
+                .iter()
+                .any(|item| item.name == "claude_tool" || item.name == "Claude only")
+        );
+        assert!(
+            claude
+                .candidates
+                .iter()
+                .any(|item| item.name == "claude_tool")
+        );
+        assert!(
+            claude
+                .candidates
+                .iter()
+                .any(|item| item.name == "Claude only")
+        );
+        assert!(
+            !claude
+                .candidates
+                .iter()
+                .any(|item| item.name == "codex_tool" || item.name == "Codex only")
+        );
+    }
 
     #[test]
     fn discovery_preview_includes_global_and_workspace_skill_path_and_hash_without_body() {
@@ -822,6 +1200,212 @@ mod tests {
     }
 
     #[test]
+    fn home_directory_is_selectable_without_duplicate_global_skills() {
+        let home = tempfile::tempdir().unwrap();
+        let skill_dir = home.path().join(".codex/skills/example");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: Example\ndescription: A global skill\n---\nInstructions\n",
+        )
+        .unwrap();
+
+        let preview = discover(
+            home.path(),
+            &[home.path().to_path_buf()],
+            &[],
+            &BTreeMap::new(),
+        )
+        .preview();
+        let skills: Vec<_> = preview
+            .candidates
+            .iter()
+            .filter(|item| item.kind == ImportCandidateKind::Skill && item.name == "Example")
+            .collect();
+        assert_eq!(skills.len(), 1, "home skills must not be scanned twice");
+        assert_eq!(skills[0].scope, "global");
+        let canonical_home = home.path().canonicalize().unwrap();
+        assert_eq!(
+            preview
+                .candidates
+                .iter()
+                .filter(|item| {
+                    item.kind == ImportCandidateKind::Workspace
+                        && item.scope == format!("workspace:{}", canonical_home.display())
+                })
+                .count(),
+            1
+        );
+        assert!(
+            preview
+                .candidates
+                .iter()
+                .find(|item| {
+                    item.kind == ImportCandidateKind::Workspace
+                        && item.scope == format!("workspace:{}", canonical_home.display())
+                })
+                .unwrap()
+                .problem
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn preview_collapses_identical_skills_and_mcp_definitions_across_sources() {
+        let config = ServerConfig::Http {
+            url: "https://example.com/mcp".into(),
+        };
+        let connection = |id: &str, source: &str| Candidate {
+            preview: ImportConnection {
+                id: id.into(),
+                name: "paper".into(),
+                source: source.into(),
+                repository: None,
+                has_credentials: false,
+                enabled_at_source: true,
+                problem: None,
+            },
+            config: Some(config.clone()),
+            credentials: None,
+        };
+        let skill = |source: &str, path: &str| neko_protocol::skills::Skill {
+            path: path.into(),
+            name: "paseo-handoff".into(),
+            description: "Hand work over".into(),
+            source: source.into(),
+            workspace_id: None,
+            content_hash: "same-content".into(),
+        };
+        let preview = Discovery {
+            candidates: vec![
+                connection("codex-paper", "/Users/nish/.codex/config.toml"),
+                connection("claude-paper", "/Users/nish/.claude.json"),
+            ],
+            skills: vec![
+                skill("Codex", "/Users/nish/.codex/skills/paseo-handoff/SKILL.md"),
+                skill(
+                    "Claude",
+                    "/Users/nish/.claude/skills/paseo-handoff/SKILL.md",
+                ),
+            ],
+            ..Discovery::default()
+        }
+        .preview();
+        let connections = preview
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.kind == ImportCandidateKind::Connection)
+            .collect::<Vec<_>>();
+        let skills = preview
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.kind == ImportCandidateKind::Skill)
+            .collect::<Vec<_>>();
+        assert_eq!(connections.len(), 1);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(connections[0].name, "paper");
+        assert!(connections[0].source.contains("Codex"));
+        assert!(connections[0].source.contains("Claude"));
+        assert_eq!(skills[0].name, "paseo-handoff");
+        assert!(skills[0].source.contains("Codex"));
+        assert!(skills[0].source.contains("Claude"));
+    }
+
+    #[test]
+    fn a_plain_directory_is_offered_as_an_importable_workspace() {
+        let directory = tempfile::tempdir().unwrap();
+        let preview = Discovery {
+            repositories: vec![directory.path().to_string_lossy().into_owned()],
+            ..Default::default()
+        }
+        .preview();
+        let workspace = preview
+            .candidates
+            .iter()
+            .find(|candidate| candidate.kind == ImportCandidateKind::Workspace)
+            .unwrap();
+        assert!(workspace.problem.is_none());
+    }
+
+    #[test]
+    fn generated_workspace_folders_are_secondary_but_still_selectable() {
+        let home = tempfile::tempdir().unwrap();
+        let project = home.path().join("Documents/hme");
+        let scratch = home.path().join("Documents/Codex/2026-09-26/one-off-task");
+        let worktree = home.path().join("Documents/worktree");
+        let generated_design = home.path().join("Library/Application Support/Open Design/namespaces/release-stable/data/projects/e15eca3c-c066-462f-8aaa-3afb88728d92");
+        let smoke_root = tempfile::Builder::new()
+            .prefix("neko-workbench-smoke-")
+            .tempdir()
+            .unwrap();
+        let smoke = smoke_root.path().join("repo");
+        let missing = home.path().join("Documents/removed-project");
+        for path in [&project, &scratch, &worktree, &smoke, &generated_design] {
+            fs::create_dir_all(path).unwrap();
+        }
+        fs::write(
+            worktree.join(".git"),
+            "gitdir: /tmp/origin/.git/worktrees/task\n",
+        )
+        .unwrap();
+        let preview = Discovery {
+            repositories: [
+                &project,
+                &scratch,
+                &worktree,
+                &smoke,
+                &generated_design,
+                &missing,
+            ]
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+            ..Default::default()
+        }
+        .preview();
+        let workspace = |path: &Path| {
+            preview
+                .candidates
+                .iter()
+                .find(|item| {
+                    item.kind == ImportCandidateKind::Workspace
+                        && item.workspace.as_deref() == path.to_str()
+                })
+                .unwrap()
+        };
+        assert_eq!(
+            workspace(&project)
+                .metadata
+                .get("review_group")
+                .map(String::as_str),
+            Some("primary")
+        );
+        for path in [&scratch, &worktree, &smoke, &generated_design] {
+            let item = workspace(path);
+            assert_eq!(
+                item.metadata.get("review_group").map(String::as_str),
+                Some("other")
+            );
+            assert!(item.metadata.get("review_reason").is_some());
+            assert!(
+                item.problem.is_none(),
+                "secondary folders remain selectable"
+            );
+        }
+        assert_eq!(
+            workspace(&missing)
+                .metadata
+                .get("review_group")
+                .map(String::as_str),
+            Some("other")
+        );
+        assert_eq!(
+            workspace(&missing).problem.as_deref(),
+            Some("Folder no longer exists")
+        );
+    }
+
+    #[test]
     fn discovery_adds_skills_for_workspaces_found_by_paseo_adapter() {
         let home = tempfile::tempdir().unwrap();
         let repository = home.path().join("repo");
@@ -841,6 +1425,50 @@ mod tests {
         assert!(preview.candidates.iter().any(|candidate| {
             candidate.kind == ImportCandidateKind::Skill && candidate.name == "Local"
         }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovery_deduplicates_a_workspace_reached_through_a_symlink_alias() {
+        use std::os::unix::fs::symlink;
+        let home = tempfile::tempdir().unwrap();
+        let repository = home.path().join("repo");
+        fs::create_dir_all(repository.join(".agents/skills/local")).unwrap();
+        fs::write(
+            repository.join(".agents/skills/local/SKILL.md"),
+            "---\nname: Local\n---\nWorkspace instructions",
+        )
+        .unwrap();
+        let alias = home.path().join("repo-alias");
+        symlink(&repository, &alias).unwrap();
+        fs::create_dir_all(home.path().join(".paseo/projects")).unwrap();
+        fs::write(
+            home.path().join(".paseo/projects/projects.json"),
+            serde_json::json!([{"rootPath": repository, "archivedAt": null}]).to_string(),
+        )
+        .unwrap();
+
+        let preview = discover(home.path(), &[alias], &[], &BTreeMap::new()).preview();
+        assert_eq!(
+            preview
+                .candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate.kind == ImportCandidateKind::Workspace && candidate.name == "repo"
+                })
+                .count(),
+            1
+        );
+        assert_eq!(
+            preview
+                .candidates
+                .iter()
+                .filter(|candidate| {
+                    candidate.kind == ImportCandidateKind::Skill && candidate.name == "Local"
+                })
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -863,7 +1491,12 @@ mod tests {
         )
         .unwrap();
         let preview = discover(home.path(), &[], &[], &BTreeMap::new()).preview();
-        assert!(!preview.candidates.iter().any(|candidate| candidate.name == "Escaped"));
+        assert!(
+            !preview
+                .candidates
+                .iter()
+                .any(|candidate| candidate.name == "Escaped")
+        );
     }
 
     #[cfg(unix)]
@@ -919,7 +1552,7 @@ mod tests {
         assert_eq!(first.candidates, second.candidates);
         assert!(first.candidates.iter().any(|candidate| {
             candidate.kind == ImportCandidateKind::Connection
-                && candidate.source.contains(".codex/config.toml")
+                && candidate.source == "Codex"
                 && candidate.scope == "global"
         }));
         assert!(first.candidates.iter().all(|candidate| {
@@ -1055,7 +1688,7 @@ mod tests {
         );
     }
     #[test]
-    fn preserves_header_environment_and_project_disable_and_rejects_unsupported_cwd() {
+    fn preserves_header_environment_project_disable_and_working_directory() {
         let home = tempfile::tempdir().unwrap();
         fs::create_dir(home.path().join(".codex")).unwrap();
         fs::write(home.path().join(".codex/config.toml"), "[mcp_servers.remote]\nurl='https://example.com/mcp'\n[mcp_servers.remote.env_http_headers]\nAuthorization='AUTH'\n[mcp_servers.local]\ncommand='/bin/sh'\ncwd='/repo'\n").unwrap();
@@ -1085,14 +1718,7 @@ mod tests {
             .iter()
             .find(|c| c.preview.name == "local")
             .unwrap();
-        assert!(
-            local
-                .preview
-                .problem
-                .as_ref()
-                .unwrap()
-                .contains("working directory")
-        );
+        assert!(local.preview.problem.is_some()); // /repo is not an existing directory.
         assert!(local.config.is_none());
         assert!(
             !out.candidates
@@ -1155,9 +1781,74 @@ mod tests {
                 &[],
                 &BTreeMap::new(),
                 Some("/repo"),
+                Path::new("/tmp"),
             );
             assert!(result.is_err(), "accepted {argument}");
         }
+    }
+
+    #[test]
+    fn workspace_stdio_arguments_without_relative_paths_import() {
+        let result = configuration(
+            &serde_json::json!({"command":"/bin/sh", "args":["-c", "exit 0"]}),
+            &[],
+            &BTreeMap::new(),
+            Some("/repo"),
+            Path::new("/tmp"),
+        );
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[test]
+    fn explicit_working_directory_is_kept_in_imported_configuration() {
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir(home.path().join(".codex")).unwrap();
+        fs::write(
+            home.path().join(".codex/config.toml"),
+            "[mcp_servers.local]\ncommand='/bin/sh'\ncwd='.'\n",
+        )
+        .unwrap();
+        let out = discover(home.path(), &[], &[], &BTreeMap::new());
+        let local = out
+            .candidates
+            .iter()
+            .find(|c| c.preview.name == "local")
+            .unwrap();
+        assert!(
+            local.preview.problem.is_none(),
+            "{:?}",
+            local.preview.problem
+        );
+        assert_eq!(
+            serde_json::to_value(local.config.as_ref().unwrap()).unwrap()["cwd"],
+            home.path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+        );
+    }
+
+    #[test]
+    fn project_relative_server_argument_uses_project_working_directory() {
+        let repository = tempfile::tempdir().unwrap();
+        let result = configuration(
+            &serde_json::json!({"command":"/bin/sh", "args":["./server.sh"]}),
+            &[],
+            &BTreeMap::new(),
+            repository.path().to_str(),
+            repository.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(result.0).unwrap()["cwd"],
+            repository
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+        );
     }
 
     #[test]
@@ -1172,6 +1863,7 @@ mod tests {
             &[],
             &environment,
             None,
+            Path::new("/tmp"),
         );
         assert!(result.unwrap_err().contains("32"));
     }

@@ -52,15 +52,28 @@ pub struct Span {
 /// One block-level element.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
-    Heading { level: u8, spans: Vec<Span> },
-    Paragraph { spans: Vec<Span> },
+    Heading {
+        level: u8,
+        spans: Vec<Span>,
+    },
+    Paragraph {
+        spans: Vec<Span>,
+    },
     /// The language tag is parsed and dropped — there is no highlighter here,
     /// and carrying a field nothing reads is how dead vocabulary starts.
-    CodeFence { text: String },
+    CodeFence {
+        text: String,
+    },
     /// One item per block, pre-numbered: `marker` is `"•"` or `"3."` so the
     /// renderer never re-derives ordinal state the parser already had.
-    ListItem { depth: u8, marker: String, spans: Vec<Span> },
-    Quote { spans: Vec<Span> },
+    ListItem {
+        depth: u8,
+        marker: String,
+        spans: Vec<Span>,
+    },
+    Quote {
+        spans: Vec<Span>,
+    },
     Rule,
 }
 
@@ -82,7 +95,11 @@ enum Container {
     Heading(u8),
     Paragraph,
     Quote,
-    ListItem { marker: String, depth: u8, emitted: bool },
+    ListItem {
+        marker: String,
+        depth: u8,
+        emitted: bool,
+    },
 }
 
 pub fn parse(source: &str) -> Vec<Block> {
@@ -146,7 +163,9 @@ pub fn parse(source: &str) -> Vec<Block> {
         containers: &mut Vec<(Container, Vec<Span>)>,
         lists: &[Option<u64>],
     ) {
-        let Some((container, spans)) = containers.pop() else { return };
+        let Some((container, spans)) = containers.pop() else {
+            return;
+        };
         match container {
             Container::Heading(level) => blocks.push(Block::Heading { level, spans }),
             Container::Paragraph => {
@@ -159,11 +178,19 @@ pub fn parse(source: &str) -> Vec<Block> {
                     blocks.push(Block::Quote { spans });
                 }
             }
-            Container::ListItem { marker, depth, emitted } => {
+            Container::ListItem {
+                marker,
+                depth,
+                emitted,
+            } => {
                 // Already flushed when its nested list opened; anything left
                 // is trailing text after the sublist, its own line.
                 if !emitted || !spans.is_empty() {
-                    blocks.push(Block::ListItem { depth, marker, spans });
+                    blocks.push(Block::ListItem {
+                        depth,
+                        marker,
+                        spans,
+                    });
                 }
             }
         }
@@ -211,8 +238,14 @@ pub fn parse(source: &str) -> Vec<Block> {
                 // children, which on screen read as the sublist belonging to
                 // the item above. Caught by a screenshot, not by the parse
                 // tests, which only checked membership and depth.
-                if let Some((Container::ListItem { marker, depth, emitted }, spans)) =
-                    containers.last_mut()
+                if let Some((
+                    Container::ListItem {
+                        marker,
+                        depth,
+                        emitted,
+                    },
+                    spans,
+                )) = containers.last_mut()
                     && !spans.is_empty()
                 {
                     blocks.push(Block::ListItem {
@@ -237,13 +270,22 @@ pub fn parse(source: &str) -> Vec<Block> {
                     }
                     None => "\u{2022}".to_string(),
                 };
-                containers.push((Container::ListItem { marker, depth, emitted: false }, Vec::new()));
+                containers.push((
+                    Container::ListItem {
+                        marker,
+                        depth,
+                        emitted: false,
+                    },
+                    Vec::new(),
+                ));
             }
             Event::End(TagEnd::Item) => close(&mut blocks, &mut containers, &lists),
             Event::Start(Tag::CodeBlock(_)) => fence = Some(String::new()),
             Event::End(TagEnd::CodeBlock) => {
                 if let Some(text) = fence.take() {
-                    blocks.push(Block::CodeFence { text: text.trim_end().to_string() });
+                    blocks.push(Block::CodeFence {
+                        text: text.trim_end().to_string(),
+                    });
                 }
             }
             Event::Start(Tag::Strong) => inline.bold = true,
@@ -286,7 +328,9 @@ pub fn parse(source: &str) -> Vec<Block> {
     if let Some(text) = fence.take()
         && !text.trim().is_empty()
     {
-        blocks.push(Block::CodeFence { text: text.trim_end().to_string() });
+        blocks.push(Block::CodeFence {
+            text: text.trim_end().to_string(),
+        });
     }
     blocks
 }
@@ -322,7 +366,10 @@ fn span_style(span: &Span) -> HighlightStyle {
         style.color = Some(theme::active().text_primary.into());
     }
     if span.link {
-        style.underline = Some(UnderlineStyle { thickness: px(1.), ..Default::default() });
+        style.underline = Some(UnderlineStyle {
+            thickness: px(1.),
+            ..Default::default()
+        });
     }
     style
 }
@@ -400,7 +447,11 @@ fn render_block(block: &Block) -> AnyElement {
             .text_color(palette.text_primary)
             .child(SharedString::from(text.clone()))
             .into_any_element(),
-        Block::ListItem { depth, marker, spans } => div()
+        Block::ListItem {
+            depth,
+            marker,
+            spans,
+        } => div()
             .flex()
             .gap(px(6.))
             .pl(px(4. + 14. * f32::from(*depth)))
@@ -473,16 +524,23 @@ mod tests {
     #[test]
     fn bold_and_inline_code_become_styled_spans_not_markers() {
         let blocks = parse(AGENT);
-        let Block::Paragraph { spans } = &blocks[1] else { panic!("not a paragraph") };
+        let Block::Paragraph { spans } = &blocks[1] else {
+            panic!("not a paragraph")
+        };
         assert!(spans.iter().any(|s| s.bold && s.text == "60 documents"));
         assert!(spans.iter().any(|s| s.code && s.text == "node:"));
-        assert!(!spans.iter().any(|s| s.text.contains("**")), "markers must not survive");
+        assert!(
+            !spans.iter().any(|s| s.text.contains("**")),
+            "markers must not survive"
+        );
     }
 
     #[test]
     fn a_fence_keeps_its_text_verbatim_and_drops_its_language() {
         let blocks = parse(AGENT);
-        let Block::CodeFence { text } = &blocks[4] else { panic!("not a fence") };
+        let Block::CodeFence { text } = &blocks[4] else {
+            panic!("not a fence")
+        };
         assert_eq!(text, "pnpm ingest-drive --limit 0 | tail -3");
     }
 
@@ -501,7 +559,10 @@ mod tests {
         // "re-ran", and it rendered between "fixed" and "re-ran" because
         // blocks emitted at close and a parent closes after its children.
         let blocks = parse("- fixed the script\n- re-ran ingest\n  - twice\n");
-        assert_eq!(plain(&blocks), vec!["fixed the script", "re-ran ingest", "twice"]);
+        assert_eq!(
+            plain(&blocks),
+            vec!["fixed the script", "re-ran ingest", "twice"]
+        );
     }
 
     #[test]
@@ -517,7 +578,6 @@ mod tests {
         assert_eq!(markers, vec!["1.", "2."]);
     }
 
-
     #[test]
     fn each_nested_item_keeps_its_own_text() {
         // The first parser here used one flat span buffer, and this exact
@@ -525,7 +585,11 @@ mod tests {
         // scooped up the outer item's text. Every container buffers its own
         // spans now, which is what this pins.
         let blocks = parse("- outer\n  - inner\n");
-        assert_eq!(plain(&blocks), vec!["outer", "inner"], "parent before child, as written");
+        assert_eq!(
+            plain(&blocks),
+            vec!["outer", "inner"],
+            "parent before child, as written"
+        );
     }
     #[test]
     fn nested_bullets_know_their_depth() {
@@ -543,9 +607,14 @@ mod tests {
     #[test]
     fn a_link_keeps_its_text_and_drops_its_destination() {
         let blocks = parse("see [the docs](https://example.com/x) here");
-        let Block::Paragraph { spans } = &blocks[0] else { panic!() };
+        let Block::Paragraph { spans } = &blocks[0] else {
+            panic!()
+        };
         assert!(spans.iter().any(|s| s.link && s.text == "the docs"));
-        assert!(!plain(&blocks)[0].contains("https"), "the URL is not rendered text");
+        assert!(
+            !plain(&blocks)[0].contains("https"),
+            "the URL is not rendered text"
+        );
     }
 
     #[test]
@@ -553,8 +622,15 @@ mod tests {
         // Non-ASCII before a styled span is the case that breaks a char-count
         // implementation silently.
         let spans = vec![
-            Span { text: "café ".into(), ..Default::default() },
-            Span { text: "东".into(), bold: true, ..Default::default() },
+            Span {
+                text: "café ".into(),
+                ..Default::default()
+            },
+            Span {
+                text: "东".into(),
+                bold: true,
+                ..Default::default()
+            },
         ];
         let (text, highlights) = flatten(&spans);
         assert_eq!(&text[highlights[0].0.clone()], "东");

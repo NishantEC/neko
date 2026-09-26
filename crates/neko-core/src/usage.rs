@@ -108,12 +108,15 @@ impl Vendor {
             // The Keychain, **not** `~/.claude/.credentials.json` — that
             // path is the Linux case and does not exist on macOS.
             Vendor::Claude => {
-                let raw = run_capture("/usr/bin/security", &[
-                    "find-generic-password",
-                    "-w",
-                    "-s",
-                    "Claude Code-credentials",
-                ])?;
+                let raw = run_capture(
+                    "/usr/bin/security",
+                    &[
+                        "find-generic-password",
+                        "-w",
+                        "-s",
+                        "Claude Code-credentials",
+                    ],
+                )?;
                 claude_token(&raw).map(Credential::bare)
             }
             Vendor::Codex => codex_credential(&read_home(".codex/auth.json")?),
@@ -140,7 +143,10 @@ impl Vendor {
                     // A browser User-Agent is not decoration: this is a
                     // `chatgpt.com` backend route, and it answers with an
                     // HTML challenge page rather than JSON without one.
-                    ("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"),
+                    (
+                        "User-Agent",
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+                    ),
                 ];
                 if let Some(account) = &cred.account {
                     h.push(("ChatGPT-Account-Id", account.as_str()));
@@ -177,7 +183,10 @@ struct Credential {
 
 impl Credential {
     fn bare(token: String) -> Self {
-        Credential { token, account: None }
+        Credential {
+            token,
+            account: None,
+        }
     }
 }
 
@@ -215,7 +224,10 @@ pub enum Reading {
     /// ordinary row, because a meter at 0% would be a claim about quota
     /// this answer cannot make. `title` names the same thing a window
     /// would, so the left column still lines up with the meters above it.
-    Note { title: String, detail: String },
+    Note {
+        title: String,
+        detail: String,
+    },
     /// Signed out, or the token expired — actionable, unlike a generic error.
     NeedsAuth,
     Failed(String),
@@ -297,7 +309,10 @@ impl VendorUsage {
     pub fn headroom_percent(&self) -> Option<f32> {
         match &self.reading {
             Reading::Windows(windows) if !windows.is_empty() => {
-                let worst = windows.iter().map(|w| w.utilization).fold(f32::MIN, f32::max);
+                let worst = windows
+                    .iter()
+                    .map(|w| w.utilization)
+                    .fold(f32::MIN, f32::max);
                 Some((100.0 - worst).clamp(0.0, 100.0))
             }
             _ => None,
@@ -321,7 +336,10 @@ fn fetch_all() -> Vec<VendorUsage> {
             .iter()
             .map(|&vendor| scope.spawn(move || fetch_one(vendor)))
             .collect();
-        running.into_iter().filter_map(|h| h.join().ok().flatten()).collect()
+        running
+            .into_iter()
+            .filter_map(|h| h.join().ok().flatten())
+            .collect()
     })
 }
 
@@ -343,8 +361,14 @@ fn read_home(relative: &str) -> Option<String> {
 }
 
 fn run_capture(program: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(program).args(args).stdin(Stdio::null()).output().ok()?;
-    out.status.success().then(|| String::from_utf8(out.stdout).ok())?
+    let out = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8(out.stdout).ok())?
 }
 
 /// `--config -` reads ordinary curl options from stdin, so neither a token
@@ -353,7 +377,14 @@ fn run_capture(program: &str, args: &[&str]) -> Option<String> {
 /// actionable) from a transport failure without parsing curl's diagnostics.
 fn curl_get(url: &str, headers: &[(&str, &str)]) -> Result<String, Reading> {
     let mut child = Command::new("/usr/bin/curl")
-        .args(["--silent", "--show-error", "--config", "-", "--write-out", "\n%{http_code}"])
+        .args([
+            "--silent",
+            "--show-error",
+            "--config",
+            "-",
+            "--write-out",
+            "\n%{http_code}",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -371,7 +402,9 @@ fn curl_get(url: &str, headers: &[(&str, &str)]) -> Result<String, Reading> {
         .write_all(config.as_bytes())
         .map_err(|e| Reading::Failed(format!("couldn't send the request: {e}")))?;
 
-    let out = child.wait_with_output().map_err(|e| Reading::Failed(format!("curl failed: {e}")))?;
+    let out = child
+        .wait_with_output()
+        .map_err(|e| Reading::Failed(format!("curl failed: {e}")))?;
     let (body, status) = split_status(&String::from_utf8_lossy(&out.stdout));
     match status {
         // Some of these routes answer an expired session with an HTML
@@ -411,12 +444,15 @@ pub fn split_status(raw: &str) -> (String, Option<u16>) {
 /// knows where this token lives and exactly one to audit. The returned
 /// `String` is the secret; callers must not log it.
 pub fn claude_access_token() -> Option<String> {
-    let raw = run_capture("/usr/bin/security", &[
-        "find-generic-password",
-        "-w",
-        "-s",
-        "Claude Code-credentials",
-    ])?;
+    let raw = run_capture(
+        "/usr/bin/security",
+        &[
+            "find-generic-password",
+            "-w",
+            "-s",
+            "Claude Code-credentials",
+        ],
+    )?;
     claude_token(&raw)
 }
 
@@ -433,10 +469,16 @@ pub fn claude_token(raw: &str) -> Option<String> {
 fn codex_credential(raw: &str) -> Option<Credential> {
     let parsed: serde_json::Value = serde_json::from_str(raw.trim()).ok()?;
     let tokens = parsed.get("tokens")?;
-    let token = tokens.get("access_token")?.as_str().filter(|t| !t.is_empty())?;
+    let token = tokens
+        .get("access_token")?
+        .as_str()
+        .filter(|t| !t.is_empty())?;
     Some(Credential {
         token: token.to_string(),
-        account: tokens.get("account_id").and_then(serde_json::Value::as_str).map(str::to_string),
+        account: tokens
+            .get("account_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
     })
 }
 
@@ -446,7 +488,9 @@ fn codex_credential(raw: &str) -> Option<Credential> {
 /// for another issuer would otherwise win on map order alone.
 pub fn grok_token(raw: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(raw.trim()).ok()?;
-    if let Some(flat) = parsed.get("access_token").and_then(serde_json::Value::as_str)
+    if let Some(flat) = parsed
+        .get("access_token")
+        .and_then(serde_json::Value::as_str)
         && !flat.is_empty()
     {
         return Some(flat.to_string());
@@ -460,7 +504,9 @@ pub fn grok_token(raw: &str) -> Option<String> {
             .filter(|k| !k.is_empty())
             .map(str::to_string)
     };
-    let preferred = entries.keys().filter(|k| k.starts_with("https://auth.x.ai::"));
+    let preferred = entries
+        .keys()
+        .filter(|k| k.starts_with("https://auth.x.ai::"));
     let fallback = entries.keys();
     preferred.chain(fallback).find_map(|k| nested(k))
 }
@@ -487,7 +533,9 @@ pub fn parse_claude(body: &str) -> Reading {
     };
     let mut windows = Vec::new();
     for (id, label) in KNOWN {
-        let Some(entry) = parsed.get(*id).filter(|v| !v.is_null()) else { continue };
+        let Some(entry) = parsed.get(*id).filter(|v| !v.is_null()) else {
+            continue;
+        };
         let Some(used) = entry.get("utilization").and_then(serde_json::Value::as_f64) else {
             continue;
         };
@@ -518,8 +566,16 @@ pub fn parse_codex(body: &str) -> Reading {
         return Reading::Failed("the usage API returned something unreadable".to_string());
     };
     let slots = [
-        ("primary", parsed.pointer("/rate_limit/primary_window"), None),
-        ("secondary", parsed.pointer("/rate_limit/secondary_window"), None),
+        (
+            "primary",
+            parsed.pointer("/rate_limit/primary_window"),
+            None,
+        ),
+        (
+            "secondary",
+            parsed.pointer("/rate_limit/secondary_window"),
+            None,
+        ),
         (
             "code_review",
             parsed.pointer("/code_review_rate_limit/primary_window"),
@@ -528,11 +584,18 @@ pub fn parse_codex(body: &str) -> Reading {
     ];
     let mut windows = Vec::new();
     for (id, entry, prefix) in slots {
-        let Some(entry) = entry.filter(|v| !v.is_null()) else { continue };
-        let Some(used) = entry.get("used_percent").and_then(serde_json::Value::as_f64) else {
+        let Some(entry) = entry.filter(|v| !v.is_null()) else {
             continue;
         };
-        let span = entry.get("limit_window_seconds").and_then(serde_json::Value::as_i64);
+        let Some(used) = entry
+            .get("used_percent")
+            .and_then(serde_json::Value::as_f64)
+        else {
+            continue;
+        };
+        let span = entry
+            .get("limit_window_seconds")
+            .and_then(serde_json::Value::as_i64);
         windows.push(UsageWindow {
             id: id.to_string(),
             label: match prefix {
@@ -756,7 +819,9 @@ pub fn rows_for(readings: &[VendorUsage], now_unix_ms: i64) -> Vec<Row> {
         return vec![Row {
             id: "none".to_string(),
             title: "No provider signed in on this Mac".to_string(),
-            subtitle: Some("Sign in with `claude`, `codex` or `grok` to see quota here".to_string()),
+            subtitle: Some(
+                "Sign in with `claude`, `codex` or `grok` to see quota here".to_string(),
+            ),
             group: None,
             meter: None,
         }];
@@ -785,11 +850,15 @@ pub fn rows_for(readings: &[VendorUsage], now_unix_ms: i64) -> Vec<Row> {
                     // rest. Headroom is what the pane is opened to ask, so
                     // it is always the qualifier rather than an omission.
                     let stats = vec![
-                        MeterStat { value: format!("{used:.0}%"), label: "used".to_string() },
+                        MeterStat {
+                            value: format!("{used:.0}%"),
+                            label: "used".to_string(),
+                        },
                         match &w.detail {
-                            Some(d) => {
-                                MeterStat { value: d.value.clone(), label: d.label.clone() }
-                            }
+                            Some(d) => MeterStat {
+                                value: d.value.clone(),
+                                label: d.label.clone(),
+                            },
                             None => MeterStat {
                                 value: format!("{:.0}%", 100.0 - used),
                                 label: "left".to_string(),
@@ -800,7 +869,10 @@ pub fn rows_for(readings: &[VendorUsage], now_unix_ms: i64) -> Vec<Row> {
                         &w.id,
                         w.label.clone(),
                         w.resets_at.map(|at| resets_label(at, now_unix_ms)),
-                        Some(Meter { fraction: used / 100.0, stats }),
+                        Some(Meter {
+                            fraction: used / 100.0,
+                            stats,
+                        }),
                     );
                 }
             }
@@ -813,9 +885,12 @@ pub fn rows_for(readings: &[VendorUsage], now_unix_ms: i64) -> Vec<Row> {
                 Some("Sign in again, then reopen this".to_string()),
                 None,
             ),
-            Reading::Failed(why) => {
-                push("error", "Couldn't read usage".to_string(), Some(why.clone()), None)
-            }
+            Reading::Failed(why) => push(
+                "error",
+                "Couldn't read usage".to_string(),
+                Some(why.clone()),
+                None,
+            ),
         }
     }
     rows
@@ -830,7 +905,8 @@ mod tests {
     #[test]
     fn each_vendor_reads_its_own_credential_shape() {
         assert_eq!(
-            claude_token(r#"{"claudeAiOauth":{"accessToken":"tok","refreshToken":"r"}}"#).as_deref(),
+            claude_token(r#"{"claudeAiOauth":{"accessToken":"tok","refreshToken":"r"}}"#)
+                .as_deref(),
             Some("tok")
         );
         let codex = codex_credential(
@@ -840,7 +916,10 @@ mod tests {
         assert_eq!(codex.token, "tok");
         assert_eq!(codex.account.as_deref(), Some("acct"));
         // Both shapes grok has shipped.
-        assert_eq!(grok_token(r#"{"access_token":"flat"}"#).as_deref(), Some("flat"));
+        assert_eq!(
+            grok_token(r#"{"access_token":"flat"}"#).as_deref(),
+            Some("flat")
+        );
         assert_eq!(
             grok_token(r#"{"https://auth.x.ai::default":{"key":"nested"}}"#).as_deref(),
             Some("nested")
@@ -859,7 +938,10 @@ mod tests {
 
     #[test]
     fn a_credential_with_no_usable_token_is_none_rather_than_an_empty_string() {
-        assert_eq!(claude_token(r#"{"claudeAiOauth":{"accessToken":""}}"#), None);
+        assert_eq!(
+            claude_token(r#"{"claudeAiOauth":{"accessToken":""}}"#),
+            None
+        );
         assert_eq!(claude_token("{}"), None);
         assert_eq!(claude_token("not json"), None);
         assert!(codex_credential(r#"{"tokens":{"access_token":""}}"#).is_none());
@@ -868,7 +950,10 @@ mod tests {
 
     #[test]
     fn the_status_line_is_split_off_the_body() {
-        assert_eq!(split_status("{\"a\":1}\n200"), ("{\"a\":1}".to_string(), Some(200)));
+        assert_eq!(
+            split_status("{\"a\":1}\n200"),
+            ("{\"a\":1}".to_string(), Some(200))
+        );
         assert_eq!(split_status("\n401").1, Some(401));
         assert_eq!(split_status("curl: (6) could not resolve host").1, None);
     }
@@ -884,8 +969,13 @@ mod tests {
             "nimbus_quill": {"utilization": 0.0, "resets_at": null},
             "amber_ladder": null
         }"#;
-        let Reading::Windows(w) = parse_claude(body) else { panic!("expected windows") };
-        assert_eq!(w.iter().map(|w| w.id.as_str()).collect::<Vec<_>>(), ["five_hour", "seven_day"]);
+        let Reading::Windows(w) = parse_claude(body) else {
+            panic!("expected windows")
+        };
+        assert_eq!(
+            w.iter().map(|w| w.id.as_str()).collect::<Vec<_>>(),
+            ["five_hour", "seven_day"]
+        );
         assert_eq!(w[0].label, "5-hour limit");
         assert_eq!(w[0].utilization, 6.0);
     }
@@ -895,7 +985,9 @@ mod tests {
         // `nimbus_quill` carries a real number, and it is still skipped: a
         // percentage against a name nobody can interpret is noise.
         let body = r#"{"nimbus_quill": {"utilization": 12.0}, "five_hour": {"utilization": 1.0}}"#;
-        let Reading::Windows(w) = parse_claude(body) else { panic!("expected windows") };
+        let Reading::Windows(w) = parse_claude(body) else {
+            panic!("expected windows")
+        };
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].id, "five_hour");
     }
@@ -908,7 +1000,9 @@ mod tests {
         let body = r#"{"plan_type":"team","rate_limit":{
             "primary_window":{"used_percent":0,"limit_window_seconds":604800,"reset_at":1788163446},
             "secondary_window":null},"code_review_rate_limit":null}"#;
-        let Reading::Windows(w) = parse_codex(body) else { panic!("expected windows") };
+        let Reading::Windows(w) = parse_codex(body) else {
+            panic!("expected windows")
+        };
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].label, "Weekly limit");
         assert_eq!(w[0].resets_at, Some(1788163446));
@@ -921,7 +1015,9 @@ mod tests {
     fn grok_turns_credits_into_a_fraction_and_keeps_the_raw_count() {
         let body = r#"{"config":{"monthlyLimit":{"val":150},"used":{"val":30},
                       "billingPeriodEnd":"2026-09-01T00:00:00Z"}}"#;
-        let Reading::Windows(w) = parse_grok(body) else { panic!("expected windows") };
+        let Reading::Windows(w) = parse_grok(body) else {
+            panic!("expected windows")
+        };
         assert_eq!(w[0].utilization, 20.0);
         // The percentage alone hides the magnitude — 20% of 150 and 20% of
         // 15000 are very different amounts of headroom.
@@ -940,9 +1036,15 @@ mod tests {
 
     #[test]
     fn a_response_with_nothing_applicable_says_so_rather_than_showing_an_empty_pane() {
-        assert!(matches!(parse_claude(r#"{"five_hour": null}"#), Reading::Failed(_)));
+        assert!(matches!(
+            parse_claude(r#"{"five_hour": null}"#),
+            Reading::Failed(_)
+        ));
         assert!(matches!(parse_claude("garbage"), Reading::Failed(_)));
-        assert!(matches!(parse_codex(r#"{"rate_limit":null}"#), Reading::Note { .. }));
+        assert!(matches!(
+            parse_codex(r#"{"rate_limit":null}"#),
+            Reading::Note { .. }
+        ));
         assert!(matches!(parse_grok("{}"), Reading::Failed(_)));
     }
 
@@ -952,7 +1054,10 @@ mod tests {
         assert_eq!(epoch_from_rfc3339("2026-08-25T14:00:00Z"), Some(1787666400));
         // 2000 is a leap year, 1900 was not — the case a naive %4 gets wrong.
         assert_eq!(epoch_from_rfc3339("2000-03-01T00:00:00Z"), Some(951868800));
-        assert_eq!(epoch_from_rfc3339("2026-08-25T14:00:00.512Z"), Some(1787666400));
+        assert_eq!(
+            epoch_from_rfc3339("2026-08-25T14:00:00.512Z"),
+            Some(1787666400)
+        );
         assert_eq!(epoch_from_rfc3339("not a date"), None);
     }
 
@@ -996,29 +1101,42 @@ mod tests {
             },
         ];
         let rows = rows_for(&readings, NOW_MS);
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), [
-            "claude:seven_day",
-            "codex:seven_day"
-        ]);
+        assert_eq!(
+            rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["claude:seven_day", "codex:seven_day"]
+        );
         assert_eq!(rows[0].group.as_deref(), Some("Claude Code"));
         assert_eq!(rows[1].group.as_deref(), Some("Codex"));
         let stats = &rows[0].meter.as_ref().unwrap().stats;
-        assert_eq!((stats[0].value.as_str(), stats[0].label.as_str()), ("68%", "used"));
-        assert_eq!((stats[1].value.as_str(), stats[1].label.as_str()), ("32%", "left"));
+        assert_eq!(
+            (stats[0].value.as_str(), stats[0].label.as_str()),
+            ("68%", "used")
+        );
+        assert_eq!(
+            (stats[1].value.as_str(), stats[1].label.as_str()),
+            ("32%", "left")
+        );
     }
 
     #[test]
     fn a_vendor_with_nothing_to_measure_stays_an_ordinary_row() {
         // A card with an empty bar would read as "0% used", which is a
         // claim about quota none of these states can make.
-        for reading in
-            [
-                Reading::Note { title: "Monthly credits".into(), detail: "none".into() },
-                Reading::NeedsAuth,
-                Reading::Failed("x".into()),
-            ]
-        {
-            let rows = rows_for(&[VendorUsage { vendor: Vendor::Grok, reading }], NOW_MS);
+        for reading in [
+            Reading::Note {
+                title: "Monthly credits".into(),
+                detail: "none".into(),
+            },
+            Reading::NeedsAuth,
+            Reading::Failed("x".into()),
+        ] {
+            let rows = rows_for(
+                &[VendorUsage {
+                    vendor: Vendor::Grok,
+                    reading,
+                }],
+                NOW_MS,
+            );
             assert_eq!(rows.len(), 1);
             assert!(rows[0].meter.is_none());
         }

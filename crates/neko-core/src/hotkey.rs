@@ -20,7 +20,11 @@ pub fn get_hotkey(db: &crate::Db) -> rusqlite::Result<HotkeyConfig> {
     }
 }
 
-pub fn set_hotkey(db: &crate::Db, combo: HotkeyCombo, now_unix_ms: i64) -> rusqlite::Result<HotkeyConfig> {
+pub fn set_hotkey(
+    db: &crate::Db,
+    combo: HotkeyCombo,
+    now_unix_ms: i64,
+) -> rusqlite::Result<HotkeyConfig> {
     let config = HotkeyConfig {
         combo,
         updated_at_unix_ms: now_unix_ms,
@@ -62,10 +66,7 @@ fn known_reserved() -> Vec<(HotkeyCombo, &'static str)> {
             HotkeyCombo::new(vec![Ctrl], "Space"),
             "Input Source switching",
         ),
-        (
-            HotkeyCombo::new(vec![Ctrl], "Up"),
-            "Mission Control",
-        ),
+        (HotkeyCombo::new(vec![Ctrl], "Up"), "Mission Control"),
         (
             HotkeyCombo::new(vec![Cmd, Shift], "3"),
             "Screenshot: whole screen",
@@ -134,6 +135,9 @@ mod tests {
 
     #[test]
     fn an_unreserved_combo_has_no_known_conflict() {
-        assert!(check_known_conflict(&HotkeyCombo::new(vec![Modifier::Ctrl, Modifier::Alt], "K")).is_none());
+        assert!(
+            check_known_conflict(&HotkeyCombo::new(vec![Modifier::Ctrl, Modifier::Alt], "K"))
+                .is_none()
+        );
     }
 }

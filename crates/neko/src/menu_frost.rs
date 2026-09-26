@@ -23,11 +23,14 @@
 //! unmounts this element entirely and it never paints again to say so.
 
 use gpui::{
-    AnyElement, App, Bounds, Element, GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels, Window,
+    AnyElement, App, Bounds, Element, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
+    Pixels, Window,
 };
 
 pub fn sync_menu_frost(child: impl IntoElement) -> MenuFrostSync {
-    MenuFrostSync { child: child.into_any_element() }
+    MenuFrostSync {
+        child: child.into_any_element(),
+    }
 }
 
 pub struct MenuFrostSync {

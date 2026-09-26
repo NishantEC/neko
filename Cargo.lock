@@ -3619,6 +3619,7 @@ dependencies = [
  "neko-core",
  "neko-protocol",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

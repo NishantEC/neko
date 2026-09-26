@@ -1,17 +1,17 @@
 //! The persistent native workspace, separate from the quick launcher.
 mod home;
-mod tools;
-mod skills;
-mod schedules;
 mod profiles;
+mod schedules;
+mod skills;
+mod tools;
 
-use home::TicketFilter;
 use crate::{text_field::TextField, theme};
 use gpui::{
     App, Context, Entity, Global, IntoElement, KeyDownEvent, ParentElement, Render, SharedString,
-    Styled, TitlebarOptions, Window, WindowBounds, WindowHandle,
-    WindowKind, WindowOptions, div, point, prelude::*, px,
+    Styled, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions, div,
+    point, prelude::*, px,
 };
+use home::TicketFilter;
 use neko_client::NekoClient;
 use neko_protocol::{
     Request, Response,
@@ -291,7 +291,7 @@ impl WorkspaceRoot {
             connection_error: None,
             notice: None,
             workspace_name: input("Workspace name", cx),
-            repository: input("/Users/you/Projects/repository", cx),
+            repository: input("/Users/you/Projects/folder", cx),
             instructions: input("How Neko should work in this repository", cx),
             away_enabled: false,
             creating_workspace: true,
@@ -300,7 +300,10 @@ impl WorkspaceRoot {
             task_goal: input("Describe the outcome and how to verify it", cx),
             api_key,
             server_label: input("Name this connection", cx),
-            skill_source: input("https://github.com/owner/repo/blob/commit/path/SKILL.md", cx),
+            skill_source: input(
+                "https://github.com/owner/repo/blob/commit/path/SKILL.md",
+                cx,
+            ),
             skill_filter,
             profile_form: profiles::Form::new(cx),
             memory_editing: None,
@@ -324,7 +327,10 @@ impl WorkspaceRoot {
             appearance: None,
             composer: input("Ask Neko anything, or tell it what to look after…", cx),
             note_input: input("Steer this ticket…", cx),
-            memory_input: input("Something Neko should know, like \"we use pytest in hme\"", cx),
+            memory_input: input(
+                "Something Neko should know, like \"we use pytest in hme\"",
+                cx,
+            ),
             ticket_filter: TicketFilter::NeedsYou,
             translucent: false,
             drag_armed: false,
@@ -357,10 +363,31 @@ impl WorkspaceRoot {
             &command,
             Command::CreateTask { .. } | Command::PlanIssue { .. }
         );
-        let submitted_schedule=match &command {Command::Schedules(neko_protocol::scheduled_plans::ScheduleCommand::Save{schedule})=>Some(schedule.clone()),_=>None};
-        let previous_schedules=self.snapshot.schedules.iter().map(|s|s.id.clone()).collect::<Vec<_>>();
-        let submitted_profile=match &command {Command::AgentProfiles(neko_protocol::agent_profiles::ProfileCommand::Save{profile})=>Some(profile.clone()),_=>None};
-        let previous_profiles=self.snapshot.agent_profiles.profiles.iter().map(|p|p.id.clone()).collect::<Vec<_>>();
+        let submitted_schedule = match &command {
+            Command::Schedules(neko_protocol::scheduled_plans::ScheduleCommand::Save {
+                schedule,
+            }) => Some(schedule.clone()),
+            _ => None,
+        };
+        let previous_schedules = self
+            .snapshot
+            .schedules
+            .iter()
+            .map(|s| s.id.clone())
+            .collect::<Vec<_>>();
+        let submitted_profile = match &command {
+            Command::AgentProfiles(neko_protocol::agent_profiles::ProfileCommand::Save {
+                profile,
+            }) => Some(profile.clone()),
+            _ => None,
+        };
+        let previous_profiles = self
+            .snapshot
+            .agent_profiles
+            .profiles
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<Vec<_>>();
         let submitted_draft = match &command {
             Command::CreateTask { title, goal, .. } => Some((title.clone(), goal.clone())),
             _ => None,
@@ -628,7 +655,11 @@ impl WorkspaceRoot {
         self.api_key.update(cx, |field, cx| field.clear(cx));
         self.request(
             Command::Mcp(McpCommand::AddConnection {
-                workspace_id: if self.global_server { String::new() } else { workspace_id },
+                workspace_id: if self.global_server {
+                    String::new()
+                } else {
+                    workspace_id
+                },
                 label: value(&self.server_label, cx),
                 config,
                 trust_local_process: self.trust_server,
@@ -662,7 +693,7 @@ impl WorkspaceRoot {
                         .border_1()
                         .border_color(t.border_hairline)
                         .child(field("Workspace name", &self.workspace_name))
-                        .child(field("Local repository folder", &self.repository))
+                        .child(field("Workspace folder", &self.repository))
                         .child(note("Paste the folder path. Neko uses isolated worktrees, so your checkout stays untouched."))
                         .child(
                             div()
@@ -685,7 +716,7 @@ impl WorkspaceRoot {
             form = form
                 .child(heading("Workspace settings", "Update where this workspace lives or the standing guidance Neko uses."))
                 .child(field("Name", &self.workspace_name))
-                .child(field("Local repository folder", &self.repository))
+                .child(field("Workspace folder", &self.repository))
                 .child(field("Workspace instructions", &self.instructions))
                 .child(note("Tools and responsibilities are scoped separately. Editing work still waits for your approval."))
                 .child(div().flex().justify_end().child(button("save-workspace", "Save changes", !self.busy, true, cx, |root, _, cx| root.save_workspace(cx))));
@@ -699,7 +730,11 @@ impl WorkspaceRoot {
             .py(px(28.))
             .flex()
             .justify_center()
-            .child(crate::motion::fade_in("workspace-editor-reveal", crate::motion::system_reduce_motion(), form))
+            .child(crate::motion::fade_in(
+                "workspace-editor-reveal",
+                crate::motion::system_reduce_motion(),
+                form,
+            ))
     }
 
     fn integrations_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -737,8 +772,8 @@ impl Render for WorkspaceRoot {
             View::Responsibilities => self.responsibilities_page(cx),
             View::Memory => self.memory_page(cx),
             View::Profiles => {
-                let content=profiles::view(self,cx);
-                self.settings_page("Agent profiles",content,cx)
+                let content = profiles::view(self, cx);
+                self.settings_page("Agent profiles", content, cx)
             }
             View::Workspaces => {
                 let content = self.workspaces_view(cx).into_any_element();
@@ -779,7 +814,12 @@ impl Render for WorkspaceRoot {
 
 impl WorkspaceRoot {
     /// The existing workspace and tool editors, inside the new chrome.
-    fn settings_page(&self, title: &str, content: gpui::AnyElement, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn settings_page(
+        &self,
+        title: &str,
+        content: gpui::AnyElement,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         div()
             .size_full()
             .flex()
@@ -1034,13 +1074,22 @@ mod tests {
 
     #[test]
     fn compact_workspace_draft_keeps_an_explicit_name() {
-        let workspace = workspace_from_draft("CareConnect", "/Users/nish/Projects/triage-fe", "", true, None)
-            .expect("an explicit name remains valid");
+        let workspace = workspace_from_draft(
+            "CareConnect",
+            "/Users/nish/Projects/triage-fe",
+            "",
+            true,
+            None,
+        )
+        .expect("an explicit name remains valid");
         assert_eq!(workspace.name, "CareConnect");
     }
 
     #[test]
     fn compact_workspace_draft_explains_when_the_folder_is_missing() {
-        assert_eq!(workspace_from_draft("", "", "", true, None).unwrap_err(), "Choose the local repository folder for this workspace.");
+        assert_eq!(
+            workspace_from_draft("", "", "", true, None).unwrap_err(),
+            "Choose the local repository folder for this workspace."
+        );
     }
 }

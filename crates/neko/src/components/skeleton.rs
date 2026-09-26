@@ -100,15 +100,27 @@ fn row_skeleton(row: usize, intensity: f32) -> Div {
         .px_3()
         // The icon socket, at the size a real row's artwork occupies, so
         // nothing shifts sideways when the answer lands.
-        .child(plate(intensity).flex_shrink_0().size(px(theme::ROW_ICON_PX)))
+        .child(
+            plate(intensity)
+                .flex_shrink_0()
+                .size(px(theme::ROW_ICON_PX)),
+        )
         .child(
             div()
                 .flex_1()
                 .flex()
                 .flex_col()
                 .gap(px(5.))
-                .child(plate(intensity).h(px(9.)).w(gpui::relative(TITLE_WIDTHS[row])))
-                .child(plate(intensity).h(px(7.)).w(gpui::relative(SUBTITLE_WIDTHS[row]))),
+                .child(
+                    plate(intensity)
+                        .h(px(9.))
+                        .w(gpui::relative(TITLE_WIDTHS[row])),
+                )
+                .child(
+                    plate(intensity)
+                        .h(px(7.))
+                        .w(gpui::relative(SUBTITLE_WIDTHS[row])),
+                ),
         )
 }
 
@@ -132,24 +144,29 @@ fn meter_skeleton(row: usize, intensity: f32) -> Div {
                 .flex()
                 .flex_col()
                 .gap(px(6.))
-                .child(plate(intensity).h(px(11.)).w(gpui::relative(TITLE_WIDTHS[row])))
-                .child(plate(intensity).h(px(8.)).w(gpui::relative(SUBTITLE_WIDTHS[row]))),
+                .child(
+                    plate(intensity)
+                        .h(px(11.))
+                        .w(gpui::relative(TITLE_WIDTHS[row])),
+                )
+                .child(
+                    plate(intensity)
+                        .h(px(8.))
+                        .w(gpui::relative(SUBTITLE_WIDTHS[row])),
+                ),
         )
         .child(
             div()
                 .flex_shrink_0()
                 .w(px(theme::METER_COLUMN_WIDTH_PX))
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(theme::METER_TICK_GAP_PX))
-                        .children((0..theme::METER_TICK_COUNT).map(|_| {
-                            plate(intensity)
-                                .flex_1()
-                                .h(px(theme::METER_TICK_HEIGHT_PX))
-                                .rounded(px(theme::METER_TICK_RADIUS_PX))
-                        })),
-                )
+                .child(div().flex().gap(px(theme::METER_TICK_GAP_PX)).children(
+                    (0..theme::METER_TICK_COUNT).map(|_| {
+                        plate(intensity)
+                            .flex_1()
+                            .h(px(theme::METER_TICK_HEIGHT_PX))
+                            .rounded(px(theme::METER_TICK_RADIUS_PX))
+                    }),
+                ))
                 .child(
                     div()
                         .mt(px(6.))
@@ -187,9 +204,12 @@ mod tests {
         let chat = crate::modes::chrome_for("conversation").expect("the conversation mode");
         assert_eq!(chat.skeleton, SkeletonShape::Bubble);
         let plain = crate::modes::chrome_for("schedule").expect("the schedules mode");
-        assert_eq!(plain.skeleton, SkeletonShape::Row, "an ordinary list stays a row");
+        assert_eq!(
+            plain.skeleton,
+            SkeletonShape::Row,
+            "an ordinary list stays a row"
+        );
     }
-
 
     #[test]
     fn the_shimmer_never_reaches_either_extreme() {

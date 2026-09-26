@@ -29,7 +29,11 @@ impl Tab {
         let all = Tab::ALL;
         let i = all.iter().position(|t| *t == self).unwrap_or(0);
         let n = all.len();
-        all[if forward { (i + 1) % n } else { (i + n - 1) % n }]
+        all[if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        }]
     }
 
     pub fn title(self) -> &'static str {
@@ -89,14 +93,19 @@ pub fn candidate_from_press(
         modifiers.push(Modifier::Shift);
     }
     let canonical = crate::onboarding::state::canonicalize_key_name(key);
-    Some(crate::onboarding::state::validate_candidate(&modifiers, &canonical))
+    Some(crate::onboarding::state::validate_candidate(
+        &modifiers, &canonical,
+    ))
 }
 
 /// A press of a modifier key on its own. gpui reports these as ordinary key
 /// presses, and treating one as a candidate would reject "⌘" as "no key"
 /// every time the person merely started holding it down.
 fn is_bare_modifier(key: &str) -> bool {
-    matches!(key, "cmd" | "command" | "alt" | "option" | "ctrl" | "control" | "shift" | "fn" | "function")
+    matches!(
+        key,
+        "cmd" | "command" | "alt" | "option" | "ctrl" | "control" | "shift" | "fn" | "function"
+    )
 }
 
 #[cfg(test)]
@@ -123,7 +132,10 @@ mod tests {
         let combo = candidate_from_press("space", true, false, false, true)
             .expect("a real key press is a candidate")
             .expect("cmd-shift-space is a valid hotkey");
-        assert_eq!(combo, HotkeyCombo::new(vec![Modifier::Cmd, Modifier::Shift], "Space"));
+        assert_eq!(
+            combo,
+            HotkeyCombo::new(vec![Modifier::Cmd, Modifier::Shift], "Space")
+        );
     }
 
     #[test]
@@ -163,5 +175,4 @@ mod tests {
             }
         }
     }
-
 }

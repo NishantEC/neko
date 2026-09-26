@@ -125,9 +125,18 @@ impl Provider for AppsProvider {
         // the list is a suggestion — "what you reach for" — rather than a
         // set of matches. Once something is typed it is an answer to that
         // query, and calling it Applications is the honest label.
-        let section = if suggesting { "Suggested" } else { "Applications" };
+        let section = if suggesting {
+            "Suggested"
+        } else {
+            "Applications"
+        };
         let apps = self.apps.read().unwrap();
-        let recency = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recency().unwrap_or_default();
+        let recency = self
+            .db
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .recency()
+            .unwrap_or_default();
         let mut scored: Vec<Candidate> = apps
             .iter()
             .filter_map(|app| {
@@ -175,7 +184,11 @@ impl Provider for AppsProvider {
         // which is noise, not depth. Sorted here rather than left to
         // `search::allocate` because the cap has to be applied to the *best*
         // few, and allocate only ever sees what this returns.
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scored.truncate(SUGGESTION_COUNT);
         scored
     }
@@ -189,7 +202,11 @@ impl Provider for AppsProvider {
             return Err(ProviderError(format!("no such app: {id}")));
         };
         crate::launch::launch_app(&app_path).map_err(|e| ProviderError(e.to_string()))?;
-        let _ = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner).record_launch(id, crate::now_unix_ms());
+        let _ = self
+            .db
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record_launch(id, crate::now_unix_ms());
         Ok(())
     }
 
@@ -278,8 +295,13 @@ fn sealed_system_directories() -> Vec<PathBuf> {
 /// names the captain actually asked for, still filtered through
 /// `read_app_bundle`'s ordinary checks (nesting, `CFBundlePackageType`,
 /// `LSBackgroundOnly`) like every other entry in the index.
-const CORE_SERVICES_ALLOWED_APPS: &[&str] =
-    &["Finder.app", "Installer.app", "Siri.app", "Game Center.app", "Screen Time.app"];
+const CORE_SERVICES_ALLOWED_APPS: &[&str] = &[
+    "Finder.app",
+    "Installer.app",
+    "Siri.app",
+    "Game Center.app",
+    "Screen Time.app",
+];
 
 fn core_services_root() -> PathBuf {
     PathBuf::from("/System/Library/CoreServices")
@@ -350,7 +372,10 @@ const APP_BUNDLE_PREDICATE: &str = "kMDItemContentType == 'com.apple.application
 /// `Some(vec![])` is a trusted, successful "no matches" — see this
 /// module's doc comment on why that is not treated as a failure.
 fn query_spotlight_app_bundles() -> Option<Vec<PathBuf>> {
-    let output = Command::new("mdfind").arg(APP_BUNDLE_PREDICATE).output().ok()?;
+    let output = Command::new("mdfind")
+        .arg(APP_BUNDLE_PREDICATE)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -414,11 +439,13 @@ fn bundle_display_name(dict: &plist::Dictionary, path: &Path) -> Option<String> 
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
     };
-    from_key("CFBundleDisplayName").or_else(|| from_key("CFBundleName")).or_else(|| {
-        path.file_stem()
-            .map(|s| s.to_string_lossy().trim().to_owned())
-            .filter(|s| !s.is_empty())
-    })
+    from_key("CFBundleDisplayName")
+        .or_else(|| from_key("CFBundleName"))
+        .or_else(|| {
+            path.file_stem()
+                .map(|s| s.to_string_lossy().trim().to_owned())
+                .filter(|s| !s.is_empty())
+        })
 }
 
 /// Reads `path`'s `Info.plist` and returns `None` both for a bundle that
@@ -522,7 +549,9 @@ fn is_nested_or_noisy(path: &Path) -> bool {
         "/Script Editor/Templates/",
     ];
     let path_str = path.to_string_lossy();
-    NOISY_SUBSTRINGS.iter().any(|needle| path_str.contains(needle))
+    NOISY_SUBSTRINGS
+        .iter()
+        .any(|needle| path_str.contains(needle))
 }
 
 /// Spawns a background thread that keeps the application index live:
@@ -531,11 +560,13 @@ fn is_nested_or_noisy(path: &Path) -> bool {
 /// doc comment for the API choice; the mechanics are documented inline
 /// below since they carry real, previously-unobvious constraints.
 pub fn watch_applications(on_change: impl Fn(Vec<AppEntry>) + Send + 'static) {
-    std::thread::spawn(move || loop {
-        if let Err(e) = run_live_watch(&on_change) {
-            eprintln!("neko-core: spotlight live watch ended ({e}), retrying in 5s");
+    std::thread::spawn(move || {
+        loop {
+            if let Err(e) = run_live_watch(&on_change) {
+                eprintln!("neko-core: spotlight live watch ended ({e}), retrying in 5s");
+            }
+            std::thread::sleep(Duration::from_secs(5));
         }
-        std::thread::sleep(Duration::from_secs(5));
     });
 }
 
@@ -746,8 +777,14 @@ mod tests {
         // empty `Path` reproduces the same "no candidate anywhere" case
         // `bundle_display_name` has to handle.
         let mut dict = plist::Dictionary::new();
-        dict.insert("CFBundleDisplayName".to_string(), plist::Value::String(String::new()));
-        dict.insert("CFBundleName".to_string(), plist::Value::String("   ".to_string()));
+        dict.insert(
+            "CFBundleDisplayName".to_string(),
+            plist::Value::String(String::new()),
+        );
+        dict.insert(
+            "CFBundleName".to_string(),
+            plist::Value::String("   ".to_string()),
+        );
         assert_eq!(bundle_display_name(&dict, Path::new("")), None);
     }
 
@@ -783,7 +820,10 @@ mod tests {
         );
         let app = read_app_bundle(&dir);
         std::fs::remove_dir_all(&dir).unwrap();
-        assert!(app.is_none(), "an LSBackgroundOnly bundle must be filtered out");
+        assert!(
+            app.is_none(),
+            "an LSBackgroundOnly bundle must be filtered out"
+        );
     }
 
     #[test]
@@ -812,7 +852,10 @@ mod tests {
         );
         let app = read_app_bundle(&helper);
         std::fs::remove_dir_all(&host).unwrap();
-        assert!(app.is_none(), "a bundle nested inside another .app must be filtered out");
+        assert!(
+            app.is_none(),
+            "a bundle nested inside another .app must be filtered out"
+        );
     }
 
     #[test]
@@ -835,7 +878,9 @@ mod tests {
         assert!(is_nested_or_noisy(&PathBuf::from(
             "/Users/x/Library/Developer/Xcode/DerivedData/Foo-abc/Build/Products/Debug/Foo.app"
         )));
-        assert!(is_nested_or_noisy(&PathBuf::from("/Users/x/project/ios/build/Debug/Foo.app")));
+        assert!(is_nested_or_noisy(&PathBuf::from(
+            "/Users/x/project/ios/build/Debug/Foo.app"
+        )));
     }
 
     #[test]
@@ -849,7 +894,10 @@ mod tests {
     }
 
     fn provider_with(apps: Vec<AppEntry>) -> AppsProvider {
-        AppsProvider::new(Arc::new(RwLock::new(apps)), Arc::new(Mutex::new(crate::Db::open_in_memory().unwrap())))
+        AppsProvider::new(
+            Arc::new(RwLock::new(apps)),
+            Arc::new(Mutex::new(crate::Db::open_in_memory().unwrap())),
+        )
     }
 
     #[test]
@@ -863,7 +911,11 @@ mod tests {
         // With nothing typed the same rows are a frecency-ranked suggestion,
         // and say so.
         let suggested = provider.search("", 0);
-        assert!(suggested.iter().all(|c| c.item.section_label == "Suggested"));
+        assert!(
+            suggested
+                .iter()
+                .all(|c| c.item.section_label == "Suggested")
+        );
         assert!(
             suggested.len() <= SUGGESTION_COUNT,
             "a suggestion list is short on purpose — the tail is every app on the machine, not more suggestions"
@@ -875,10 +927,18 @@ mod tests {
     fn provider_search_boosts_recently_launched_apps_on_a_tied_fuzzy_score() {
         let db = crate::Db::open_in_memory().unwrap();
         db.record_launch("b", 1_000_000).unwrap();
-        let provider =
-            AppsProvider::new(Arc::new(RwLock::new(vec![app_entry("a", "Finder"), app_entry("b", "Finder")])), Arc::new(Mutex::new(db)));
+        let provider = AppsProvider::new(
+            Arc::new(RwLock::new(vec![
+                app_entry("a", "Finder"),
+                app_entry("b", "Finder"),
+            ])),
+            Arc::new(Mutex::new(db)),
+        );
         let results = provider.search("find", 1_000_000 + 1000);
-        let best = results.iter().max_by(|a, b| a.score.total_cmp(&b.score)).unwrap();
+        let best = results
+            .iter()
+            .max_by(|a, b| a.score.total_cmp(&b.score))
+            .unwrap();
         assert_eq!(best.item.id, "b");
     }
 
@@ -921,7 +981,8 @@ mod suggestion_tests {
         // ones a suggestion list has to surface.
         for i in [9, 10, 11] {
             for _ in 0..5 {
-                db.record_launch(&format!("/Applications/App{i}.app"), 1_000_000 + i as i64).unwrap();
+                db.record_launch(&format!("/Applications/App{i}.app"), 1_000_000 + i as i64)
+                    .unwrap();
             }
         }
         let provider = AppsProvider::new(
@@ -934,7 +995,10 @@ mod suggestion_tests {
         let ids: Vec<&str> = suggested.iter().map(|c| c.item.id.as_str()).collect();
         for i in [9, 10, 11] {
             let wanted = format!("/Applications/App{i}.app");
-            assert!(ids.contains(&wanted.as_str()), "a launched app must be suggested, got {ids:?}");
+            assert!(
+                ids.contains(&wanted.as_str()),
+                "a launched app must be suggested, got {ids:?}"
+            );
         }
     }
 }
