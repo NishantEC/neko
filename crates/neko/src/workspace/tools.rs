@@ -1,4 +1,34 @@
 use neko_protocol::mcp_host::ServerConfig;
+use neko_protocol::setup_import::{ImportCandidate, ImportCandidateKind};
+
+fn candidate_in_workspace(candidate: &ImportCandidate, repository: &str) -> bool {
+    if candidate.kind != ImportCandidateKind::Connection {
+        return false;
+    }
+    let Some(path) = candidate.workspace.as_deref() else {
+        return true;
+    };
+    if path == repository {
+        return true;
+    }
+    let (Ok(left), Ok(right)) = (
+        std::path::Path::new(path).canonicalize(),
+        std::path::Path::new(repository).canonicalize(),
+    ) else {
+        return false;
+    };
+    left == right
+}
+
+fn candidate_is_local(candidate: &ImportCandidate) -> bool {
+    // Old previews omit transport. Unknown means local until proven otherwise,
+    // so a discovery format change never silently trusts executable code.
+    candidate.metadata.get("transport").map(String::as_str) != Some("http")
+}
+
+pub(super) fn needs_initial_discovery(workspace: Option<&str>, scanned: Option<&str>) -> bool {
+    workspace.is_some() && workspace != scanned
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Tab {
@@ -95,6 +125,9 @@ pub(super) fn view(
             cx,
             move |r, _, cx| {
                 r.tools_tab = tab;
+                if tab == Tab::Connections {
+                    refresh_found_connections(r, cx);
+                }
                 cx.notify();
             },
         ));
@@ -109,6 +142,11 @@ pub(super) fn view(
             .child(super::skills::catalog(root,cx)).into_any_element(),
         Tab::Connections => {}
     }
+    body = body.child(found_connections(root, cx));
+    body = body.child(heading(
+        "Neko connections",
+        "Only tools you explicitly allow can be used in this workspace.",
+    ));
     for c in root.snapshot.mcp.connections.iter().filter(|c| {
         root.selection
             .workspace
@@ -271,6 +309,211 @@ pub(super) fn view(
         .when_some(root.connection_error.clone(), |body, e| body.child(div().text_color(theme::active().state_danger).child(e)))
         .child(button("add-mcp", "Add server", !root.busy && (!root.local_server || root.trust_server), true, cx, |root, _, cx| root.connect_mcp(cx)))
         .into_any_element()
+}
+
+pub(super) fn refresh_found_connections(
+    root: &mut super::WorkspaceRoot,
+    cx: &mut gpui::Context<super::WorkspaceRoot>,
+) {
+    use neko_protocol::setup_import::ImportCommand;
+    let Some((workspace_id, repository)) = root
+        .snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| Some(&workspace.id) == root.selection.workspace.as_ref())
+        .map(|workspace| (workspace.id.clone(), workspace.repository.clone()))
+    else {
+        return;
+    };
+    root.found_connections_scanned_workspace = Some(workspace_id);
+    root.request(
+        super::Command::SetupImport(ImportCommand::Discover {
+            repositories: vec![repository],
+            source_id: None,
+        }),
+        cx,
+    );
+}
+
+fn found_connections(
+    root: &super::WorkspaceRoot,
+    cx: &mut gpui::Context<super::WorkspaceRoot>,
+) -> gpui::AnyElement {
+    use super::*;
+    use neko_protocol::mcp_host::McpCommand;
+    let Some(workspace) = root
+        .snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| Some(&workspace.id) == root.selection.workspace.as_ref())
+    else {
+        return div().into_any_element();
+    };
+    let candidates = root
+        .snapshot
+        .import_preview
+        .candidates
+        .iter()
+        .filter(|candidate| candidate_in_workspace(candidate, &workspace.repository))
+        .collect::<Vec<_>>();
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(px(10.))
+        .child(heading(
+            "Found in your setup",
+            "Connections from your local agent configuration. Neko keeps a link; the source stays in place. Tool access still needs your approval.",
+        ))
+        .child(button(
+            "refresh-found-connections",
+            "Refresh local setup",
+            !root.busy,
+            false,
+            cx,
+            |root, _, cx| refresh_found_connections(root, cx),
+        ));
+    if candidates.is_empty() {
+        return section
+            .child(note("No connections found yet. Refresh to check Codex, Claude and other local setup for this workspace."))
+            .into_any_element();
+    }
+    for candidate in candidates {
+        let linked = root.snapshot.mcp.connections.iter().find(|connection| {
+            connection.available_in(&workspace.id)
+                && connection
+                    .source_link
+                    .as_ref()
+                    .is_some_and(|source| source.candidate_id == candidate.id)
+        });
+        let source_disabled = candidate
+            .metadata
+            .get("enabled_at_source")
+            .map(String::as_str)
+            == Some("false");
+        let problem = candidate
+            .problem
+            .as_deref()
+            .or(source_disabled.then_some("Disabled in source setup"));
+        let existing_copy = candidate.workspace.is_some()
+            && candidate
+                .metadata
+                .get("already_in_neko")
+                .map(String::as_str)
+                == Some("true")
+            && linked.is_none();
+        let local = candidate_is_local(candidate);
+        let available = problem.is_none() && linked.is_none() && !root.busy;
+        let workspace_id = workspace.id.clone();
+        let candidate_id = candidate.id.clone();
+        let scope = candidate
+            .workspace
+            .as_deref()
+            .map_or("Global", |_| "This workspace");
+        let status = if let Some(connection) = linked {
+            connection.error.as_ref().map_or_else(
+                || {
+                    format!(
+                        "Linked as {} · tools still need your approval",
+                        connection.label
+                    )
+                },
+                |error| format!("Needs review: {error}"),
+            )
+        } else if let Some(problem) = problem {
+            format!("Unavailable: {problem}")
+        } else if existing_copy {
+            "Already saved in Neko · linking will use the source instead and reset tool grants"
+                .into()
+        } else if local {
+            "Local process · review before trusting".into()
+        } else {
+            "Ready to link · tools still need your approval".into()
+        };
+        let mut row = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .p(px(14.))
+            .rounded(px(10.))
+            .bg(theme::active().surface_raised)
+            .child(
+                div()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(candidate.name.clone()),
+            )
+            .child(note(format!("{} · {}", candidate.source, scope)))
+            .child(note(
+                candidate
+                    .metadata
+                    .get("config_summary")
+                    .cloned()
+                    .unwrap_or_else(|| "Review this server in its source file".into()),
+            ))
+            .child(note(format!(
+                "Configuration {}",
+                candidate
+                    .metadata
+                    .get("config_fingerprint")
+                    .map(String::as_str)
+                    .unwrap_or("unavailable")
+            )))
+            .child(note(status));
+        if linked.is_none() && problem.is_none() {
+            if local {
+                row = row.child(note("This executable can run on your Mac outside the agent sandbox. Linking trusts this local process, but never grants any of its tools."));
+            }
+            if existing_copy {
+                row = row.child(note("This replaces the matching saved definition. Its current tool approvals will be cleared; source credentials stay in their original setup."));
+            }
+            row = row.child(button(
+                format!("link-found-{candidate_id}"),
+                if local {
+                    "Trust local process & link"
+                } else if existing_copy {
+                    "Use source instead"
+                } else {
+                    "Link connection"
+                },
+                available,
+                false,
+                cx,
+                move |root, _, cx| {
+                    root.request(
+                        Command::Mcp(McpCommand::LinkSource {
+                            workspace_id: workspace_id.clone(),
+                            candidate_id: candidate_id.clone(),
+                            trust_local_process: local,
+                        }),
+                        cx,
+                    )
+                },
+            ));
+        } else if linked.is_some() && problem.is_none() {
+            row = row.child(button(
+                format!("relink-found-{candidate_id}"),
+                if local {
+                    "Trust current process & relink"
+                } else {
+                    "Relink current source"
+                },
+                !root.busy,
+                false,
+                cx,
+                move |root, _, cx| {
+                    root.request(
+                        Command::Mcp(McpCommand::LinkSource {
+                            workspace_id: workspace_id.clone(),
+                            candidate_id: candidate_id.clone(),
+                            trust_local_process: local,
+                        }),
+                        cx,
+                    )
+                },
+            ));
+        }
+        section = section.child(row);
+    }
+    section.into_any_element()
 }
 
 fn responsibilities(
@@ -443,6 +686,51 @@ fn responsibilities(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    fn candidate(workspace: Option<&str>, transport: &str) -> ImportCandidate {
+        ImportCandidate {
+            id: "source-id".into(),
+            kind: ImportCandidateKind::Connection,
+            source: "Codex".into(),
+            scope: workspace.map_or_else(|| "global".into(), |path| format!("workspace:{path}")),
+            workspace: workspace.map(str::to_owned),
+            name: "example".into(),
+            metadata: BTreeMap::from([("transport".into(), transport.into())]),
+            problem: None,
+        }
+    }
+
+    #[test]
+    fn found_connections_are_limited_to_global_and_selected_workspace() {
+        assert!(candidate_in_workspace(&candidate(None, "http"), "/repo/a"));
+        assert!(candidate_in_workspace(
+            &candidate(Some("/repo/a"), "http"),
+            "/repo/a"
+        ));
+        assert!(!candidate_in_workspace(
+            &candidate(Some("/repo/b"), "http"),
+            "/repo/a"
+        ));
+        let mut skill = candidate(None, "http");
+        skill.kind = ImportCandidateKind::Skill;
+        assert!(!candidate_in_workspace(&skill, "/repo/a"));
+    }
+
+    #[test]
+    fn unknown_transport_requires_local_process_trust() {
+        assert!(!candidate_is_local(&candidate(None, "http")));
+        assert!(candidate_is_local(&candidate(None, "stdio")));
+        assert!(candidate_is_local(&candidate(None, "unsupported")));
+    }
+
+    #[test]
+    fn initial_discovery_runs_once_per_workspace() {
+        assert!(!needs_initial_discovery(None, None));
+        assert!(needs_initial_discovery(Some("one"), None));
+        assert!(!needs_initial_discovery(Some("one"), Some("one")));
+        assert!(needs_initial_discovery(Some("two"), Some("one")));
+    }
     #[test]
     fn responsibility_form_requires_explicit_scope_and_defaults_to_planning() {
         assert!(responsibility_from_form("w", "Watch bugs", &[], false).is_err());

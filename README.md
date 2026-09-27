@@ -6,18 +6,18 @@ for quick search, clipboard history, and task attention.
 
 ## Neko-owned work
 
-Create a workspace from any existing folder, then add your own
-MCP servers in **Tools & skills → Connections**. No Linear, Slack, or other service is bundled
+Create a workspace from any existing folder, then link an MCP definition already
+in your local Codex/Claude setup or add your own server in **Tools & skills → Connections**. No Linear, Slack, or other service is bundled
 or required. Multiple connections, including instances of the same server,
 have separate workspace scope, credentials, and permissions.
 
 Code tasks need a Git repository because Neko builds in an isolated worktree;
-non-Git folders can still be saved as workspaces. During setup, discovered
-project folders appear first. Generated and worktree folders stay selectable
-under the collapsed **Other folders** section.
+non-Git folders can still be saved as workspaces. Setup uses the native folder
+picker and never requires a Git repository just to register a workspace.
 
-1. Add a remote Streamable HTTP URL or an explicitly trusted local executable
-   and JSON argument array. Neko does not download or install server packages.
+1. Link one existing definition from **Found in your setup**, or add a remote
+   Streamable HTTP URL or explicitly trusted local executable and JSON argument
+   array. Neko does not download or install server packages.
 2. Sign in through the browser if the server supports OAuth, or supply optional
    credential JSON in the masked field. Secrets are stored in macOS Keychain.
 3. Discover tools, inspect their schemas, and grant only those you trust to run
@@ -111,8 +111,11 @@ workspace without copying its files. Codex, Claude, Agents and workspace
 SKILL.md files are listed by reference to Neko's agents in that workspace.
 Agents open a skill only when relevant; a skill never grants tool authority.
 Neko-installed skills still require separate activation. Existing MCP
-definitions are not silently made executable: add or approve connections and
-individual tools in **Tools & skills**. The legacy import protocol remains
+definitions appear in **Tools & skills → Connections** for the selected
+workspace. Linking stores a source reference, not source credentials, and
+grants no tools. Neko re-reads the source before discovery and dispatch;
+changed or missing definitions revoke grants. Local executables require
+separate trust, and each discovered tool needs a workspace grant. The legacy import protocol remains
 available for migration fixtures and existing data; it is no longer a first-run
 screen. Verify that legacy protocol with:
 

@@ -482,6 +482,7 @@ mod tests {
                 }],
                 discovered_ms: Some(100),
                 error: None,
+                source_link: None,
             });
         state.mcp.grants.push(ToolGrant {
             workspace_id: "w".into(),

@@ -211,6 +211,8 @@ pub struct WorkspaceRoot {
     skill_source: Entity<TextField>,
     skill_filter: Entity<TextField>,
     tools_tab: tools::Tab,
+    /// One read-only source scan per selected workspace on first Connections visit.
+    found_connections_scanned_workspace: Option<String>,
     browse_skills: bool,
     skill_limit: usize,
     opened_skill_audits: Vec<(String, String)>,
@@ -322,6 +324,7 @@ impl WorkspaceRoot {
             profile_form: profiles::Form::new(cx),
             memory_editing: None,
             tools_tab: tools::Tab::Connections,
+            found_connections_scanned_workspace: None,
             browse_skills: false,
             skill_limit: 20,
             opened_skill_audits: Vec::new(),
@@ -775,6 +778,34 @@ impl WorkspaceRoot {
 
 impl Render for WorkspaceRoot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.loaded
+            && !self.busy
+            && self.view == View::Integrations
+            && self.tools_tab == tools::Tab::Connections
+            && tools::needs_initial_discovery(
+                self.selection.workspace.as_deref(),
+                self.found_connections_scanned_workspace.as_deref(),
+            )
+        {
+            // UI rendering does not perform IO. Defer the one-time scan until
+            // after paint, then re-check because navigation may have changed.
+            let entity = cx.entity();
+            cx.defer(move |cx| {
+                let _ = entity.update(cx, |root, cx| {
+                    if root.loaded
+                        && !root.busy
+                        && root.view == View::Integrations
+                        && root.tools_tab == tools::Tab::Connections
+                        && tools::needs_initial_discovery(
+                            root.selection.workspace.as_deref(),
+                            root.found_connections_scanned_workspace.as_deref(),
+                        )
+                    {
+                        tools::refresh_found_connections(root, cx);
+                    }
+                });
+            });
+        }
         let appearance = theme::active_theme().appearance;
         if self.appearance != Some(appearance) {
             let _ = crate::material::set_window_appearance(window, appearance);

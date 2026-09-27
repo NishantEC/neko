@@ -79,6 +79,133 @@ pub struct Candidate {
     pub credentials: Option<Secret>,
 }
 
+/// Resolve one definition from its authoritative source for one workspace.
+/// The returned secret stays in daemon memory; this function never launches it.
+pub fn resolve_linked_source(
+    home: &Path,
+    workspace: &Path,
+    paths: &[PathBuf],
+    environment: &BTreeMap<String, String>,
+    candidate_id: &str,
+) -> Result<Candidate, String> {
+    let workspace = workspace
+        .canonicalize()
+        .map_err(|_| "Workspace folder is unavailable")?;
+    if !workspace.is_dir() {
+        return Err("Workspace folder is unavailable".into());
+    }
+    // Tool dispatch needs only MCP definitions. Do not scan skills, schedules,
+    // Paseo metadata, or other Claude project folders on every guard check.
+    let repositories = [workspace.clone()];
+    let context = DiscoveryContext::new(home, &repositories, paths, environment);
+    let discovery = discover_codex_claude(&context, None, true);
+    let candidate = discovery
+        .candidates
+        .into_iter()
+        .find(|candidate| candidate.preview.id == candidate_id)
+        .ok_or("Source MCP definition is unavailable")?;
+    if let Some(repository) = &candidate.preview.repository {
+        if Path::new(repository).canonicalize().ok().as_deref() != Some(workspace.as_path()) {
+            return Err("Source MCP definition belongs to another workspace".into());
+        }
+    }
+    if !candidate.preview.enabled_at_source {
+        return Err("Source MCP definition is disabled".into());
+    }
+    if let Some(problem) = &candidate.preview.problem {
+        return Err(format!("Source MCP definition needs attention: {problem}"));
+    }
+    if candidate.config.is_none() {
+        return Err("Source MCP definition is unsupported".into());
+    }
+    Ok(candidate)
+}
+
+/// Stable identity of the supported transport fields, excluding source auth.
+pub fn config_identity(config: &ServerConfig) -> String {
+    let bytes = serde_json::to_vec(config).expect("ServerConfig is serializable");
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+/// Detect replacement or in-place modification of a trusted local launcher.
+pub fn executable_identity(config: &ServerConfig) -> Result<Option<String>, String> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let ServerConfig::Stdio { command, args, cwd } = config else {
+        return Ok(None);
+    };
+    let path = Path::new(command)
+        .canonicalize()
+        .map_err(|_| "Linked MCP executable is unavailable")?;
+    let metadata = fs::metadata(&path).map_err(|_| "Linked MCP executable is unavailable")?;
+    if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+        return Err("Linked MCP executable is unavailable".into());
+    }
+    let mut identity = format!(
+        "{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
+        path.display(),
+        metadata.dev(),
+        metadata.ino(),
+        metadata.len(),
+        metadata.mtime(),
+        metadata.mtime_nsec(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+        metadata.mode()
+    );
+    // A launcher such as node or python is only half of the trusted program.
+    // Track file arguments too, so changing its script invalidates prior trust.
+    for argument in args.iter().take(64) {
+        let value = argument
+            .rsplit_once('=')
+            .map_or(argument.as_str(), |(_, value)| value);
+        let candidate = Path::new(value);
+        let has_script_extension = candidate
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                matches!(
+                    extension,
+                    "js" | "mjs" | "cjs" | "ts" | "py" | "json" | "toml" | "yaml" | "yml"
+                )
+            });
+        if !candidate.is_absolute() && !has_script_extension {
+            continue;
+        }
+        let candidate = if candidate.is_absolute() {
+            candidate.to_path_buf()
+        } else if let Some(cwd) = cwd {
+            Path::new(cwd).join(candidate)
+        } else {
+            continue;
+        };
+        let path = match candidate.canonicalize() {
+            Ok(path) => path,
+            Err(_) if has_script_extension => return Err("Linked MCP script is unavailable".into()),
+            Err(_) => continue,
+        };
+        let metadata = fs::metadata(&path).map_err(|_| "Linked MCP script is unavailable")?;
+        if !metadata.is_file() {
+            continue;
+        }
+        use std::fmt::Write;
+        write!(
+            identity,
+            "\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
+            path.display(),
+            metadata.dev(),
+            metadata.ino(),
+            metadata.len(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+            metadata.mode()
+        )
+        .expect("String formatting cannot fail");
+    }
+    Ok(Some(format!("{:x}", Sha256::digest(identity.as_bytes()))))
+}
+
 /// Read-only capability set handed to source adapters. It deliberately has no
 /// process, network, or credential-store handle.
 pub struct DiscoveryContext<'a> {
@@ -202,6 +329,47 @@ impl Discovery {
                         (
                             "has_credentials".into(),
                             candidate.preview.has_credentials.to_string(),
+                        ),
+                        (
+                            "transport".into(),
+                            match candidate.config {
+                                Some(ServerConfig::Stdio { .. }) => "stdio",
+                                Some(ServerConfig::Http { .. }) => "http",
+                                None => "unsupported",
+                            }
+                            .into(),
+                        ),
+                        (
+                            "config_summary".into(),
+                            match candidate.config.as_ref() {
+                                Some(ServerConfig::Http { url }) => reqwest::Url::parse(url)
+                                    .map_or_else(
+                                        |_| "Remote MCP server".into(),
+                                        |mut parsed| {
+                                            let _ = parsed.set_username("");
+                                            let _ = parsed.set_password(None);
+                                            parsed.set_query(None);
+                                            parsed.set_fragment(None);
+                                            parsed.to_string()
+                                        },
+                                    ),
+                                Some(ServerConfig::Stdio { command, args, cwd }) => format!(
+                                    "{} · {} arguments · working folder {}",
+                                    command,
+                                    args.len(),
+                                    cwd.as_deref().unwrap_or("default")
+                                ),
+                                None => "Unsupported configuration".into(),
+                            },
+                        ),
+                        (
+                            "config_fingerprint".into(),
+                            candidate
+                                .config
+                                .as_ref()
+                                .map_or_else(String::new, |config| {
+                                    config_identity(config).chars().take(12).collect()
+                                }),
                         ),
                     ]),
                     problem: candidate.preview.problem.clone(),
@@ -796,7 +964,11 @@ fn add_servers(
 }
 
 /// Caller supplies environment and executable search roots; no shell is run.
-fn discover_codex_claude(context: &DiscoveryContext<'_>, source_filter: Option<&str>) -> Discovery {
+fn discover_codex_claude(
+    context: &DiscoveryContext<'_>,
+    source_filter: Option<&str>,
+    linked_only: bool,
+) -> Discovery {
     let home = context.home;
     let repositories = context.repositories;
     let paths = context.paths;
@@ -858,6 +1030,14 @@ fn discover_codex_claude(context: &DiscoveryContext<'_>, source_filter: Option<&
         );
         if let Some(projects) = value.get("projects").and_then(Value::as_object) {
             for (directory, project) in projects.iter().take(100) {
+                if linked_only
+                    && !repositories.iter().any(|repository| {
+                        Path::new(directory).canonicalize().ok().as_deref()
+                            == Some(repository.as_path())
+                    })
+                {
+                    continue;
+                }
                 // Project inventory remains importable for its config files;
                 // skill roots are separately bounded below to caller/home roots.
                 if out.repositories.len() >= 100 && !out.repositories.contains(directory) {
@@ -895,11 +1075,12 @@ fn discover_codex_claude(context: &DiscoveryContext<'_>, source_filter: Option<&
             }
         }
     }
-    let (schedules, warnings) = if source_filter.is_none_or(|source| source == "codex") {
-        crate::schedule_import::discover(home)
-    } else {
-        (Vec::new(), Vec::new())
-    };
+    let (schedules, warnings) =
+        if !linked_only && source_filter.is_none_or(|source| source == "codex") {
+            crate::schedule_import::discover(home)
+        } else {
+            (Vec::new(), Vec::new())
+        };
     for schedule in &schedules {
         if let Some(repository) = &schedule.repository {
             if !out.repositories.contains(repository) && out.repositories.len() < 100 {
@@ -989,7 +1170,7 @@ fn discover_filtered(
     let context = DiscoveryContext::new(home, &repositories, paths, environment);
     let mut out = Discovery::default();
     if source.is_none_or(|source| matches!(source, "codex" | "claude")) {
-        out = discover_codex_claude(&context, source);
+        out = discover_codex_claude(&context, source, false);
     }
     if source.is_none_or(|source| source == "paseo") {
         PaseoSource.discover(&context, &mut out);
@@ -1085,6 +1266,81 @@ fn discover_filtered(
 mod tests {
     use super::*;
     use neko_protocol::setup_import::ImportCandidateKind;
+
+    #[test]
+    fn linked_source_resolves_only_selected_workspace_and_detects_changes() {
+        let home = tempfile::tempdir().unwrap();
+        let one = home.path().join("one");
+        let two = home.path().join("two");
+        fs::create_dir_all(&one).unwrap();
+        fs::create_dir_all(&two).unwrap();
+        fs::write(
+            one.join(".mcp.json"),
+            r#"{"mcpServers":{"local":{"url":"https://one.example/mcp"}}}"#,
+        )
+        .unwrap();
+        let first = discover(home.path(), &[one.clone()], &[], &BTreeMap::new());
+        let id = first.candidates[0].preview.id.clone();
+        let linked = resolve_linked_source(home.path(), &one, &[], &BTreeMap::new(), &id).unwrap();
+        assert_eq!(linked.preview.name, "local");
+        assert!(resolve_linked_source(home.path(), &two, &[], &BTreeMap::new(), &id).is_err());
+        fs::write(
+            one.join(".mcp.json"),
+            r#"{"mcpServers":{"local":{"url":"https://changed.example/mcp"}}}"#,
+        )
+        .unwrap();
+        let changed = resolve_linked_source(home.path(), &one, &[], &BTreeMap::new(), &id).unwrap();
+        assert_ne!(linked.config, changed.config);
+        fs::remove_file(one.join(".mcp.json")).unwrap();
+        assert!(resolve_linked_source(home.path(), &one, &[], &BTreeMap::new(), &id).is_err());
+    }
+
+    #[test]
+    fn trusted_launcher_identity_tracks_script_arguments() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("launcher");
+        let script = directory.path().join("server.mjs");
+        fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(&script, "version one").unwrap();
+        let config = ServerConfig::Stdio {
+            command: executable.to_string_lossy().into_owned(),
+            args: vec![script.to_string_lossy().into_owned()],
+            cwd: None,
+        };
+        let before = executable_identity(&config).unwrap();
+        fs::write(&script, "version two has changed").unwrap();
+        assert_ne!(before, executable_identity(&config).unwrap());
+    }
+
+    #[test]
+    fn discovery_summary_never_displays_url_credentials() {
+        let preview = Discovery {
+            candidates: vec![Candidate {
+                preview: ImportConnection {
+                    id: "remote".into(),
+                    name: "remote".into(),
+                    source: "source".into(),
+                    repository: None,
+                    has_credentials: false,
+                    enabled_at_source: true,
+                    problem: None,
+                },
+                config: Some(ServerConfig::Http {
+                    url: "https://user:password@example.com/mcp?token=secret#fragment".into(),
+                }),
+                credentials: None,
+            }],
+            ..Discovery::default()
+        }
+        .preview();
+        let summary = preview.candidates[0]
+            .metadata
+            .get("config_summary")
+            .unwrap();
+        assert_eq!(summary, "https://example.com/mcp");
+    }
 
     #[test]
     fn source_scan_reads_only_the_selected_source() {
@@ -1304,6 +1560,13 @@ mod tests {
         assert_eq!(connections.len(), 1);
         assert_eq!(skills.len(), 1);
         assert_eq!(connections[0].name, "paper");
+        assert_eq!(
+            connections[0]
+                .metadata
+                .get("config_summary")
+                .map(String::as_str),
+            Some("https://example.com/mcp")
+        );
         assert!(connections[0].source.contains("Codex"));
         assert!(connections[0].source.contains("Claude"));
         assert_eq!(skills[0].name, "paseo-handoff");

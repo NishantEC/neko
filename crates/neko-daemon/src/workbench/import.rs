@@ -639,6 +639,7 @@ mod tests {
                 tools: Vec::new(),
                 discovered_ms: None,
                 error: None,
+                source_link: None,
             });
         let mut preview = discovery.preview();
         mark_existing_items(&mut preview, &discovery, &state);

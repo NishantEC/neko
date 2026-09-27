@@ -29,6 +29,17 @@ pub struct McpTool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SourceLink {
+    /// Canonical source configuration path, for provenance and revalidation.
+    pub source_path: String,
+    pub candidate_id: String,
+    /// Hash of sanitized transport configuration, excluding credentials.
+    pub config_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable_identity: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpConnection {
     #[serde(default)]
     pub oauth: bool,
@@ -44,6 +55,20 @@ pub struct McpConnection {
     pub tools: Vec<McpTool>,
     pub discovered_ms: Option<i64>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_link: Option<SourceLink>,
+}
+
+#[cfg(test)]
+mod linked_tests {
+    use super::*;
+
+    #[test]
+    fn existing_connection_json_remains_unlinked() {
+        let json = r#"{"id":"c","workspace_id":"w","label":"Old","config":{"transport":"http","url":"https://example.com/mcp"},"enabled":true,"trusted":true,"has_credentials":false,"tools":[],"discovered_ms":null,"error":null}"#;
+        let connection: McpConnection = serde_json::from_str(json).unwrap();
+        assert!(connection.source_link.is_none());
+    }
 }
 impl McpConnection {
     pub fn available_in(&self, workspace: &str) -> bool {
@@ -141,6 +166,11 @@ pub enum McpCommand {
         config: ServerConfig,
         trust_local_process: bool,
         credentials: Option<Secret>,
+    },
+    LinkSource {
+        workspace_id: String,
+        candidate_id: String,
+        trust_local_process: bool,
     },
     Discover {
         connection_id: String,

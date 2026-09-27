@@ -5,7 +5,7 @@ use neko_core::{
         capability::{Registry, Scope},
         credentials, store as policy, transport,
     },
-    workbench as store,
+    setup_import, workbench as store,
 };
 use neko_protocol::{
     mcp_host::*,
@@ -15,6 +15,7 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+use std::{collections::BTreeMap, path::PathBuf};
 
 pub struct Host {
     db: Arc<Mutex<Db>>,
@@ -55,6 +56,121 @@ impl Drop for PendingCredential {
     }
 }
 impl Host {
+    fn source_candidate(
+        &self,
+        connection: &McpConnection,
+    ) -> Result<Option<setup_import::Candidate>, String> {
+        let Some(link) = &connection.source_link else {
+            return Ok(None);
+        };
+        let result = self.resolve_source_candidate(connection, link);
+        if let Err(error) = &result {
+            self.invalidate_source_link(connection, error);
+        }
+        result.map(Some)
+    }
+
+    fn invalidate_source_link(&self, connection: &McpConnection, error: &str) {
+        let Ok(db) = self.db.lock() else { return };
+        let Ok(mut state) = store::load(&db) else {
+            return;
+        };
+        let Some(current) = state
+            .mcp
+            .connections
+            .iter_mut()
+            .find(|c| c.id == connection.id && c.source_link == connection.source_link)
+        else {
+            return;
+        };
+        current.tools.clear();
+        current.discovered_ms = None;
+        current.error = Some(error.chars().take(512).collect());
+        state
+            .mcp
+            .grants
+            .retain(|grant| grant.connection_id != connection.id);
+        let _ = store::save(&db, &state);
+    }
+
+    fn resolve_source_candidate(
+        &self,
+        connection: &McpConnection,
+        link: &SourceLink,
+    ) -> Result<setup_import::Candidate, String> {
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| "Workspace storage unavailable")?;
+        let state = store::load(&db)?;
+        let workspace = state
+            .workspaces
+            .iter()
+            .find(|w| w.id == connection.workspace_id)
+            .ok_or("Linked workspace is unavailable")?;
+        let repository = PathBuf::from(&workspace.repository);
+        drop(db);
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or("Home directory unavailable")?;
+        let paths = std::env::var_os("PATH")
+            .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let environment = std::env::vars_os()
+            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+            .collect::<BTreeMap<_, _>>();
+        let candidate = setup_import::resolve_linked_source(
+            &home,
+            &repository,
+            &paths,
+            &environment,
+            &link.candidate_id,
+        )?;
+        let current_path = std::fs::canonicalize(&candidate.preview.source)
+            .map_err(|_| "Source MCP file is unavailable")?;
+        if current_path.to_string_lossy() != link.source_path
+            || candidate.config.as_ref().is_none_or(|config| {
+                setup_import::config_identity(config) != link.config_hash
+                    || setup_import::executable_identity(config).ok()
+                        != Some(link.executable_identity.clone())
+            })
+        {
+            return Err("Source MCP definition changed; review it again before using tools".into());
+        }
+        Ok(candidate)
+    }
+
+    fn resolved_transport(
+        &self,
+        connection: &McpConnection,
+        cancel: &AtomicBool,
+    ) -> Result<(ServerConfig, transport::Credentials), String> {
+        if let Some(candidate) = self.source_candidate(connection)? {
+            let config = candidate
+                .config
+                .ok_or("Source MCP configuration unavailable")?;
+            if connection.oauth {
+                return Ok((config, self.credentials_cancellable(connection, cancel)?));
+            }
+            let secret = candidate
+                .credentials
+                .map(|value| credentials::parse(&value.0))
+                .transpose()?
+                .unwrap_or_default();
+            return Ok((
+                config,
+                transport::Credentials {
+                    bearer: secret.bearer,
+                    environment: secret.environment,
+                },
+            ));
+        }
+        Ok((
+            connection.config.clone(),
+            self.credentials_cancellable(connection, cancel)?,
+        ))
+    }
+
     pub fn cancel_chat(&self, turn_id: &str) {
         self.registry.cancel_run(&format!("chat:{turn_id}"));
     }
@@ -146,12 +262,135 @@ impl Host {
     }
     pub fn command(self: &Arc<Self>, command: McpCommand) -> Result<Snapshot, String> {
         match command {
+            McpCommand::LinkSource {
+                workspace_id,
+                candidate_id,
+                trust_local_process,
+            } => {
+                let db = self
+                    .db
+                    .lock()
+                    .map_err(|_| "Workspace storage unavailable")?;
+                let mut state = store::load(&db)?;
+                let workspace = state
+                    .workspaces
+                    .iter()
+                    .find(|w| w.id == workspace_id)
+                    .ok_or("Choose a workspace before linking tools")?;
+                let repository = PathBuf::from(&workspace.repository);
+                let home = std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .ok_or("Home directory unavailable")?;
+                let paths = std::env::var_os("PATH")
+                    .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let environment = std::env::vars_os()
+                    .filter_map(|(key, value)| {
+                        Some((key.into_string().ok()?, value.into_string().ok()?))
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let candidate = setup_import::resolve_linked_source(
+                    &home,
+                    &repository,
+                    &paths,
+                    &environment,
+                    &candidate_id,
+                )?;
+                let config = candidate
+                    .config
+                    .ok_or("Source MCP configuration unavailable")?;
+                let local = matches!(config, ServerConfig::Stdio { .. });
+                if local && !trust_local_process {
+                    return Err("Approve this local MCP process before linking it".into());
+                }
+                let source_path = std::fs::canonicalize(&candidate.preview.source)
+                    .map_err(|_| "Source MCP file is unavailable")?
+                    .to_string_lossy()
+                    .into_owned();
+                let source_link = SourceLink {
+                    source_path,
+                    candidate_id,
+                    config_hash: setup_import::config_identity(&config),
+                    executable_identity: setup_import::executable_identity(&config)?,
+                };
+                if let Some(existing) = state.mcp.connections.iter_mut().find(|c| {
+                    c.workspace_id == workspace_id
+                        && c.source_link
+                            .as_ref()
+                            .is_some_and(|link| link.candidate_id == source_link.candidate_id)
+                }) {
+                    if existing.source_link.as_ref() == Some(&source_link)
+                        && existing.error.is_none()
+                    {
+                        return Ok(state);
+                    }
+                    existing.config = config.clone();
+                    existing.source_link = Some(source_link);
+                    existing.oauth = false;
+                    existing.enabled = true;
+                    existing.trusted = !local || trust_local_process;
+                    existing.has_credentials = candidate.preview.has_credentials;
+                    existing.tools.clear();
+                    existing.discovered_ms = None;
+                    existing.error = None;
+                    let existing_id = existing.id.clone();
+                    state
+                        .mcp
+                        .grants
+                        .retain(|grant| grant.connection_id != existing_id);
+                    policy::validate(&state)?;
+                    store::save(&db, &state)?;
+                    return store::load(&db);
+                }
+                if let Some(existing) = state.mcp.connections.iter_mut().find(|c| {
+                    c.workspace_id == workspace_id
+                        && c.label == candidate.preview.name
+                        && c.config == config
+                        && c.source_link.is_none()
+                }) {
+                    existing.source_link = Some(source_link);
+                    existing.oauth = false;
+                    existing.enabled = true;
+                    existing.trusted = !local || trust_local_process;
+                    existing.has_credentials = candidate.preview.has_credentials;
+                    existing.tools.clear();
+                    existing.discovered_ms = None;
+                    existing.error = None;
+                    let existing_id = existing.id.clone();
+                    state
+                        .mcp
+                        .grants
+                        .retain(|grant| grant.connection_id != existing_id);
+                    policy::validate(&state)?;
+                    store::save(&db, &state)?;
+                    return store::load(&db);
+                }
+                let connection = McpConnection {
+                    oauth: false,
+                    id: store::new_id(),
+                    workspace_id,
+                    label: candidate.preview.name,
+                    config: config.clone(),
+                    enabled: true,
+                    trusted: !local || trust_local_process,
+                    has_credentials: candidate.preview.has_credentials,
+                    tools: Vec::new(),
+                    discovered_ms: None,
+                    error: None,
+                    source_link: Some(source_link),
+                };
+                state.mcp.connections.push(connection);
+                policy::validate(&state)?;
+                store::save(&db, &state)?;
+                store::load(&db)
+            }
             McpCommand::Authenticate {
                 connection_id,
                 client_id,
             } => {
                 let connection = self.connection(&connection_id)?;
-                let ServerConfig::Http { url } = connection.config else {
+                let (config, _) = self.resolved_transport(&connection, &AtomicBool::new(false))?;
+                let ServerConfig::Http { url } = config else {
                     return Err("Browser authentication is for remote MCP servers".into());
                 };
                 if client_id
@@ -264,9 +503,11 @@ impl Host {
                     .try_lock()
                     .map_err(|_| "Another MCP operation is running; retry shortly")?;
                 let connection = self.connection(&connection_id)?;
-                let result = self.credentials(&connection).and_then(|secrets| {
-                    transport::discover(&connection.config, &secrets, &AtomicBool::new(false))
-                });
+                let result = self
+                    .resolved_transport(&connection, &AtomicBool::new(false))
+                    .and_then(|(config, secrets)| {
+                        transport::discover(&config, &secrets, &AtomicBool::new(false))
+                    });
                 let db = self
                     .db
                     .lock()
@@ -356,6 +597,7 @@ impl Host {
             tools: vec![],
             discovered_ms: None,
             error: None,
+            source_link: None,
         };
         {
             let db = self
@@ -402,9 +644,6 @@ impl Host {
         .find(|c| c.id == id && c.enabled && c.trusted)
         .ok_or_else(|| "MCP connection is missing, paused or untrusted".into())
     }
-    fn credentials(&self, c: &McpConnection) -> Result<transport::Credentials, String> {
-        self.credentials_cancellable(c, &AtomicBool::new(false))
-    }
     fn credentials_cancellable(
         &self,
         c: &McpConnection,
@@ -447,6 +686,11 @@ impl Host {
                     s.agent_profiles.revision == scope.profile_revision
                         && policy::authorize(&s, &scope.workspace_id, connection, tool)
                             .is_ok_and(|t| t.schema_hash == hash)
+                        && s.mcp
+                            .connections
+                            .iter()
+                            .find(|c| c.id == connection)
+                            .is_some_and(|c| self.source_candidate(c).is_ok())
                 })
     }
 
@@ -538,6 +782,9 @@ impl Host {
                 let mut tools = Vec::new();
                 for id in &scope.connection_ids {
                     if let Some(c) = state.mcp.connections.iter().find(|c| &c.id == id) {
+                        if self.source_candidate(c).is_err() {
+                            continue;
+                        }
                         for t in &c.tools {
                             if policy::authorize(&state, &scope.workspace_id, id, &t.name).is_ok() {
                                 tools.push(serde_json::json!({"connection_id": id, "connection_label": c.label, "tool_name": t.name, "description": t.description, "input_schema": serde_json::from_str::<serde_json::Value>(&t.input_schema).map_err(|_| "Invalid tool schema")?}));
@@ -620,14 +867,14 @@ impl Host {
                             &tool_name,
                             &tool.schema_hash,
                             &cancelled,
-                            || self.credentials_cancellable(&connection, &cancelled),
+                            || self.resolved_transport(&connection, &cancelled),
                         )
-                        .and_then(|secrets| {
+                        .and_then(|(config, secrets)| {
                             if std::time::Instant::now() >= deadline {
                                 return Err("MCP operation timed out".into());
                             }
                             transport::call_guarded(
-                                &connection.config,
+                                &config,
                                 &secrets,
                                 &tool_name,
                                 &tool.schema_hash,
@@ -707,6 +954,269 @@ impl Drop for Lease {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linking_source_keeps_credentials_out_of_neko_and_grants_empty() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("project");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join(".mcp.json"), r#"{"mcpServers":{"tool":{"url":"https://example.com/mcp","headers":{"Authorization":"Bearer private-sentinel"}}}}"#).unwrap();
+        let h = host();
+        {
+            let db = h.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.workspaces[0].repository = repo.to_string_lossy().into_owned();
+            store::save(&db, &state).unwrap();
+        }
+        let home_directory = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+        let found = neko_core::setup_import::discover(
+            &home_directory,
+            &[repo.clone()],
+            &[],
+            &Default::default(),
+        );
+        let id = found
+            .candidates
+            .iter()
+            .find(|c| c.preview.name == "tool")
+            .unwrap()
+            .preview
+            .id
+            .clone();
+        let state = h
+            .command(McpCommand::LinkSource {
+                workspace_id: "w".into(),
+                candidate_id: id,
+                trust_local_process: false,
+            })
+            .unwrap();
+        let c = &state.mcp.connections[0];
+        assert!(c.source_link.is_some());
+        assert!(state.mcp.grants.is_empty());
+        assert!(!format!("{state:?}").contains("private-sentinel"));
+    }
+
+    #[test]
+    fn changed_or_missing_linked_source_blocks_granted_tools() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("project");
+        std::fs::create_dir_all(&repository).unwrap();
+        let source = repository.join(".mcp.json");
+        std::fs::write(
+            &source,
+            r#"{"mcpServers":{"linked":{"url":"https://one.example/mcp"}}}"#,
+        )
+        .unwrap();
+        let h = host();
+        {
+            let db = h.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.workspaces[0].repository = repository.to_string_lossy().into_owned();
+            store::save(&db, &state).unwrap();
+        }
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let discovery =
+            setup_import::discover(&home, &[repository.clone()], &[], &Default::default());
+        let candidate_id = discovery
+            .candidates
+            .iter()
+            .find(|c| c.preview.name == "linked")
+            .unwrap()
+            .preview
+            .id
+            .clone();
+        let linked = h
+            .command(McpCommand::LinkSource {
+                workspace_id: "w".into(),
+                candidate_id,
+                trust_local_process: false,
+            })
+            .unwrap();
+        let id = linked.mcp.connections[0].id.clone();
+        {
+            let db = h.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.mcp.connections[0].tools.push(McpTool {
+                read_only: true,
+                name: "lookup".into(),
+                description: "Read".into(),
+                input_schema: "{}".into(),
+                schema_hash: "schema".into(),
+            });
+            state.mcp.grants.push(ToolGrant {
+                workspace_id: "w".into(),
+                connection_id: id.clone(),
+                tool_name: "lookup".into(),
+                schema_hash: "schema".into(),
+            });
+            store::save(&db, &state).unwrap();
+        }
+        let revision = store::load(&h.db.lock().unwrap())
+            .unwrap()
+            .agent_profiles
+            .revision;
+        let lease = h
+            .lease("test-run", "w", vec![id.clone()], revision)
+            .unwrap();
+        let list = || {
+            h.bridge(BridgeRequest {
+                token: neko_protocol::workbench::Secret(lease.token().into()),
+                action: BridgeAction::List,
+            })
+            .unwrap()
+        };
+        assert!(list().contains("lookup"));
+        std::fs::write(
+            &source,
+            r#"{"mcpServers":{"linked":{"url":"https://changed.example/mcp"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(list(), "[]");
+        assert!(
+            store::load(&h.db.lock().unwrap())
+                .unwrap()
+                .mcp
+                .grants
+                .is_empty()
+        );
+        assert!(
+            h.bridge(BridgeRequest {
+                token: neko_protocol::workbench::Secret(lease.token().into()),
+                action: BridgeAction::Call {
+                    connection_id: id.clone(),
+                    tool_name: "lookup".into(),
+                    arguments_json: "{}".into()
+                }
+            })
+            .is_err()
+        );
+        std::fs::remove_file(&source).unwrap();
+        assert_eq!(list(), "[]");
+        std::fs::write(
+            &source,
+            r#"{"mcpServers":{"linked":{"url":"https://changed.example/mcp"}}}"#,
+        )
+        .unwrap();
+        let relinked = h
+            .command(McpCommand::LinkSource {
+                workspace_id: "w".into(),
+                candidate_id: linked.mcp.connections[0]
+                    .source_link
+                    .as_ref()
+                    .unwrap()
+                    .candidate_id
+                    .clone(),
+                trust_local_process: false,
+            })
+            .unwrap();
+        assert_eq!(relinked.mcp.connections.len(), 1);
+        assert!(
+            matches!(&relinked.mcp.connections[0].config, ServerConfig::Http { url } if url == "https://changed.example/mcp")
+        );
+        assert!(relinked.mcp.connections[0].error.is_none());
+        assert!(relinked.mcp.grants.is_empty());
+    }
+
+    #[test]
+    fn linked_local_executable_change_revokes_the_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("project");
+        std::fs::create_dir_all(&repository).unwrap();
+        let executable = repository.join("server.sh");
+        std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(
+            repository.join(".mcp.json"),
+            format!(
+                r#"{{"mcpServers":{{"local":{{"command":"{}"}}}}}}"#,
+                executable.display()
+            ),
+        )
+        .unwrap();
+        let h = host();
+        {
+            let db = h.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.workspaces[0].repository = repository.to_string_lossy().into_owned();
+            store::save(&db, &state).unwrap();
+        }
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let discovery =
+            setup_import::discover(&home, &[repository.clone()], &[], &Default::default());
+        let id = discovery
+            .candidates
+            .iter()
+            .find(|c| c.preview.name == "local")
+            .unwrap()
+            .preview
+            .id
+            .clone();
+        let state = h
+            .command(McpCommand::LinkSource {
+                workspace_id: "w".into(),
+                candidate_id: id,
+                trust_local_process: true,
+            })
+            .unwrap();
+        let connection = state.mcp.connections[0].clone();
+        assert!(h.source_candidate(&connection).is_ok());
+        std::fs::write(&executable, "#!/bin/sh\necho changed\n").unwrap();
+        assert!(h.source_candidate(&connection).is_err());
+    }
+
+    #[test]
+    fn linking_matching_neko_copy_reuses_it_without_duplicating_or_carrying_grants() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("project");
+        std::fs::create_dir_all(&repository).unwrap();
+        std::fs::write(
+            repository.join(".mcp.json"),
+            r#"{"mcpServers":{"copy":{"url":"https://example.com/mcp"}}}"#,
+        )
+        .unwrap();
+        let h = host();
+        {
+            let db = h.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.workspaces[0].repository = repository.to_string_lossy().into_owned();
+            store::save(&db, &state).unwrap();
+        }
+        let (existing_id, _) = h
+            .add_connection(
+                "w".into(),
+                "copy".into(),
+                ServerConfig::Http {
+                    url: "https://example.com/mcp".into(),
+                },
+                false,
+                None,
+                true,
+                false,
+            )
+            .unwrap();
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let discovery = setup_import::discover(&home, &[repository], &[], &Default::default());
+        let candidate_id = discovery
+            .candidates
+            .iter()
+            .find(|c| c.preview.name == "copy")
+            .unwrap()
+            .preview
+            .id
+            .clone();
+        let state = h
+            .command(McpCommand::LinkSource {
+                workspace_id: "w".into(),
+                candidate_id,
+                trust_local_process: false,
+            })
+            .unwrap();
+        assert_eq!(state.mcp.connections.len(), 1);
+        assert_eq!(state.mcp.connections[0].id, existing_id);
+        assert!(state.mcp.connections[0].source_link.is_some());
+        assert!(state.mcp.grants.is_empty());
+    }
     fn host() -> Arc<Host> {
         let db = Db::open_in_memory().unwrap();
         let mut snapshot = Snapshot::default();
@@ -946,6 +1456,7 @@ mod tests {
                 }],
                 discovered_ms: None,
                 error: None,
+                source_link: None,
             });
             state.mcp.grants.push(ToolGrant {
                 connection_id: "c".into(),

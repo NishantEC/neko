@@ -438,7 +438,11 @@ fn ping_with_timeout(stream: &mut UnixStream, timeout: Duration) -> io::Result<(
                 .ok_or_else(|| {
                     io::Error::new(io::ErrorKind::TimedOut, "daemon probe deadline exceeded")
                 })?;
-            self.stream.set_read_timeout(Some(remaining))?;
+            // macOS socket timeouts have microsecond precision. A positive
+            // sub-microsecond duration rounds to zero and becomes InvalidInput
+            // instead of the intended bounded read near the deadline.
+            self.stream
+                .set_read_timeout(Some(remaining.max(Duration::from_millis(1))))?;
             self.stream.read(buf)
         }
     }

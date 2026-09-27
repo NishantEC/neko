@@ -1,4 +1,4 @@
-//! Mac permission and shortcut substates. The six visible setup steps live in setup.rs.
+//! Mac permission and shortcut substates. The three visible setup steps live in setup.rs.
 use neko_protocol::HotkeyCombo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
