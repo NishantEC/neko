@@ -46,11 +46,16 @@ Successful and failed dispatched calls have inline receipts. These guarantees
 depend on the explicitly trusted server's effect declaration; Neko cannot prove
 that arbitrary remote code is read-only, or undo an action already dispatched.
 
-The daemon-owned `neko-core::mcp_host` hosts user-added stdio and Streamable
-HTTP servers through pinned rmcp 3.4.1. Connections, discovered schema hashes,
-explicit grants, responsibilities, receipts and source evidence live in the
-versioned workbench snapshot. Credentials live in per-connection Keychain
-entries; OAuth uses discovered metadata, PKCE/state/issuer checks and bounded
+The daemon-owned `neko-core::mcp_host` hosts user-added and source-linked stdio
+and Streamable HTTP servers through pinned rmcp 3.4.1. A linked connection
+stores its source identity, reviewed transport snapshot, and fingerprint, not
+source credentials. The daemon resolves the current source definition and
+credentials before discovery and dispatch, and revokes grants when the
+definition or trusted local executable changes or disappears. Connections,
+discovered schema hashes, explicit grants, responsibilities, receipts and
+source evidence live in the versioned workbench snapshot. Neko-owned
+credentials live in per-connection Keychain entries; source credentials remain
+in their original setup. OAuth uses discovered metadata, PKCE/state/issuer checks and bounded
 browser callbacks. Legacy Linear data remains historical; old polling and
 permissions are disabled, not converted into grants.
 

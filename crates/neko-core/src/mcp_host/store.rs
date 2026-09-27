@@ -409,6 +409,7 @@ mod tests {
             }],
             discovered_ms: Some(1),
             error: None,
+            source_link: None,
         });
         state
     }

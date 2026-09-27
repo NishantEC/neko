@@ -75,6 +75,75 @@ fn call(host: &Host, lease: &Lease, connection: &str) -> Result<String, String> 
 }
 
 #[test]
+fn linked_workspace_stdio_server_dispatches_only_after_its_tool_grant() {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = directory.path().join("project");
+    std::fs::create_dir_all(&repository).unwrap();
+    let node = std::process::Command::new("which")
+        .arg("node")
+        .output()
+        .unwrap();
+    let executable = String::from_utf8(node.stdout).unwrap().trim().to_owned();
+    let script = format!(
+        "{}/../../scripts/fixtures/mcp-host.mjs",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::write(repository.join(".mcp.json"), serde_json::json!({"mcpServers":{"fixture":{"command":executable,"args":[script,"readonly"]}}}).to_string()).unwrap();
+    let db = Db::open_in_memory().unwrap();
+    let mut state = Snapshot::default();
+    state.workspaces.push(Workspace {
+        id: "linked".into(),
+        name: "Linked".into(),
+        repository: repository.to_string_lossy().into_owned(),
+        instructions: String::new(),
+        away_enabled: false,
+    });
+    store::save(&db, &state).unwrap();
+    let host = Arc::new(Host::new(Arc::new(Mutex::new(db))));
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+    let found = neko_core::setup_import::discover(
+        &home,
+        &[repository],
+        &[std::path::PathBuf::from("/usr/bin")],
+        &Default::default(),
+    );
+    let candidate_id = found
+        .candidates
+        .iter()
+        .find(|c| c.preview.name == "fixture")
+        .unwrap()
+        .preview
+        .id
+        .clone();
+    let linked = host
+        .command(McpCommand::LinkSource {
+            workspace_id: "linked".into(),
+            candidate_id,
+            trust_local_process: true,
+        })
+        .unwrap();
+    let id = linked.mcp.connections[0].id.clone();
+    let lease = host
+        .lease("linked-test", "linked", vec![id.clone()], 0)
+        .unwrap();
+    assert!(call(&host, &lease, &id).is_err());
+    let discovered = host
+        .command(McpCommand::Discover {
+            connection_id: id.clone(),
+        })
+        .unwrap();
+    let tool = &discovered.mcp.connections[0].tools[0];
+    host.command(McpCommand::SetToolGrant {
+        connection_id: id.clone(),
+        tool_name: tool.name.clone(),
+        schema_hash: tool.schema_hash.clone(),
+        allowed: true,
+    })
+    .unwrap();
+    assert!(call(&host, &lease, &id).unwrap().contains("proof"));
+}
+
+#[test]
 fn global_tool_dispatch_keeps_workspace_grants_separate() {
     let (host, _, lease_a, connection) = fixture(true);
     {
