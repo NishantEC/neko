@@ -6,6 +6,7 @@
 //! group, and that grouping is the whole vocabulary of this screen.
 use super::*;
 use crate::assets::icon;
+use crate::motion::HoverWash as _;
 use gpui::{AnyElement, FontWeight, MouseButton, Rgba};
 use neko_protocol::mcp_host::{McpCommand, Responsibility};
 use neko_protocol::workbench::{ChatMessage, ChatRole, MemoryEntry, MemoryKind, Task};
@@ -604,6 +605,13 @@ impl WorkspaceRoot {
                    view: View,
                    cx: &mut Context<Self>| {
             let selected = self.view == view;
+            let base = crate::motion::state_blend(
+                &format!("workspace-nav-{id}-selected"),
+                selected,
+                crate::motion::system_reduce_motion(),
+                alpha(t.surface_selected, 0.0),
+                t.surface_selected,
+            );
             div()
                 .id(id)
                 .tab_index(0)
@@ -615,8 +623,7 @@ impl WorkspaceRoot {
                 .py(px(7.))
                 .rounded(px(8.))
                 .cursor_pointer()
-                .when(selected, |r| r.bg(t.surface_selected))
-                .hover(|s| s.bg(alpha(t.surface_selected, 0.6)))
+                .hover_bg(format!("workspace-nav-{id}-hover"), base, alpha(t.surface_selected, 0.6))
                 .focus_visible(|s| s.border_1().border_color(t.text_primary))
                 .on_click(cx.listener(move |root, _, _, cx| {
                     if root.view == View::Integrations && view != View::Integrations {
@@ -691,6 +698,13 @@ impl WorkspaceRoot {
                 .count();
             let running = tasks.iter().any(|x| group(x.status) == Group::Working);
             let selected = self.selection.workspace.as_deref() == Some(&w.id);
+            let base = crate::motion::state_blend(
+                &format!("workspace-folder-{}-selected", w.id),
+                selected,
+                crate::motion::system_reduce_motion(),
+                alpha(t.surface_selected, 0.0),
+                t.surface_selected,
+            );
             let id = w.id.clone();
             let click_id = id.clone();
             let settings_id = w.id.clone();
@@ -707,8 +721,7 @@ impl WorkspaceRoot {
                         .py(px(7.))
                         .rounded(px(8.))
                         .cursor_pointer()
-                        .when(selected, |r| r.bg(t.surface_selected))
-                        .hover(|s| s.bg(alpha(t.surface_selected, 0.6)))
+                        .hover_bg(format!("workspace-folder-{}-hover", w.id), base, alpha(t.surface_selected, 0.6))
                         .focus_visible(|s| s.border_1().border_color(t.text_primary))
                         .on_click(cx.listener(move |root, _, _, cx| {
                             if root.selection.workspace.as_deref() == Some(&click_id) {

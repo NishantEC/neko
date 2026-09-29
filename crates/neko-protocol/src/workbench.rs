@@ -1,5 +1,6 @@
 //! Neko-owned work. Credentials are write-only and never returned in snapshots.
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Secret(pub String);
@@ -153,6 +154,12 @@ pub struct TaskSplit {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
+    /// Every folder in a logical workspace. Legacy workspaces use `repository`.
+    #[serde(default)]
+    pub workspace_folders: BTreeMap<String, Vec<String>>,
+    /// Immutable checkout source chosen when a task is created.
+    #[serde(default)]
+    pub task_roots: BTreeMap<String, String>,
     #[serde(default)]
     pub agent_profiles: crate::agent_profiles::AgentProfiles,
     #[serde(default)]
@@ -181,6 +188,23 @@ pub struct Snapshot {
     /// Suggested learning requires an explicit accept or reject.
     #[serde(default)]
     pub memory_proposals: Vec<MemoryProposal>,
+}
+
+impl Snapshot {
+    pub fn folders_for(&self, workspace: &Workspace) -> Vec<String> {
+        self.workspace_folders
+            .get(&workspace.id)
+            .filter(|folders| !folders.is_empty())
+            .cloned()
+            .unwrap_or_else(|| vec![workspace.repository.clone()])
+    }
+
+    pub fn root_for(&self, task: &Task, workspace: &Workspace) -> String {
+        self.task_roots
+            .get(&task.id)
+            .cloned()
+            .unwrap_or_else(|| workspace.repository.clone())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -253,6 +277,10 @@ pub struct ChatMessage {
     /// Memories Neko saved from this turn, shown under the reply.
     #[serde(default)]
     pub remembered: Vec<String>,
+    /// Responsibilities Neko suggested in this turn, saved paused until the
+    /// user turns them on.
+    #[serde(default)]
+    pub responsibility_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -299,6 +327,11 @@ pub enum Command {
     SaveWorkspace {
         workspace: Workspace,
     },
+    /// Atomically save the logical workspace and its selected local folders.
+    SaveWorkspaceWithFolders {
+        workspace: Workspace,
+        folders: Vec<String>,
+    },
     ConnectLinear {
         workspace_id: String,
         api_key: Secret,
@@ -316,6 +349,13 @@ pub enum Command {
         workspace_id: String,
         title: String,
         goal: String,
+    },
+    /// A Neko agent chooses a specific attached folder; the daemon validates it.
+    CreateTaskInFolder {
+        workspace_id: String,
+        title: String,
+        goal: String,
+        folder: String,
     },
     PlanIssue {
         issue_id: String,
@@ -360,6 +400,16 @@ pub enum Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn workspace_folders_and_task_roots_survive_snapshot_round_trip() {
+        let mut value = serde_json::to_value(Snapshot::default()).unwrap();
+        value["workspace_folders"] = serde_json::json!({"w": ["/repo/a", "/repo/b"]});
+        value["task_roots"] = serde_json::json!({"t": "/repo/b"});
+        let snapshot: Snapshot = serde_json::from_value(value).unwrap();
+        let saved = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(saved["workspace_folders"]["w"][1], "/repo/b");
+        assert_eq!(saved["task_roots"]["t"], "/repo/b");
+    }
     #[test]
     fn credential_debug_does_not_expose_key() {
         let command = Command::ConnectLinear {

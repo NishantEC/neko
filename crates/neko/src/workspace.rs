@@ -200,6 +200,7 @@ pub struct WorkspaceRoot {
     notice: Option<String>,
     workspace_name: Entity<TextField>,
     repository: Entity<TextField>,
+    draft_folders: Vec<String>,
     instructions: Entity<TextField>,
     away_enabled: bool,
     creating_workspace: bool,
@@ -308,6 +309,7 @@ impl WorkspaceRoot {
             notice: None,
             workspace_name: input("Workspace name", cx),
             repository: input("/Users/you/Projects/folder", cx),
+            draft_folders: Vec::new(),
             instructions: input("How Neko should work in this repository", cx),
             away_enabled: false,
             creating_workspace: true,
@@ -372,13 +374,16 @@ impl WorkspaceRoot {
             Command::Mcp(neko_protocol::mcp_host::McpCommand::AddConnection { .. })
         );
         let saved = match &command {
-            Command::SaveWorkspace { workspace } => Some(workspace.clone()),
+            Command::SaveWorkspace { workspace }
+            | Command::SaveWorkspaceWithFolders { workspace, .. } => Some(workspace.clone()),
             _ => None,
         };
         let new_task = matches!(
             // Scheduled planning is separately recorded by its schedule.
             &command,
-            Command::CreateTask { .. } | Command::PlanIssue { .. }
+            Command::CreateTask { .. }
+                | Command::CreateTaskInFolder { .. }
+                | Command::PlanIssue { .. }
         );
         let submitted_schedule = match &command {
             Command::Schedules(neko_protocol::scheduled_plans::ScheduleCommand::Save {
@@ -406,7 +411,10 @@ impl WorkspaceRoot {
             .map(|p| p.id.clone())
             .collect::<Vec<_>>();
         let submitted_draft = match &command {
-            Command::CreateTask { title, goal, .. } => Some((title.clone(), goal.clone())),
+            Command::CreateTask { title, goal, .. }
+            | Command::CreateTaskInFolder { title, goal, .. } => {
+                Some((title.clone(), goal.clone()))
+            }
             _ => None,
         };
         let submitted_message = match &command {
@@ -571,13 +579,14 @@ impl WorkspaceRoot {
         else {
             return;
         };
-        self.selection.select_workspace(workspace.id);
+        self.selection.select_workspace(workspace.id.clone());
         self.creating_workspace = false;
         self.workspace_advanced = false;
         self.workspace_name
             .update(cx, |field, cx| field.set_content(&workspace.name, cx));
         self.repository
             .update(cx, |field, cx| field.set_content(&workspace.repository, cx));
+        self.draft_folders = self.snapshot.folders_for(&workspace);
         self.instructions.update(cx, |field, cx| {
             field.set_content(&workspace.instructions, cx)
         });
@@ -611,6 +620,7 @@ impl WorkspaceRoot {
         self.workspace_advanced = false;
         self.selection = Selection::default();
         self.away_enabled = false;
+        self.draft_folders.clear();
         for field in [
             &self.workspace_name,
             &self.repository,
@@ -625,9 +635,14 @@ impl WorkspaceRoot {
     }
 
     fn save_workspace(&mut self, cx: &mut Context<Self>) {
+        let Some(primary) = self.draft_folders.first() else {
+            self.error = Some("Add at least one folder to this workspace.".into());
+            cx.notify();
+            return;
+        };
         let mut workspace = match workspace_from_draft(
             &value(&self.workspace_name, cx),
-            &value(&self.repository, cx),
+            primary,
             &value(&self.instructions, cx),
             self.creating_workspace,
             self.selection.workspace.as_deref(),
@@ -645,7 +660,50 @@ impl WorkspaceRoot {
             cx.notify();
             return;
         }
-        self.request(Command::SaveWorkspace { workspace }, cx);
+        self.request(
+            Command::SaveWorkspaceWithFolders {
+                workspace,
+                folders: self.draft_folders.clone(),
+            },
+            cx,
+        );
+    }
+
+    fn add_workspace_folders(&mut self, cx: &mut Context<Self>) {
+        if self.busy || workspace_evidence() {
+            return;
+        }
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: true,
+            prompt: Some("Add folders to workspace".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let result = receiver.await;
+            let _ = this.update(cx, |root, cx| {
+                match result {
+                    Ok(Ok(Some(paths))) => {
+                        root.draft_folders = merge_folders(
+                            std::mem::take(&mut root.draft_folders),
+                            paths
+                                .into_iter()
+                                .map(|path| path.to_string_lossy().into_owned())
+                                .collect(),
+                        );
+                        if let Some(first) = root.draft_folders.first() {
+                            root.repository
+                                .update(cx, |field, cx| field.set_content(first, cx));
+                        }
+                    }
+                    Ok(Ok(None)) => {}
+                    Ok(Err(error)) => root.error = Some(error.to_string()),
+                    Err(_) => root.error = Some("Folder chooser closed unexpectedly".into()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn connect_mcp(&mut self, cx: &mut Context<Self>) {
@@ -695,6 +753,57 @@ impl WorkspaceRoot {
             .flex()
             .flex_col()
             .gap(px(16.));
+        let mut folders = div().flex().flex_col().gap(px(8.));
+        for (index, path) in self.draft_folders.iter().enumerate() {
+            folders = folders.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.))
+                    .p(px(10.))
+                    .rounded(px(8.))
+                    .bg(t.surface_raised)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(3.))
+                            .child(note(if index == 0 {
+                                "Primary folder"
+                            } else {
+                                "Source folder"
+                            }))
+                            .child(path.clone()),
+                    )
+                    .when(creating || index > 0, |row| {
+                        row.child(button(
+                            format!("remove-workspace-folder-{index}"),
+                            "Remove",
+                            !self.busy,
+                            false,
+                            cx,
+                            move |root, _, cx| {
+                                if index < root.draft_folders.len() {
+                                    root.draft_folders.remove(index);
+                                    cx.notify();
+                                }
+                            },
+                        ))
+                    }),
+            );
+        }
+        if self.draft_folders.is_empty() {
+            folders = folders.child(note("No folders added yet."));
+        }
+        folders = folders.child(button(
+            "add-workspace-folders",
+            "Add folders…",
+            !self.busy,
+            false,
+            cx,
+            |root, _, cx| root.add_workspace_folders(cx),
+        ));
 
         if creating {
             form = form
@@ -710,8 +819,9 @@ impl WorkspaceRoot {
                         .border_1()
                         .border_color(t.border_hairline)
                         .child(field("Workspace name", &self.workspace_name))
-                        .child(field("Workspace folder", &self.repository))
-                        .child(note("Paste the folder path. Neko uses isolated worktrees, so your checkout stays untouched."))
+                        .child(note("Source folders"))
+                        .child(folders)
+                        .child(note("Choose one or more local folders. Neko will select the right repository for each task; edits use isolated worktrees."))
                         .child(
                             div()
                                 .flex()
@@ -733,7 +843,8 @@ impl WorkspaceRoot {
             form = form
                 .child(heading("Workspace settings", "Update where this workspace lives or the standing guidance Neko uses."))
                 .child(field("Name", &self.workspace_name))
-                .child(field("Workspace folder", &self.repository))
+                .child(note("Source folders"))
+                .child(folders)
                 .child(field("Workspace instructions", &self.instructions))
                 .child(note("Tools and responsibilities are scoped separately. Editing work still waits for your approval."))
                 .child(div().flex().justify_end().child(button("save-workspace", "Save changes", !self.busy, true, cx, |root, _, cx| root.save_workspace(cx))));
@@ -829,6 +940,12 @@ impl Render for WorkspaceRoot {
                 self.settings_page("Tools & skills", content, cx)
             }
         };
+        // Sidebar state is registered while constructing `body` and the sidebar
+        // below; render the sidebar before checking the shared motion clock.
+        let sidebar = self.home_sidebar(cx);
+        if crate::motion::hover_fades_active() {
+            window.request_animation_frame();
+        }
         let background = if self.translucent {
             theme::active().surface_panel_translucent
         } else {
@@ -852,7 +969,7 @@ impl Render for WorkspaceRoot {
                     cx.stop_propagation();
                 }
             })
-            .child(self.home_sidebar(cx))
+            .child(sidebar)
             .child(div().flex_1().min_w(px(0.)).h_full().child(body))
     }
 }
@@ -911,6 +1028,15 @@ fn value(field: &Entity<TextField>, cx: &App) -> String {
 fn alpha(mut color: gpui::Rgba, a: f32) -> gpui::Rgba {
     color.a = a;
     color
+}
+
+fn merge_folders(mut existing: Vec<String>, selected: Vec<String>) -> Vec<String> {
+    for folder in selected {
+        if !existing.contains(&folder) {
+            existing.push(folder);
+        }
+    }
+    existing
 }
 
 /// The compact create flow has one non-negotiable value: a real local folder.
@@ -1136,5 +1262,14 @@ mod tests {
             workspace_from_draft("", "", "", true, None).unwrap_err(),
             "Choose the local repository folder for this workspace."
         );
+    }
+
+    #[test]
+    fn native_picker_adds_multiple_folders_without_duplicates() {
+        let folders = merge_folders(
+            vec!["/repo/a".into()],
+            vec!["/repo/b".into(), "/repo/a".into(), "/repo/c".into()],
+        );
+        assert_eq!(folders, vec!["/repo/a", "/repo/b", "/repo/c"]);
     }
 }

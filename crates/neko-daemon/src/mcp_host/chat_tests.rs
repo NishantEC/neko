@@ -225,6 +225,28 @@ fn action_waits_without_dispatch_until_approved_once() {
 }
 
 #[test]
+fn pending_chat_approval_does_not_reserve_mcp_execution_slot() {
+    let (host, turn, lease, connection) = fixture(false);
+    std::thread::scope(|threads| {
+        let run = threads.spawn(|| call(&host, &lease, &connection));
+        let id = wait_card(&host, &turn);
+        let slot_available = host.call_slot.try_lock().is_ok();
+        let discovered = host
+            .command(McpCommand::Discover {
+                connection_id: connection.clone(),
+            })
+            .unwrap();
+        assert_eq!(discovered.mcp.connections[0].tools[0].name, "echo");
+        neko_chat::decide_call(&host.db.lock().unwrap(), &turn, &id, true).unwrap();
+        assert!(run.join().unwrap().unwrap().contains("receipt_id"));
+        assert!(
+            slot_available,
+            "Approval must not block unrelated MCP operations"
+        );
+    });
+}
+
+#[test]
 fn denial_and_cancellation_never_dispatch() {
     for cancel in [false, true] {
         let (host, turn, lease, connection) = fixture(false);

@@ -228,6 +228,32 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
     })
 }
 
+/// Stage a definition in the candidate snapshot; callers save only after all
+/// related fields (including folder mappings) and task-history guards are ready.
+fn stage_workspace(snapshot: &mut Snapshot, mut workspace: neko_protocol::workbench::Workspace) -> Result<String, String> {
+    workspace.name = workspace.name.trim().to_owned();
+    required("Workspace name", &workspace.name, 256)?;
+    bounded("Workspace instructions", &workspace.instructions, MAX_CONTENT_BYTES)?;
+    workspace.repository = canonical_workspace_directory(&workspace.repository)?;
+    if workspace.id.is_empty() {
+        workspace.id = new_id();
+        let id = workspace.id.clone();
+        snapshot.workspaces.push(workspace);
+        Ok(id)
+    } else {
+        let previous = snapshot.workspaces.iter_mut()
+            .find(|w| w.id == workspace.id).ok_or("Workspace no longer exists")?;
+        if previous.repository != workspace.repository
+            && snapshot.tasks.iter().any(|t| t.workspace_id == workspace.id)
+        {
+            return Err("This workspace already has task history. Create a new workspace for a different repository".into());
+        }
+        let id = workspace.id.clone();
+        *previous = workspace;
+        Ok(id)
+    }
+}
+
 fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
     let mut snapshot = load(db)?;
     match command {
@@ -241,34 +267,36 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         }
         Command::Skills(_) => return Err("Skill commands must be handled by the daemon".into()),
         Command::Snapshot => return Ok(snapshot),
-        Command::SaveWorkspace { mut workspace } => {
-            workspace.name = workspace.name.trim().to_owned();
-            required("Workspace name", &workspace.name, 256)?;
-            bounded(
-                "Workspace instructions",
-                &workspace.instructions,
-                MAX_CONTENT_BYTES,
-            )?;
-            workspace.repository = canonical_workspace_directory(&workspace.repository)?;
-            if workspace.id.is_empty() {
-                workspace.id = new_id();
-                snapshot.workspaces.push(workspace);
-            } else {
-                let previous = snapshot
-                    .workspaces
-                    .iter_mut()
-                    .find(|w| w.id == workspace.id)
-                    .ok_or("Workspace no longer exists")?;
-                if previous.repository != workspace.repository
-                    && snapshot
-                        .tasks
-                        .iter()
-                        .any(|t| t.workspace_id == workspace.id)
-                {
-                    return Err("This workspace already has task history. Create a new workspace for a different repository".into());
-                }
-                *previous = workspace;
+        Command::SaveWorkspace { workspace } => {
+            stage_workspace(&mut snapshot, workspace)?;
+        }
+        Command::SaveWorkspaceWithFolders {
+            mut workspace,
+            folders,
+        } => {
+            if folders.is_empty() || folders.len() > 20 {
+                return Err("Choose one to twenty workspace folders".into());
             }
+            let folders = folders
+                .iter()
+                .map(|folder| canonical_workspace_directory(folder))
+                .collect::<Result<Vec<_>, _>>()?;
+            if folders.iter().collect::<HashSet<_>>().len() != folders.len() {
+                return Err("A folder is already in this workspace".into());
+            }
+            workspace.repository = folders[0].clone();
+            let id = stage_workspace(&mut snapshot, workspace)?;
+            for task in snapshot.tasks.iter().filter(|task| task.workspace_id == id) {
+                if let Some(root) = snapshot.task_roots.get(&task.id) {
+                    if !folders.contains(root) {
+                        return Err(
+                            "A folder with task history cannot be removed from this workspace"
+                                .into(),
+                        );
+                    }
+                }
+            }
+            snapshot.workspace_folders.insert(id, folders);
         }
         Command::CreateTask {
             workspace_id,
@@ -280,11 +308,32 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 .iter()
                 .find(|w| w.id == workspace_id)
                 .ok_or("Workspace no longer exists")?;
-            canonical_repository(&workspace.repository)
+            let folder = route_folder(&snapshot, workspace, &title, &goal)?;
+            canonical_repository(&folder)
                 .map_err(|_| "Code tasks require a Git repository")?;
-            snapshot
-                .tasks
-                .push(create_task(workspace_id, None, title, goal)?);
+            let task = create_task(workspace_id, None, title, goal)?;
+            snapshot.task_roots.insert(task.id.clone(), folder);
+            snapshot.tasks.push(task);
+        }
+        Command::CreateTaskInFolder {
+            workspace_id,
+            title,
+            goal,
+            folder,
+        } => {
+            let workspace = snapshot
+                .workspaces
+                .iter()
+                .find(|w| w.id == workspace_id)
+                .ok_or("Workspace no longer exists")?;
+            let folder = canonical_workspace_directory(&folder)?;
+            if !snapshot.folders_for(workspace).contains(&folder) {
+                return Err("That folder is not in this workspace".into());
+            }
+            canonical_repository(&folder).map_err(|_| "Code tasks require a Git repository")?;
+            let task = create_task(workspace_id, None, title, goal)?;
+            snapshot.task_roots.insert(task.id.clone(), folder);
+            snapshot.tasks.push(task);
         }
         Command::PlanIssue { issue_id } => {
             let issue = snapshot
@@ -304,13 +353,13 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 .iter()
                 .find(|w| w.id == issue.workspace_id)
                 .ok_or("Workspace no longer exists")?;
-            canonical_repository(&workspace.repository)
-                .map_err(|_| "Code tasks require a Git repository")?;
             let goal = if issue.description.trim().is_empty() {
                 issue.title.clone()
             } else {
                 issue.description.clone()
             };
+            let folder = route_folder(&snapshot, workspace, &issue.title, &goal)?;
+            canonical_repository(&folder).map_err(|_| "Code tasks require a Git repository")?;
             let mut task = create_task(
                 issue.workspace_id.clone(),
                 Some(issue.id.clone()),
@@ -318,6 +367,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 goal,
             )?;
             task.source_revision = Some(issue.updated_at.clone());
+            snapshot.task_roots.insert(task.id.clone(), folder);
             snapshot.tasks.push(task);
         }
         Command::ProposeSplit { task_id } => {
@@ -389,6 +439,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                         plan: child.plan.clone(),
                     });
                     snapshot.splits[index].subtasks[i].task_id = Some(child.id.clone());
+                    if let Some(root) = snapshot.task_roots.get(&parent.id).cloned() {
+                        snapshot.task_roots.insert(child.id.clone(), root);
+                    }
                     snapshot.tasks.push(child);
                 }
                 snapshot.splits[index].approved = true;
@@ -622,6 +675,29 @@ fn terminal(status: TaskStatus) -> bool {
     )
 }
 
+fn route_folder(
+    snapshot: &Snapshot,
+    workspace: &neko_protocol::workbench::Workspace,
+    title: &str,
+    goal: &str,
+) -> Result<String, String> {
+    let folders = snapshot.folders_for(workspace);
+    if folders.len() == 1 {
+        return Ok(folders[0].clone());
+    }
+    let request = format!("{title} {goal}").to_lowercase();
+    let matches = folders.iter().filter(|folder| {
+        std::path::Path::new(folder)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.len() >= 3 && request.contains(&name.to_lowercase()))
+    }).collect::<Vec<_>>();
+    match matches.as_slice() {
+        [folder] => Ok((*folder).clone()),
+        _ => Err("More than one folder is available. Ask Neko to choose the right one or name the folder in your task.".into()),
+    }
+}
+
 pub fn create_task(
     workspace_id: String,
     issue_id: Option<String>,
@@ -793,6 +869,29 @@ fn validate(snapshot: &Snapshot) -> Result<(), String> {
             &workspace.instructions,
             MAX_CONTENT_BYTES,
         )?;
+    }
+    for (workspace_id, folders) in &snapshot.workspace_folders {
+        let workspace = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| &workspace.id == workspace_id)
+            .ok_or("Folder list references a missing workspace")?;
+        if folders.is_empty()
+            || folders.len() > 20
+            || folders[0] != workspace.repository
+            || folders.iter().collect::<HashSet<_>>().len() != folders.len()
+        {
+            return Err("Invalid workspace folders".into());
+        }
+        for folder in folders {
+            required("Workspace folder", folder, 4096)?;
+        }
+    }
+    for (task_id, root) in &snapshot.task_roots {
+        if !snapshot.tasks.iter().any(|task| &task.id == task_id) {
+            return Err("Task root references a missing task".into());
+        }
+        required("Task root", root, 4096)?;
     }
     for connection in &snapshot.connections {
         if !workspaces.contains(connection.workspace_id.as_str()) {
@@ -1512,6 +1611,120 @@ mod tests {
     }
 
     #[test]
+    fn replacing_workspace_folders_updates_repository_and_folder_map_together() {
+        let db = Db::open_in_memory().unwrap();
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let third = tempfile::tempdir().unwrap();
+        let path = |dir: &tempfile::TempDir| dir.path().canonicalize().unwrap().to_string_lossy().into_owned();
+        let initial = apply(&db, Command::SaveWorkspaceWithFolders {
+            workspace: Workspace {
+                id: String::new(), name: "Initial".into(), repository: path(&first),
+                instructions: String::new(), away_enabled: false,
+            },
+            folders: vec![path(&first), path(&second)],
+        }).unwrap();
+        let mut edited = initial.workspaces[0].clone();
+        edited.name = "Updated".into();
+        let updated = apply(&db, Command::SaveWorkspaceWithFolders {
+            workspace: edited,
+            folders: vec![path(&second), path(&third)],
+        }).unwrap();
+        assert_eq!(updated.workspaces[0].id, initial.workspaces[0].id);
+        assert_eq!(updated.workspaces[0].repository, path(&second));
+        assert_eq!(updated.folders_for(&updated.workspaces[0]), vec![path(&second), path(&third)]);
+        assert_eq!(load(&db).unwrap().workspaces[0].name, "Updated");
+    }
+
+    #[test]
+    fn workspace_folder_update_rejections_preserve_saved_workspace_and_task_roots() {
+        let db = Db::open_in_memory().unwrap();
+        let first = repository();
+        let second = repository();
+        let path = |dir: &tempfile::TempDir| dir.path().canonicalize().unwrap().to_string_lossy().into_owned();
+        let initial = apply(&db, Command::SaveWorkspaceWithFolders {
+            workspace: Workspace {
+                id: String::new(), name: "Initial".into(), repository: path(&first),
+                instructions: String::new(), away_enabled: false,
+            },
+            folders: vec![path(&first), path(&second)],
+        }).unwrap();
+        let saved = apply(&db, Command::CreateTaskInFolder {
+            workspace_id: initial.workspaces[0].id.clone(), title: "Pinned".into(),
+            goal: "Keep source root".into(), folder: path(&second),
+        }).unwrap();
+        for folders in [vec![path(&first)], vec![path(&second), path(&first)], vec![path(&first), path(&first)]] {
+            let mut edited = saved.workspaces[0].clone();
+            edited.name = "Must not persist".into();
+            assert!(apply(&db, Command::SaveWorkspaceWithFolders { workspace: edited, folders }).is_err());
+            let after = load(&db).unwrap();
+            assert_eq!(after.workspaces, saved.workspaces);
+            assert_eq!(after.workspace_folders, saved.workspace_folders);
+            assert_eq!(after.task_roots, saved.task_roots);
+        }
+    }
+
+    #[test]
+    fn one_workspace_can_hold_two_folders_and_pin_a_task_to_the_chosen_one() {
+        let db = Db::open_in_memory().unwrap();
+        let first = repository();
+        let second = repository();
+        let workspace = Workspace {
+            id: String::new(),
+            name: "Product".into(),
+            repository: first.path().to_string_lossy().into_owned(),
+            instructions: String::new(),
+            away_enabled: false,
+        };
+        let state = apply(
+            &db,
+            Command::SaveWorkspaceWithFolders {
+                workspace,
+                folders: vec![
+                    first.path().to_string_lossy().into_owned(),
+                    second.path().to_string_lossy().into_owned(),
+                ],
+            },
+        )
+        .unwrap();
+        let id = state.workspaces[0].id.clone();
+        assert_eq!(state.folders_for(&state.workspaces[0]).len(), 2);
+        let task = apply(
+            &db,
+            Command::CreateTaskInFolder {
+                workspace_id: id.clone(),
+                title: "Fix API".into(),
+                goal: "Fix the API".into(),
+                folder: second.path().to_string_lossy().into_owned(),
+            },
+        )
+        .unwrap()
+        .tasks
+        .pop()
+        .unwrap();
+        let saved = load(&db).unwrap();
+        assert_eq!(
+            saved.root_for(&task, &saved.workspaces[0]),
+            second.path().canonicalize().unwrap().to_string_lossy()
+        );
+        assert!(
+            apply(
+                &db,
+                Command::CreateTaskInFolder {
+                    workspace_id: id.clone(),
+                    title: "Wrong".into(),
+                    goal: "Wrong".into(),
+                    folder: std::env::temp_dir().to_string_lossy().into_owned(),
+                }
+            )
+            .is_err()
+        );
+        assert!(apply(&db, Command::CreateTask {
+            workspace_id: id, title: "Fix a bug".into(), goal: "Fix a bug".into(),
+        }).is_err(), "ambiguous manual work must not silently run in the primary folder");
+    }
+
+    #[test]
     fn repository_is_canonical_git_root_and_active_tasks_pin_it() {
         let db = Db::open_in_memory().unwrap();
         let repo = repository();
@@ -1767,6 +1980,7 @@ mod tests {
         let original = task(&db, &ws);
         let mut snapshot = load(&db).unwrap();
         snapshot.tasks.clear();
+        snapshot.task_roots.clear();
         for index in 0..42 {
             let mut task = original.clone();
             task.id = format!("task-{index}");

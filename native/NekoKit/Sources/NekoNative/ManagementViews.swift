@@ -1,23 +1,23 @@
 import SwiftUI
 import NekoKit
 
-private func replacing(_ value: JSONValue, _ fields: [String: JSONValue]) -> JSONValue {
+func replacing(_ value: JSONValue, _ fields: [String: JSONValue]) -> JSONValue {
     var result = value.object
     fields.forEach { result[$0.key] = $0.value }
     return .object(result)
 }
-private func nested(_ family: String, _ name: String, _ fields: [String: JSONValue]) -> JSONValue {
+func nested(_ family: String, _ name: String, _ fields: [String: JSONValue]) -> JSONValue {
     .object([family: .command(name, fields)])
 }
-private struct ManagementDraft: Identifiable {
+struct ManagementDraft: Identifiable {
     let id = UUID()
     var value: JSONValue
     var workspace: String? = nil
 }
-@MainActor private func submit(_ model: AppModel, _ command: JSONValue) {
+@MainActor func submit(_ model: AppModel, _ command: JSONValue) {
     Task { await model.workbench(command) }
 }
-@MainActor private func profileFor(_ model: AppModel) -> String {
+@MainActor func profileFor(_ model: AppModel) -> String {
     let profiles = model.snapshot["agent_profiles"]
     if let workspace = model.selectedWorkspace {
         return profiles["assignments"].array.first { $0["workspace_id"].string == workspace }?["profile_id"].string ?? "default"
@@ -28,7 +28,7 @@ private struct ManagementDraft: Identifiable {
 
 /// List rows can coalesce several controls into one accessibility row on macOS.
 /// Eager stacks preserve each native button and toggle as a separate AX element.
-private struct ManagementScroll<Content: View>: View {
+struct ManagementScroll<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
         ScrollView {
@@ -142,7 +142,7 @@ struct MemoryView: View {
 }
 
 /// Workspaces Neko should show in a grouped page: the selected one, or all of them.
-@MainActor private func scopedWorkspaces(_ model: AppModel) -> [(offset: Int, element: JSONValue)] {
+@MainActor func scopedWorkspaces(_ model: AppModel) -> [(offset: Int, element: JSONValue)] {
     Array(model.workspaces.enumerated()).filter { model.selectedWorkspace == nil || $0.element.recordID == model.selectedWorkspace }
 }
 
@@ -193,42 +193,6 @@ struct EmptyRow: View {
 
 func relativeTime(_ ms: Int) -> String {
     ms <= 0 ? "Never" : RelativeDateTimeFormatter().localizedString(for: Date(timeIntervalSince1970: Double(ms) / 1000), relativeTo: .now)
-}
-
-struct ResponsibilitiesView: View {
-    @ObservedObject var model: AppModel
-    @State private var draft: ManagementDraft?
-    var body: some View {
-        ManagementScroll {
-            PageIntro(title: "What Neko watches", message: "Tell Neko what to keep an eye on in each workspace, such as new Linear issues assigned to you or Sentry errors. It checks every 10 minutes and brings anything important to Today.") { EmptyView() }
-            if model.workspaces.isEmpty { EmptyRow(text: "Add a workspace first, then choose what Neko should watch in it.") }
-            ForEach(scopedWorkspaces(model), id: \.element.recordID) { index, workspace in
-                let items = model.snapshot["mcp"]["responsibilities"].array.filter { $0["workspace_id"].string == workspace.recordID }
-                WorkspaceSection(name: workspace["name"].string, color: workspaceColor(index), detail: items.isEmpty ? nil : "\(items.count) watching") {
-                    Button("Watch something", systemImage: "plus") { draft = ManagementDraft(value: .object([:]), workspace: workspace.recordID) }.controlSize(.small)
-                } content: {
-                    if items.isEmpty { EmptyRow(text: "Nothing watched here yet.") }
-                    ForEach(items, id: \.self) { item in
-                        HStack(alignment: .top, spacing: 12) {
-                            Toggle("", isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
-                                submit(model, nested("Mcp", "SaveResponsibility", ["responsibility": replacing(item, ["enabled": .bool(enabled)])]))
-                            })).toggleStyle(.switch).controlSize(.mini).labelsHidden().accessibilityLabel("Enabled")
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(item["instruction"].string).font(.system(size: 13)).foregroundStyle(N.text).textSelection(.enabled)
-                                Text((item["failures"].int > 0 ? "Needs attention · " : "") + "Last checked \(relativeTime(item["last_attempt_ms"].int))" + (item["last_result"].string.isEmpty ? "" : " · " + item["last_result"].string))
-                                    .font(.system(size: 12)).foregroundStyle(item["failures"].int > 0 ? NekoStyle.coral : N.text4).lineLimit(2)
-                            }
-                            Spacer()
-                            Button("Check now") { submit(model, nested("Mcp", "Wake", ["responsibility_id": item["id"]])) }.controlSize(.small)
-                            Button("Edit") { draft = ManagementDraft(value: item, workspace: workspace.recordID) }.controlSize(.small)
-                        }.padding(.vertical, 6).overlay(alignment: .top) { N.line.frame(height: 1) }
-                    }
-                }
-            }
-        }.sheet(item: $draft) { item in
-            ManagementEditor(model: model, kind: .responsibility, original: item.value, workspace: item.workspace ?? model.selectedWorkspace, profileID: profileFor(model))
-        }
-    }
 }
 
 struct SchedulesView: View {
@@ -373,7 +337,7 @@ enum ManagementKind: String {
         }
     }
 }
-private struct ManagementEditor: View {
+struct ManagementEditor: View {
     @ObservedObject var model: AppModel
     let kind: ManagementKind
     let original: JSONValue

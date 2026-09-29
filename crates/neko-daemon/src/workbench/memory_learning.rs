@@ -530,6 +530,7 @@ mod tests {
                 text: "Your answer".into(),
                 tickets: vec![],
                 memories: vec![],
+                responsibilities: vec![],
             },
         )
         .unwrap();
@@ -554,6 +555,7 @@ mod tests {
                 text: "Acknowledged".into(),
                 tickets: vec![],
                 memories: vec![],
+                responsibilities: vec![],
             },
         )
         .unwrap();
