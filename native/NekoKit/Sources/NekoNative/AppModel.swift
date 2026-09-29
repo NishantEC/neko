@@ -90,6 +90,23 @@ import NekoKit
             return true
         } catch { self.error = error.localizedDescription; return false }
     }
+    /// The home folder as the user's catch-all default workspace, named after the Mac user.
+    var homeWorkspaceID: String? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        return workspaces.first { ws in
+            ws["repository"].string == home || snapshot["workspace_folders"][ws.recordID].array.contains { $0.string == home }
+        }?.recordID
+    }
+    @discardableResult func addHomeWorkspace() async -> Bool {
+        if let existing = homeWorkspaceID { selectedWorkspace = existing; return true }
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let user = NSFullUserName().split(separator: " ").first.map(String.init) ?? NSUserName()
+        let workspace: JSONValue = .object(["id": .string(""), "name": .string(user), "repository": .string(home),
+            "instructions": .string("Default workspace for everything under the home folder."), "away_enabled": .bool(false)])
+        let saved = await workbench(.command("SaveWorkspaceWithFolders", ["workspace": workspace, "folders": .array([.string(home)])]))
+        if saved { selectedWorkspace = homeWorkspaceID }
+        return saved
+    }
     func completeSetup() async {
         do {
             let reply = try await request(.command("SetOnboardingComplete", ["completed": .bool(true)]))
