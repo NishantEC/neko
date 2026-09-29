@@ -222,30 +222,31 @@ struct TodayView: View {
         let working = model.tasks.filter { ["Queued", "Planning", "Building", "Reviewing"].contains($0["status"].string) }.count
         let watched = model.snapshot["mcp"]["responsibilities"].array.filter { $0["enabled"].bool }
         let workspaces = model.workspaces.count
-        return VStack(spacing: 28) {
+        return VStack(spacing: 24) {
             VStack(spacing: 8) {
-                Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.6))
+                Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text4)
                 Text(needs == 0 ? "\(part). All quiet while you were away." : "\(part). Here's what I found:")
-                    .font(.system(size: 30, weight: .semibold)).tracking(-0.6).foregroundStyle(.white).multilineTextAlignment(.center)
+                    .font(.system(size: 26, weight: .semibold)).tracking(-0.6).foregroundStyle(N.text).multilineTextAlignment(.center)
             }.frame(maxWidth: .infinity)
             HStack(spacing: 14) {
-                SummaryCard(title: "Needs you", value: "\(needs)", caption: needs == 1 ? "decision to make" : "decisions to make", symbol: "hand.raised.fill", tint: Gem.topaz, action: needs == 0 ? nil : "Review") {
+                PlainSummaryCard(title: "Needs you", value: "\(needs)", caption: needs == 1 ? "decision to make" : "decisions to make", symbol: "hand.raised", action: needs == 0 ? nil : "Review") {
                     NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
                 }
-                SummaryCard(title: "Working now", value: "\(working)", caption: working == 1 ? "task in progress" : "tasks in progress", symbol: "bolt.fill", tint: Gem.amethyst, action: working == 0 ? nil : "Follow") {
+                PlainSummaryCard(title: "Working now", value: "\(working)", caption: working == 1 ? "task in progress" : "tasks in progress", symbol: "bolt", action: working == 0 ? nil : "Follow") {
                     NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
                 }
-                SummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "not set up yet" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", symbol: "eye.fill", tint: Gem.emerald, action: workspaces == 0 ? "Add" : "Manage") {
+                PlainSummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "not set up yet" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", symbol: "eye", action: workspaces == 0 ? "Add" : "Manage") {
                     if workspaces == 0 { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
                 }
             }
-            OrbButton(title: watched.isEmpty ? "Start" : "Check now") {
+            Button(watched.isEmpty ? "Start watching" : "Check now") {
                 if watched.isEmpty {
                     if workspaces == 0 { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
                 } else {
                     for item in watched { Task { await model.workbench(.object(["Mcp": .command("Wake", ["responsibility_id": item["id"]])])) } }
                 }
             }
+            .nekoPrimaryButton()
             .accessibilityLabel(watched.isEmpty ? "Start watching" : "Check everything now")
         }
         .padding(.top, 40)
@@ -414,7 +415,7 @@ struct LoopStep: View {
                 Text(detail).font(.system(size: 12.5)).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 16)
-            Button(action, action: perform).controlSize(.small).glassButton().padding(.top, 2)
+            Button(action, action: perform).nekoGlassButton().controlSize(.small).padding(.top, 2)
         }
         .padding(.vertical, 12)
         .overlay(alignment: .top) { N.line.frame(height: 1) }
