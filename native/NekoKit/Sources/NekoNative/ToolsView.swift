@@ -34,6 +34,9 @@ struct ToolsView: View {
     @State private var validation: String?
     @State private var busy = false
     @State private var openedAudits: Set<String> = []
+    @State private var expandedConnections: Set<String> = []
+    @State private var expandedSkills: Set<String> = []
+    @State private var showImports = false
 
     private var workspace: String { model.selectedWorkspace ?? "" }
     private var connections: [JSONValue] {
@@ -50,7 +53,7 @@ struct ToolsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Tools & skills").font(.system(size: 20, weight: .semibold)).foregroundStyle(N.text)
-            Text("Tools let Neko read your work apps, such as Linear, Sentry, GitHub or Slack. Connect a tool once, then choose which workspaces may use it, so each project can have its own Linear.").font(.system(size: 13)).foregroundStyle(N.text3).lineLimit(3)
+            Text("Connect the services Neko can use. You decide which tools each workspace may access.").font(.system(size: 13)).foregroundStyle(N.text3)
             if let error = validation ?? model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
                 Picker("Show", selection: $tab) {
                     Text("Connections").tag(0)
@@ -84,22 +87,40 @@ struct ToolsView: View {
     private var connectionsBody: some View {
         VStack(alignment: .leading, spacing: 20) {
             if workspace.isEmpty {
-                Label("Showing tools for all workspaces. Pick one workspace in the toolbar to choose what it may use.", systemImage: "square.stack.3d.up").font(.callout).foregroundStyle(.secondary)
+                Label("Viewing all connections. Choose a workspace in the sidebar to set permissions.", systemImage: "square.stack.3d.up").font(.callout).foregroundStyle(.secondary)
             }
-            GroupBox("Found on this Mac") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Tools you already set up in Codex, Claude or your project folders. Linking reuses them; your sign-ins stay where they are.").foregroundStyle(.secondary)
-                    Button("Look again") {
-                        send("SetupImport", "Discover", ["repositories": .array(folders), "source_id": .null])
-                    }
-                    ForEach(Array(candidates.enumerated()), id: \.offset) { _, candidate in candidateRow(candidate) }
-                    if candidates.isEmpty { Text("Nothing found yet. Press Look again after adding a folder.").foregroundStyle(.secondary) }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            HStack {
+                Text("Connected tools").font(.system(size: 15, weight: .semibold)).foregroundStyle(N.text)
+                Text("\(connections.count)").font(.caption).foregroundStyle(N.text4)
+                Spacer()
+                if !workspace.isEmpty {
+                    Text("\(model.snapshot["mcp"]["grants"].array.filter { $0["workspace_id"].string == workspace }.count) allowed in this workspace")
+                        .font(.caption).foregroundStyle(N.text3)
+                }
             }
-            ForEach(Array(connections.enumerated()), id: \.offset) { _, connection in connectionCard(connection) }
+            ForEach(connections, id: \.recordID) { connection in connectionCard(connection) }
             if connections.isEmpty {
-                Text("No tools connected yet. Link one found on this Mac, or add one manually below.").foregroundStyle(.secondary)
+                ContentUnavailableView("No tools connected", systemImage: "shippingbox", description: Text("Import a tool from this Mac or add an MCP server below."))
             }
+            DisclosureGroup(isExpanded: $showImports) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Add a tool already configured in Codex, Claude, or a project folder. Existing connections stay unchanged.")
+                        .font(.callout).foregroundStyle(N.text3)
+                    Button("Scan this Mac again") {
+                        send("SetupImport", "Discover", ["repositories": .array(folders), "source_id": .null])
+                    }.controlSize(.small)
+                    ForEach(unlinkedCandidates, id: \.recordID) { candidate in candidateRow(candidate) }
+                    if unlinkedCandidates.isEmpty {
+                        Text("No new connections found.").font(.callout).foregroundStyle(N.text4)
+                    }
+                }.padding(.top, 12)
+            } label: {
+                Label("Import from this Mac", systemImage: "square.and.arrow.down")
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .padding(16)
+            .background(N.card.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(N.line))
             Button(showManual ? "Hide manual setup" : "Add a tool manually…", systemImage: showManual ? "chevron.down" : "chevron.right") { showManual.toggle() }
                 .buttonStyle(.borderless)
             if showManual {
@@ -121,22 +142,27 @@ struct ToolsView: View {
         }
     }
 
+    private var unlinkedCandidates: [JSONValue] {
+        candidates.filter { candidate in
+            candidate["metadata"]["already_in_neko"].string != "true" &&
+            !connections.contains { $0["source_link"]["candidate_id"].string == candidate["id"].string }
+        }
+    }
+
     private func candidateRow(_ candidate: JSONValue) -> some View {
         let localProcess = candidate["metadata"]["transport"].string != "http"
-        let linked = connections.contains { $0["source_link"]["candidate_id"].string == candidate["id"].string }
         let problem = candidate["problem"].string
         return VStack(alignment: .leading, spacing: 6) {
             Text(candidate["name"].string).font(.headline)
-            Text(candidate["source"].string).font(.caption).textSelection(.enabled)
-            Text(candidate["metadata"]["config_summary"].string).textSelection(.enabled)
-            Text("Configuration: " + candidate["metadata"]["config_fingerprint"].string).font(.caption).textSelection(.enabled)
+            Text(candidate["source"].string).font(.caption).foregroundStyle(N.text3)
+            DisclosureGroup("Connection details") {
+                Text(candidate["metadata"]["config_summary"].string).textSelection(.enabled)
+                Text("Configuration: " + candidate["metadata"]["config_fingerprint"].string).font(.caption).textSelection(.enabled)
+            }.font(.caption)
             if !problem.isEmpty { Text(problem).foregroundStyle(.red) }
             if localProcess { Text("This executable runs on your Mac outside the agent sandbox. Review the command before trusting it.").font(.caption) }
             if workspace.isEmpty { Text("Select a workspace before linking this source configuration.").font(.caption).foregroundStyle(.secondary) }
-            if linked || candidate["metadata"]["already_in_neko"].string == "true" {
-                Text("Linking replaces the matching definition and clears its existing tool grants.").font(.caption)
-            }
-            Button(localProcess ? (linked ? "Trust current process & relink" : "Trust local process & link") : (linked ? "Relink current source" : "Link connection")) {
+            Button(localProcess ? "Trust and connect local tool" : "Connect this tool") {
                 send("Mcp", "LinkSource", ["workspace_id": .string(workspace), "candidate_id": candidate["id"], "trust_local_process": .bool(localProcess)])
             }.disabled(workspace.isEmpty || !problem.isEmpty || candidate["metadata"]["enabled_at_source"].string == "false")
             Divider()
@@ -144,10 +170,31 @@ struct ToolsView: View {
     }
 
     private func connectionCard(_ connection: JSONValue) -> some View {
-        GroupBox(connection["label"].string) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(connection["workspace_id"].string.isEmpty ? "Global definition · grants are workspace-specific" : (model.workspaces.first { $0.recordID == connection["workspace_id"].string }?["name"].string ?? "Workspace connection")).font(.caption).foregroundStyle(.secondary)
-                Text(connection["config"]["url"].string.isEmpty ? connection["config"]["command"].string : connection["config"]["url"].string).textSelection(.enabled)
+        let count = connection["tools"].array.count
+        let allowed = model.snapshot["mcp"]["grants"].array.filter { $0["workspace_id"].string == workspace && $0["connection_id"].string == connection.recordID }.count
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if expandedConnections.contains(connection.recordID) { expandedConnections.remove(connection.recordID) }
+                else { expandedConnections.insert(connection.recordID) }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: connection["enabled"].bool ? "checkmark.circle.fill" : "pause.circle")
+                        .foregroundStyle(connection["enabled"].bool ? NekoStyle.mint : N.text4)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(connection["label"].string).font(.system(size: 14, weight: .medium)).foregroundStyle(N.text)
+                        Text(connection["workspace_id"].string.isEmpty ? "Available to all workspaces" : (model.workspaces.first { $0.recordID == connection["workspace_id"].string }?["name"].string ?? "Workspace tool"))
+                            .font(.caption).foregroundStyle(N.text4)
+                    }
+                    Spacer()
+                    Text(workspace.isEmpty ? "\(count) tools" : "\(allowed) of \(count) allowed")
+                        .font(.caption).foregroundStyle(N.text3)
+                    Image(systemName: expandedConnections.contains(connection.recordID) ? "chevron.up" : "chevron.down")
+                        .font(.caption).foregroundStyle(N.text4)
+                }.contentShape(Rectangle()).padding(15)
+            }.buttonStyle(.plain)
+            if expandedConnections.contains(connection.recordID) {
+                VStack(alignment: .leading, spacing: 10) {
+                Text(connection["config"]["url"].string.isEmpty ? connection["config"]["command"].string : connection["config"]["url"].string).font(.caption).foregroundStyle(N.text4).textSelection(.enabled)
                 if !connection["error"].string.isEmpty { Text(connection["error"].string).foregroundStyle(.red) }
                 HStack {
                     Button("Discover tools") { send("Mcp", "Discover", ["connection_id": connection["id"]]) }.disabled(!connection["enabled"].bool)
@@ -160,9 +207,14 @@ struct ToolsView: View {
                         }.disabled(!connection["enabled"].bool)
                     }
                 }
+                if count == 0 { Text("No tools discovered yet. Discover tools, then choose what Neko may use.").font(.callout).foregroundStyle(N.text3) }
                 ForEach(Array(connection["tools"].array.enumerated()), id: \.offset) { _, tool in toolRow(tool, connection: connection) }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                }.padding(.horizontal, 15).padding(.bottom, 15)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(N.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(N.line))
     }
 
     private func toolRow(_ tool: JSONValue, connection: JSONValue) -> some View {
@@ -249,9 +301,11 @@ struct ToolsView: View {
 
     private var skillsBody: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Skills provide instructions. They never grant tool permissions.").foregroundStyle(.secondary)
-            Button("Refresh local skills") { send("Skills", "Refresh") }
-            LabeledContent("Search skills") { TextField("Name or description", text: $search).labelsHidden() }
+            Text("Skills teach Neko how to work. They do not give it access to tools.").font(.callout).foregroundStyle(N.text3)
+            HStack(spacing: 12) {
+                TextField("Search skills", text: $search).textFieldStyle(.roundedBorder)
+                Button("Refresh", systemImage: "arrow.clockwise") { send("Skills", "Refresh") }.controlSize(.small)
+            }
             ForEach(Array(visibleSkills.enumerated()), id: \.offset) { _, skill in skillRow(skill) }
             ForEach(SkillPresentation.unavailable(enabled: model.snapshot["skills"]["enabled"].array, available: model.snapshot["skills"]["available"].array, workspace: workspace), id: \.self) { record in
                 GroupBox("Unavailable enabled skill") {
@@ -288,10 +342,28 @@ struct ToolsView: View {
     private func skillRow(_ skill: JSONValue) -> some View {
         let record = SkillPresentation.enabledRecord(for: skill, enabled: model.snapshot["skills"]["enabled"].array, workspace: workspace)
         let changed = record != nil && record?["content_hash"] != skill["content_hash"]
-        return GroupBox(skill["name"].string) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(skill["description"].string)
-                Text(skill["path"].string).font(.caption).textSelection(.enabled)
+        let key = skill["path"].string
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if expandedSkills.contains(key) { expandedSkills.remove(key) }
+                else { expandedSkills.insert(key) }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "text.book.closed").foregroundStyle(N.text3).frame(width: 18)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(skill["name"].string).font(.system(size: 14, weight: .medium)).foregroundStyle(N.text)
+                        Text(skill["description"].string).font(.caption).foregroundStyle(N.text4).lineLimit(1)
+                    }
+                    Spacer()
+                    Text(record == nil ? "Available" : changed ? "Changed" : "Enabled")
+                        .font(.caption).foregroundStyle(changed ? NekoStyle.amber : N.text3)
+                    Image(systemName: expandedSkills.contains(key) ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(N.text4)
+                }.contentShape(Rectangle()).padding(14)
+            }.buttonStyle(.plain)
+            if expandedSkills.contains(key) {
+                VStack(alignment: .leading, spacing: 8) {
+                Text(skill["description"].string).font(.callout).foregroundStyle(N.text3)
+                Text(skill["path"].string).font(.caption).foregroundStyle(N.text4).textSelection(.enabled)
                 if changed { Text("Instructions changed. Review them before enabling the updated version.").foregroundStyle(.orange) }
                 Button("Open instructions to review") {
                     if !NSWorkspace.shared.open(URL(fileURLWithPath: skill["path"].string)) { validation = "Could not open this instruction file." }
@@ -306,8 +378,11 @@ struct ToolsView: View {
                         send("Skills", "SetEnabled", ["workspace_id": record["workspace_id"], "path": record["path"], "content_hash": record["content_hash"], "enabled": .bool(false)])
                     }
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.bottom, 14)
+            }
         }
+        .background(N.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(N.line))
     }
 
     private func proposalCard(_ proposal: JSONValue) -> some View {

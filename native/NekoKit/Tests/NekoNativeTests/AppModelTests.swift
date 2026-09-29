@@ -133,6 +133,23 @@ private actor ControlledTransport {
         XCTAssertNil(SkillPresentation.enabledRecord(for: available, enabled: [enabled], workspace: "b"))
     }
 
+    func testWatchingRequiresCurrentWorkspaceToolGrantBeforeTurnOn() async {
+        let model = AppModel { _ in XCTFail("Turn on must not send a command without a usable grant"); return .null }
+        let item: JSONValue = .object(["id": .string("check"), "workspace_id": .string("a"), "connection_ids": .array([.string("admin")])])
+        let tool: JSONValue = .object(["name": .string("search"), "schema_hash": .string("v1")])
+        let connection: JSONValue = .object(["id": .string("admin"), "label": .string("Admin"), "enabled": .bool(true), "tools": .array([tool])])
+        let grant: JSONValue = .object(["workspace_id": .string("a"), "connection_id": .string("admin"), "tool_name": .string("search"), "schema_hash": .string("v1")])
+        model.snapshot = .object(["mcp": .object(["connections": .array([connection]), "grants": .array([])])])
+        XCTAssertEqual(Watching.ungranted(model, item), ["Admin"])
+        Watching.turnOn(model, item)
+        XCTAssertEqual(model.selectedWorkspace, "a")
+        XCTAssertFalse(model.busy)
+        model.snapshot = .object(["mcp": .object(["connections": .array([connection]), "grants": .array([grant])])])
+        XCTAssertTrue(Watching.ungranted(model, item).isEmpty)
+        model.snapshot = .object(["mcp": .object(["connections": .array([connection]), "grants": .array([.object(["workspace_id": .string("b"), "connection_id": .string("admin"), "tool_name": .string("search"), "schema_hash": .string("v1")])])])])
+        XCTAssertEqual(Watching.ungranted(model, item), ["Admin"])
+    }
+
     func testSplitProposalGuardExcludesParentsAndChildren() {
         let task: JSONValue = .object(["id": .string("parent"), "status": .string("AwaitingApproval")])
         let split: JSONValue = .object(["parent_id": .string("parent"), "subtasks": .array([.object(["task_id": .string("child")])])])
