@@ -812,7 +812,16 @@ fn converse(
         if cancel.load(Ordering::Acquire) {
             return Err("Cancelled".into());
         }
-        if let Some(workspace) = chosen {
+        // An unscoped conversation has one unambiguous tool authority only
+        // when this profile owns exactly one workspace. With several, the
+        // user must select a workspace before tools can run.
+        let tool_workspace = chosen.or_else(|| {
+            let owned: Vec<_> = snapshot.workspaces.iter().filter(|w| {
+                snapshot.agent_profiles.owner(&w.id) == snapshot.agent_profiles.active_profile_id
+            }).collect();
+            (owned.len() == 1).then(|| owned[0].id.as_str())
+        });
+        if let Some(workspace) = tool_workspace {
             let connections = snapshot
                 .mcp
                 .connections
@@ -856,6 +865,22 @@ fn converse(
     }
 }
 
+/// Use only an existing Git root explicitly present in the proposed answer.
+/// A path elsewhere on disk cannot silently escape the registered workspace.
+fn ticket_folder_in_reply(reply: &str, goal: &str, workspace_root: &str) -> Option<String> {
+    let root = std::path::Path::new(workspace_root).canonicalize().ok()?;
+    let mut found = std::collections::BTreeSet::new();
+    for word in format!("{reply} {goal}").split_whitespace() {
+        let path = word.trim_matches(|c: char| matches!(c, '`' | '\'' | '"' | '(' | ')' | ',' | ';' | ':' | '.'));
+        if !path.starts_with('/') { continue; }
+        let Ok(repository) = store::canonical_repository(path) else { continue; };
+        if std::path::Path::new(&repository).starts_with(&root) {
+            found.insert(repository);
+        }
+    }
+    (found.len() == 1).then(|| found.into_iter().next()).flatten()
+}
+
 /// Serialize every reply mutation with Stop. The pending-state check and all
 /// ticket/memory/completion writes share the same database lock, so a reply
 /// that lost to Stop cannot create work or persist memories afterward.
@@ -893,6 +918,7 @@ fn complete_chat_reply(
         );
     }
     snapshot.agent_profiles.active_profile_id = turn.agent_profile_id.clone();
+    let reply_text = reply.text.clone();
     let mut opened = Vec::new();
     let mut skipped = false;
     for ticket in reply.tickets {
@@ -903,7 +929,15 @@ fn complete_chat_reply(
             continue;
         };
         let folders = snapshot.folders_for(workspace);
-        let command = match ticket.folder {
+        let folder = ticket.folder.or_else(|| {
+            // A home workspace is a container, not itself a Git checkout.
+            // Recover a single explicit repository path from the reply so
+            // the proposed ticket can be pinned to that checkout.
+            (folders.len() == 1 && store::canonical_repository(&folders[0]).is_err())
+                .then(|| ticket_folder_in_reply(&reply_text, &ticket.goal, &folders[0]))
+                .flatten()
+        });
+        let command = match folder {
             Some(folder) => Command::CreateTaskInFolder {
                 workspace_id: workspace.id.clone(),
                 title: ticket.title,
@@ -979,7 +1013,11 @@ fn complete_chat_reply(
         reply.text
     };
     if skipped {
-        text.push_str("\n\nI could not open every ticket. Check that its workspace and folder are available, or tell me which folder to use.");
+        text.push_str(if opened.is_empty() {
+            "\n\nNo ticket was created. Choose a Git folder for this workspace, or name its repository path and ask me to create the ticket."
+        } else {
+            "\n\nOne proposed ticket was not created. Choose its Git folder and ask me to retry."
+        });
     }
     if unplaced {
         text.push_str("\n\nI could not save every suggestion to watch. Connect a tool to that workspace in Tools & skills, then ask again.");
@@ -1370,6 +1408,56 @@ mod tests {
             }],
             responsibilities: vec![],
         }
+    }
+
+    #[test]
+    fn ticket_path_in_reply_must_be_one_repo_inside_workspace() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("Documents/neko");
+        std::fs::create_dir_all(&repo).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet"])
+            .arg(&repo).status().unwrap().success());
+        let root = home.path().to_str().unwrap();
+        let path = repo.to_str().unwrap();
+        assert_eq!(ticket_folder_in_reply(&format!("State: `{path}` is active."), "", root),
+            Some(repo.canonicalize().unwrap().to_string_lossy().into_owned()));
+        assert_eq!(ticket_folder_in_reply("No path given", "", root), None);
+        let other = tempfile::tempdir().unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet"])
+            .arg(other.path()).status().unwrap().success());
+        assert_eq!(ticket_folder_in_reply(other.path().to_str().unwrap(), "", root), None);
+    }
+
+    #[test]
+    fn all_workspaces_reply_links_ticket_to_nested_repo() {
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("Documents/neko");
+        std::fs::create_dir_all(&repo).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet"])
+            .arg(&repo).status().unwrap().success());
+        let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
+        let workspace = {
+            let db = db.lock().unwrap();
+            store::apply(&db, Command::SaveWorkspaceWithFolders {
+                workspace: Workspace { id: String::new(), name: "Home".into(),
+                    repository: home.path().to_string_lossy().into(),
+                    instructions: String::new(), away_enabled: false },
+                folders: vec![home.path().to_string_lossy().into()],
+            }).unwrap().workspaces[0].id.clone()
+        };
+        let turn = neko_chat::begin_turn(&db.lock().unwrap(), "Plan my next step").unwrap();
+        complete_chat_reply(&db, &AtomicBool::new(false), &turn,
+            "Plan my next step", None,
+            neko_chat::Reply { text: format!("The active repo is `{}`.", repo.display()),
+                tickets: vec![neko_chat::ProposedTicket { title: "Repair repo".into(),
+                    goal: "Make branch reproducible".into(), workspace_id: Some(workspace.clone()),
+                    folder: None }], memories: vec![], responsibilities: vec![] }).unwrap();
+        let state = store::load(&db.lock().unwrap()).unwrap();
+        let reply = state.conversation.iter().find(|m| m.id == turn).unwrap();
+        assert_eq!(reply.ticket_ids.len(), 1);
+        assert_eq!(state.tasks[0].workspace_id, workspace);
+        assert_eq!(state.task_roots[&reply.ticket_ids[0]],
+            repo.canonicalize().unwrap().to_string_lossy());
     }
 
     #[test]

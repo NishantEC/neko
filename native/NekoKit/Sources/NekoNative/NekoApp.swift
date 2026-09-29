@@ -65,6 +65,7 @@ struct WorkspaceView: View {
                         case "Memory": MemoryView(model: model)
                         case "Profiles": ProfilesView(model: model)
                         case "Schedules": SchedulesView(model: model)
+                        case "Activity": ActivityGallery()
                         default: TodayView(model: model)
                         }
                     }
@@ -253,7 +254,7 @@ struct WatchingStatus: View {
     let connected: Bool
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(connected ? NekoStyle.accent : Color.secondary).frame(width: 7, height: 7)
+            PixelGlyph(activity: connected ? .watching : .idle, size: 11)
             Text(connected ? "Watching" : "Reconnecting…").font(.callout)
         }.padding(.horizontal, 8).accessibilityElement(children: .combine)
     }

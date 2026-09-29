@@ -453,8 +453,7 @@ struct StatusPill: View {
     var live = true
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(live ? NekoStyle.accent : N.text4).frame(width: 6, height: 6)
-                .shadow(color: NekoStyle.accent.opacity(live ? 0.8 : 0), radius: 4)
+            PixelGlyph(activity: live ? .watching : .idle, size: 10)
             Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(N.text2)
         }.padding(.horizontal, 10).frame(height: 26).liquidGlassCapsule()
     }
@@ -733,7 +732,8 @@ struct PlainSummaryCard: View {
     let title: String
     let value: String
     let caption: String
-    let symbol: String
+    let activity: NekoActivity
+    var live = false
     var action: String? = nil
     var perform: () -> Void = {}
     @State private var hover = false
@@ -742,7 +742,7 @@ struct PlainSummaryCard: View {
             HStack {
                 Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text3)
                 Spacer()
-                Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(N.text4)
+                PixelGlyph(activity: live ? activity : .idle, size: 16, animated: live)
             }
             Spacer(minLength: 20)
             Text(value).font(.system(size: 30, weight: .semibold)).tracking(-0.5).foregroundStyle(N.text).monospacedDigit()

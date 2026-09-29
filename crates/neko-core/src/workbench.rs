@@ -327,7 +327,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 .find(|w| w.id == workspace_id)
                 .ok_or("Workspace no longer exists")?;
             let folder = canonical_workspace_directory(&folder)?;
-            if !snapshot.folders_for(workspace).contains(&folder) {
+            if !snapshot.folders_for(workspace).iter().any(|root| {
+                std::path::Path::new(&folder).starts_with(root)
+            }) {
                 return Err("That folder is not in this workspace".into());
             }
             canonical_repository(&folder).map_err(|_| "Code tasks require a Git repository")?;
@@ -1193,6 +1195,30 @@ mod tests {
                 .success()
         );
         dir
+    }
+
+    #[test]
+    fn home_workspace_can_pin_a_ticket_to_a_nested_git_checkout() {
+        let db = Db::open_in_memory().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let project = home.path().join("Documents/project");
+        std::fs::create_dir_all(&project).unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet"])
+            .arg(&project).status().unwrap().success());
+        let state = apply(&db, Command::SaveWorkspaceWithFolders {
+            workspace: Workspace { id: String::new(), name: "Home".into(),
+                repository: home.path().to_string_lossy().into(),
+                instructions: String::new(), away_enabled: false },
+            folders: vec![home.path().to_string_lossy().into()],
+        }).unwrap();
+        let task = apply(&db, Command::CreateTaskInFolder {
+            workspace_id: state.workspaces[0].id.clone(),
+            title: "Repair build".into(), goal: "Fix this repo".into(),
+            folder: project.to_string_lossy().into(),
+        }).unwrap().tasks.pop().unwrap();
+        let saved = load(&db).unwrap();
+        assert_eq!(saved.root_for(&task, &saved.workspaces[0]),
+            project.canonicalize().unwrap().to_string_lossy());
     }
     fn workspace(db: &Db, repo: &std::path::Path) -> Workspace {
         apply(

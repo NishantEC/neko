@@ -75,6 +75,54 @@ fn call(host: &Host, lease: &Lease, connection: &str) -> Result<String, String> 
 }
 
 #[test]
+fn all_workspaces_chat_uses_only_an_unambiguous_workspace_authority() {
+    let db = Db::open_in_memory().unwrap();
+    let mut state = Snapshot::default();
+    state.workspaces.push(Workspace {
+        id: "home".into(), name: "Home".into(), repository: "/tmp".into(),
+        instructions: String::new(), away_enabled: false,
+    });
+    store::save(&db, &state).unwrap();
+    let turn = neko_chat::begin_turn(&db, "Use my tools").unwrap();
+    let host = Arc::new(Host::new(Arc::new(Mutex::new(db))));
+    assert!(host.lease(&format!("chat:{turn}"), "home", vec![], 0).is_ok());
+    {
+        let db = host.db.lock().unwrap();
+        let mut state = store::load(&db).unwrap();
+        state.workspaces.push(Workspace {
+            id: "other".into(), name: "Other".into(), repository: "/tmp".into(),
+            instructions: String::new(), away_enabled: false,
+        });
+        store::save(&db, &state).unwrap();
+    }
+    assert!(host.lease(&format!("chat:{turn}"), "home", vec![], 0).is_err());
+}
+
+#[test]
+fn all_workspaces_chat_can_call_a_granted_read_tool_in_its_only_workspace() {
+    let (host, scoped_turn, scoped_lease, connection) = fixture(true);
+    drop(scoped_lease);
+    let global_turn = {
+        let db = host.db.lock().unwrap();
+        neko_chat::finish_turn(&db, &scoped_turn, "done", vec![], false).unwrap();
+        let mut state = store::load(&db).unwrap();
+        state.workspaces.retain(|w| w.id == "a");
+        store::save(&db, &state).unwrap();
+        neko_chat::begin_turn(&db, "Check my admin tool").unwrap()
+    };
+    let lease = host.lease(&format!("chat:{global_turn}"), "a", vec![connection.clone()], 0).unwrap();
+    let catalog = host.bridge(BridgeRequest {
+        token: Secret(lease.token().into()), action: BridgeAction::List,
+    }).unwrap();
+    assert!(catalog.contains("echo"));
+    assert!(call(&host, &lease, &connection).unwrap().contains("proof"));
+    let state = store::load(&host.db.lock().unwrap()).unwrap();
+    let turn = state.conversation.iter().find(|m| m.id == global_turn).unwrap();
+    assert_eq!(turn.tool_calls.len(), 1);
+    assert_eq!(turn.tool_calls[0].status, ChatToolStatus::Succeeded);
+}
+
+#[test]
 fn linked_workspace_stdio_server_dispatches_only_after_its_tool_grant() {
     let directory = tempfile::tempdir().unwrap();
     let repository = directory.path().join("project");
