@@ -150,7 +150,8 @@ struct ResponsibilitiesView: View {
         let failing = item["failures"].int > 0
         return HStack(alignment: .top, spacing: 12) {
             Toggle("", isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
-                submit(model, nested("Mcp", "SaveResponsibility", ["responsibility": replacing(item, ["enabled": .bool(enabled)])]))
+                if enabled { Watching.turnOn(model, item) }
+                else { submit(model, nested("Mcp", "SaveResponsibility", ["responsibility": replacing(item, ["enabled": .bool(false)])])) }
             })).toggleStyle(.switch).controlSize(.mini).labelsHidden().accessibilityLabel("Watching on")
             VStack(alignment: .leading, spacing: 3) {
                 Text(item["instruction"].string).font(.system(size: 13)).foregroundStyle(item["enabled"].bool ? N.text : N.text3).textSelection(.enabled)

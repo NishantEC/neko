@@ -21,14 +21,17 @@ struct SuggestedResponsibilityCard: View {
                 promise("checkmark", "Reads \(tools.joined(separator: ", ")) every 10 minutes in \(workspace) and brings what matters to Today.")
                 promise("hand.raised", item["prepare_low_risk"].bool ? "May prepare low-risk local fixes; never publishes or messages anyone." : "Never changes, posts or replies to anything. Plans wait for your approval.")
                 if !missing.isEmpty {
-                    promise("exclamationmark.circle", "Give Neko read access to \(missing.joined(separator: ", ")) in Tools & skills first.", color: NekoStyle.amber)
+                    promise("exclamationmark.circle", "Choose tools Neko may use from \(missing.joined(separator: ", ")) before this check can run.", color: NekoStyle.amber)
                 }
             }
             HStack(spacing: 8) {
                 if live {
                     Label("Watching", systemImage: "checkmark").font(.system(size: 12, weight: .medium)).foregroundStyle(NekoStyle.mint)
                 } else {
-                    Button("Turn on") { Watching.turnOn(model, item) }.nekoPrimaryButton().controlSize(.small)
+                    Button(missing.isEmpty ? "Turn on" : "Choose access") {
+                        if missing.isEmpty { Watching.turnOn(model, item) }
+                        else { Watching.reviewAccess(model, item) }
+                    }.nekoPrimaryButton().controlSize(.small)
                 }
                 if let onEdit { Button("Edit", action: onEdit).controlSize(.small) }
                 if !live { Button("Dismiss") { Watching.remove(model, item) }.controlSize(.small) }

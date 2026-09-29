@@ -389,6 +389,10 @@ struct ManagementEditor: View {
                 }
                 if kind == .responsibility {
                     Toggle("Enabled", isOn: $enabled)
+                    if enabled && !missingToolAccess.isEmpty {
+                        Label("Choose access for \(missingToolAccess.joined(separator: ", ")) in Tools & skills before turning this on.", systemImage: "exclamationmark.circle")
+                            .font(.caption).foregroundStyle(NekoStyle.amber)
+                    }
                     Toggle("Allow preparation of low-risk local fixes", isOn: $prepare)
                     Text("Remote tool permission and publication authority are separate.").font(.caption)
                     ForEach(model.snapshot["mcp"]["connections"].array.filter { $0["workspace_id"].string.isEmpty || $0["workspace_id"].string == effectiveWorkspace }, id: \.self) { connection in
@@ -402,7 +406,7 @@ struct ManagementEditor: View {
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
-                Button(saving ? "Saving…" : "Save") { save() }.keyboardShortcut(.defaultAction).disabled(saving || !kind.hasRequiredContent(name: name, text: text) || (kind == .memory && memoryKind == "workspace" && effectiveWorkspace == nil) || (kind == .responsibility && connections.isEmpty))
+                Button(saving ? "Saving…" : "Save") { save() }.keyboardShortcut(.defaultAction).disabled(saving || !kind.hasRequiredContent(name: name, text: text) || (kind == .memory && memoryKind == "workspace" && effectiveWorkspace == nil) || (kind == .responsibility && (connections.isEmpty || (enabled && !missingToolAccess.isEmpty))))
             }
         }.padding(24).frame(width: 540).onAppear {
             name = original["name"].string
@@ -416,6 +420,9 @@ struct ManagementEditor: View {
         }
     }
     private var effectiveWorkspace: String? { original["id"].string.isEmpty ? workspace : (original["workspace_id"] == .null ? nil : original["workspace_id"].string) }
+    private var missingToolAccess: [String] {
+        Watching.ungranted(model, .object(["workspace_id": .string(effectiveWorkspace ?? ""), "connection_ids": .array(connections.sorted().map(JSONValue.string))]))
+    }
     private func save() {
         let command: JSONValue
         let now = JSONValue.number((Date().timeIntervalSince1970 * 1000).rounded(.down))

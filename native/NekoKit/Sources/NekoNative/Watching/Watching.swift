@@ -41,11 +41,23 @@ enum Watching {
     /// A tool can only be read once the workspace has granted at least one of its tools.
     @MainActor static func ungranted(_ model: AppModel, _ item: JSONValue) -> [String] {
         let workspace = item["workspace_id"].string
-        let granted = Set(model.snapshot["mcp"]["grants"].array.filter { $0["workspace_id"].string == workspace }.map { $0["connection_id"].string })
+        let granted = Set(model.snapshot["mcp"]["grants"].array.filter { grant in
+            guard grant["workspace_id"].string == workspace else { return false }
+            return model.snapshot["mcp"]["connections"].array.contains { connection in
+                connection.recordID == grant["connection_id"].string && connection["enabled"].bool && connection["error"].string.isEmpty &&
+                connection["tools"].array.contains { $0["name"] == grant["tool_name"] && $0["schema_hash"] == grant["schema_hash"] }
+            }
+        }.map { $0["connection_id"].string })
         return item["connection_ids"].array.map(\.string).filter { !granted.contains($0) }.map { label(model, connection: $0) }
     }
 
+    @MainActor static func reviewAccess(_ model: AppModel, _ item: JSONValue) {
+        model.selectedWorkspace = item["workspace_id"].string
+        NotificationCenter.default.post(name: .nekoNavigate, object: "Tools & skills")
+    }
+
     @MainActor static func turnOn(_ model: AppModel, _ item: JSONValue) {
+        guard ungranted(model, item).isEmpty else { reviewAccess(model, item); return }
         Task {
             let saved = await model.workbench(nested("Mcp", "SaveResponsibility", ["responsibility": replacing(item, ["enabled": .bool(true)])]))
             if saved { await model.workbench(nested("Mcp", "Wake", ["responsibility_id": item["id"]])) }
