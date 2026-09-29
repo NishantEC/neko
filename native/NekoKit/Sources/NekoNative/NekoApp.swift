@@ -14,7 +14,8 @@ import NekoKit
                 .onReceive(NotificationCenter.default.publisher(for: .nekoOpenWorkspace)) { _ in openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
                 .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in openSettings() }
         }
-        .defaultSize(width: 1440, height: 900)
+        .defaultSize(width: 1280, height: 820)
+        .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) { Button("Quick panel") { PaletteController.shared.toggle(model: model) }.keyboardShortcut("k", modifiers: [.command]) }
         }
@@ -67,6 +68,7 @@ struct WorkspaceView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .modifier(ArcCard(enabled: page != "Today"))
                     .background { LookBackground(look: look) }
                     .softScrollEdges()
                     .navigationTitle(PageInfo.title(page))
@@ -87,7 +89,8 @@ struct WorkspaceView: View {
                 }
             }
         }
-        .frame(minWidth: 960, maxWidth: .infinity, minHeight: 620, maxHeight: .infinity)
+        .frame(minWidth: model.onboarding ? 760 : 960, maxWidth: model.onboarding ? 760 : .infinity, minHeight: model.onboarding ? 580 : 620, maxHeight: model.onboarding ? 580 : .infinity)
+        .onChange(of: model.onboarding) { _, onboarding in if !onboarding { WindowSizer.expandForWorkspace() } }
         .preferredColorScheme(.dark)
         .environment(\.nekoLook, NekoLook(rawValue: look) ?? .ambient)
         .safeAreaInset(edge: .top) {
@@ -287,5 +290,33 @@ struct WorkspaceMenu: View {
         .menuIndicator(.visible)
         .help("Choose where Neko works")
         .accessibilityLabel("Workspace: \(current)")
+    }
+}
+
+/// Arc: content floats in a calm, neutral card; colour stays on the window space around it.
+struct ArcCard: ViewModifier {
+    let enabled: Bool
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .background(N.panel.opacity(0.94), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.08)))
+                .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+                .padding([.horizontal, .bottom], 10).padding(.top, 2)
+        } else {
+            content
+        }
+    }
+}
+
+/// Setup is a small, fixed window; the workspace opens at a comfortable size once setup ends.
+@MainActor enum WindowSizer {
+    static func expandForWorkspace() {
+        guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("workspace") == true || $0.title.hasPrefix("Neko") || $0.title.hasPrefix("Today") }),
+              let screen = window.screen?.visibleFrame else { return }
+        let size = NSSize(width: min(1280, screen.width - 80), height: min(820, screen.height - 60))
+        let origin = NSPoint(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2)
+        window.setFrame(NSRect(origin: origin, size: size), display: true, animate: true)
     }
 }

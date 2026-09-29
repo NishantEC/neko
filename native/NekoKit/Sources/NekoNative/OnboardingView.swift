@@ -11,56 +11,40 @@ struct OnboardingView: View {
     @State private var workspaceSheet = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack { Text("Neko").font(.headline); Spacer(); Text("Setup · \(step + 1) of 3").foregroundStyle(.secondary) }
-            Spacer()
-            switch step {
-            case 0:
-                BrandMark(size: 96).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .shadow(color: NekoStyle.accent.opacity(0.35), radius: 28, y: 12)
-                OpalGreeting(title: "While you are away,\nNeko keeps watch.", subtitle: "It watches your projects and tools, plans the next step the way you would, and asks before it changes anything.")
-                Button("Get started") { step = 1 }.glassProminentButton().tint(NekoStyle.accent).controlSize(.large)
-            case 1:
-                Text("Let Neko work on your Mac").font(.largeTitle.bold())
-                Text("Each permission is optional. You can always open the full app without a shortcut.").foregroundStyle(.secondary)
-                Button(trusted ? "Accessibility enabled" : "Allow Accessibility…") {
-                    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-                    trusted = AXIsProcessTrustedWithOptions(options)
-                }.disabled(trusted)
-                Text("Used for paste actions. macOS controls this permission.").font(.caption)
-                Toggle("Clipboard history", isOn: Binding(get: { clipboard ?? false }, set: { value in
-                    pending = true
-                    Task {
-                        do {
-                            let reply = try await model.request(.command("SetClipboardHistoryEnabled", ["enabled": .bool(value)]))
-                            guard reply["ClipboardHistoryEnabled"]["enabled"] == .bool(value) else { throw NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: "Clipboard setting was not acknowledged."]) }
-                            clipboard = value; model.error = nil
-                        } catch { model.error = error.localizedDescription }
-                        pending = false
-                    }
-                })).disabled(clipboard == nil || pending)
-                Text("Saved locally. Off by default; enabling starts clipboard capture.").font(.caption)
-                HotkeySettingsView(model: model)
-            default:
-                Text("Choose a workspace").font(.largeTitle.bold())
-                Text("Work where you already work. Choose an existing workspace or add a folder.").foregroundStyle(.secondary)
-                Picker("Workspace", selection: $model.selectedWorkspace) {
-                    Text("Choose later").tag(String?.none)
-                    ForEach(model.workspaces, id: \.recordID) { item in Text(item["name"].string).tag(Optional(item.recordID)) }
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+            Group {
+                switch step {
+                case 0: welcomeStep
+                case 1: permissionsStep
+                default: workspaceStep
                 }
-                Button("Add workspace…") { model.selectedWorkspace = nil; workspaceSheet = true }
             }
-            if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-            Spacer()
-            if step > 0 {
-                HStack {
-                    Button("Back") { step -= 1 }
-                    Spacer()
-                    if step < 2 { Button("Set up later") { finish() } }
-                    Button(step == 2 ? "Open Neko" : "Continue") { if step == 2 { finish() } else { step += 1 } }.nekoPrimaryButton()
-                }.disabled(pending)
+            .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .move(edge: .leading).combined(with: .opacity)))
+            .id(step)
+            if let error = model.error { Text(error).font(.callout).foregroundStyle(Color.oklch(0.75, 0.15, 27)).textSelection(.enabled).padding(.top, 12) }
+            Spacer(minLength: 24)
+            HStack {
+                if step > 0 { Button("Back") { step -= 1 }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.7)) }
+                Spacer()
+                HStack(spacing: 6) {
+                    ForEach(0..<3) { i in Capsule().fill(.white.opacity(i == step ? 0.9 : 0.25)).frame(width: i == step ? 20 : 6, height: 6) }
+                }.accessibilityLabel("Step \(step + 1) of 3")
+                Spacer()
+                if step > 0 {
+                    if step < 2 { Button("Skip") { finish() }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.7)) }
+                    Button(step == 2 ? "Open Neko" : "Continue") { if step == 2 { finish() } else { step += 1 } }.buttonStyle(PillButtonStyle())
+                } else { Color.clear.frame(width: 60, height: 1) }
             }
-        }.padding(48).frame(minWidth: 650, minHeight: 530).frame(maxWidth: .infinity, maxHeight: .infinity).background { LookBackground(look: "ambient").ignoresSafeArea() }
+            .disabled(pending)
+            .frame(maxWidth: 560)
+        }
+        .padding(40)
+        .frame(width: 760, height: 580)
+        .background { SpaceGradient() }
+        .environment(\.colorScheme, .dark)
+        .hiddenWindowToolbarBackground()
+        .navigationTitle("")
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: step)
             .sheet(isPresented: $workspaceSheet) { WorkspaceEditor(model: model) }
             .task {
@@ -71,6 +55,95 @@ struct OnboardingView: View {
                     try? await Task.sleep(for: .seconds(1))
                 }
             }
+    }
+    private var welcomeStep: some View {
+        VStack(spacing: 22) {
+            BrandMark(size: 96).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .shadow(color: Color.oklch(0.6, 0.2, 310).opacity(0.55), radius: 40, y: 18)
+            VStack(spacing: 10) {
+                Text("While you're away,\nNeko keeps watch.").font(.system(size: 32, weight: .bold)).tracking(-0.7).multilineTextAlignment(.center).foregroundStyle(.white)
+                Text("It watches your projects and tools, plans the next step the way you would, and asks before it changes anything.")
+                    .font(.system(size: 15)).foregroundStyle(.white.opacity(0.72)).multilineTextAlignment(.center).frame(maxWidth: 480)
+            }
+            OrbButton(title: "Start") { step = 1 }.padding(.top, 8)
+        }
+    }
+    private var permissionsStep: some View {
+        stepCard(title: "Let Neko work on your Mac", subtitle: "Each of these is optional. You can change them later in Settings.") {
+            settingRow(symbol: "hand.point.up.left.fill", tint: Color.oklch(0.7, 0.14, 250), title: "Accessibility", detail: "Lets Neko paste for you. macOS asks you to confirm.") {
+                Button(trusted ? "Enabled" : "Allow…") {
+                    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+                    trusted = AXIsProcessTrustedWithOptions(options)
+                }.disabled(trusted).buttonStyle(PillButtonStyle())
+            }
+            settingRow(symbol: "doc.on.clipboard.fill", tint: Color.oklch(0.7, 0.14, 160), title: "Clipboard history", detail: "Saved only on this Mac. Off by default.") {
+                Toggle("Clipboard history", isOn: Binding(get: { clipboard ?? false }, set: { value in
+        pending = true
+        Task {
+            do {
+                let reply = try await model.request(.command("SetClipboardHistoryEnabled", ["enabled": .bool(value)]))
+                guard reply["ClipboardHistoryEnabled"]["enabled"] == .bool(value) else { throw NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: "Clipboard setting was not acknowledged."]) }
+                clipboard = value; model.error = nil
+            } catch { model.error = error.localizedDescription }
+            pending = false
+        }
+    })).disabled(clipboard == nil || pending)
+                .toggleStyle(.switch).labelsHidden()
+            }
+            settingRow(symbol: "keyboard.fill", tint: Color.oklch(0.7, 0.15, 320), title: "Quick panel shortcut", detail: "Summon Neko from anywhere.") {
+                HotkeySettingsView(model: model)
+            }
+        }
+    }
+    private var workspaceStep: some View {
+        stepCard(title: "Where do you work?", subtitle: "Add a folder you already work in. Each workspace can have its own tools, such as its own Linear.") {
+            if model.workspaces.isEmpty {
+                Button { model.selectedWorkspace = nil; workspaceSheet = true } label: {
+                    HStack(spacing: 14) {
+                        DimensionalGlyph(symbol: "folder.fill.badge.plus", tint: Color.oklch(0.68, 0.14, 230), size: 52)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Add a workspace").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                            Text("Choose one or more folders").font(.system(size: 13)).foregroundStyle(.white.opacity(0.65))
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.5))
+                    }.padding(14).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            } else {
+                ForEach(model.workspaces, id: \.recordID) { item in
+                    HStack(spacing: 10) {
+                        Image(systemName: "folder.fill").foregroundStyle(.white.opacity(0.8))
+                        Text(item["name"].string).font(.system(size: 14, weight: .medium)).foregroundStyle(.white)
+                        Spacer()
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.oklch(0.78, 0.14, 158))
+                    }.padding(.vertical, 6)
+                }
+                Button("Add another workspace…") { model.selectedWorkspace = nil; workspaceSheet = true }.buttonStyle(PillButtonStyle())
+            }
+        }
+    }
+    private func stepCard<Content: View>(title: String, subtitle: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.system(size: 24, weight: .bold)).tracking(-0.4).foregroundStyle(.white)
+                Text(subtitle).font(.system(size: 14)).foregroundStyle(.white.opacity(0.7)).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 4, content: content)
+                .padding(12)
+                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.14)))
+        }.frame(maxWidth: 560)
+    }
+    private func settingRow<Trailing: View>(symbol: String, tint: Color, title: String, detail: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(spacing: 14) {
+            DimensionalGlyph(symbol: symbol, tint: tint, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                Text(detail).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.65))
+            }
+            Spacer(minLength: 12)
+            trailing()
+        }.padding(10)
     }
     private func finish() { pending = true; Task { await model.completeSetup(); pending = false } }
 }
