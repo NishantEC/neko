@@ -1,0 +1,116 @@
+import SwiftUI
+import NekoKit
+
+@MainActor final class AppModel: ObservableObject {
+    @Published var snapshot: JSONValue = .object([:])
+    @Published var selectedWorkspace: String?
+    @Published private var actionError: String?
+    @Published private var connectionError: String?
+    /// Explicit action failures survive background reconnects. Dismissing the
+    /// banner clears both categories; a successful health refresh clears only
+    /// the connection error it has actually resolved.
+    var error: String? {
+        get { actionError ?? connectionError }
+        set {
+            actionError = newValue
+            if newValue == nil { connectionError = nil }
+        }
+    }
+    @Published var chatDrafts = ScopedChatDrafts()
+    @Published var sendingChatScopes: Set<ChatDraftScope> = []
+    @Published var connected = false
+    @Published var busy = false
+    @Published var onboarding = false
+    @Published var loadingSetup = true
+    let client = DaemonClient()
+    private let transport: (@Sendable (JSONValue) async throws -> JSONValue)?
+    private var polling: Task<Void, Never>?
+    private var generation = 0
+    private var refreshSequence = 0
+
+    init(transport: (@Sendable (JSONValue) async throws -> JSONValue)? = nil) { self.transport = transport }
+
+    var workspaces: [JSONValue] { snapshot["workspaces"].array }
+    var tasks: [JSONValue] { snapshot["tasks"].array.filter { selectedWorkspace == nil || $0["workspace_id"].string == selectedWorkspace } }
+    func request(_ request: JSONValue) async throws -> JSONValue {
+        let result: JSONValue
+        if let transport { result = try await transport(request) }
+        else { result = try await client.request(request) }
+        if case .object(let values) = result, let failure = values["Error"] {
+            throw NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: failure["message"].string])
+        }
+        return result
+    }
+    func start() async {
+        await refresh()
+        do {
+            let state = try await request(.string("GetOnboardingState"))
+            guard case .bool(let completed) = state["OnboardingState"]["completed"] else { throw invalidResponse() }
+            onboarding = !completed
+            loadingSetup = false
+        }
+        catch { self.error = error.localizedDescription }
+        polling?.cancel()
+        polling = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                await self?.refresh()
+            }
+        }
+    }
+    func refresh() async {
+        guard !busy else { return }
+        let started = generation
+        refreshSequence += 1
+        let sequence = refreshSequence
+        do {
+            let result = try await request(.object(["Workbench": .string("Snapshot")]))
+            guard started == generation, sequence == refreshSequence else { return }
+            guard case .object = result["Workbench"] else { throw invalidResponse() }
+            snapshot = result["Workbench"]
+            connected = true
+            connectionError = nil
+        } catch {
+            guard started == generation, sequence == refreshSequence else { return }
+            connected = false; connectionError = error.localizedDescription
+        }
+    }
+    @discardableResult func workbench(_ command: JSONValue) async -> Bool {
+        guard !busy else { error = "Another change is still saving. Please try again."; return false }
+        generation += 1
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await request(.object(["Workbench": command]))
+            guard case .object = result["Workbench"] else { throw invalidResponse() }
+            snapshot = result["Workbench"]
+            connected = true
+            error = nil
+            return true
+        } catch { self.error = error.localizedDescription; return false }
+    }
+    func completeSetup() async {
+        do {
+            let reply = try await request(.command("SetOnboardingComplete", ["completed": .bool(true)]))
+            guard reply["OnboardingState"]["completed"] == .bool(true) else { throw invalidResponse() }
+            onboarding = false
+            error = nil
+        }
+        catch { self.error = error.localizedDescription }
+    }
+    private func invalidResponse() -> NSError {
+        NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: "The daemon returned an unexpected response. Please try again."])
+    }
+}
+
+extension JSONValue {
+    var recordID: String { self["id"].string }
+}
+
+extension View {
+    @ViewBuilder func nekoGlass() -> some View {
+        if #available(macOS 26, *) { self.glassEffect(.regular, in: .rect(cornerRadius: 18)) }
+        else { self.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18)) }
+    }
+}
