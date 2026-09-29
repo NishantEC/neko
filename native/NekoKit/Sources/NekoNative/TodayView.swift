@@ -229,13 +229,13 @@ struct TodayView: View {
                     .font(.system(size: 30, weight: .semibold)).tracking(-0.6).foregroundStyle(.white).multilineTextAlignment(.center)
             }.frame(maxWidth: .infinity)
             HStack(spacing: 14) {
-                SummaryCard(title: "Needs you", value: "\(needs)", caption: needs == 1 ? "decision to make" : "decisions to make", symbol: "hand.raised.fill", tint: .oklch(0.72, 0.16, 60), action: needs == 0 ? nil : "Review") {
+                SummaryCard(title: "Needs you", value: "\(needs)", caption: needs == 1 ? "decision to make" : "decisions to make", symbol: "hand.raised.fill", tint: Gem.topaz, action: needs == 0 ? nil : "Review") {
                     NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
                 }
-                SummaryCard(title: "Working now", value: "\(working)", caption: working == 1 ? "task in progress" : "tasks in progress", symbol: "bolt.fill", tint: .oklch(0.66, 0.17, 300), action: working == 0 ? nil : "Follow") {
+                SummaryCard(title: "Working now", value: "\(working)", caption: working == 1 ? "task in progress" : "tasks in progress", symbol: "bolt.fill", tint: Gem.amethyst, action: working == 0 ? nil : "Follow") {
                     NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
                 }
-                SummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "add a workspace to start" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", symbol: "eye.fill", tint: .oklch(0.70, 0.13, 200), action: workspaces == 0 ? "Add" : "Manage") {
+                SummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "add a workspace to start" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", symbol: "eye.fill", tint: Gem.emerald, action: workspaces == 0 ? "Add" : "Manage") {
                     if workspaces == 0 { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
                 }
             }

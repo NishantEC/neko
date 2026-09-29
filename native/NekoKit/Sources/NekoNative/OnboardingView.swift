@@ -59,7 +59,7 @@ struct OnboardingView: View {
     private var welcomeStep: some View {
         VStack(spacing: 22) {
             BrandMark(size: 96).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .shadow(color: Color.oklch(0.6, 0.2, 310).opacity(0.55), radius: 40, y: 18)
+                .shadow(color: Gem.amethyst.opacity(0.55), radius: 36, y: 16)
             VStack(spacing: 10) {
                 Text("While you're away,\nNeko keeps watch.").font(.system(size: 32, weight: .bold)).tracking(-0.7).multilineTextAlignment(.center).foregroundStyle(.white)
                 Text("It watches your projects and tools, plans the next step the way you would, and asks before it changes anything.")
@@ -70,13 +70,13 @@ struct OnboardingView: View {
     }
     private var permissionsStep: some View {
         stepCard(title: "Let Neko work on your Mac", subtitle: "Each of these is optional. You can change them later in Settings.") {
-            settingRow(symbol: "hand.point.up.left.fill", tint: Color.oklch(0.7, 0.14, 250), title: "Accessibility", detail: "Lets Neko paste for you. macOS asks you to confirm.") {
+            settingRow(symbol: "hand.point.up.left.fill", tint: Gem.sapphire, title: "Accessibility", detail: "Lets Neko paste for you. macOS asks you to confirm.") {
                 Button(trusted ? "Enabled" : "Allow…") {
                     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
                     trusted = AXIsProcessTrustedWithOptions(options)
                 }.disabled(trusted).buttonStyle(PillButtonStyle())
             }
-            settingRow(symbol: "doc.on.clipboard.fill", tint: Color.oklch(0.7, 0.14, 160), title: "Clipboard history", detail: "Saved only on this Mac. Off by default.") {
+            settingRow(symbol: "doc.on.clipboard.fill", tint: Gem.emerald, title: "Clipboard history", detail: "Saved only on this Mac. Off by default.") {
                 Toggle("Clipboard history", isOn: Binding(get: { clipboard ?? false }, set: { value in
         pending = true
         Task {
@@ -90,7 +90,7 @@ struct OnboardingView: View {
     })).disabled(clipboard == nil || pending)
                 .toggleStyle(.switch).labelsHidden()
             }
-            settingRow(symbol: "keyboard.fill", tint: Color.oklch(0.7, 0.15, 320), title: "Quick panel shortcut", detail: "Summon Neko from anywhere.") {
+            settingRow(symbol: "keyboard.fill", tint: Gem.amethyst, title: "Quick panel shortcut", detail: "Summon Neko from anywhere.") {
                 HotkeySettingsView(model: model)
             }
         }
@@ -100,7 +100,7 @@ struct OnboardingView: View {
             if model.workspaces.isEmpty {
                 Button { model.selectedWorkspace = nil; workspaceSheet = true } label: {
                     HStack(spacing: 14) {
-                        DimensionalGlyph(symbol: "folder.fill.badge.plus", tint: Color.oklch(0.68, 0.14, 230), size: 52)
+                        DimensionalGlyph(symbol: "folder.fill.badge.plus", tint: Gem.sapphire, size: 52)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Add a workspace").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                             Text("Choose one or more folders").font(.system(size: 13)).foregroundStyle(.white.opacity(0.65))
