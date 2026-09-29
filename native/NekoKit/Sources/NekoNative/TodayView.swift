@@ -89,7 +89,7 @@ struct TodayView: View {
                             if messages.isEmpty {
                                 greeting
                                 if model.workspaces.isEmpty {
-                                    HStack { Text("Start with a folder you already work in.").font(.system(size: 13)).foregroundStyle(N.text3); Spacer(); Button("Add a workspace") { addingWorkspace = true }.nekoPrimaryButton() }
+                                    howNekoWorks
                                 } else {
                                     brief
                                 }
@@ -214,12 +214,29 @@ struct TodayView: View {
             }
             Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.system(size: 12)).foregroundStyle(N.text4)
             Text("\(part).").font(.system(size: look == .mascot ? 34 : look == .dense ? 20 : 26, weight: .semibold)).tracking(-0.5).foregroundStyle(N.text)
-            Text(waiting == 0 ? "Nothing needs you right now. Tell me what to look after, or start with something small." : "\(waiting) \(waiting == 1 ? "thing needs" : "things need") you. Everything else is being watched.")
+            Text(waiting == 0 ? (model.workspaces.isEmpty ? "I watch your work while you're away, plan the next step the way you would, and ask before I act." : "Nothing needs you right now. I'm watching.") : "\(waiting) \(waiting == 1 ? "thing needs" : "things need") you. Everything else is being watched.")
                 .font(.system(size: 14)).lineSpacing(4).foregroundStyle(N.text3)
+        }
+    }
+    private var howNekoWorks: some View {
+        let watching = !model.snapshot["mcp"]["responsibilities"].array.isEmpty
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("How Neko works").font(.system(size: 12, weight: .medium)).foregroundStyle(N.text4).padding(.bottom, 8)
+            LoopStep(number: 1, title: "Watch", detail: "Add a folder you work in, then the sources to keep an eye on: Linear, Sentry, GitHub, Slack.", done: !model.workspaces.isEmpty && watching,
+                     action: model.workspaces.isEmpty ? "Add a workspace" : "Choose what to watch") {
+                if model.workspaces.isEmpty { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
+            }
+            LoopStep(number: 2, title: "Plan", detail: "When something changes, Neko reads it and drafts the next step the way you would. Read only.", done: !model.tasks.isEmpty, action: "Try a plan") {
+                draft = "Look at this workspace and plan the most useful next step. Read only; explain your reasoning."
+            }
+            LoopStep(number: 3, title: "Ask you", detail: "Nothing changes without your approval. Plans and finished fixes wait for you in Work.", done: model.tasks.contains { $0["status"].string == "Completed" }, action: "Open Work") {
+                NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
+            }
         }
     }
     @ViewBuilder private var brief: some View {
         let recent = model.tasks.filter { !["Completed", "Cancelled"].contains($0["status"].string) }.prefix(5)
+        if recent.isEmpty { howNekoWorks } else {
         VStack(alignment: .leading, spacing: 0) {
             Text(recent.isEmpty ? "Start with something small" : "While you were away").font(.system(size: 12, weight: .medium)).foregroundStyle(N.text4).padding(.bottom, 8)
             if recent.isEmpty {
@@ -232,6 +249,7 @@ struct TodayView: View {
                     BriefRow(dot: taskColor(status), title: task["title"].string, meta: friendlyTaskStatus(status) + (task["goal"].string.isEmpty ? "" : " · " + task["goal"].string), action: status == "AwaitingApproval" ? "Review plan" : status == "ReadyForReview" ? "Review" : "Open") { ticket = task.recordID }
                 }
             }
+        }
         }
     }
     private func toolCall(_ call: JSONValue, turn: String, pending: Bool) -> some View {
@@ -340,5 +358,35 @@ struct RailRow: View {
             .overlay(alignment: .bottom) { Color.white.opacity(0.05).frame(height: 1) }
             .contentShape(Rectangle())
         }.buttonStyle(.plain).onHover { hover = $0 }
+    }
+}
+
+extension Notification.Name { static let nekoNavigate = Notification.Name("neko.navigate") }
+
+struct LoopStep: View {
+    let number: Int
+    let title: String
+    let detail: String
+    let done: Bool
+    let action: String
+    let perform: () -> Void
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                Circle().strokeBorder(done ? NekoStyle.mint : N.lineStrong, lineWidth: 1.5)
+                if done { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(NekoStyle.mint) }
+                else { Text("\(number)").font(.system(size: 11, weight: .semibold).monospacedDigit()).foregroundStyle(N.text3) }
+            }.frame(width: 22, height: 22).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(N.text)
+                Text(detail).font(.system(size: 12.5)).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 16)
+            Button(action, action: perform).controlSize(.small).glassButton().padding(.top, 2)
+        }
+        .padding(.vertical, 12)
+        .overlay(alignment: .top) { N.line.frame(height: 1) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Step \(number), \(title)\(done ? ", done" : ""). \(detail)")
     }
 }

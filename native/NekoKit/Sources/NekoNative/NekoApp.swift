@@ -68,7 +68,8 @@ struct WorkspaceView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background { LookBackground(look: look) }
                     .softScrollEdges()
-                    .navigationTitle(page)
+                    .navigationTitle(PageInfo.title(page))
+                    .onReceive(NotificationCenter.default.publisher(for: .nekoNavigate)) { note in if let key = note.object as? String { page = key } }
                     .navigationSubtitle(model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces")
                     .toolbar {
                         ToolbarItem(placement: .status) { WatchingStatus(connected: model.connected) }
@@ -191,11 +192,14 @@ struct NativeSidebar: View {
     @Binding var addingWorkspace: Bool
     var body: some View {
         List(selection: Binding<String?>(get: { page }, set: { if let v = $0 { page = v } })) {
-            Section {
-                ForEach(pages, id: \.0) { item in
-                    let attention = item.0 == "Tickets" ? StatusSummary(snapshot: model.snapshot).needsAttention : 0
-                    Label(item.0, systemImage: item.1).tag(item.0).badge(attention)
-                }
+            Section("Your day") {
+                row("Today"); row("Tickets")
+            }
+            Section("What Neko watches") {
+                row("Responsibilities"); row("Schedules")
+            }
+            Section("Teach Neko") {
+                row("Tools & skills"); row("Memory"); row("Profiles")
             }
             Section("Workspaces") {
                 workspaceRow(nil, name: "All workspaces", color: .secondary)
@@ -207,6 +211,10 @@ struct NativeSidebar: View {
             }
         }
         .listStyle(.sidebar)
+    }
+    private func row(_ key: String) -> some View {
+        let attention = key == "Tickets" ? StatusSummary(snapshot: model.snapshot).needsAttention : 0
+        return Label(PageInfo.title(key), systemImage: PageInfo.icon(key)).tag(key).badge(attention)
     }
     private func workspaceRow(_ id: String?, name: String, color: Color) -> some View {
         let selected = model.selectedWorkspace == id
@@ -228,5 +236,29 @@ struct WatchingStatus: View {
             Circle().fill(connected ? NekoStyle.accent : Color.secondary).frame(width: 7, height: 7)
             Text(connected ? "Watching" : "Reconnecting…").font(.callout)
         }.padding(.horizontal, 8).accessibilityElement(children: .combine)
+    }
+}
+
+/// User-facing names follow the product loop: Neko watches, plans, then asks you.
+enum PageInfo {
+    static func title(_ key: String) -> String {
+        switch key {
+        case "Tickets": "Work"
+        case "Responsibilities": "Watching"
+        case "Tools & skills": "Tools & skills"
+        default: key
+        }
+    }
+    static func icon(_ key: String) -> String {
+        switch key {
+        case "Today": "sun.max"
+        case "Tickets": "checklist"
+        case "Responsibilities": "eye"
+        case "Schedules": "clock"
+        case "Tools & skills": "wrench.and.screwdriver"
+        case "Memory": "brain"
+        case "Profiles": "person.2"
+        default: "circle"
+        }
     }
 }
