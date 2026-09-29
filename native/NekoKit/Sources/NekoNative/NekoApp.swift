@@ -52,7 +52,7 @@ struct WorkspaceView: View {
             } else if model.onboarding { OnboardingView(model: model) }
             else {
                 NavigationSplitView {
-                    NativeSidebar(model: model, page: $page, pages: pages, addingWorkspace: $addingWorkspace)
+                    NativeSidebar(model: model, page: $page, pages: pages, addingWorkspace: $addingWorkspace, look: $look)
                         .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
                 } detail: {
                     Group {
@@ -75,17 +75,6 @@ struct WorkspaceView: View {
 
                     .onReceive(NotificationCenter.default.publisher(for: .nekoNavigate)) { note in if let key = note.object as? String { page = key } }
                     .navigationSubtitle(model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces")
-                    .toolbar {
-                        ToolbarItem(placement: .navigation) { WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace) }
-                        ToolbarItem(placement: .status) { WatchingStatus(connected: model.connected) }
-                        ToolbarItemGroup(placement: .primaryAction) {
-                            Menu {
-                                Picker("Look", selection: $look) { ForEach(NekoLook.allCases) { Text($0.title).tag($0.rawValue) } }.pickerStyle(.inline)
-                            } label: { Label("Look", systemImage: "paintpalette") }
-                            .help("Switch Neko's look")
-                            Button { PaletteController.shared.toggle(model: model) } label: { Label("Quick panel", systemImage: "command") }.help("Quick panel (⌘K)")
-                        }
-                    }
                 }
             }
         }
@@ -199,6 +188,7 @@ struct NativeSidebar: View {
     @State private var selection: String?
     let pages: [(String, String)]
     @Binding var addingWorkspace: Bool
+    @Binding var look: String
     var body: some View {
         List(selection: $selection) {
             ForEach(PageInfo.groups, id: \.title) { group in
@@ -208,6 +198,30 @@ struct NativeSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        // Where Neko works sits at the top, like a Codex or Xcode project picker.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace)
+                .menuStyle(.button).buttonStyle(.borderless)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+        }
+        // Status and app controls live in the sidebar footer.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack(spacing: 10) {
+                WatchingStatus(connected: model.connected)
+                Spacer()
+                Menu {
+                    Picker("Look", selection: $look) { ForEach(NekoLook.allCases) { Text($0.title).tag($0.rawValue) } }.pickerStyle(.inline)
+                } label: { Image(systemName: "paintpalette") }
+                .menuStyle(.button).buttonStyle(.borderless).menuIndicator(.hidden).fixedSize()
+                .help("Switch Neko's look").accessibilityLabel("Look")
+                Button { PaletteController.shared.toggle(model: model) } label: { Image(systemName: "command") }
+                    .buttonStyle(.borderless).help("Quick panel (⌘K)").accessibilityLabel("Quick panel")
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .overlay(alignment: .top) { N.line.frame(height: 1) }
+        }
         .onAppear { selection = page }
         .onChange(of: selection) { _, v in if let v, v != page { page = v } }
         .onChange(of: page) { _, v in if selection != v { selection = v } }
