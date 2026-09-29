@@ -650,14 +650,16 @@ struct SummaryCard: View {
                 Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.78))
                 Spacer(minLength: 28)
                 Text(value).font(.system(size: 34, weight: .bold)).tracking(-0.6).foregroundStyle(.white).monospacedDigit()
-                HStack(alignment: .firstTextBaseline) {
+                // Fixed-height row so the big number sits on the same line in every card,
+                // whether or not the card has an action.
+                HStack(alignment: .center) {
                     Text(caption).font(.system(size: 13)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
                     Spacer(minLength: 8)
                     if let action {
                         Button(action, action: perform)
                             .buttonStyle(PillButtonStyle())
                     }
-                }.padding(.top, 2)
+                }.frame(height: 28).padding(.top, 2)
             }
             .padding(18)
             .frame(maxWidth: .infinity, minHeight: 168, alignment: .topLeading)

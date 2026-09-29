@@ -115,7 +115,7 @@ struct TodayView: View {
                                 .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                             }
                             Color.clear.frame(height: 1).id("bottom")
-                        }.padding(.horizontal, 64).padding(.top, 48).padding(.bottom, 24).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+                        }.padding(.horizontal, 64).padding(.top, 48).padding(.bottom, 24).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
                             .background(GeometryReader { geometry in
                                 Color.clear.preference(key: ChatScrollMetricsKey.self, value: ChatScrollMetrics(contentHeight: geometry.size.height, originY: geometry.frame(in: .named("chatTranscript")).minY, viewportHeight: viewport.size.height))
                             })
@@ -153,7 +153,7 @@ struct TodayView: View {
                 .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
                 .liquidGlass(radius: 18)
                 .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
-                .padding(.horizontal, 64).padding(.bottom, 24).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 64).padding(.bottom, 24).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
             }
             if !messages.isEmpty {
             ScrollView {
@@ -235,7 +235,7 @@ struct TodayView: View {
                 SummaryCard(title: "Working now", value: "\(working)", caption: working == 1 ? "task in progress" : "tasks in progress", symbol: "bolt.fill", tint: Gem.amethyst, action: working == 0 ? nil : "Follow") {
                     NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
                 }
-                SummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "add a workspace to start" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", symbol: "eye.fill", tint: Gem.emerald, action: workspaces == 0 ? "Add" : "Manage") {
+                SummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "not set up yet" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", symbol: "eye.fill", tint: Gem.emerald, action: workspaces == 0 ? "Add" : "Manage") {
                     if workspaces == 0 { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
                 }
             }
@@ -248,7 +248,7 @@ struct TodayView: View {
             }
             .accessibilityLabel(watched.isEmpty ? "Start watching" : "Check everything now")
         }
-        .padding(.top, 12)
+        .padding(.top, 40)
     }
     private var howNekoWorks: some View {
         let watching = !model.snapshot["mcp"]["responsibilities"].array.isEmpty
