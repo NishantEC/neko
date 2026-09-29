@@ -93,9 +93,18 @@ struct TodayView: View {
                             ForEach(messages, id: \.recordID) { message in
                                 let mine = message["role"].string == "user"
                                 HStack(alignment: .top, spacing: 12) {
-                                if mine { Spacer(minLength: 80) } else { Avatar(role: "neko") }
+                                if mine { Spacer(minLength: 80) }
                                 VStack(alignment: .leading, spacing: 10) {
-                                    HStack(spacing: 8) { Text(mine ? "You" : "Neko").font(NekoFont.heading); if message["pending"].bool { TypingDots(); Spacer(); Button("Stop") { Task { await model.workbench(.command("CancelChat", ["turn_id": message["id"]])) } }.nekoGlassButton() } }
+                                    HStack(spacing: 8) { Text(mine ? "You" : "Neko").font(NekoFont.heading); if message["pending"].bool { Spacer(); Button("Stop") { Task { await model.workbench(.command("CancelChat", ["turn_id": message["id"]])) } }.nekoGlassButton() } }
+                                    if message["pending"].bool {
+                                        let now = ChatActivity.describe(message, model: model)
+                                        ActivityCapsule(activity: now.activity, label: now.label).padding(.bottom, 6)
+                                    }
+                                    if !mine && message["ticket_ids"].array.isEmpty &&
+                                        (message["text"].string.contains("I could not open every ticket") || message["text"].string.contains("No ticket was created")) {
+                                        Label("No ticket was created from this reply", systemImage: "exclamationmark.triangle")
+                                            .font(.callout).foregroundStyle(NekoStyle.amber)
+                                    }
                                     ReadableText(text: message["text"].string).lineSpacing(4)
                                     if message["failed"].bool { Label("This turn did not complete.", systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
                                     ForEach(message["tool_calls"].array, id: \.recordID) { call in toolCall(call, turn: message.recordID, pending: message["pending"].bool) }
@@ -114,7 +123,6 @@ struct TodayView: View {
                                 }
                                 .padding(mine ? 12 : 0)
                                 .background { if mine { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(0.05)).overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08))) } }
-                                if mine { Avatar(role: "user") }
                                 }
                                 .id(message.recordID)
                                 .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
@@ -144,6 +152,17 @@ struct TodayView: View {
                 }
                 }
                 VStack(alignment: .leading, spacing: 12) {
+                    if let notice = toolAccessNotice {
+                        HStack(spacing: 10) {
+                            Image(systemName: "wrench.and.screwdriver").foregroundStyle(NekoStyle.amber)
+                            Text(notice).font(.caption).foregroundStyle(N.text2)
+                            Spacer()
+                            Button("Set up tools") {
+                                if model.selectedWorkspace == nil, model.workspaces.count == 1 { model.selectedWorkspace = model.workspaces[0].recordID }
+                                NotificationCenter.default.post(name: .nekoNavigate, object: "Tools & skills")
+                            }.controlSize(.small)
+                        }.padding(.horizontal, 12).padding(.vertical, 8).nekoCard(padding: 0, radius: 10)
+                    }
                     ComposerView(text: Binding(get: { draft }, set: { draft = $0 }), onSubmit: send, onError: { model.error = $0 }).id(scope).frame(height: 52)
                     HStack(spacing: 8) {
                         WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace).menuStyle(.button).buttonStyle(.borderless).controlSize(.small).fixedSize()
@@ -176,6 +195,21 @@ struct TodayView: View {
         .sheet(isPresented: Binding(get: { ticket != nil }, set: { if !$0 { ticket = nil } })) {
             if let id = ticket { VStack { HStack { Spacer(); Button("Done") { ticket = nil }.keyboardShortcut(.cancelAction) }.padding(); TicketDetail(model: model, id: id) }.frame(minWidth: 650, minHeight: 600) }
         }.sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
+    }
+    private var toolAccessNotice: String? {
+        let workspace = model.selectedWorkspace ?? (model.workspaces.count == 1 ? model.workspaces[0].recordID : "")
+        guard !workspace.isEmpty else { return model.workspaces.count > 1 ? "Choose a workspace to use its tools." : nil }
+        let connected = model.snapshot["mcp"]["connections"].array.filter {
+            $0["enabled"].bool && $0["trusted"].bool && ($0["workspace_id"].string.isEmpty || $0["workspace_id"].string == workspace)
+        }
+        guard !connected.isEmpty else { return nil }
+        let grants = model.snapshot["mcp"]["grants"].array
+        let usable = connected.contains { connection in
+            connection["tools"].array.contains { tool in
+                grants.contains { $0["workspace_id"].string == workspace && $0["connection_id"].string == connection.recordID && $0["tool_name"].string == tool["name"].string && $0["schema_hash"].string == tool["schema_hash"].string }
+            }
+        }
+        return usable ? nil : "Tools are connected, but Neko has no permission to call them yet."
     }
     @ViewBuilder private var suggestions: some View {
         EmptyView()
@@ -234,13 +268,13 @@ struct TodayView: View {
                     .font(.system(size: 26, weight: .semibold)).tracking(-0.6).foregroundStyle(N.text).multilineTextAlignment(.center)
             }.frame(maxWidth: .infinity)
             HStack(spacing: 14) {
-                PlainSummaryCard(title: "Needs you", value: "\(needs)", caption: needs == 1 ? "decision to make" : "decisions to make", symbol: "hand.raised", action: needs == 0 ? nil : "Review") {
+                PlainSummaryCard(title: "Needs you", value: "\(needs)", caption: needs == 1 ? "decision to make" : "decisions to make", activity: .needsYou, live: needs > 0, action: needs == 0 ? nil : "Review") {
                     NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
                 }
-                PlainSummaryCard(title: "Working now", value: "\(working)", caption: working == 1 ? "task in progress" : "tasks in progress", symbol: "bolt", action: working == 0 ? nil : "Follow") {
+                PlainSummaryCard(title: "Working now", value: "\(working)", caption: working == 1 ? "task in progress" : "tasks in progress", activity: .creating, live: working > 0, action: working == 0 ? nil : "Follow") {
                     NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
                 }
-                PlainSummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "not set up yet" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", symbol: "eye", action: workspaces == 0 ? "Add" : "Manage") {
+                PlainSummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "not set up yet" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", activity: .watching, live: !watched.isEmpty, action: workspaces == 0 ? "Add" : "Manage") {
                     if workspaces == 0 { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
                 }
             }

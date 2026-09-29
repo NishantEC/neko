@@ -75,7 +75,7 @@ struct TicketsView: View {
                         let tasks = model.tasks.filter { column.statuses.contains($0["status"].string) && (includeStopped || !["Failed", "Cancelled"].contains($0["status"].string)) }.sorted { $0["updated_at_ms"].int > $1["updated_at_ms"].int }
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 8) {
-                                StatusGlyph(status: column.statuses[0], size: 14)
+                                PixelGlyph(activity: .forTask(column.statuses.first { $0 != "Queued" } ?? column.statuses[0]), size: 13, animated: false)
                                 Text(column.title).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text)
                                 Text(String(tasks.count)).font(.system(size: 13).monospacedDigit()).foregroundStyle(N.text4)
                                 Spacer(minLength: 0)
@@ -104,7 +104,7 @@ struct TicketsView: View {
         let workspace = model.workspaces.first { $0.recordID == task["workspace_id"].string }?["name"].string ?? "Workspace"
         let status = task["status"].string
         return Button { selected = task.recordID } label: {
-            TicketCard(id: "NEK-" + String(task.recordID.prefix(4)).uppercased(), title: task["title"].string, workspace: workspace, workspaceColor: workspaceColor(index), meta: friendlyTaskStatus(status), highlighted: status == "AwaitingApproval")
+            TicketCard(id: "NEK-" + String(task.recordID.prefix(4)).uppercased(), title: task["title"].string, workspace: workspace, workspaceColor: workspaceColor(index), meta: friendlyTaskStatus(status), highlighted: status == "AwaitingApproval", activity: .forTask(status))
         }.buttonStyle(.plain).accessibilityLabel("\(task["title"].string), \(workspace), \(friendlyTaskStatus(status))").accessibilityHint("Open ticket details and available actions")
     }
     private func emptyText(_ column: String) -> String {
@@ -230,13 +230,15 @@ struct TicketCard: View {
     let workspaceColor: Color
     let meta: String
     let highlighted: Bool
+    var activity: NekoActivity = .idle
     @State private var hover = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Text(id).font(.system(size: 12)).foregroundStyle(N.text4)
                 Spacer()
-                Text(meta).font(.system(size: 11)).foregroundStyle(N.text4).lineLimit(1)
+                Label { Text(meta).lineLimit(1) } icon: { PixelGlyph(activity: activity, size: 10) }
+                    .font(.system(size: 11)).foregroundStyle(activity.animates ? N.text2 : N.text4)
             }
             Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text).lineSpacing(2).lineLimit(3).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 6) {

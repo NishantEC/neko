@@ -38,7 +38,7 @@ struct ToolsView: View {
     private var workspace: String { model.selectedWorkspace ?? "" }
     private var connections: [JSONValue] {
         model.snapshot["mcp"]["connections"].array.filter {
-            $0["workspace_id"].string.isEmpty || $0["workspace_id"].string == workspace
+            workspace.isEmpty || $0["workspace_id"].string.isEmpty || $0["workspace_id"].string == workspace
         }
     }
     private var folders: [JSONValue] {
@@ -146,7 +146,7 @@ struct ToolsView: View {
     private func connectionCard(_ connection: JSONValue) -> some View {
         GroupBox(connection["label"].string) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(connection["workspace_id"].string.isEmpty ? "Global definition · grants are workspace-specific" : "Workspace connection").font(.caption).foregroundStyle(.secondary)
+                Text(connection["workspace_id"].string.isEmpty ? "Global definition · grants are workspace-specific" : (model.workspaces.first { $0.recordID == connection["workspace_id"].string }?["name"].string ?? "Workspace connection")).font(.caption).foregroundStyle(.secondary)
                 Text(connection["config"]["url"].string.isEmpty ? connection["config"]["command"].string : connection["config"]["url"].string).textSelection(.enabled)
                 if !connection["error"].string.isEmpty { Text(connection["error"].string).foregroundStyle(.red) }
                 HStack {
@@ -175,7 +175,7 @@ struct ToolsView: View {
             Text(tool["description"].string).foregroundStyle(.secondary)
             Text(tool["read_only"].bool ? "Server declares read-only: granted chat lookups run without another prompt." : "Action or unspecified effect: chat requires approval per call; unattended responsibilities use the grant directly.").font(.caption)
             DisclosureGroup("Input schema") { Text(tool["input_schema"].string).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
-            Button(allowed ? "Revoke unattended access" : "Allow unattended use") {
+            Button(allowed ? "Revoke tool access" : (tool["read_only"].bool ? "Allow Neko to read with this tool" : "Allow Neko to request this tool")) {
                 send("Mcp", "SetWorkspaceToolGrant", ["workspace_id": .string(workspace), "connection_id": connection["id"], "tool_name": tool["name"], "schema_hash": tool["schema_hash"], "allowed": .bool(!allowed)])
             }.disabled(workspace.isEmpty || !connection["enabled"].bool || !connection["error"].string.isEmpty)
         }

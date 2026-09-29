@@ -737,7 +737,13 @@ impl Host {
                 .find(|m| m.id == turn_id && m.pending)
                 .ok_or("Chat turn is no longer active")?;
             if turn.agent_profile_revision != state.agent_profiles.revision
-                || turn.workspace_id.as_deref() != Some(workspace_id)
+                || (turn.workspace_id.as_deref() != Some(workspace_id)
+                    && !(turn.workspace_id.is_none()
+                        && state.workspaces.iter().filter(|w|
+                            state.agent_profiles.owner(&w.id) == turn.agent_profile_id
+                        ).count() == 1
+                        && state.workspaces.iter().any(|w| w.id == workspace_id
+                            && state.agent_profiles.owner(&w.id) == turn.agent_profile_id)))
                 || turn.agent_profile_id != state.agent_profiles.owner(workspace_id)
             {
                 return Err("Chat agent profile authority changed before launch".into());
