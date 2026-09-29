@@ -107,7 +107,7 @@ struct PreferencesView: View {
                     HStack { TextField("Folder path", text: $path); Button("Choose…") { choose() }; Button("Add") { activate("folder-scope", path, action: "add") }.disabled(path.trimmingCharacters(in: .whitespaces).isEmpty) }
                 }.padding().tabItem { Label("Search", systemImage: "magnifyingglass") }
                 Form {
-                    Text("\(agents.count) agents visible from the configured provider.")
+                    Text(agents.isEmpty ? "No agent provider is turned on." : "\(agents.count) agents visible from the configured provider.")
                     preferenceToggle("Show agents", "agents-enabled")
                     preferenceToggle("Include idle agents", "agents-include-idle")
                     Text("Legacy agent providers are opt-in. These settings do not enable a provider.").font(.caption).foregroundStyle(.secondary)
@@ -130,8 +130,10 @@ struct PreferencesView: View {
         do {
             settings = try await search("preference")
             folders = try await search("folder-scope")
-            agents = try await search("agent")
         } catch { model.error = error.localizedDescription }
+        // Legacy agent providers are opt-in (NEKO_LEGACY_AGENTS=1). When the
+        // provider is not registered, that simply means "no agents", not an error.
+        agents = (try? await search("agent")) ?? []
     }
     private func search(_ provider: String) async throws -> [JSONValue] {
         (try await model.request(.command("Search", ["query": .string(""), "limit": .number(200), "provider": .string(provider)])))["SearchResults"]["items"].array
