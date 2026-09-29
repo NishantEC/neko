@@ -42,6 +42,7 @@ struct StatusMenu: View {
 struct WorkspaceView: View {
     @ObservedObject var model: AppModel
     @State private var page = ProcessInfo.processInfo.environment["NEKO_START_PAGE"] ?? "Today"
+    @State private var columns: NavigationSplitViewVisibility = .all
     @AppStorage("neko.look") private var look = ProcessInfo.processInfo.environment["NEKO_LOOK"] ?? NekoLook.ambient.rawValue
     @State private var addingWorkspace = false
     private let pages = [("Today", "sun.max"), ("Tickets", "tray"), ("Responsibilities", "waveform.path"), ("Tools & skills", "shippingbox"), ("Schedules", "calendar"), ("Memory", "text.alignleft"), ("Profiles", "person.2")]
@@ -51,7 +52,7 @@ struct WorkspaceView: View {
                 VStack(spacing: 20) { ProgressView("Connecting to Neko…"); if model.error != nil { Button("Retry connection") { Task { await model.start() } } } }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.onboarding { OnboardingView(model: model) }
             else {
-                NavigationSplitView {
+                NavigationSplitView(columnVisibility: $columns) {
                     NativeSidebar(model: model, page: $page, pages: pages, addingWorkspace: $addingWorkspace, look: $look)
                         .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
                 } detail: {
@@ -68,13 +69,18 @@ struct WorkspaceView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .modifier(ArcCard(enabled: page != "Today"))
                     .background { LookBackground(look: look) }
                     .softScrollEdges()
-                    .navigationTitle(PageInfo.title(page))
+                    // No title strip: the page is named by the sidebar selection, and the
+                    // content runs to the top edge with only the window controls above it.
+                    .environment(\.sidebarCollapsed, columns == .detailOnly)
+                    // Pages other than Work keep clear of the window controls strip.
+                    .safeAreaPadding(.top, page == "Tickets" ? 0 : 44)
+                    .navigationTitle("")
+                    .hiddenWindowToolbarBackground()
+                    .ignoresSafeArea(.container, edges: .top)
 
                     .onReceive(NotificationCenter.default.publisher(for: .nekoNavigate)) { note in if let key = note.object as? String { page = key } }
-                    .navigationSubtitle(model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces")
                 }
             }
         }
@@ -335,5 +341,15 @@ struct ArcCard: ViewModifier {
         let size = NSSize(width: min(1280, screen.width - 80), height: min(820, screen.height - 60))
         let origin = NSPoint(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2)
         window.setFrame(NSRect(origin: origin, size: size), display: true, animate: true)
+    }
+}
+
+/// When the sidebar is hidden, the traffic lights and sidebar toggle float over
+/// the top-left of the detail pane; pages leave room for them.
+private struct SidebarCollapsedKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var sidebarCollapsed: Bool {
+        get { self[SidebarCollapsedKey.self] }
+        set { self[SidebarCollapsedKey.self] = newValue }
     }
 }

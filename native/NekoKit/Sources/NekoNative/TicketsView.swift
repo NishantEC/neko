@@ -48,6 +48,7 @@ struct TicketsView: View {
     @ObservedObject var model: AppModel
     @State private var selected: String?
     @State private var includeStopped = true
+    @Environment(\.sidebarCollapsed) private var collapsed
     private let columns: [(title: String, icon: String, color: Color, statuses: [String])] = [
         ("Needs approval", "circle.lefthalf.filled", NekoStyle.amber, ["AwaitingApproval", "Failed"]),
         ("In progress", "circle.dotted", NekoStyle.accent, ["Queued", "Planning", "Building", "Reviewing"]),
@@ -61,7 +62,10 @@ struct TicketsView: View {
                 Button(includeStopped ? "Showing failed & cancelled" : "Hiding failed & cancelled") { includeStopped.toggle() }.controlSize(.small).glassButton()
                 Spacer()
                 Text("\(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")").font(.system(size: 12)).foregroundStyle(N.text4)
-            }.padding(.horizontal, 20).frame(height: 44).overlay(alignment: .bottom) { N.line.frame(height: 1) }
+            }
+            .padding(.leading, collapsed ? 150 : 20).padding(.trailing, 20)
+            .frame(height: 52).overlay(alignment: .bottom) { N.line.frame(height: 1) }
+            .animation(.snappy(duration: 0.25), value: collapsed)
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 16) {
                     ForEach(columns, id: \.title) { column in
