@@ -18,7 +18,7 @@ struct OnboardingView: View {
             case 0:
                 BrandMark(size: 96).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .shadow(color: NekoStyle.accent.opacity(0.35), radius: 28, y: 12)
-                OpalGreeting(title: "A little less on\nyour mind.", subtitle: "One Neko to think with. A quick panel when you need it. Your work stays yours.")
+                OpalGreeting(title: "While you are away,\nNeko keeps watch.", subtitle: "It watches your projects and tools, plans the next step the way you would, and asks before it changes anything.")
                 Button("Get started") { step = 1 }.glassProminentButton().tint(NekoStyle.accent).controlSize(.large)
             case 1:
                 Text("Let Neko work on your Mac").font(.largeTitle.bold())
