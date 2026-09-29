@@ -42,7 +42,7 @@ struct StatusMenu: View {
 struct WorkspaceView: View {
     @ObservedObject var model: AppModel
     @State private var page = ProcessInfo.processInfo.environment["NEKO_START_PAGE"] ?? "Today"
-    @State private var columns: NavigationSplitViewVisibility = .all
+    @State private var columns: NavigationSplitViewVisibility = ProcessInfo.processInfo.environment["NEKO_SIDEBAR"] == "hidden" ? .detailOnly : .all
     @AppStorage("neko.look") private var look = ProcessInfo.processInfo.environment["NEKO_LOOK"] ?? NekoLook.ambient.rawValue
     @State private var addingWorkspace = false
     private let pages = [("Today", "sun.max"), ("Tickets", "tray"), ("Responsibilities", "waveform.path"), ("Tools & skills", "shippingbox"), ("Schedules", "calendar"), ("Memory", "text.alignleft"), ("Profiles", "person.2")]
@@ -58,7 +58,7 @@ struct WorkspaceView: View {
                 } detail: {
                     Group {
                         switch page {
-                        case "Tickets": TicketsView(model: model)
+                        case "Tickets": TicketsView(model: model, sidebarHidden: columns == .detailOnly)
                         case "Workspaces": WorkspacesView(model: model)
                         case "Responsibilities": ResponsibilitiesView(model: model)
                         case "Tools & skills": ToolsView(model: model)

@@ -48,7 +48,8 @@ struct TicketsView: View {
     @ObservedObject var model: AppModel
     @State private var selected: String?
     @State private var includeStopped = true
-    @Environment(\.sidebarCollapsed) private var collapsed
+    var sidebarHidden = false
+    private var collapsed: Bool { sidebarHidden }
     private let columns: [(title: String, icon: String, color: Color, statuses: [String])] = [
         ("Needs approval", "circle.lefthalf.filled", NekoStyle.amber, ["AwaitingApproval", "Failed"]),
         ("In progress", "circle.dotted", NekoStyle.accent, ["Queued", "Planning", "Building", "Reviewing"]),
@@ -63,8 +64,10 @@ struct TicketsView: View {
                 Spacer()
                 Text("\(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")").font(.system(size: 12)).foregroundStyle(N.text4)
             }
+            // With the sidebar hidden, the traffic lights and sidebar toggle float over
+            // this row, so it steps right to clear them.
             .padding(.leading, collapsed ? 150 : 20).padding(.trailing, 20)
-            .frame(height: 52).overlay(alignment: .bottom) { N.line.frame(height: 1) }
+            .frame(height: 52)
             .animation(.snappy(duration: 0.25), value: collapsed)
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 16) {
