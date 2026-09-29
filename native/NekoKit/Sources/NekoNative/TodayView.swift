@@ -100,6 +100,11 @@ struct TodayView: View {
                                     if message["failed"].bool { Label("This turn did not complete.", systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
                                     ForEach(message["tool_calls"].array, id: \.recordID) { call in toolCall(call, turn: message.recordID, pending: message["pending"].bool) }
                                     ForEach(message["remembered"].array, id: \.self) { memory in Label("Remembered: \(memory.string)", systemImage: "text.alignleft").font(.callout).foregroundStyle(.secondary) }
+                                    ForEach(message["responsibility_ids"].array, id: \.self) { id in
+                                        if let item = model.snapshot["mcp"]["responsibilities"].array.first(where: { $0.recordID == id.string }) {
+                                            SuggestedResponsibilityCard(model: model, item: item)
+                                        }
+                                    }
                                     ForEach(model.snapshot["mcp"]["receipts"].array.filter { $0["run_id"].string == "chat:\(message.recordID)" }, id: \.recordID) { receipt in
                                         DisclosureGroup {
                                             Text("Receipt \(receipt.recordID)").font(.system(.caption, design: .monospaced)).textSelection(.enabled)

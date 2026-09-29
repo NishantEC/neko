@@ -88,15 +88,23 @@ pub fn resolve_linked_source(
     environment: &BTreeMap<String, String>,
     candidate_id: &str,
 ) -> Result<Candidate, String> {
-    let workspace = workspace
-        .canonicalize()
-        .map_err(|_| "Workspace folder is unavailable")?;
-    if !workspace.is_dir() {
-        return Err("Workspace folder is unavailable".into());
-    }
+    resolve_linked_source_in_folders(home, &[workspace.to_path_buf()], paths, environment, candidate_id)
+}
+
+pub fn resolve_linked_source_in_folders(
+    home: &Path,
+    folders: &[PathBuf],
+    paths: &[PathBuf],
+    environment: &BTreeMap<String, String>,
+    candidate_id: &str,
+) -> Result<Candidate, String> {
+    let repositories = folders.iter().map(|folder| {
+        let canonical = folder.canonicalize().map_err(|_| "Workspace folder is unavailable")?;
+        if !canonical.is_dir() { return Err("Workspace folder is unavailable".into()); }
+        Ok(canonical)
+    }).collect::<Result<Vec<_>, String>>()?;
     // Tool dispatch needs only MCP definitions. Do not scan skills, schedules,
     // Paseo metadata, or other Claude project folders on every guard check.
-    let repositories = [workspace.clone()];
     let context = DiscoveryContext::new(home, &repositories, paths, environment);
     let discovery = discover_codex_claude(&context, None, true);
     let candidate = discovery
@@ -105,7 +113,7 @@ pub fn resolve_linked_source(
         .find(|candidate| candidate.preview.id == candidate_id)
         .ok_or("Source MCP definition is unavailable")?;
     if let Some(repository) = &candidate.preview.repository {
-        if Path::new(repository).canonicalize().ok().as_deref() != Some(workspace.as_path()) {
+        if !repositories.iter().any(|workspace| Path::new(repository).canonicalize().ok().as_deref() == Some(workspace.as_path())) {
             return Err("Source MCP definition belongs to another workspace".into());
         }
     }
@@ -1283,6 +1291,8 @@ mod tests {
         let id = first.candidates[0].preview.id.clone();
         let linked = resolve_linked_source(home.path(), &one, &[], &BTreeMap::new(), &id).unwrap();
         assert_eq!(linked.preview.name, "local");
+        let combined = resolve_linked_source_in_folders(home.path(), &[two.clone(), one.clone()], &[], &BTreeMap::new(), &id).unwrap();
+        assert_eq!(combined.preview.name, "local");
         assert!(resolve_linked_source(home.path(), &two, &[], &BTreeMap::new(), &id).is_err());
         fs::write(
             one.join(".mcp.json"),

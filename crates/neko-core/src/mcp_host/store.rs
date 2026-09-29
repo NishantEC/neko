@@ -198,6 +198,28 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
                 .ok_or("Responsibility is missing or paused")?;
             r.next_due_ms = now;
         }
+        McpCommand::RemoveResponsibility { responsibility_id } => {
+            let before = state.mcp.responsibilities.len();
+            state
+                .mcp
+                .responsibilities
+                .retain(|r| r.id != responsibility_id);
+            if state.mcp.responsibilities.len() == before {
+                return Err("Responsibility is already gone".into());
+            }
+            state
+                .mcp
+                .sources
+                .retain(|s| s.responsibility_id != responsibility_id || s.task_id.is_some());
+            for source in state
+                .mcp
+                .sources
+                .iter_mut()
+                .filter(|s| s.responsibility_id == responsibility_id)
+            {
+                source.eligible = false;
+            }
+        }
         _ => return Err("This MCP command needs the connection controller".into()),
     }
     validate(state)

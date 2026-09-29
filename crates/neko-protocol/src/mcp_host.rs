@@ -198,6 +198,11 @@ pub enum McpCommand {
     Wake {
         responsibility_id: String,
     },
+    /// Deletes a responsibility (for example a dismissed suggestion). Its
+    /// unlinked source observations go with it; ones behind tickets stay.
+    RemoveResponsibility {
+        responsibility_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

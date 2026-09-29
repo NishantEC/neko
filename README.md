@@ -6,14 +6,16 @@ for quick search, clipboard history, and task attention.
 
 ## Neko-owned work
 
-Create a workspace from any existing folder, then link an MCP definition already
+Create a named workspace with one or more existing folders using the native multi-folder picker, then link an MCP definition already
 in your local Codex/Claude setup or add your own server in **Tools & skills → Connections**. No Linear, Slack, or other service is bundled
 or required. Multiple connections, including instances of the same server,
 have separate workspace scope, credentials, and permissions.
 
 Code tasks need a Git repository because Neko builds in an isolated worktree;
-non-Git folders can still be saved as workspaces. Setup uses the native folder
-picker and never requires a Git repository just to register a workspace.
+non-Git folders can still be attached. When a workspace has multiple folders,
+Neko's agent can name the folder for a ticket; an ambiguous task is held rather
+than silently run in the first folder. Setup never requires Git just to register
+a workspace.
 
 1. Link one existing definition from **Found in your setup**, or add a remote
    Streamable HTTP URL or explicitly trusted local executable and JSON argument
@@ -224,7 +226,31 @@ capability. neko never reads Codex session/rollout files.
 
 ## Build and run
 
-Requires macOS and Rust 1.97.1 (`rustc --version`).
+The native SwiftUI/AppKit client requires macOS 14+, Xcode's Swift toolchain,
+and Rust 1.97.1 for the daemon. Build a signed, self-contained bundle without
+changing the installed app:
+
+```sh
+bash scripts/build-native.sh
+bash scripts/install-native.sh --dry-run
+```
+
+When ready to install, `bash scripts/install-native.sh` builds and verifies
+the native bundle, stops only processes running from the exact installed
+`/Applications/Neko.app` paths, and moves the previous app into a recoverable
+backup. User data, Keychain credentials, and preferences remain intact. Set
+`NEKO_CODESIGN_IDENTITY` to a stable Apple Development identity if desired;
+otherwise the build uses ad-hoc signing. Use `--skip-build` to install an
+already-built, verified native bundle.
+
+`--clean-data` explicitly moves the Neko data directory into a recoverable
+sibling backup; it does not delete credentials or preferences. The installer
+prints recovery paths and does not launch the replacement automatically.
+Preview builds (`NEKO_NATIVE_PREVIEW=1`) use a separate bundle identity and
+are not accepted by this installer. No installation is performed by a dry run.
+
+The historical GPUI client remains available through the following legacy
+build path; it is not the native installer’s source:
 
 ```sh
 ./scripts/setup-gpui-patch.sh   # once, before the first build
@@ -265,16 +291,9 @@ Accessibility client:
 NEKO_CODESIGN_IDENTITY='Apple Development: Your Name (TEAMID)' scripts/run-dev.sh
 ```
 
-To replace the installed app with a **fully clean** local install (the bundle,
-Neko database/configuration, and Neko-owned Keychain credentials are removed
-before replacement), run:
-
-```sh
-NEKO_CODESIGN_IDENTITY='Apple Development: Your Name (TEAMID)' scripts/install-clean.sh
-```
-
-This intentionally preserves the macOS Accessibility approval for the stable
-`dev.neko.launcher` identity, so the configured summon shortcut can keep working.
+The historical `scripts/install-clean.sh` builds the GPUI client and deletes
+Neko-owned data and credentials. It is not the native installation path; use
+`scripts/install-native.sh` for the SwiftUI/AppKit app and recoverable backups.
 
 Find the exact identity on this Mac with `security find-identity -v -p
 codesigning`. The script builds `target/debug/Neko.app`; add that app once in

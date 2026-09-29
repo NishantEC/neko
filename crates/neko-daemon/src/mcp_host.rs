@@ -108,7 +108,7 @@ impl Host {
             .iter()
             .find(|w| w.id == connection.workspace_id)
             .ok_or("Linked workspace is unavailable")?;
-        let repository = PathBuf::from(&workspace.repository);
+        let repositories = state.folders_for(workspace).into_iter().map(PathBuf::from).collect::<Vec<_>>();
         drop(db);
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -119,9 +119,9 @@ impl Host {
         let environment = std::env::vars_os()
             .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
             .collect::<BTreeMap<_, _>>();
-        let candidate = setup_import::resolve_linked_source(
+        let candidate = setup_import::resolve_linked_source_in_folders(
             &home,
-            &repository,
+            &repositories,
             &paths,
             &environment,
             &link.candidate_id,
@@ -277,7 +277,7 @@ impl Host {
                     .iter()
                     .find(|w| w.id == workspace_id)
                     .ok_or("Choose a workspace before linking tools")?;
-                let repository = PathBuf::from(&workspace.repository);
+                let repositories = state.folders_for(workspace).into_iter().map(PathBuf::from).collect::<Vec<_>>();
                 let home = std::env::var_os("HOME")
                     .map(PathBuf::from)
                     .ok_or("Home directory unavailable")?;
@@ -289,9 +289,9 @@ impl Host {
                         Some((key.into_string().ok()?, value.into_string().ok()?))
                     })
                     .collect::<BTreeMap<_, _>>();
-                let candidate = setup_import::resolve_linked_source(
+                let candidate = setup_import::resolve_linked_source_in_folders(
                     &home,
-                    &repository,
+                    &repositories,
                     &paths,
                     &environment,
                     &candidate_id,
@@ -807,10 +807,6 @@ impl Host {
                 if !scope.connection_ids.contains(&connection_id) {
                     return Err("Connection is not granted to this run".into());
                 }
-                let _slot = self
-                    .call_slot
-                    .try_lock()
-                    .map_err(|_| "Another MCP operation is running; retry shortly")?;
                 let tool =
                     policy::authorize(&state, &scope.workspace_id, &connection_id, &tool_name)?
                         .clone();
@@ -828,6 +824,12 @@ impl Host {
                     &arguments_json,
                     std::time::Duration::from_secs(120),
                 )?;
+                let _slot = self.call_slot.try_lock().map_err(|_| {
+                    if let Some(call_id) = &chat_call {
+                        let _ = self.finish_chat_call(&scope, call_id, false);
+                    }
+                    "Another MCP operation is running; retry shortly".to_owned()
+                })?;
                 let stop = AtomicBool::new(false);
                 let cancelled = AtomicBool::new(false);
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);

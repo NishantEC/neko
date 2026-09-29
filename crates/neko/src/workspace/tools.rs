@@ -1,23 +1,20 @@
 use neko_protocol::mcp_host::ServerConfig;
 use neko_protocol::setup_import::{ImportCandidate, ImportCandidateKind};
 
-fn candidate_in_workspace(candidate: &ImportCandidate, repository: &str) -> bool {
+fn candidate_in_workspace(candidate: &ImportCandidate, repositories: &[String]) -> bool {
     if candidate.kind != ImportCandidateKind::Connection {
         return false;
     }
     let Some(path) = candidate.workspace.as_deref() else {
         return true;
     };
-    if path == repository {
-        return true;
-    }
-    let (Ok(left), Ok(right)) = (
-        std::path::Path::new(path).canonicalize(),
-        std::path::Path::new(repository).canonicalize(),
-    ) else {
-        return false;
-    };
-    left == right
+    repositories.iter().any(|repository| {
+        if path == repository { return true; }
+        match (std::path::Path::new(path).canonicalize(), std::path::Path::new(repository).canonicalize()) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
+    })
 }
 
 fn candidate_is_local(candidate: &ImportCandidate) -> bool {
@@ -316,19 +313,20 @@ pub(super) fn refresh_found_connections(
     cx: &mut gpui::Context<super::WorkspaceRoot>,
 ) {
     use neko_protocol::setup_import::ImportCommand;
-    let Some((workspace_id, repository)) = root
+    let Some(workspace) = root
         .snapshot
         .workspaces
         .iter()
         .find(|workspace| Some(&workspace.id) == root.selection.workspace.as_ref())
-        .map(|workspace| (workspace.id.clone(), workspace.repository.clone()))
     else {
         return;
     };
+    let workspace_id = workspace.id.clone();
+    let repositories = root.snapshot.folders_for(workspace);
     root.found_connections_scanned_workspace = Some(workspace_id);
     root.request(
         super::Command::SetupImport(ImportCommand::Discover {
-            repositories: vec![repository],
+            repositories,
             source_id: None,
         }),
         cx,
@@ -354,7 +352,7 @@ fn found_connections(
         .import_preview
         .candidates
         .iter()
-        .filter(|candidate| candidate_in_workspace(candidate, &workspace.repository))
+        .filter(|candidate| candidate_in_workspace(candidate, &root.snapshot.folders_for(workspace)))
         .collect::<Vec<_>>();
     let mut section = div()
         .flex()
@@ -703,18 +701,20 @@ mod tests {
 
     #[test]
     fn found_connections_are_limited_to_global_and_selected_workspace() {
-        assert!(candidate_in_workspace(&candidate(None, "http"), "/repo/a"));
+        let folders = vec!["/repo/a".to_owned(), "/repo/c".to_owned()];
+        assert!(candidate_in_workspace(&candidate(None, "http"), &folders));
         assert!(candidate_in_workspace(
             &candidate(Some("/repo/a"), "http"),
-            "/repo/a"
+            &folders
         ));
+        assert!(candidate_in_workspace(&candidate(Some("/repo/c"), "http"), &folders));
         assert!(!candidate_in_workspace(
             &candidate(Some("/repo/b"), "http"),
-            "/repo/a"
+            &folders
         ));
         let mut skill = candidate(None, "http");
         skill.kind = ImportCandidateKind::Skill;
-        assert!(!candidate_in_workspace(&skill, "/repo/a"));
+        assert!(!candidate_in_workspace(&skill, &folders));
     }
 
     #[test]
