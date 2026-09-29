@@ -12,6 +12,7 @@ private func nested(_ family: String, _ name: String, _ fields: [String: JSONVal
 private struct ManagementDraft: Identifiable {
     let id = UUID()
     var value: JSONValue
+    var workspace: String? = nil
 }
 @MainActor private func submit(_ model: AppModel, _ command: JSONValue) {
     Task { await model.workbench(command) }
@@ -44,34 +45,42 @@ struct ProfilesView: View {
     @ObservedObject var model: AppModel
     @State private var draft: ManagementDraft?
     var body: some View {
+        let profiles = model.snapshot["agent_profiles"]["profiles"].array
         ManagementScroll {
-            Button("New profile") { draft = ManagementDraft(value: .object([:])) }
-            ForEach(model.snapshot["agent_profiles"]["profiles"].array, id: \.self) { profile in
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(profile["name"].string).font(.headline).accessibilityAddTraits(.isHeader)
-                    if !profile["instructions"].string.isEmpty {
-                        Text(profile["instructions"].string).textSelection(.enabled)
-                    }
-                    HStack {
-                        Button("Edit") { draft = ManagementDraft(value: profile) }
-                        Button(model.snapshot["agent_profiles"]["active_profile_id"] == profile["id"] ? "Active profile" : "Make active") {
-                            submit(model, nested("AgentProfiles", "SetActive", ["profile_id": profile["id"]]))
-                        }
-                        if let workspace = model.selectedWorkspace {
-                            Button("Assign to selected workspace") {
-                                submit(model, nested("AgentProfiles", "AssignWorkspace", ["workspace_id": .string(workspace), "profile_id": profile["id"]]))
+            PageIntro(title: "Profiles", message: "A profile is how Neko thinks and writes for a kind of work: its instructions and its memories. Give a workspace its own profile when it needs a different voice or rules.") {
+                Button("New profile", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) }
+            }
+            ForEach(profiles, id: \.self) { profile in
+                let active = model.snapshot["agent_profiles"]["active_profile_id"] == profile["id"]
+                let assigned = model.snapshot["agent_profiles"]["assignments"].array.filter { $0["profile_id"] == profile["id"] }.compactMap { a in model.workspaces.first { $0.recordID == a["workspace_id"].string }?["name"].string }
+                WorkspaceSection(name: profile["name"].string, color: active ? NekoStyle.accent : N.text4, detail: active ? "Default" : nil) {
+                    HStack(spacing: 8) {
+                        if !active { Button("Make default") { submit(model, nested("AgentProfiles", "SetActive", ["profile_id": profile["id"]])) }.controlSize(.small) }
+                        Menu("Use in workspace") {
+                            ForEach(model.workspaces, id: \.recordID) { workspace in
+                                Button(workspace["name"].string) { submit(model, nested("AgentProfiles", "AssignWorkspace", ["workspace_id": .string(workspace.recordID), "profile_id": profile["id"]])) }
                             }
-                        }
+                        }.controlSize(.small).fixedSize().disabled(model.workspaces.isEmpty)
+                        Button("Edit") { draft = ManagementDraft(value: profile) }.controlSize(.small)
                     }
-                    ForEach(model.snapshot["agent_profiles"]["profiles"].array.filter { $0["id"] != profile["id"] }, id: \.self) { source in
-                        Toggle("Read global memories from \(source["name"].string)", isOn: Binding(get: {
-                            model.snapshot["agent_profiles"]["read_grants"].array.contains { $0["reader_id"] == profile["id"] && $0["source_id"] == source["id"] }
-                        }, set: { allowed in
-                            submit(model, nested("AgentProfiles", "SetReadGrant", ["reader_id": profile["id"], "source_id": source["id"], "allowed": .bool(allowed)]))
-                        }))
+                } content: {
+                    Text(profile["instructions"].string.isEmpty ? "No special instructions." : profile["instructions"].string)
+                        .font(.system(size: 12.5)).foregroundStyle(N.text3).lineLimit(3).textSelection(.enabled)
+                    Text(assigned.isEmpty ? "Not used by a specific workspace." : "Used in " + assigned.joined(separator: ", "))
+                        .font(.system(size: 12)).foregroundStyle(N.text4)
+                    if profiles.count > 1 {
+                        DisclosureGroup("Share memories from other profiles") {
+                            ForEach(profiles.filter { $0["id"] != profile["id"] }, id: \.self) { source in
+                                Toggle("Can read \(source["name"].string)'s general memories", isOn: Binding(get: {
+                                    model.snapshot["agent_profiles"]["read_grants"].array.contains { $0["reader_id"] == profile["id"] && $0["source_id"] == source["id"] }
+                                }, set: { allowed in
+                                    submit(model, nested("AgentProfiles", "SetReadGrant", ["reader_id": profile["id"], "source_id": source["id"], "allowed": .bool(allowed)]))
+                                }))
+                            }
+                            Text("This only shares memories. It never shares tools or workspace access.").font(.caption).foregroundStyle(N.text4)
+                        }.font(.system(size: 12.5))
                     }
-                    Text("Read grants share global memories only; they do not grant tools or workspace access.").font(.caption).foregroundStyle(.secondary)
-                }.accessibilityElement(children: .contain)
+                }
             }
         }.sheet(item: $draft) { item in
             ManagementEditor(model: model, kind: .profile, original: item.value, workspace: model.selectedWorkspace, profileID: profileFor(model))
@@ -83,36 +92,47 @@ struct MemoryView: View {
     @ObservedObject var model: AppModel
     @State private var draft: ManagementDraft?
     private func inScope(_ item: JSONValue) -> Bool {
-        item["agent_profile_id"].string == profileFor(model) && (item["workspace_id"] == .null || item["workspace_id"].string == model.selectedWorkspace)
+        item["agent_profile_id"].string == profileFor(model) && (item["workspace_id"] == .null || model.selectedWorkspace == nil || item["workspace_id"].string == model.selectedWorkspace)
+    }
+    private func scopeLabel(_ item: JSONValue) -> String {
+        item["workspace_id"] == .null ? "Everywhere" : (model.workspaces.first { $0.recordID == item["workspace_id"].string }?["name"].string ?? "Workspace")
     }
     var body: some View {
+        let memories = model.snapshot["memory"].array.filter(inScope)
+        let proposals = model.snapshot["memory_proposals"].array.filter(inScope)
         ManagementScroll {
-            Button("Add memory") { draft = ManagementDraft(value: .object([:])) }
-            if model.snapshot["memory"].array.filter(inScope).isEmpty { Text("No memories yet. Add a preference or something Neko should remember about your work.").foregroundStyle(.secondary) }
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Memories").font(.headline).accessibilityAddTraits(.isHeader)
-                ForEach(model.snapshot["memory"].array.filter(inScope), id: \.self) { entry in
-                    VStack(alignment: .leading) {
-                        Text(entry["kind"].string.capitalized).font(.caption).foregroundStyle(.secondary)
-                        Text(entry["text"].string).textSelection(.enabled)
-                        HStack {
-                            Button("Edit") { draft = ManagementDraft(value: entry) }
-                            Button("Delete", role: .destructive) { submit(model, .command("DeleteMemory", ["id": entry["id"]])) }
-                        }
+            PageIntro(title: "Memory", message: "What Neko has learned about how you work: preferences, decisions and facts about your projects. Neko suggests new memories; nothing is kept until you accept it.") {
+                Button("Add memory", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) }
+            }
+            if !proposals.isEmpty {
+                WorkspaceSection(name: "Suggested", color: NekoStyle.amber, detail: "\(proposals.count) waiting") { EmptyView() } content: {
+                    ForEach(proposals, id: \.self) { proposal in
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(proposal["text"].string).font(.system(size: 13)).foregroundStyle(N.text)
+                                Text(proposal["source"].string).font(.system(size: 12)).foregroundStyle(N.text4)
+                            }
+                            Spacer()
+                            Button("Keep") { submit(model, .command("DecideMemoryProposal", ["id": proposal["id"], "accept": .bool(true)])) }.controlSize(.small)
+                            Button("Dismiss") { submit(model, .command("DecideMemoryProposal", ["id": proposal["id"], "accept": .bool(false)])) }.controlSize(.small)
+                        }.padding(.vertical, 6).overlay(alignment: .top) { N.line.frame(height: 1) }
                     }
                 }
             }
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Suggested memories").font(.headline).accessibilityAddTraits(.isHeader)
-                ForEach(model.snapshot["memory_proposals"].array.filter(inScope), id: \.self) { proposal in
-                    VStack(alignment: .leading) {
-                        Text(proposal["text"].string)
-                        Text(proposal["source"].string).font(.caption).foregroundStyle(.secondary)
-                        HStack {
-                            Button("Accept") { submit(model, .command("DecideMemoryProposal", ["id": proposal["id"], "accept": .bool(true)])) }
-                            Button("Reject") { submit(model, .command("DecideMemoryProposal", ["id": proposal["id"], "accept": .bool(false)])) }
+            WorkspaceSection(name: "Remembered", color: N.text4, detail: memories.isEmpty ? nil : "\(memories.count)") { EmptyView() } content: {
+                if memories.isEmpty { EmptyRow(text: "Nothing yet. Tell Neko \"remember that…\" in Today, or add one here.") }
+                ForEach(memories, id: \.self) { entry in
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry["text"].string).font(.system(size: 13)).foregroundStyle(N.text).textSelection(.enabled)
+                            Text("\(entry["kind"].string.capitalized) · \(scopeLabel(entry))").font(.system(size: 12)).foregroundStyle(N.text4)
                         }
-                    }
+                        Spacer()
+                        Menu("More") {
+                            Button("Edit") { draft = ManagementDraft(value: entry) }
+                            Button("Forget", role: .destructive) { submit(model, .command("DeleteMemory", ["id": entry["id"]])) }
+                        }.controlSize(.small).fixedSize()
+                    }.padding(.vertical, 6).overlay(alignment: .top) { N.line.frame(height: 1) }
                 }
             }
         }.sheet(item: $draft) { item in
@@ -121,28 +141,92 @@ struct MemoryView: View {
     }
 }
 
+/// Workspaces Neko should show in a grouped page: the selected one, or all of them.
+@MainActor private func scopedWorkspaces(_ model: AppModel) -> [(offset: Int, element: JSONValue)] {
+    Array(model.workspaces.enumerated()).filter { model.selectedWorkspace == nil || $0.element.recordID == model.selectedWorkspace }
+}
+
+struct PageIntro<Action: View>: View {
+    let title: String
+    let message: String
+    @ViewBuilder var action: () -> Action
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 20, weight: .semibold)).foregroundStyle(N.text)
+                Text(message).font(.system(size: 13)).foregroundStyle(N.text3).lineLimit(4)
+            }
+            Spacer(minLength: 16)
+            action()
+        }.padding(.bottom, 4)
+    }
+}
+
+struct WorkspaceSection<Trailing: View, Content: View>: View {
+    let name: String
+    let color: Color
+    var detail: String? = nil
+    @ViewBuilder var trailing: () -> Trailing
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous).fill(color).frame(width: 10, height: 10)
+                Text(name).font(.system(size: 13, weight: .semibold)).foregroundStyle(N.text)
+                if let detail { Text(detail).font(.system(size: 12)).foregroundStyle(N.text4) }
+                Spacer()
+                trailing()
+            }
+            .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
+            content()
+        }
+        .padding(16)
+        .background(N.card.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(N.line))
+    }
+}
+
+struct EmptyRow: View {
+    let text: String
+    var body: some View { Text(text).font(.system(size: 12.5)).foregroundStyle(N.text4).padding(.vertical, 6) }
+}
+
+func relativeTime(_ ms: Int) -> String {
+    ms <= 0 ? "Never" : RelativeDateTimeFormatter().localizedString(for: Date(timeIntervalSince1970: Double(ms) / 1000), relativeTo: .now)
+}
+
 struct ResponsibilitiesView: View {
     @ObservedObject var model: AppModel
     @State private var draft: ManagementDraft?
     var body: some View {
         ManagementScroll {
-            Button("New responsibility") { draft = ManagementDraft(value: .object([:])) }.disabled(model.selectedWorkspace == nil)
-            if model.snapshot["mcp"]["responsibilities"].array.filter({ $0["workspace_id"].string == model.selectedWorkspace }).isEmpty { Text(model.selectedWorkspace == nil ? "Choose a workspace to add responsibilities." : "No responsibilities yet. Add something you want Neko to check regularly.").foregroundStyle(.secondary) }
-            ForEach(model.snapshot["mcp"]["responsibilities"].array.filter { $0["workspace_id"].string == model.selectedWorkspace }, id: \.self) { item in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(item["instruction"].string).textSelection(.enabled)
-                    Text(item["last_result"].string).font(.caption).foregroundStyle(.secondary)
-                    Toggle("Enabled", isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
-                        submit(model, nested("Mcp", "SaveResponsibility", ["responsibility": replacing(item, ["enabled": .bool(enabled)])]))
-                    }))
-                    HStack {
-                        Button("Edit") { draft = ManagementDraft(value: item) }
-                        Button("Check now") { submit(model, nested("Mcp", "Wake", ["responsibility_id": item["id"]])) }
+            PageIntro(title: "What Neko watches", message: "Tell Neko what to keep an eye on in each workspace, such as new Linear issues assigned to you or Sentry errors. It checks every 10 minutes and brings anything important to Today.") { EmptyView() }
+            if model.workspaces.isEmpty { EmptyRow(text: "Add a workspace first, then choose what Neko should watch in it.") }
+            ForEach(scopedWorkspaces(model), id: \.element.recordID) { index, workspace in
+                let items = model.snapshot["mcp"]["responsibilities"].array.filter { $0["workspace_id"].string == workspace.recordID }
+                WorkspaceSection(name: workspace["name"].string, color: workspaceColor(index), detail: items.isEmpty ? nil : "\(items.count) watching") {
+                    Button("Watch something", systemImage: "plus") { draft = ManagementDraft(value: .object([:]), workspace: workspace.recordID) }.controlSize(.small)
+                } content: {
+                    if items.isEmpty { EmptyRow(text: "Nothing watched here yet.") }
+                    ForEach(items, id: \.self) { item in
+                        HStack(alignment: .top, spacing: 12) {
+                            Toggle("", isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
+                                submit(model, nested("Mcp", "SaveResponsibility", ["responsibility": replacing(item, ["enabled": .bool(enabled)])]))
+                            })).toggleStyle(.switch).controlSize(.mini).labelsHidden().accessibilityLabel("Enabled")
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item["instruction"].string).font(.system(size: 13)).foregroundStyle(N.text).textSelection(.enabled)
+                                Text((item["failures"].int > 0 ? "Needs attention · " : "") + "Last checked \(relativeTime(item["last_attempt_ms"].int))" + (item["last_result"].string.isEmpty ? "" : " · " + item["last_result"].string))
+                                    .font(.system(size: 12)).foregroundStyle(item["failures"].int > 0 ? NekoStyle.coral : N.text4).lineLimit(2)
+                            }
+                            Spacer()
+                            Button("Check now") { submit(model, nested("Mcp", "Wake", ["responsibility_id": item["id"]])) }.controlSize(.small)
+                            Button("Edit") { draft = ManagementDraft(value: item, workspace: workspace.recordID) }.controlSize(.small)
+                        }.padding(.vertical, 6).overlay(alignment: .top) { N.line.frame(height: 1) }
                     }
                 }
             }
         }.sheet(item: $draft) { item in
-            ManagementEditor(model: model, kind: .responsibility, original: item.value, workspace: model.selectedWorkspace, profileID: profileFor(model))
+            ManagementEditor(model: model, kind: .responsibility, original: item.value, workspace: item.workspace ?? model.selectedWorkspace, profileID: profileFor(model))
         }
     }
 }
@@ -152,29 +236,85 @@ struct SchedulesView: View {
     @State private var draft: ManagementDraft?
     var body: some View {
         ManagementScroll {
-            Button("New schedule") { draft = ManagementDraft(value: .object([:])) }.disabled(model.selectedWorkspace == nil)
-            if model.snapshot["schedules"].array.filter({ $0["workspace_id"].string == model.selectedWorkspace }).isEmpty { Text(model.selectedWorkspace == nil ? "Choose a workspace to add a schedule." : "No schedules yet. Choose when Neko should prepare a plan for you.").foregroundStyle(.secondary) }
-            ForEach(model.snapshot["schedules"].array.filter { $0["workspace_id"].string == model.selectedWorkspace }, id: \.self) { item in
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(item["name"].string).font(.headline).accessibilityAddTraits(.isHeader)
-                    Text(item["prompt"].string).textSelection(.enabled)
-                    Text("\(ScheduleRecurrence.summary(item["rule"].string)) · \(item["timezone"].string)").font(.caption)
-                    Text(item["last_result"].string).foregroundStyle(.secondary)
-                    if item["next_due_ms"] != .null {
-                        Text("Next: \(Date(timeIntervalSince1970: Double(item["next_due_ms"].int) / 1000).formatted())").font(.caption)
-                    }
-                    Toggle("Enabled", isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
-                        submit(model, nested("Schedules", "SetEnabled", ["id": item["id"], "enabled": .bool(enabled)]))
-                    }))
-                    HStack {
-                        Button("Edit") { draft = ManagementDraft(value: item) }
-                        Button("Run now") { submit(model, nested("Schedules", "RunNow", ["id": item["id"]])) }
-                        Button("Delete", role: .destructive) { submit(model, nested("Schedules", "Remove", ["id": item["id"]])) }
+            PageIntro(title: "Schedules", message: "Ask Neko to prepare something at a set time, such as a morning brief or a weekly review. Every result waits for you in Work.") { EmptyView() }
+            if model.workspaces.isEmpty { EmptyRow(text: "Add a workspace first.") }
+            ForEach(scopedWorkspaces(model), id: \.element.recordID) { index, workspace in
+                let items = model.snapshot["schedules"].array.filter { $0["workspace_id"].string == workspace.recordID }
+                WorkspaceSection(name: workspace["name"].string, color: workspaceColor(index), detail: items.isEmpty ? nil : "\(items.count) scheduled") {
+                    Button("New schedule", systemImage: "plus") { draft = ManagementDraft(value: .object([:]), workspace: workspace.recordID) }.controlSize(.small)
+                } content: {
+                    if items.isEmpty { EmptyRow(text: "No schedules here yet.") }
+                    ForEach(items, id: \.self) { item in
+                        HStack(alignment: .top, spacing: 12) {
+                            Toggle("", isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
+                                submit(model, nested("Schedules", "SetEnabled", ["id": item["id"], "enabled": .bool(enabled)]))
+                            })).toggleStyle(.switch).controlSize(.mini).labelsHidden().accessibilityLabel("Enabled")
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item["name"].string).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text)
+                                Text(item["prompt"].string).font(.system(size: 12.5)).foregroundStyle(N.text3).lineLimit(2).textSelection(.enabled)
+                                Text("\(ScheduleRecurrence.summary(item["rule"].string)) · \(item["timezone"].string)" + (item["next_due_ms"] == .null ? "" : " · next \(relativeTime(item["next_due_ms"].int))"))
+                                    .font(.system(size: 12)).foregroundStyle(N.text4)
+                            }
+                            Spacer()
+                            Button("Run now") { submit(model, nested("Schedules", "RunNow", ["id": item["id"]])) }.controlSize(.small)
+                            Menu("More") {
+                                Button("Edit") { draft = ManagementDraft(value: item, workspace: workspace.recordID) }
+                                Button("Delete", role: .destructive) { submit(model, nested("Schedules", "Remove", ["id": item["id"]])) }
+                            }.controlSize(.small).fixedSize()
+                        }.padding(.vertical, 6).overlay(alignment: .top) { N.line.frame(height: 1) }
                     }
                 }
             }
         }.sheet(item: $draft) { item in
-            ManagementEditor(model: model, kind: .schedule, original: item.value, workspace: model.selectedWorkspace, profileID: profileFor(model))
+            ManagementEditor(model: model, kind: .schedule, original: item.value, workspace: item.workspace ?? model.selectedWorkspace, profileID: profileFor(model))
+        }
+    }
+}
+
+/// One place for every workspace: folders, connected tools, what's watched, and sync status.
+struct WorkspacesView: View {
+    @ObservedObject var model: AppModel
+    @State private var editing = false
+    var body: some View {
+        ManagementScroll {
+            PageIntro(title: "Workspaces", message: "Each workspace is a project: its folders, the tools it can use (for example its own Linear team) and what Neko watches for it. Everything comes together under All workspaces.") {
+                Button("Add workspace", systemImage: "plus") { model.selectedWorkspace = nil; editing = true }
+            }
+            if model.workspaces.isEmpty { EmptyRow(text: "No workspaces yet. Add a folder you already work in.") }
+            ForEach(Array(model.workspaces.enumerated()), id: \.element.recordID) { index, workspace in
+                row(workspace, color: workspaceColor(index))
+            }
+        }.sheet(isPresented: $editing) { WorkspaceEditor(model: model) }
+    }
+    private func row(_ workspace: JSONValue, color: Color) -> some View {
+        let id = workspace.recordID
+        let folders = model.snapshot["workspace_folders"][id].array.map(\.string)
+        let responsibilities = model.snapshot["mcp"]["responsibilities"].array.filter { $0["workspace_id"].string == id }
+        let grantedIDs = Set(model.snapshot["mcp"]["grants"].array.filter { $0["workspace_id"].string == id }.map { $0["connection_id"].string })
+        let tools = model.snapshot["mcp"]["connections"].array.filter { grantedIDs.contains($0.recordID) || $0["workspace_id"].string == id }.map { $0["label"].string }
+        let lastChecked = responsibilities.map { $0["last_attempt_ms"].int }.max() ?? 0
+        let failing = responsibilities.contains { $0["failures"].int > 0 }
+        let tickets = model.tasks.filter { $0["workspace_id"].string == id && !["Completed", "Cancelled"].contains($0["status"].string) }.count
+        return WorkspaceSection(name: workspace["name"].string, color: color, detail: tickets == 0 ? nil : "\(tickets) open") {
+            HStack(spacing: 8) {
+                Button("Sync now", systemImage: "arrow.clockwise") {
+                    responsibilities.forEach { submit(model, nested("Mcp", "Wake", ["responsibility_id": $0["id"]])) }
+                }.controlSize(.small).disabled(responsibilities.isEmpty).help(responsibilities.isEmpty ? "Add something to watch first" : "Check everything this workspace watches")
+                Button("Settings") { model.selectedWorkspace = id; editing = true }.controlSize(.small)
+            }
+        } content: {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 6) {
+                fact("Folders", folders.isEmpty ? "None" : folders.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: ", "))
+                fact("Tools", tools.isEmpty ? "None connected" : tools.joined(separator: ", "))
+                fact("Watching", responsibilities.isEmpty ? "Nothing yet" : "\(responsibilities.count) \(responsibilities.count == 1 ? "item" : "items")")
+                fact("Last sync", responsibilities.isEmpty ? "—" : relativeTime(lastChecked) + (failing ? " · needs attention" : ""), warn: failing)
+            }
+        }
+    }
+    private func fact(_ label: String, _ value: String, warn: Bool = false) -> some View {
+        GridRow {
+            Text(label).font(.system(size: 12)).foregroundStyle(N.text4).gridColumnAlignment(.trailing)
+            Text(value).font(.system(size: 12.5)).foregroundStyle(warn ? NekoStyle.coral : N.text2).lineLimit(2).textSelection(.enabled)
         }
     }
 }

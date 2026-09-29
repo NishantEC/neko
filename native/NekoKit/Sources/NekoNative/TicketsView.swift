@@ -8,6 +8,28 @@ enum TicketPresentation {
         let files: [String]
         let tests: [String]
         let summary: String
+        private enum CodingKeys: String, CodingKey { case passed, findings, files, tests, summary }
+        /// Findings arrive either as plain strings or as {severity, path, finding}
+        /// objects; both render as one readable line.
+        struct Finding: Decodable {
+            let text: String
+            init(from decoder: Decoder) throws {
+                if let plain = try? decoder.singleValueContainer().decode(String.self) { text = plain; return }
+                let value = try JSONValue(from: decoder)
+                let severity = value["severity"].string, path = value["path"].string
+                let body = value["finding"].string.isEmpty ? value["message"].string : value["finding"].string
+                text = [severity.isEmpty ? nil : severity.capitalized, path.isEmpty ? nil : (path as NSString).lastPathComponent].compactMap { $0 }.joined(separator: " · ") + (severity.isEmpty && path.isEmpty ? "" : ": ") + body
+            }
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            passed = try c.decode(Bool.self, forKey: .passed)
+            let decoded: [Finding] = (try? c.decode([Finding].self, forKey: .findings)) ?? []
+            findings = decoded.map { $0.text }
+            files = (try? c.decode([String].self, forKey: .files)) ?? []
+            tests = (try? c.decode([String].self, forKey: .tests)) ?? []
+            summary = (try? c.decode(String.self, forKey: .summary)) ?? ""
+        }
     }
     static func review(_ result: String) -> (body: String, verdict: Review?) {
         guard let range = result.range(of: "\n\nIndependent review:\n", options: .backwards),
@@ -38,7 +60,7 @@ struct TicketsView: View {
             HStack(spacing: 8) {
                 Button(includeStopped ? "Showing failed & cancelled" : "Hiding failed & cancelled") { includeStopped.toggle() }.controlSize(.small).glassButton()
                 Spacer()
-                Text("\(model.tasks.count) tickets").font(.system(size: 12)).foregroundStyle(N.text4)
+                Text("\(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")").font(.system(size: 12)).foregroundStyle(N.text4)
             }.padding(.horizontal, 20).frame(height: 44).overlay(alignment: .bottom) { N.line.frame(height: 1) }
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 16) {

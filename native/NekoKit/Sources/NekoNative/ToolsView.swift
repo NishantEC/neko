@@ -28,6 +28,7 @@ struct ToolsView: View {
     @State private var credentials = ""
     @State private var trust = false
     @State private var clientID = ""
+    @State private var showManual = false
     @State private var repositoryURL = ""
     @State private var search = ""
     @State private var validation: String?
@@ -48,18 +49,18 @@ struct ToolsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Tools & skills").font(.largeTitle.bold())
-            Text("Connect your tools and choose what each workspace may use.").foregroundStyle(.secondary)
+            Text("Tools & skills").font(.system(size: 20, weight: .semibold)).foregroundStyle(N.text)
+            Text("Tools let Neko read your work apps, such as Linear, Sentry, GitHub or Slack. Connect a tool once, then choose which workspaces may use it, so each project can have its own Linear.").font(.system(size: 13)).foregroundStyle(N.text3).lineLimit(3)
             if let error = validation ?? model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-                Picker("Tools section", selection: $tab) {
+                Picker("Show", selection: $tab) {
                     Text("Connections").tag(0)
                     Text("Skills").tag(1)
-                }.pickerStyle(.segmented)
+                }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 260)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         if tab == 0 { connectionsBody }
                         else if workspace.isEmpty {
-                            ContentUnavailableView("Choose a workspace for skills", systemImage: "folder", description: Text("Select a workspace in the sidebar to review and enable its instructions."))
+                            ContentUnavailableView("Choose a workspace for skills", systemImage: "folder", description: Text("Pick a workspace in the toolbar to see the skills its folders already contain."))
                         } else { skillsBody }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
                 }
@@ -83,26 +84,30 @@ struct ToolsView: View {
     private var connectionsBody: some View {
         VStack(alignment: .leading, spacing: 20) {
             if workspace.isEmpty {
-                Label("Global connections · select a workspace to grant tool access", systemImage: "globe").foregroundStyle(.secondary)
+                Label("Showing tools for all workspaces. Pick one workspace in the toolbar to choose what it may use.", systemImage: "square.stack.3d.up").font(.callout).foregroundStyle(.secondary)
             }
-            GroupBox("Found in your setup") {
+            GroupBox("Found on this Mac") {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Link local agent configurations. Source credentials stay in their original setup; tool access needs separate approval.").foregroundStyle(.secondary)
-                    Button("Refresh local setup") {
+                    Text("Tools you already set up in Codex, Claude or your project folders. Linking reuses them; your sign-ins stay where they are.").foregroundStyle(.secondary)
+                    Button("Look again") {
                         send("SetupImport", "Discover", ["repositories": .array(folders), "source_id": .null])
                     }
                     ForEach(Array(candidates.enumerated()), id: \.offset) { _, candidate in candidateRow(candidate) }
-                    if candidates.isEmpty { Text("No matching connections in the current preview.").foregroundStyle(.secondary) }
+                    if candidates.isEmpty { Text("Nothing found yet. Press Look again after adding a folder.").foregroundStyle(.secondary) }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }
             ForEach(Array(connections.enumerated()), id: \.offset) { _, connection in connectionCard(connection) }
             if connections.isEmpty {
-                Text("No connections added here yet. Link a discovered configuration or add a server below.").foregroundStyle(.secondary)
+                Text("No tools connected yet. Link one found on this Mac, or add one manually below.").foregroundStyle(.secondary)
             }
-            LabeledContent("OAuth client ID (optional)") { TextField("Client ID", text: $clientID).labelsHidden() }
-            Text("Browser sign-in uses server OAuth metadata. Sign-in never grants tool access.").font(.caption).foregroundStyle(.secondary)
-            addConnection
-            Link("Browse MCP Registry", destination: URL(string: "https://registry.modelcontextprotocol.io")!)
+            Button(showManual ? "Hide manual setup" : "Add a tool manually…", systemImage: showManual ? "chevron.down" : "chevron.right") { showManual.toggle() }
+                .buttonStyle(.borderless)
+            if showManual {
+                addConnection
+                LabeledContent("OAuth client ID (advanced)") { TextField("Only if the tool asks for one", text: $clientID).labelsHidden() }
+                Text("Signing in never gives a workspace access by itself; you still choose per workspace.").font(.caption).foregroundStyle(.secondary)
+                Link("Find tools in the MCP Registry", destination: URL(string: "https://registry.modelcontextprotocol.io")!)
+            }
         }
     }
 
@@ -177,7 +182,7 @@ struct ToolsView: View {
     }
 
     private var addConnection: some View {
-        GroupBox("Add an MCP server") {
+        GroupBox("Tool server") {
             VStack(alignment: .leading, spacing: 12) {
                 LabeledContent("Connection name") { TextField("Name", text: $label).labelsHidden() }
                 if workspace.isEmpty {

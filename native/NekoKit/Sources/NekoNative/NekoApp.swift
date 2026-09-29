@@ -57,6 +57,7 @@ struct WorkspaceView: View {
                     Group {
                         switch page {
                         case "Tickets": TicketsView(model: model)
+                        case "Workspaces": WorkspacesView(model: model)
                         case "Responsibilities": ResponsibilitiesView(model: model)
                         case "Tools & skills": ToolsView(model: model)
                         case "Memory": MemoryView(model: model)
@@ -69,8 +70,7 @@ struct WorkspaceView: View {
                     .background { LookBackground(look: look) }
                     .softScrollEdges()
                     .navigationTitle(PageInfo.title(page))
-                    .onChange(of: model.workspaces.count) { _, n in if n == 1, model.selectedWorkspace == nil { model.selectedWorkspace = model.workspaces.first?.recordID } }
-                    .onAppear { if model.workspaces.count == 1, model.selectedWorkspace == nil { model.selectedWorkspace = model.workspaces.first?.recordID } }
+
                     .onReceive(NotificationCenter.default.publisher(for: .nekoNavigate)) { note in if let key = note.object as? String { page = key } }
                     .navigationSubtitle(model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces")
                     .toolbar {
@@ -237,7 +237,7 @@ struct WatchingStatus: View {
 enum PageInfo {
     static let groups: [(title: String, keys: [String])] = [
         ("Your day", ["Today", "Tickets"]),
-        ("What Neko watches", ["Responsibilities", "Schedules"]),
+        ("What Neko watches", ["Workspaces", "Responsibilities", "Schedules"]),
         ("Teach Neko", ["Tools & skills", "Memory", "Profiles"])
     ]
     static func title(_ key: String) -> String {
@@ -251,6 +251,7 @@ enum PageInfo {
     static func icon(_ key: String) -> String {
         switch key {
         case "Today": "sun.max"
+        case "Workspaces": "square.stack.3d.up"
         case "Tickets": "checklist"
         case "Responsibilities": "eye"
         case "Schedules": "clock"
