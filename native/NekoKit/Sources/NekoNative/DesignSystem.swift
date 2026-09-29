@@ -498,7 +498,8 @@ struct LookBackground: View {
             if opaque { Color(nsColor: .windowBackgroundColor) } else { field.extendsUnderSidebar() }
         }
     }
-    @ViewBuilder private var field: some View { SpaceGradient() }
+    /// In-app backdrop stays quiet; the animated gem field is onboarding-only.
+    @ViewBuilder private var field: some View { N.canvas }
 }
 
 extension View {
@@ -722,5 +723,41 @@ struct OrbButton: View {
 extension View {
     @ViewBuilder func hiddenWindowToolbarBackground() -> some View {
         if #available(macOS 15, *) { self.toolbarBackgroundVisibility(.hidden, for: .windowToolbar) } else { self }
+    }
+}
+
+
+// MARK: - Plain (in-app) variants: no colour, no shaders. Gem styling is onboarding-only.
+
+struct PlainSummaryCard: View {
+    let title: String
+    let value: String
+    let caption: String
+    let symbol: String
+    var action: String? = nil
+    var perform: () -> Void = {}
+    @State private var hover = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text3)
+                Spacer()
+                Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(N.text4)
+            }
+            Spacer(minLength: 20)
+            Text(value).font(.system(size: 30, weight: .semibold)).tracking(-0.5).foregroundStyle(N.text).monospacedDigit()
+            HStack(alignment: .center) {
+                Text(caption).font(.system(size: 12.5)).foregroundStyle(N.text3).lineLimit(1)
+                Spacer(minLength: 8)
+                if let action { Button(action, action: perform).nekoGlassButton().controlSize(.small) }
+            }.frame(height: 28).padding(.top, 2)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 140, alignment: .topLeading)
+        .background(hover ? N.selected : N.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(N.line))
+        .animation(.easeOut(duration: 0.12), value: hover)
+        .onHover { hover = $0 }
+        .accessibilityElement(children: .combine)
     }
 }
