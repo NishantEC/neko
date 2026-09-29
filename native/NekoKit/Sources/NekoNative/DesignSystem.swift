@@ -542,20 +542,73 @@ extension Color {
 /// Deep indigo into violet, with a soft magenta bloom low right.
 struct SpaceGradient: View {
     var intensity: Double = 1
+    @Environment(\.accessibilityReduceTransparency) private var opaque
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        ZStack {
-            if #available(macOS 15, *) {
-                MeshGradient(width: 3, height: 3,
-                    points: [.init(0, 0), .init(0.5, 0), .init(1, 0), .init(0, 0.5), .init(0.55, 0.45), .init(1, 0.5), .init(0, 1), .init(0.5, 1), .init(1, 1)],
-                    colors: [
-                        .oklch(0.24, 0.09, 280), .oklch(0.20, 0.08, 286), .oklch(0.23, 0.10, 300),
-                        .oklch(0.21, 0.08, 272), .oklch(0.26, 0.12, 292), .oklch(0.30, 0.14, 318),
-                        .oklch(0.18, 0.06, 268), .oklch(0.25, 0.11, 300), .oklch(0.34, 0.16, 330)
-                    ])
+        Group {
+            if let library = GemShaders.library, !opaque {
+                GeometryReader { geo in
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { context in
+                        let t = Float(context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3600))
+                        Rectangle().fill(.black)
+                            .colorEffect(library.gemField(.float2(Float(geo.size.width), Float(geo.size.height)), .float(t)))
+                    }
+                }
             } else {
-                LinearGradient(colors: [.oklch(0.22, 0.09, 280), .oklch(0.32, 0.15, 320)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                MeshFallback()
             }
-        }.opacity(intensity).ignoresSafeArea().accessibilityHidden(true)
+        }.opacity(intensity).ignoresSafeArea().accessibilityHidden(true).allowsHitTesting(false)
+    }
+}
+
+private struct MeshFallback: View {
+    var body: some View {
+        if #available(macOS 15, *) {
+            MeshGradient(width: 3, height: 3,
+                points: [.init(0, 0), .init(0.5, 0), .init(1, 0), .init(0, 0.5), .init(0.55, 0.45), .init(1, 0.5), .init(0, 1), .init(0.5, 1), .init(1, 1)],
+                colors: [
+                    .oklch(0.20, 0.07, 265), .oklch(0.16, 0.05, 275), .oklch(0.19, 0.08, 295),
+                    .oklch(0.17, 0.06, 255), .oklch(0.22, 0.09, 285), .oklch(0.24, 0.10, 305),
+                    .oklch(0.13, 0.04, 262), .oklch(0.19, 0.08, 290), .oklch(0.22, 0.09, 175)
+                ])
+        } else {
+            LinearGradient(colors: [.oklch(0.18, 0.07, 265), .oklch(0.22, 0.09, 300)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+    }
+}
+
+/// Loads the Metal gem shaders bundled with the app. Nil in tests or if the
+/// library is missing, so every caller falls back to plain gradients.
+enum GemShaders {
+    static let library: ShaderLibrary? = Bundle.main.url(forResource: "Neko", withExtension: "metallib").map { ShaderLibrary(url: $0) }
+}
+
+/// Jewel tints: one stone per meaning.
+enum Gem {
+    static let ruby = Color.oklch(0.58, 0.19, 18)
+    static let amethyst = Color.oklch(0.55, 0.17, 300)
+    static let sapphire = Color.oklch(0.55, 0.16, 262)
+    static let emerald = Color.oklch(0.62, 0.14, 160)
+    static let topaz = Color.oklch(0.74, 0.14, 70)
+}
+
+/// A shape filled with faceted gem shading, animated by a slow key light.
+struct GemSurface<S: Shape>: View {
+    let shape: S
+    let tint: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        if let library = GemShaders.library {
+            GeometryReader { geo in
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { context in
+                    let t = Float(context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3600))
+                    shape.fill(.white)
+                        .colorEffect(library.gemSheen(.float2(Float(geo.size.width), Float(geo.size.height)), .float(t), .color(tint)))
+                }
+            }
+        } else {
+            shape.fill(LinearGradient(colors: [tint, tint.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
     }
 }
 
@@ -565,24 +618,18 @@ struct DimensionalGlyph: View {
     let symbol: String
     let tint: Color
     var size: CGFloat = 76
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var float = false
     var body: some View {
         ZStack {
+            GemSurface(shape: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous), tint: tint)
             RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                .fill(LinearGradient(colors: [tint.opacity(0.95), tint.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))
-            RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                .fill(LinearGradient(colors: [.white.opacity(0.45), .clear], startPoint: .top, endPoint: .center))
-                .padding(1.5).blendMode(.plusLighter).opacity(0.6)
-            RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                .strokeBorder(LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                .strokeBorder(LinearGradient(colors: [.white.opacity(0.6), .white.opacity(0.08)], startPoint: .top, endPoint: .bottom), lineWidth: 1)
             Image(systemName: symbol)
-                .font(.system(size: size * 0.42, weight: .semibold))
+                .font(.system(size: size * 0.40, weight: .semibold))
                 .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
         }
         .frame(width: size, height: size)
-        .shadow(color: tint.opacity(0.55), radius: 18, y: 10)
+        .shadow(color: tint.opacity(0.5), radius: 16, y: 8)
         .accessibilityHidden(true)
     }
 }
@@ -618,12 +665,16 @@ struct SummaryCard: View {
         }
         .background {
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(hover ? 0.10 : 0.07))
-                RadialGradient(colors: [tint.opacity(0.35), .clear], center: .topTrailing, startRadius: 0, endRadius: 220)
+                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.ultraThinMaterial).opacity(0.55)
+                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.black.opacity(0.25))
+                RadialGradient(colors: [tint.opacity(hover ? 0.42 : 0.30), .clear], center: .topTrailing, startRadius: 0, endRadius: 240)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(AngularGradient(colors: [.white.opacity(0.35), tint.opacity(0.5), .white.opacity(0.08), Gem.sapphire.opacity(0.4), .white.opacity(0.35)], center: .center), lineWidth: 1)
+        )
         .scaleEffect(hover ? 1.01 : 1)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: hover)
         .onHover { hover = $0 }
@@ -641,26 +692,28 @@ struct PillButtonStyle: ButtonStyle {
     }
 }
 
-/// CleanMyMac's round primary action: a glowing orb with a soft halo.
+/// Primary action: a polished-stone pill with a slow light sweep.
 struct OrbButton: View {
     let title: String
     let perform: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulse = false
+    @State private var hover = false
     var body: some View {
         Button(action: perform) {
-            Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                .frame(width: 92, height: 92)
-                .background {
-                    ZStack {
-                        Circle().fill(RadialGradient(colors: [.oklch(0.62, 0.2, 320), .oklch(0.45, 0.2, 300)], center: .topLeading, startRadius: 4, endRadius: 90))
-                        Circle().strokeBorder(.white.opacity(0.45), lineWidth: 1.5)
-                    }
-                }
-                .shadow(color: .oklch(0.6, 0.22, 320).opacity(pulse ? 0.8 : 0.45), radius: pulse ? 30 : 18)
+            HStack(spacing: 8) {
+                Text(title).font(.system(size: 15, weight: .semibold))
+                Image(systemName: "arrow.right").font(.system(size: 13, weight: .semibold))
+                    .offset(x: hover ? 2 : 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 26).frame(height: 44)
+            .background { GemSurface(shape: RoundedRectangle(cornerRadius: 14, style: .continuous), tint: Gem.amethyst) }
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(LinearGradient(colors: [.white.opacity(0.45), .white.opacity(0.06)], startPoint: .top, endPoint: .bottom), lineWidth: 1))
+            .shadow(color: Gem.amethyst.opacity(hover ? 0.55 : 0.35), radius: hover ? 22 : 14, y: 6)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: hover)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
-        .onAppear { if !reduceMotion { withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { pulse = true } } }
+        .onHover { hover = $0 }
     }
 }
 
