@@ -301,7 +301,7 @@ struct BriefRow: View {
                 Circle().fill(dot).frame(width: 6, height: 6).frame(width: 16, height: 20)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 13)).foregroundStyle(N.text).lineLimit(1)
-                    Text(meta).font(.system(size: 12)).foregroundStyle(Color(white: 0.49)).lineLimit(1)
+                    Text(meta).font(.system(size: 12)).foregroundStyle(N.text3).lineLimit(1)
                 }
                 Spacer(minLength: 12)
                 Text(action).font(.system(size: 12, weight: .medium)).foregroundStyle(hover ? N.text : N.text2)
@@ -331,7 +331,7 @@ struct RailRow: View {
                 StatusGlyph(status: status, size: 14)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 13)).foregroundStyle(N.text).lineLimit(1)
-                    Text(meta).font(.system(size: 12)).foregroundStyle(Color(white: 0.49)).lineLimit(1)
+                    Text(meta).font(.system(size: 12)).foregroundStyle(N.text3).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }

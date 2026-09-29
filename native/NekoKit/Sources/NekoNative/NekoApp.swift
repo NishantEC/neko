@@ -144,7 +144,7 @@ struct NekoSidebar: View {
         let attention = title == "Tickets" ? StatusSummary(snapshot: model.snapshot).needsAttention : 0
         return Button { withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { page = title } } label: {
             HStack(spacing: 10) {
-                Image(systemName: icon).font(.system(size: 12.5)).frame(width: 16).foregroundStyle(selected ? N.text : Color(white: 0.49))
+                Image(systemName: icon).font(.system(size: 12.5)).frame(width: 16).foregroundStyle(selected ? N.text : N.text3)
                 Text(title).font(.system(size: 13, weight: selected ? .medium : .regular)).foregroundStyle(selected ? N.text : N.text2)
                 Spacer()
                 if attention > 0 {

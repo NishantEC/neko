@@ -4,15 +4,16 @@ import SwiftUI
 /// "Quiet craft": neutral ink, hairline structure, monospaced numerics, one
 /// accent taken from the mascot's green eyes. Color is reserved for state.
 enum NekoStyle {
-    static let accent = Color(red: 0.9607843137254902, green: 0.6470588235294118, blue: 0.1411764705882353)
-    static let rose = Color(red: 0.96, green: 0.52, blue: 0.66)
-    static let pearl = Color(red: 0.975, green: 0.973, blue: 0.965)
-    static let plum = Color(red: 0.07, green: 0.07, blue: 0.08)
-    static let lilac = Color(red: 0.788235294117647, green: 0.6274509803921569, blue: 1)
-    static let mint = Color(red: 0.48627450980392156, green: 0.8392156862745098, blue: 0.6274509803921569)
-    static let amber = Color(red: 0.9607843137254902, green: 0.6470588235294118, blue: 0.1411764705882353)
-    static let sky = Color(red: 0.43529411764705883, green: 0.6588235294117647, blue: 1)
-    static let coral = Color(red: 1, green: 0.4196078431372549, blue: 0.4196078431372549)
+    // One meaning per colour. OKLCH values; see Palette section below.
+    static let accent = Color.oklch(0.57, 0.15, 264)     // indigo · primary fill + selection only; white on it ≥4.5:1
+    static let amber = Color.oklch(0.80, 0.13, 78)       // needs approval
+    static let sky = Color.oklch(0.76, 0.10, 222)        // ready to review
+    static let mint = Color.oklch(0.76, 0.12, 158)       // done
+    static let coral = Color.oklch(0.68, 0.16, 27)       // failed
+    static let lilac = Color.oklch(0.74, 0.09, 300)      // workspace tag only
+    static let rose = Color.oklch(0.74, 0.09, 350)       // workspace tag only
+    static let pearl = Color.oklch(0.975, 0.003, 264)
+    static let plum = Color.oklch(0.16, 0.004, 264)
     static let signature = LinearGradient(colors: [accent, accent], startPoint: .top, endPoint: .bottom)
     static let radius: CGFloat = 12
     static let radiusSmall: CGFloat = 7
@@ -228,7 +229,7 @@ func taskColor(_ status: String) -> Color {
     case "Completed": NekoStyle.mint
     case "Failed": NekoStyle.coral
     case "Cancelled": .secondary
-    default: NekoStyle.lilac
+    default: N.text3
     }
 }
 
@@ -340,16 +341,18 @@ func friendlyTaskStatus(_ status: String) -> String {
 /// HiFi v2 tokens (Paper "Native · HiFi v2"). Night-shift instrument panel:
 /// neutral instrument surfaces, one amber indicator. 4pt spacing grid.
 enum N {
-    static let canvas = Color(red: 0.043137254901960784, green: 0.043137254901960784, blue: 0.047058823529411764)
-    static let panel = Color(red: 0.07450980392156863, green: 0.07450980392156863, blue: 0.08235294117647059)
-    static let card = Color(red: 0.09411764705882353, green: 0.09411764705882353, blue: 0.10588235294117647)
-    static let selected = Color(red: 0.11764705882352941, green: 0.11764705882352941, blue: 0.12941176470588237)
-    static let line = Color.white.opacity(0.06)
-    static let lineStrong = Color.white.opacity(0.09)
-    static let text = Color(red: 0.9294117647058824, green: 0.9294117647058824, blue: 0.9372549019607843)
-    static let text2 = Color(red: 0.6313725490196078, green: 0.6313725490196078, blue: 0.6509803921568628)
-    static let text3 = Color(red: 0.5568627450980392, green: 0.5568627450980392, blue: 0.5803921568627451)
-    static let text4 = Color(red: 0.43137254901960786, green: 0.43137254901960786, blue: 0.4549019607843137)
+    // Graphite neutrals, hue 264 at near-zero chroma so greys stay clean, not muddy.
+    // Measured WCAG on panel (L 0.19): text 16.9, text2 9.9, text3 6.4, text4 5.5; all states ≥5.0 on cards.
+    static let canvas = Color.oklch(0.155, 0.004, 264)
+    static let panel = Color.oklch(0.19, 0.004, 264)
+    static let card = Color.oklch(0.225, 0.005, 264)
+    static let selected = Color.oklch(0.265, 0.006, 264)
+    static let line = Color.white.opacity(0.07)
+    static let lineStrong = Color.white.opacity(0.11)
+    static let text = Color.oklch(0.97, 0.002, 264)
+    static let text2 = Color.oklch(0.80, 0.006, 264)
+    static let text3 = Color.oklch(0.68, 0.008, 264)
+    static let text4 = Color.oklch(0.64, 0.008, 264)
     static let sidebarWidth: CGFloat = 232
     static let headerHeight: CGFloat = 48
     static let rowHeight: CGFloat = 30
@@ -500,12 +503,12 @@ struct LookBackground: View {
             MeshGradient(width: 3, height: 3,
                 points: [.init(0, 0), .init(0.5, 0), .init(1, 0), .init(0, 0.5), .init(0.45, 0.55), .init(1, 0.5), .init(0, 1), .init(0.5, 1), .init(1, 1)],
                 colors: [
-                    Color(red: 0.16, green: 0.10, blue: 0.05), Color(red: 0.07, green: 0.07, blue: 0.09), Color(red: 0.08, green: 0.06, blue: 0.14),
-                    Color(red: 0.28, green: 0.16, blue: 0.05), Color(red: 0.08, green: 0.08, blue: 0.10), Color(red: 0.14, green: 0.08, blue: 0.20),
-                    Color(red: 0.07, green: 0.07, blue: 0.08), Color(red: 0.06, green: 0.06, blue: 0.07), Color(red: 0.09, green: 0.07, blue: 0.12)
+                    Color.oklch(0.21, 0.02, 264), Color.oklch(0.17, 0.006, 264), Color.oklch(0.16, 0.004, 264),
+                    Color.oklch(0.19, 0.012, 250), Color.oklch(0.165, 0.004, 264), Color.oklch(0.17, 0.008, 280),
+                    Color.oklch(0.155, 0.004, 264), Color.oklch(0.15, 0.003, 264), Color.oklch(0.16, 0.006, 264)
                 ])
         } else {
-            LinearGradient(colors: [Color(red: 0.2, green: 0.12, blue: 0.05), Color(red: 0.07, green: 0.07, blue: 0.09)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [Color.oklch(0.21, 0.02, 264), Color.oklch(0.155, 0.004, 264)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 }
@@ -522,5 +525,24 @@ extension View {
 extension View {
     @ViewBuilder func glassProminentButton() -> some View {
         if #available(macOS 26, *) { self.buttonStyle(.glassProminent) } else { self.buttonStyle(.borderedProminent) }
+    }
+}
+
+
+// MARK: - OKLCH
+
+extension Color {
+    /// OKLCH → sRGB (Björn Ottosson). Out-of-gamut channels are clamped.
+    static func oklch(_ l: Double, _ c: Double, _ hDegrees: Double, opacity: Double = 1) -> Color {
+        let h = hDegrees * .pi / 180
+        let a = c * cos(h), b = c * sin(h)
+        let l_ = l + 0.3963377774 * a + 0.2158037573 * b
+        let m_ = l - 0.1055613458 * a - 0.0638541728 * b
+        let s_ = l - 0.0894841775 * a - 1.2914855480 * b
+        let L = l_ * l_ * l_, M = m_ * m_ * m_, S = s_ * s_ * s_
+        let r = 4.0767416621 * L - 3.3077115913 * M + 0.2309699292 * S
+        let g = -1.2684380046 * L + 2.6097574011 * M - 0.3413193965 * S
+        let bl = -0.0041960863 * L - 0.7034186147 * M + 1.7076147010 * S
+        return Color(.sRGBLinear, red: min(max(r, 0), 1), green: min(max(g, 0), 1), blue: min(max(bl, 0), 1), opacity: opacity)
     }
 }
