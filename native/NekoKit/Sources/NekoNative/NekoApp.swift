@@ -90,7 +90,10 @@ struct WorkspaceView: View {
             }
         }
         .frame(minWidth: model.onboarding ? 760 : 960, maxWidth: model.onboarding ? 760 : .infinity, minHeight: model.onboarding ? 580 : 620, maxHeight: model.onboarding ? 580 : .infinity)
-        .onChange(of: model.onboarding) { _, onboarding in if !onboarding { WindowSizer.expandForWorkspace() } }
+        .onChange(of: model.onboarding) { _, onboarding in
+            // Let SwiftUI lift the fixed setup frame first, then grow the window.
+            if !onboarding { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { WindowSizer.expandForWorkspace() } }
+        }
         .preferredColorScheme(.dark)
         .environment(\.nekoLook, NekoLook(rawValue: look) ?? .ambient)
         .safeAreaInset(edge: .top) {
@@ -313,8 +316,8 @@ struct ArcCard: ViewModifier {
 /// Setup is a small, fixed window; the workspace opens at a comfortable size once setup ends.
 @MainActor enum WindowSizer {
     static func expandForWorkspace() {
-        guard let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("workspace") == true || $0.title.hasPrefix("Neko") || $0.title.hasPrefix("Today") }),
-              let screen = window.screen?.visibleFrame else { return }
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width >= 600 && $0.styleMask.contains(.titled) }),
+              let screen = (window.screen ?? NSScreen.main)?.visibleFrame else { return }
         let size = NSSize(width: min(1280, screen.width - 80), height: min(820, screen.height - 60))
         let origin = NSPoint(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2)
         window.setFrame(NSRect(origin: origin, size: size), display: true, animate: true)

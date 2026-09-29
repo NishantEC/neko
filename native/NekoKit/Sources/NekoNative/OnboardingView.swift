@@ -97,13 +97,26 @@ struct OnboardingView: View {
     }
     private var workspaceStep: some View {
         stepCard(title: "Where do you work?", subtitle: "Add a folder you already work in. Each workspace can have its own tools, such as its own Linear.") {
+            if model.homeWorkspaceID == nil {
+                Button { Task { await model.addHomeWorkspace() } } label: {
+                    HStack(spacing: 14) {
+                        DimensionalGlyph(symbol: "house.fill", tint: Gem.amethyst, size: 52)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Use my home folder").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                            Text("Recommended · one default workspace for everything in ~").font(.system(size: 13)).foregroundStyle(.white.opacity(0.65))
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.5))
+                    }.padding(14).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
             if model.workspaces.isEmpty {
                 Button { model.selectedWorkspace = nil; workspaceSheet = true } label: {
                     HStack(spacing: 14) {
                         DimensionalGlyph(symbol: "folder.fill.badge.plus", tint: Gem.sapphire, size: 52)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Add a workspace").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                            Text("Choose one or more folders").font(.system(size: 13)).foregroundStyle(.white.opacity(0.65))
+                            Text("Choose specific folders").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                            Text("A project, with its own tools such as its own Linear").font(.system(size: 13)).foregroundStyle(.white.opacity(0.65))
                         }
                         Spacer()
                         Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.5))

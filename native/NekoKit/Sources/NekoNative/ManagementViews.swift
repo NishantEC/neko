@@ -280,7 +280,19 @@ struct WorkspacesView: View {
             PageIntro(title: "Workspaces", message: "Each workspace is a project: its folders, the tools it can use (for example its own Linear team) and what Neko watches for it. Everything comes together under All workspaces.") {
                 Button("Add workspace", systemImage: "plus") { model.selectedWorkspace = nil; editing = true }
             }
-            if model.workspaces.isEmpty { EmptyRow(text: "No workspaces yet. Add a folder you already work in.") }
+            if model.homeWorkspaceID == nil {
+                HStack(spacing: 12) {
+                    Image(systemName: "house").font(.system(size: 16)).foregroundStyle(N.text3).frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Add your home folder as the default workspace").font(.system(size: 13, weight: .medium)).foregroundStyle(N.text)
+                        Text("Covers everything in ~ that isn't part of a specific workspace.").font(.system(size: 12)).foregroundStyle(N.text4)
+                    }
+                    Spacer()
+                    Button("Add home folder") { Task { await model.addHomeWorkspace() } }.nekoGlassButton().controlSize(.small)
+                }
+                .padding(14)
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(N.line, style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
+            }
             ForEach(Array(model.workspaces.enumerated()), id: \.element.recordID) { index, workspace in
                 row(workspace, color: workspaceColor(index))
             }
@@ -295,7 +307,9 @@ struct WorkspacesView: View {
         let lastChecked = responsibilities.map { $0["last_attempt_ms"].int }.max() ?? 0
         let failing = responsibilities.contains { $0["failures"].int > 0 }
         let tickets = model.tasks.filter { $0["workspace_id"].string == id && !["Completed", "Cancelled"].contains($0["status"].string) }.count
-        return WorkspaceSection(name: workspace["name"].string, color: color, detail: tickets == 0 ? nil : "\(tickets) open") {
+        let isHome = id == model.homeWorkspaceID
+        let detail = [isHome ? "Default · home folder" : nil, tickets == 0 ? nil : "\(tickets) open"].compactMap { $0 }.joined(separator: " · ")
+        return WorkspaceSection(name: workspace["name"].string, color: color, detail: detail.isEmpty ? nil : detail) {
             HStack(spacing: 8) {
                 Button("Sync now", systemImage: "arrow.clockwise") {
                     responsibilities.forEach { submit(model, nested("Mcp", "Wake", ["responsibility_id": $0["id"]])) }
