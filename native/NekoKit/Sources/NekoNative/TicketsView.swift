@@ -24,11 +24,11 @@ enum TicketPresentation {
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             passed = try c.decode(Bool.self, forKey: .passed)
-            let decoded: [Finding] = (try? c.decode([Finding].self, forKey: .findings)) ?? []
-            findings = decoded.map { $0.text }
-            files = (try? c.decode([String].self, forKey: .files)) ?? []
-            tests = (try? c.decode([String].self, forKey: .tests)) ?? []
-            summary = (try? c.decode(String.self, forKey: .summary)) ?? ""
+            // Every field is required: a malformed reply must never read as a pass.
+            findings = try c.decode([Finding].self, forKey: .findings).map { $0.text }
+            files = try c.decode([String].self, forKey: .files)
+            tests = try c.decode([String].self, forKey: .tests)
+            summary = try c.decode(String.self, forKey: .summary)
         }
     }
     static func review(_ result: String) -> (body: String, verdict: Review?) {
