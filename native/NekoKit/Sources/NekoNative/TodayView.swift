@@ -87,12 +87,8 @@ struct TodayView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 32) {
                             if messages.isEmpty {
-                                greeting
-                                if model.workspaces.isEmpty {
-                                    howNekoWorks
-                                } else {
-                                    brief
-                                }
+                                todayHero
+                                if model.workspaces.isEmpty { howNekoWorks } else { brief }
                             }
                             ForEach(messages, id: \.recordID) { message in
                                 let mine = message["role"].string == "user"
@@ -159,6 +155,7 @@ struct TodayView: View {
                 .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
                 .padding(.horizontal, 64).padding(.bottom, 24).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
             }
+            if !messages.isEmpty {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     railHeader("Needs you", ["AwaitingApproval", "ReadyForReview", "Failed"])
@@ -168,6 +165,7 @@ struct TodayView: View {
                 }
             }.scrollIndicators(.never).frame(width: 300)
             .overlay(alignment: .leading) { N.line.frame(width: 1) }
+            }
         }
         }.animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: messages.count)
         .sheet(isPresented: Binding(get: { ticket != nil }, set: { if !$0 { ticket = nil } })) {
@@ -216,6 +214,41 @@ struct TodayView: View {
             Text(waiting == 0 ? (model.workspaces.isEmpty ? "I watch your work while you're away, plan the next step the way you would, and ask before I act." : "Nothing needs you right now. I'm watching.") : "\(waiting) \(waiting == 1 ? "thing needs" : "things need") you. Everything else is being watched.")
                 .font(.system(size: 14)).lineSpacing(4).foregroundStyle(N.text3)
         }
+    }
+    private var todayHero: some View {
+        let h = Calendar.current.component(.hour, from: Date())
+        let part = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
+        let needs = model.tasks.filter { ["AwaitingApproval", "ReadyForReview", "Failed"].contains($0["status"].string) }.count
+        let working = model.tasks.filter { ["Queued", "Planning", "Building", "Reviewing"].contains($0["status"].string) }.count
+        let watched = model.snapshot["mcp"]["responsibilities"].array.filter { $0["enabled"].bool }
+        let workspaces = model.workspaces.count
+        return VStack(spacing: 28) {
+            VStack(spacing: 8) {
+                Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.6))
+                Text(needs == 0 ? "\(part). All quiet while you were away." : "\(part). Here's what I found:")
+                    .font(.system(size: 30, weight: .semibold)).tracking(-0.6).foregroundStyle(.white).multilineTextAlignment(.center)
+            }.frame(maxWidth: .infinity)
+            HStack(spacing: 14) {
+                SummaryCard(title: "Needs you", value: "\(needs)", caption: needs == 1 ? "decision to make" : "decisions to make", symbol: "hand.raised.fill", tint: .oklch(0.72, 0.16, 60), action: needs == 0 ? nil : "Review") {
+                    NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
+                }
+                SummaryCard(title: "Working now", value: "\(working)", caption: working == 1 ? "task in progress" : "tasks in progress", symbol: "bolt.fill", tint: .oklch(0.66, 0.17, 300), action: working == 0 ? nil : "Follow") {
+                    NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
+                }
+                SummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "add a workspace to start" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", symbol: "eye.fill", tint: .oklch(0.70, 0.13, 200), action: workspaces == 0 ? "Add" : "Manage") {
+                    if workspaces == 0 { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
+                }
+            }
+            OrbButton(title: watched.isEmpty ? "Start" : "Check now") {
+                if watched.isEmpty {
+                    if workspaces == 0 { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
+                } else {
+                    for item in watched { Task { await model.workbench(.object(["Mcp": .command("Wake", ["responsibility_id": item["id"]])])) } }
+                }
+            }
+            .accessibilityLabel(watched.isEmpty ? "Start watching" : "Check everything now")
+        }
+        .padding(.top, 12)
     }
     private var howNekoWorks: some View {
         let watching = !model.snapshot["mcp"]["responsibilities"].array.isEmpty

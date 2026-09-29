@@ -498,19 +498,7 @@ struct LookBackground: View {
             if opaque { Color(nsColor: .windowBackgroundColor) } else { field.extendsUnderSidebar() }
         }
     }
-    @ViewBuilder private var field: some View {
-        if #available(macOS 15, *) {
-            MeshGradient(width: 3, height: 3,
-                points: [.init(0, 0), .init(0.5, 0), .init(1, 0), .init(0, 0.5), .init(0.45, 0.55), .init(1, 0.5), .init(0, 1), .init(0.5, 1), .init(1, 1)],
-                colors: [
-                    Color.oklch(0.21, 0.02, 264), Color.oklch(0.17, 0.006, 264), Color.oklch(0.16, 0.004, 264),
-                    Color.oklch(0.19, 0.012, 250), Color.oklch(0.165, 0.004, 264), Color.oklch(0.17, 0.008, 280),
-                    Color.oklch(0.155, 0.004, 264), Color.oklch(0.15, 0.003, 264), Color.oklch(0.16, 0.006, 264)
-                ])
-        } else {
-            LinearGradient(colors: [Color.oklch(0.21, 0.02, 264), Color.oklch(0.155, 0.004, 264)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        }
-    }
+    @ViewBuilder private var field: some View { SpaceGradient() }
 }
 
 extension View {
@@ -544,5 +532,140 @@ extension Color {
         let g = -1.2684380046 * L + 2.6097574011 * M - 0.3413193965 * S
         let bl = -0.0041960863 * L - 0.7034186147 * M + 1.7076147010 * S
         return Color(.sRGBLinear, red: min(max(r, 0), 1), green: min(max(g, 0), 1), blue: min(max(bl, 0), 1), opacity: opacity)
+    }
+}
+
+
+// MARK: - Arc × CleanMyMac
+
+/// Arc keeps colour on the window "space" and leaves content neutral.
+/// Deep indigo into violet, with a soft magenta bloom low right.
+struct SpaceGradient: View {
+    var intensity: Double = 1
+    var body: some View {
+        ZStack {
+            if #available(macOS 15, *) {
+                MeshGradient(width: 3, height: 3,
+                    points: [.init(0, 0), .init(0.5, 0), .init(1, 0), .init(0, 0.5), .init(0.55, 0.45), .init(1, 0.5), .init(0, 1), .init(0.5, 1), .init(1, 1)],
+                    colors: [
+                        .oklch(0.24, 0.09, 280), .oklch(0.20, 0.08, 286), .oklch(0.23, 0.10, 300),
+                        .oklch(0.21, 0.08, 272), .oklch(0.26, 0.12, 292), .oklch(0.30, 0.14, 318),
+                        .oklch(0.18, 0.06, 268), .oklch(0.25, 0.11, 300), .oklch(0.34, 0.16, 330)
+                    ])
+            } else {
+                LinearGradient(colors: [.oklch(0.22, 0.09, 280), .oklch(0.32, 0.15, 320)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        }.opacity(intensity).ignoresSafeArea().accessibilityHidden(true)
+    }
+}
+
+/// CleanMyMac-style dimensional glyph: a glossy tinted tile with an SF Symbol,
+/// top highlight, inner rim and a soft coloured drop shadow.
+struct DimensionalGlyph: View {
+    let symbol: String
+    let tint: Color
+    var size: CGFloat = 76
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var float = false
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+                .fill(LinearGradient(colors: [tint.opacity(0.95), tint.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+                .fill(LinearGradient(colors: [.white.opacity(0.45), .clear], startPoint: .top, endPoint: .center))
+                .padding(1.5).blendMode(.plusLighter).opacity(0.6)
+            RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+                .strokeBorder(LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom), lineWidth: 1)
+            Image(systemName: symbol)
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+        }
+        .frame(width: size, height: size)
+        .shadow(color: tint.opacity(0.55), radius: 18, y: 10)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Big-number summary card with a glyph peeking from the top right and a pill action.
+struct SummaryCard: View {
+    let title: String
+    let value: String
+    let caption: String
+    let symbol: String
+    let tint: Color
+    var action: String? = nil
+    var perform: () -> Void = {}
+    @State private var hover = false
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.78))
+                Spacer(minLength: 28)
+                Text(value).font(.system(size: 34, weight: .bold)).tracking(-0.6).foregroundStyle(.white).monospacedDigit()
+                HStack(alignment: .firstTextBaseline) {
+                    Text(caption).font(.system(size: 13)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                    Spacer(minLength: 8)
+                    if let action {
+                        Button(action, action: perform)
+                            .buttonStyle(PillButtonStyle())
+                    }
+                }.padding(.top, 2)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, minHeight: 168, alignment: .topLeading)
+            DimensionalGlyph(symbol: symbol, tint: tint, size: 64).padding(.top, -6).padding(.trailing, 14)
+        }
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(hover ? 0.10 : 0.07))
+                RadialGradient(colors: [tint.opacity(0.35), .clear], center: .topTrailing, startRadius: 0, endRadius: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(LinearGradient(colors: [.white.opacity(0.22), .white.opacity(0.05)], startPoint: .top, endPoint: .bottom)))
+        .scaleEffect(hover ? 1.01 : 1)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: hover)
+        .onHover { hover = $0 }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct PillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white)
+            .padding(.horizontal, 14).frame(height: 28)
+            .background(.white.opacity(configuration.isPressed ? 0.28 : 0.18), in: Capsule())
+            .overlay(Capsule().strokeBorder(.white.opacity(0.25)))
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+    }
+}
+
+/// CleanMyMac's round primary action: a glowing orb with a soft halo.
+struct OrbButton: View {
+    let title: String
+    let perform: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+    var body: some View {
+        Button(action: perform) {
+            Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 92, height: 92)
+                .background {
+                    ZStack {
+                        Circle().fill(RadialGradient(colors: [.oklch(0.62, 0.2, 320), .oklch(0.45, 0.2, 300)], center: .topLeading, startRadius: 4, endRadius: 90))
+                        Circle().strokeBorder(.white.opacity(0.45), lineWidth: 1.5)
+                    }
+                }
+                .shadow(color: .oklch(0.6, 0.22, 320).opacity(pulse ? 0.8 : 0.45), radius: pulse ? 30 : 18)
+        }
+        .buttonStyle(.plain)
+        .onAppear { if !reduceMotion { withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { pulse = true } } }
+    }
+}
+
+extension View {
+    @ViewBuilder func hiddenWindowToolbarBackground() -> some View {
+        if #available(macOS 15, *) { self.toolbarBackgroundVisibility(.hidden, for: .windowToolbar) } else { self }
     }
 }
