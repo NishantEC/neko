@@ -69,16 +69,18 @@ struct WorkspaceView: View {
                     .background { LookBackground(look: look) }
                     .softScrollEdges()
                     .navigationTitle(PageInfo.title(page))
+                    .onChange(of: model.workspaces.count) { _, n in if n == 1, model.selectedWorkspace == nil { model.selectedWorkspace = model.workspaces.first?.recordID } }
+                    .onAppear { if model.workspaces.count == 1, model.selectedWorkspace == nil { model.selectedWorkspace = model.workspaces.first?.recordID } }
                     .onReceive(NotificationCenter.default.publisher(for: .nekoNavigate)) { note in if let key = note.object as? String { page = key } }
                     .navigationSubtitle(model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces")
                     .toolbar {
+                        ToolbarItem(placement: .navigation) { WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace) }
                         ToolbarItem(placement: .status) { WatchingStatus(connected: model.connected) }
                         ToolbarItemGroup(placement: .primaryAction) {
                             Menu {
                                 Picker("Look", selection: $look) { ForEach(NekoLook.allCases) { Text($0.title).tag($0.rawValue) } }.pickerStyle(.inline)
                             } label: { Label("Look", systemImage: "paintpalette") }
                             .help("Switch Neko's look")
-                            Button { model.selectedWorkspace = nil; addingWorkspace = true } label: { Label("Add workspace", systemImage: "folder.badge.plus") }
                             Button { PaletteController.shared.toggle(model: model) } label: { Label("Quick panel", systemImage: "command") }.help("Quick panel (⌘K)")
                         }
                     }
@@ -188,33 +190,25 @@ struct SelectedGlass: ViewModifier {
 struct NativeSidebar: View {
     @ObservedObject var model: AppModel
     @Binding var page: String
+    @State private var selection: String?
     let pages: [(String, String)]
     @Binding var addingWorkspace: Bool
     var body: some View {
-        List(selection: Binding<String?>(get: { page }, set: { if let v = $0 { page = v } })) {
-            Section("Your day") {
-                row("Today"); row("Tickets")
-            }
-            Section("What Neko watches") {
-                row("Responsibilities"); row("Schedules")
-            }
-            Section("Teach Neko") {
-                row("Tools & skills"); row("Memory"); row("Profiles")
-            }
-            Section("Workspaces") {
-                workspaceRow(nil, name: "All workspaces", color: .secondary)
-                ForEach(Array(model.workspaces.enumerated()), id: \.element.recordID) { index, workspace in
-                    workspaceRow(workspace.recordID, name: workspace["name"].string, color: workspaceColor(index))
+        List(selection: $selection) {
+            ForEach(PageInfo.groups, id: \.title) { group in
+                Section(group.title) {
+                    ForEach(group.keys, id: \.self) { key in row(key) }
                 }
-                Button { model.selectedWorkspace = nil; addingWorkspace = true } label: { Label("Add workspace", systemImage: "plus") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
             }
         }
         .listStyle(.sidebar)
+        .onAppear { selection = page }
+        .onChange(of: selection) { _, v in if let v, v != page { page = v } }
+        .onChange(of: page) { _, v in if selection != v { selection = v } }
     }
     private func row(_ key: String) -> some View {
         let attention = key == "Tickets" ? StatusSummary(snapshot: model.snapshot).needsAttention : 0
-        return Label(PageInfo.title(key), systemImage: PageInfo.icon(key)).tag(key).badge(attention)
+        return Label(PageInfo.title(key), systemImage: PageInfo.icon(key)).badge(attention)
     }
     private func workspaceRow(_ id: String?, name: String, color: Color) -> some View {
         let selected = model.selectedWorkspace == id
@@ -241,6 +235,11 @@ struct WatchingStatus: View {
 
 /// User-facing names follow the product loop: Neko watches, plans, then asks you.
 enum PageInfo {
+    static let groups: [(title: String, keys: [String])] = [
+        ("Your day", ["Today", "Tickets"]),
+        ("What Neko watches", ["Responsibilities", "Schedules"]),
+        ("Teach Neko", ["Tools & skills", "Memory", "Profiles"])
+    ]
     static func title(_ key: String) -> String {
         switch key {
         case "Tickets": "Work"
@@ -260,5 +259,32 @@ enum PageInfo {
         case "Profiles": "person.2"
         default: "circle"
         }
+    }
+}
+
+/// One place to choose where Neko works, as in Codex and Xcode. Used in the toolbar and composer.
+struct WorkspaceMenu: View {
+    @ObservedObject var model: AppModel
+    @Binding var addingWorkspace: Bool
+    var compact = false
+    private var current: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
+    var body: some View {
+        Menu {
+            Button { model.selectedWorkspace = nil } label: { Label("All workspaces", systemImage: model.selectedWorkspace == nil ? "checkmark" : "square.stack") }
+            if !model.workspaces.isEmpty { Divider() }
+            ForEach(model.workspaces, id: \.recordID) { workspace in
+                Button { model.selectedWorkspace = workspace.recordID } label: {
+                    Label(workspace["name"].string, systemImage: model.selectedWorkspace == workspace.recordID ? "checkmark" : "folder")
+                }
+            }
+            Divider()
+            Button("Add workspace…") { addingWorkspace = true }
+            if model.selectedWorkspace != nil { Button("Workspace settings…") { addingWorkspace = true } }
+        } label: {
+            Label(current, systemImage: "folder").labelStyle(.titleAndIcon)
+        }
+        .menuIndicator(.visible)
+        .help("Choose where Neko works")
+        .accessibilityLabel("Workspace: \(current)")
     }
 }

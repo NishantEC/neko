@@ -130,7 +130,7 @@ struct TodayView: View {
                             scrollFollow.update(metrics)
                             // Layout has now measured the completed reply, so
                             // scroll to its new bottom rather than the old one.
-                            if resized, scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) }
+                            if resized, scrollFollow.followsLatest { DispatchQueue.main.async { reader.scrollTo("bottom", anchor: .bottom) } }
                         }
                         .onChange(of: messages.last) { _, _ in
                             if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) }
@@ -142,11 +142,11 @@ struct TodayView: View {
                         .onAppear { reader.scrollTo("bottom", anchor: .bottom) }
                 }
                 }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
                     ComposerView(text: Binding(get: { draft }, set: { draft = $0 }), onSubmit: send, onError: { model.error = $0 }).id(scope).frame(height: 52)
                     HStack(spacing: 8) {
-                        GlassGroup(spacing: 6) { HStack(spacing: 6) { ComposerChip(text: workspaceName); ComposerChip(text: "Read only") } }
+                        WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace).menuStyle(.button).buttonStyle(.borderless).controlSize(.small).fixedSize()
+                        ComposerChip(text: "Read only")
                         Spacer()
                         Text("⌘↵").font(.system(size: 11)).foregroundStyle(N.text4)
                         Button { send() } label: {
@@ -158,7 +158,6 @@ struct TodayView: View {
                 .liquidGlass(radius: 18)
                 .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
                 .padding(.horizontal, 64).padding(.bottom, 24).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
-                }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
