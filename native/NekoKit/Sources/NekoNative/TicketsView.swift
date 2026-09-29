@@ -217,7 +217,7 @@ struct TicketCard: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(hover ? Color(red: 0.11, green: 0.11, blue: 0.12) : N.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(hover ? N.selected : N.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(highlighted ? NekoStyle.accent.opacity(0.35) : Color.white.opacity(hover ? 0.1 : 0.06)))
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
