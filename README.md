@@ -1,8 +1,10 @@
 # neko
 
-A native personal-agent workspace and quick command center for macOS, written
-in Rust on [GPUI](https://gpui.rs). Launch Neko for the full app; press ⌥Space
-for quick search, clipboard history, and task attention.
+A native personal-agent workspace and quick command center for macOS. The
+installed app is SwiftUI/AppKit over a Rust daemon and protocol; the original
+[GPUI](https://gpui.rs) client remains a historical development path. Launch
+Neko for the full app; press ⌥Space for quick search, clipboard history, and
+task attention.
 
 ## Neko-owned work
 
@@ -22,10 +24,15 @@ a workspace.
    array. Neko does not download or install server packages.
 2. Sign in through the browser if the server supports OAuth, or supply optional
    credential JSON in the masked field. Secrets are stored in macOS Keychain.
-3. Discover tools, inspect their schemas, and grant only those you trust to run
-   unattended. New or changed tool schemas need fresh permission.
-4. Add a responsibility, select its connections, and write what to watch.
-   Checks run every ten minutes while the daemon is running; failures back off.
+3. Discover tools and inspect their schemas. Discovered tools are available in
+   the connection's workspace without a second per-tool switch.
+4. A trusted connected source with a currently granted, read-declared tool for
+   listing changing work starts one plan-only watch in each available workspace. An
+   untried chat suggestion for that source is started instead of adding a
+   duplicate. You can refine or pause the watch; checks run every ten minutes
+   while the daemon is running, and failures back off. Sources with no such
+   tools need review before unattended checking. Search-only reference catalogs
+   stay available on demand rather than becoming empty recurring checks.
 5. Keep **Plan only**, or explicitly allow low-risk local fixes. A read-only
    supervisor investigates, a builder uses an isolated Git worktree, and an
    independent read-only reviewer checks the actual diff and executes checks.
@@ -34,7 +41,10 @@ a workspace.
 Open the full app from the Dock, menu bar **Open Neko Workspace**, or the
 palette's **Open Neko Workspace** command. **Today** is a conversation with
 Neko: its brief lists tickets that need you, and asking for work opens a
-ticket that is planned read-only and waits for your approval. **Tickets**
+ticket that is planned read-only and waits for your approval. Its composer
+accepts pasted or dropped images and files as local attachments. Return sends
+or queues a message, Shift-Return inserts a line, and Command-Return interrupts
+the current reply and sends. **Work**
 lists everything by needs you, working and done; open one to approve, retry,
 or add a note that steers its next plan or build. **Propose parallel subtasks**
 on an awaiting plan generates two or three scoped proposals for your approval.
@@ -65,21 +75,35 @@ the MCP Registry and skills.sh; skill installation previews standalone SKILL.md
 content and requires source/audit review before saving and separate activation.
 
 Automatic local preparation requires successful scoped tool receipts no older
-than fifteen minutes, unchanged source revision/content, current responsibility
-and tool permission, and a bounded low-risk bug assessment with evidence,
+than fifteen minutes, unchanged source revision/content, an enabled responsibility
+with selected connections, and a bounded low-risk bug assessment with evidence,
 files and tests. Sensitive or uncertain work needs a decision. Manual tasks
 still require approval. Model assessments and source interpretation are
 judgment, not proof. **Ready for review** does not mean tests passed or merged.
 
-Pausing a connection revokes its grants; resuming does not restore them.
+Pausing a connection removes its tool access; resuming restores the currently
+discovered tools in its workspace.
+The tool-access migration pauses existing responsibilities once. Untried chat
+suggestions for readable sources then start automatically, while an existing
+manual pause remains in effect.
 Pausing a responsibility prevents future wakes and cancels its active watch.
-Revocation cannot undo a remote action already sent. User-granted MCP tools
+Revocation cannot undo a remote action already sent. Connected MCP tools
 can themselves mutate external systems: a server's read-only annotation is
-not a security guarantee. Permission to prepare a local fix does not grant
+not a security guarantee. Background watches expose and call only tools
+declared read-only; trust the server before connecting it. Permission to prepare a local fix does not grant
 push, PR creation, messages, or deployment.
 
 The local Codex CLI must be installed and authenticated. `NEKO_CODEX_PATH`
-can select an absolute executable path. Runs ignore global user config/rules
+can select an absolute executable path. You can select a model in the
+main-window Settings → AI page or the Today composer. The default uses the
+signed-in Codex account; Ollama and LM Studio use the Codex CLI's local-provider
+adapter and require their local server to be installed and running. If the
+optional OpenCodex CLI is installed, Neko reads its live model catalog and
+shows enabled models under their provider names. Routed runs use its running
+loopback proxy; Neko does not import its credentials or fetch those providers'
+models independently. Without it, the Codex default and local-provider choices
+remain available. Model selection changes future runs, not work in progress.
+Runs ignore global user config/rules
 and receive only a temporary Neko bridge, not upstream server credentials.
 Shell network access stays disabled; only the two capability-checked bridge
 tools are preapproved. Your global Codex configuration is not modified.
@@ -114,10 +138,10 @@ SKILL.md files are listed by reference to Neko's agents in that workspace.
 Agents open a skill only when relevant; a skill never grants tool authority.
 Neko-installed skills still require separate activation. Existing MCP
 definitions appear in **Tools & skills → Connections** for the selected
-workspace. Linking stores a source reference, not source credentials, and
-grants no tools. Neko re-reads the source before discovery and dispatch;
-changed or missing definitions revoke grants. Local executables require
-separate trust, and each discovered tool needs a workspace grant. The legacy import protocol remains
+workspace. Linking stores a source reference, not source credentials. Neko
+re-reads the source before discovery and dispatch; changed or missing definitions
+remove access until reviewed and rediscovered. Local executables require
+separate trust. The legacy import protocol remains
 available for migration fixtures and existing data; it is no longer a first-run
 screen. Verify that legacy protocol with:
 

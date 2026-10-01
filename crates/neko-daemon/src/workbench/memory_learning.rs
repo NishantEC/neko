@@ -99,6 +99,7 @@ impl Controller {
                     prompt: learning::prompt(&job, &snapshot),
                     writable: false,
                     timeout: Duration::from_secs(90),
+                    runtime: snapshot.agent_runtime.clone(),
                 },
                 &AtomicBool::new(false),
             )

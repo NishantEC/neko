@@ -21,6 +21,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const SERVICE: &str = "app.neko.mcp.oauth";
 const FAILED: &str =
     "MCP authentication failed. Check the server configuration and authenticate again.";
+const DECLINED: &str = "Authentication was declined or cancelled in the browser. Try again.";
 static REFRESH_LOCK: Mutex<()> = Mutex::new(());
 static CREDENTIAL_GATE: LazyLock<CredentialGate> = LazyLock::new(CredentialGate::default);
 
@@ -254,7 +255,7 @@ fn callback(target: &str) -> Result<AuthorizationCallback, String> {
     }
     let url = Url::parse(&format!("http://127.0.0.1{target}")).map_err(|_| FAILED)?;
     if url.query_pairs().any(|(key, value)| {
-        key == "error" || (matches!(key.as_ref(), "code" | "state" | "iss") && value.is_empty())
+        matches!(key.as_ref(), "code" | "state" | "iss" | "error") && value.is_empty()
     }) {
         return Err(FAILED.into());
     }
@@ -263,7 +264,21 @@ fn callback(target: &str) -> Result<AuthorizationCallback, String> {
             return Err(FAILED.into());
         }
     }
+    if url.query_pairs().any(|(key, _)| key == "error") {
+        if url.query_pairs().any(|(key, _)| key == "code")
+            || !url.query_pairs().any(|(key, _)| key == "state")
+        {
+            return Err(FAILED.into());
+        }
+        return Err(DECLINED.into());
+    }
     AuthorizationCallback::from_redirect_url(url.as_str()).map_err(|_| FAILED.into())
+}
+
+/// Reserve the credential generation before starting a worker so a cancelled
+/// attempt cannot invalidate a later retry merely by starting late.
+pub fn begin_authorization(id: &str) -> Result<u64, String> {
+    CREDENTIAL_GATE.invalidate(id, || ()).map(|(epoch, ())| epoch)
 }
 
 /// Called only following an explicit Authenticate action. URL delivery does not itself open a browser.
@@ -271,6 +286,7 @@ pub fn authorize(
     id: &str,
     url: &str,
     client_id: Option<&str>,
+    epoch: u64,
     cancel: &AtomicBool,
     on_url: impl FnOnce(&str),
 ) -> Result<(), String> {
@@ -279,7 +295,6 @@ pub fn authorize(
         return Err("Authentication cancelled".into());
     }
     safe_url(url)?;
-    let epoch = CREDENTIAL_GATE.invalidate(id, || ())?.0;
     runtime(async {
         bounded(deadline, cancel, async {
             let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.map_err(|_| FAILED)?;
@@ -314,11 +329,13 @@ pub fn authorize(
                         if !address.ip().is_loopback() { continue; }
                         let read_deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(2));
                         let result = read_callback(&mut stream, read_deadline, cancel).await;
+                        let declined = matches!(&result, Err(error) if error == DECLINED);
                         let success = if let Ok(callback) = result {
                             manager.exchange_code_for_token_with_issuer(&callback.code, &callback.csrf_token, callback.issuer.as_deref()).await.is_ok()
                         } else { false };
                         let response = if success { "HTTP/1.1 200 OK\r\nContent-Length: 37\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nAuthenticated. You can close this tab." } else { "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" };
                         let _ = tokio::time::timeout_at(deadline.min(tokio::time::Instant::now() + Duration::from_secs(1)), stream.write_all(response.as_bytes())).await;
+                        if declined { return Err(DECLINED.into()); }
                         if success {
                             if cancel.load(Ordering::Acquire) { return Err("Authentication cancelled".into()); }
                             let credentials = store.load().await.map_err(|_| FAILED)?.ok_or(FAILED)?;
@@ -774,5 +791,24 @@ mod tests {
             assert!(callback(target).is_err());
         }
         assert!(callback("/callback?code=x&state=y").is_ok());
+    }
+
+    #[test]
+    fn provider_denial_reports_a_retryable_authentication_failure() {
+        assert_eq!(
+            callback("/callback?error=access_denied&state=example")
+                .unwrap_err(),
+            "Authentication was declined or cancelled in the browser. Try again."
+        );
+    }
+
+    #[test]
+    fn retry_epoch_invalidates_an_older_worker_even_if_it_starts_late() {
+        let id = "retry-epoch-test";
+        let old = begin_authorization(id).unwrap();
+        let current = begin_authorization(id).unwrap();
+        assert_ne!(old, current);
+        assert!(CREDENTIAL_GATE.commit(id, old, true, || Ok(())).is_err());
+        CREDENTIAL_GATE.commit(id, current, true, || Ok(())).unwrap();
     }
 }

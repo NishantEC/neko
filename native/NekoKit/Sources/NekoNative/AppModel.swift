@@ -4,6 +4,7 @@ import NekoKit
 @MainActor final class AppModel: ObservableObject {
     @Published var snapshot: JSONValue = .object([:])
     @Published var selectedWorkspace: String?
+    @Published var requestedPage: String?
     @Published private var actionError: String?
     @Published private var connectionError: String?
     /// Explicit action failures survive background reconnects. Dismissing the

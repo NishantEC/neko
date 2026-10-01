@@ -132,16 +132,21 @@ pub struct McpState {
     pub connections: Vec<McpConnection>,
     pub grants: Vec<ToolGrant>,
     pub responsibilities: Vec<Responsibility>,
+    /// Source/workspace pairs already considered for automatic watching. A
+    /// later manual pause must not be undone by the scheduler.
+    #[serde(default)]
+    pub auto_watch_scopes: Vec<String>,
     pub receipts: Vec<ToolReceipt>,
     pub sources: Vec<SourceEvidence>,
 }
 impl Default for McpState {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             connections: vec![],
             grants: vec![],
             responsibilities: vec![],
+            auto_watch_scopes: vec![],
             receipts: vec![],
             sources: vec![],
         }

@@ -205,6 +205,9 @@ impl Controller {
             .lock()
             .map_err(|_| "Workspace storage unavailable")?;
         let mut state = store::load(&db)?;
+        if policy::seed_source_watches(&mut state, now) {
+            store::save(&db, &state)?;
+        }
         let Some(index) = state
             .mcp
             .responsibilities
@@ -234,7 +237,7 @@ impl Controller {
             profile_revision: state.agent_profiles.revision,
             responsibility,
             workspace,
-            run_id: store::new_id(),
+            run_id: format!("watch:{}", store::new_id()),
         }))
     }
     fn finish_wake(
@@ -309,6 +312,7 @@ impl Controller {
                 directory: claim.workspace.repository.clone().into(),
                 writable: false,
                 timeout: Duration::from_secs(600),
+                runtime: state.agent_runtime.clone(),
                 prompt: format!(
                     "{}\nThis wake is read-only: do not mutate external systems, publish, send messages, or edit files. A tool grant is not permission to exceed this read-only wake.\nWorkspace preferences:\n{}\nAgent context:\n{}\nUser-enabled workspace skills:\n{skills}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context, recheck them using current tools):\n{}",
                     responsibility::INSTRUCTION,
@@ -525,6 +529,25 @@ mod tests {
                 .next_due_ms
                 >= 600_100
         );
+    }
+    #[test]
+    fn background_run_claims_new_readable_source_without_turn_on() {
+        let controller = configured();
+        {
+            let db = controller.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.mcp.responsibilities.clear();
+            state.mcp.connections[0].tools[0].read_only = true;
+            state.mcp.connections[0].tools[0].name = "list_issues".into();
+            state.mcp.grants[0].tool_name = "list_issues".into();
+            store::save(&db, &state).unwrap();
+        }
+        let claim = controller.claim_due(100).unwrap().expect("automatic watch");
+        assert!(claim.run_id.starts_with("watch:"));
+        assert!(claim.responsibility.enabled);
+        assert!(!claim.responsibility.prepare_low_risk);
+        assert_eq!(claim.responsibility.connection_ids, ["c"]);
+        assert!(controller.claim_due(101).unwrap().is_none());
     }
     #[test]
     fn responsibility_skills_are_scoped_and_changed_files_fail_before_launch() {

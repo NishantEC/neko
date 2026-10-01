@@ -2,6 +2,11 @@
 
 ## Current standalone workspace (2026-09-24)
 
+As of 2026-10-02, `/Applications/Neko.app` is built from `native/NekoKit`
+(SwiftUI/AppKit) over the same daemon and workbench protocol. The GPUI
+`workspace.rs` client described in the historical implementation record below
+is not the native installer's source.
+
 The current default supersedes the historical agent-browser and accessory-only
 window decisions below. Neko opens a regular, persistent `workspace.rs` app
 window; the hotkey remains a separate palette, dismissed with native
@@ -24,7 +29,7 @@ guaranteed by the current Codex sandbox; do not describe scoped prompts as a
 security boundary. Task worktrees are preserved, including failed work.
 
 User-owned MCP replaces the built-in Linear integration. The separate
-`neko-core::mcp_host` module owns SDK transport, schema-bound grants,
+`neko-core::mcp_host` module owns SDK transport, workspace-scoped tool access,
 Keychain credentials/OAuth, run capabilities, source receipts and generic
 responsibility policy. The legacy Paseo-specific `mcp` module is unchanged.
 Versioned migration retains old tasks, sources, worktrees and credential IDs,
@@ -32,12 +37,14 @@ but disables legacy polling/away authority. No global Codex configuration is
 modified. Never reintroduce a service-specific connector as the default.
 
 Users add local executable/argument configurations or remote HTTP URLs in
-Tools / MCP, discover tools and explicitly grant unattended use per workspace.
-Local executable trust is separate from tool permission; server annotations
-are not a security boundary. A per-run daemon bridge keeps upstream credentials
-out of worker configuration and rechecks current scope, grants and schema.
+Tools / MCP, then discover tools. Discovered tools become available in the
+connection's workspace without a per-tool switch. Enabling a responsibility
+with selected connections separately authorizes unattended checks. Local
+executable trust is separate; server annotations are not a security boundary.
+A per-run daemon bridge keeps upstream credentials out of worker configuration
+and rechecks current connection scope and schema.
 Its two tools alone are preapproved; shell networking remains disabled.
-Remote tools may mutate systems if granted: local-fix authority is not
+Remote tools may mutate systems when called: local-fix authority is not
 publication authority and cancellation cannot undo completed remote effects.
 
 Generic responsibilities wake every ten minutes while the daemon runs, with
@@ -46,6 +53,12 @@ observations; a fresh unchanged actionable source plus a bounded low-risk
 model assessment can authorize a local fix when explicitly enabled. Manual
 tasks, missing evidence and sensitive/uncertain changes still need approval.
 Editing responsibility instructions/connections invalidates old eligibility.
+Trusted, connected sources with a granted read-declared tool that lists changing work now get one
+plan-only watch per available workspace without a second activation. An
+untried chat suggestion for that source is activated instead of duplicated;
+durable scope markers keep later manual pauses paused. Background leases expose
+and call only tools declared read-only, which still relies on the trusted
+server's honesty rather than creating a security boundary.
 No automatic installation, marketplace, arbitrary swarm, cloud execution,
 cross-workspace sharing or automatic PR publication is claimed. Legacy
 Codex/Paseo providers remain opt-in via `NEKO_LEGACY_AGENTS=1`.
@@ -6476,9 +6489,9 @@ product decisions, not extensions of this local app-server loop. Evidence:
 
 ## Chat tool authority
 
-Chat MCP tools use the selected workspace's lease and current schema grants;
+Chat MCP tools use the selected workspace's lease and current connection catalog;
 unscoped chat has no bridge. Server `readOnlyHint` participates in schema identity
-and is an explicit trust decision at grant time. Unknown/action tools require
+and is supplied by the server, not a security guarantee. Unknown/action tools require
 one inline approval per exact call. See `docs/architecture.md` and
 `crates/neko-daemon/src/mcp_host/chat_tests.rs`; `node scripts/smoke-workbench.mjs`
 exercises actual chat-worker/bridge IPC with approval, denial, Stop and restart.

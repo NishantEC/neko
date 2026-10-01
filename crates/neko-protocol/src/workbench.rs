@@ -153,7 +153,19 @@ pub struct TaskSplit {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentRuntime {
+    /// Empty means the signed-in Codex account. Local values use Codex's OSS adapter.
+    #[serde(default)]
+    pub provider: String,
+    /// Empty lets the selected provider choose its default model.
+    #[serde(default)]
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub agent_runtime: AgentRuntime,
     /// Every folder in a logical workspace. Legacy workspaces use `repository`.
     #[serde(default)]
     pub workspace_folders: BTreeMap<String, Vec<String>>,
@@ -273,12 +285,14 @@ pub struct ChatMessage {
     #[serde(default)]
     pub pending: bool,
     #[serde(default)]
+    pub queued: bool,
+    #[serde(default)]
     pub failed: bool,
     /// Memories Neko saved from this turn, shown under the reply.
     #[serde(default)]
     pub remembered: Vec<String>,
-    /// Responsibilities Neko suggested in this turn, saved paused until the
-    /// user turns them on.
+    /// Responsibilities Neko suggested in this turn. The daemon starts an
+    /// untried suggestion when its selected source has readable tools.
     #[serde(default)]
     pub responsibility_ids: Vec<String>,
 }
@@ -306,6 +320,7 @@ pub enum ChatToolStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
+    SetAgentRuntime { runtime: AgentRuntime },
     AgentProfiles(crate::agent_profiles::ProfileCommand),
     Schedules(crate::scheduled_plans::ScheduleCommand),
     SetupImport(crate::setup_import::ImportCommand),
@@ -376,6 +391,11 @@ pub enum Command {
     SendMessage {
         text: String,
         /// Where new tickets should go when the message doesn't say.
+        workspace_id: Option<String>,
+    },
+    /// Stop the current reply, then send this message before other queued messages.
+    InterruptAndSendMessage {
+        text: String,
         workspace_id: Option<String>,
     },
     /// Steer one ticket. Notes reach its planner and builder as user

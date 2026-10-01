@@ -266,8 +266,7 @@ struct WorkspacesView: View {
         let id = workspace.recordID
         let folders = model.snapshot["workspace_folders"][id].array.map(\.string)
         let responsibilities = model.snapshot["mcp"]["responsibilities"].array.filter { $0["workspace_id"].string == id }
-        let grantedIDs = Set(model.snapshot["mcp"]["grants"].array.filter { $0["workspace_id"].string == id }.map { $0["connection_id"].string })
-        let tools = model.snapshot["mcp"]["connections"].array.filter { grantedIDs.contains($0.recordID) || $0["workspace_id"].string == id }.map { $0["label"].string }
+        let tools = model.snapshot["mcp"]["connections"].array.filter { $0["workspace_id"].string.isEmpty || $0["workspace_id"].string == id }.map { $0["label"].string }
         let lastChecked = responsibilities.map { $0["last_attempt_ms"].int }.max() ?? 0
         let failing = responsibilities.contains { $0["failures"].int > 0 }
         let tickets = model.tasks.filter { $0["workspace_id"].string == id && !["Completed", "Cancelled"].contains($0["status"].string) }.count

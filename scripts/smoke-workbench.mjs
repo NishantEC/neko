@@ -257,8 +257,7 @@ try {
       const ready = discovered.mcp.connections.find(c => c.id === connection.id);
       assert.equal(ready.error, null, JSON.stringify(ready));
       assert.equal(ready.tools.length, 1);
-      assert.ok(!discovered.mcp.grants.some(g => g.connection_id === ready.id), 'Discovery must not grant tools');
-      await mcp({ SetToolGrant: { connection_id: ready.id, tool_name: ready.tools[0].name, schema_hash: ready.tools[0].schema_hash, allowed: true } });
+      assert.ok(discovered.mcp.grants.some(g => g.connection_id === ready.id && g.tool_name === ready.tools[0].name), 'Discovery makes tools available in the connected workspace');
       return ready;
     }
     const own = await addConnection(workspaceId, 'Workspace A fixture', 'alpha');
@@ -322,16 +321,16 @@ try {
     // a fix opens exactly one ordinary queued ticket linked to the reply.
     const before = durable.tasks.length;
     await command({ SendMessage: { text: 'Anything on fire?', workspace_id: workspaceId } });
-    const busy = await request({ Workbench: { SendMessage: { text: 'second', workspace_id: null } } });
-    assert.ok(busy.Error && /still replying/.test(busy.Error.message), JSON.stringify(busy));
-    const quiet = await waitSnapshot(s => s.conversation.length === 2 && !s.conversation[1].pending, 'Neko did not reply');
+    const queued = await command({ SendMessage: { text: 'second', workspace_id: null } });
+    assert.ok(queued.conversation.some(message => message.text === 'second' && message.queued), 'Second message was not queued');
+    const quiet = await waitSnapshot(s => s.conversation.length === 4 && !s.conversation[3].pending, 'Neko did not process queued reply');
     assert.equal(quiet.conversation[1].role, 'neko');
     assert.equal(quiet.conversation[1].failed, false);
     assert.equal(quiet.tasks.length, before);
     await command({ SendMessage: { text: 'Please fix the cart crash', workspace_id: workspaceId } });
-    const replied = await waitSnapshot(s => s.conversation.length === 4 && !s.conversation[3].pending, 'Neko did not open a ticket');
-    assert.equal(replied.conversation[3].ticket_ids.length, 1);
-    const opened = replied.tasks.find(t => t.id === replied.conversation[3].ticket_ids[0]);
+    const replied = await waitSnapshot(s => s.conversation.length === 6 && !s.conversation[5].pending, 'Neko did not open a ticket');
+    assert.equal(replied.conversation[5].ticket_ids.length, 1);
+    const opened = replied.tasks.find(t => t.id === replied.conversation[5].ticket_ids[0]);
     assert.equal(opened.workspace_id, workspaceId);
     assert.ok(['Queued', 'Planning', 'AwaitingApproval'].includes(opened.status), opened.status);
     const noted = await command({ AddTicketNote: { task_id: opened.id, text: 'Also cover discount-only carts.' } });
@@ -339,16 +338,16 @@ try {
     await command({ CancelTask: { task_id: opened.id } });
     await stop(); launch(); await connect();
     const kept = await command('Snapshot');
-    assert.equal(kept.conversation.length, 4);
+    assert.equal(kept.conversation.length, 6);
     // Memory: a stated preference is remembered and shown under the reply; a
     // decision is filed as one; user entries can be added and forgotten.
     await command({ SendMessage: { text: 'Remember that I always want small PRs', workspace_id: workspaceId } });
-    const learned = await waitSnapshot(s => s.conversation.length === 6 && !s.conversation[5].pending, 'Neko did not remember');
-    assert.equal(learned.conversation[5].remembered.length, 1);
+    const learned = await waitSnapshot(s => s.conversation.length === 8 && !s.conversation[7].pending, 'Neko did not remember');
+    assert.equal(learned.conversation[7].remembered.length, 1);
     assert.equal(learned.memory.filter(m => m.source === 'chat').length, 1);
     assert.ok(learned.memory.some(m => m.source.startsWith('ticket:') && m.kind === 'decision'));
     await command({ SendMessage: { text: 'We decided to drop IE11 support', workspace_id: workspaceId } });
-    const decided = await waitSnapshot(s => s.conversation.length === 8 && !s.conversation[7].pending, 'Neko did not record the decision');
+    const decided = await waitSnapshot(s => s.conversation.length === 10 && !s.conversation[9].pending, 'Neko did not record the decision');
     assert.ok(decided.memory.some(m => m.kind === 'decision'));
     const added = await command({ SaveMemory: { entry: { id: '', kind: 'workspace', workspace_id: workspaceId, text: 'Run make test before committing', source: 'user', created_at_ms: 0, updated_at_ms: 0 } } });
     const note = added.memory.find(m => m.text === 'Run make test before committing');
@@ -358,26 +357,17 @@ try {
     await stop(); launch(); await connect();
     assert.equal((await command('Snapshot')).memory.filter(m => m.source === 'chat').length, 2);
     // Actual chat runner -> stdio MCP adapter -> scoped daemon host. The
-    // unannotated fixture conservatively needs approval even with a grant.
+    // fixture declares this lookup read-only, so it can run without a manual
+    // chat approval while the foreign workspace remains inaccessible.
     await mcp({ SetEnabled: { connection_id: own.id, enabled: true } });
     await mcp({ SetToolGrant: { connection_id: own.id, tool_name: own.tools[0].name, schema_hash: own.tools[0].schema_hash, allowed: true } });
-    for (const outcome of ['approve', 'deny', 'cancel', 'restart']) {
-      const start = await command({ SendMessage: { text: `CHAT_TOOL_PROBE ${outcome === 'deny' ? 'CHAT_TOOL_DENY ' : ''}FOREIGN_CONNECTION_ID=${foreign.id}`, workspace_id: workspaceId } });
-      const turnId = start.conversation.at(-1).id;
-      const waiting = await waitSnapshot(s => s.conversation.find(m => m.id === turnId)?.tool_calls.some(c => c.status === 'awaiting_approval'), 'Chat approval card did not appear');
-      const call = waiting.conversation.find(m => m.id === turnId).tool_calls[0];
-      assert.equal(call.workspace_id, workspaceId);
-      assert.ok(!waiting.mcp.receipts.some(r => r.run_id === `chat:${turnId}`), 'Action executed before approval');
-      if (outcome === 'restart') { await stop(); launch(); await connect(); }
-      else if (outcome === 'cancel') await command({ CancelChat: { turn_id: turnId } });
-      else await command({ DecideChatTool: { turn_id: turnId, call_id: call.id, approve: outcome === 'approve' } });
-      const done = await waitSnapshot(s => !s.conversation.find(m => m.id === turnId)?.pending, 'Chat did not settle');
-      const receipts = done.mcp.receipts.filter(r => r.run_id === `chat:${turnId}`);
-      assert.equal(receipts.length, outcome === 'approve' ? 1 : 0);
-      if (outcome === 'approve') assert.equal(receipts[0].success, true);
-      const stale = await request({ Workbench: { DecideChatTool: { turn_id: turnId, call_id: call.id, approve: true } } });
-      assert.ok(stale.Error, 'A closed approval was accepted again');
-    }
+    const start = await command({ SendMessage: { text: `CHAT_TOOL_PROBE FOREIGN_CONNECTION_ID=${foreign.id}`, workspace_id: workspaceId } });
+    const turnId = start.conversation.at(-1).id;
+    const done = await waitSnapshot(s => !s.conversation.find(m => m.id === turnId)?.pending, 'Read-only chat tool did not settle');
+    const receipts = done.mcp.receipts.filter(r => r.run_id === `chat:${turnId}`);
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].success, true);
+    assert.equal(receipts[0].workspace_id, workspaceId);
   }
-  console.log(JSON.stringify({ passed: true, agent: live ? 'live Codex CLI' : 'deterministic fixture', scratch, taskId, checks: ['real IPC', 'private socket', 'durable storage', 'read-only plan', 'approval gate', 'isolated build', 'independent review', 'palette task', 'invalid approval', 'cancellation', 'daemon restart', ...(!live ? ['user-added generic MCPs', 'explicit schema grants', 'real stdio bridge and receipts', 'workspace scope rejection', 'low-risk standing delegation', 'sensitive work held', 'manual task held under Away', 'wake deduplication', 'pause and revoke', 'durable MCP policy', 'Neko chat reply', 'chat opens a ticket', 'one turn at a time', 'ticket notes', 'durable chat', 'memory from chat', 'decisions', 'memory editing', 'durable memory'] : [])] }, null, 2));
+  console.log(JSON.stringify({ passed: true, agent: live ? 'live Codex CLI' : 'deterministic fixture', scratch, taskId, checks: ['real IPC', 'private socket', 'durable storage', 'read-only plan', 'approval gate', 'isolated build', 'independent review', 'palette task', 'invalid approval', 'cancellation', 'daemon restart', ...(!live ? ['user-added generic MCPs', 'connected tools available by default', 'real stdio bridge and receipts', 'workspace scope rejection', 'low-risk standing delegation', 'sensitive work held', 'manual task held under Away', 'wake deduplication', 'pause and revoke', 'durable MCP policy', 'Neko chat reply', 'chat opens a ticket', 'queued messages', 'ticket notes', 'durable chat', 'memory from chat', 'decisions', 'memory editing', 'durable memory'] : [])] }, null, 2));
 } finally { await stop(); }

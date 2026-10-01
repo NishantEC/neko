@@ -89,8 +89,13 @@ struct PreferencesView: View {
     @State private var path = ""
     @State private var pending = false
     @State private var clipboard = ClipboardConsentState()
+    @State private var agentProvider = "codex"
+    @State private var agentModel = ""
+    @State private var availableModels: [AgentModel] = []
     var body: some View {
-        VStack {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Settings").font(.system(size: 24, weight: .semibold))
+                .padding(.horizontal, 12)
             TabView {
                 Form {
                     HotkeySettingsView(model: model)
@@ -99,6 +104,40 @@ struct PreferencesView: View {
                     Text("Saves copied content locally. Turning this off stops new capture; existing history remains.").font(.caption).foregroundStyle(.secondary)
                     if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
                 }.padding().tabItem { Label("General", systemImage: "gearshape") }
+                Form {
+                    Section("Agent runtime") {
+                        Picker("Provider", selection: $agentProvider) {
+                            Text("Codex account").tag("codex")
+                            Text("Ollama (local)").tag("ollama")
+                            Text("LM Studio (local)").tag("lmstudio")
+                            ForEach(Array(Set(availableModels.filter { !$0.native }.map(\.provider))).sorted(), id: \.self) { provider in
+                                Text(provider.capitalized).tag("opencodex:\(provider)")
+                            }
+                        }
+                        .onChange(of: agentProvider) { _, selected in
+                            guard selected.hasPrefix("opencodex:"),
+                                  !availableModels.contains(where: { $0.id == agentModel && "opencodex:\($0.provider)" == selected }) else { return }
+                            agentModel = availableModels.first(where: { "opencodex:\($0.provider)" == selected })?.id ?? ""
+                        }
+                        if agentProvider.hasPrefix("opencodex:") {
+                            Picker("Model", selection: $agentModel) {
+                                ForEach(availableModels.filter { "opencodex:\($0.provider)" == agentProvider }) { entry in
+                                    Text(entry.model).tag(entry.id)
+                                }
+                            }
+                            if !availableModels.contains(where: { $0.id == agentModel }) {
+                                Text("This model is not currently available. Choose another model or check its connection.").foregroundStyle(.secondary)
+                            }
+                        } else {
+                            TextField("Model (provider default if empty)", text: $agentModel)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        Text("New Neko conversations, tasks, and background checks use this model. Changing it does not interrupt work already in progress.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Save agent runtime") { saveAgentRuntime() }
+                            .disabled(agentModel.count > 120 || pending || (agentProvider.hasPrefix("opencodex:") && !availableModels.contains { $0.id == agentModel && "opencodex:\($0.provider)" == agentProvider }))
+                    }
+                }.padding().tabItem { Label("AI", systemImage: "cpu") }
                 VStack(alignment: .leading) {
                     Text("Search folders").font(.headline)
                     List(folders, id: \.self) { folder in
@@ -120,12 +159,25 @@ struct PreferencesView: View {
                 }.padding().tabItem { Label("About", systemImage: "info.circle") }
             }.disabled(pending)
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled).padding() }
-        }.frame(width: 650, height: 450).task { await load() }
+        }
+        .frame(maxWidth: 860, maxHeight: .infinity)
+        .padding(.horizontal, 28).padding(.bottom, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task {
+            await load()
+            availableModels = await AgentModelCatalog.load()
+        }
     }
     private func preferenceToggle(_ title: String, _ id: String) -> some View {
         Toggle(title, isOn: Binding(get: { settings.first { $0["id"].string == id }?["accessory"].string == "On" }, set: { _ in activate("preference", id) }))
     }
     private func load() async {
+        let runtime = model.snapshot["agent_runtime"]
+        agentProvider = runtime["provider"].string.isEmpty ? "codex" : runtime["provider"].string
+        agentModel = runtime["model"].string
+        if agentProvider == "opencodex", let slash = agentModel.firstIndex(of: "/") {
+            agentProvider = "opencodex:\(agentModel[..<slash])"
+        }
         await loadClipboard()
         do {
             settings = try await search("preference")
@@ -134,6 +186,15 @@ struct PreferencesView: View {
         // Legacy agent providers are opt-in (NEKO_LEGACY_AGENTS=1). When the
         // provider is not registered, that simply means "no agents", not an error.
         agents = (try? await search("agent")) ?? []
+    }
+    private func saveAgentRuntime() {
+        pending = true
+        Task {
+            _ = await model.workbench(.command("SetAgentRuntime", ["runtime": .object([
+                "provider": .string(agentProvider.hasPrefix("opencodex:") ? "opencodex" : agentProvider), "model": .string(agentModel.trimmingCharacters(in: .whitespacesAndNewlines))
+            ])]))
+            pending = false
+        }
     }
     private func search(_ provider: String) async throws -> [JSONValue] {
         (try await model.request(.command("Search", ["query": .string(""), "limit": .number(200), "provider": .string(provider)])))["SearchResults"]["items"].array

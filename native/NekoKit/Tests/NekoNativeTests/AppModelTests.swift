@@ -83,6 +83,26 @@ private actor ControlledTransport {
         XCTAssertEqual(recreated.model.chatDrafts.text(for: scope), "Keep this draft")
         XCTAssertTrue(recreated.model.sendingChatScopes.contains(scope))
     }
+    func testChatActivityUsesCallsOnceAndSurfacesFailuresAndApprovals() {
+        let calls: [JSONValue] = [
+            .object(["id": .string("a"), "tool_name": .string("list_issues"), "status": .string("succeeded")]),
+            .object(["id": .string("b"), "tool_name": .string("list_issues"), "status": .string("succeeded")]),
+            .object(["id": .string("c"), "tool_name": .string("get_issue"), "status": .string("failed")]),
+            .object(["id": .string("d"), "tool_name": .string("update_issue"), "status": .string("awaiting_approval")])
+        ]
+        let receipts: [JSONValue] = [.object(["id": .string("r"), "tool_name": .string("list_issues"), "success": .bool(true)])]
+        let summary = ChatToolActivitySummary(calls: calls, receipts: receipts)
+        XCTAssertEqual(summary.count, 4)
+        XCTAssertEqual(summary.succeeded, 2)
+        XCTAssertEqual(summary.failed, 1)
+        XCTAssertEqual(summary.awaitingApproval, 1)
+        XCTAssertFalse(summary.showsReceiptsSeparately)
+        XCTAssertEqual(summary.title, "4 tool calls · 1 needs approval")
+
+        let legacy = ChatToolActivitySummary(calls: [], receipts: receipts)
+        XCTAssertTrue(legacy.showsReceiptsSeparately)
+        XCTAssertEqual(legacy.count, 1)
+    }
     func testReviewPresentationDoesNotInferPassFromMalformedResponse() {
         let valid = "Built it\n\nIndependent review:\n{\"passed\":true,\"findings\":[],\"files\":[\"a\"],\"tests\":[\"test\"],\"summary\":\"Checked\"}"
         XCTAssertEqual(TicketPresentation.review(valid).body, "Built it")
@@ -133,20 +153,28 @@ private actor ControlledTransport {
         XCTAssertNil(SkillPresentation.enabledRecord(for: available, enabled: [enabled], workspace: "b"))
     }
 
-    func testWatchingRequiresCurrentWorkspaceToolGrantBeforeTurnOn() async {
-        let model = AppModel { _ in XCTFail("Turn on must not send a command without a usable grant"); return .null }
+    func testConnectedToolsAreAvailableWithoutIndividualGrants() {
+        let tools: [JSONValue] = [
+            .object(["name": .string("read"), "schema_hash": .string("v2")]),
+            .object(["name": .string("write"), "schema_hash": .string("v1")]),
+        ]
+        let connection: JSONValue = .object(["id": .string("server"), "tools": .array(tools)])
+        XCTAssertEqual(ToolsPresentation.toolSummary(connection), "2 tools")
+        XCTAssertEqual(ToolsPresentation.toolSummary(replacing(connection, ["tools": .array([])])), "Not discovered")
+        XCTAssertEqual(ToolsPresentation.toolSummary(replacing(connection, ["tools": .array([]), "discovered_ms": .number(1)])), "No tools")
+    }
+
+    func testWatchingNeedsAUsableConnectionNotIndividualToolGrants() async {
+        let model = AppModel { _ in return .null }
         let item: JSONValue = .object(["id": .string("check"), "workspace_id": .string("a"), "connection_ids": .array([.string("admin")])])
         let tool: JSONValue = .object(["name": .string("search"), "schema_hash": .string("v1")])
-        let connection: JSONValue = .object(["id": .string("admin"), "label": .string("Admin"), "enabled": .bool(true), "tools": .array([tool])])
+        let connection: JSONValue = .object(["id": .string("admin"), "label": .string("Admin"), "enabled": .bool(true), "trusted": .bool(true), "tools": .array([tool])])
         let grant: JSONValue = .object(["workspace_id": .string("a"), "connection_id": .string("admin"), "tool_name": .string("search"), "schema_hash": .string("v1")])
         model.snapshot = .object(["mcp": .object(["connections": .array([connection]), "grants": .array([])])])
-        XCTAssertEqual(Watching.ungranted(model, item), ["Admin"])
-        Watching.turnOn(model, item)
-        XCTAssertEqual(model.selectedWorkspace, "a")
-        XCTAssertFalse(model.busy)
+        XCTAssertTrue(Watching.ungranted(model, item).isEmpty)
         model.snapshot = .object(["mcp": .object(["connections": .array([connection]), "grants": .array([grant])])])
         XCTAssertTrue(Watching.ungranted(model, item).isEmpty)
-        model.snapshot = .object(["mcp": .object(["connections": .array([connection]), "grants": .array([.object(["workspace_id": .string("b"), "connection_id": .string("admin"), "tool_name": .string("search"), "schema_hash": .string("v1")])])])])
+        model.snapshot = .object(["mcp": .object(["connections": .array([replacing(connection, ["workspace_id": .string("b")])]), "grants": .array([])])])
         XCTAssertEqual(Watching.ungranted(model, item), ["Admin"])
     }
 

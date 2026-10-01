@@ -2,8 +2,8 @@ import SwiftUI
 import NekoKit
 
 /// What Neko keeps an eye on. You describe it in plain words (or ask Neko to
-/// suggest from your connected tools); Neko writes it up as a responsibility
-/// that stays paused until you turn it on.
+/// suggest from your connected tools); Neko writes it up as a responsibility.
+/// Readable connected sources are activated by the daemon; explicit pauses stick.
 enum Watching {
     static let suggestPrompt = "Look at the tools connected to this workspace and suggest up to three things you should keep an eye on for me. Only suggest what those tools can actually check."
 
@@ -38,17 +38,15 @@ enum Watching {
         model.snapshot["mcp"]["connections"].array.first { $0.recordID == id }?["label"].string ?? "Removed tool"
     }
 
-    /// A tool can only be read once the workspace has granted at least one of its tools.
+    /// A responsibility can use a connected catalog in its workspace once turned on.
     @MainActor static func ungranted(_ model: AppModel, _ item: JSONValue) -> [String] {
         let workspace = item["workspace_id"].string
-        let granted = Set(model.snapshot["mcp"]["grants"].array.filter { grant in
-            guard grant["workspace_id"].string == workspace else { return false }
-            return model.snapshot["mcp"]["connections"].array.contains { connection in
-                connection.recordID == grant["connection_id"].string && connection["enabled"].bool && connection["error"].string.isEmpty &&
-                connection["tools"].array.contains { $0["name"] == grant["tool_name"] && $0["schema_hash"] == grant["schema_hash"] }
-            }
-        }.map { $0["connection_id"].string })
-        return item["connection_ids"].array.map(\.string).filter { !granted.contains($0) }.map { label(model, connection: $0) }
+        let available = Set(model.snapshot["mcp"]["connections"].array.filter { connection in
+            connection["enabled"].bool && connection["trusted"].bool && connection["error"].string.isEmpty &&
+            (connection["workspace_id"].string.isEmpty || connection["workspace_id"].string == workspace) &&
+            !connection["tools"].array.isEmpty
+        }.map(\.recordID))
+        return item["connection_ids"].array.map(\.string).filter { !available.contains($0) }.map { label(model, connection: $0) }
     }
 
     @MainActor static func reviewAccess(_ model: AppModel, _ item: JSONValue) {

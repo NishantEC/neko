@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import NekoKit
 
 struct ChatDraftScope: Hashable {
@@ -9,19 +10,32 @@ struct ChatDraftScope: Hashable {
 struct ScopedChatDrafts {
     struct Submission { let scope: ChatDraftScope; let text: String; let revision: Int }
     private var values: [ChatDraftScope: String] = [:]
+    private var attached: [ChatDraftScope: [ComposerAttachment]] = [:]
     private var revisions: [ChatDraftScope: Int] = [:]
     func text(for scope: ChatDraftScope) -> String { values[scope] ?? "" }
+    func attachments(for scope: ChatDraftScope) -> [ComposerAttachment] { attached[scope] ?? [] }
+    mutating func add(_ attachment: ComposerAttachment, for scope: ChatDraftScope) {
+        guard !attachments(for: scope).contains(attachment) else { return }
+        attached[scope, default: []].append(attachment)
+        revisions[scope, default: 0] += 1
+    }
+    mutating func remove(_ attachment: ComposerAttachment, for scope: ChatDraftScope) {
+        attached[scope]?.removeAll { $0 == attachment }
+        revisions[scope, default: 0] += 1
+    }
     mutating func set(_ text: String, for scope: ChatDraftScope) {
         guard values[scope] != text else { return }
         values[scope] = text
         revisions[scope, default: 0] += 1
     }
     func submission(for scope: ChatDraftScope) -> Submission {
-        Submission(scope: scope, text: text(for: scope), revision: revisions[scope, default: 0])
+        let parts = [text(for: scope).trimmingCharacters(in: .whitespacesAndNewlines)] + attachments(for: scope).map(\.reference)
+        return Submission(scope: scope, text: parts.filter { !$0.isEmpty }.joined(separator: "\n"), revision: revisions[scope, default: 0])
     }
     mutating func complete(_ submission: Submission, succeeded: Bool) {
         guard succeeded, revisions[submission.scope, default: 0] == submission.revision else { return }
         set("", for: submission.scope)
+        attached[submission.scope] = []
     }
 }
 
@@ -44,9 +58,33 @@ struct ChatScrollFollowState {
     }
 }
 
+enum ChatComposerClearance {
+    static func bottomSpace(for composerHeight: CGFloat) -> CGFloat { composerHeight + 24 }
+}
+
+private struct ChatComposerHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 private struct ChatScrollMetricsKey: PreferenceKey {
     static let defaultValue = ChatScrollMetrics()
     static func reduce(value: inout ChatScrollMetrics, nextValue: () -> ChatScrollMetrics) { value = nextValue() }
+}
+
+struct ChatToolActivitySummary {
+    let calls: [JSONValue]
+    let receipts: [JSONValue]
+    var showsReceiptsSeparately: Bool { calls.isEmpty }
+    var count: Int { showsReceiptsSeparately ? receipts.count : calls.count }
+    var succeeded: Int { showsReceiptsSeparately ? receipts.filter { $0["success"].bool }.count : calls.filter { $0["status"].string == "succeeded" }.count }
+    var failed: Int { showsReceiptsSeparately ? receipts.filter { !$0["success"].bool }.count : calls.filter { ["failed", "denied"].contains($0["status"].string) }.count }
+    var awaitingApproval: Int { calls.filter { $0["status"].string == "awaiting_approval" }.count }
+    var title: String {
+        let noun = showsReceiptsSeparately ? "tool receipt" : "tool call"
+        let warning = awaitingApproval > 0 ? " · \(awaitingApproval) needs approval" : failed > 0 ? " · \(failed) failed" : ""
+        return "\(count) \(noun)\(count == 1 ? "" : "s")\(warning)"
+    }
 }
 
 struct TodayView: View {
@@ -55,6 +93,8 @@ struct TodayView: View {
     @State private var transcriptHeight: CGFloat = 0
     @State private var ticket: String?
     @State private var addingWorkspace = false
+    @State private var composerHeight: CGFloat = 0
+    @State private var availableModels: [AgentModel] = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.nekoLook) private var look
     private var workspaceName: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
@@ -71,6 +111,9 @@ struct TodayView: View {
         nonmutating set { model.chatDrafts.set(newValue, for: scope) }
     }
     private var sending: Bool { model.sendingChatScopes.contains(scope) }
+    private var replying: Bool { model.snapshot["conversation"].array.contains { $0["pending"].bool } }
+    private var attachments: [ComposerAttachment] { model.chatDrafts.attachments(for: scope) }
+    private var workSummary: TodayWorkSummary { TodayWorkSummary(tasks: model.tasks, workspaceID: model.selectedWorkspace) }
     private var messages: [JSONValue] {
         model.snapshot["conversation"].array.filter {
             ($0["workspace_id"] == .null ? nil : $0["workspace_id"].string) == scope.workspaceID &&
@@ -78,10 +121,11 @@ struct TodayView: View {
         }
     }
     var body: some View {
+        GeometryReader { outer in
         VStack(spacing: 0) {
         PanelHeader(title: "Today", crumb: workspaceName) { StatusPill(text: model.connected ? "Watching" : "Reconnecting…", live: model.connected) }
         HStack(spacing: 0) {
-            VStack(spacing: 0) {
+            ZStack(alignment: .bottom) {
                 GeometryReader { viewport in
                 ScrollViewReader { reader in
                     ScrollView {
@@ -95,7 +139,7 @@ struct TodayView: View {
                                 HStack(alignment: .top, spacing: 12) {
                                 if mine { Spacer(minLength: 80) }
                                 VStack(alignment: .leading, spacing: 10) {
-                                    HStack(spacing: 8) { Text(mine ? "You" : "Neko").font(NekoFont.heading); if message["pending"].bool { Spacer(); Button("Stop") { Task { await model.workbench(.command("CancelChat", ["turn_id": message["id"]])) } }.nekoGlassButton() } }
+                                    HStack(spacing: 8) { Text(mine ? "You" : "Neko").font(NekoFont.heading); if message["queued"].bool { Text("Queued").font(.caption).foregroundStyle(N.text3) }; if message["pending"].bool { Spacer(); Button("Stop") { Task { await model.workbench(.command("CancelChat", ["turn_id": message["id"]])) } }.nekoGlassButton() } }
                                     if message["pending"].bool {
                                         let now = ChatActivity.describe(message, model: model)
                                         ActivityCapsule(activity: now.activity, label: now.label).padding(.bottom, 6)
@@ -107,17 +151,14 @@ struct TodayView: View {
                                     }
                                     ReadableText(text: message["text"].string).lineSpacing(4)
                                     if message["failed"].bool { Label("This turn did not complete.", systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
-                                    ForEach(message["tool_calls"].array, id: \.recordID) { call in toolCall(call, turn: message.recordID, pending: message["pending"].bool) }
+                                    let receipts = model.snapshot["mcp"]["receipts"].array.filter { $0["run_id"].string == "chat:\(message.recordID)" }
+                                    let activity = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: receipts)
+                                    if activity.count > 0 { toolActivity(activity, turn: message.recordID, pending: message["pending"].bool) }
                                     ForEach(message["remembered"].array, id: \.self) { memory in Label("Remembered: \(memory.string)", systemImage: "text.alignleft").font(.callout).foregroundStyle(.secondary) }
                                     ForEach(message["responsibility_ids"].array, id: \.self) { id in
                                         if let item = model.snapshot["mcp"]["responsibilities"].array.first(where: { $0.recordID == id.string }) {
                                             SuggestedResponsibilityCard(model: model, item: item)
                                         }
-                                    }
-                                    ForEach(model.snapshot["mcp"]["receipts"].array.filter { $0["run_id"].string == "chat:\(message.recordID)" }, id: \.recordID) { receipt in
-                                        DisclosureGroup {
-                                            Text("Receipt \(receipt.recordID)").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                                        } label: { Label("\(receipt["tool_name"].string) · \(receipt["success"].bool ? "Completed" : "Failed")", systemImage: receipt["success"].bool ? "checkmark.circle" : "exclamationmark.circle").font(.caption).foregroundStyle(.secondary) }
                                     }
                                     ForEach(message["ticket_ids"].array, id: \.self) { id in Button(model.snapshot["tasks"].array.first { $0.recordID == id.string }?["title"].string ?? "Open ticket", systemImage: "tray") { ticket = id.string } }
                                 }
@@ -127,8 +168,8 @@ struct TodayView: View {
                                 .id(message.recordID)
                                 .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                             }
-                            Color.clear.frame(height: 1).id("bottom")
-                        }.padding(.horizontal, 64).padding(.top, 48).padding(.bottom, 24).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
+                            Color.clear.frame(height: ChatComposerClearance.bottomSpace(for: composerHeight)).id("bottom")
+                        }.padding(.horizontal, 32).padding(.top, 48).padding(.bottom, 24).frame(maxWidth: 800, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
                             .background(GeometryReader { geometry in
                                 Color.clear.preference(key: ChatScrollMetricsKey.self, value: ChatScrollMetrics(contentHeight: geometry.size.height, originY: geometry.frame(in: .named("chatTranscript")).minY, viewportHeight: viewport.size.height))
                             })
@@ -151,50 +192,148 @@ struct TodayView: View {
                         .onAppear { reader.scrollTo("bottom", anchor: .bottom) }
                 }
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    if let notice = toolAccessNotice {
-                        HStack(spacing: 10) {
-                            Image(systemName: "wrench.and.screwdriver").foregroundStyle(NekoStyle.amber)
-                            Text(notice).font(.caption).foregroundStyle(N.text2)
-                            Spacer()
-                            Button("Set up tools") {
-                                if model.selectedWorkspace == nil, model.workspaces.count == 1 { model.selectedWorkspace = model.workspaces[0].recordID }
-                                NotificationCenter.default.post(name: .nekoNavigate, object: "Tools & skills")
-                            }.controlSize(.small)
-                        }.padding(.horizontal, 12).padding(.vertical, 8).nekoCard(padding: 0, radius: 10)
-                    }
-                    ComposerView(text: Binding(get: { draft }, set: { draft = $0 }), onSubmit: send, onError: { model.error = $0 }).id(scope).frame(height: 52)
-                    HStack(spacing: 8) {
-                        WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace).menuStyle(.button).buttonStyle(.borderless).controlSize(.small).fixedSize()
-                        ComposerChip(text: "Read only")
-                        Spacer()
-                        Text("⌘↵").font(.system(size: 11)).foregroundStyle(N.text4)
-                        Button { send() } label: {
-                            Image(systemName: "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(N.canvas).frame(width: 30, height: 30).background(NekoStyle.accent, in: Circle()).shadow(color: NekoStyle.accent.opacity(0.5), radius: 8)
-                        }.buttonStyle(.plain).opacity(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending || model.busy ? 0.35 : 1).disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending || model.busy).accessibilityLabel("Send message")
-                    }
-                }
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
-                .liquidGlass(radius: 18)
-                .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
-                .padding(.horizontal, 64).padding(.bottom, 24).frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity, alignment: .center)
-            }
-            if !messages.isEmpty {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    railHeader("Needs you", ["AwaitingApproval", "ReadyForReview", "Failed"])
-                    taskGroup(["AwaitingApproval", "ReadyForReview", "Failed"])
-                    railHeader("Working now", ["Queued", "Planning", "Building", "Reviewing"]).padding(.top, 12)
-                    taskGroup(["Queued", "Planning", "Building", "Reviewing"])
-                }
-            }.scrollIndicators(.never).frame(width: 300)
-            .overlay(alignment: .leading) { N.line.frame(width: 1) }
+                composer(availableWidth: outer.size.width)
             }
         }
+        }
         }.animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: messages.count)
+        .task { availableModels = await AgentModelCatalog.load() }
         .sheet(isPresented: Binding(get: { ticket != nil }, set: { if !$0 { ticket = nil } })) {
             if let id = ticket { VStack { HStack { Spacer(); Button("Done") { ticket = nil }.keyboardShortcut(.cancelAction) }.padding(); TicketDetail(model: model, id: id) }.frame(minWidth: 650, minHeight: 600) }
         }.sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
+    }
+    private func composer(availableWidth: CGFloat) -> some View {
+        let cardWidth = min(720, max(360, availableWidth - 96))
+        return VStack(alignment: .leading, spacing: 8) {
+            if let notice = toolAccessNotice {
+                HStack(spacing: 10) {
+                    Image(systemName: "wrench.and.screwdriver").foregroundStyle(NekoStyle.amber)
+                    Text(notice).font(.caption).foregroundStyle(N.text2)
+                    Spacer()
+                    Button("Set up tools") {
+                        if model.selectedWorkspace == nil, model.workspaces.count == 1 { model.selectedWorkspace = model.workspaces[0].recordID }
+                        NotificationCenter.default.post(name: .nekoNavigate, object: "Tools & skills")
+                    }.controlSize(.small)
+                }.padding(.horizontal, 12).padding(.vertical, 8).nekoCard(padding: 0, radius: 10)
+            }
+            ComposerView(
+                text: Binding(get: { draft }, set: { draft = $0 }),
+                onSubmit: { send() },
+                onInterruptAndSubmit: { send(interrupt: true) },
+                onAttach: { model.chatDrafts.add($0, for: scope) },
+                onError: { model.error = $0 }
+            ).id(scope).frame(width: cardWidth - 36, alignment: .leading)
+            if !attachments.isEmpty { attachmentStrip }
+            HStack(spacing: 8) {
+                Button(action: chooseAttachments) {
+                    Image(systemName: "plus").font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(N.text2).frame(width: 30, height: 30)
+                        .background(N.selected.opacity(0.55), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help("Attach images or files; you can also paste or drop them")
+                .accessibilityLabel("Attach images or files")
+                Menu {
+                    Menu("OpenAI") {
+                        Button("Default model") { selectRuntime("codex") }
+                        ForEach(availableModels.filter(\.native)) { entry in
+                            Button(entry.model) { selectRuntime("codex", model: entry.model) }
+                        }
+                    }
+                    Button("Ollama · local") { selectRuntime("ollama") }
+                    Button("LM Studio · local") { selectRuntime("lmstudio") }
+                    if availableModels.contains(where: { !$0.native }) {
+                        Divider()
+                        ForEach(Array(Set(availableModels.filter { !$0.native }.map(\.provider))).sorted(), id: \.self) { provider in
+                            Menu(provider.capitalized) {
+                                ForEach(availableModels.filter { !$0.native && $0.provider == provider }) { entry in
+                                    Button(entry.model) { selectRuntime("opencodex", model: entry.id) }
+                                }
+                            }
+                        }
+                    }
+                    Button("Refresh models") {
+                        Task { availableModels = await AgentModelCatalog.load() }
+                    }
+                    Divider()
+                    Button("Model settings…") { NotificationCenter.default.post(name: .nekoNavigate, object: "Settings") }
+                } label: {
+                    Text(runtimeLabel)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(N.text3)
+                    .padding(.horizontal, 8).frame(height: 30)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .tint(N.text3)
+                .fixedSize()
+                .help("Choose the agent runtime. Local providers need a running Ollama or LM Studio server.")
+                Spacer(minLength: 8)
+                Button { send() } label: {
+                    Group {
+                        if sending { ProgressView().controlSize(.mini) }
+                        else { Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold)) }
+                    }
+                    .foregroundStyle(canSend ? Color.white : N.text3)
+                    .frame(width: 30, height: 30)
+                    .background(canSend ? NekoStyle.accent : N.selected.opacity(0.65), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                .accessibilityLabel(sending ? "Sending message" : replying ? "Queue message" : "Send message")
+            }
+            .frame(width: cardWidth - 36)
+        }
+        .padding(.horizontal, 18).padding(.top, 11).padding(.bottom, 10)
+        .background(N.panel.opacity(0.45), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .liquidGlass(radius: 16)
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: ChatComposerHeightKey.self, value: geometry.size.height)
+            }
+        }
+        .onPreferenceChange(ChatComposerHeightKey.self) { height in
+            if abs(height - composerHeight) > 1 { composerHeight = height }
+        }
+    }
+
+    private var canSend: Bool { !model.chatDrafts.submission(for: scope).text.isEmpty && !sending && !model.busy }
+
+    private var runtimeLabel: String {
+        let runtime = model.snapshot["agent_runtime"]
+        let provider = runtime["provider"].string
+        let name = provider == "ollama" ? "Ollama" : provider == "lmstudio" ? "LM Studio" : provider == "opencodex" ? "Connected model" : "Codex"
+        let selectedModel = runtime["model"].string
+        if provider == "opencodex", let slash = selectedModel.firstIndex(of: "/") {
+            return "\(selectedModel[..<slash].capitalized) · \(selectedModel[selectedModel.index(after: slash)...])"
+        }
+        return selectedModel.isEmpty ? name : "\(name) · \(selectedModel)"
+    }
+
+    private func selectRuntime(_ provider: String, model selectedModel: String = "") {
+        Task { await model.workbench(.command("SetAgentRuntime", ["runtime": .object(["provider": .string(provider), "model": .string(selectedModel)])])) }
+    }
+
+    private var attachmentStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(attachments) { attachment in
+                    HStack(spacing: 6) {
+                        Image(systemName: attachment.isImage ? "photo" : "doc")
+                        Text(attachment.name).lineLimit(1)
+                        Button { model.chatDrafts.remove(attachment, for: scope) } label: {
+                            Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove \(attachment.name)")
+                    }
+                    .font(.system(size: 11)).foregroundStyle(N.text2)
+                    .padding(.horizontal, 9).frame(height: 26).liquidGlassCapsule()
+                }
+            }
+        }.scrollIndicators(.never)
     }
     private var toolAccessNotice: String? {
         let workspace = model.selectedWorkspace ?? (model.workspaces.count == 1 ? model.workspaces[0].recordID : "")
@@ -203,13 +342,8 @@ struct TodayView: View {
             $0["enabled"].bool && $0["trusted"].bool && ($0["workspace_id"].string.isEmpty || $0["workspace_id"].string == workspace)
         }
         guard !connected.isEmpty else { return nil }
-        let grants = model.snapshot["mcp"]["grants"].array
-        let usable = connected.contains { connection in
-            connection["tools"].array.contains { tool in
-                grants.contains { $0["workspace_id"].string == workspace && $0["connection_id"].string == connection.recordID && $0["tool_name"].string == tool["name"].string && $0["schema_hash"].string == tool["schema_hash"].string }
-            }
-        }
-        return usable ? nil : "Tools are connected, but Neko has no permission to call them yet."
+        let usable = connected.contains { !$0["tools"].array.isEmpty && $0["error"].string.isEmpty }
+        return usable ? nil : "Connections are present, but no tools are available yet. Discover their tools in Tools & skills."
     }
     @ViewBuilder private var suggestions: some View {
         EmptyView()
@@ -221,23 +355,6 @@ struct TodayView: View {
         Button("Plan my next step", systemImage: "arrow.triangle.branch") { draft = "Help me decide the next small, useful step in this workspace. Read only and explain your reasoning." }.nekoGlassButton()
         Button("Review a change", systemImage: "doc.text.magnifyingglass") { draft = "Review the current changes in this workspace. Do not modify files; explain risks and missing tests." }.nekoGlassButton()
         Button("Remember a preference", systemImage: "bookmark") { draft = "Remember this preference: " }.nekoGlassButton()
-    }
-    private func railHeader(_ title: String, _ statuses: [String]) -> some View {
-        HStack {
-            Text(title).font(.system(size: 12, weight: .medium)).foregroundStyle(N.text3)
-            Spacer()
-            Text(String(model.tasks.filter { statuses.contains($0["status"].string) }.count)).font(.system(size: 12).monospacedDigit()).foregroundStyle(N.text4)
-        }.padding(.horizontal, 20).frame(height: 40)
-    }
-    @ViewBuilder private func taskGroup(_ statuses: [String]) -> some View {
-        let tasks = model.tasks.filter { statuses.contains($0["status"].string) }
-        if tasks.isEmpty {
-            Text(statuses.contains("AwaitingApproval") ? "Nothing waiting on you." : "Nothing running right now.")
-                .font(.system(size: 12)).foregroundStyle(N.text4).padding(.horizontal, 20).frame(height: 36, alignment: .leading)
-        }
-        ForEach(tasks, id: \.recordID) { task in
-            RailRow(title: task["title"].string, meta: friendlyTaskStatus(task["status"].string) + " · " + (model.workspaces.first { $0.recordID == task["workspace_id"].string }?["name"].string ?? "Workspace"), status: task["status"].string) { ticket = task.recordID }
-        }
     }
     private var greeting: some View {
         let h = Calendar.current.component(.hour, from: Date())
@@ -257,30 +374,28 @@ struct TodayView: View {
     private var todayHero: some View {
         let h = Calendar.current.component(.hour, from: Date())
         let part = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
-        let needs = model.tasks.filter { ["AwaitingApproval", "ReadyForReview", "Failed"].contains($0["status"].string) }.count
-        let working = model.tasks.filter { ["Queued", "Planning", "Building", "Reviewing"].contains($0["status"].string) }.count
-        let watched = model.snapshot["mcp"]["responsibilities"].array.filter { $0["enabled"].bool }
-        let workspaces = model.workspaces.count
-        return VStack(spacing: 24) {
-            VStack(spacing: 8) {
-                Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text4)
-                Text(needs == 0 ? "\(part). All quiet while you were away." : "\(part). Here's what I found:")
-                    .font(.system(size: 26, weight: .semibold)).tracking(-0.6).foregroundStyle(N.text).multilineTextAlignment(.center)
-            }.frame(maxWidth: .infinity)
-            HStack(spacing: 14) {
-                PlainSummaryCard(title: "Needs you", value: "\(needs)", caption: needs == 1 ? "decision to make" : "decisions to make", activity: .needsYou, live: needs > 0, action: needs == 0 ? nil : "Review") {
-                    NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
-                }
-                PlainSummaryCard(title: "Working now", value: "\(working)", caption: working == 1 ? "task in progress" : "tasks in progress", activity: .creating, live: working > 0, action: working == 0 ? nil : "Follow") {
-                    NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
-                }
-                PlainSummaryCard(title: "Watching", value: "\(watched.count)", caption: workspaces == 0 ? "not set up yet" : "across \(workspaces) \(workspaces == 1 ? "workspace" : "workspaces")", activity: .watching, live: !watched.isEmpty, action: workspaces == 0 ? "Add" : "Manage") {
-                    if workspaces == 0 { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
-                }
+        let watched = model.snapshot["mcp"]["responsibilities"].array.filter {
+            $0["enabled"].bool && (model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace)
+        }
+        return VStack(alignment: .leading, spacing: 18) {
+            Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(N.text4)
+            Text(workSummary.needsYou.isEmpty ? "\(part). All quiet for now." : "\(part). There's work to review.")
+                .font(.system(size: 28, weight: .semibold)).tracking(-0.7).foregroundStyle(N.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(model.workspaces.isEmpty ? "Add a workspace to give Neko somewhere to start." : "Ask about your work, or let Neko watch for changes. You'll review anything it wants to do.")
+                .font(.system(size: 14)).foregroundStyle(N.text3)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 18) {
+                Label("\(workSummary.needsYou.count) needs you", systemImage: "hand.raised")
+                Label("\(workSummary.working.count) in progress", systemImage: "circle.dotted")
+                Label("\(watched.count) watching", systemImage: "eye")
             }
+            .font(.system(size: 12)).foregroundStyle(N.text3)
+            .padding(.top, 4)
             Button(watched.isEmpty ? "Start watching" : "Check now") {
                 if watched.isEmpty {
-                    if workspaces == 0 { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
+                    if model.workspaces.isEmpty { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
                 } else {
                     for item in watched { Task { await model.workbench(.object(["Mcp": .command("Wake", ["responsibility_id": item["id"]])])) } }
                 }
@@ -288,7 +403,7 @@ struct TodayView: View {
             .nekoPrimaryButton()
             .accessibilityLabel(watched.isEmpty ? "Start watching" : "Check everything now")
         }
-        .padding(.top, 40)
+        .padding(.top, 56)
     }
     private var howNekoWorks: some View {
         let watching = !model.snapshot["mcp"]["responsibilities"].array.isEmpty
@@ -307,10 +422,9 @@ struct TodayView: View {
         }
     }
     @ViewBuilder private var brief: some View {
-        let recent = model.tasks.filter { !["Completed", "Cancelled"].contains($0["status"].string) }.prefix(5)
-        if recent.isEmpty { howNekoWorks } else {
+        let recent = Array((workSummary.needsYou + workSummary.working).prefix(5))
         VStack(alignment: .leading, spacing: 0) {
-            Text(recent.isEmpty ? "Start with something small" : "While you were away").font(.system(size: 12, weight: .medium)).foregroundStyle(N.text4).padding(.bottom, 8)
+            Text(recent.isEmpty ? "Try asking" : "While you were away").font(.system(size: 12, weight: .medium)).foregroundStyle(N.text4).padding(.bottom, 8)
             if recent.isEmpty {
                 BriefRow(dot: N.text4, title: "Plan my next step", meta: "Decide the next small, useful move · read only", action: "Ask") { draft = "Help me decide the next small, useful step in this workspace. Read only and explain your reasoning." }
                 BriefRow(dot: N.text4, title: "Review a change", meta: "Risks and missing tests · no edits", action: "Ask") { draft = "Review the current changes in this workspace. Do not modify files; explain risks and missing tests." }
@@ -322,26 +436,94 @@ struct TodayView: View {
                 }
             }
         }
+    }
+    private func toolActivity(_ activity: ChatToolActivitySummary, turn: String, pending: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if activity.showsReceiptsSeparately || activity.calls.contains(where: { $0["status"].string != "awaiting_approval" }) {
+                DisclosureGroup {
+                VStack(alignment: .leading, spacing: 0) {
+                    if activity.showsReceiptsSeparately {
+                        ForEach(activity.receipts, id: \.recordID) { receipt in
+                            HStack(spacing: 7) {
+                                Image(systemName: receipt["success"].bool ? "checkmark" : "exclamationmark.triangle")
+                                Text(receipt["tool_name"].string)
+                                Spacer()
+                                Text(receipt["success"].bool ? "Done" : "Failed")
+                            }
+                            .font(.system(size: 12))
+                            .foregroundStyle(receipt["success"].bool ? N.text3 : NekoStyle.amber)
+                            .padding(.vertical, 7)
+                            Divider().opacity(0.4)
+                        }
+                    } else {
+                        ForEach(activity.calls.filter { $0["status"].string != "awaiting_approval" }, id: \.recordID) { call in
+                            toolCall(call, turn: turn, pending: pending)
+                        }
+                    }
+                }.padding(.top, 8)
+            } label: {
+                Label(activity.title, systemImage: activity.failed > 0 ? "exclamationmark.circle" : "checkmark.circle")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(activity.failed > 0 || activity.awaitingApproval > 0 ? NekoStyle.amber : N.text3)
+                }
+            } else {
+                Label(activity.title, systemImage: "hand.raised")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(NekoStyle.amber)
+            }
+            ForEach(activity.calls.filter { $0["status"].string == "awaiting_approval" }, id: \.recordID) { call in
+                toolCall(call, turn: turn, pending: pending)
+            }
         }
+        .padding(.top, 4)
     }
     private func toolCall(_ call: JSONValue, turn: String, pending: Bool) -> some View {
         func decide(_ approve: Bool) { Task { await model.workbench(.command("DecideChatTool", ["turn_id": .string(turn), "call_id": call["id"], "approve": .bool(approve)])) } }
-        return VStack(alignment: .leading, spacing: 8) {
-            Label(call["tool_name"].string, systemImage: "wrench.and.screwdriver").font(.callout.bold())
-            Text("\(model.workspaces.first { $0.recordID == call["workspace_id"].string }?["name"].string ?? "Unknown workspace") · \(model.snapshot["mcp"]["connections"].array.first { $0.recordID == call["connection_id"].string }?["label"].string ?? "Removed connection")").font(.caption).foregroundStyle(.secondary)
-            Text(call["status"].string.replacingOccurrences(of: "_", with: " ")).foregroundStyle(.secondary)
-            DisclosureGroup("Request details") { Text(call["arguments_json"].string).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+        let status = call["status"].string
+        let connection = model.snapshot["mcp"]["connections"].array.first { $0.recordID == call["connection_id"].string }?["label"].string ?? "Removed connection"
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: status == "failed" || status == "denied" ? "exclamationmark.circle" : status == "awaiting_approval" ? "hand.raised" : "checkmark")
+                    .foregroundStyle(status == "failed" || status == "denied" || status == "awaiting_approval" ? NekoStyle.amber : N.text4)
+                    .frame(width: 14)
+                Text(call["tool_name"].string).fontWeight(.medium)
+                Text("· \(connection)").foregroundStyle(N.text4).lineLimit(1)
+                Spacer(minLength: 8)
+                Text(status.replacingOccurrences(of: "_", with: " ").capitalized).foregroundStyle(N.text4)
+            }.font(.system(size: 12))
+            DisclosureGroup("Request details") {
+                Text(call["arguments_json"].string).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+            }.font(.system(size: 11)).foregroundStyle(N.text4).padding(.leading, 22)
             if pending && call["status"].string == "awaiting_approval" {
-                HStack { Button("Deny", role: .destructive) { decide(false) }; Button("Allow this request") { decide(true) }.nekoPrimaryButton() }.disabled(model.busy)
+                HStack { Button("Deny", role: .destructive) { decide(false) }; Button("Allow this request") { decide(true) }.nekoPrimaryButton() }
+                    .padding(.leading, 22).disabled(model.busy)
             }
-        }.padding(12).nekoCard(padding: 0, radius: 12)
+            Divider().opacity(0.4)
+        }.padding(.vertical, 5)
     }
-    private func send() {
-        guard !sending, !model.busy, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    private func chooseAttachments() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        let selectedScope = scope
+        panel.begin { response in
+            guard response == .OK else { return }
+            Task { @MainActor in
+                for url in panel.urls {
+                    do { model.chatDrafts.add(try ComposerAttachmentStore.saveFile(url), for: selectedScope) }
+                    catch { model.error = error.localizedDescription }
+                }
+            }
+        }
+    }
+
+    private func send(interrupt: Bool = false) {
+        guard !sending, !model.busy else { return }
         let submission = model.chatDrafts.submission(for: scope)
+        guard !submission.text.isEmpty else { return }
         model.sendingChatScopes.insert(submission.scope)
         Task {
-            let saved = await model.workbench(.command("SendMessage", ["text": .string(submission.text), "workspace_id": submission.scope.workspaceID.map(JSONValue.string) ?? .null]))
+            let saved = await model.workbench(.command(interrupt ? "InterruptAndSendMessage" : "SendMessage", ["text": .string(submission.text), "workspace_id": submission.scope.workspaceID.map(JSONValue.string) ?? .null]))
             model.chatDrafts.complete(submission, succeeded: saved)
             model.sendingChatScopes.remove(submission.scope)
         }
@@ -368,15 +550,6 @@ struct SuggestionRow: View {
     }
 }
 
-
-struct ComposerChip: View {
-    let text: String
-    var body: some View {
-        Text(text).font(.system(size: 12)).foregroundStyle(N.text3).lineLimit(1)
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .liquidGlassCapsule()
-    }
-}
 
 struct BriefRow: View {
     let dot: Color

@@ -33,7 +33,7 @@ pub struct Controller {
     pub mcp: Arc<crate::mcp_host::Host>,
     db: Arc<Mutex<Db>>,
     active: Mutex<Vec<Active>>,
-    chat_active: Mutex<Option<Active>>,
+    chat_active: Arc<Mutex<Option<Active>>>,
     waking: Mutex<()>,
 }
 
@@ -44,7 +44,7 @@ impl Controller {
             mcp: Arc::new(crate::mcp_host::Host::new(db.clone())),
             db,
             active: Mutex::new(Vec::new()),
-            chat_active: Mutex::new(None),
+            chat_active: Arc::new(Mutex::new(None)),
             waking: Mutex::new(()),
         }
     }
@@ -132,30 +132,78 @@ impl Controller {
                 }
                 store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), Command::RetryTask { task_id })
             }
-            Command::SendMessage { text, workspace_id } => {
-                let mut active = self.chat_active.lock().map_err(|_| "Chat state unavailable")?;
-                if let Some(id) = &workspace_id {
-                    let state = store::load(&*self.db.lock().map_err(|_| "Chat storage unavailable")?)?;
-                    if !state.workspaces.iter().any(|w| &w.id == id) { return Err("Selected workspace no longer exists".into()); }
-                }
-                let pending = neko_chat::begin_scoped_turn(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &text, workspace_id.as_deref())?;
-                let cancelled = Arc::new(AtomicBool::new(false));
-                *active = Some(Active { task_id: pending.clone(), cancelled: cancelled.clone() });
-                let db = self.db.clone();
-                let mcp = self.mcp.clone();
-                let text = text.trim().to_owned();
-                std::thread::spawn(move || {
-                    let run = std::panic::AssertUnwindSafe(|| converse(&db, &mcp, &cancelled, &pending, &text, workspace_id.as_deref()));
-                    if std::panic::catch_unwind(run).is_err() {
-                        // Never leave "thinking" stuck; a poisoned lock is recovered.
-                        let guard = db.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                        let _ = neko_chat::finish_turn(&guard, &pending, "Something went wrong while I was replying. Send your message again.", vec![], true);
-                    }
-                });
-                store::load(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
-            }
+            Command::SendMessage { text, workspace_id } => self.send_message(text, workspace_id, false),
+            Command::InterruptAndSendMessage { text, workspace_id } => self.send_message(text, workspace_id, true),
             command => store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), command),
         }
+    }
+
+    fn send_message(&self, text: String, workspace_id: Option<String>, interrupt: bool) -> Result<Snapshot, String> {
+        let mut active = self.chat_active.lock().map_err(|_| "Chat state unavailable")?;
+        let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
+        if let Some(id) = &workspace_id {
+            let state = store::load(&db)?;
+            if !state.workspaces.iter().any(|w| &w.id == id) { return Err("Selected workspace no longer exists".into()); }
+        }
+        let id = if active.is_some() {
+            neko_chat::queue_scoped_turn(&db, &text, workspace_id.as_deref())?
+        } else {
+            neko_chat::begin_scoped_turn(&db, &text, workspace_id.as_deref())?
+        };
+        let mut launch = None;
+        if interrupt {
+            if let Some(current) = active.as_ref() {
+                current.cancelled.store(true, Ordering::Release);
+                self.mcp.cancel_chat(&current.task_id);
+                neko_chat::finish_turn(&db, &current.task_id, "Interrupted by your next message.", vec![], true)?;
+                neko_chat::prioritize_queued_turn(&db, &id)?;
+            }
+        }
+        if active.is_none() {
+            let messages = neko_chat::load(&db)?;
+            launch = if messages.iter().any(|m| m.id == id && m.pending) {
+                Some((id, text.trim().to_owned(), workspace_id))
+            } else { neko_chat::begin_next_queued_turn(&db)? };
+            if let Some((pending, _, _)) = &launch {
+                *active = Some(Active { task_id: pending.clone(), cancelled: Arc::new(AtomicBool::new(false)) });
+            }
+        }
+        let snapshot = store::load(&db)?;
+        drop(db);
+        drop(active);
+        if let Some(turn) = launch { self.spawn_chat_worker(turn); }
+        Ok(snapshot)
+    }
+
+    fn spawn_chat_worker(&self, first: (String, String, Option<String>)) {
+        let db = self.db.clone();
+        let mcp = self.mcp.clone();
+        let active = self.chat_active.clone();
+        std::thread::spawn(move || {
+            let mut turn = first;
+            loop {
+                let cancelled = {
+                    let guard = active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    guard.as_ref().filter(|entry| entry.task_id == turn.0).map(|entry| entry.cancelled.clone())
+                };
+                let Some(cancelled) = cancelled else { break };
+                let run = std::panic::AssertUnwindSafe(|| converse(&db, &mcp, &cancelled, &turn.0, &turn.1, turn.2.as_deref()));
+                if std::panic::catch_unwind(run).is_err() {
+                    let guard = db.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let _ = neko_chat::finish_turn(&guard, &turn.0, "Something went wrong while I was replying. Send your message again.", vec![], true);
+                }
+                let mut current = active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let guard = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                match neko_chat::begin_next_queued_turn(&guard) {
+                    Ok(Some(next)) => {
+                        *current = Some(Active { task_id: next.0.clone(), cancelled: Arc::new(AtomicBool::new(false)) });
+                        turn = next;
+                    }
+                    Ok(None) => { *current = None; break; }
+                    Err(error) => { eprintln!("neko chat queue: {error}"); *current = None; break; }
+                }
+            }
+        });
     }
 
     fn update_task(&self, id: &str, update: impl FnOnce(&mut Task)) -> Result<(), String> {
@@ -268,6 +316,19 @@ impl Controller {
         ) {
             eprintln!("neko: cannot recover chat: {error}");
         }
+        let queued = {
+            let mut active = self.chat_active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match neko_chat::begin_next_queued_turn(&db) {
+                Ok(Some(turn)) => {
+                    *active = Some(Active { task_id: turn.0.clone(), cancelled: Arc::new(AtomicBool::new(false)) });
+                    Some(turn)
+                }
+                Ok(None) => None,
+                Err(error) => { eprintln!("neko chat queue recovery: {error}"); None }
+            }
+        };
+        if let Some(turn) = queued { self.spawn_chat_worker(turn); }
         self.start_learning();
         let controller = self.clone();
         std::thread::spawn(move || {
@@ -557,6 +618,7 @@ impl Controller {
                     ),
                     writable: !planning,
                     timeout: Duration::from_secs(if planning { 600 } else { 1800 }),
+                    runtime: snapshot.agent_runtime.clone(),
                 },
                 &store::new_id(),
                 &authority,
@@ -638,6 +700,7 @@ impl Controller {
                     prompt: format!("{}\nHost-observed diff base: {}\nHost-observed changed files (verify every file, including committed edits and untracked additions): {}\nInherited dependency files: {:?}\nRequired approved checks (execute every command exactly and report it in tests; if blocked, fail): {:?}", prompt(workspace, &review_task, "reviewer", &memory), split.and_then(|s| s.base.as_deref()).unwrap_or(&base), changed.join(", "), inherited, required_checks),
                     writable: false,
                     timeout: Duration::from_secs(600),
+                    runtime: snapshot.agent_runtime.clone(),
                 },
                 &store::new_id(),
                 &authority,
@@ -807,6 +870,7 @@ fn converse(
         ),
         writable: false,
         timeout: Duration::from_secs(180),
+        runtime: snapshot.agent_runtime.clone(),
     };
     let result = (|| {
         if cancel.load(Ordering::Acquire) {
@@ -1175,6 +1239,7 @@ fn propose_ticket_skill(
             ),
             writable: false,
             timeout: Duration::from_secs(120),
+            runtime: snapshot.agent_runtime.clone(),
         },
         &AtomicBool::new(false),
         |_| {},
@@ -1580,6 +1645,22 @@ mod tests {
         assert_eq!(message.text, "Stopped.");
         assert!(message.failed && !message.pending);
         assert!(message.ticket_ids.is_empty() && message.remembered.is_empty());
+    }
+
+    #[test]
+    fn normal_send_queues_and_interrupt_send_stops_then_prioritizes() {
+        let controller = controller_with_task(TaskStatus::Completed);
+        let first = neko_chat::begin_scoped_turn(&controller.db.lock().unwrap(), "first", Some("w")).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        *controller.chat_active.lock().unwrap() = Some(Active { task_id: first.clone(), cancelled: cancel.clone() });
+        let state = controller.command(Command::SendMessage { text: "second".into(), workspace_id: Some("w".into()) }).unwrap();
+        assert!(state.conversation.iter().any(|m| m.text == "second" && m.queued));
+        assert!(!cancel.load(Ordering::Acquire));
+        let state = controller.command(Command::InterruptAndSendMessage { text: "urgent".into(), workspace_id: Some("w".into()) }).unwrap();
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(state.conversation.iter().find(|m| m.id == first).unwrap().failed);
+        let db = controller.db.lock().unwrap();
+        assert_eq!(neko_chat::begin_next_queued_turn(&db).unwrap().unwrap().1, "urgent");
     }
 
     #[test]

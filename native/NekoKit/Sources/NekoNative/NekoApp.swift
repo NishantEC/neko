@@ -4,7 +4,6 @@ import NekoKit
 @main struct NekoNativeApp: App {
     @StateObject private var model = AppModel()
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
     init() { NativeLifecycle.startDaemon() }
     var body: some Scene {
         Window("Neko", id: "workspace") {
@@ -12,14 +11,14 @@ import NekoKit
                 .tint(NekoStyle.accent)
                 .task { await model.start(); await PaletteController.shared.configure(model: model) }
                 .onReceive(NotificationCenter.default.publisher(for: .nekoOpenWorkspace)) { _ in openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
-                .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in openSettings() }
+                .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
         }
         .defaultSize(width: 1280, height: 820)
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) { Button("Quick panel") { PaletteController.shared.toggle(model: model) }.keyboardShortcut("k", modifiers: [.command]) }
+            CommandGroup(replacing: .appSettings) { Button("Settings…") { model.requestedPage = "Settings"; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }.keyboardShortcut(",", modifiers: [.command]) }
         }
-        Settings { PreferencesView(model: model) }
         MenuBarExtra("Neko", systemImage: "cat") { StatusMenu(model: model) }
     }
 }
@@ -33,7 +32,7 @@ struct StatusMenu: View {
         Divider()
         Button("Quick panel") { PaletteController.shared.toggle(model: model) }
         Button("Open Neko") { openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
-        SettingsLink { Text("Settings…") }
+        Button("Settings…") { model.requestedPage = "Settings"; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
         Divider()
         Button("Quit Neko") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
@@ -45,7 +44,7 @@ struct WorkspaceView: View {
     @State private var columns: NavigationSplitViewVisibility = ProcessInfo.processInfo.environment["NEKO_SIDEBAR"] == "hidden" ? .detailOnly : .all
     @AppStorage("neko.look") private var look = ProcessInfo.processInfo.environment["NEKO_LOOK"] ?? NekoLook.ambient.rawValue
     @State private var addingWorkspace = false
-    private let pages = [("Today", "sun.max"), ("Tickets", "tray"), ("Responsibilities", "waveform.path"), ("Tools & skills", "shippingbox"), ("Schedules", "calendar"), ("Memory", "text.alignleft"), ("Profiles", "person.2")]
+    private let pages = [("Today", "sun.max"), ("Tickets", "tray"), ("Responsibilities", "waveform.path"), ("Tools & skills", "shippingbox"), ("Schedules", "calendar"), ("Memory", "text.alignleft"), ("Profiles", "person.2"), ("Settings", "gearshape")]
     var body: some View {
         Group {
             if model.loadingSetup {
@@ -65,6 +64,7 @@ struct WorkspaceView: View {
                         case "Memory": MemoryView(model: model)
                         case "Profiles": ProfilesView(model: model)
                         case "Schedules": SchedulesView(model: model)
+                        case "Settings": PreferencesView(model: model)
                         case "Activity": ActivityGallery()
                         default: TodayView(model: model)
                         }
@@ -99,6 +99,9 @@ struct WorkspaceView: View {
             }
         }
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
+        .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in page = "Settings" }
+        .onChange(of: model.requestedPage) { _, requested in if let requested { page = requested; model.requestedPage = nil } }
+        .onAppear { if let requested = model.requestedPage { page = requested; model.requestedPage = nil } }
     }
 }
 
@@ -265,7 +268,8 @@ enum PageInfo {
     static let groups: [(title: String, keys: [String])] = [
         ("Your day", ["Today", "Tickets"]),
         ("What Neko watches", ["Workspaces", "Responsibilities", "Schedules"]),
-        ("Teach Neko", ["Tools & skills", "Memory", "Profiles"])
+        ("Teach Neko", ["Tools & skills", "Memory", "Profiles"]),
+        ("Neko", ["Settings"])
     ]
     static func title(_ key: String) -> String {
         switch key {
@@ -285,6 +289,7 @@ enum PageInfo {
         case "Tools & skills": "wrench.and.screwdriver"
         case "Memory": "brain"
         case "Profiles": "person.2"
+        case "Settings": "gearshape"
         default: "circle"
         }
     }
