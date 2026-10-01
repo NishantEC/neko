@@ -24,7 +24,7 @@ struct ResponsibilitiesView: View {
 
     var body: some View {
         ManagementScroll {
-            PageIntro(title: "What Neko watches", message: "Tell Neko what to keep an eye on, or let it suggest from your connected tools. It checks every 10 minutes, brings anything important to Today, and never changes anything without asking.") { EmptyView() }
+            PageIntro(title: "What Neko watches", message: "Connected sources that can list changing work start watching automatically. Neko checks every 10 minutes and brings changes to Today. Pause a watch here whenever you want; external changes still need your direction.") { EmptyView() }
             if model.workspaces.isEmpty {
                 EmptyRow(text: "Add a workspace first, then tell Neko what to watch in it.")
             } else {
@@ -108,7 +108,7 @@ struct ResponsibilitiesView: View {
         let suggested = all.filter { suggestedIDs.contains($0.recordID) }
         if !suggested.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                sectionTitle("Suggested", detail: "Paused until you turn them on")
+                sectionTitle("Not started automatically", detail: "Review source access or start a custom check")
                 ForEach(suggested, id: \.recordID) { item in
                     SuggestedResponsibilityCard(model: model, item: item) { draft = ManagementDraft(value: item, workspace: item["workspace_id"].string) }
                 }
@@ -142,7 +142,7 @@ struct ResponsibilitiesView: View {
     private func status(_ item: JSONValue) -> String {
         let tools = item["connection_ids"].array.map { Watching.label(model, connection: $0.string) }.joined(separator: ", ")
         let workspace = model.selectedWorkspace == nil ? (model.workspaces.first { $0.recordID == item["workspace_id"].string }?["name"].string ?? "") : ""
-        let state = item["failures"].int > 0 ? "Needs attention" : item["enabled"].bool ? "Last checked \(relativeTime(item["last_attempt_ms"].int))" : "Paused"
+        let state = item["failures"].int > 0 ? "Needs attention" : item["enabled"].bool ? (item["last_attempt_ms"] == .null ? "First check queued" : "Last checked \(relativeTime(item["last_attempt_ms"].int))") : "Paused"
         return [state, tools, workspace].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 

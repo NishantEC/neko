@@ -6,8 +6,10 @@ arbitrary; several of these decisions cost days to learn.
 
 ## Current default: standalone Neko work
 
-`neko-protocol::workbench` supplies typed commands and snapshots. The GPUI
-`workspace.rs` window is a client only. `neko-core::workbench` stores bounded,
+`neko-protocol::workbench` supplies typed commands and snapshots. The installed
+client is `native/NekoKit` (SwiftUI/AppKit); the earlier GPUI `workspace.rs`
+window remains a separate legacy client. Both are clients of the same daemon.
+`neko-core::workbench` stores bounded,
 validated snapshots atomically in the daemon-owned SQLite settings table.
 Workspace identity is a canonical existing folder, including a non-Git folder.
 Creating or planning a code task separately validates that the folder belongs
@@ -20,7 +22,7 @@ workspace without holding the
 database mutex during model/network calls. A two-second supervisor heartbeat
 is separate from task progress; it does not claim the model made progress.
 
-The main window (`workspace.rs`, `workspace/home.rs`) is organised around
+The native main window (`native/NekoKit/Sources/NekoNative/NekoApp.swift`) is organised around
 Neko, tickets and responsibilities. Tickets are workbench tasks; status alone
 places each in *needs you*, *working* or *done* (`home::group`). **Today** is a
 conversation with Neko: a brief built from those groups, ticket cards, the
@@ -29,7 +31,7 @@ shows a panel with its actions, activity and the user's steering notes.
 `neko-core::neko_chat` stores the conversation in its own bounded setting,
 outside the task store's reserved capacity. Each message is one Codex turn with
 read-only filesystem access (`neko-daemon::workbench::converse`). A selected
-workspace receives only its granted MCP connections through a temporary lease;
+workspace receives its connected MCP tools through a temporary lease;
 an unscoped chat receives no bridge. Chat history injected into the prompt is
 also scoped. A reply may propose up to three
 tickets, which become ordinary queued tasks, so planning and approval gates are
@@ -37,8 +39,8 @@ unchanged. Ticket notes (event role `note`) reach planner and builder prompts
 as direction inside the approved scope and never grant tools or publication.
 
 Chat tool cards persist the exact arguments and workspace. A tool whose server
-declares `readOnlyHint=true` can run under its grant; the declaration participates
-in the schema hash and the grant UI states this trust decision. Unknown/action
+declares `readOnlyHint=true` can run without another prompt; the declaration participates
+in the schema hash. Unknown/action
 tools need an inline approval for each exact call. Denial never dispatches.
 Approvals expire after 120 seconds; upstream execution remains bounded to 20
 seconds. Stop, runner timeout, lease drop, or daemon restart fail closed.
@@ -50,9 +52,9 @@ The daemon-owned `neko-core::mcp_host` hosts user-added and source-linked stdio
 and Streamable HTTP servers through pinned rmcp 3.4.1. A linked connection
 stores its source identity, reviewed transport snapshot, and fingerprint, not
 source credentials. The daemon resolves the current source definition and
-credentials before discovery and dispatch, and revokes grants when the
+credentials before discovery and dispatch, and removes access when the
 definition or trusted local executable changes or disappears. Connections,
-discovered schema hashes, explicit grants, responsibilities, receipts and
+discovered schema hashes, workspace-scoped tool records, responsibilities, receipts and
 source evidence live in the versioned workbench snapshot. Neko-owned
 credentials live in per-connection Keychain entries; source credentials remain
 in their original setup. OAuth uses discovered metadata, PKCE/state/issuer checks and bounded
@@ -60,15 +62,29 @@ browser callbacks. Legacy Linear data remains historical; old polling and
 permissions are disabled, not converted into grants.
 
 `native_runner` starts ephemeral Codex processes in isolated task worktrees.
+The saved `agent_runtime` snapshot chooses the Codex account (default), the
+CLI's Ollama/LM Studio local adapter, or an available model routed through an
+installed OpenCodex loopback proxy for each new run. The native picker obtains
+OpenCodex's live model list through `ocx models live --json`, discards disabled
+entries, and displays real provider names; Neko does not independently fetch
+those providers' catalogs or import their credentials. Runs still use the Codex
+CLI with ephemeral configuration. Selection does not alter already-running
+work. The Today composer and main-window Settings → AI page both update it.
 A scoped, expiring capability in environment variables connects a temporary
 stdio bridge back to the daemon. Only `neko_list_tools` and `neko_call_tool`
 are enabled and preapproved. Upstream configurations and credentials are not
 passed to workers. Global user config/rules are ignored and shell networking
-stays disabled. Current workspace scope, grant and schema are checked before
+stays disabled. Current workspace scope, connection state and schema are checked before
 each call, including after upstream rediscovery. Revocation prevents subsequent
 dispatch; cancellation cannot undo a request already delivered upstream.
 
-Responsibilities persist their next due time before running. A ten-minute
+The scheduler seeds one plan-only watch for each trusted, scoped source with a
+granted read-declared tool that can enumerate changing work, or activates its
+untried chat suggestion. Search-only reference catalogs remain on demand. A durable
+scope marker prevents a later manual pause from being undone. Background MCP
+leases hide and reject tools not declared read-only; this is a trusted-server
+declaration, not proof that an upstream server is harmless. Responsibilities
+persist their next due time before running. A ten-minute
 local wake invokes a read-only agent with selected tools, with bounded failure
 backoff and no replay of missed intervals. Generic observations require real
 successful scoped receipts. Source identity/revision deduplicates tasks;

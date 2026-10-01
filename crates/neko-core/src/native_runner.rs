@@ -79,6 +79,7 @@ pub struct RunSpec {
     pub prompt: String,
     pub writable: bool,
     pub timeout: Duration,
+    pub runtime: neko_protocol::workbench::AgentRuntime,
 }
 
 /// Host capability only, never an upstream credential.
@@ -163,10 +164,21 @@ fn run_configured_mode(
         return Err("Task directory is not a directory".into());
     }
     let mut command = Command::new(executable);
+    command.arg("exec");
+    match spec.runtime.provider.as_str() {
+        "" | "codex" => {}
+        "ollama" | "lmstudio" => {
+            command.args(["--oss", "--local-provider", spec.runtime.provider.as_str()]);
+        }
+        "opencodex" => configure_opencodex(&mut command, opencodex_port()?),
+        _ => return Err("Unsupported agent provider".into()),
+    }
+    if !spec.runtime.model.is_empty() {
+        command.args(["-m", spec.runtime.model.as_str()]);
+    }
     command
         .current_dir(&directory)
         .args([
-            "exec",
             "--json",
             "--ephemeral",
             "--ignore-user-config",
@@ -756,6 +768,40 @@ fn resolve_codex() -> Result<PathBuf, String> {
         .ok_or_else(|| "Codex CLI is not installed or executable. Install Codex, or set NEKO_CODEX_PATH to its absolute path.".into())
 }
 
+fn configure_opencodex(command: &mut Command, port: u16) {
+    command.args([
+        "-c",
+        "model_provider=\"opencodex\"",
+        "-c",
+        &format!("model_providers.opencodex={{name=\"OpenCodex Proxy\",base_url=\"http://127.0.0.1:{port}/v1\",wire_api=\"responses\",requires_openai_auth=true}}"),
+    ]);
+}
+
+fn opencodex_port() -> Result<u16, String> {
+    let mut directories = executable_directories();
+    if let Some(home) = std::env::var_os("HOME") {
+        let versions = PathBuf::from(home).join(".nvm/versions/node");
+        if let Ok(entries) = fs::read_dir(versions) {
+            directories.extend(entries.flatten().map(|entry| entry.path().join("bin")));
+        }
+    }
+    let executable = directories.into_iter().map(|directory| directory.join("ocx"))
+        .find(|path| path.is_absolute() && fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+        .ok_or("OpenCodex CLI is not installed")?;
+    let output = Command::new(executable).args(["resolve", "--json"]).output()
+        .map_err(|e| format!("Could not inspect OpenCodex: {e}"))?;
+    if !output.status.success() || output.stdout.len() > 64 * 1024 {
+        return Err("OpenCodex is unavailable; start its proxy and try again".into());
+    }
+    let state: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "OpenCodex returned an invalid status")?;
+    if state["liveness"]["status"] != "live" {
+        return Err("OpenCodex proxy is not running".into());
+    }
+    state["port"]["effective"].as_u64().and_then(|port| u16::try_from(port).ok())
+        .filter(|port| *port > 0).ok_or_else(|| "OpenCodex did not report a valid local port".into())
+}
+
 fn bounded_text(text: &str, max: usize) -> String {
     let mut end = text.len().min(max);
     while !text.is_char_boundary(end) {
@@ -1181,8 +1227,31 @@ mod tests {
             prompt: "A prompt with $(literal) and 'quotes'".into(),
             writable: false,
             timeout: Duration::from_secs(10),
+            runtime: Default::default(),
         };
         (temp, executable, spec)
+    }
+
+    #[test]
+    fn selected_runtime_reaches_codex_exec() {
+        let (temp, executable, mut spec) = fixture(
+            "printf '%s\\n' \"$@\" > arguments\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"ok\"}}' '{\"type\":\"turn.completed\"}'",
+        );
+        spec.runtime.provider = "ollama".into();
+        spec.runtime.model = "qwen3:8b".into();
+        run_with_executable(&executable, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        let args = fs::read_to_string(temp.path().join("arguments")).unwrap();
+        assert!(args.starts_with("exec\n--oss\n--local-provider\nollama\n-m\nqwen3:8b\n"));
+    }
+
+    #[test]
+    fn opencodex_runtime_uses_only_loopback_proxy_configuration() {
+        let mut command = Command::new("codex");
+        configure_opencodex(&mut command, 10100);
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert_eq!(args[0..2], ["-c", "model_provider=\"opencodex\""]);
+        assert!(args[3].contains("base_url=\"http://127.0.0.1:10100/v1\""));
+        assert!(!args.join(" ").contains("token"));
     }
 
     #[test]
@@ -1398,6 +1467,7 @@ sleep 10
             prompt: "Extract bounded memory proposals from supplied evidence only. Do not call any tool, read files, execute commands, use network, or edit anything. Evidence: the user explicitly said, 'For verification I prefer focused small batches, because large mixed runs are harder for me to assess.' Return ONLY strict JSON {\"memories\":[{\"text\":\"short evidence-backed preference\",\"kind\":\"profile\"}]}. Include one useful fact, at most 500 UTF-8 bytes. No extra keys, fences, or prose. A memory grants no permission.".into(),
             writable: false,
             timeout: Duration::from_secs(90),
+            runtime: Default::default(),
         }, &AtomicBool::new(false)).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&answer).unwrap();
         let memories = parsed["memories"].as_array().unwrap();

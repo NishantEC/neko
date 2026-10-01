@@ -38,7 +38,26 @@ pub fn authorize<'a>(
 }
 pub fn migrate(state: &mut Snapshot) -> Result<bool, String> {
     match state.mcp.version {
-        1 => Ok(false),
+        2 => Ok(false),
+        1 => {
+            // A newly available catalog must not silently widen an existing
+            // unattended watch. The user can re-enable it after reviewing its
+            // selected connections under the new policy.
+            for responsibility in &mut state.mcp.responsibilities {
+                responsibility.enabled = false;
+            }
+            for connection_id in state
+                .mcp
+                .connections
+                .iter()
+                .map(|c| c.id.clone())
+                .collect::<Vec<_>>()
+            {
+                allow_discovered_tools(state, &connection_id);
+            }
+            state.mcp.version = 2;
+            Ok(true)
+        }
         0 => {
             for workspace in &mut state.workspaces {
                 workspace.away_enabled = false;
@@ -59,6 +78,135 @@ pub fn migrate(state: &mut Snapshot) -> Result<bool, String> {
     }
 }
 
+/// A linked connection makes its discovered catalog available wherever it is scoped.
+/// The separate connection trust, workspace scope and run approval checks still apply.
+pub fn allow_discovered_tools(state: &mut Snapshot, connection_id: &str) {
+    let Some(connection) = state.mcp.connections.iter().find(|c| c.id == connection_id) else {
+        return;
+    };
+    let existing = &mut state.mcp.grants;
+    for workspace in &state.workspaces {
+        if !connection.available_in(&workspace.id) {
+            continue;
+        }
+        for tool in &connection.tools {
+            if !existing.iter().any(|g| {
+                g.workspace_id == workspace.id
+                    && g.connection_id == connection.id
+                    && g.tool_name == tool.name
+                    && g.schema_hash == tool.schema_hash
+            }) {
+                existing.retain(|g| {
+                    !(g.workspace_id == workspace.id
+                        && g.connection_id == connection.id
+                        && g.tool_name == tool.name)
+                });
+                existing.push(ToolGrant {
+                    workspace_id: workspace.id.clone(),
+                    connection_id: connection.id.clone(),
+                    tool_name: tool.name.clone(),
+                    schema_hash: tool.schema_hash.clone(),
+                });
+            }
+        }
+    }
+}
+
+fn generic_watch_instruction(label: &str) -> String {
+    format!("Check {label} for new or changed work relevant to this workspace. Summarize what needs attention with source evidence; do not change external systems.")
+}
+
+/// A generic recurring check needs a way to enumerate changing work. Search
+/// across static design/reference assets is useful on demand, not a watch.
+fn can_enumerate_work(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let enumerates = ["list", "search", "query", "fetch"].iter()
+        .any(|verb| name.starts_with(&format!("{verb}_")) || name.ends_with(&format!("_{verb}")));
+    let signals = ["issue", "event", "incident", "alert", "notification", "message",
+        "task", "ticket", "pull_request", "comment", "error", "failure", "record",
+        "change", "update"];
+    enumerates && signals.iter().any(|signal| name.contains(signal))
+}
+
+/// Start one plan-only watch per readable source and workspace. Existing
+/// untried chat suggestions are activated instead of adding a duplicate.
+/// Each scope is considered once so a subsequent user pause remains durable.
+pub fn seed_source_watches(state: &mut Snapshot, now: i64) -> bool {
+    let mut changed = false;
+    let suggested: std::collections::HashSet<&str> = state.conversation.iter()
+        .flat_map(|message| message.responsibility_ids.iter().map(String::as_str))
+        .collect();
+    let scopes: Vec<(String, String, String)> = state.workspaces.iter().flat_map(|workspace| {
+        state.mcp.connections.iter()
+            .filter(move |connection| connection.available_in(&workspace.id))
+            .map(move |connection| (workspace.id.clone(), connection.id.clone(), connection.label.clone()))
+    }).collect();
+    for (workspace_id, connection_id, label) in scopes {
+        let key = format!("{workspace_id}\u{1f}{connection_id}");
+        let can_watch_changes = state.mcp.connections.iter()
+            .find(|c| c.id == connection_id)
+            .is_some_and(|connection| connection.tools.iter().any(|tool| tool.read_only
+                && can_enumerate_work(&tool.name)
+                && authorize(state, &workspace_id, &connection_id, &tool.name).is_ok()));
+        if state.mcp.auto_watch_scopes.contains(&key) {
+            if !can_watch_changes {
+                for responsibility in &mut state.mcp.responsibilities {
+                    if responsibility.workspace_id == workspace_id
+                        && responsibility.connection_ids == [connection_id.as_str()]
+                        && responsibility.instruction == generic_watch_instruction(&label)
+                        && responsibility.enabled {
+                        responsibility.enabled = false;
+                        responsibility.last_result = "Paused: this source has no tool for listing changing work. It remains available for on-demand questions.".into();
+                        changed = true;
+                    }
+                }
+            }
+            continue;
+        }
+        let Some(connection) = state.mcp.connections.iter().find(|c| c.id == connection_id) else {
+            continue;
+        };
+        if !connection.enabled || !connection.trusted || connection.error.is_some()
+            || !connection.tools.iter().any(|tool| tool.read_only
+                && authorize(state, &workspace_id, &connection_id, &tool.name).is_ok()) {
+            continue;
+        }
+        let existing: Vec<usize> = state.mcp.responsibilities.iter().enumerate()
+            .filter(|(_, responsibility)| responsibility.workspace_id == workspace_id
+                && responsibility.connection_ids.contains(&connection_id))
+            .map(|(index, _)| index).collect();
+        if existing.is_empty() {
+            if !can_watch_changes { continue; }
+            if state.mcp.responsibilities.len() >= 100 { continue; }
+            state.mcp.responsibilities.push(Responsibility {
+                id: crate::workbench::new_id(),
+                workspace_id: workspace_id.clone(),
+                instruction: generic_watch_instruction(&label),
+                connection_ids: vec![connection_id.clone()],
+                enabled: true,
+                prepare_low_risk: false,
+                next_due_ms: now,
+                last_attempt_ms: None,
+                last_result: String::new(),
+                failures: 0,
+            });
+        } else {
+            for index in existing {
+                let responsibility = &mut state.mcp.responsibilities[index];
+                if !responsibility.enabled && responsibility.last_attempt_ms.is_none()
+                    && suggested.contains(responsibility.id.as_str()) {
+                    responsibility.enabled = true;
+                    responsibility.prepare_low_risk = false;
+                    responsibility.next_due_ms = now;
+                }
+            }
+        }
+        state.mcp.auto_watch_scopes.push(key);
+        changed = true;
+    }
+    changed
+}
+
 pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Result<(), String> {
     match command {
         McpCommand::SetEnabled {
@@ -77,6 +225,8 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
                     .mcp
                     .grants
                     .retain(|g| g.connection_id != connection_id);
+            } else {
+                allow_discovered_tools(state, &connection_id);
             }
         }
         McpCommand::SetToolGrant {
@@ -296,14 +446,18 @@ fn validate_responsibility(state: &Snapshot, r: &Responsibility) -> Result<(), S
     Ok(())
 }
 pub fn validate(state: &Snapshot) -> Result<(), String> {
-    if state.mcp.version != 1
+    if state.mcp.version != 2
         || state.mcp.connections.len() > 100
-        || state.mcp.grants.len() > 2000
+        || state.mcp.grants.len() > 12_800
         || state.mcp.responsibilities.len() > 100
+        || state.mcp.auto_watch_scopes.len() > 10_000
         || state.mcp.receipts.len() > 1000
         || state.mcp.sources.len() > 1000
     {
         return Err("Unsupported MCP state version or record limit exceeded".into());
+    }
+    for scope in &state.mcp.auto_watch_scopes {
+        text(scope, 600, true)?;
     }
     let mut ids = std::collections::HashSet::new();
     for c in &state.mcp.connections {
@@ -436,6 +590,110 @@ mod tests {
         state
     }
     #[test]
+    fn seed_source_watches_starts_once_for_a_readable_connection() {
+        let mut state = state();
+        state.mcp.connections[0].tools[0].read_only = true;
+        state.mcp.connections[0].tools[0].name = "list_issues".into();
+        allow_discovered_tools(&mut state, "c");
+        assert!(seed_source_watches(&mut state, 100));
+        assert_eq!(state.mcp.responsibilities.len(), 1);
+        let watch = &state.mcp.responsibilities[0];
+        assert!(watch.enabled);
+        assert!(!watch.prepare_low_risk);
+        assert_eq!(watch.next_due_ms, 100);
+        assert_eq!(watch.connection_ids, ["c"]);
+        assert!(!seed_source_watches(&mut state, 200));
+        assert_eq!(state.mcp.responsibilities.len(), 1);
+    }
+
+    #[test]
+    fn seed_source_watches_activates_untried_suggestion_but_respects_pause() {
+        let mut state = state();
+        state.mcp.connections[0].tools[0].read_only = true;
+        allow_discovered_tools(&mut state, "c");
+        state.mcp.responsibilities.push(Responsibility {
+            id: "suggested".into(), workspace_id: "a".into(),
+            instruction: "Watch Linear".into(), connection_ids: vec!["c".into()],
+            enabled: false, prepare_low_risk: false, next_due_ms: 0,
+            last_attempt_ms: None, last_result: String::new(), failures: 0,
+        });
+        state.conversation.push(serde_json::from_value(serde_json::json!({
+            "id":"message", "at_ms":1, "role":"neko", "text":"suggestion",
+            "responsibility_ids":["suggested"]
+        })).unwrap());
+        assert!(seed_source_watches(&mut state, 100));
+        assert!(state.mcp.responsibilities[0].enabled);
+        assert_eq!(state.mcp.responsibilities.len(), 1);
+        let mut paused = state.mcp.responsibilities[0].clone();
+        paused.enabled = false;
+        apply_command(&mut state, McpCommand::SaveResponsibility {
+            responsibility: paused,
+        }, 101).unwrap();
+        assert!(!seed_source_watches(&mut state, 102));
+        assert!(!state.mcp.responsibilities[0].enabled);
+    }
+
+    #[test]
+    fn seed_source_watches_does_not_start_without_read_tool() {
+        let mut state = state();
+        allow_discovered_tools(&mut state, "c");
+        assert!(!seed_source_watches(&mut state, 100));
+        assert!(state.mcp.responsibilities.is_empty());
+    }
+
+    #[test]
+    fn seed_source_watches_skips_search_only_catalogs() {
+        let mut state = state();
+        state.mcp.connections[0].tools[0].read_only = true;
+        state.mcp.connections[0].tools[0].name = "search_screens".into();
+        allow_discovered_tools(&mut state, "c");
+        assert!(!seed_source_watches(&mut state, 100));
+        assert!(state.mcp.responsibilities.is_empty());
+    }
+
+    #[test]
+    fn seed_source_watches_pauses_prior_generic_search_only_watch() {
+        let mut state = state();
+        state.mcp.connections[0].tools[0].read_only = true;
+        state.mcp.connections[0].tools[0].name = "search_screens".into();
+        allow_discovered_tools(&mut state, "c");
+        state.mcp.auto_watch_scopes.push("a\u{1f}c".into());
+        state.mcp.responsibilities.push(Responsibility {
+            id: "generic".into(), workspace_id: "a".into(),
+            instruction: "Check User tools for new or changed work relevant to this workspace. Summarize what needs attention with source evidence; do not change external systems.".into(),
+            connection_ids: vec!["c".into()], enabled: true,
+            prepare_low_risk: false, next_due_ms: 100,
+            last_attempt_ms: Some(100), last_result: String::new(), failures: 0,
+        });
+        assert!(seed_source_watches(&mut state, 200));
+        assert!(!state.mcp.responsibilities[0].enabled);
+    }
+    #[test]
+    fn existing_connected_tools_become_available_without_per_tool_setup() {
+        let mut state = state();
+        state.mcp.version = 1;
+        state.mcp.responsibilities.push(Responsibility {
+            id: "watch".into(),
+            workspace_id: "a".into(),
+            instruction: "Check status".into(),
+            connection_ids: vec!["c".into()],
+            enabled: true,
+            prepare_low_risk: false,
+            next_due_ms: 0,
+            last_attempt_ms: None,
+            last_result: String::new(),
+            failures: 0,
+        });
+        assert!(state.mcp.grants.is_empty());
+        assert!(migrate(&mut state).unwrap());
+        assert_eq!(state.mcp.version, 2);
+        assert!(authorize(&state, "a", "c", "lookup").is_ok());
+        assert!(
+            !state.mcp.responsibilities[0].enabled,
+            "new unattended authority needs explicit re-enabling"
+        );
+    }
+    #[test]
     fn global_definitions_require_separate_workspace_grants() {
         let mut state = state();
         let mut second = state.workspaces[0].clone();
@@ -463,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn grants_are_bound_to_discovered_schema_and_do_not_survive_pause() {
+    fn pausing_revokes_tools_and_resuming_restores_discovered_tools() {
         let mut state = state();
         let grant = |hash: &str| McpCommand::SetToolGrant {
             connection_id: "c".into(),
@@ -493,7 +751,7 @@ mod tests {
             3,
         )
         .unwrap();
-        assert!(authorize(&state, "a", "c", "lookup").is_err());
+        assert!(authorize(&state, "a", "c", "lookup").is_ok());
     }
     #[test]
     fn responsibilities_cannot_select_another_workspaces_connections() {
@@ -610,7 +868,7 @@ mod tests {
         assert!(!state.workspaces[0].away_enabled);
         assert!(!state.connections[0].enabled);
         assert_eq!(state.connections[0].organization_id, "org");
-        assert_eq!(state.mcp.version, 1);
+        assert_eq!(state.mcp.version, 2);
         assert!(!migrate(&mut state).unwrap());
     }
 }

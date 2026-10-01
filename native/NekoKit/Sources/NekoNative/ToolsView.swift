@@ -15,6 +15,18 @@ enum SkillPresentation {
     }
 }
 
+enum ToolsPresentation {
+    static func toolSummary(_ connection: JSONValue) -> String {
+        let count = connection["tools"].array.count
+        if count > 0 { return "\(count) \(count == 1 ? "tool" : "tools")" }
+        return connection["discovered_ms"] == .null ? "Not discovered" : "No tools"
+    }
+}
+
+private struct ConnectionSelection: Identifiable {
+    let id: String
+}
+
 @MainActor
 struct ToolsView: View {
     @ObservedObject var model: AppModel
@@ -28,15 +40,18 @@ struct ToolsView: View {
     @State private var credentials = ""
     @State private var trust = false
     @State private var clientID = ""
-    @State private var showManual = false
     @State private var repositoryURL = ""
     @State private var search = ""
     @State private var validation: String?
     @State private var busy = false
     @State private var openedAudits: Set<String> = []
-    @State private var expandedConnections: Set<String> = []
     @State private var expandedSkills: Set<String> = []
-    @State private var showImports = false
+    @State private var selectedConnection: ConnectionSelection?
+    @State private var showImportSheet = false
+    @State private var showManualSheet = false
+    @State private var toolSearch = ""
+    @State private var showFindSkill = false
+    @State private var expandedCandidates: Set<String> = []
 
     private var workspace: String { model.selectedWorkspace ?? "" }
     private var connections: [JSONValue] {
@@ -51,25 +66,69 @@ struct ToolsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Tools & skills").font(.system(size: 20, weight: .semibold)).foregroundStyle(N.text)
-            Text("Connect the services Neko can use. You decide which tools each workspace may access.").font(.system(size: 13)).foregroundStyle(N.text3)
-            if let error = validation ?? model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Tools & skills").font(.system(size: 25, weight: .semibold)).foregroundStyle(N.text)
+                    Text("Connections provide access. Skills provide instructions.")
+                        .font(.system(size: 13)).foregroundStyle(N.text3)
+                }
+                Spacer(minLength: 12)
+                if busy { ProgressView().controlSize(.small).accessibilityLabel("Updating tools and skills") }
+            }
+            .padding(.bottom, 24)
+
+            HStack {
                 Picker("Show", selection: $tab) {
                     Text("Connections").tag(0)
                     Text("Skills").tag(1)
-                }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 260)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        if tab == 0 { connectionsBody }
-                        else if workspace.isEmpty {
-                            ContentUnavailableView("Choose a workspace for skills", systemImage: "folder", description: Text("Pick a workspace in the toolbar to see the skills its folders already contain."))
-                        } else { skillsBody }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
                 }
-                .disabled(busy || model.busy)
-            if busy { ProgressView("Updating…").controlSize(.small) }
-        }.padding(24)
+                .pickerStyle(.segmented).labelsHidden().frame(width: 250)
+                Spacer()
+                if tab == 0 {
+                    Menu {
+                        Button("Import from this Mac", systemImage: "square.and.arrow.down") { showImportSheet = true }
+                        Button("Add connection manually", systemImage: "plus") { showManualSheet = true }
+                    } label: {
+                        Label("Add connection", systemImage: "plus")
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .padding(.bottom, 16)
+
+            if let error = validation ?? model.error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(.orange)
+                    .textSelection(.enabled)
+                    .padding(.bottom, 12)
+            }
+            ScrollView {
+                Group {
+                    if tab == 0 { connectionsBody }
+                    else if workspace.isEmpty {
+                        ContentUnavailableView("Choose a workspace for skills", systemImage: "folder", description: Text("Choose a workspace in the sidebar to see skills in its folders."))
+                    } else { skillsBody }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 28)
+            }
+            .disabled(busy || model.busy)
+        }
+        .frame(maxWidth: 940, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 32)
+        .padding(.top, 28)
+        .frame(maxWidth: .infinity, alignment: .top)
+        .sheet(item: $selectedConnection) { selection in
+            if let connection = connections.first(where: { $0.recordID == selection.id }) {
+                connectionDetail(connection)
+            } else {
+                ContentUnavailableView("Connection unavailable", systemImage: "link", description: Text("Close this window and choose a connection again."))
+                    .frame(width: 560, height: 300)
+            }
+        }
+        .sheet(isPresented: $showImportSheet) { importSheet }
+        .sheet(isPresented: $showManualSheet) { manualSheet }
     }
 
     private func send(_ family: String, _ name: String, _ fields: [String: JSONValue]? = nil, onSuccess: (() -> Void)? = nil) {
@@ -85,51 +144,113 @@ struct ToolsView: View {
     }
 
     private var connectionsBody: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if workspace.isEmpty {
-                Label("Viewing all connections. Choose a workspace in the sidebar to set permissions.", systemImage: "square.stack.3d.up").font(.callout).foregroundStyle(.secondary)
-            }
-            HStack {
-                Text("Connected tools").font(.system(size: 15, weight: .semibold)).foregroundStyle(N.text)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Connections").font(.system(size: 14, weight: .semibold)).foregroundStyle(N.text)
                 Text("\(connections.count)").font(.caption).foregroundStyle(N.text4)
                 Spacer()
-                if !workspace.isEmpty {
-                    Text("\(model.snapshot["mcp"]["grants"].array.filter { $0["workspace_id"].string == workspace }.count) allowed in this workspace")
-                        .font(.caption).foregroundStyle(N.text3)
+                if workspace.isEmpty {
+                    Text("All workspaces").font(.caption).foregroundStyle(N.text4)
+                } else {
+                    Text(model.workspaces.first { $0.recordID == workspace }?["name"].string ?? "Selected workspace")
+                        .font(.caption).foregroundStyle(N.text4)
                 }
             }
-            ForEach(connections, id: \.recordID) { connection in connectionCard(connection) }
+            .padding(.bottom, 10)
+            if workspace.isEmpty {
+                    Text("Choose a workspace in the sidebar to see the connections it can use.")
+                    .font(.callout).foregroundStyle(N.text3)
+                    .padding(.bottom, 14)
+            }
             if connections.isEmpty {
-                ContentUnavailableView("No tools connected", systemImage: "shippingbox", description: Text("Import a tool from this Mac or add an MCP server below."))
-            }
-            DisclosureGroup(isExpanded: $showImports) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Add a tool already configured in Codex, Claude, or a project folder. Existing connections stay unchanged.")
-                        .font(.callout).foregroundStyle(N.text3)
-                    Button("Scan this Mac again") {
-                        send("SetupImport", "Discover", ["repositories": .array(folders), "source_id": .null])
-                    }.controlSize(.small)
-                    ForEach(unlinkedCandidates, id: \.recordID) { candidate in candidateRow(candidate) }
-                    if unlinkedCandidates.isEmpty {
-                        Text("No new connections found.").font(.callout).foregroundStyle(N.text4)
+                ContentUnavailableView("No connections yet", systemImage: "link", description: Text("Import a connection from this Mac or add one manually."))
+                    .frame(maxWidth: .infinity, minHeight: 240)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(connections.enumerated()), id: \.element.recordID) { index, connection in
+                        connectionRow(connection)
+                        if index < connections.count - 1 { Divider().padding(.leading, 48) }
                     }
-                }.padding(.top, 12)
-            } label: {
-                Label("Import from this Mac", systemImage: "square.and.arrow.down")
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .padding(16)
-            .background(N.card.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(N.line))
-            Button(showManual ? "Hide manual setup" : "Add a tool manually…", systemImage: showManual ? "chevron.down" : "chevron.right") { showManual.toggle() }
-                .buttonStyle(.borderless)
-            if showManual {
-                addConnection
-                LabeledContent("OAuth client ID (advanced)") { TextField("Only if the tool asks for one", text: $clientID).labelsHidden() }
-                Text("Signing in never gives a workspace access by itself; you still choose per workspace.").font(.caption).foregroundStyle(.secondary)
-                Link("Find tools in the MCP Registry", destination: URL(string: "https://registry.modelcontextprotocol.io")!)
+                }
+                .background(N.card.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
+                .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(N.line.opacity(0.7)))
             }
         }
+    }
+
+    private var importSheet: some View {
+        let items = unlinkedCandidates
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Import from this Mac").font(.title2.weight(.semibold))
+                Spacer()
+                Button("Done") { showImportSheet = false }
+            }
+            .padding(.bottom, 6)
+            Text("Review connections already configured in other apps. Nothing is linked until you choose it.")
+                .font(.callout).foregroundStyle(.secondary)
+                .padding(.bottom, 18)
+            HStack {
+                Menu {
+                    ForEach(model.workspaces, id: \.recordID) { item in
+                        Button(item["name"].string) { model.selectedWorkspace = item.recordID }
+                    }
+                } label: {
+                    Label(model.workspaces.first { $0.recordID == workspace }?["name"].string ?? "Choose workspace", systemImage: "folder")
+                }
+                .accessibilityLabel("Workspace for imported connection")
+                Spacer()
+                Button("Scan again", systemImage: "arrow.clockwise") {
+                    send("SetupImport", "Discover", ["repositories": .array(folders), "source_id": .null])
+                }
+            }
+            .controlSize(.small)
+            .padding(.bottom, 10)
+            if workspace.isEmpty {
+                Text("Choose a workspace above to link a connection.")
+                    .font(.callout).foregroundStyle(N.text3)
+                    .padding(.bottom, 12)
+            }
+            ScrollView {
+                if items.isEmpty {
+                    VStack {
+                        ContentUnavailableView("No new connections found", systemImage: "magnifyingglass", description: Text("Scan again after adding a tool in Codex, Claude, or a project folder."))
+                    }.frame(maxWidth: .infinity, minHeight: 260)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.element.recordID) { index, candidate in
+                            candidateRow(candidate)
+                            if index < items.count - 1 { Divider().padding(.leading, 16) }
+                        }
+                    }
+                    .background(N.card.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(N.line.opacity(0.65)))
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 670, height: 570)
+    }
+
+    private var manualSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Add connection").font(.title2.weight(.semibold))
+                Spacer()
+                Button("Done") { showManualSheet = false }
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    addConnection
+                    LabeledContent("OAuth client ID (advanced)") { TextField("Only if the tool asks for one", text: $clientID).labelsHidden() }
+                    Text("Connecting makes discovered tools available here. Neko asks before chat actions that may change data.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Link("Browse the MCP Registry", destination: URL(string: "https://registry.modelcontextprotocol.io")!)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 650, height: 620)
     }
 
     private var candidates: [JSONValue] {
@@ -152,85 +273,201 @@ struct ToolsView: View {
     private func candidateRow(_ candidate: JSONValue) -> some View {
         let localProcess = candidate["metadata"]["transport"].string != "http"
         let problem = candidate["problem"].string
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(candidate["name"].string).font(.headline)
-            Text(candidate["source"].string).font(.caption).foregroundStyle(N.text3)
-            DisclosureGroup("Connection details") {
-                Text(candidate["metadata"]["config_summary"].string).textSelection(.enabled)
-                Text("Configuration: " + candidate["metadata"]["config_fingerprint"].string).font(.caption).textSelection(.enabled)
-            }.font(.caption)
-            if !problem.isEmpty { Text(problem).foregroundStyle(.red) }
-            if localProcess { Text("This executable runs on your Mac outside the agent sandbox. Review the command before trusting it.").font(.caption) }
-            if workspace.isEmpty { Text("Select a workspace before linking this source configuration.").font(.caption).foregroundStyle(.secondary) }
-            Button(localProcess ? "Trust and connect local tool" : "Connect this tool") {
-                send("Mcp", "LinkSource", ["workspace_id": .string(workspace), "candidate_id": candidate["id"], "trust_local_process": .bool(localProcess)])
-            }.disabled(workspace.isEmpty || !problem.isEmpty || candidate["metadata"]["enabled_at_source"].string == "false")
-            Divider()
+        let key = candidate.recordID
+        let expanded = expandedCandidates.contains(key)
+        let source = candidate["source"].string
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if expanded { expandedCandidates.remove(key) }
+                else { expandedCandidates.insert(key) }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: localProcess ? "terminal" : "link")
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(N.text3)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(candidate["name"].string)
+                            .font(.system(size: 14, weight: .medium)).foregroundStyle(N.text)
+                        Text(source.isEmpty ? "Local configuration" : source)
+                            .font(.caption).foregroundStyle(N.text4)
+                    }
+                    Spacer(minLength: 10)
+                    if !problem.isEmpty {
+                        Text("Needs setup").font(.caption).foregroundStyle(NekoStyle.amber)
+                    } else if candidate["metadata"]["enabled_at_source"].string == "false" {
+                        Text("Paused at source").font(.caption).foregroundStyle(N.text4)
+                    } else {
+                        Text(localProcess ? "Local" : "Remote").font(.caption).foregroundStyle(N.text4)
+                    }
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold)).foregroundStyle(N.text4)
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 64)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if expanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !problem.isEmpty {
+                        Label(problem, systemImage: "exclamationmark.triangle")
+                            .font(.callout).foregroundStyle(NekoStyle.amber)
+                    }
+                    Text(candidate["metadata"]["config_summary"].string)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(N.text3)
+                        .textSelection(.enabled)
+                    if localProcess {
+                        Text("This executable runs on your Mac outside the agent sandbox. Review its command before trusting it.")
+                            .font(.caption).foregroundStyle(N.text4)
+                    }
+                    Button(localProcess ? "Trust and connect" : "Connect") {
+                        send("Mcp", "LinkSource", ["workspace_id": .string(workspace), "candidate_id": candidate["id"], "trust_local_process": .bool(localProcess)])
+                    }
+                    .disabled(workspace.isEmpty || !problem.isEmpty || candidate["metadata"]["enabled_at_source"].string == "false")
+                    .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 52).padding(.trailing, 16).padding(.bottom, 16)
+            }
         }
     }
 
-    private func connectionCard(_ connection: JSONValue) -> some View {
+    private func connectionRow(_ connection: JSONValue) -> some View {
+        let summary = ToolsPresentation.toolSummary(connection)
+        let scope = connection["workspace_id"].string.isEmpty ? "All workspaces" : (model.workspaces.first { $0.recordID == connection["workspace_id"].string }?["name"].string ?? "Workspace")
+        let status = !connection["error"].string.isEmpty ? "Needs attention" : (connection["enabled"].bool ? "Available" : "Paused")
+        return Button {
+            toolSearch = ""
+            selectedConnection = ConnectionSelection(id: connection.recordID)
+        } label: {
+            HStack(spacing: 13) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(N.text3)
+                    .frame(width: 32)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(connection["label"].string).font(.system(size: 14, weight: .medium)).foregroundStyle(N.text)
+                    Text("\(scope)  ·  \(status)").font(.caption).foregroundStyle(N.text4)
+                }
+                Spacer(minLength: 10)
+                Text(summary)
+                    .font(.caption).foregroundStyle(N.text3)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(N.text4)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 64)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(connection["label"].string), \(status), \(summary)")
+    }
+
+    private func connectionDetail(_ connection: JSONValue) -> some View {
         let count = connection["tools"].array.count
-        let allowed = model.snapshot["mcp"]["grants"].array.filter { $0["workspace_id"].string == workspace && $0["connection_id"].string == connection.recordID }.count
+        let filtered = connection["tools"].array.filter {
+            toolSearch.isEmpty || ($0["name"].string + " " + $0["description"].string).localizedCaseInsensitiveContains(toolSearch)
+        }
         return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                if expandedConnections.contains(connection.recordID) { expandedConnections.remove(connection.recordID) }
-                else { expandedConnections.insert(connection.recordID) }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: connection["enabled"].bool ? "checkmark.circle.fill" : "pause.circle")
-                        .foregroundStyle(connection["enabled"].bool ? NekoStyle.mint : N.text4)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(connection["label"].string).font(.system(size: 14, weight: .medium)).foregroundStyle(N.text)
-                        Text(connection["workspace_id"].string.isEmpty ? "Available to all workspaces" : (model.workspaces.first { $0.recordID == connection["workspace_id"].string }?["name"].string ?? "Workspace tool"))
-                            .font(.caption).foregroundStyle(N.text4)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(connection["label"].string).font(.title2.weight(.semibold))
+                    Text(ToolsPresentation.toolSummary(connection))
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done") { selectedConnection = nil }
+            }
+            .padding(.bottom, 18)
+            if !connection["error"].string.isEmpty {
+                Label(connection["error"].string, systemImage: "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(.orange).textSelection(.enabled).padding(.bottom, 14)
+            }
+            HStack {
+                Button("Discover tools") { send("Mcp", "Discover", ["connection_id": connection["id"]]) }
+                    .disabled(!connection["enabled"].bool)
+                Button(connection["enabled"].bool ? "Pause connection" : "Enable connection") {
+                    send("Mcp", "SetEnabled", ["connection_id": connection["id"], "enabled": .bool(!connection["enabled"].bool)])
+                }
+                if connection["config"]["transport"].string == "http" {
+                    Button("Sign in") {
+                        send("Mcp", "Authenticate", ["connection_id": connection["id"], "client_id": clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .null : .string(clientID.trimmingCharacters(in: .whitespacesAndNewlines))])
+                    }.disabled(!connection["enabled"].bool)
+                }
+                Spacer()
+            }
+            .controlSize(.small)
+            .padding(.bottom, 18)
+            DisclosureGroup("Connection details") {
+                Text(connection["config"]["url"].string.isEmpty ? connection["config"]["command"].string : connection["config"]["url"].string)
+                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.callout)
+            .padding(.bottom, 18)
+            HStack {
+                Text("Tools").font(.headline)
+                Spacer()
+                if count > 0 { TextField("Search tools", text: $toolSearch).textFieldStyle(.roundedBorder).frame(width: 220) }
+            }
+            .padding(.bottom, 10)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if count == 0 {
+                        Text("No tools discovered. Use Discover tools to load what this connection offers.")
+                            .font(.callout).foregroundStyle(.secondary).padding(.vertical, 22)
+                    } else if filtered.isEmpty {
+                        Text("No tools match your search.").font(.callout).foregroundStyle(.secondary).padding(.vertical, 22)
                     }
-                    Spacer()
-                    Text(workspace.isEmpty ? "\(count) tools" : "\(allowed) of \(count) allowed")
-                        .font(.caption).foregroundStyle(N.text3)
-                    Image(systemName: expandedConnections.contains(connection.recordID) ? "chevron.up" : "chevron.down")
-                        .font(.caption).foregroundStyle(N.text4)
-                }.contentShape(Rectangle()).padding(15)
-            }.buttonStyle(.plain)
-            if expandedConnections.contains(connection.recordID) {
-                VStack(alignment: .leading, spacing: 10) {
-                Text(connection["config"]["url"].string.isEmpty ? connection["config"]["command"].string : connection["config"]["url"].string).font(.caption).foregroundStyle(N.text4).textSelection(.enabled)
-                if !connection["error"].string.isEmpty { Text(connection["error"].string).foregroundStyle(.red) }
-                HStack {
-                    Button("Discover tools") { send("Mcp", "Discover", ["connection_id": connection["id"]]) }.disabled(!connection["enabled"].bool)
-                    Button(connection["enabled"].bool ? "Pause & revoke grants" : "Enable") {
-                        send("Mcp", "SetEnabled", ["connection_id": connection["id"], "enabled": .bool(!connection["enabled"].bool)])
-                    }
-                    if connection["config"]["transport"].string == "http" {
-                        Button("Sign in through browser") {
-                            send("Mcp", "Authenticate", ["connection_id": connection["id"], "client_id": clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .null : .string(clientID.trimmingCharacters(in: .whitespacesAndNewlines))])
-                        }.disabled(!connection["enabled"].bool)
+                    ForEach(Array(filtered.enumerated()), id: \.offset) { index, tool in
+                        toolRow(tool, connection: connection)
+                        if index < filtered.count - 1 { Divider() }
                     }
                 }
-                if count == 0 { Text("No tools discovered yet. Discover tools, then choose what Neko may use.").font(.callout).foregroundStyle(N.text3) }
-                ForEach(Array(connection["tools"].array.enumerated()), id: \.offset) { _, tool in toolRow(tool, connection: connection) }
-                }.padding(.horizontal, 15).padding(.bottom, 15)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(N.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(N.line))
+        .padding(24)
+        .frame(width: 700, height: 620)
     }
 
     private func toolRow(_ tool: JSONValue, connection: JSONValue) -> some View {
-        let allowed = model.snapshot["mcp"]["grants"].array.contains {
-            $0["workspace_id"].string == workspace && $0["connection_id"].string == connection["id"].string && $0["tool_name"].string == tool["name"].string && $0["schema_hash"].string == tool["schema_hash"].string
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(tool["name"].string).font(.system(size: 14, weight: .medium))
+                Spacer(minLength: 12)
+                Text(!connection["enabled"].bool ? "Paused" : (connection["error"].string.isEmpty ? "Available" : "Needs attention"))
+                    .font(.caption).foregroundStyle(N.text4)
+            }
+            if !tool["description"].string.isEmpty {
+                Text(tool["description"].string)
+                    .font(.callout).foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            HStack(spacing: 10) {
+                Text(tool["read_only"].bool ? "Declared read-only" : "May change data")
+                    .font(.caption).foregroundStyle(N.text4)
+                DisclosureGroup("Details") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(tool["description"].string).textSelection(.enabled)
+                        Text(tool["read_only"].bool ? "The server declares this tool read-only. Chat lookups can run without another prompt." : "Chat asks before each call. Enabled responsibilities may use their selected connections unattended.")
+                        Text("Input schema").fontWeight(.medium)
+                        Text(tool["input_schema"].string)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(N.text3)
+                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .font(.caption)
         }
-        return VStack(alignment: .leading, spacing: 6) {
-            Divider()
-            Text(tool["name"].string).font(.headline)
-            Text(tool["description"].string).foregroundStyle(.secondary)
-            Text(tool["read_only"].bool ? "Server declares read-only: granted chat lookups run without another prompt." : "Action or unspecified effect: chat requires approval per call; unattended responsibilities use the grant directly.").font(.caption)
-            DisclosureGroup("Input schema") { Text(tool["input_schema"].string).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
-            Button(allowed ? "Revoke tool access" : (tool["read_only"].bool ? "Allow Neko to read with this tool" : "Allow Neko to request this tool")) {
-                send("Mcp", "SetWorkspaceToolGrant", ["workspace_id": .string(workspace), "connection_id": connection["id"], "tool_name": tool["name"], "schema_hash": tool["schema_hash"], "allowed": .bool(!allowed)])
-            }.disabled(workspace.isEmpty || !connection["enabled"].bool || !connection["error"].string.isEmpty)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 14)
     }
 
     private var addConnection: some View {
@@ -238,9 +475,9 @@ struct ToolsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 LabeledContent("Connection name") { TextField("Name", text: $label).labelsHidden() }
                 if workspace.isEmpty {
-                    Text("Scope: Global definition. Grant tools separately in each workspace.").font(.callout)
+                    Text("Scope: Available in every workspace when connected.").font(.callout)
                 } else {
-                    Toggle("Global definition (grant separately in each workspace)", isOn: $global)
+                    Toggle("Available in all workspaces", isOn: $global)
                 }
                 Toggle("Local executable", isOn: $local).onChange(of: local) { _, _ in trust = false; target = "" }
                 LabeledContent(local ? "Absolute executable path" : "Server URL") {
@@ -300,13 +537,27 @@ struct ToolsView: View {
     }
 
     private var skillsBody: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Skills teach Neko how to work. They do not give it access to tools.").font(.callout).foregroundStyle(N.text3)
-            HStack(spacing: 12) {
-                TextField("Search skills", text: $search).textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Skills").font(.system(size: 14, weight: .semibold)).foregroundStyle(N.text)
+                    Text("Instructions from this workspace's folders. A skill cannot access tools on its own.")
+                        .font(.callout).foregroundStyle(N.text3)
+                }
+                Spacer(minLength: 12)
                 Button("Refresh", systemImage: "arrow.clockwise") { send("Skills", "Refresh") }.controlSize(.small)
             }
-            ForEach(Array(visibleSkills.enumerated()), id: \.offset) { _, skill in skillRow(skill) }
+            TextField("Search skills", text: $search).textFieldStyle(.roundedBorder)
+            if !visibleSkills.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(visibleSkills.enumerated()), id: \.offset) { index, skill in
+                        skillRow(skill)
+                        if index < visibleSkills.count - 1 { Divider().padding(.leading, 46) }
+                    }
+                }
+                .background(N.card.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
+                .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(N.line.opacity(0.7)))
+            }
             ForEach(SkillPresentation.unavailable(enabled: model.snapshot["skills"]["enabled"].array, available: model.snapshot["skills"]["available"].array, workspace: workspace), id: \.self) { record in
                 GroupBox("Unavailable enabled skill") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -321,14 +572,21 @@ struct ToolsView: View {
             if visibleSkills.isEmpty {
                 Text(search.isEmpty ? "No local skills available yet. Refresh local skills or fetch an instruction file below." : "No skills match this search.").foregroundStyle(.secondary)
             }
-            GroupBox("Find a skill") {
+            DisclosureGroup(isExpanded: $showFindSkill) {
                 VStack(alignment: .leading, spacing: 10) {
                     Link("Browse skills.sh", destination: URL(string: "https://skills.sh")!)
                     LabeledContent("GitHub SKILL.md URL") { TextField("https://github.com/…/SKILL.md", text: $repositoryURL).labelsHidden() }
-                    Text("Preview fetches only the instruction file (64 KB maximum). Scripts and references are not installed. Choose a self-contained skill.").font(.caption)
+                    Text("Only the instruction file is previewed. Scripts and references are not installed.")
+                        .font(.caption).foregroundStyle(N.text3)
                     Button("Fetch for review") { send("Skills", "PreviewRepository", ["workspace_id": .string(workspace), "url": .string(repositoryURL)]) }.disabled(repositoryURL.isEmpty)
-                }.padding(8)
+                }.padding(.top, 12)
+            } label: {
+                Label("Find a skill", systemImage: "plus")
+                    .font(.system(size: 14, weight: .medium))
             }
+            .padding(16)
+            .background(N.card.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
+            .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(N.line.opacity(0.7)))
             ForEach(Array(model.snapshot["skills"]["proposals"].array.filter { $0["workspace_id"].string == workspace }.enumerated()), id: \.offset) { _, proposal in proposalCard(proposal) }
         }
     }
@@ -349,7 +607,7 @@ struct ToolsView: View {
                 else { expandedSkills.insert(key) }
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "text.book.closed").foregroundStyle(N.text3).frame(width: 18)
+                    Image(systemName: "text.book.closed").foregroundStyle(N.text3).frame(width: 28)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(skill["name"].string).font(.system(size: 14, weight: .medium)).foregroundStyle(N.text)
                         Text(skill["description"].string).font(.caption).foregroundStyle(N.text4).lineLimit(1)
@@ -358,7 +616,7 @@ struct ToolsView: View {
                     Text(record == nil ? "Available" : changed ? "Changed" : "Enabled")
                         .font(.caption).foregroundStyle(changed ? NekoStyle.amber : N.text3)
                     Image(systemName: expandedSkills.contains(key) ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(N.text4)
-                }.contentShape(Rectangle()).padding(14)
+                }.contentShape(Rectangle()).padding(.horizontal, 16).frame(minHeight: 64)
             }.buttonStyle(.plain)
             if expandedSkills.contains(key) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -378,11 +636,9 @@ struct ToolsView: View {
                         send("Skills", "SetEnabled", ["workspace_id": record["workspace_id"], "path": record["path"], "content_hash": record["content_hash"], "enabled": .bool(false)])
                     }
                 }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.bottom, 14)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 56).padding(.trailing, 16).padding(.bottom, 16)
             }
         }
-        .background(N.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(N.line))
     }
 
     private func proposalCard(_ proposal: JSONValue) -> some View {

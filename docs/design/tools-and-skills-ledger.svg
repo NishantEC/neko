@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="990" viewBox="0 0 1600 990" role="img" aria-label="Neko Tools and skills ledger concept with compact connection rows and a focused permissions drawer">
+ <defs><style>
+ text{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif;fill:#f2f2f3}.muted{fill:#a3a4ad}.faint{fill:#747680}.blue{fill:#91afff}.amber{fill:#e8bf8a}.green{fill:#96d2b4}.small{font-size:14px}.tiny{font-size:12px}.body{font-size:16px}.h1{font-size:30px;font-weight:650;letter-spacing:-.7px}.h2{font-size:21px;font-weight:630}.semi{font-weight:620}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+ </style></defs>
+ <rect width="1600" height="990" rx="24" fill="#111214"/><rect x="1" y="1" width="1598" height="988" rx="23" fill="none" stroke="#38393d"/>
+ <path d="M24 0H248V990H24Q0 990 0 966V24Q0 0 24 0Z" fill="#1b1c1f"/><path d="M248 0V990" stroke="#34353a"/>
+ <circle cx="31" cy="31" r="7" fill="#ff5f57"/><circle cx="54" cy="31" r="7" fill="#febc2e"/><circle cx="77" cy="31" r="7" fill="#28c840"/>
+ <text x="28" y="92" class="small blue semi">▱  Nishant ⌄</text><text x="28" y="145" class="tiny faint semi">YOUR DAY</text>
+ <text x="34" y="179" class="body">☼  Today</text><text x="34" y="219" class="body">☷  Work</text><text x="28" y="280" class="tiny faint semi">WHAT NEKO WATCHES</text>
+ <text x="34" y="316" class="body">▱  Workspaces</text><text x="34" y="356" class="body">◉  Watching</text><text x="34" y="396" class="body">◷  Schedules</text><text x="28" y="457" class="tiny faint semi">TEACH NEKO</text>
+ <rect x="14" y="473" width="220" height="39" rx="9" fill="#343943"/><text x="34" y="500" class="body semi">⚒  Tools &amp; skills</text><text x="34" y="551" class="body">◌  Memory</text><text x="34" y="591" class="body">♙  Profiles</text><path d="M0 933H248" stroke="#34353a"/><text x="28" y="964" class="small muted">●  Watching</text>
+ <text x="292" y="76" class="h1">Tools &amp; skills</text><text x="292" y="106" class="small muted">Connections found on this Mac. Choose access for the selected workspace.</text>
+ <text x="292" y="163" class="body semi">Connections</text><text x="428" y="163" class="body muted">Skills</text><path d="M292 181H390" stroke="#91afff" stroke-width="2.5"/><path d="M292 181H1558" stroke="#34353a"/>
+ <rect x="292" y="209" width="1266" height="50" rx="9" fill="#1c1d20" stroke="#37383d"/><text x="313" y="240" class="body muted">⌕  Search connections or tools</text><text x="1390" y="240" class="small faint">⌘ F</text>
+ <text x="292" y="302" class="small muted semi">CONNECTED ON THIS MAC</text><text x="1367" y="302" class="small muted semi">ACCESS IN NISHANT</text>
+ <path d="M292 319H1558" stroke="#3a3b40"/>
+ <text x="306" y="361" class="body semi">Production admin</text><text x="306" y="386" class="small muted">Codex · Local process · 5 tools</text><text x="1180" y="373" class="small green">● Connected</text><text x="1391" y="373" class="small amber">0 of 5 allowed</text><text x="1540" y="373" class="body muted">⌄</text>
+ <path d="M292 408H1558" stroke="#34353a"/>
+ <text x="306" y="451" class="body semi">Staging admin</text><text x="306" y="476" class="small muted">Codex + Claude · Local process · 5 tools</text><text x="1180" y="463" class="small green">● Connected</text><text x="1391" y="463" class="small amber">0 of 5 allowed</text><text x="1540" y="463" class="body muted">›</text>
+ <path d="M292 498H1558" stroke="#34353a"/>
+ <text x="306" y="541" class="body semi">Personal Linear</text><text x="306" y="566" class="small muted">Codex · Remote server · 68 tools</text><text x="1180" y="553" class="small green">● Connected</text><text x="1381" y="553" class="small amber">0 of 68 allowed</text><text x="1540" y="553" class="body muted">›</text>
+ <path d="M292 588H1558" stroke="#34353a"/>
+ <text x="301" y="630" class="small blue semi">＋ Add connection</text><text x="466" y="630" class="small muted">Import from Mac</text>
+ <rect x="292" y="676" width="1266" height="263" rx="14" fill="#1b1c20" stroke="#4c5360"/>
+ <text x="316" y="713" class="h2">Production admin</text><text x="316" y="740" class="small muted">Five available tools. None are allowed in Nishant.</text><text x="1514" y="713" class="body muted">×</text>
+ <path d="M316 756H1534" stroke="#37383d"/>
+ <text x="316" y="788" class="small amber semi">Effect not declared</text><text x="484" y="788" class="small muted">Grant each tool only after review; scheduled checks can use grants without asking again.</text>
+ <text x="316" y="831" class="body">List models</text><text x="507" y="831" class="small faint mono">admin_list_models</text><rect x="1383" y="809" width="135" height="35" rx="8" fill="#282a2f" stroke="#454750"/><text x="1400" y="832" class="small">Review access</text>
+ <path d="M316 856H1534" stroke="#37383d"/>
+ <text x="316" y="887" class="body">Inspect model schema</text><text x="507" y="887" class="small faint mono">admin_get_model_schema</text><rect x="1383" y="866" width="135" height="35" rx="8" fill="#282a2f" stroke="#454750"/><text x="1400" y="889" class="small">Review access</text>
+ <text x="316" y="923" class="small blue">Show all 5 tools ↓</text>
+</svg>

@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 import NekoKit
 
@@ -25,6 +26,31 @@ import NekoKit
 @testable import NekoNative
 
 final class PaletteAndComposerTests: XCTestCase {
+    func testSettingsIsAvailableAsMainWorkspacePage() {
+        XCTAssertTrue(PageInfo.groups.contains { $0.keys.contains("Settings") })
+        XCTAssertEqual(PageInfo.icon("Settings"), "gearshape")
+    }
+    @MainActor func testComposerTextContainerUsesAvailableWidth() throws {
+        let model = AppModel { _ in .null }
+        model.loadingSetup = false
+        let host = NSHostingView(rootView: WorkspaceView(model: model).frame(width: 1400, height: 800))
+        host.frame = NSRect(x: 0, y: 0, width: 1400, height: 800)
+        host.layoutSubtreeIfNeeded()
+        func textView(in root: NSView) -> NSTextView? {
+            if let root = root as? NSTextView { return root }
+            return root.subviews.compactMap(textView).first
+        }
+        let editor = try XCTUnwrap(textView(in: host))
+        XCTAssertGreaterThan(editor.enclosingScrollView?.frame.width ?? 0, 650, "The scroll view must fill the composer")
+        editor.insertText("hasdghjsaghjdgsjahgddhjsag", replacementRange: NSRange(location: 0, length: 0))
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(editor.frame.width, 650, "The NSTextView itself must fill the composer")
+        XCTAssertGreaterThan(editor.textContainer?.containerSize.width ?? 0, 650)
+        let range = try XCTUnwrap(editor.layoutManager?.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil))
+        XCTAssertGreaterThan(range.width, 650)
+    }
     @MainActor func testActionsKeyboardMovesInsideMenuAndKeepsDestructiveConfirmation() {
         let model = AppModel { _ in .string("Activated") }
         let state = PaletteState(model: model, search: { _ in AsyncThrowingStream { $0.finish() } })
@@ -118,5 +144,18 @@ final class PaletteAndComposerTests: XCTestCase {
         XCTAssertEqual(file.pathExtension, "png")
         XCTAssertEqual(Array(try Data(contentsOf: file).prefix(8)), [137, 80, 78, 71, 13, 10, 26, 10])
         XCTAssertThrowsError(try ComposerAttachmentStore.saveImage(Data("not an image".utf8), root: root))
+    }
+
+    func testFileAttachmentCopiesBytesAndRejectsDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("neko-file-test-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = root.appendingPathComponent("report.txt")
+        try Data("hello".utf8).write(to: source)
+        let attachment = try ComposerAttachmentStore.saveFile(source, root: root)
+        XCTAssertEqual(attachment.name, "report.txt")
+        XCTAssertEqual(attachment.isImage, false)
+        XCTAssertTrue(attachment.reference.contains("file://"))
+        XCTAssertThrowsError(try ComposerAttachmentStore.saveFile(root, root: root))
     }
 }

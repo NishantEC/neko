@@ -257,6 +257,20 @@ fn stage_workspace(snapshot: &mut Snapshot, mut workspace: neko_protocol::workbe
 fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
     let mut snapshot = load(db)?;
     match command {
+        Command::SetAgentRuntime { runtime } => {
+            if !matches!(runtime.provider.as_str(), "" | "codex" | "ollama" | "lmstudio" | "opencodex") {
+                return Err("Choose Codex, Ollama, LM Studio, or OpenCodex".into());
+            }
+            if runtime.provider == "opencodex" && !runtime.model.split_once('/').is_some_and(|(provider, model)| !provider.is_empty() && !model.is_empty()) {
+                return Err("Choose a configured OpenCodex provider and model".into());
+            }
+            if runtime.model.len() > 120
+                || !runtime.model.chars().all(|c| c.is_ascii_alphanumeric() || "-_:./".contains(c))
+            {
+                return Err("Model name may use letters, numbers, hyphens, underscores, colons, dots, and slashes (up to 120 characters)".into());
+            }
+            snapshot.agent_runtime = runtime;
+        }
         Command::AgentProfiles(command) => crate::agent_profiles::apply(&mut snapshot, command)?,
         Command::Schedules(neko_protocol::scheduled_plans::ScheduleCommand::List) => {
             return Ok(snapshot);
@@ -269,6 +283,16 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::Snapshot => return Ok(snapshot),
         Command::SaveWorkspace { workspace } => {
             stage_workspace(&mut snapshot, workspace)?;
+            for id in snapshot
+                .mcp
+                .connections
+                .iter()
+                .filter(|c| c.workspace_id.is_empty())
+                .map(|c| c.id.clone())
+                .collect::<Vec<_>>()
+            {
+                crate::mcp_host::store::allow_discovered_tools(&mut snapshot, &id);
+            }
         }
         Command::SaveWorkspaceWithFolders {
             mut workspace,
@@ -297,6 +321,16 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 }
             }
             snapshot.workspace_folders.insert(id, folders);
+            for id in snapshot
+                .mcp
+                .connections
+                .iter()
+                .filter(|c| c.workspace_id.is_empty())
+                .map(|c| c.id.clone())
+                .collect::<Vec<_>>()
+            {
+                crate::mcp_host::store::allow_discovered_tools(&mut snapshot, &id);
+            }
         }
         Command::CreateTask {
             workspace_id,
@@ -559,6 +593,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         }
         Command::SetupImport(_) => return Err("Import requires the daemon".into()),
         Command::SendMessage { .. }
+        | Command::InterruptAndSendMessage { .. }
         | Command::DecideChatTool { .. }
         | Command::CancelChat { .. } => {
             return Err("Talking to Neko requires the daemon".into());
@@ -1083,6 +1118,84 @@ mod tests {
     }
     use super::*;
     use neko_protocol::workbench::{Issue, LinearConnection, TaskStatus, Workspace};
+
+    #[test]
+    fn new_workspace_inherits_discovered_global_connection_tools() {
+        use neko_protocol::mcp_host::{McpConnection, McpTool, ServerConfig};
+        let db = Db::open_in_memory().unwrap();
+        let mut initial = Snapshot::default();
+        initial.mcp.connections.push(McpConnection {
+            id: "global".into(),
+            workspace_id: String::new(),
+            label: "Global".into(),
+            config: ServerConfig::Http {
+                url: "https://example.com/mcp".into(),
+            },
+            enabled: true,
+            trusted: true,
+            oauth: false,
+            has_credentials: false,
+            tools: vec![McpTool {
+                name: "lookup".into(),
+                description: String::new(),
+                input_schema: "{}".into(),
+                schema_hash: "v1".into(),
+                read_only: true,
+            }],
+            discovered_ms: Some(1),
+            error: None,
+            source_link: None,
+        });
+        save(&db, &initial).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let state = apply(
+            &db,
+            Command::SaveWorkspace {
+                workspace: Workspace {
+                    id: String::new(),
+                    name: "New".into(),
+                    repository: folder.path().to_string_lossy().into(),
+                    instructions: String::new(),
+                    away_enabled: false,
+                },
+            },
+        )
+        .unwrap();
+        assert!(crate::mcp_host::store::authorize(
+            &state,
+            &state.workspaces[0].id,
+            "global",
+            "lookup"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn runtime_choice_is_validated_and_persisted() {
+        let db = Db::open_in_memory().unwrap();
+        let runtime = neko_protocol::workbench::AgentRuntime {
+            provider: "ollama".into(),
+            model: "qwen3:8b".into(),
+        };
+        apply(&db, Command::SetAgentRuntime { runtime: runtime.clone() }).unwrap();
+        assert_eq!(load(&db).unwrap().agent_runtime, runtime);
+        let routed = neko_protocol::workbench::AgentRuntime {
+            provider: "opencodex".into(), model: "anthropic/claude-sonnet-5".into(),
+        };
+        apply(&db, Command::SetAgentRuntime { runtime: routed.clone() }).unwrap();
+        assert_eq!(load(&db).unwrap().agent_runtime, routed);
+        assert!(apply(&db, Command::SetAgentRuntime {
+            runtime: neko_protocol::workbench::AgentRuntime {
+                provider: "opencodex".into(), model: "/".into(),
+            }
+        }).is_err());
+        assert!(apply(&db, Command::SetAgentRuntime {
+            runtime: neko_protocol::workbench::AgentRuntime {
+                provider: "unknown".into(), model: String::new()
+            }
+        }).is_err());
+        assert_eq!(load(&db).unwrap().agent_runtime, routed);
+    }
 
     #[test]
     fn migration_never_writes_a_snapshot_that_exceeds_the_read_limit() {

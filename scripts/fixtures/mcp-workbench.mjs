@@ -12,6 +12,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
   });
   else if (request.method === 'tools/list') send(request.id, { tools: [{
     name: 'assigned_changes', description: 'Read two assigned, current fixture bugs. This tool never changes files.',
+    annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   }] });
   else if (request.method === 'tools/call' && request.params.name === 'assigned_changes' && Object.keys(request.params.arguments ?? {}).length === 0) send(request.id, {

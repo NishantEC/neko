@@ -389,7 +389,14 @@ impl Host {
                 client_id,
             } => {
                 let connection = self.connection(&connection_id)?;
-                let (config, _) = self.resolved_transport(&connection, &AtomicBool::new(false))?;
+                // Re-authentication must not depend on the old token still
+                // being readable or refreshable. Resolve only the source URL.
+                let config = match self.source_candidate(&connection)? {
+                    Some(candidate) => candidate
+                        .config
+                        .ok_or("Source MCP configuration unavailable")?,
+                    None => connection.config.clone(),
+                };
                 let ServerConfig::Http { url } = config else {
                     return Err("Browser authentication is for remote MCP servers".into());
                 };
@@ -404,9 +411,10 @@ impl Host {
                     .auth
                     .lock()
                     .map_err(|_| "Authentication state unavailable")?;
-                if auth.contains_key(&connection_id) {
-                    return Err("Authentication is already in progress".into());
+                if let Some(previous) = auth.get(&connection_id) {
+                    previous.store(true, Ordering::Release);
                 }
+                let epoch = neko_core::mcp_host::oauth::begin_authorization(&connection_id)?;
                 {
                     let db = self
                         .db
@@ -434,45 +442,61 @@ impl Host {
                     id: connection_id.clone(),
                     cancel: cancel.clone(),
                 };
+                let worker_id = connection_id.clone();
+                let worker_cancel = cancel.clone();
                 std::thread::Builder::new()
                     .name("neko-oauth".into())
                     .spawn(move || {
                         let _attempt = attempt;
                         let result = neko_core::mcp_host::oauth::authorize(
-                            &connection_id,
+                            &worker_id,
                             &url,
                             client_id.as_deref(),
-                            &cancel,
+                            epoch,
+                            &worker_cancel,
                             |url| {
                                 let _ = std::process::Command::new("/usr/bin/open")
                                     .arg(url)
                                     .status();
                             },
                         );
-                        if let Ok(db) = host.db.lock() {
-                            if let Ok(mut state) = store::load(&db) {
-                                if let Some(c) = state
-                                    .mcp
-                                    .connections
-                                    .iter_mut()
-                                    .find(|c| c.id == connection_id)
-                                {
-                                    if c.enabled && !cancel.load(Ordering::Acquire) {
-                                        match result {
-                                            Ok(()) => {
-                                                c.oauth = true;
-                                                c.has_credentials = true;
-                                                c.error = None;
+                        if let Ok(active) = host.auth.lock() {
+                            if active.get(&worker_id).is_some_and(|current| Arc::ptr_eq(current, &worker_cancel))
+                                && !worker_cancel.load(Ordering::Acquire)
+                            {
+                                if let Ok(db) = host.db.lock() {
+                                    if let Ok(mut state) = store::load(&db) {
+                                        if let Some(c) = state
+                                            .mcp
+                                            .connections
+                                            .iter_mut()
+                                            .find(|c| c.id == worker_id)
+                                        {
+                                            if c.enabled {
+                                                match result {
+                                                    Ok(()) => {
+                                                        c.oauth = true;
+                                                        c.has_credentials = true;
+                                                        c.error = None;
+                                                    }
+                                                    Err(error) => c.error = Some(error),
+                                                }
+                                                let _ = store::save(&db, &state);
                                             }
-                                            Err(error) => c.error = Some(error),
                                         }
-                                        let _ = store::save(&db, &state);
                                     }
                                 }
                             }
                         }
                     })
-                    .map_err(|e| format!("Cannot start browser sign-in: {e}"))?;
+                    .map_err(|e| {
+                        if let Ok(mut active) = self.auth.lock() {
+                            if active.get(&connection_id).is_some_and(|current| Arc::ptr_eq(current, &cancel)) {
+                                active.remove(&connection_id);
+                            }
+                        }
+                        format!("Cannot start browser sign-in: {e}")
+                    })?;
                 store::load(
                     &*self
                         .db
@@ -538,6 +562,14 @@ impl Host {
                             .iter()
                             .any(|t| t.name == g.tool_name && t.schema_hash == g.schema_hash)
                 });
+                if state
+                    .mcp
+                    .connections
+                    .iter()
+                    .any(|c| c.id == connection_id && c.error.is_none())
+                {
+                    policy::allow_discovered_tools(&mut state, &connection_id);
+                }
                 store::save(&db, &state)?;
                 store::load(&db)
             }
@@ -792,6 +824,9 @@ impl Host {
                             continue;
                         }
                         for t in &c.tools {
+                            if scope.run_id.starts_with("watch:") && !t.read_only {
+                                continue;
+                            }
                             if policy::authorize(&state, &scope.workspace_id, id, &t.name).is_ok() {
                                 tools.push(serde_json::json!({"connection_id": id, "connection_label": c.label, "tool_name": t.name, "description": t.description, "input_schema": serde_json::from_str::<serde_json::Value>(&t.input_schema).map_err(|_| "Invalid tool schema")?}));
                             }
@@ -816,6 +851,9 @@ impl Host {
                 let tool =
                     policy::authorize(&state, &scope.workspace_id, &connection_id, &tool_name)?
                         .clone();
+                if scope.run_id.starts_with("watch:") && !tool.read_only {
+                    return Err("This background watch can call only tools declared read-only; ask Neko in chat for a write action".into());
+                }
                 let connection = state
                     .mcp
                     .connections
@@ -1241,6 +1279,41 @@ mod tests {
         Arc::new(Host::new(Arc::new(Mutex::new(db))))
     }
     #[test]
+    fn background_run_sees_only_read_declared_tools_and_cannot_call_write_tool() {
+        let h = host();
+        {
+            let db = h.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.mcp.connections.push(McpConnection {
+                oauth: false, id: "source".into(), workspace_id: "w".into(),
+                label: "Source".into(), config: ServerConfig::Http {
+                    url: "https://example.com/mcp".into(),
+                }, enabled: true, trusted: true, has_credentials: false,
+                tools: vec![
+                    McpTool { read_only: true, name: "lookup".into(), description: "Read".into(), input_schema: "{}".into(), schema_hash: "read".into() },
+                    McpTool { read_only: false, name: "delete".into(), description: "Write".into(), input_schema: "{}".into(), schema_hash: "write".into() },
+                ], discovered_ms: Some(1), error: None, source_link: None,
+            });
+            for (name, hash) in [("lookup", "read"), ("delete", "write")] {
+                state.mcp.grants.push(ToolGrant {
+                    workspace_id: "w".into(), connection_id: "source".into(),
+                    tool_name: name.into(), schema_hash: hash.into(),
+                });
+            }
+            store::save(&db, &state).unwrap();
+        }
+        let revision = store::load(&h.db.lock().unwrap()).unwrap().agent_profiles.revision;
+        let lease = h.lease("watch:test", "w", vec!["source".into()], revision).unwrap();
+        let token = || neko_protocol::workbench::Secret(lease.token().into());
+        let tools = h.bridge(BridgeRequest { token: token(), action: BridgeAction::List }).unwrap();
+        assert!(tools.contains("lookup"));
+        assert!(!tools.contains("delete"));
+        let error = h.bridge(BridgeRequest { token: token(), action: BridgeAction::Call {
+            connection_id: "source".into(), tool_name: "delete".into(), arguments_json: "{}".into(),
+        }}).unwrap_err();
+        assert!(error.contains("read-only"));
+    }
+    #[test]
     fn imported_disabled_connection_is_created_disabled_without_touching_other_connections() {
         let h = host();
         let (first, _) = h
@@ -1385,6 +1458,75 @@ mod tests {
             host.auth.lock().unwrap().get("connection").unwrap(),
             &replacement
         ));
+    }
+
+    #[test]
+    fn retrying_authentication_replaces_a_pending_attempt() {
+        let host = host();
+        let (connection_id, _) = host
+            .add_connection(
+                "w".into(),
+                "Local OAuth fixture".into(),
+                ServerConfig::Http {
+                    url: "https://127.0.0.1/mcp".into(),
+                },
+                false,
+                None,
+                true,
+                false,
+            )
+            .unwrap();
+        let previous = Arc::new(AtomicBool::new(false));
+        host.auth
+            .lock()
+            .unwrap()
+            .insert(connection_id.clone(), previous.clone());
+
+        let result = host.command(McpCommand::Authenticate {
+            connection_id,
+            client_id: None,
+        });
+
+        assert!(result.is_ok(), "retry should start a fresh browser attempt: {result:?}");
+        assert!(previous.load(Ordering::Acquire), "the previous attempt must be cancelled");
+    }
+
+    #[test]
+    fn reauthentication_does_not_require_a_working_old_token() {
+        let host = host();
+        let (connection_id, _) = host
+            .add_connection(
+                "w".into(),
+                "Expired OAuth fixture".into(),
+                ServerConfig::Http {
+                    url: "https://127.0.0.1/mcp".into(),
+                },
+                false,
+                None,
+                true,
+                false,
+            )
+            .unwrap();
+        {
+            let db = host.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            let connection = state
+                .mcp
+                .connections
+                .iter_mut()
+                .find(|connection| connection.id == connection_id)
+                .unwrap();
+            connection.oauth = true;
+            connection.has_credentials = true;
+            store::save(&db, &state).unwrap();
+        }
+
+        let result = host.command(McpCommand::Authenticate {
+            connection_id,
+            client_id: None,
+        });
+
+        assert!(result.is_ok(), "a broken old token must not block a fresh sign-in: {result:?}");
     }
 
     #[test]

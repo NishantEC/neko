@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="990" viewBox="0 0 1600 990" role="img" aria-label="Proposed Neko Tools and skills screen with a compact connection list, selected connection detail, and explicit workspace access controls">
+  <defs>
+    <style>
+      :root { --app:#101113; --side:#191a1d; --panel:#17181b; --raised:#202126; --line:#303136; --ink:#f1f1f3; --muted:#9a9ba4; --faint:#71727b; --blue:#8aabff; --amber:#e1b780; --green:#8fc8ac; }
+      text { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", Helvetica, Arial, sans-serif; fill:var(--ink); }
+      .muted { fill:var(--muted); } .faint { fill:var(--faint); } .blue { fill:var(--blue); } .amber { fill:var(--amber); } .green { fill:var(--green); }
+      .title { font-size:29px; font-weight:650; letter-spacing:-.6px; } .h2 { font-size:21px; font-weight:630; letter-spacing:-.25px; }
+      .body { font-size:16px; } .small { font-size:14px; } .tiny { font-size:12px; }
+      .semi { font-weight:620; } .medium { font-weight:540; } .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+  </defs>
+  <rect width="1600" height="990" rx="24" fill="#101113"/>
+  <rect x="1" y="1" width="1598" height="988" rx="23" fill="none" stroke="#37383d"/>
+  <!-- The existing app sidebar is deliberately unchanged. -->
+  <path d="M24 0H248V990H24Q0 990 0 966V24Q0 0 24 0Z" fill="#191a1d"/>
+  <path d="M248 0V990" stroke="#34353a"/>
+  <circle cx="31" cy="31" r="7" fill="#ff5f57"/><circle cx="54" cy="31" r="7" fill="#febc2e"/><circle cx="77" cy="31" r="7" fill="#28c840"/>
+  <text x="28" y="92" class="small blue semi">▱  Nishant ⌄</text>
+  <text x="28" y="145" class="tiny faint semi">YOUR DAY</text>
+  <text x="34" y="179" class="body">☼  Today</text><text x="34" y="219" class="body">☷  Work</text>
+  <text x="28" y="280" class="tiny faint semi">WHAT NEKO WATCHES</text>
+  <text x="34" y="316" class="body">▱  Workspaces</text><text x="34" y="356" class="body">◉  Watching</text><text x="34" y="396" class="body">◷  Schedules</text>
+  <text x="28" y="457" class="tiny faint semi">TEACH NEKO</text>
+  <rect x="14" y="473" width="220" height="39" rx="9" fill="#303b55"/>
+  <text x="34" y="500" class="body semi">⚒  Tools &amp; skills</text>
+  <text x="34" y="551" class="body">◌  Memory</text><text x="34" y="591" class="body">♙  Profiles</text>
+  <path d="M0 933H248" stroke="#34353a"/><text x="28" y="964" class="small muted">●  Watching</text>
+
+  <!-- Page heading and quiet, structural tabs. -->
+  <text x="288" y="79" class="title">Tools &amp; skills</text>
+  <text x="288" y="108" class="small muted">Choose what Neko can use in this workspace.</text>
+  <text x="1418" y="76" class="small muted">Nishant workspace</text>
+  <text x="288" y="164" class="body semi">Connections</text><text x="420" y="164" class="body muted">Skills</text>
+  <path d="M288 181H388" stroke="#8aabff" stroke-width="2.5"/><path d="M288 181H1558" stroke="#303136"/>
+
+  <!-- Blocking task is shown as context, not a blanket grant prompt. -->
+  <rect x="288" y="210" width="1270" height="70" rx="12" fill="#28241f" stroke="#5a4839"/>
+  <circle cx="318" cy="245" r="10" fill="none" stroke="#e1b780" stroke-width="1.5"/>
+  <text x="314" y="250" class="small amber semi">!</text>
+  <text x="344" y="240" class="body semi">3 checks are waiting for access</text>
+  <text x="344" y="260" class="small muted">Choose the exact tools they may use. Checks stay paused until you turn them on.</text>
+  <text x="1442" y="249" class="small amber semi">View checks  →</text>
+
+  <!-- Source list, compact and selected. -->
+  <rect x="288" y="307" width="338" height="631" rx="13" fill="#17181b" stroke="#303136"/>
+  <text x="310" y="343" class="small semi">CONNECTIONS</text><text x="431" y="343" class="small faint">3</text>
+  <rect x="565" y="322" width="40" height="30" rx="8" fill="#282a2e"/><text x="578" y="343" class="body">＋</text>
+  <rect x="301" y="366" width="312" height="78" rx="10" fill="#282b32" stroke="#505e77"/>
+  <text x="316" y="392" class="body semi">Production admin</text>
+  <text x="316" y="417" class="small amber">Access off</text><text x="546" y="417" class="small muted">0 / 5</text>
+  <text x="316" y="478" class="body medium">Staging admin</text>
+  <text x="316" y="503" class="small amber">Access off</text><text x="546" y="503" class="small muted">0 / 5</text>
+  <path d="M310 522H604" stroke="#303136"/>
+  <text x="316" y="557" class="body medium">Personal Linear</text>
+  <text x="316" y="582" class="small amber">Access off</text><text x="533" y="582" class="small muted">0 / 68</text>
+  <path d="M310 612H604" stroke="#303136"/>
+  <text x="315" y="647" class="small muted">Status means access in Nishant,</text>
+  <text x="315" y="667" class="small muted">not just whether a server responds.</text>
+  <path d="M310 845H604" stroke="#303136"/>
+  <text x="312" y="877" class="small blue semi">＋  Add a connection</text>
+  <text x="312" y="909" class="small muted">Import from Mac · Enter MCP URL</text>
+
+  <!-- Detail inspector: no giant expanding card or wall of schemas. -->
+  <rect x="642" y="307" width="916" height="631" rx="13" fill="#17181b" stroke="#303136"/>
+  <text x="670" y="350" class="h2">Production admin</text>
+  <text x="670" y="378" class="small muted">From Codex · Available in Nishant · Local process</text>
+  <rect x="1417" y="325" width="112" height="34" rx="8" fill="#282a2e" stroke="#3a3b42"/>
+  <text x="1433" y="347" class="small medium">Manage  ···</text>
+  <path d="M670 400H1530" stroke="#303136"/>
+  <text x="670" y="437" class="body semi">Access in Nishant</text>
+  <text x="670" y="461" class="small muted">Select only the tools this workspace needs.</text>
+  <rect x="670" y="485" width="860" height="62" rx="9" fill="#24211f" stroke="#5a4839"/>
+  <text x="688" y="509" class="small amber semi">Effect not declared by this server</text>
+  <text x="688" y="530" class="small muted">Granted tools can run in scheduled checks without a per-call prompt. Review each one.</text>
+  <text x="670" y="589" class="small muted semi">TOOL</text><text x="1198" y="589" class="small blue">⌕  Search tools</text><text x="1330" y="589" class="small muted semi">ALLOW</text>
+  <path d="M670 603H1530" stroke="#303136"/>
+  <text x="670" y="631" class="body medium">List models</text><text x="670" y="648" class="tiny faint mono">admin_list_models</text>
+  <rect x="1355" y="617" width="40" height="23" rx="12" fill="#3c3d42"/><circle cx="1367" cy="628.5" r="9" fill="#aaaab1"/>
+  <path d="M670 665H1530" stroke="#303136"/>
+  <text x="670" y="691" class="body medium">Inspect model schema</text><text x="670" y="708" class="tiny faint mono">admin_get_model_schema</text>
+  <rect x="1355" y="677" width="40" height="23" rx="12" fill="#3c3d42"/><circle cx="1367" cy="688.5" r="9" fill="#aaaab1"/>
+  <path d="M670 725H1530" stroke="#303136"/>
+  <text x="670" y="751" class="body medium">Search records</text><text x="670" y="768" class="tiny faint mono">admin_search</text>
+  <rect x="1355" y="737" width="40" height="23" rx="12" fill="#3c3d42"/><circle cx="1367" cy="748.5" r="9" fill="#aaaab1"/>
+  <path d="M670 785H1530" stroke="#303136"/>
+  <text x="670" y="812" class="body medium">Get a record</text><text x="670" y="829" class="tiny faint mono">admin_get</text>
+  <rect x="1355" y="798" width="40" height="23" rx="12" fill="#3c3d42"/><circle cx="1367" cy="809.5" r="9" fill="#aaaab1"/>
+  <path d="M670 847H1530" stroke="#303136"/>
+  <text x="670" y="877" class="small muted">1 other tool · Authentication</text>
+  <text x="1384" y="877" class="small blue semi">Show all 5 ↓</text>
+  <path d="M642 896H1558" stroke="#303136"/>
+  <text x="670" y="920" class="small muted">0 of 5 allowed</text><text x="1395" y="920" class="small faint">Nothing changed</text>
+</svg>

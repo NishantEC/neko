@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="990" viewBox="0 0 1600 990" role="img" aria-label="Neko task-first Tools and skills concept with paused checks and connected tools organized around them">
+ <defs><style>
+ text{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif;fill:#f1f2f3}.muted{fill:#a2a3ab}.faint{fill:#72747d}.blue{fill:#91afff}.amber{fill:#e3bd8f}.green{fill:#9bd1b5}.small{font-size:14px}.tiny{font-size:12px}.body{font-size:16px}.h1{font-size:30px;font-weight:650;letter-spacing:-.7px}.h2{font-size:20px;font-weight:630}.semi{font-weight:620}
+ </style></defs>
+ <rect width="1600" height="990" rx="24" fill="#111214"/><rect x="1" y="1" width="1598" height="988" rx="23" fill="none" stroke="#38393d"/>
+ <path d="M24 0H248V990H24Q0 990 0 966V24Q0 0 24 0Z" fill="#1b1c1f"/><path d="M248 0V990" stroke="#34353a"/>
+ <circle cx="31" cy="31" r="7" fill="#ff5f57"/><circle cx="54" cy="31" r="7" fill="#febc2e"/><circle cx="77" cy="31" r="7" fill="#28c840"/>
+ <text x="28" y="92" class="small blue semi">▱  Nishant ⌄</text><text x="28" y="145" class="tiny faint semi">YOUR DAY</text>
+ <text x="34" y="179" class="body">☼  Today</text><text x="34" y="219" class="body">☷  Work</text><text x="28" y="280" class="tiny faint semi">WHAT NEKO WATCHES</text>
+ <text x="34" y="316" class="body">▱  Workspaces</text><text x="34" y="356" class="body">◉  Watching</text><text x="34" y="396" class="body">◷  Schedules</text><text x="28" y="457" class="tiny faint semi">TEACH NEKO</text>
+ <rect x="14" y="473" width="220" height="39" rx="9" fill="#343943"/><text x="34" y="500" class="body semi">⚒  Tools &amp; skills</text><text x="34" y="551" class="body">◌  Memory</text><text x="34" y="591" class="body">♙  Profiles</text><path d="M0 933H248" stroke="#34353a"/><text x="28" y="964" class="small muted">●  Watching</text>
+ <text x="292" y="79" class="h1">Teach Neko what it may use</text><text x="292" y="109" class="small muted">Nishant workspace · Connected tools remain off until you allow specific actions.</text>
+ <rect x="292" y="148" width="1266" height="203" rx="16" fill="#24211f" stroke="#5b4d3f"/>
+ <text x="320" y="190" class="small amber semi">NEEDS YOUR DECISION</text><text x="320" y="227" class="h2">Three checks are paused</text><text x="320" y="254" class="small muted">They need access to production admin, staging admin, or Linear before Neko can check again.</text>
+ <rect x="320" y="281" width="391" height="48" rx="9" fill="#2c2927" stroke="#5a4b3e"/><text x="339" y="311" class="small">Production failures</text><text x="649" y="311" class="small amber">Review →</text>
+ <rect x="724" y="281" width="390" height="48" rx="9" fill="#2c2927" stroke="#5a4b3e"/><text x="743" y="311" class="small">Staging failures</text><text x="1053" y="311" class="small amber">Review →</text>
+ <rect x="1127" y="281" width="403" height="48" rx="9" fill="#2c2927" stroke="#5a4b3e"/><text x="1146" y="311" class="small">Schema drift</text><text x="1468" y="311" class="small amber">Review →</text>
+ <text x="292" y="410" class="body semi">Your tools</text><text x="1450" y="410" class="small blue">＋ Add tool</text>
+ <text x="292" y="442" class="small muted">Connections</text><text x="411" y="442" class="small faint">Skills</text><path d="M292 458H377" stroke="#91afff" stroke-width="2.5"/><path d="M292 458H1558" stroke="#36373c"/>
+ <rect x="292" y="482" width="400" height="355" rx="13" fill="#1b1c20" stroke="#37383d"/>
+ <text x="315" y="521" class="h2">Production admin</text><text x="315" y="548" class="small muted">Connected through Codex · 5 tools</text><path d="M315 576H669" stroke="#37383d"/>
+ <text x="315" y="609" class="small green">● Connected</text><text x="539" y="609" class="small amber">0 allowed</text>
+ <text x="315" y="650" class="small muted">Use only the commands you approve.</text><text x="315" y="671" class="small muted">Server effects are not declared.</text>
+ <rect x="315" y="775" width="354" height="39" rx="9" fill="#313641" stroke="#586985"/><text x="437" y="801" class="small semi">Review tools →</text>
+ <rect x="709" y="482" width="400" height="355" rx="13" fill="#1b1c20" stroke="#37383d"/>
+ <text x="732" y="521" class="h2">Staging admin</text><text x="732" y="548" class="small muted">Connected through Codex + Claude · 5 tools</text><path d="M732 576H1086" stroke="#37383d"/>
+ <text x="732" y="609" class="small green">● Connected</text><text x="956" y="609" class="small amber">0 allowed</text>
+ <text x="732" y="650" class="small muted">Separate grants from production.</text><text x="732" y="671" class="small muted">No tools available to checks yet.</text>
+ <rect x="732" y="775" width="354" height="39" rx="9" fill="#282a2e" stroke="#47494f"/><text x="854" y="801" class="small semi">Review tools →</text>
+ <rect x="1126" y="482" width="432" height="355" rx="13" fill="#1b1c20" stroke="#37383d"/>
+ <text x="1149" y="521" class="h2">Personal Linear</text><text x="1149" y="548" class="small muted">Connected through Codex · 68 tools</text><path d="M1149 576H1534" stroke="#37383d"/>
+ <text x="1149" y="609" class="small green">● Connected</text><text x="1404" y="609" class="small amber">0 allowed</text>
+ <text x="1149" y="650" class="small muted">Search and filter actions before</text><text x="1149" y="671" class="small muted">granting workspace access.</text>
+ <rect x="1149" y="775" width="385" height="39" rx="9" fill="#282a2e" stroke="#47494f"/><text x="1292" y="801" class="small semi">Review tools →</text>
+ <text x="292" y="895" class="small muted">Found on this Mac</text><text x="441" y="895" class="small blue">Import another connection</text><text x="1457" y="895" class="small faint">3 connected</text>
+</svg>

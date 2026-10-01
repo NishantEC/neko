@@ -101,6 +101,7 @@ fn close_calls(turn: &mut ChatMessage) {
 
 const SETTING: &str = "neko_chat_v1";
 pub const MAX_MESSAGES: usize = 200;
+pub const MAX_QUEUED_TURNS: usize = 20;
 pub const MAX_USER_TEXT: usize = 4 * 1024;
 pub const MAX_REPLY_TEXT: usize = 8 * 1024;
 pub const MAX_PROPOSED_TICKETS: usize = 3;
@@ -156,6 +157,14 @@ pub fn begin_scoped_turn(
     text: &str,
     workspace_id: Option<&str>,
 ) -> Result<String, String> {
+    begin_scoped_turn_inner(db, text, workspace_id, false)
+}
+
+pub fn queue_scoped_turn(db: &Db, text: &str, workspace_id: Option<&str>) -> Result<String, String> {
+    begin_scoped_turn_inner(db, text, workspace_id, true)
+}
+
+fn begin_scoped_turn_inner(db: &Db, text: &str, workspace_id: Option<&str>, force_queue: bool) -> Result<String, String> {
     let text = text.trim();
     if text.is_empty() {
         return Err("Type a message for Neko".into());
@@ -164,12 +173,25 @@ pub fn begin_scoped_turn(
         return Err(format!("Keep messages under {} KB", MAX_USER_TEXT / 1024));
     }
     let mut messages = load(db)?;
-    if messages.iter().any(|m| m.pending) {
-        return Err("Neko is still replying to your last message".into());
-    }
     let now = crate::now_unix_ms();
     let state = crate::workbench::load(db)?;
     let agent_profile_id = state.agent_profiles.for_scope(workspace_id).to_owned();
+    if force_queue || messages.iter().any(|m| m.pending || m.queued) {
+        if messages.iter().filter(|m| m.queued).count() >= MAX_QUEUED_TURNS {
+            return Err("Neko already has 20 messages queued. Wait for a reply before adding more.".into());
+        }
+        let queued = ChatMessage {
+            agent_profile_revision: state.agent_profiles.revision,
+            agent_profile_id,
+            workspace_id: workspace_id.map(str::to_owned),
+            queued: true,
+            ..message(ChatRole::User, text.to_owned(), now)
+        };
+        let id = queued.id.clone();
+        messages.push(queued);
+        save(db, &messages)?;
+        return Ok(id);
+    }
     messages.push(ChatMessage {
         agent_profile_revision: state.agent_profiles.revision,
         agent_profile_id: agent_profile_id.clone(),
@@ -187,6 +209,38 @@ pub fn begin_scoped_turn(
     messages.push(pending);
     save(db, &messages)?;
     Ok(id)
+}
+
+/// Promote the oldest queued message only after the previous reply has settled.
+pub fn begin_next_queued_turn(db: &Db) -> Result<Option<(String, String, Option<String>)>, String> {
+    let mut messages = load(db)?;
+    if messages.iter().any(|m| m.pending) { return Ok(None); }
+    let Some(index) = messages.iter().position(|m| m.queued) else { return Ok(None); };
+    let mut user = messages.remove(index);
+    user.queued = false;
+    let text = user.text.clone();
+    let workspace = user.workspace_id.clone();
+    let pending = ChatMessage {
+        agent_profile_revision: user.agent_profile_revision,
+        agent_profile_id: user.agent_profile_id.clone(),
+        workspace_id: workspace.clone(),
+        pending: true,
+        ..message(ChatRole::Neko, String::new(), crate::now_unix_ms())
+    };
+    let id = pending.id.clone();
+    messages.push(user);
+    messages.push(pending);
+    save(db, &messages)?;
+    Ok(Some((id, text, workspace)))
+}
+
+pub fn prioritize_queued_turn(db: &Db, id: &str) -> Result<(), String> {
+    let mut messages = load(db)?;
+    let index = messages.iter().position(|m| m.id == id && m.queued).ok_or("Queued message missing")?;
+    let message = messages.remove(index);
+    let first = messages.iter().position(|m| m.queued).unwrap_or(messages.len());
+    messages.insert(first, message);
+    save(db, &messages)
 }
 
 pub fn finish_turn(
@@ -261,6 +315,7 @@ fn message(role: ChatRole, text: String, at_ms: i64) -> ChatMessage {
         text,
         ticket_ids: vec![],
         pending: false,
+        queued: false,
         failed: false,
         remembered: vec![],
         responsibility_ids: vec![],
@@ -455,6 +510,7 @@ pub fn prompt(
         .filter(|m| {
             m.agent_profile_id == profile
                 && !m.pending
+                && !m.queued
                 && !m.text.is_empty()
                 && m.workspace_id.as_deref() == scope
         })
@@ -638,15 +694,46 @@ mod tests {
     }
 
     #[test]
-    fn only_one_turn_runs_at_a_time_and_empty_is_refused() {
+    fn later_messages_queue_while_a_turn_runs_and_empty_is_refused() {
         let db = Db::open_in_memory().unwrap();
         assert!(begin_turn(&db, "   ").is_err());
         begin_turn(&db, "one").unwrap();
-        assert!(
-            begin_turn(&db, "two")
-                .unwrap_err()
-                .contains("still replying")
-        );
+        assert!(begin_turn(&db, "two").is_ok());
+        assert_eq!(load(&db).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn queued_turns_resume_in_order_and_interrupt_message_takes_priority() {
+        let db = Db::open_in_memory().unwrap();
+        let first = begin_turn(&db, "one").unwrap();
+        let second = begin_turn(&db, "two").unwrap();
+        let urgent = begin_turn(&db, "urgent").unwrap();
+        prioritize_queued_turn(&db, &urgent).unwrap();
+        assert!(load(&db).unwrap().iter().find(|m| m.id == second).unwrap().queued);
+        assert!(begin_next_queued_turn(&db).unwrap().is_none());
+        finish_turn(&db, &first, "done", vec![], false).unwrap();
+        let promoted = begin_next_queued_turn(&db).unwrap().unwrap();
+        assert_eq!(promoted.1, "urgent");
+        finish_turn(&db, &promoted.0, "done", vec![], false).unwrap();
+        assert_eq!(begin_next_queued_turn(&db).unwrap().unwrap().1, "two");
+    }
+
+    #[test]
+    fn queued_turn_survives_recovery_after_active_turn_is_interrupted() {
+        let db = Db::open_in_memory().unwrap();
+        begin_turn(&db, "one").unwrap();
+        begin_turn(&db, "two").unwrap();
+        recover_interrupted(&db).unwrap();
+        assert_eq!(begin_next_queued_turn(&db).unwrap().unwrap().1, "two");
+    }
+
+    #[test]
+    fn queue_is_bounded_without_evicting_the_running_reply() {
+        let db = Db::open_in_memory().unwrap();
+        let first = begin_turn(&db, "one").unwrap();
+        for index in 0..20 { begin_turn(&db, &format!("queued {index}")).unwrap(); }
+        assert!(begin_turn(&db, "overflow").is_err());
+        assert!(load(&db).unwrap().iter().any(|m| m.id == first && m.pending));
     }
 
     #[test]

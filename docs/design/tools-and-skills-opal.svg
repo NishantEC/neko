@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="990" viewBox="0 0 1600 990" role="img" aria-label="Luminous Neko Tools and skills concept with prismatic colors, asymmetrical connection shelf, and clear permissions table">
+ <defs>
+  <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f5f5f1"/><stop offset="1" stop-color="#eeeff6"/></linearGradient>
+  <radialGradient id="iris"><stop stop-color="#839bff" stop-opacity=".78"/><stop offset=".55" stop-color="#a7a8fa" stop-opacity=".34"/><stop offset="1" stop-color="#a7a8fa" stop-opacity="0"/></radialGradient>
+  <radialGradient id="pink"><stop stop-color="#e9a7cf" stop-opacity=".65"/><stop offset=".53" stop-color="#f4c4d6" stop-opacity=".31"/><stop offset="1" stop-color="#f4c4d6" stop-opacity="0"/></radialGradient>
+  <radialGradient id="sun"><stop stop-color="#f3c49d" stop-opacity=".56"/><stop offset=".57" stop-color="#f7d6b3" stop-opacity=".2"/><stop offset="1" stop-color="#f7d6b3" stop-opacity="0"/></radialGradient>
+  <linearGradient id="aura" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e1dfff"/><stop offset=".55" stop-color="#f3dcea"/><stop offset="1" stop-color="#ffe5d4"/></linearGradient>
+  <linearGradient id="selected" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#faf9fe"/><stop offset="1" stop-color="#f3eaf9"/></linearGradient>
+  <linearGradient id="button" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5b62b0"/><stop offset="1" stop-color="#7464a4"/></linearGradient>
+  <filter id="blur"><feGaussianBlur stdDeviation="44"/></filter>
+  <filter id="shadow" x="-30%" y="-50%" width="160%" height="200%"><feDropShadow dx="0" dy="18" stdDeviation="25" flood-color="#6a6891" flood-opacity=".14"/></filter>
+  <pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".45" fill="#767aa0" opacity=".24"/></pattern>
+  <clipPath id="clip"><rect x="250" width="1350" height="990"/></clipPath>
+  <style>
+   text{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif;fill:#272735}.muted{fill:#676878}.faint{fill:#9294a3}.violet{fill:#63569e}.green{fill:#3d7e69}.rose{fill:#a66981}.small{font-size:14px}.tiny{font-size:12px}.body{font-size:16px}.medium{font-weight:560}.semi{font-weight:650}.title{font-size:32px;font-weight:660;letter-spacing:-.8px}.big{font-size:29px;font-weight:640;letter-spacing:-.6px}.section{font-size:20px;font-weight:640;letter-spacing:-.2px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  </style>
+ </defs>
+ <rect width="1600" height="990" fill="url(#paper)"/>
+ <g clip-path="url(#clip)">
+  <ellipse cx="1255" cy="102" rx="390" ry="245" fill="url(#iris)" filter="url(#blur)"/>
+  <ellipse cx="1446" cy="255" rx="330" ry="268" fill="url(#pink)" filter="url(#blur)"/>
+  <ellipse cx="895" cy="215" rx="310" ry="255" fill="url(#sun)" filter="url(#blur)"/>
+  <rect x="250" width="1350" height="990" fill="url(#dots)" opacity=".16"/>
+ </g>
+ <rect width="250" height="990" fill="#f7f6f7" fill-opacity=".77"/><path d="M250 0V990" stroke="#b8b6c2" stroke-opacity=".48"/>
+ <path d="M33 59l9-15 9 15-9 15z" fill="#9c80bb"/><text x="62" y="64" class="body semi">Neko</text>
+ <rect x="18" y="107" width="214" height="42" rx="12" fill="#fcfbfe" fill-opacity=".83" stroke="#c8c4d1"/><text x="34" y="134" class="small medium">◫  Nishant</text><text x="209" y="134" class="small muted">⌄</text>
+ <text x="33" y="203" class="tiny faint semi">YOUR DAY</text><text x="37" y="244" class="body muted">☼  Today</text><text x="37" y="289" class="body muted">☷  Work</text>
+ <text x="33" y="362" class="tiny faint semi">WHAT NEKO WATCHES</text><text x="37" y="404" class="body muted">◇  Workspaces</text><text x="37" y="449" class="body muted">◉  Watching</text><text x="37" y="494" class="body muted">◷  Schedules</text>
+ <text x="33" y="568" class="tiny faint semi">TEACH NEKO</text><rect x="17" y="582" width="216" height="44" rx="12" fill="#ded8ec"/><rect x="17" y="593" width="3" height="22" rx="1.5" fill="#725eaa"/><text x="37" y="610" class="body semi">✧  Tools &amp; skills</text><text x="37" y="669" class="body muted">◌  Memory</text><text x="37" y="714" class="body muted">♧  Profiles</text>
+ <path d="M25 932H225" stroke="#c9c5d0"/><circle cx="37" cy="962" r="4" fill="#72b099"/><text x="53" y="967" class="small muted">Watching</text>
+ <text x="294" y="71" class="title">Tools &amp; skills</text><text x="295" y="104" class="body muted">Give Neko the right access, one workspace at a time.</text>
+ <rect x="1376" y="45" width="186" height="41" rx="20.5" fill="#fff" fill-opacity=".55" stroke="#c6bfd0"/><text x="1398" y="71" class="small medium">Nishant workspace  ⌄</text>
+ <text x="295" y="153" class="small semi">Connections</text><text x="416" y="153" class="small muted">Skills</text><rect x="295" y="171" width="94" height="3" rx="1.5" fill="#7962af"/><path d="M295 174H1561" stroke="#c4bece"/>
+ <rect x="295" y="201" width="1266" height="139" rx="23" fill="#fff" fill-opacity=".47" stroke="#fff" stroke-opacity=".75" filter="url(#shadow)"/>
+ <text x="325" y="239" class="tiny violet semi">YOUR NEXT DECISION</text><text x="325" y="279" class="big">Three checks need a little more trust.</text>
+ <text x="325" y="309" class="body muted">They are paused until you review their exact commands. Connection does not mean permission.</text>
+ <rect x="1340" y="259" width="184" height="45" rx="22" fill="url(#button)"/><text x="1374" y="287" class="small semi" fill="#fff" style="fill:#fff">Review checks  ↗</text>
+ <g opacity=".75"><ellipse cx="1179" cy="270" rx="55" ry="40" fill="#b4a8e1" opacity=".48"/><ellipse cx="1230" cy="252" rx="50" ry="52" fill="#eac1d8" opacity=".58"/><ellipse cx="1272" cy="282" rx="42" ry="38" fill="#f4cfb5" opacity=".64"/></g>
+ <text x="295" y="396" class="section">Connected on this Mac</text><text x="1480" y="396" class="small violet semi">＋  Add new</text>
+ <rect x="295" y="417" width="526" height="170" rx="21" fill="url(#selected)" stroke="#a99bc5" stroke-width="1.3" filter="url(#shadow)"/>
+ <rect x="319" y="444" width="58" height="58" rx="18" fill="url(#aura)" stroke="#c3afd0"/><path d="M335 473l13-16 13 16-13 16z" fill="none" stroke="#695997" stroke-width="2"/>
+ <text x="395" y="463" class="section">Production admin</text><text x="395" y="490" class="small muted">Codex · local process · 5 commands</text>
+ <path d="M319 520H793" stroke="#c8bbd6"/><circle cx="331" cy="552" r="5" fill="#68a992"/><text x="346" y="557" class="small green medium">Connected</text><text x="586" y="557" class="small rose medium">0 allowed in Nishant</text><text x="783" y="557" class="body violet">↗</text>
+ <rect x="838" y="417" width="337" height="170" rx="21" fill="#fff" fill-opacity=".67" stroke="#fff" stroke-opacity=".82"/>
+ <rect x="859" y="443" width="43" height="43" rx="14" fill="#e5ddf8"/><path d="M872 456h17v17h-17z" fill="none" stroke="#8776b2" stroke-width="2"/>
+ <text x="915" y="459" class="body semi">Staging admin</text><text x="915" y="484" class="small muted">Codex + Claude · 5 commands</text><path d="M859 519H1153" stroke="#ded9e4"/><text x="859" y="553" class="small green">● Connected</text><text x="1063" y="553" class="small rose">0 allowed</text>
+ <rect x="1192" y="417" width="369" height="170" rx="21" fill="#fff" fill-opacity=".67" stroke="#fff" stroke-opacity=".82"/>
+ <rect x="1213" y="443" width="43" height="43" rx="14" fill="#dcefea"/><path d="M1226 457h17m-17 6h17m-17 6h13" stroke="#619d8a" stroke-width="2" stroke-linecap="round"/>
+ <text x="1269" y="459" class="body semi">Personal Linear</text><text x="1269" y="484" class="small muted">Codex · remote · 68 commands</text><path d="M1213 519H1539" stroke="#ded9e4"/><text x="1213" y="553" class="small green">● Connected</text><text x="1449" y="553" class="small rose">0 allowed</text>
+ <rect x="295" y="618" width="1266" height="326" rx="23" fill="#fff" fill-opacity=".82" stroke="#fff" filter="url(#shadow)"/>
+ <text x="326" y="662" class="section">Production admin</text><text x="326" y="687" class="small muted">Choose which commands Nishant may use · effect not declared by server</text>
+ <rect x="1346" y="635" width="178" height="37" rx="18.5" fill="#f6f2f9" stroke="#d8ccdf"/><text x="1365" y="659" class="small violet medium">Nishant only  ⌄</text>
+ <path d="M326 711H1530" stroke="#d8d5df"/>
+ <rect x="326" y="731" width="364" height="41" rx="12" fill="#f5f3f8" stroke="#dad6e1"/><text x="347" y="756" class="small muted">⌕  Search 5 commands</text>
+ <text x="751" y="756" class="small muted">Permission is off until you approve each one.</text>
+ <text x="326" y="807" class="small muted semi">COMMAND</text><text x="1164" y="807" class="small muted semi">WHAT IT CAN DO</text><text x="1444" y="807" class="small muted semi">ACCESS</text>
+ <path d="M326 820H1530" stroke="#d8d5df"/>
+ <text x="326" y="850" class="body semi">List models</text><text x="326" y="868" class="tiny faint mono">admin_list_models</text><text x="1164" y="855" class="small muted">Effect not declared</text><rect x="1438" y="831" width="92" height="34" rx="11" fill="#f0eaf6" stroke="#cfc0dd"/><text x="1455" y="853" class="small violet semi">Review</text>
+ <path d="M326 884H1530" stroke="#e1dde6"/><text x="326" y="914" class="body semi">Inspect model schema</text><text x="1164" y="914" class="small muted">Effect not declared</text><rect x="1438" y="892" width="92" height="34" rx="11" fill="#f0eaf6" stroke="#cfc0dd"/><text x="1455" y="914" class="small violet semi">Review</text>
+ <text x="295" y="974" class="tiny faint">Import from this Mac     ·     Add an MCP URL manually</text><text x="1453" y="974" class="tiny faint">0 of 5 allowed</text>
+</svg>
