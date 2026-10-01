@@ -1,10 +1,8 @@
 # neko
 
-A native personal-agent workspace and quick command center for macOS. The
-installed app is SwiftUI/AppKit over a Rust daemon and protocol; the original
-[GPUI](https://gpui.rs) client remains a historical development path. Launch
-Neko for the full app; press ⌥Space for quick search, clipboard history, and
-task attention.
+A native personal-agent workspace and quick command center for macOS. Neko's
+SwiftUI/AppKit app runs on a local Rust daemon. Open the app for your workspace;
+press ⌥Space for quick search, clipboard history, and task attention.
 
 ## Neko-owned work
 
@@ -184,47 +182,6 @@ One query searches every source at once, each under its own section header:
 hides the panel. Seventeen themes ship built in, with live preview as you
 arrow through them.
 
-## Historical agent browsers (opt-in only)
-
-The following older surfaces are disabled by default. They are retained behind
-`NEKO_LEGACY_AGENTS=1` for compatibility, not dependencies of Neko-owned work.
-
-neko drives the agents [Paseo](https://paseo.sh) supervises, over its daemon's
-own MCP endpoint, so the things you would switch apps for are a keypress away:
-
-- **An agent blocked on a permission** leads the root list, and the Dock icon
-  badges the count even while the panel is hidden — so you find out without
-  looking.
-- **Agents** lists every session; Enter sends a follow-up prompt, ⌘K changes
-  its session mode or cancels the run.
-- **Codex tasks** share the agent tile strip, but keep a separate local
-  app-server control path. A task opens a compact, read-only activity view;
-  when Codex indexes a task without exposing its turns, the view shows its
-  real opening request and says that the conversation is unavailable instead
-  of pretending the task title is its content.
-  An approval presents a readable summary when Codex supplies one, plus
-  explicit Approve/Decline actions. A decline uses the same confirmation guard
-  as other destructive menu actions.
-- **Schedules** shows what runs on a cron and when it next fires. Enter pauses
-  or resumes; running one now is behind ⌘K, because Enter is what a finger
-  presses on the way past a list.
-- **Terminals** shows what is open and what each last printed.
-- **Usage** reads your quota straight from each provider's own API — Claude
-  Code, Codex and Grok.
-- **Ask neko** takes a sentence. It proposes exactly one tool call, shows you
-  the call, and runs nothing until you press Enter again.
-
-The Paseo-backed agent-control surface degrades to nothing if Paseo is not
-running; none of it is required for the launcher half to work.
-
-Codex is separately optional. neko supervises one local `codex app-server
---stdio` child and renders only its compact in-memory projection. If Codex is
-missing, signed out, or stops, retained task tiles say they are unavailable and
-approvals are not actionable; applications, files, clipboard history and the
-rest of the launcher continue to work. Opening a task can request up to 40
-visible activity summaries only when Codex accepts its experimental history
-capability. neko never reads Codex session/rollout files.
-
 ## What it is not
 
 - **Not cross-platform.** It links AppKit directly for window material,
@@ -233,20 +190,9 @@ capability. neko never reads Codex session/rollout files.
   tool servers are separate user-trusted processes or services. The search seam is
   the `Provider` trait, not WASM — see
   [docs/adding-a-provider.md](docs/adding-a-provider.md).
-- **Not a cloud app.** Normal search is local; user-connected MCP tools and
-  explicitly created/authorized agent tasks use their respective services.
-  The following outbound behavior applies only to the opt-in legacy surfaces:
-  SQLite and Spotlight's own index, with nothing leaving the machine. Three
-  features do make outbound requests, all of them to somewhere you are already
-  signed in, and none of them running unless you use it: **Usage** reads quota
-  from Anthropic, OpenAI and xAI; **Ask neko** sends your sentence and the
-  names of your agents to Anthropic's Messages API to plan a tool call; and
-  everything under **Agents** talks to Paseo's daemon on `127.0.0.1`. The
-  optional Codex projection talks only to one local child over stdio.
-  Credentials are read from the Keychain and from the CLIs' own config files,
-  are never persisted by neko, and are passed to `curl` on stdin so they
-  cannot appear in `ps` output.
-- **Not distributable.** See the licence section below.
+- **Not a cloud app.** Search and workbench state live on your Mac. A model run
+  or a tool you connect can contact its provider; Neko does not host your work
+  in a Neko cloud service.
 
 ## Build and run
 
@@ -273,120 +219,41 @@ prints recovery paths and does not launch the replacement automatically.
 Preview builds (`NEKO_NATIVE_PREVIEW=1`) use a separate bundle identity and
 are not accepted by this installer. No installation is performed by a dry run.
 
-The historical GPUI client remains available through the following legacy
-build path; it is not the native installer’s source:
-
-```sh
-./scripts/setup-gpui-patch.sh   # once, before the first build
-cargo build --release
-./target/release/neko
-```
-
-The first step is not optional. neko depends on a pinned fork of gpui with one
-local patch applied on top, and the workspace `[patch]` section points at a
-checkout that this script populates at `.gpui-fork-patched/` inside the repo
-(gitignored — it is a whole third-party monorepo). Without it `cargo build` fails
-with a missing-path error. Run it again whenever the pinned rev changes. The
-patch itself fixes a ~30ms warm-summon regression in the fork; see
-[docs/architecture.md](docs/architecture.md#the-gpui-dependency).
-
-Run it once more from a clean shell to confirm — it is idempotent and prints
-`nothing to do` when the checkout is already current.
-
-The first launch has three setup steps: welcome, optional Mac permissions and
-shortcut, and choosing a workspace folder. The workspace remains a normal app
-window independently of the shortcut. Setup can be skipped without granting
-tools or running a sweep. To replay onboarding:
-
-```sh
-NEKO_RESET_ONBOARDING=1 ./target/release/neko
-```
-
-If you decline Accessibility, the hotkey cannot register. neko opens its panel
-on launch so it stays reachable; after dismissing it, use the menu-bar item to
-summon it again.
-
-For development without a global hotkey, `cargo run --release` works. If you
-need `⌥Space`, use a stable Apple Development signature instead — ad-hoc
-debug signatures change on every rebuild, so macOS treats each one as a new
-Accessibility client:
-
-```sh
-NEKO_CODESIGN_IDENTITY='Apple Development: Your Name (TEAMID)' scripts/run-dev.sh
-```
-
-The historical `scripts/install-clean.sh` builds the GPUI client and deletes
-Neko-owned data and credentials. It is not the native installation path; use
-`scripts/install-native.sh` for the SwiftUI/AppKit app and recoverable backups.
-
-Find the exact identity on this Mac with `security find-identity -v -p
-codesigning`. The script builds `target/debug/Neko.app`; add that app once in
-System Settings → Privacy & Security → Accessibility. Subsequent runs retain
-the same permission because the signed bundle identifier remains stable. The
-latency numbers in `AGENTS.md` are measured against the release binary run
-directly.
+On first launch, choose a workspace folder and any Mac permissions you want to
+grant. The main window works without the global shortcut; no tool connection or
+background watch is activated just by opening the app. If you decline
+Accessibility, use the Dock or menu bar to reopen Neko.
 
 ## How it is put together
 
-Five crates: a pure wire protocol, a resident daemon that owns SQLite and every
-index, a thin client SDK, and the GPUI app. Read
-[docs/architecture.md](docs/architecture.md) before the code.
+The SwiftUI/AppKit app in `native/NekoKit` talks to a resident Rust daemon over
+the typed `neko-protocol` wire format. The daemon owns SQLite, search indexes,
+MCP connections, scheduling, and task supervision. See
+[docs/architecture.md](docs/architecture.md) for the boundaries.
 
 | Document | What it covers |
 | --- | --- |
-| [docs/architecture.md](docs/architecture.md) | Crates, the daemon/client split, the wire protocol, providers, ranking, modes, the window |
+| [docs/architecture.md](docs/architecture.md) | Native app, daemon/client split, wire protocol, workbench and MCP authority |
 | [docs/adding-a-provider.md](docs/adding-a-provider.md) | Adding a result type through the `Provider` seam |
-| [docs/plan-agent-control-plane.md](docs/plan-agent-control-plane.md) | How the agent half was surveyed and built, including the two layers that turned out differently |
-| [docs/adding-a-theme.md](docs/adding-a-theme.md) | Adding an eighteenth theme |
-| `AGENTS.md` | The full engineering record: every decision, what was measured, and what was ruled out |
-| `docs/evidence/` | Reports and window-scoped screenshots behind each of those decisions |
-
-`AGENTS.md` is long because it is the project's memory. When a document above
-and `AGENTS.md` disagree, `AGENTS.md` is the record and the code is the truth.
+| `AGENTS.md` | Detailed engineering decisions and constraints |
 
 ## Development
 
 ```sh
-cargo test --workspace
-cargo clippy --all-targets
+swift test --package-path native/NekoKit
+cargo test -p neko-core -p neko-daemon -p neko-protocol
+cargo build -p neko-daemon --bin neko-daemon
+node scripts/smoke-workbench.mjs
 ```
 
-Tests are headless. The GPUI ones run against `TestAppContext`, so no window
-opens. Two suites take a process-wide lock because they touch shared OS state:
-theme tests (`theme::test_lock`, the active palette is a process global) and
-pasteboard tests (`text_field::tests::pasteboard_test_lock`, there is one
-systemwide `NSPasteboard`).
-
-`crates/neko/src/evidence.rs` holds env-gated hooks for capturing screenshots
-without synthetic input — `NEKO_SHOW_ON_LAUNCH=1`, `NEKO_SHOW_QUERY=<text>`,
-`NEKO_SHOW_THEME=<id>`, `NEKO_BENCH=<n>` and others. Every one of them shows
-its window **without taking keyboard focus**. That is a deliberate default: an
-evidence window that took focus once captured real keystrokes meant for another
-app. Activation is a separate opt-in, `NEKO_EVIDENCE_ACTIVATE=1`, and it warns
-on stderr when set.
+The smoke test uses isolated local data and a deterministic child fixture. It
+does not prove a live model, an authenticated MCP account, or production
+monitoring.
 
 ## Licence
 
-Every line of source in this repository is MIT — see `LICENSE`. One vendored
-file is Apache-2.0 and attributed in `NOTICE`. Seventeen theme palettes vendor
-colour *values* from eight upstream projects, every one MIT and verified from
-its own source; the table is in `docs/evidence/themes-report.md`.
-
-**A built binary is a different matter, and it is GPL, not MIT.**
-`crates/neko` links the `wingleeio/zed` fork of gpui, which unconditionally
-pulls in GPL-3.0-or-later code through `gpui → sum_tree → ztracing`, with no
-feature that avoids it. This is not particular to that fork — vanilla Zed's
-gpui carries the same chain (`zed-industries/zed#55470`, open).
-
-So, taking the cautious reading:
-
-- **Source**: redistribute freely. MIT is GPL-compatible; nothing conflicts.
-- **Binaries**: you may ship them, under **GPL-3.0-or-later** terms — complete
-  corresponding source to recipients, same freedoms, no added restrictions.
-- **Using it yourself**: nothing attaches. GPL obligations arrive on
-  conveyance, not on use.
-
-`NOTICE` states this in full, including the two questions that are genuinely
-unsettled rather than answered. None of it is legal advice; if you intend to
-ship this commercially, ask a lawyer. The record of why the fork was adopted
-with the exposure understood is in `AGENTS.md`, "The GPUI dependency decision".
+Neko's own source is MIT-licensed; see `LICENSE`. Vendored dependencies have
+their own notices in `NOTICE`. Binary obligations depend on the target being
+built: the native installer does not link the optional GPUI client, whose
+dependency chain includes GPL-3.0-or-later code. Review the dependencies and
+`NOTICE` for any binary you plan to distribute. This is not legal advice.
