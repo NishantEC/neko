@@ -666,6 +666,12 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             crate::neko_memory::set_options(db, options)?;
             return load(db);
         }
+        Command::SetTaskBudget { cents } => {
+            if cents.is_some_and(|c| c == 0 || c > 100_000) {
+                return Err("Choose a budget between $0.01 and $1,000, or none".into());
+            }
+            snapshot.task_budget_cents = cents;
+        }
         Command::DecideMemoryProposal { id, accept } => {
             crate::memory_learning::decide(db, &snapshot, &id, accept)?;
             return load(db);
@@ -745,6 +751,28 @@ pub fn recover_interrupted(db: &Db) -> Result<Snapshot, String> {
         return load(db);
     }
     Ok(snapshot)
+}
+
+/// Agent cost a ticket has reported so far, from its USAGE events.
+pub fn task_cost_usd(task: &neko_protocol::workbench::Task) -> f64 {
+    task.events
+        .iter()
+        .filter_map(|e| e.message.strip_prefix("USAGE "))
+        .filter_map(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+        .filter_map(|v| v["cost_usd"].as_f64())
+        .filter(|c| c.is_finite() && *c >= 0.0)
+        .sum()
+}
+
+/// Err with a plain explanation once the ticket has used its budget.
+pub fn within_budget(snapshot: &Snapshot, task_id: &str) -> Result<(), String> {
+    let (Some(cents), Some(task)) = (snapshot.task_budget_cents, snapshot.tasks.iter().find(|t| t.id == task_id)) else { return Ok(()) };
+    let spent = task_cost_usd(task);
+    let budget = f64::from(cents) / 100.0;
+    if spent >= budget {
+        return Err(format!("Stopped: this ticket reached its ${budget:.2} budget (${spent:.2} reported). Raise the budget in Settings → AI, then retry."));
+    }
+    Ok(())
 }
 
 fn deletable(status: TaskStatus) -> bool {
@@ -1109,6 +1137,27 @@ fn validate(snapshot: &Snapshot) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ticket_budgets_count_reported_cost_only() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let ticket = task(&db, &ws);
+        let mut state = load(&db).unwrap();
+        for (i, message) in ["USAGE {\"cost_usd\":0.30}", "USAGE {\"input_tokens\":5}", "USAGE {\"cost_usd\":0.25}", "USAGE not json", "Command completed"].iter().enumerate() {
+            state.tasks[0].events.push(TaskEvent { at_ms: i as i64, role: "builder".into(), message: (*message).into() });
+        }
+        save(&db, &state).unwrap();
+        let state = apply(&db, Command::SetTaskBudget { cents: Some(100) }).unwrap();
+        assert!((task_cost_usd(&state.tasks[0]) - 0.55).abs() < 1e-9);
+        assert!(within_budget(&state, &ticket.id).is_ok());
+        let state = apply(&db, Command::SetTaskBudget { cents: Some(50) }).unwrap();
+        assert!(within_budget(&state, &ticket.id).unwrap_err().contains("$0.50 budget ($0.55 reported)"));
+        assert!(apply(&db, Command::SetTaskBudget { cents: Some(0) }).is_err());
+        let state = apply(&db, Command::SetTaskBudget { cents: None }).unwrap();
+        assert!(within_budget(&state, &ticket.id).is_ok());
+    }
+
     #[test]
     fn protected_folders_cannot_become_workspaces() {
         use std::path::Path;

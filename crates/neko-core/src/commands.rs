@@ -131,6 +131,13 @@ const COMMANDS: &[CommandSpec] = &[
         glyph: Glyph::Sliders,
     },
     CommandSpec {
+        id: "documents",
+        title: "Search inside documents",
+        aliases: &["Search inside documents", "Find document", "Document search", "Find my", "Resume", "Aadhaar", "Licence", "Passport", "Invoice"],
+        mode: "document",
+        glyph: Glyph::File,
+    },
+    CommandSpec {
         id: "schedules",
         title: "Schedules",
         aliases: &["Schedules", "Cron", "Recurring Agents", "Automations"],
@@ -224,7 +231,7 @@ impl Provider for CommandsProvider {
         COMMANDS
             .iter()
             .filter(|cmd| {
-                !self.standalone || matches!(cmd.id, "clipboard-history" | "themes" | "preferences")
+                !self.standalone || matches!(cmd.id, "clipboard-history" | "themes" | "preferences" | "documents")
             })
             .chain(self.standalone.then_some(&WORKSPACE))
             .filter_map(|cmd| {
