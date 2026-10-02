@@ -133,6 +133,20 @@ struct PreferencesView: View {
     @State private var check: ModelCheckResult?
     @State private var refreshingModels = false
     @State private var budget = ""
+    @State private var presence = PresenceController.enabled
+    @State private var checkingUpdates = false
+    @State private var updateStatus: Updates.Status?
+    @State private var updateNote: String?
+    private func checkUpdates() {
+        checkingUpdates = true
+        Task { updateStatus = await Updates.check(); checkingUpdates = false }
+    }
+    private func runUpdate() {
+        switch Updates.update() {
+        case .success(let log): updateNote = "Updating in the background. Neko will quit, rebuild and reopen. Log: \(log.path)"
+        case .failure(let reason): updateNote = reason.message
+        }
+    }
     private enum BudgetValue: Equatable { case none, cents(Int), invalid }
     private var budgetCents: BudgetValue {
         let text = budget.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "$", with: "")
@@ -153,6 +167,8 @@ struct PreferencesView: View {
                 Form {
                     HotkeySettingsView(model: model)
                     preferenceToggle("Launch at login", "launch-at-login")
+                    Toggle("Show a floating status while Neko works", isOn: Binding(get: { presence }, set: { presence = $0; PresenceController.enabled = $0; PresenceController.shared.refresh() }))
+                    Text("A small capsule in the corner while tickets run or a reply is pending. It shows how work ended for a few seconds, then hides. Click it to open Neko.").font(.caption).foregroundStyle(.secondary)
                     Toggle("Clipboard history", isOn: Binding(get: { clipboard.enabled ?? false }, set: { value in setClipboard(value) })).disabled(clipboard.enabled == nil)
                     Text("Saves copied content locally. Turning this off stops new capture; existing history remains.").font(.caption).foregroundStyle(.secondary)
                     if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
@@ -248,6 +264,13 @@ struct PreferencesView: View {
                     Text("Neko").font(.title.bold())
                     Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
                     Text("Your workspace, native on your Mac.").foregroundStyle(.secondary)
+                    if let build = Updates.Build.current { Text("Build \(String(build.commit.prefix(7)))").font(.caption.monospaced()).foregroundStyle(.secondary) }
+                    HStack {
+                        Button(checkingUpdates ? "Checking…" : "Check for updates") { checkUpdates() }.disabled(checkingUpdates)
+                        if case .behind = updateStatus { Button("Update now") { runUpdate() }.buttonStyle(.borderedProminent) }
+                    }.padding(.top, 8)
+                    if let updateStatus { Text(updateStatus.message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+                    if let updateNote { Text(updateNote).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled) }
                 }.padding().tabItem { Label("About", systemImage: "info.circle") }
             }.disabled(pending)
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled).padding() }

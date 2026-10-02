@@ -55,6 +55,32 @@ final class ChatDraftTests: XCTestCase {
         XCTAssertEqual(all.trash.last?.path, "/Users/a/Library/Application Support/neko")
     }
 
+    func testPresenceShowsWorkThenLingersOnTheOutcome() {
+        func snap(_ status: String, pending: Bool = false) -> JSONValue {
+            .object(["tasks": .array([.object(["id": .string("t"), "title": .string("Fix login"), "status": .string(status)])]),
+                     "conversation": .array(pending ? [.object(["pending": .bool(true)])] : [])])
+        }
+        let building = PresenceState.from(snapshot: snap("Building"), previous: nil)
+        XCTAssertEqual(building?.activity, .creating)
+        XCTAssertEqual(building?.lingers, false)
+        XCTAssertTrue(building?.label.contains("Fix login") == true)
+        let done = PresenceState.from(snapshot: snap("ReadyForReview"), previous: snap("Reviewing"))
+        XCTAssertEqual(done?.activity, .ready)
+        XCTAssertEqual(done?.lingers, true)
+        XCTAssertNil(PresenceState.from(snapshot: snap("ReadyForReview"), previous: snap("ReadyForReview")), "nothing new: stay hidden")
+        XCTAssertEqual(PresenceState.from(snapshot: snap("Completed", pending: true), previous: nil)?.label, "Neko is replying")
+    }
+
+    func testUpdatesCompareAndRefuseUnsafeCheckouts() throws {
+        let behind = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"ahead_by":3,"commits":[{"sha":"aaa"},{"sha":"bbbbbbbbbb"}]}"#.utf8))
+        XCTAssertEqual(Updates.parse(behind), .behind(3, latest: "bbbbbbbbbb"))
+        XCTAssertEqual(Updates.parse(try JSONDecoder().decode(JSONValue.self, from: Data(#"{"ahead_by":0}"#.utf8))), .upToDate)
+        XCTAssertNil(Updates.blocker(gitStatus: "", branch: "main"))
+        XCTAssertNotNil(Updates.blocker(gitStatus: " M README.md\n", branch: "main"))
+        XCTAssertNotNil(Updates.blocker(gitStatus: "", branch: "codex/kibu-parity"))
+        XCTAssertEqual(Updates.shellQuote("/a b/it's"), "'/a b/it'\\''s'")
+    }
+
     func testSlashCommandsParseLocallyAndOrdinaryTextPassesThrough() {
         XCTAssertEqual(SlashCommand.parse(" /stop "), .stop)
         XCTAssertEqual(SlashCommand.parse("/remember tests use pnpm"), .remember("tests use pnpm"))

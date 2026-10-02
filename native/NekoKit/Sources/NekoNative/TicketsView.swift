@@ -128,6 +128,40 @@ struct TicketDetail: View {
     @State private var note = ""
     @State private var childTicket: String?
     @State private var confirmDelete = false
+    @State private var changes: (files: [String], patch: String)?
+    @State private var changesError: String?
+    @State private var loadingChanges = false
+    private var changesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Changes").font(.headline)
+                Spacer()
+                Button(loadingChanges ? "Loading…" : (changes == nil ? "Show changes" : "Refresh")) { loadChanges() }.disabled(loadingChanges).controlSize(.small)
+            }
+            Text("What this ticket changed in its own worktree. Nothing here is in your repository until you bring it over.").font(.caption).foregroundStyle(.secondary)
+            if let changesError { Text(changesError).font(.caption).foregroundStyle(NekoStyle.amber) }
+            if let changes {
+                if changes.files.isEmpty { Text("No changes yet.").foregroundStyle(.secondary) }
+                else {
+                    Text("\(changes.files.count) \(changes.files.count == 1 ? "file" : "files"): \(changes.files.prefix(12).joined(separator: ", "))\(changes.files.count > 12 ? "…" : "")").font(.caption)
+                    ScrollView([.vertical, .horizontal]) {
+                        Text(changes.patch).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: 320).padding(8).nekoCard(padding: 0, radius: 8)
+                }
+            }
+        }
+    }
+    private func loadChanges() {
+        loadingChanges = true
+        Task {
+            do {
+                let reply = try await model.request(.command("TaskChanges", ["task_id": .string(id)]))["TaskChanges"]
+                changes = (reply["files"].array.map(\.string), reply["patch"].string)
+                changesError = nil
+            } catch { changesError = error.localizedDescription }
+            loadingChanges = false
+        }
+    }
     @Environment(\.dismiss) private var dismiss
     private var ticket: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == id } ?? .null }
     var body: some View {
@@ -160,6 +194,7 @@ struct TicketDetail: View {
                 section("Plan", ticket["plan"].string)
                 let review = TicketPresentation.review(ticket["result"].string)
                 section("Result", review.body)
+                if !ticket["worktree"].string.isEmpty { changesSection }
                 if let verdict = review.verdict {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(verdict.passed ? "Reviewer reported passed" : "Reviewer found issues", systemImage: verdict.passed ? "checkmark.shield" : "exclamationmark.shield").font(.headline).foregroundStyle(verdict.passed ? .green : .orange)

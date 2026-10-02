@@ -325,6 +325,64 @@ fn message(role: ChatRole, text: String, at_ms: i64) -> ChatMessage {
 }
 
 /// What Neko wants to happen after a turn.
+
+/// "What can you do?" and friends: short questions about Neko itself.
+/// Anchored at both ends so "help me fix the build" stays a real request.
+pub fn is_capability_question(message: &str) -> bool {
+    let text = message.trim().trim_end_matches(['?', '!', '.']).trim().to_lowercase();
+    let text = text.trim_start_matches("hi ").trim_start_matches("hey ").trim_start_matches("neko ").trim();
+    matches!(
+        text,
+        "help" | "what can you do" | "what can you do for me" | "what do you do" | "what are you"
+            | "who are you" | "capabilities" | "what can neko do" | "what tools do you have" | "what tools can you use"
+    )
+}
+
+/// Built from what is actually set up on this Mac, so it can't drift from
+/// what Neko can really do.
+pub fn capability_answer(snapshot: &Snapshot, scope: Option<&str>) -> String {
+    let runtime = &snapshot.agent_runtime;
+    let runtime_label = match runtime.provider.as_str() {
+        "" | "codex" => "Codex",
+        "claude" => "Claude Code",
+        "opencode" => "OpenCode",
+        "ollama" => "Ollama",
+        "lmstudio" => "LM Studio",
+        _ => "a connected model",
+    };
+    let model = if runtime.model.is_empty() { "its default model".to_string() } else { runtime.model.clone() };
+    let workspaces: Vec<&str> = snapshot.workspaces.iter().filter(|w| scope.is_none_or(|s| s == w.id)).map(|w| w.name.as_str()).collect();
+    let in_scope = |workspace: &str| scope.is_none_or(|s| s == workspace);
+    let tools: Vec<String> = snapshot
+        .mcp
+        .connections
+        .iter()
+        .filter(|c| c.enabled && c.trusted && (c.workspace_id.is_empty() || in_scope(&c.workspace_id)))
+        .map(|c| format!("{} ({} tools)", c.label, c.tools.len()))
+        .collect();
+    let watching = snapshot.mcp.responsibilities.iter().filter(|r| r.enabled && in_scope(&r.workspace_id)).count();
+    let mut lines = vec![
+        format!("I plan and build changes in your repositories, using {runtime_label} with {model}. Every change happens in its own copy of the repo, and I ask before building."),
+        if workspaces.is_empty() {
+            "No workspaces yet. Add a folder you work in, then ask me for a change.".into()
+        } else {
+            format!("Workspaces: {}.", workspaces.join(", "))
+        },
+        if tools.is_empty() {
+            "No tools connected. Add an MCP server in Tools & skills to let me read your issue tracker, docs or other services.".into()
+        } else {
+            format!("Tools I can use: {}.", tools.join(", "))
+        },
+        if watching == 0 { "I’m not watching anything yet. Ask me to keep an eye on something.".into() } else { format!("I’m watching {watching} {} every 10 minutes.", if watching == 1 { "responsibility" } else { "responsibilities" }) },
+        "I remember what you tell me (“remember that…”), and you can ask what I remember or tell me to forget.".into(),
+        "In the composer, type / for shortcuts like /stop, /models and /permissions, and press ⌥Return to include what you selected in the app you were just in.".into(),
+    ];
+    lines.retain(|l| !l.is_empty());
+    lines.join("\n\n")
+}
+
+
+/// What Neko wants to happen after a turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reply {
     pub text: String,
@@ -609,6 +667,20 @@ fn truncate(text: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capability_questions_are_answered_from_real_setup() {
+        assert!(is_capability_question("What can you do?"));
+        assert!(is_capability_question("hey neko what can you do"));
+        assert!(is_capability_question("help"));
+        assert!(!is_capability_question("help me fix the failing build"));
+        assert!(!is_capability_question("what can you do about the flaky test"));
+        let mut snapshot = Snapshot::default();
+        snapshot.agent_runtime = neko_protocol::workbench::AgentRuntime { provider: "claude".into(), model: "sonnet".into() };
+        let answer = capability_answer(&snapshot, None);
+        assert!(answer.contains("Claude Code with sonnet"), "{answer}");
+        assert!(answer.contains("No workspaces yet") && answer.contains("No tools connected"));
+    }
 
     #[test]
     fn historical_tool_arguments_are_bounded_without_evicting_active_approval() {

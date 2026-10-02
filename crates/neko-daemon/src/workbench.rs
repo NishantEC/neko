@@ -877,6 +877,14 @@ fn converse(
     }
     snapshot.agent_profiles.active_profile_id = turn.agent_profile_id.clone();
     let chosen = preferred.filter(|id| snapshot.workspaces.iter().any(|w| &w.id == id));
+    if neko_chat::is_capability_question(message) {
+        let text = neko_chat::capability_answer(&snapshot, chosen);
+        let guard = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(error) = neko_chat::finish_turn(&guard, pending, &text, vec![], false) {
+            eprintln!("neko chat: {error}");
+        }
+        return;
+    }
     if let Some(intent) = neko_memory::chat_intent(message) {
         // Memory requests are answered by code, instantly and exactly.
         let (text, remembered) = answer_memory_intent(db, &snapshot, chosen, intent);

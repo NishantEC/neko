@@ -446,6 +446,10 @@ pub enum Request {
     },
     /// Time each runtime and report which installs Neko uses. Metadata only.
     Diagnostics,
+    /// Read-only: the files and patch a ticket's worktree changed.
+    TaskChanges {
+        task_id: String,
+    },
     /// `provider`, when set, scopes this search to exactly one provider's
     /// own `search()` — no cross-provider `allocate()`, no section
     /// reservation, just that provider's own candidates sorted by score.
@@ -559,6 +563,11 @@ pub enum Response {
     AgentModels(agent_models::ModelCatalog),
     AgentModelCheck(agent_models::ModelCheck),
     Diagnostics(agent_models::DiagnosticsReport),
+    TaskChanges {
+        files: Vec<String>,
+        patch: String,
+        truncated: bool,
+    },
     /// One search reply. **A single `Request::Search` can be answered by
     /// more than one of these** — see [`Response::ends_request`] and
     /// `AGENTS.md`'s "Two-phase search" section.

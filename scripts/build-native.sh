@@ -27,6 +27,11 @@ xcrun -sdk macosx metallib "$shader_work/Gem.air" -o "$bundle/Contents/Resources
 /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string neko.icns' "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 14.0' "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$bundle/Contents/Info.plist"
+# Lets Settings → About check GitHub for newer commits and rebuild from this checkout.
+if commit="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null)"; then
+  /usr/libexec/PlistBuddy -c "Add :NekoGitCommit string $commit" "$bundle/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :NekoSourcePath string $repo_root" "$bundle/Contents/Info.plist"
+fi
 identity="${NEKO_CODESIGN_IDENTITY:--}"
 codesign --force --sign "$identity" --identifier "$bundle_id.daemon" --timestamp=none "$bundle/Contents/MacOS/neko-daemon"
 codesign --force --sign "$identity" --identifier "$bundle_id" --timestamp=none "$bundle/Contents/MacOS/neko"
