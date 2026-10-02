@@ -103,7 +103,7 @@ struct TicketsView: View {
                     }.padding(.horizontal, 14).frame(height: 36)
                     TicketDetail(model: model, id: selected, close: { self.selected = nil })
                 }
-                .inspectorColumnWidth(min: 420, ideal: 520, max: 760)
+                .inspectorColumnWidth(min: 340, ideal: 460, max: 760)
             }
         }
     }
@@ -115,8 +115,9 @@ struct TicketsView: View {
                 Text("\(workspaceLabel) · \(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")\(startsWithoutAsking ? " · starts without asking" : "")")
                     .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
+            .layoutPriority(-1)
             Spacer(minLength: 12)
-            TextField("Search tickets", text: $search).textFieldStyle(.roundedBorder).frame(width: 180).controlSize(.small)
+            TextField("Search tickets", text: $search).textFieldStyle(.roundedBorder).frame(minWidth: 90, maxWidth: 180).controlSize(.small)
             Picker("Layout", selection: $layout) {
                 Label("List", systemImage: "list.bullet").tag("list")
                 Label("Board", systemImage: "rectangle.split.3x1").tag("board")
