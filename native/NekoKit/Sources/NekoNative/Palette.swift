@@ -89,6 +89,7 @@ private final class SearchPanel: NSPanel {
     private weak var model: AppModel?
     private var previousApplication: NSRunningApplication?
     private var hotkey: EventHotKeyRef?
+    private var stopHotkey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private var registeredKey: UInt32?
     private var registeredModifiers: UInt32?
@@ -104,13 +105,21 @@ private final class SearchPanel: NSPanel {
         }
         if handler == nil {
             var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+            InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+                var pressed = EventHotKeyID()
+                GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &pressed)
+                let id = pressed.id
                 Task { @MainActor in
                     let controller = PaletteController.shared
-                    if let model = controller.model { controller.toggle(model: model) }
+                    guard let model = controller.model else { return }
+                    if id == StopAllWork.hotkeyID { await StopAllWork.run(model) } else { controller.toggle(model: model) }
                 }
                 return noErr
             }, 1, &event, nil, &handler)
+        }
+        if stopHotkey == nil {
+            // ⌘⇧Esc: stop everything from anywhere. Not a system shortcut (Force Quit is ⌘⌥Esc).
+            RegisterEventHotKey(UInt32(53), UInt32(cmdKey | shiftKey), EventHotKeyID(signature: 0x4E454B4F, id: StopAllWork.hotkeyID), GetApplicationEventTarget(), 0, &stopHotkey)
         }
         var combo: JSONValue = .object(["key": .string("Space"), "modifiers": .array([.string("Alt")])])
         do {

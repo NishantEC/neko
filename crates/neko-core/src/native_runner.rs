@@ -762,13 +762,24 @@ pub(crate) fn resolve_codex() -> Result<PathBuf, String> {
         let path = PathBuf::from(path);
         return if executable(&path) { Ok(path) } else { Err(missing()) };
     }
+    newest_codex(codex_candidates()).ok_or_else(missing)
+}
+
+/// Every distinct executable `codex` Neko can see, in PATH order.
+pub(crate) fn codex_candidates() -> Vec<PathBuf> {
+    let executable = |path: &PathBuf| path.is_absolute() && fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
     let mut candidates: Vec<PathBuf> = Vec::new();
     for path in executable_directories().into_iter().map(|directory| directory.join("codex")) {
         if executable(&path) && !candidates.iter().any(|seen| same_file(seen, &path)) {
             candidates.push(path);
         }
     }
-    newest_codex(candidates).ok_or_else(missing)
+    candidates
+}
+
+/// "0.155.1" for display, or None when the version can't be read.
+pub(crate) fn codex_version_label(path: &Path) -> Option<String> {
+    codex_version(path).map(|v| v.iter().map(u64::to_string).collect::<Vec<_>>().join("."))
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {

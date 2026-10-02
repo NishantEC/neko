@@ -548,6 +548,43 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 "Acknowledged the result and marked this task complete. Nothing merged or published.",
             );
         }
+        Command::DeleteTask { task_id } => {
+            let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("Task no longer exists")?;
+            if !deletable(task.status) {
+                return Err("Only a completed, failed or cancelled task can be deleted. Cancel it first".into());
+            }
+            if snapshot.splits.iter().any(|s| s.subtasks.iter().any(|p| p.task_id.as_deref() == Some(&task_id))) {
+                return Err("Delete the parent ticket; its subtasks go with it".into());
+            }
+            let mut ids = vec![task_id.clone()];
+            ids.extend(snapshot.splits.iter().filter(|s| s.parent_id == task_id).flat_map(|s| s.subtasks.iter().filter_map(|p| p.task_id.clone())));
+            if snapshot.tasks.iter().any(|t| ids.contains(&t.id) && !deletable(t.status)) {
+                return Err("A subtask of this ticket is still running. Cancel it first".into());
+            }
+            remove_tasks(&mut snapshot, &ids);
+        }
+        Command::ClearFinishedTasks { workspace_id } => {
+            let child_ids: Vec<String> = snapshot.splits.iter().flat_map(|s| s.subtasks.iter().filter_map(|p| p.task_id.clone())).collect();
+            let mut ids: Vec<String> = Vec::new();
+            for task in snapshot.tasks.iter().filter(|t| {
+                matches!(t.status, TaskStatus::Completed | TaskStatus::Cancelled)
+                    && !child_ids.contains(&t.id)
+                    && workspace_id.as_ref().is_none_or(|w| &t.workspace_id == w)
+            }) {
+                let children: Vec<String> = snapshot.splits.iter().filter(|s| s.parent_id == task.id).flat_map(|s| s.subtasks.iter().filter_map(|p| p.task_id.clone())).collect();
+                if snapshot.tasks.iter().filter(|t| children.contains(&t.id)).all(|t| deletable(t.status)) {
+                    ids.push(task.id.clone());
+                    ids.extend(children);
+                }
+            }
+            remove_tasks(&mut snapshot, &ids);
+        }
+        Command::CancelAllWork => {
+            for task in snapshot.tasks.iter_mut().filter(|t| !terminal(t.status)) {
+                task.status = TaskStatus::Cancelled;
+                append_event(task, "user", "Stopped with Stop all work. Worktree preserved.");
+            }
+        }
         Command::RetryTask { task_id } => {
             if snapshot.splits.iter().any(|s| {
                 s.subtasks
@@ -702,6 +739,28 @@ pub fn recover_interrupted(db: &Db) -> Result<Snapshot, String> {
     Ok(snapshot)
 }
 
+fn deletable(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled)
+}
+
+/// History only: task worktrees, source evidence and files stay on disk.
+/// Source evidence keeps its task id so a watcher never re-files the same item.
+fn remove_tasks(snapshot: &mut Snapshot, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    snapshot.tasks.retain(|t| !ids.contains(&t.id));
+    snapshot.splits.retain(|s| !ids.contains(&s.parent_id));
+    for id in ids {
+        snapshot.task_roots.remove(id);
+    }
+    for schedule in &mut snapshot.schedules {
+        if schedule.last_task_id.as_ref().is_some_and(|id| ids.contains(id)) {
+            schedule.last_task_id = None;
+        }
+    }
+}
+
 fn terminal(status: TaskStatus) -> bool {
     matches!(
         status,
@@ -776,10 +835,40 @@ pub fn canonical_workspace_directory(path: &str) -> Result<String, String> {
     if !directory.is_dir() {
         return Err("Workspace folder must be a directory".into());
     }
+    if let Some(reason) = protected_folder(&directory) {
+        return Err(format!("Neko won’t use {} as a workspace: {reason}", directory.display()));
+    }
     directory
         .to_str()
         .map(str::to_owned)
         .ok_or_else(|| "Workspace folder path must be valid UTF-8".into())
+}
+
+/// Folders agents must never work in, whatever is asked: system locations,
+/// credentials, and Neko's own data. A home folder is allowed; one of these
+/// inside it is not. Paths are canonical (symlinks resolved) when checked.
+pub fn protected_folder(path: &std::path::Path) -> Option<&'static str> {
+    if path == std::path::Path::new("/") || path == std::path::Path::new("/Users") {
+        return Some("it contains every user’s files");
+    }
+    const SYSTEM: &[&str] = &[
+        "/System", "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/libexec", "/private/etc",
+        "/private/var/db", "/Library/LaunchDaemons", "/Library/LaunchAgents", "/Library/Keychains",
+    ];
+    if SYSTEM.iter().any(|p| path.starts_with(p)) {
+        return Some("it is a protected system location");
+    }
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        let home = home.canonicalize().unwrap_or(home);
+        const SECRETS: &[&str] = &[".ssh", ".aws", ".gnupg", ".kube", ".docker", ".config/gh", "Library/Keychains", "Library/Cookies", "Library/Mail", "Library/Messages"];
+        if SECRETS.iter().any(|p| path.starts_with(home.join(p))) {
+            return Some("it holds credentials or private data");
+        }
+    }
+    if path.starts_with(neko_protocol::support_dir()) {
+        return Some("it is Neko’s own data folder");
+    }
+    None
 }
 
 /// Code-changing tasks require a Git checkout, even though workspace context
@@ -1012,6 +1101,51 @@ fn validate(snapshot: &Snapshot) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn protected_folders_cannot_become_workspaces() {
+        use std::path::Path;
+        assert!(protected_folder(Path::new("/")).is_some());
+        assert!(protected_folder(Path::new("/System/Library")).is_some());
+        assert!(protected_folder(Path::new("/usr/bin")).is_some());
+        let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+        assert!(protected_folder(&home.join(".ssh")).is_some());
+        assert!(protected_folder(&home.join("Library/Keychains/x")).is_some());
+        assert!(protected_folder(&home).is_none(), "the home workspace stays allowed");
+        assert!(protected_folder(&home.join("Documents/project")).is_none());
+        assert!(protected_folder(Path::new("/usr/local/src/app")).is_none());
+        assert!(canonical_workspace_directory("/System").unwrap_err().contains("protected system location"));
+    }
+
+    #[test]
+    fn finished_tasks_can_be_deleted_or_cleared_and_stop_all_cancels_the_rest() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let running = task(&db, &ws);
+        let done = task(&db, &ws);
+        let failed = task(&db, &ws);
+        let mut state = load(&db).unwrap();
+        for t in &mut state.tasks {
+            t.status = if t.id == done.id { TaskStatus::Completed } else if t.id == failed.id { TaskStatus::Failed } else { TaskStatus::Building };
+        }
+        state.task_roots.insert(done.id.clone(), repo.path().to_string_lossy().into());
+        save(&db, &state).unwrap();
+
+        assert!(apply(&db, Command::DeleteTask { task_id: running.id.clone() }).unwrap_err().contains("Cancel it first"));
+        let cleared = apply(&db, Command::ClearFinishedTasks { workspace_id: None }).unwrap();
+        assert!(!cleared.tasks.iter().any(|t| t.id == done.id), "completed task cleared");
+        assert!(!cleared.task_roots.contains_key(&done.id));
+        assert!(cleared.tasks.iter().any(|t| t.id == failed.id), "failed tasks stay for retry");
+        let deleted = apply(&db, Command::DeleteTask { task_id: failed.id.clone() }).unwrap();
+        assert!(!deleted.tasks.iter().any(|t| t.id == failed.id));
+
+        let stopped = apply(&db, Command::CancelAllWork).unwrap();
+        let survivor = stopped.tasks.iter().find(|t| t.id == running.id).unwrap();
+        assert_eq!(survivor.status, TaskStatus::Cancelled);
+        assert!(survivor.events.last().unwrap().message.contains("Stop all work"));
+        assert!(repo.path().exists(), "files are never touched");
+    }
+
     #[test]
     fn decisions_remain_exact_when_notes_fill_the_event_history() {
         let db = Db::open_in_memory().unwrap();

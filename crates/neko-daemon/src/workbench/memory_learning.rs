@@ -527,7 +527,7 @@ mod tests {
             &id,
             "One more",
             None,
-            neko_chat::Reply {
+            neko_chat::Reply { used_memory: vec![],
                 text: "Your answer".into(),
                 tickets: vec![],
                 memories: vec![],
@@ -552,7 +552,7 @@ mod tests {
             &id,
             "Small batches worked",
             None,
-            neko_chat::Reply {
+            neko_chat::Reply { used_memory: vec![],
                 text: "Acknowledged".into(),
                 tickets: vec![],
                 memories: vec![],
