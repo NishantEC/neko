@@ -209,8 +209,9 @@ struct TicketsView: View {
                         }.scrollIndicators(.never)
                     }
                     .frame(width: 280).frame(maxHeight: .infinity, alignment: .top)
-                    .background(dropTarget == column.id ? column.color.opacity(0.10) : Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(dropTarget == column.id ? column.color.opacity(0.6) : Color.white.opacity(0.05)))
+                    // Columns are plain; only the one under a dragged card lights up.
+                    .background(dropTarget == column.id ? column.color.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(dropTarget == column.id ? column.color.opacity(0.5) : .clear))
                     .dropDestination(for: String.self) { ids, _ in
                         guard let id = ids.first else { return false }
                         return move(id, to: column)
