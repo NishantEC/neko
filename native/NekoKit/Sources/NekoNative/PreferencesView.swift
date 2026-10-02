@@ -118,6 +118,7 @@ enum HotkeyFallbacks {
 }
 
 struct PreferencesView: View {
+    @AppStorage("neko.settings.tab") private var settingsTab = "General"
     @ObservedObject var model: AppModel
     @State private var settings: [JSONValue] = []
     @State private var folders: [JSONValue] = []
@@ -163,7 +164,19 @@ struct PreferencesView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Settings").font(.system(size: 24, weight: .semibold))
                 .padding(.horizontal, 12)
-            TabView {
+            GlassSegmented(selection: $settingsTab, options: [
+                .init(value: "General", title: "General", symbol: "gearshape"),
+                .init(value: "AI", title: "AI", symbol: "cpu"),
+                .init(value: "Search", title: "Search", symbol: "magnifyingglass"),
+                .init(value: "Permissions", title: "Permissions", symbol: "lock.shield"),
+                .init(value: "Diagnostics", title: "Diagnostics", symbol: "stethoscope"),
+                .init(value: "Agents", title: "Agents", symbol: "person.2"),
+                .init(value: "About", title: "About", symbol: "info.circle")
+            ])
+            .frame(maxWidth: .infinity)
+            Group {
+                switch settingsTab {
+                case "General":
                 Form {
                     HotkeySettingsView(model: model)
                     preferenceToggle("Launch at login", "launch-at-login")
@@ -172,7 +185,9 @@ struct PreferencesView: View {
                     Toggle("Clipboard history", isOn: Binding(get: { clipboard.enabled ?? false }, set: { value in setClipboard(value) })).disabled(clipboard.enabled == nil)
                     Text("Saves copied content locally. Turning this off stops new capture; existing history remains.").font(.caption).foregroundStyle(.secondary)
                     if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
-                }.formStyle(.grouped).tabItem { Label("General", systemImage: "gearshape") }
+                }.formStyle(.grouped)
+                case "AI":
+
                 Form {
                     Section("Agent runtime") {
                         Picker("Runs with", selection: $agentProvider) {
@@ -246,24 +261,32 @@ struct PreferencesView: View {
                         Text("Counts the cost Claude Code and OpenCode report for each ticket and stops the ticket when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                }.padding().tabItem { Label("AI", systemImage: "cpu") }
+                }.padding()
+                case "Search":
+
                 VStack(alignment: .leading) {
                     Text("Search folders").font(.headline)
                     List(folders, id: \.self) { folder in
                         HStack { Text(folder["title"].string); Spacer(); Button("Remove") { activate("folder-scope", folder["id"].string) } }
                     }
                     HStack { TextField("Folder path", text: $path); Button("Choose…") { choose() }; Button("Add") { activate("folder-scope", path, action: "add") }.disabled(path.trimmingCharacters(in: .whitespaces).isEmpty) }
-                }.padding().tabItem { Label("Search", systemImage: "magnifyingglass") }
+                }.padding()
+                case "Permissions":
+
                 PermissionsView(model: model)
-                    .tabItem { Label("Permissions", systemImage: "lock.shield") }
+                case "Diagnostics":
+
                 DiagnosticsView(model: model)
-                    .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+                case "Agents":
+
                 Form {
                     Text(agents.isEmpty ? "No agent provider is turned on." : "\(agents.count) agents visible from the configured provider.")
                     preferenceToggle("Show agents", "agents-enabled")
                     preferenceToggle("Include idle agents", "agents-include-idle")
                     Text("Legacy agent providers are opt-in. These settings do not enable a provider.").font(.caption).foregroundStyle(.secondary)
-                }.padding().tabItem { Label("Agents", systemImage: "person.2") }
+                }.padding()
+                case "About":
+
                 VStack(spacing: 16) {
                     BrandMark(size: 72)
                     Text("Neko").font(.title.bold())
@@ -276,8 +299,12 @@ struct PreferencesView: View {
                     }.padding(.top, 8)
                     if let updateStatus { Text(updateStatus.message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                     if let updateNote { Text(updateNote).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled) }
-                }.padding().tabItem { Label("About", systemImage: "info.circle") }
-            }.disabled(pending)
+                }.padding()
+                default: EmptyView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .disabled(pending)
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled).padding() }
         }
         .frame(maxWidth: 860, maxHeight: .infinity)

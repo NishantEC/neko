@@ -120,20 +120,14 @@ struct TicketsView: View {
             .layoutPriority(-1)
             Spacer(minLength: 12)
             TextField("Search tickets", text: $search).textFieldStyle(.roundedBorder).frame(minWidth: 90, maxWidth: 180).controlSize(.small)
-            Picker("Layout", selection: $layout) {
-                Label("List", systemImage: "list.bullet").tag("list")
-                Label("Board", systemImage: "rectangle.split.3x1").tag("board")
-            }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
-            .help("Show tickets as a list or as a board")
-            .labelStyle(.iconOnly)
-            Picker("Open tickets", selection: $openAs) {
-                Label("Drawer", systemImage: "sidebar.right").tag("drawer")
-                Label("Window", systemImage: "rectangle.center.inset.filled").tag("modal")
-            }
-            .pickerStyle(.segmented).labelsHidden().fixedSize()
-            .help("Open a ticket in a drawer beside the list, or in a window on top")
-            .labelStyle(.iconOnly)
+            GlassSegmented(selection: $layout, options: [
+                .init(value: "list", title: "List", symbol: "list.bullet", help: "Show tickets as a list"),
+                .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tickets as a board")
+            ], iconOnly: true)
+            GlassSegmented(selection: $openAs, options: [
+                .init(value: "drawer", title: "Drawer", symbol: "sidebar.right", help: "Open tickets in a drawer beside the list"),
+                .init(value: "modal", title: "Window", symbol: "rectangle.center.inset.filled", help: "Open tickets in a window on top")
+            ], iconOnly: true)
             Menu {
                 Toggle("Start tickets without asking", isOn: Binding(get: { startsWithoutAsking }, set: { value in
                     Task { await model.workbench(.command("SetStartWithoutApproval", ["enabled": .bool(value)])) }

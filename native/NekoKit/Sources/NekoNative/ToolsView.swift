@@ -79,11 +79,10 @@ struct ToolsView: View {
             .padding(.bottom, 24)
 
             HStack {
-                Picker("Show", selection: $tab) {
-                    Text("Connections").tag(0)
-                    Text("Skills").tag(1)
-                }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 250)
+                GlassSegmented(selection: $tab, options: [
+                    .init(value: 0, title: "Connections"),
+                    .init(value: 1, title: "Skills")
+                ])
                 Spacer()
                 if tab == 0 {
                     Menu {

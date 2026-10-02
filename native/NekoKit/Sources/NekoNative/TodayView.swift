@@ -235,12 +235,10 @@ struct TodayView: View {
                     .buttonStyle(.plain)
                     .help("Attach images or files; you can also paste or drop them")
                     .accessibilityLabel("Attach images or files")
-                    Picker("Mode", selection: $mode) {
-                        Text("Ask").tag("ask")
-                        Text("Plan").tag("plan")
-                    }
-                    .pickerStyle(.segmented).labelsHidden().fixedSize().controlSize(.small)
-                    .help("Ask answers now. Plan has Neko propose a ticket with a plan for your approval, without changing anything.")
+                    GlassSegmented(selection: $mode, options: [
+                        .init(value: "ask", title: "Ask", help: "Ask: Neko answers now"),
+                        .init(value: "plan", title: "Plan", help: "Plan: Neko proposes a ticket with a plan for your approval, without changing anything")
+                    ], size: .small)
                     runtimeMenu
                     Spacer(minLength: 8)
                     Button { send() } label: {
