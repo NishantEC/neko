@@ -80,6 +80,9 @@ try {
   assert.match(reply, /remember/i);
   assert.ok(snapshot.memory.some(m => m.text === 'Tests in this repo use pnpm'));
   ({ reply } = await say('What do you remember?'));
+  const capabilities = (await say('What can you do?')).reply;
+  assert.match(capabilities, /Workspaces|No workspaces yet/);
+  console.log('capabilities ->', capabilities.split('\n')[0].slice(0, 90));
   assert.match(reply, /Tests in this repo use pnpm/);
   ({ reply, snapshot } = await say('remember that my openai key is sk-proj-abcdefghijklmnopqrstuvwxyz123456'));
   console.log('secret ->', reply);
@@ -108,6 +111,8 @@ try {
   await command({ CreateTask: { workspace_id: workspaceId, title: 'Smoke', goal: 'Do nothing; this is a smoke test.' } });
   const stopped = await command('CancelAllWork');
   const task = stopped.tasks[0];
+  const noChanges = await request({ TaskChanges: { task_id: task.id } });
+  assert.match(noChanges.Error?.message ?? '', /no worktree yet/);
   assert.equal(task.status, 'Cancelled');
   console.log('stop all ->', task.events.at(-1).message);
   for (let n = 0; n < 50; n++) {

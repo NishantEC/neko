@@ -7,6 +7,7 @@
 
 pub mod agent_profiles;
 pub mod agent_catalog;
+pub mod answers;
 pub mod agents;
 pub mod apps;
 pub mod ask;

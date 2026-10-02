@@ -92,7 +92,7 @@ impl AppState {
                 state.providers.retain(|p| {
                     matches!(
                         p.id(),
-                        "app" | "file" | "clipboard" | "settings" | "theme" | "preference"
+                        "app" | "file" | "clipboard" | "settings" | "theme" | "preference" | "answer"
                     )
                 });
                 state
@@ -138,6 +138,8 @@ impl AppState {
             Box::new(neko_core::apps::AppsProvider::new(apps.clone(), db.clone())),
             Box::new(file_provider),
             Box::new(neko_core::clipboard::ClipboardProvider::new(db.clone())),
+            // Arithmetic and city times, computed locally; Enter copies.
+            Box::new(neko_core::answers::AnswerProvider),
             Box::new(settings_provider),
             // No test-provided variant needed, unlike file/settings above:
             // `CommandsProvider` does zero I/O (a fixed, compiled-in table
@@ -293,6 +295,30 @@ impl AppState {
             .chain(self.mode_providers.iter())
             .map(|p| p.as_ref())
     }
+}
+
+/// What a ticket's worktree changed, against its own HEAD (workers can't
+/// commit), including new files. Only Neko's own task worktrees are read.
+fn task_changes(state: &AppState, task_id: &str) -> Result<(Vec<String>, String, bool), String> {
+    const LIMIT: usize = 512 * 1024;
+    let snapshot = neko_core::workbench::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
+    let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("That ticket no longer exists")?;
+    let worktree = task.worktree.as_deref().ok_or("This ticket has no worktree yet")?;
+    let root = neko_protocol::support_dir().join("task-worktrees");
+    let directory = std::path::Path::new(worktree).canonicalize().map_err(|_| "The ticket’s worktree is missing")?;
+    if !root.canonicalize().is_ok_and(|r| directory.starts_with(r)) {
+        return Err("Only Neko’s own task worktrees can be shown".into());
+    }
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let base = neko_core::native_runner::head(&directory, &cancel)?;
+    let files = neko_core::native_runner::changed_files(&directory, &base, &cancel)?;
+    let patch = neko_core::native_runner::task_patch(&directory, &base, &cancel)?;
+    let truncated = patch.len() > LIMIT;
+    let mut text = String::from_utf8_lossy(&patch[..patch.len().min(LIMIT)]).into_owned();
+    if truncated {
+        text.push_str("\n… (patch shortened)");
+    }
+    Ok((files, text, truncated))
 }
 
 pub fn now_unix_ms() -> i64 {
@@ -698,6 +724,10 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             Response::AgentModels(neko_core::agent_catalog::catalog(refresh))
         }
         Request::Diagnostics => Response::Diagnostics(neko_core::agent_catalog::diagnostics(&neko_protocol::support_dir())),
+        Request::TaskChanges { task_id } => match task_changes(state, &task_id) {
+            Ok((files, patch, truncated)) => Response::TaskChanges { files, patch, truncated },
+            Err(message) => Response::Error { message },
+        },
         Request::CheckAgentModel { runtime, save } => {
             let check = neko_core::agent_catalog::check(&runtime);
             if check.ok && save {

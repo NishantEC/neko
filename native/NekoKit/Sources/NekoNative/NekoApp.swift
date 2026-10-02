@@ -9,7 +9,7 @@ import NekoKit
         Window("Neko", id: "workspace") {
             WorkspaceView(model: model)
                 .tint(NekoStyle.accent)
-                .task { PreviousAppContext.shared.start(); await model.start(); await PaletteController.shared.configure(model: model) }
+                .task { PreviousAppContext.shared.start(); PresenceController.shared.start(model: model); await model.start(); await PaletteController.shared.configure(model: model) }
                 .onReceive(NotificationCenter.default.publisher(for: .nekoOpenWorkspace)) { _ in openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
                 .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
         }
