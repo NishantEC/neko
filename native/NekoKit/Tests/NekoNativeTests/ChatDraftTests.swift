@@ -9,7 +9,7 @@ final class ChatDraftTests: XCTestCase {
             .appendingPathComponent("Sources/NekoNative/TodayView.swift"), encoding: .utf8)
         let composer = try XCTUnwrap(source.components(separatedBy: "private func composer(availableWidth: CGFloat)").dropFirst().first?
             .components(separatedBy: "private var canSend").first)
-        XCTAssertTrue(composer.contains(".liquidGlass(radius: 16)"))
+        XCTAssertTrue(composer.contains(".liquidGlass(radius: 20)"))
         XCTAssertFalse(composer.contains(".background(N.card"))
         XCTAssertFalse(composer.contains("Text(\"Message\")"))
         XCTAssertTrue(composer.contains(".menuIndicator(.hidden)"))
@@ -22,7 +22,7 @@ final class ChatDraftTests: XCTestCase {
             .appendingPathComponent("Sources/NekoNative/TodayView.swift"), encoding: .utf8)
         let composer = try XCTUnwrap(source.components(separatedBy: "private func composer(availableWidth: CGFloat)").dropFirst().first?
             .components(separatedBy: "private var canSend").first)
-        XCTAssertTrue(composer.contains(".frame(width: cardWidth - 36)"))
+        XCTAssertTrue(composer.contains(".frame(width: width)"))
     }
 
     @MainActor func testPreviousAppContextIsMarkedAsUntrustedAndBounded() {
@@ -114,7 +114,7 @@ final class ChatDraftTests: XCTestCase {
         let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/NekoNative/TodayView.swift"), encoding: .utf8)
-        let composer = try XCTUnwrap(source.components(separatedBy: ".liquidGlass(radius: 16)").dropFirst().first?
+        let composer = try XCTUnwrap(source.components(separatedBy: ".liquidGlass(radius: 20)").dropFirst().first?
             .components(separatedBy: ".frame(maxWidth: .infinity, alignment: .center)").first)
         XCTAssertFalse(composer.contains(".overlay"))
         XCTAssertFalse(composer.contains(".strokeBorder"))
@@ -136,7 +136,7 @@ final class ChatDraftTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/NekoNative/TodayView.swift"), encoding: .utf8)
         let composer = try XCTUnwrap(source.components(separatedBy: "private func composer(availableWidth: CGFloat)").dropFirst().first?
-            .components(separatedBy: ".liquidGlass(radius: 16)").first)
+            .components(separatedBy: ".liquidGlass(radius: 20)").first)
         XCTAssertFalse(composer.contains("WorkspaceMenu"))
         XCTAssertFalse(composer.contains("Read only"))
         XCTAssertFalse(composer.contains("sidebar.right"))

@@ -16,6 +16,9 @@ struct ComposerAttachment: Identifiable, Equatable {
     var id: String { reference }
 }
 
+/// Keys the composer offers to an open / or @ menu before handling them itself.
+enum ComposerMenuKey { case up, down, accept, dismiss }
+
 /// Plain text remains the daemon contract. Images become durable file references
 /// in that text, matching crates/neko/src/attachments.rs.
 struct ComposerView: NSViewRepresentable {
@@ -26,6 +29,8 @@ struct ComposerView: NSViewRepresentable {
     let onError: (String) -> Void
     /// ⌥Return: send with the previous app's selection attached.
     var onSubmitWithContext: (() -> Void)? = nil
+    /// Returns true when an open menu used the key.
+    var onMenuKey: ((ComposerMenuKey) -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -45,7 +50,7 @@ struct ComposerView: NSViewRepresentable {
         editor.isEditable = true
         editor.isSelectable = true
         editor.drawsBackground = false
-        editor.font = .systemFont(ofSize: 15)
+        editor.font = .systemFont(ofSize: 13)
         editor.textColor = .labelColor
         editor.insertionPointColor = .labelColor
         editor.textContainerInset = NSSize(width: 0, height: 6)
@@ -63,6 +68,7 @@ struct ComposerView: NSViewRepresentable {
         editor.submit = onSubmit
         editor.interruptAndSubmit = onInterruptAndSubmit
         editor.submitWithContext = onSubmitWithContext
+        editor.menuKey = onMenuKey
         editor.attach = onAttach
         editor.reportError = onError
         editor.registerForDraggedTypes([.fileURL, .png, .tiff])
@@ -76,6 +82,7 @@ struct ComposerView: NSViewRepresentable {
         editor.submit = onSubmit
         editor.interruptAndSubmit = onInterruptAndSubmit
         editor.submitWithContext = onSubmitWithContext
+        editor.menuKey = onMenuKey
         editor.attach = onAttach
         editor.reportError = onError
         // Never interrupt an input method's marked composition. Delegate writes
@@ -117,6 +124,7 @@ struct ComposerView: NSViewRepresentable {
     var submit: (() -> Void)?
     var interruptAndSubmit: (() -> Void)?
     var submitWithContext: (() -> Void)?
+    var menuKey: ((ComposerMenuKey) -> Bool)?
     var attach: ((ComposerAttachment) -> Void)?
     var reportError: ((String) -> Void)?
 
@@ -130,6 +138,16 @@ struct ComposerView: NSViewRepresentable {
     }
 
     override func keyDown(with event: NSEvent) {
+        if !hasMarkedText(), event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, let menuKey {
+            let key: ComposerMenuKey? = switch event.keyCode {
+            case 126: .up
+            case 125: .down
+            case 36, 76, 48: .accept
+            case 53: .dismiss
+            default: nil
+            }
+            if let key, menuKey(key) { return }
+        }
         guard [36, 76].contains(event.keyCode), !hasMarkedText() else { super.keyDown(with: event); return }
         if event.modifierFlags.contains(.command) { interruptAndSubmit?(); return }
         if event.modifierFlags.contains(.shift) { insertNewline(nil); return }
@@ -176,10 +194,10 @@ struct ComposerView: NSViewRepresentable {
         super.draw(dirtyRect)
         if string.isEmpty, !hasMarkedText() {
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: font ?? NSFont.systemFont(ofSize: 15),
+                .font: font ?? NSFont.systemFont(ofSize: 13),
                 .foregroundColor: NSColor.placeholderTextColor
             ]
-            ("Ask a question or describe what to watch…" as NSString).draw(
+            ("Ask Neko, type / for commands or @ to add context" as NSString).draw(
                 at: NSPoint(x: textContainerInset.width, y: textContainerInset.height), withAttributes: attributes)
         }
     }
