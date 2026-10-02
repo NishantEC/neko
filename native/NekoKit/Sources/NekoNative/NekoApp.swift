@@ -67,7 +67,7 @@ struct WorkspaceView: View {
                     let isToday = ownsToolbarRow && page != "Tickets"
                     VStack(spacing: 0) {
                     // Today places the banner under its own toolbar row.
-                    if !isToday { FullDiskAccessBanner().padding(.top, ownsToolbarRow ? 40 : 0) }
+                    if !isToday { FullDiskAccessBanner().padding(.top, 40) }
                     Group {
                         switch page {
                         case "Tickets": TicketsView(model: model, sidebarHidden: columns == .detailOnly)
@@ -91,7 +91,9 @@ struct WorkspaceView: View {
                     // content runs to the top edge with only the window controls above it.
                     .environment(\.sidebarCollapsed, columns == .detailOnly)
                     // Pages other than Work keep clear of the window controls strip.
-                    .safeAreaPadding(.top, ownsToolbarRow ? 0 : 44)
+                    // Every page starts at the window's top edge; each page's own
+                    // header spacing is enough to clear the window controls.
+                    .safeAreaPadding(.top, 0)
                     .navigationTitle("")
                     .hiddenWindowToolbarBackground()
                     .ignoresSafeArea(.container, edges: .top)
