@@ -60,17 +60,21 @@ pub fn catalog(refresh: bool) -> ModelCatalog {
             }
         }
     }
-    let (codex, ollama, lmstudio) = std::thread::scope(|scope| {
+    let (codex, claude, opencode, ollama, lmstudio) = std::thread::scope(|scope| {
         let codex = scope.spawn(codex_source);
+        let claude = scope.spawn(claude_source);
+        let opencode = scope.spawn(opencode_source);
         let ollama = scope.spawn(ollama_source);
         let lmstudio = scope.spawn(lmstudio_source);
         (
             codex.join().unwrap_or_else(|_| failed_source("codex", "Codex")),
+            claude.join().unwrap_or_else(|_| failed_source("claude", "Claude Code")),
+            opencode.join().unwrap_or_else(|_| failed_source("opencode", "OpenCode")),
             ollama.join().unwrap_or_else(|_| failed_source("ollama", "Ollama")),
             lmstudio.join().unwrap_or_else(|_| failed_source("lmstudio", "LM Studio")),
         )
     });
-    let fresh = ModelCatalog { sources: vec![codex, ollama, lmstudio], read_at_ms: now };
+    let fresh = ModelCatalog { sources: vec![codex, claude, opencode, ollama, lmstudio], read_at_ms: now };
     let mut guard = state().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     guard.catalog = Some(fresh.clone());
     with_checks(fresh, &guard.checks)
@@ -282,6 +286,199 @@ fn plan_label(plan: Option<&str>) -> String {
 
 // ---------------------------------------------------------------- Local servers
 
+// ---------------------------------------------------------------- Claude Code and OpenCode
+
+fn claude_source() -> ModelSource {
+    let base = |connection: &str, status: SourceStatus, note: &str| ModelSource {
+        provider: "claude".into(),
+        label: "Claude Code".into(),
+        connection: connection.into(),
+        status,
+        note: Some(note.into()),
+        default_model: None,
+        models: Vec::new(),
+    };
+    let Ok(executable) = crate::native_runner::cli_workers::resolve(crate::native_runner::cli_workers::Agent::Claude) else {
+        return base("Claude Code · not installed", SourceStatus::NotInstalled, "Install Claude Code to run tasks with your Claude plan.");
+    };
+    match discover_claude(&executable, DISCOVERY_TIMEOUT) {
+        Ok(source) => source,
+        Err(_) => base("Claude Code · couldn’t read models", SourceStatus::Error, "Update Claude Code or check its login, then refresh."),
+    }
+}
+
+/// Claude Code's own "initialize" control request lists its models and
+/// account. No prompt is sent and no tokens are generated.
+fn discover_claude(executable: &Path, timeout: Duration) -> Result<ModelSource, String> {
+    let scratch = Scratch::new("neko-claude-models")?;
+    let mut child = Command::new(executable)
+        .args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence"])
+        .current_dir(&scratch.0)
+        .env_remove("CLAUDECODE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Couldn’t start Claude Code: {e}"))?;
+    let mut stdin = child.stdin.take().ok_or("stdin unavailable")?;
+    let stdout = child.stdout.take().ok_or("stdout unavailable")?;
+    let (tx, lines) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if line.len() > 1024 * 1024 || tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let result = (|| {
+        writeln!(stdin, "{}", json!({"type": "control_request", "request_id": "neko-models", "request": {"subtype": "initialize", "hooks": {}}}))
+            .map_err(|_| "Claude Code stopped accepting requests".to_string())?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.checked_duration_since(Instant::now()).ok_or("Claude Code took too long to list models")?;
+            let line = lines.recv_timeout(left).map_err(|_| "Claude Code stopped before listing models".to_string())?;
+            let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
+            if message["type"] == "control_response" && message["response"]["request_id"] == "neko-models" {
+                if message["response"]["subtype"] != "success" {
+                    return Err("Claude Code initialize failed".into());
+                }
+                return Ok(claude_catalog(&message["response"]["response"]));
+            }
+        }
+    })();
+    let _ = child.kill();
+    let _ = child.wait();
+    result
+}
+
+pub(crate) fn claude_catalog(response: &Value) -> ModelSource {
+    let account = &response["account"];
+    let signed_out = account["tokenSource"].as_str() == Some("none")
+        && account["apiKeySource"].as_str().is_none_or(|s| s == "none");
+    let connection = if signed_out {
+        "Claude Code · sign-in required".to_string()
+    } else {
+        match account["subscriptionType"].as_str().filter(|s| s.len() <= 40 && s.chars().all(|c| c.is_ascii_alphanumeric() || " _-".contains(c))) {
+            Some(plan) if plan.to_ascii_lowercase().starts_with("claude") => plan.replace('_', " "),
+            Some(plan) => format!("Claude · {}", plan.replace('_', " ")),
+            None => "Claude Code · configured connection".into(),
+        }
+    };
+    let mut models = Vec::new();
+    let mut default_model = None;
+    for row in response["models"].as_array().into_iter().flatten() {
+        let Some(id) = row["value"].as_str().filter(|id| valid_model_id(id)) else { continue };
+        if models.len() >= MAX_MODELS || models.iter().any(|m: &CatalogModel| m.id == id) {
+            continue;
+        }
+        let resolved = row["resolvedModel"].as_str().filter(|r| valid_model_id(r));
+        if id == "default" {
+            default_model = resolved.map(str::to_owned).or(Some("default".into()));
+            continue; // "Provider default" in the picker already means this.
+        }
+        models.push(CatalogModel {
+            id: id.into(),
+            label: row["displayName"].as_str().unwrap_or(id).chars().take(80).collect(),
+            description: resolved.filter(|r| *r != id).map(str::to_owned),
+            recommended: false,
+            access: if signed_out { ModelAccess::Unavailable } else { ModelAccess::Listed },
+            reason: signed_out.then(|| "Sign in to Claude Code, then refresh models.".into()),
+            reasoning_efforts: Vec::new(),
+        });
+    }
+    if let Some(default) = &default_model {
+        for model in models.iter_mut().filter(|m| m.description.as_deref() == Some(default.as_str()) || &m.id == default) {
+            model.recommended = !signed_out;
+            model.reason.get_or_insert_with(|| "Claude Code’s default for your plan.".into());
+        }
+    }
+    ModelSource {
+        provider: "claude".into(),
+        label: "Claude Code".into(),
+        connection,
+        status: if signed_out { SourceStatus::SignInRequired } else { SourceStatus::Ready },
+        note: Some(if signed_out {
+            "Sign in to Claude Code, then refresh.".into()
+        } else {
+            "Runs with your Claude Code login inside Neko’s sandbox. Plan limits apply; check a model before relying on it.".into()
+        }),
+        default_model,
+        models,
+    }
+}
+
+fn opencode_source() -> ModelSource {
+    let base = ModelSource {
+        provider: "opencode".into(),
+        label: "OpenCode".into(),
+        connection: "OpenCode · not installed".into(),
+        status: SourceStatus::NotInstalled,
+        note: Some("Install OpenCode to use its providers and free models.".into()),
+        default_model: None,
+        models: Vec::new(),
+    };
+    let Ok(executable) = crate::native_runner::cli_workers::resolve(crate::native_runner::cli_workers::Agent::OpenCode) else {
+        return base;
+    };
+    let Ok(scratch) = Scratch::new("neko-opencode-models") else { return base };
+    let output = run_bounded(Command::new(&executable).arg("models").current_dir(&scratch.0).env("OPENCODE_DISABLE_PROJECT_CONFIG", "1"), DISCOVERY_TIMEOUT);
+    match output {
+        Some(text) => opencode_catalog(&text),
+        None => ModelSource { connection: "OpenCode · couldn’t read models".into(), status: SourceStatus::Error, note: Some("Update OpenCode, then refresh.".into()), ..base },
+    }
+}
+
+pub(crate) fn opencode_catalog(text: &str) -> ModelSource {
+    let mut ids: Vec<String> = text
+        .lines()
+        .map(|l| l.trim().trim_start_matches(|c: char| c == '\u{1b}' || c == '['))
+        .filter(|l| l.contains('/') && !l.starts_with('/') && !l.ends_with('/') && valid_model_id(l))
+        .map(str::to_owned)
+        .collect();
+    ids.dedup();
+    ids.truncate(MAX_MODELS);
+    let providers: std::collections::BTreeSet<&str> = ids.iter().filter_map(|i| i.split('/').next()).collect();
+    ModelSource {
+        provider: "opencode".into(),
+        label: "OpenCode".into(),
+        connection: format!("OpenCode · {} {}", providers.len(), if providers.len() == 1 { "provider" } else { "providers" }),
+        status: SourceStatus::Ready,
+        note: Some(if ids.is_empty() { "No models yet. Connect a provider in OpenCode, then refresh.".into() } else { "Runs with OpenCode’s own providers inside Neko’s sandbox. Free models may have provider limits.".into() }),
+        default_model: None,
+        models: ids
+            .into_iter()
+            .map(|id| CatalogModel {
+                label: id.split_once('/').map(|(p, m)| format!("{m} · {p}")).unwrap_or_else(|| id.clone()),
+                recommended: false,
+                description: id.ends_with("-free").then(|| "Free model".into()),
+                id,
+                access: ModelAccess::Listed,
+                reason: None,
+                reasoning_efforts: Vec::new(),
+            })
+            .collect(),
+    }
+}
+
+/// Stdout of a short metadata command, or None on failure or timeout.
+fn run_bounded(command: &mut Command, timeout: Duration) -> Option<String> {
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = std::io::Read::read_to_string(&mut std::io::Read::take(stdout, 1024 * 1024), &mut text);
+        let _ = tx.send(text);
+    });
+    let text = rx.recv_timeout(timeout).ok();
+    let _ = child.kill();
+    let status = child.wait().ok()?;
+    text.filter(|_| status.success() || status.code().is_none())
+}
+
+
+// ---------------------------------------------------------------- Local servers
+
 fn ollama_source() -> ModelSource {
     local_source(
         "ollama",
@@ -398,7 +595,7 @@ fn run_check(runtime: &AgentRuntime) -> Result<(), String> {
     if !runtime.model.is_empty() && !valid_model_id(&runtime.model) {
         return Err("invalid model id".into());
     }
-    if !matches!(runtime.provider.as_str(), "" | "codex" | "ollama" | "lmstudio" | "opencodex") {
+    if !matches!(runtime.provider.as_str(), "" | "codex" | "ollama" | "lmstudio" | "opencodex" | "claude" | "opencode") {
         return Err("unsupported provider".into());
     }
     let scratch = Scratch::new("neko-model-check")?;
@@ -510,7 +707,7 @@ pub fn diagnostics(data_dir: &Path) -> neko_protocol::agent_models::DiagnosticsR
         },
         millis: started.elapsed().as_millis() as u64,
     });
-    for (name, read) in [("Codex account and models", codex_source as fn() -> ModelSource), ("Ollama", ollama_source), ("LM Studio", lmstudio_source)] {
+    for (name, read) in [("Codex account and models", codex_source as fn() -> ModelSource), ("Claude Code", claude_source), ("OpenCode", opencode_source), ("Ollama", ollama_source), ("LM Studio", lmstudio_source)] {
         let started = Instant::now();
         let source = read();
         let optional = source.provider != "codex" && source.status == SourceStatus::NotInstalled;
@@ -602,6 +799,28 @@ mod tests {
         assert!(friendly_failure("{\"status\":429}").1.starts_with("Usage"));
         let trailing = "Codex exited with 1: 2026-10-02T00:10:49.071Z  WARN codex_rollout::list: falling_back {\"type\":\"error\",\"status\":400,\"error\":{\"message\":\"The 'x' model is not supported when using Codex with a ChatGPT account.\"}}";
         assert!(friendly_failure(trailing).1.contains("isn’t available"), "{:?}", friendly_failure(trailing));
+    }
+
+    #[test]
+    fn claude_and_opencode_catalogs_parse() {
+        let response = json!({"models": [
+            {"value": "default", "displayName": "Default (recommended)", "resolvedModel": "claude-opus-5-5"},
+            {"value": "opus", "displayName": "Opus 5.5", "resolvedModel": "claude-opus-5-5"},
+            {"value": "haiku", "displayName": "Haiku 4.5", "resolvedModel": "claude-haiku-4-5"}
+        ], "account": {"subscriptionType": "Claude Team", "email": "x@example.com"}});
+        let source = claude_catalog(&response);
+        assert_eq!(source.connection, "Claude Team");
+        assert_eq!(source.default_model.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(source.models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["opus", "haiku"]);
+        assert!(source.models[0].recommended && !source.models[1].recommended);
+        assert!(!format!("{source:?}").contains("example.com"));
+        let signed_out = claude_catalog(&json!({"models": [{"value": "opus", "displayName": "Opus"}], "account": {"tokenSource": "none"}}));
+        assert_eq!(signed_out.status, SourceStatus::SignInRequired);
+        let oc = opencode_catalog("opencode/big-pickle\nopencode/mimo-v2.6-flash-free\nnot a model\nanthropic/claude-x\n");
+        assert_eq!(oc.models.len(), 3);
+        assert_eq!(oc.connection, "OpenCode · 2 providers");
+        assert_eq!(oc.models[1].label, "mimo-v2.6-flash-free · opencode");
+        assert_eq!(oc.models[1].description.as_deref(), Some("Free model"));
     }
 
     #[test]

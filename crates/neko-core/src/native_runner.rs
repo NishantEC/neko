@@ -24,6 +24,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const MAX_PROMPT: usize = 256 * 1024;
+
+pub(crate) mod cli_workers;
 const MAX_LINE: usize = 256 * 1024;
 const MAX_STDOUT: usize = 4 * 1024 * 1024;
 const MAX_STDERR: usize = 64 * 1024;
@@ -162,6 +164,12 @@ fn run_configured_mode(
         .map_err(|e| format!("Task directory unavailable: {e}"))?;
     if !directory.is_dir() {
         return Err("Task directory is not a directory".into());
+    }
+    if let Some(agent) = cli_workers::Agent::for_provider(&spec.runtime.provider) {
+        if extraction && (spec.writable || bridge.is_some()) {
+            return Err("Extraction cannot receive write or tool authority".into());
+        }
+        return cli_workers::run(agent, spec, &directory, bridge, cancel, &mut on_event, extraction);
     }
     let mut command = Command::new(executable);
     command.arg("exec");

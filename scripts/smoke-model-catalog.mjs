@@ -50,7 +50,7 @@ function request(body, timeoutMs = 30000) {
 try {
   let started = Date.now();
   const { AgentModels: catalog } = await request({ AgentModels: { refresh: true } });
-  assert.deepEqual(catalog.sources.map(s => s.provider), ['codex', 'ollama', 'lmstudio']);
+  assert.deepEqual(catalog.sources.map(s => s.provider), ['codex', 'claude', 'opencode', 'ollama', 'lmstudio']);
   for (const source of catalog.sources) console.log(source.label.padEnd(10), source.status.padEnd(16), source.connection, '·', source.models.length, 'models', source.default_model ? 'default ' + source.default_model : '');
   console.log('catalog read in', Date.now() - started, 'ms');
   started = Date.now();
@@ -74,10 +74,18 @@ try {
     assert.deepEqual(snapshot.agent_runtime, { provider: 'codex', model }, 'a failed check must keep the previous model');
     const marked = (await request({ AgentModels: { refresh: false } })).AgentModels.sources[0].models.find(m => m.id === model);
     assert.equal(marked.access, 'checked');
+    for (const [provider, pick] of [['claude', s => s.models.find(m => m.id === 'haiku')?.id], ['opencode', s => s.models.find(m => m.id.endsWith('-free'))?.id ?? s.models[0]?.id]]) {
+      const source = catalog.sources.find(s => s.provider === provider);
+      if (source.status !== 'ready') { console.log('skip', provider, source.connection); continue; }
+      const id = pick(source);
+      started = Date.now();
+      const check = (await request({ CheckAgentModel: { runtime: { provider, model: id }, save: false } }, 130000)).AgentModelCheck;
+      console.log('check', provider, id, '->', check.ok, check.message, Date.now() - started, 'ms');
+      assert.equal(check.ok, true, provider + ' check');
+    }
   }
   console.log('model catalog smoke passed' + (live ? ' (live checks included)' : ''));
 } finally {
   socket.destroy(); daemon.kill();
   rmSync(data, { recursive: true, force: true });
 }
-

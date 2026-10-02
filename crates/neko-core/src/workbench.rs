@@ -259,8 +259,11 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
     let mut snapshot = load(db)?;
     match command {
         Command::SetAgentRuntime { runtime } => {
-            if !matches!(runtime.provider.as_str(), "" | "codex" | "ollama" | "lmstudio" | "opencodex") {
-                return Err("Choose Codex, Ollama, LM Studio, or OpenCodex".into());
+            if !matches!(runtime.provider.as_str(), "" | "codex" | "ollama" | "lmstudio" | "opencodex" | "claude" | "opencode") {
+                return Err("Choose Codex, Claude Code, OpenCode, Ollama or LM Studio".into());
+            }
+            if runtime.provider == "opencode" && !runtime.model.is_empty() && !runtime.model.split_once('/').is_some_and(|(p, m)| !p.is_empty() && !m.is_empty()) {
+                return Err("OpenCode models are written provider/model".into());
             }
             if runtime.provider == "opencodex" && !runtime.model.split_once('/').is_some_and(|(provider, model)| !provider.is_empty() && !model.is_empty()) {
                 return Err("Choose a configured OpenCodex provider and model".into());
