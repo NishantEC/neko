@@ -5,10 +5,32 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct Verdict {
     pub passed: bool,
+    /// Reviewers sometimes write structured findings. Any finding fails the
+    /// gate either way; flattening objects keeps the reason readable instead
+    /// of discarding the whole verdict as malformed.
+    #[serde(deserialize_with = "readable_findings")]
     pub findings: Vec<String>,
     pub files: Vec<String>,
     pub tests: Vec<String>,
     pub summary: String,
+}
+
+fn readable_findings<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    let values = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(values.into_iter().map(|value| match value {
+        serde_json::Value::String(text) => text,
+        serde_json::Value::Object(fields) => {
+            let field = |names: &[&str]| names.iter().find_map(|n| fields.get(*n).and_then(|v| v.as_str())).unwrap_or("").trim().to_owned();
+            let severity = field(&["severity", "priority", "level"]);
+            let issue = field(&["issue", "description", "message", "finding", "summary", "title"]);
+            let fix = field(&["recommendation", "fix", "suggestion"]);
+            let mut text = if issue.is_empty() { serde_json::Value::Object(fields.clone()).to_string() } else { issue };
+            if !severity.is_empty() { text = format!("{severity}: {text}"); }
+            if !fix.is_empty() { text = format!("{text} Fix: {fix}"); }
+            text
+        }
+        other => other.to_string(),
+    }).collect())
 }
 
 /// Decode only the single, literal script argument of known shell wrappers.
@@ -181,6 +203,10 @@ mod tests {
         assert!(accept(&answer(), &files, &files, &[], &[]).is_err());
         assert!(accept(&answer(), &files, &files, &[r#"VERIFICATION_COMMAND {"command":"cargo test","exit_code":1,"output":"FAILED"}"#.into()], &[]).is_err());
         assert!(accept(&answer(), &files, &files, &[r#"VERIFICATION_COMMAND {"command":"cargo test","exit_code":0,"output":"1 passed"}"#.into()], &[]).is_ok());
+        // Structured findings still fail the gate, with a readable reason.
+        let structured = r#"{"passed":false,"findings":[{"id":"R1","severity":"blocking","description":"Wrong repository checked out.","recommendation":"Choose the connect repo."}],"files":[],"tests":[],"summary":"Blocked"}"#;
+        let error = accept(structured, &files, &files, &[], &[]).unwrap_err();
+        assert!(error.contains("blocking: Wrong repository checked out. Fix: Choose the connect repo."), "{error}");
     }
     #[test]
     fn rejects_findings_malformed_missing_files_and_scope_escape() {

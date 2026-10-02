@@ -2,6 +2,18 @@ import SwiftUI
 import NekoKit
 
 enum TicketPresentation {
+    /// The planner's question for a ticket waiting on you, if it asked one.
+    static func waitingReason(_ task: JSONValue) -> String? {
+        guard task["status"].string == "AwaitingApproval" else { return nil }
+        for event in task["events"].array.reversed() {
+            let message = event["message"].string
+            for prefix in ["Needs your input before building: ", "Nothing to build: "] where message.hasPrefix(prefix) {
+                return (prefix.hasPrefix("Needs") ? "Needs your input: " : "Nothing to build: ") + message.dropFirst(prefix.count)
+            }
+            if event["role"].string == "user" { return nil }
+        }
+        return nil
+    }
     /// The newest daemon message on a stopped ticket, in one readable line.
     static func stopReason(_ task: JSONValue) -> String {
         let message = task["events"].array.reversed().first { !["user", "note"].contains($0["role"].string) }?["message"].string ?? ""
@@ -9,6 +21,11 @@ enum TicketPresentation {
         if line.contains("not a git repository") {
             return "This ticket isn’t linked to a Git repository yet, so Neko couldn’t make its working copy."
         }
+        if line.contains("daemon restart") { return "Stopped when Neko restarted. Start it again to continue." }
+        if line.hasPrefix("Independent verification failed:") {
+            return "Review found problems: " + line.dropFirst("Independent verification failed:".count).trimmingCharacters(in: .whitespaces).prefix(380)
+        }
+        if line.hasPrefix("Verifier returned a malformed verdict") { return "The reviewer’s answer couldn’t be read. Start it again to re-review." }
         return line.isEmpty ? "Neko stopped without a reason. Start it again to retry." : String(line.prefix(400))
     }
     struct Review: Decodable {
@@ -226,7 +243,7 @@ struct TicketsView: View {
         let index = model.workspaces.firstIndex { $0.recordID == task["workspace_id"].string } ?? 0
         let status = task["status"].string
         return Button { selected = task.recordID } label: {
-            TicketCard(id: "NEK-" + String(task.recordID.prefix(4)).uppercased(), title: task["title"].string, workspace: workspaceName(task), workspaceColor: workspaceColor(index), meta: friendlyTaskStatus(status), highlighted: selected == task.recordID, activity: .forTask(status))
+            TicketCard(id: "NEK-" + String(task.recordID.prefix(4)).uppercased(), title: task["title"].string, workspace: workspaceName(task), workspaceColor: workspaceColor(index), meta: friendlyTaskStatus(status), highlighted: selected == task.recordID, activity: .forTask(status), note: status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task))
         }
         .buttonStyle(.plain)
         .contextMenu { moveMenu(task) }
@@ -366,6 +383,16 @@ struct TicketDetail: View {
                 }
                 Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary)
                 if ticket["status"].string == "Failed" { stoppedCallout }
+                if let question = TicketPresentation.waitingReason(ticket) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Neko is waiting on you", systemImage: "questionmark.bubble.fill").font(.headline).foregroundStyle(NekoStyle.amber)
+                        Text(question).textSelection(.enabled)
+                        Text("Answer with a note below, then approve the plan. Or approve as is to build anyway.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                    .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(NekoStyle.amber.opacity(0.25)))
+                }
                 HStack {
                     switch ticket["status"].string {
                     case "AwaitingApproval":
@@ -456,11 +483,10 @@ struct TicketDetail: View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Why it stopped", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(NekoStyle.amber)
             Text(TicketPresentation.stopReason(ticket)).textSelection(.enabled)
-            if ticket["worktree"].string.isEmpty {
-                HStack {
-                    Button("Choose folder…") { chooseFolder() }
-                    Text("Pick the repository this ticket is about, then Neko starts it.").font(.caption).foregroundStyle(.secondary)
-                }
+            HStack {
+                Button("Choose folder…") { chooseFolder() }
+                Text(model.snapshot["task_roots"][id].string.isEmpty ? "Pick the repository this ticket is about, then Neko starts it." : "Working in \(URL(fileURLWithPath: model.snapshot["task_roots"][id].string).lastPathComponent). Pick another repository to start over there.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -511,6 +537,8 @@ struct TicketCard: View {
     let meta: String
     let highlighted: Bool
     var activity: NekoActivity = .idle
+    /// Why a stopped ticket stopped, shown under its title.
+    var note: String? = nil
     @State private var hover = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -521,6 +549,9 @@ struct TicketCard: View {
                     .font(.system(size: 11)).foregroundStyle(activity.animates ? N.text2 : N.text4)
             }
             Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text).lineSpacing(2).lineLimit(3).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+            if let note {
+                Text(note).font(.system(size: 11)).foregroundStyle(NekoStyle.amber).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: 6) {
                 RoundedRectangle(cornerRadius: 2, style: .continuous).fill(workspaceColor).frame(width: 8, height: 8)
                 Text(workspace).font(.system(size: 12)).foregroundStyle(N.text3).lineLimit(1)
