@@ -7,6 +7,7 @@ use crate::Db;
 use neko_protocol::workbench::{MemoryEntry, MemoryKind};
 
 const SETTING: &str = "neko_memory_v1";
+const OPTIONS: &str = "neko_memory_options_v1";
 pub const MAX_ENTRIES: usize = 300;
 /// A separate bounded allowance means a full user memory page cannot prevent
 /// cancelling a running task. Older automatic decisions remain in task events.
@@ -22,6 +23,17 @@ pub fn load(db: &Db) -> Result<Vec<MemoryEntry>, String> {
             serde_json::from_str(&json).map_err(|e| format!("Cannot read Neko memory: {e}"))
         }
     }
+}
+
+pub fn options(db: &Db) -> Result<neko_protocol::workbench::MemoryOptions, String> {
+    match db.get_setting(OPTIONS).map_err(|e| e.to_string())? {
+        None => Ok(Default::default()),
+        Some(json) => serde_json::from_str(&json).map_err(|e| format!("Cannot read memory settings: {e}")),
+    }
+}
+
+pub fn set_options(db: &Db, options: neko_protocol::workbench::MemoryOptions) -> Result<(), String> {
+    db.set_setting(OPTIONS, &serde_json::to_string(&options).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
 fn save(db: &Db, entries: &[MemoryEntry]) -> Result<(), String> {

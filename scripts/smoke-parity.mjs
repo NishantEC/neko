@@ -89,6 +89,12 @@ try {
   console.log('forget ->', reply);
   assert.match(reply, /Forgotten/);
   assert.equal(snapshot.memory.length, 0);
+  const off = await command({ SetMemoryOptions: { options: { learning: false, use_memory: false } } });
+  assert.deepEqual(off.memory_options, { learning: false, use_memory: false });
+  ({ reply, snapshot } = await say('remember that the release branch is main'));
+  assert.ok(snapshot.memory.some(m => m.text === 'The release branch is main'), 'told memories still save with learning off');
+  await command({ SetMemoryOptions: { options: { learning: true, use_memory: true } } });
+  console.log('memory switches -> ok');
   }
 
   console.log('saving workspace');

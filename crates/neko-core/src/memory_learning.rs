@@ -208,6 +208,9 @@ pub fn has_capacity(db: &Db) -> Result<bool, String> {
 }
 
 pub fn enqueue(db: &Db, snapshot: &Snapshot, source: Source) -> Result<(), String> {
+    if !crate::neko_memory::options(db)?.learning {
+        return Ok(());
+    }
     let mut jobs = load(db)?;
     // Keep tombstones while their source can still be replayed. Evicted chat
     // history cannot be re-enqueued, so its resolved tombstones need no space.

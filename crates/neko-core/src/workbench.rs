@@ -56,6 +56,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     // Attached for readers only; save() never writes it into this setting.
     snapshot.conversation = crate::neko_chat::load(db)?;
     snapshot.memory = crate::neko_memory::load(db)?;
+    snapshot.memory_options = crate::neko_memory::options(db)?;
     snapshot.memory_proposals = crate::memory_learning::proposals(db, &snapshot)?;
     snapshot.skills = crate::skills::load(db)?;
     snapshot.import_preview = crate::setup_import::load_preview(db)?;
@@ -656,6 +657,10 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         }
         Command::DeleteMemory { id } => {
             crate::neko_memory::delete(db, &id)?;
+            return load(db);
+        }
+        Command::SetMemoryOptions { options } => {
+            crate::neko_memory::set_options(db, options)?;
             return load(db);
         }
         Command::DecideMemoryProposal { id, accept } => {

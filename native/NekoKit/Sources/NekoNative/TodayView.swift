@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+@preconcurrency import ApplicationServices
 import NekoKit
 
 struct ChatDraftScope: Hashable {
@@ -232,7 +233,8 @@ struct TodayView: View {
                 onSubmit: { send() },
                 onInterruptAndSubmit: { send(interrupt: true) },
                 onAttach: { model.chatDrafts.add($0, for: scope) },
-                onError: { model.error = $0 }
+                onError: { model.error = $0 },
+                onSubmitWithContext: { send(withContext: true) }
             ).id(scope).frame(width: cardWidth - 36, alignment: .leading)
             if !attachments.isEmpty { attachmentStrip }
             HStack(spacing: 8) {
@@ -488,6 +490,9 @@ struct TodayView: View {
         }
         .padding(.top, 4)
     }
+    private var awaitingApprovals: Int {
+        messages.filter { $0["pending"].bool }.flatMap { $0["tool_calls"].array }.filter { $0["status"].string == "awaiting_approval" }.count
+    }
     private func toolCall(_ call: JSONValue, turn: String, pending: Bool) -> some View {
         func decide(_ approve: Bool) { Task { await model.workbench(.command("DecideChatTool", ["turn_id": .string(turn), "call_id": call["id"], "approve": .bool(approve)])) } }
         let status = call["status"].string
@@ -506,8 +511,14 @@ struct TodayView: View {
                 Text(call["arguments_json"].string).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }.font(.system(size: 11)).foregroundStyle(N.text4).padding(.leading, 22)
             if pending && call["status"].string == "awaiting_approval" {
-                HStack { Button("Deny", role: .destructive) { decide(false) }; Button("Allow this request") { decide(true) }.nekoPrimaryButton() }
-                    .padding(.leading, 22).disabled(model.busy)
+                // Keyboard answers only when exactly one request is waiting, so ⌘1/⌘2 is never ambiguous.
+                let only = awaitingApprovals == 1
+                HStack {
+                    Button("Deny", role: .destructive) { decide(false) }.keyboardShortcut(only ? KeyboardShortcut("2", modifiers: .command) : nil)
+                    Button("Allow this request") { decide(true) }.nekoPrimaryButton().keyboardShortcut(only ? KeyboardShortcut("1", modifiers: .command) : nil)
+                    if only { Text("⌘1 allow · ⌘2 deny").font(.system(size: 11)).foregroundStyle(N.text4) }
+                }
+                .padding(.leading, 22).disabled(model.busy)
             }
             Divider().opacity(0.4)
         }.padding(.vertical, 5)
@@ -529,7 +540,7 @@ struct TodayView: View {
         }
     }
 
-    private func send(interrupt: Bool = false) {
+    private func send(interrupt: Bool = false, withContext: Bool = false) {
         guard !sending, !model.busy else { return }
         let submission = model.chatDrafts.submission(for: scope)
         guard !submission.text.isEmpty else { return }
@@ -538,7 +549,14 @@ struct TodayView: View {
             model.chatDrafts.complete(submission, succeeded: true)
             return
         }
-        let text = SlashCommand.parse(submission.text)?.chatText ?? submission.text
+        var text = SlashCommand.parse(submission.text)?.chatText ?? submission.text
+        if withContext {
+            if let snapshot = PreviousAppContext.shared.read() {
+                text = PreviousAppContext.attach(snapshot, to: text)
+            } else {
+                model.notice = AXIsProcessTrusted() ? "No previous app to read from. Sent without context." : "Allow Accessibility in Settings → Permissions to include the previous app. Sent without context."
+            }
+        }
         model.sendingChatScopes.insert(submission.scope)
         Task {
             let saved = await model.workbench(.command(interrupt ? "InterruptAndSendMessage" : "SendMessage", ["text": .string(text), "workspace_id": submission.scope.workspaceID.map(JSONValue.string) ?? .null]))

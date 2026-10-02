@@ -200,6 +200,23 @@ pub struct Snapshot {
     /// Suggested learning requires an explicit accept or reject.
     #[serde(default)]
     pub memory_proposals: Vec<MemoryProposal>,
+    /// Whether Neko suggests new memories and uses memory at all.
+    #[serde(default)]
+    pub memory_options: MemoryOptions,
+}
+
+/// Both on by default. Off means off: no suggestions are queued, and no
+/// memory reaches a prompt. Saved memories are kept either way.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryOptions {
+    pub learning: bool,
+    pub use_memory: bool,
+}
+
+impl Default for MemoryOptions {
+    fn default() -> Self {
+        Self { learning: true, use_memory: true }
+    }
 }
 
 impl Snapshot {
@@ -426,6 +443,9 @@ pub enum Command {
     DecideMemoryProposal {
         id: String,
         accept: bool,
+    },
+    SetMemoryOptions {
+        options: MemoryOptions,
     },
 }
 

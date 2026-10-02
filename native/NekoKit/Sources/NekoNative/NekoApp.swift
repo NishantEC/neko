@@ -9,7 +9,7 @@ import NekoKit
         Window("Neko", id: "workspace") {
             WorkspaceView(model: model)
                 .tint(NekoStyle.accent)
-                .task { await model.start(); await PaletteController.shared.configure(model: model) }
+                .task { PreviousAppContext.shared.start(); await model.start(); await PaletteController.shared.configure(model: model) }
                 .onReceive(NotificationCenter.default.publisher(for: .nekoOpenWorkspace)) { _ in openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
                 .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
         }
@@ -40,6 +40,7 @@ struct StatusMenu: View {
         Divider()
         Button("Stop all work (\(StopAllWork.shortcutLabel))") { Task { await StopAllWork.run(model) } }
         Divider()
+        if Uninstaller.available { Button("Uninstall Neko…") { Uninstaller.confirmAndRun(model) } }
         Button("Quit Neko") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
 }

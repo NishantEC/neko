@@ -46,8 +46,7 @@ struct HotkeySettingsView: View {
         }.onDisappear { recording = false; updateMonitor() }
     }
     private var label: String {
-        let symbols = ["Cmd": "⌘", "Alt": "⌥", "Ctrl": "⌃", "Shift": "⇧"]
-        return combo == .null ? "Loading…" : combo["modifiers"].array.map { symbols[$0.string] ?? $0.string }.joined() + combo["key"].string.replacingOccurrences(of: "Key", with: "")
+        combo == .null ? "Loading…" : Self.label(combo)
     }
     private func updateMonitor() {
         if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
@@ -65,19 +64,56 @@ struct HotkeySettingsView: View {
             Task {
                 let previous = combo
                 do {
-                    let conflict = try await model.request(.command("CheckHotkeyConflict", ["candidate": candidate]))
-                    if conflict["HotkeyConflict"]["reason"] != .null { throw NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: conflict["HotkeyConflict"]["reason"].string]) }
-                    guard let register = NativeHotkeySettings.register else { throw NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: "Shortcut registration is not available yet."]) }
-                    try register(candidate)
-                    do {
-                        _ = try await model.request(.command("CommitHotkey", ["candidate": candidate]))
-                    } catch { try? register(previous); throw error }
-                    combo = candidate; model.error = nil
-                } catch { model.error = error.localizedDescription }
+                    try await apply(candidate, previous: previous)
+                    model.error = nil
+                } catch {
+                    // Taken by the system or another app: use the next free chord and say so.
+                    var replaced = false
+                    for fallback in HotkeyFallbacks.candidates(after: candidate) where fallback != previous {
+                        if (try? await apply(fallback, previous: previous)) != nil {
+                            model.error = nil
+                            model.notice = "\(Self.label(candidate)) is already in use, so Neko uses \(Self.label(fallback)) instead. Press another chord to change it."
+                            replaced = true
+                            break
+                        }
+                    }
+                    if !replaced { model.error = error.localizedDescription }
+                }
                 pending = false
             }
             return nil
         }
+    }
+    /// Checks known conflicts, registers live, then persists; restores the old chord on failure.
+    private func apply(_ candidate: JSONValue, previous: JSONValue) async throws {
+        let conflict = try await model.request(.command("CheckHotkeyConflict", ["candidate": candidate]))
+        if conflict["HotkeyConflict"]["reason"] != .null { throw NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: conflict["HotkeyConflict"]["reason"].string]) }
+        guard let register = NativeHotkeySettings.register else { throw NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: "Shortcut registration is not available yet."]) }
+        try register(candidate)
+        do {
+            _ = try await model.request(.command("CommitHotkey", ["candidate": candidate]))
+        } catch { try? register(previous); throw error }
+        combo = candidate
+    }
+    static func label(_ combo: JSONValue) -> String {
+        let symbols = ["Cmd": "⌘", "Alt": "⌥", "Ctrl": "⌃", "Shift": "⇧"]
+        return combo["modifiers"].array.map { symbols[$0.string] ?? $0.string }.joined() + combo["key"].string.replacingOccurrences(of: "Key", with: "")
+    }
+}
+
+/// Chords tried, in order, when the one pressed is taken.
+enum HotkeyFallbacks {
+    static func candidates(after pressed: JSONValue) -> [JSONValue] {
+        let key = pressed["key"].string.isEmpty ? "Space" : pressed["key"].string
+        let sets: [[String]] = [["Alt"], ["Cmd", "Shift"], ["Ctrl", "Alt"], ["Alt", "Shift"], ["Ctrl", "Shift"], ["Ctrl"]]
+        var out: [JSONValue] = []
+        for keyName in [key, "Space"] {
+            for modifiers in sets {
+                let candidate: JSONValue = .object(["modifiers": .array(modifiers.map(JSONValue.string)), "key": .string(keyName)])
+                if candidate != pressed, !out.contains(candidate) { out.append(candidate) }
+            }
+        }
+        return out
     }
 }
 
