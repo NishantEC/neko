@@ -566,7 +566,7 @@ struct TodayView: View {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             timer.cancel()
-            let noisy = ["/node_modules/", "/.git/", "/target/", "/.build/", "/DerivedData/", "/Pods/"]
+            let noisy = ["/node_modules/", "/.git/", "/target/", "/.build/", "/DerivedData/", "/Pods/", "/Library/", "/."]
             return String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
                 .filter { path in !noisy.contains { path.contains($0) } }
                 .prefix(5).map { $0 }
