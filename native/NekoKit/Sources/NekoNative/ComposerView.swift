@@ -24,6 +24,8 @@ struct ComposerView: NSViewRepresentable {
     let onInterruptAndSubmit: () -> Void
     let onAttach: (ComposerAttachment) -> Void
     let onError: (String) -> Void
+    /// ⌥Return: send with the previous app's selection attached.
+    var onSubmitWithContext: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -56,10 +58,11 @@ struct ComposerView: NSViewRepresentable {
         editor.minSize = NSSize(width: 0, height: 40)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.setAccessibilityLabel("Message to Neko")
-        editor.setAccessibilityHelp("Return sends or queues a message. Shift Return adds a line. Command Return interrupts the current reply and sends. Paste or drop images and files to attach them.")
+        editor.setAccessibilityHelp("Return sends or queues a message. Option Return sends it with the selection from the app you were just in. Shift Return adds a line. Command Return interrupts the current reply and sends. Paste or drop images and files to attach them.")
         editor.string = text
         editor.submit = onSubmit
         editor.interruptAndSubmit = onInterruptAndSubmit
+        editor.submitWithContext = onSubmitWithContext
         editor.attach = onAttach
         editor.reportError = onError
         editor.registerForDraggedTypes([.fileURL, .png, .tiff])
@@ -72,6 +75,7 @@ struct ComposerView: NSViewRepresentable {
         guard let editor = scroll.documentView as? ComposerTextView else { return }
         editor.submit = onSubmit
         editor.interruptAndSubmit = onInterruptAndSubmit
+        editor.submitWithContext = onSubmitWithContext
         editor.attach = onAttach
         editor.reportError = onError
         // Never interrupt an input method's marked composition. Delegate writes
@@ -112,6 +116,7 @@ struct ComposerView: NSViewRepresentable {
 @MainActor private final class ComposerTextView: NSTextView {
     var submit: (() -> Void)?
     var interruptAndSubmit: (() -> Void)?
+    var submitWithContext: (() -> Void)?
     var attach: ((ComposerAttachment) -> Void)?
     var reportError: ((String) -> Void)?
 
@@ -128,6 +133,7 @@ struct ComposerView: NSViewRepresentable {
         guard [36, 76].contains(event.keyCode), !hasMarkedText() else { super.keyDown(with: event); return }
         if event.modifierFlags.contains(.command) { interruptAndSubmit?(); return }
         if event.modifierFlags.contains(.shift) { insertNewline(nil); return }
+        if event.modifierFlags.contains(.option), !event.modifierFlags.contains(.control), let submitWithContext { submitWithContext(); return }
         if event.modifierFlags.intersection([.option, .control]).isEmpty { submit?(); return }
         super.keyDown(with: event)
     }

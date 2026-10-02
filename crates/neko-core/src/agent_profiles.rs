@@ -206,7 +206,7 @@ pub fn context_about(state: &Snapshot, scope: Option<&str>, about: Option<&str>)
     let own: Vec<_> = state
         .memory
         .iter()
-        .filter(|m| m.agent_profile_id == owner)
+        .filter(|m| m.agent_profile_id == owner && state.memory_options.use_memory)
         .cloned()
         .collect();
     let mut context = format!(
@@ -220,7 +220,8 @@ pub fn context_about(state: &Snapshot, scope: Option<&str>, about: Option<&str>)
         .memory
         .iter()
         .filter(|m| {
-            m.workspace_id.is_none()
+            state.memory_options.use_memory
+                && m.workspace_id.is_none()
                 && p.read_grants
                     .iter()
                     .any(|g| g.reader_id == owner && g.source_id == m.agent_profile_id)
@@ -245,6 +246,18 @@ pub fn context_about(state: &Snapshot, scope: Option<&str>, about: Option<&str>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn turning_memory_off_keeps_it_out_of_every_prompt() {
+        let mut s = Snapshot::default();
+        s.memory.push(neko_protocol::workbench::MemoryEntry {
+            id: "aaaaaa".into(), agent_profile_id: "default".into(), kind: neko_protocol::workbench::MemoryKind::Profile,
+            workspace_id: None, text: "Prefers short answers".into(), source: "test".into(), created_at_ms: 0, updated_at_ms: 0,
+        });
+        assert!(context(&s, None).contains("Prefers short answers"));
+        s.memory_options.use_memory = false;
+        assert!(!context(&s, None).contains("Prefers short answers"));
+    }
     fn state() -> Snapshot {
         let mut s = Snapshot::default();
         apply(

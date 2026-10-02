@@ -91,6 +91,15 @@ struct ProfilesView: View {
 struct MemoryView: View {
     @ObservedObject var model: AppModel
     @State private var draft: ManagementDraft?
+    private func memoryToggle(_ title: String, key: String, help: String) -> some View {
+        let options = model.snapshot["memory_options"]
+        let on = options[key] == .null ? true : options[key].bool
+        return Toggle(title, isOn: Binding(get: { on }, set: { value in
+            var next: [String: JSONValue] = ["learning": options["learning"] == .null ? .bool(true) : options["learning"], "use_memory": options["use_memory"] == .null ? .bool(true) : options["use_memory"]]
+            next[key] = .bool(value)
+            Task { await model.workbench(.command("SetMemoryOptions", ["options": .object(next)])) }
+        })).toggleStyle(.switch).controlSize(.small).help(help).disabled(model.busy)
+    }
     private func inScope(_ item: JSONValue) -> Bool {
         item["agent_profile_id"].string == profileFor(model) && (item["workspace_id"] == .null || model.selectedWorkspace == nil || item["workspace_id"].string == model.selectedWorkspace)
     }
@@ -104,6 +113,11 @@ struct MemoryView: View {
             PageIntro(title: "Memory", message: "What Neko has learned about how you work: preferences, decisions and facts about your projects. Neko suggests new memories; nothing is kept until you accept it.") {
                 Button("Add memory", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) }
             }
+            HStack(spacing: 18) {
+                memoryToggle("Suggest new memories", key: "learning", help: "When off, Neko stops proposing memories from chats and tickets. Things you tell it to remember are still saved.")
+                memoryToggle("Use memory in replies and tasks", key: "use_memory", help: "When off, no memory is sent to any model. Saved memories stay here.")
+                Spacer()
+            }.font(.system(size: 13))
             if !proposals.isEmpty {
                 WorkspaceSection(name: "Suggested", color: NekoStyle.amber, detail: "\(proposals.count) waiting") { EmptyView() } content: {
                     ForEach(proposals, id: \.self) { proposal in
