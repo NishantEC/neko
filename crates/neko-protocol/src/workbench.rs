@@ -166,6 +166,10 @@ pub struct AgentRuntime {
 pub struct Snapshot {
     #[serde(default)]
     pub agent_runtime: AgentRuntime,
+    /// Stop a ticket once its reported agent cost reaches this many cents.
+    /// Only runtimes that report a price (Claude Code, OpenCode) count.
+    #[serde(default)]
+    pub task_budget_cents: Option<u32>,
     /// Every folder in a logical workspace. Legacy workspaces use `repository`.
     #[serde(default)]
     pub workspace_folders: BTreeMap<String, Vec<String>>,
@@ -446,6 +450,9 @@ pub enum Command {
     },
     SetMemoryOptions {
         options: MemoryOptions,
+    },
+    SetTaskBudget {
+        cents: Option<u32>,
     },
 }
 

@@ -615,10 +615,193 @@ impl Provider for FileProvider {
     }
 }
 
+// ---------------------------------------------------------------- Inside documents
+
+/// Content search is slower than a name prefix and can match many files, so
+/// it waits longer and keeps whatever arrived when the deadline passes.
+const DOCUMENT_TIMEOUT: Duration = Duration::from_secs(4);
+
+fn run_streaming_child(mut command: Command, cancel: &Cancel, timeout: Duration) -> Vec<PathBuf> {
+    let Ok(mut child) = command.spawn() else { return Vec::new() };
+    let Some(stdout) = child.stdout.take() else {
+        kill_and_reap(&mut child, None);
+        return Vec::new();
+    };
+    let found = Arc::new(Mutex::new(Vec::new()));
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (sink, finished) = (found.clone(), done.clone());
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let mut paths = sink.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            paths.push(PathBuf::from(line));
+            if paths.len() >= MAX_RAW_RESULTS {
+                break;
+            }
+        }
+        finished.store(true, std::sync::atomic::Ordering::Release);
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    while !done.load(std::sync::atomic::Ordering::Acquire) && std::time::Instant::now() < deadline && !cancel.is_cancelled() {
+        std::thread::sleep(CANCEL_POLL_INTERVAL);
+    }
+    kill_and_reap(&mut child, None);
+    if cancel.is_cancelled() {
+        return Vec::new();
+    }
+    let paths = found.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    paths
+}
+
+
+/// Words people use around a document name that never help find it.
+const DOCUMENT_FILLER: &[&str] = &[
+    "my", "the", "a", "an", "find", "show", "open", "where", "is", "are", "that", "this", "file", "files",
+    "doc", "docs", "document", "documents", "pc", "mac", "computer", "laptop", "please", "me", "for", "of", "in", "on",
+    "copy", "scan", "scanned", "latest", "old", "new",
+];
+
+/// Names for the same document. Each group is searched as alternatives.
+const DOCUMENT_SYNONYMS: &[&[&str]] = &[
+    &["resume", "cv", "curriculum", "résumé"],
+    &["aadhaar", "aadhar", "adhar", "uidai", "आधार"],
+    &["licence", "license", "driving"],
+    &["passport"],
+    &["invoice", "bill"],
+    &["receipt"],
+    &["payslip", "salary", "pay"],
+    &["statement", "bank"],
+    &["offer", "appointment"],
+    &["insurance", "policy"],
+    &["pan", "income-tax"],
+];
+
+/// The distinct search terms for a natural document request, each with its
+/// synonyms: "find my CV" → [[resume, cv, curriculum, résumé]].
+pub fn document_terms(query: &str) -> Vec<Vec<String>> {
+    let mut groups: Vec<Vec<String>> = Vec::new();
+    for word in query.split(|c: char| c.is_whitespace() || matches!(c, ',' | '?' | '!' | '"')) {
+        let word = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '-').to_lowercase();
+        if word.chars().count() < 2 || DOCUMENT_FILLER.contains(&word.as_str()) {
+            continue;
+        }
+        let group: Vec<String> = DOCUMENT_SYNONYMS
+            .iter()
+            .find(|g| g.contains(&word.as_str()))
+            .map(|g| g.iter().map(|s| s.to_string()).collect())
+            .unwrap_or_else(|| vec![word.clone()]);
+        if !groups.contains(&group) && groups.len() < 4 {
+            groups.push(group);
+        }
+    }
+    groups
+}
+
+/// Every term group must match the name or the indexed text, by word prefix.
+fn document_predicate(groups: &[Vec<String>]) -> String {
+    groups
+        .iter()
+        .map(|group| {
+            let alternatives: Vec<String> = group
+                .iter()
+                .flat_map(|term| {
+                    let term = escape_predicate_literal(term);
+                    [format!("kMDItemTextContent == '{term}*'cdw"), format!("kMDItemDisplayName == '{term}*'cdw")]
+                })
+                .collect();
+            format!("({})", alternatives.join(" || "))
+        })
+        .collect::<Vec<_>>()
+        .join(" && ")
+}
+
+/// "Search inside documents": Spotlight's indexed text plus names, for
+/// natural requests like "my driving licence" or "aadhaar". A separate mode
+/// so the tuned filename search in the root list is untouched. It does not
+/// OCR scans Spotlight hasn't indexed.
+pub struct DocumentProvider {
+    files: FileProvider,
+}
+
+impl DocumentProvider {
+    pub fn with_db(db: Arc<Mutex<crate::Db>>) -> Self {
+        Self { files: FileProvider::with_db(db) }
+    }
+    pub fn empty() -> Self {
+        Self { files: FileProvider::empty() }
+    }
+}
+
+impl Provider for DocumentProvider {
+    fn id(&self) -> &'static str {
+        "document"
+    }
+
+    fn section_label(&self) -> &'static str {
+        "Documents"
+    }
+
+    fn search(&self, query: &str, now_unix_ms: i64) -> Vec<Candidate> {
+        self.search_cancellable(query, now_unix_ms, &Cancel::never())
+    }
+
+    fn search_cancellable(&self, query: &str, _now_unix_ms: i64, cancel: &Cancel) -> Vec<Candidate> {
+        let groups = document_terms(query);
+        let dirs = self.files.scope_dirs();
+        if groups.is_empty() || dirs.is_empty() {
+            return Vec::new();
+        }
+        let mut command = Command::new("mdfind");
+        for dir in &dirs {
+            command.arg("-onlyin").arg(dir);
+        }
+        command.arg(document_predicate(&groups)).env("NSUnbufferedIO", "YES").stdout(Stdio::piped()).stderr(Stdio::null());
+        let names: Vec<String> = groups.iter().flatten().cloned().collect();
+        let mut found: Vec<(f32, std::time::SystemTime, Candidate)> = run_streaming_child(command, cancel, DOCUMENT_TIMEOUT)
+            .into_iter()
+            .filter(|path| !is_noisy(path) && path.is_file())
+            .filter_map(|path| {
+                let name = path.file_name()?.to_string_lossy().into_owned();
+                let lower = name.to_lowercase();
+                // Name matches first, content-only matches after; never a source artifact.
+                let score = if names.iter().any(|n| lower.contains(n.as_str())) { 2.0 } else { 1.0 };
+                if is_source_artifact(&path) {
+                    return None;
+                }
+                let modified = std::fs::metadata(&path).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                let mut candidate = build_candidate(score, path, name);
+                candidate.item.section_label = "Documents".into();
+                Some((score, modified, candidate))
+            })
+            .collect();
+        found.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.cmp(&a.1)));
+        found.into_iter().take(MAX_CANDIDATES).map(|(_, _, c)| c).collect()
+    }
+
+    fn activate(&self, id: &str) -> Result<(), ProviderError> {
+        self.files.activate(id)
+    }
+
+    fn perform_action(&self, id: &str, action: &str) -> Result<(), ProviderError> {
+        self.files.perform_action(id, action)
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::process::ExitStatusExt;
+
+    #[test]
+    fn natural_document_requests_become_synonym_groups() {
+        assert_eq!(document_terms("find my CV"), vec![vec!["resume", "cv", "curriculum", "résumé"]]);
+        assert_eq!(document_terms("aadhar card")[0][0], "aadhaar");
+        assert_eq!(document_terms("my driving license scan").len(), 1, "driving and license are one document");
+        assert!(document_terms("the file on my pc").is_empty());
+        let predicate = document_predicate(&document_terms("o'brien invoice"));
+        assert!(predicate.contains("kMDItemTextContent == 'o\\'brien*'cdw"), "{predicate}");
+        assert!(predicate.contains(") && ("), "every term must match");
+    }
 
     /// A stand-in for `mdfind` with the same observable shape this module
     /// depends on: it streams one result line immediately, then stays alive

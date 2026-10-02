@@ -162,6 +162,30 @@ impl Controller {
         }
     }
 
+    /// Before each agent phase: refuse to start once the ticket's budget is used.
+    fn check_budget(&self, task_id: &str) -> Result<(), String> {
+        let snapshot = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
+        store::within_budget(&snapshot, task_id)
+    }
+
+    /// Mid-run: a cost update that crosses the budget stops the worker.
+    fn stop_if_over_budget(&self, task_id: &str, cancel: &AtomicBool) {
+        let Ok(db) = self.db.lock() else { return };
+        let Ok(snapshot) = store::load(&db) else { return };
+        if let Err(reason) = store::within_budget(&snapshot, task_id) {
+            drop(db);
+            if !cancel.swap(true, Ordering::SeqCst) {
+                let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Ok(mut state) = store::load(&db) {
+                    if let Some(task) = state.tasks.iter_mut().find(|t| t.id == task_id) {
+                        store::append_event(task, "supervisor", &reason);
+                        let _ = store::save(&db, &state);
+                    }
+                }
+            }
+        }
+    }
+
     fn send_message(&self, text: String, workspace_id: Option<String>, interrupt: bool) -> Result<Snapshot, String> {
         let mut active = self.chat_active.lock().map_err(|_| "Chat state unavailable")?;
         let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
@@ -627,6 +651,7 @@ impl Controller {
         let result = if !planning && split.is_some_and(|s| s.approved) {
             self.integrate_split(split.unwrap(), &directory, cancel, authority)?
         } else {
+            self.check_budget(&task.id)?;
             self.run_native(
                 &native_runner::RunSpec {
                     directory: directory.clone(),
@@ -648,9 +673,11 @@ impl Controller {
                 &authority,
                 cancel,
                 |event| {
+                    let usage = event.starts_with("USAGE ");
                     let _ = self.update_task_authorized(&task.id, authority, |t| {
                         store::append_event(t, role, &event)
                     });
+                    if usage { self.stop_if_over_budget(&task.id, cancel); }
                 },
             )?
         };
@@ -718,6 +745,7 @@ impl Controller {
             required_checks.sort();
             required_checks.dedup();
             let mut receipts = Vec::new();
+            self.check_budget(&task.id)?;
             let review = self.run_native(
                 &native_runner::RunSpec {
                     directory,
@@ -731,8 +759,10 @@ impl Controller {
                 cancel,
                 |event| {
                     if event.starts_with("VERIFICATION_COMMAND ") { receipts.push(event.clone()); }
+                    let usage = event.starts_with("USAGE ");
                     let _ =
                         self.update_task_authorized(&task.id, authority, |t| store::append_event(t, "reviewer", &event));
+                    if usage { self.stop_if_over_budget(&task.id, cancel); }
                 },
             )?;
             self.update_task_authorized(&task.id, authority, |t| {

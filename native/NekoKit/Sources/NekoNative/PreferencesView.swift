@@ -132,6 +132,19 @@ struct PreferencesView: View {
     @State private var checking = false
     @State private var check: ModelCheckResult?
     @State private var refreshingModels = false
+    @State private var budget = ""
+    private enum BudgetValue: Equatable { case none, cents(Int), invalid }
+    private var budgetCents: BudgetValue {
+        let text = budget.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "$", with: "")
+        if text.isEmpty { return .none }
+        guard let dollars = Double(text), dollars >= 0.01, dollars <= 1000 else { return .invalid }
+        return .cents(Int((dollars * 100).rounded()))
+    }
+    private func saveBudget() {
+        let value: JSONValue
+        switch budgetCents { case .none: value = .null; case .cents(let c): value = .number(Double(c)); case .invalid: return }
+        Task { _ = await model.workbench(.command("SetTaskBudget", ["cents": value])) }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Settings").font(.system(size: 24, weight: .semibold))
@@ -201,6 +214,17 @@ struct PreferencesView: View {
                         Text("Checking sends one short reply through the same runner tasks use, so it may use quota. A failed check keeps your current model. New conversations, tasks and background checks use the saved model; work already running is not interrupted.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    Section("Budget") {
+                        HStack {
+                            Text("Stop a ticket after")
+                            TextField("No limit", text: $budget).frame(width: 90).textFieldStyle(.roundedBorder)
+                            Text("US$")
+                            Spacer()
+                            Button("Save budget") { saveBudget() }.disabled(pending || budgetCents == .invalid)
+                        }
+                        Text("Counts the cost Claude Code and OpenCode report for each ticket and stops the ticket when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }.padding().tabItem { Label("AI", systemImage: "cpu") }
                 VStack(alignment: .leading) {
                     Text("Search folders").font(.headline)
@@ -243,6 +267,8 @@ struct PreferencesView: View {
         let runtime = model.snapshot["agent_runtime"]
         agentProvider = runtime["provider"].string.isEmpty ? "codex" : runtime["provider"].string
         agentModel = runtime["model"].string
+        let cents = model.snapshot["task_budget_cents"]
+        budget = cents == .null ? "" : String(format: "%.2f", Double(cents.int) / 100)
         await loadClipboard()
         do {
             settings = try await search("preference")
