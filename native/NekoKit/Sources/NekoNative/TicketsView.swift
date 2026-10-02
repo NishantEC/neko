@@ -76,7 +76,9 @@ struct TicketsView: View {
         VStack(alignment: .leading, spacing: 0) {
             toolbar
             Divider().opacity(0.5)
-            if layout == "list" { list } else { board }
+            if openAs == "full", let selected {
+                TicketPeek(model: model, id: selected, mode: $openAs, close: { self.selected = nil })
+            } else if layout == "list" { list } else { board }
         }
         .ignoresSafeArea(.container, edges: .top)
         .onChange(of: model.selectedWorkspace) { _, _ in selected = nil }
@@ -90,22 +92,16 @@ struct TicketsView: View {
             Text("It hasn’t been reviewed yet, so moving it to Done stops the work. Its files and worktree stay on disk.")
         }
         .sheet(isPresented: Binding(get: { openAs == "modal" && selected != nil }, set: { if !$0 { selected = nil } })) {
-            if let selected { TicketDetail(model: model, id: selected).frame(minWidth: 720, minHeight: 640) }
+            if let selected {
+                TicketPeek(model: model, id: selected, mode: $openAs, close: { self.selected = nil })
+                    .frame(minWidth: 720, minHeight: 640)
+            }
         }
         .inspector(isPresented: Binding(get: { openAs == "drawer" && selected != nil }, set: { if !$0 { selected = nil } })) {
             if let selected {
-                VStack(spacing: 0) {
-                    HStack(spacing: 6) {
-                        Button { openAs = "modal" } label: { Image(systemName: "rectangle.center.inset.filled") }
-                            .buttonStyle(.borderless).help("Open tickets in a window instead")
-                        Spacer()
-                        Button { self.selected = nil } label: { Image(systemName: "xmark") }
-                            .buttonStyle(.borderless).help("Close")
-                    }.padding(.horizontal, 14).frame(height: 36)
-                    TicketDetail(model: model, id: selected, close: { self.selected = nil })
-                }
-                .inspectorColumnWidth(min: 340, ideal: 400, max: 760)
-                .ignoresSafeArea(.container, edges: .top)
+                TicketPeek(model: model, id: selected, mode: $openAs, close: { self.selected = nil })
+                    .inspectorColumnWidth(min: 340, ideal: 400, max: 760)
+                    .ignoresSafeArea(.container, edges: .top)
             }
         }
     }
@@ -123,10 +119,6 @@ struct TicketsView: View {
             GlassSegmented(selection: $layout, options: [
                 .init(value: "list", title: "List", symbol: "list.bullet", help: "Show tickets as a list"),
                 .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tickets as a board")
-            ], iconOnly: true)
-            GlassSegmented(selection: $openAs, options: [
-                .init(value: "drawer", title: "Drawer", symbol: "sidebar.right", help: "Open tickets in a drawer beside the list"),
-                .init(value: "modal", title: "Window", symbol: "rectangle.center.inset.filled", help: "Open tickets in a window on top")
             ], iconOnly: true)
             Menu {
                 Toggle("Start tickets without asking", isOn: Binding(get: { startsWithoutAsking }, set: { value in
@@ -335,7 +327,11 @@ struct TicketDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                HStack(alignment: .top) { Text(ticket["title"].string).font(.title.bold()); Spacer(); Button("Done") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction) }
+                HStack(alignment: .top) {
+                    Text(ticket["title"].string).font(.title2.bold()).textSelection(.enabled)
+                    Spacer()
+                    Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
+                }
                 Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary)
                 HStack {
                     switch ticket["status"].string {
