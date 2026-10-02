@@ -8,6 +8,16 @@ final class RichTextTests: XCTestCase {
         ])
         XCTAssertEqual(NativeMarkdown.parse("```\nunclosed"), [.code("", "unclosed")])
     }
+    func testTablesAndReplyViewsBecomeTheirOwnBlocks() {
+        XCTAssertEqual(NativeMarkdown.parse("Rates:\n| City | Δ |\n|---|--:|\n| Pune | −8.1 |\n| Delhi | +0.5 |\nDone."), [
+            .paragraph("Rates:"), .table(["City", "Δ"], [["Pune", "−8.1"], ["Delhi", "+0.5"]]), .paragraph("Done.")
+        ])
+        // A pipe line without a separator row stays prose.
+        XCTAssertEqual(NativeMarkdown.parse("| not a table |"), [.paragraph("| not a table |")])
+        XCTAssertEqual(NativeMarkdown.parse("```neko-chart\n{\"bars\":[]}\n```\n```diff\n+a\n```"), [
+            .view("neko-chart", "{\"bars\":[]}"), .code("diff", "+a")
+        ])
+    }
     func testInlineImageReferencesSplitWithoutLosingSurroundingText() {
         XCTAssertEqual(NativeMarkdown.parse("Look ![Image](file:///tmp/a path.png) now"), [.paragraph("Look"), .image("Image", "file:///tmp/a path.png"), .paragraph("now")])
         XCTAssertEqual(NativeMarkdown.parse("![Remote](https://example.com/image.png)"), [.image("Remote", "https://example.com/image.png")])

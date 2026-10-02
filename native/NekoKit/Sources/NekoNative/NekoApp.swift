@@ -62,8 +62,10 @@ struct WorkspaceView: View {
                     NativeSidebar(model: model, page: $page, pages: pages, addingWorkspace: $addingWorkspace, look: $look)
                         .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
                 } detail: {
+                    // Work and Today (the default page) draw their own toolbar row.
+                    let ownsToolbarRow = !["Workspaces", "Responsibilities", "Tools & skills", "Memory", "Profiles", "Schedules", "Settings", "Activity"].contains(page)
                     VStack(spacing: 0) {
-                    FullDiskAccessBanner().padding(.top, page == "Tickets" ? 40 : 0)
+                    FullDiskAccessBanner().padding(.top, ownsToolbarRow ? 40 : 0)
                     Group {
                         switch page {
                         case "Tickets": TicketsView(model: model, sidebarHidden: columns == .detailOnly)
@@ -86,7 +88,7 @@ struct WorkspaceView: View {
                     // content runs to the top edge with only the window controls above it.
                     .environment(\.sidebarCollapsed, columns == .detailOnly)
                     // Pages other than Work keep clear of the window controls strip.
-                    .safeAreaPadding(.top, page == "Tickets" ? 0 : 44)
+                    .safeAreaPadding(.top, ownsToolbarRow ? 0 : 44)
                     .navigationTitle("")
                     .hiddenWindowToolbarBackground()
                     .ignoresSafeArea(.container, edges: .top)

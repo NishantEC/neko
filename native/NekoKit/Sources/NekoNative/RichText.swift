@@ -3,9 +3,21 @@ import SwiftUI
 
 enum NativeMarkdownBlock: Equatable {
     case paragraph(String), heading(Int, String), code(String, String), listItem(String, String), quote(String), image(String, String), divider
+    case table([String], [[String]]), view(String, String)
 }
 
 enum NativeMarkdown {
+    /// "| a | b |" → ["a", "b"].
+    static func tableCells(_ line: String) -> [String] {
+        var text = line.trimmingCharacters(in: .whitespaces)
+        if text.hasPrefix("|") { text.removeFirst() }
+        if text.hasSuffix("|") { text.removeLast() }
+        return text.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+    static func isTableSeparator(_ line: String) -> Bool {
+        let cells = tableCells(line)
+        return !cells.isEmpty && line.contains("-") && cells.allSatisfy { cell in !cell.isEmpty && cell.allSatisfy { "-:".contains($0) } }
+    }
     static func parse(_ text: String) -> [NativeMarkdownBlock] {
         let lines = text.components(separatedBy: .newlines)
         var result: [NativeMarkdownBlock] = []
@@ -18,11 +30,15 @@ enum NativeMarkdown {
             result += splitImages(paragraph.joined(separator: "\n"))
             paragraph = []
         }
-        for line in lines {
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            index += 1
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if let opening = fence {
                 if trimmed.hasPrefix(opening), trimmed.dropFirst(opening.count).allSatisfy({ $0 == opening.first }) {
-                    result.append(.code(language, code.joined(separator: "\n")))
+                    let body = code.joined(separator: "\n")
+                    result.append(ReplyStyle.viewKinds.contains(language.lowercased()) ? .view(language.lowercased(), body) : .code(language, body))
                     fence = nil; code = []
                 } else { code.append(line) }
                 continue
@@ -33,6 +49,18 @@ enum NativeMarkdown {
                 let marker = String(trimmed.prefix(while: { $0 == character }))
                 fence = marker
                 language = trimmed.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
+                continue
+            }
+            if trimmed.hasPrefix("|"), index < lines.count, isTableSeparator(lines[index]) {
+                flush()
+                let headers = tableCells(trimmed)
+                index += 1
+                var rows: [[String]] = []
+                while index < lines.count, lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("|") {
+                    rows.append(tableCells(lines[index]))
+                    index += 1
+                }
+                result.append(.table(headers, rows))
                 continue
             }
             if trimmed.isEmpty { flush(); continue }
@@ -117,7 +145,12 @@ struct ReadableText: View {
                 case .paragraph(let value): inline(value)
                 case .heading(let level, let value):
                     inline(value).font(level == 1 ? .title2.bold() : level == 2 ? .title3.bold() : .headline).accessibilityAddTraits(.isHeader)
-                case .code(let language, let code): NativeCodeBlock(language: language, code: code)
+                case .code(let language, let code):
+                    if language.lowercased() == "diff" || language.lowercased() == "patch" { NativeDiffBlock(code: code) }
+                    else if ReplyStyle.terminalLanguages.contains(language.lowercased()) { NativeTerminalBlock(language: language, code: code) }
+                    else { NativeCodeBlock(language: language, code: code) }
+                case .table(let headers, let rows): NativeTableBlock(headers: headers, rows: rows)
+                case .view(let kind, let source): ReplyBlockView(kind: kind, source: source)
                 case .listItem(let marker, let value):
                     HStack(alignment: .top, spacing: 8) { Text(marker).frame(minWidth: 16, alignment: .trailing); inline(value) }
                 case .quote(let value):
