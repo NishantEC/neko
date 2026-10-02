@@ -103,7 +103,7 @@ struct TicketsView: View {
                     }.padding(.horizontal, 14).frame(height: 36)
                     TicketDetail(model: model, id: selected, close: { self.selected = nil })
                 }
-                .inspectorColumnWidth(min: 340, ideal: 460, max: 760)
+                .inspectorColumnWidth(min: 340, ideal: 400, max: 760)
             }
         }
     }
@@ -124,12 +124,14 @@ struct TicketsView: View {
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
             .help("Show tickets as a list or as a board")
+            .labelStyle(.iconOnly)
             Picker("Open tickets", selection: $openAs) {
                 Label("Drawer", systemImage: "sidebar.right").tag("drawer")
                 Label("Window", systemImage: "rectangle.center.inset.filled").tag("modal")
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
             .help("Open a ticket in a drawer beside the list, or in a window on top")
+            .labelStyle(.iconOnly)
             Menu {
                 Toggle("Start tickets without asking", isOn: Binding(get: { startsWithoutAsking }, set: { value in
                     Task { await model.workbench(.command("SetStartWithoutApproval", ["enabled": .bool(value)])) }
