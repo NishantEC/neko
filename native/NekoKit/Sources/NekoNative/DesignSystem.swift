@@ -107,6 +107,22 @@ struct NoiseOverlay: View { var body: some View { Color.clear } }
 }
 
 extension View {
+    /// A floating notice over page content: opaque so the page never shows
+    /// through its text, with a hairline edge and a soft lift.
+    func nekoToast() -> some View {
+        self
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(0.6))
+            }
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
+            .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
+            .frame(maxWidth: 720)
+            .padding(.horizontal, 16).padding(.top, 8)
+            .frame(maxWidth: .infinity)
+    }
     func nekoCard(padding: CGFloat = 16, radius: CGFloat = NekoStyle.radius, highlighted: Bool = false, interactive: Bool = false) -> some View {
         modifier(NekoCardModifier(padding: padding, radius: radius, highlighted: highlighted, interactive: interactive))
     }

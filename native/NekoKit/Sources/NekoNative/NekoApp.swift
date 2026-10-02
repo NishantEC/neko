@@ -112,17 +112,21 @@ struct WorkspaceView: View {
         .safeAreaInset(edge: .top) {
             if let notice = model.notice, model.error == nil {
                 HStack(spacing: 10) { Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint); Text(notice).font(NekoFont.body); Spacer(); Button { model.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
-                    .nekoCard(padding: 12, radius: 12).padding(.horizontal, 16).padding(.top, 8).transition(.move(edge: .top).combined(with: .opacity))
+                    .nekoToast().transition(.move(edge: .top).combined(with: .opacity))
             }
             if let error = model.error {
                 HStack(spacing: 10) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(NekoStyle.amber); Text(error).font(NekoFont.body).textSelection(.enabled).lineLimit(2); Spacer(); Button("Retry") { Task { await model.refresh() } }.nekoGlassButton(); Button { model.error = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
-                    .nekoCard(padding: 12, radius: 12).padding(.horizontal, 16).padding(.top, 8).transition(.move(edge: .top).combined(with: .opacity))
+                    .nekoToast().transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
         .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in page = "Settings" }
         .onChange(of: model.requestedPage) { _, requested in if let requested { page = requested; model.requestedPage = nil } }
-        .onAppear { if let requested = model.requestedPage { page = requested; model.requestedPage = nil } }
+        .onAppear {
+            if let requested = model.requestedPage { page = requested; model.requestedPage = nil }
+            // Development only: NEKO_NOTICE_DEMO="text" shows a notice to check the toast's look.
+            if let demo = ProcessInfo.processInfo.environment["NEKO_NOTICE_DEMO"], !demo.isEmpty { model.notice = demo }
+        }
     }
 }
 
