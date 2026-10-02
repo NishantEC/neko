@@ -226,7 +226,7 @@ struct TodayView: View {
                             if !["/remember", "/forget"].contains(entry.name) { send() }
                         }
                     }
-                }.padding(.vertical, 4).nekoCard(padding: 0, radius: 10)
+                }.padding(.vertical, 4).frame(width: cardWidth - 36, alignment: .leading).nekoCard(padding: 0, radius: 10)
             }
             ComposerView(
                 text: Binding(get: { draft }, set: { draft = $0 }),

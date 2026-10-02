@@ -52,8 +52,7 @@ import NekoKit
         }
         return result
     }
-    func start() async {
-        await refresh()
+    func loadSetup() async {
         do {
             let state = try await request(.string("GetOnboardingState"))
             guard case .bool(let completed) = state["OnboardingState"]["completed"] else { throw invalidResponse() }
@@ -61,12 +60,18 @@ import NekoKit
             loadingSetup = false
         }
         catch { self.error = error.localizedDescription }
+    }
+    func start() async {
+        await refresh()
+        await loadSetup()
         polling?.cancel()
         polling = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
                 await self?.refresh()
+                // Started before the daemon was up: finish setup once it answers.
+                if let self, self.loadingSetup, self.connected { await self.loadSetup() }
             }
         }
     }
@@ -82,6 +87,8 @@ import NekoKit
             snapshot = result["Workbench"]
             connected = true
             connectionError = nil
+            // A connection failure from before the daemon was up is no longer true.
+            if let error, AppModel.isConnectionError(error) { self.error = nil }
         } catch {
             guard started == generation, sequence == refreshSequence else { return }
             connected = false; connectionError = error.localizedDescription
@@ -100,6 +107,10 @@ import NekoKit
             error = nil
             return true
         } catch { self.error = error.localizedDescription; return false }
+    }
+    /// The home folder as the user's catch-all default workspace, named after the Mac user.
+    static func isConnectionError(_ message: String) -> Bool {
+        message.hasPrefix("Daemon connection failed") || message == DaemonClientError.disconnected.errorDescription || message == DaemonClientError.timedOut.errorDescription
     }
     /// The home folder as the user's catch-all default workspace, named after the Mac user.
     var homeWorkspaceID: String? {

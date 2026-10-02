@@ -1,64 +1,75 @@
 # Kibu → Neko gap list
 
-Source: `madhurjyadc/kibu` at `4397da4`. Neko branch `codex/kibu-parity` (from `7000f1f`). Second sweep 2026-10-02.
+Source: `madhurjyadc/kibu` at `4397da4`. Neko branch `codex/kibu-parity` (from `7000f1f`). Third sweep 2026-10-02.
 
-**Done** = built and tested on this branch · **Have** = Neko already did it · **Partial** · **Gap** · **Skip** = Kibu's product, not Neko's.
+**Done** = built and tested on this branch · **Have** = Neko already did it · **Skip** = Kibu's product, not Neko's.
 
-## Built on this branch
+## Agents and models
 
 | Area | What Neko does now | Proof |
 |---|---|---|
-| Model catalog | Daemon reads Codex `app-server` (account, plan, default, efforts), Ollama, LM Studio; no `ocx` | live: ChatGPT · Pro, 17 models |
-| Check & use model | One minimal reply through the real runner; saved only on success | live: pass 10 s; bad model refused, old choice kept |
-| Error messages | Quota, sign-in, plan, newer-Codex, timeout; CLI log noise ignored; no secrets shown | unit + live |
-| Codex install | Newest of all installs (found 3 here: nvm 0.146, Homebrew 0.155, ChatGPT.app 0.159) | Diagnostics |
-| Diagnostics | Settings → Diagnostics: installs, versions, per-runtime timings, app↔daemon round trip | smoke |
-| Secrets in memory | Refused on every write, proposal and prompt; reply says why | unit + smoke |
-| Memory chat verbs | "remember that…", "forget…", "what do you remember" answered by code in ~2 ms | smoke |
-| Relevant memory | Prompts carry memory sharing a word with the request, plus standing facts about you | unit |
-| Memory citations | Lines tagged `[m:…]`; replies end with "From memory: …" | unit |
-| Memory switches | "Suggest new memories" and "Use memory" on the Memory page, enforced in the daemon | unit + smoke |
-| Ticket history | Delete a finished ticket; Clear finished (failed stay for retry); worktrees and files kept | unit + smoke |
-| Stop all work | Work menu, status menu, `/stop`, global ⌘⇧Esc | unit + smoke |
-| Slash commands | `/stop /remember /forget /recall /memory /tickets /clear /models /permissions /setup /help` with suggestions | unit |
-| Previous app context | ⌥Return attaches the previous app's selection and window title, marked untrusted, 4,000-char cap | unit |
-| Keyboard approvals | ⌘1 allow / ⌘2 deny when exactly one tool request waits | build |
-| Hotkey fallback | A taken chord falls back to the next free one and says which | unit |
-| Permissions page | Accessibility, clipboard, protected workspace folders; reading never prompts | unit |
+| Model catalog | Daemon reads Codex `app-server`, Claude Code `initialize`, `opencode models`, Ollama, LM Studio; no `ocx` | live, including a bare GUI-style PATH |
+| Claude Code and OpenCode workers | Run with their own logins under a Neko `sandbox-exec` profile: writes only to the worktree, the CLI's state folders and a private temp dir | live: edit in worktree, receipts, write to `~` blocked |
+| Role tool limits | Read-only roles get no edit tools; extraction gets none; web tools never; OpenCode ignores repository config | unit |
+| Check & use model | One reply through the real runner; saved only on success | live for Codex, Claude Code, OpenCode |
+| Error messages | Quota, sign-in, plan, newer Codex, not responding, timeout; log noise ignored; nothing secret shown | unit + live |
+| Codex install | Newest of every install (nvm 0.146, Homebrew 0.155, ChatGPT.app 0.159 here) | Diagnostics |
+| Per-ticket budget | Stops a ticket at a dollar amount, before each phase and mid-run, from reported cost | unit |
+| Diagnostics | Installs, versions, per-runtime timings, app ↔ daemon round trip | in-app |
+
+## Safety and history
+
+| Area | What Neko does now | Proof |
+|---|---|---|
+| Stop all work | ⌘⇧Esc anywhere, Work menu, status menu, `/stop` | unit + smoke |
+| Ticket history | Delete a finished ticket; Clear finished (failed ones stay) | unit + smoke |
+| Ticket changes | Read-only file list and patch from the ticket's worktree | build + smoke (no-worktree path) |
 | Protected folders | System, credential and Neko-data folders refused as workspaces | unit + smoke |
-| Uninstall | Moves the app (and optionally data) to the Trash; stops work, login item, daemon; resets Accessibility | unit (plan only) |
-| Untrusted tool output | MCP call results described to the model as untrusted data | prompt text |
-| IPC robustness | A malformed request gets an error reply instead of a closed connection | unit + smoke |
+| Untrusted content | MCP results and ⌥Return context are marked as data | prompt text + unit |
+| IPC | A malformed request gets an error reply | unit + smoke |
+| Undo | Not needed: workers can only write inside their own worktree, and nothing reaches your repo until you take it | design |
 
-## Still open
+## Memory
 
-| Kibu | Neko | Fit | What it takes |
-|---|---|---|---|
-| Claude Code / OpenCode as workers, using their own logins | Gap | Core | **Needs your decision** (below). New runner adapter: stream-json events → receipts, MCP bridge via `--mcp-config`, write limits without Codex's sandbox |
-| Their model catalogs | Gap | Core | Small once they can run tasks |
-| Search inside documents, synonyms (CV/resume, Aadhaar) | Gap | Core | File search is filename-only; content search must not disturb the tuned ranking |
-| Per-task spend limit, "wrap up" at 75% | Partial | Maybe | Neko has timeouts and worker caps; `codex exec` reports usage only at turn end, so a mid-turn budget needs app-server turns |
-| Preview of planned file changes before they apply | Partial | Maybe | Neko reviews a diff after the build in its worktree; a pre-build preview would be new |
-| Undo | Partial | Maybe | Neko never writes outside task worktrees, so there's little to undo; remote MCP side effects can't be undone by anyone |
-| "Only while working" presence (appear, linger 6 s, hide) | Partial | Maybe | Activity capsule exists; no linger/auto-hide policy |
-| Auto-update | Gap | Maybe | Sparkle or a GitHub-release check |
-| Capability answer built from real registered tools | Partial | Maybe | `/help` lists commands; not connected tools |
-| Local arithmetic / time questions without a model | Gap | Maybe | Palette could answer "2+2" or "time in Tokyo" |
+| Area | What Neko does now | Proof |
+|---|---|---|
+| Secrets | Keys, tokens, card/ID numbers and "password is …" refused everywhere | unit + smoke |
+| Chat verbs | "remember that…", "forget…", "what do you remember" answered by code | smoke |
+| Relevance | Prompts carry memory that shares a word with the request, plus standing facts about you | unit |
+| Citations | Replies end with "From memory: …" | unit |
+| Switches | Suggest new memories / use memory | unit + smoke |
+
+## Interface
+
+| Area | What Neko does now | Proof |
+|---|---|---|
+| Slash commands | `/stop /remember /forget /recall /memory /tickets /clear /models /permissions /setup /help` with suggestions | unit + in-app |
+| "What can you do?" | Answered from the real setup | smoke + in-app |
+| Previous app context | ⌥Return attaches the previous app's selection and window title | unit |
+| Approvals | ⌘1 / ⌘2 for the one waiting request | build |
+| Hotkey | A taken chord falls back to the next free one | unit |
+| Permissions page | Accessibility, clipboard, protected workspace folders; no prompts on read | in-app |
+| Presence | Optional floating capsule while work runs; shows the outcome 6 s; click opens Neko | unit |
+| Quick panel answers | Arithmetic and "time in <city>", locally; Enter copies | live IPC |
+| Document search | "Search inside documents" mode: Spotlight text + names, filler dropped, synonyms | live IPC |
+| Updates | About compares the build's commit with GitHub main; Update now refuses a dirty or non-main checkout | in-app + unit |
+| Uninstall | Moves the app (and optionally data) to the Trash | unit (plan) |
 
 ## Skip
 
-Calendar, Reminders, Notes and Mail drafts; timers and reminders; system volume and appearance; Shortcuts runner; driving your browser; the pet sprite and personality; the Jev router model (separate paid key). These are Kibu's product. Any of them can come later as a user-added MCP server.
+Calendar, Reminders, Notes and Mail; timers; system volume and appearance; Shortcuts; driving your browser; the pet and personality; the Jev router model. Any of them can come later as a user-added MCP server.
 
-## Found in this sweep (Neko-only)
+## Found while building
 
-- Two daemon singleton-socket tests fail when both daemon test binaries run in parallel; they pass alone (3/3). Existing flake.
-- Uninstall, ⌥Return context, ⌘1/⌘2 and the Permissions page are built and unit-tested, but not yet clicked through in the installed app.
+- A GUI-launched daemon has a bare PATH; npm-installed CLIs need `node`. Discovery and runners now use the full agent search path.
+- OpenCode reads its project from `PWD`/`--dir`, not the process cwd; without this it worked in the wrong folder (the sandbox blocked the writes).
+- OpenCode's free tier rejects requests that offer no tools at all; no-tool runs use shell "ask", which auto-rejects.
+- Startup could hang on "Connecting to Neko…" if the first request beat the daemon; setup now finishes once the daemon answers.
+- Two daemon singleton-socket tests are flaky when both daemon test binaries run in parallel (pass alone).
 
-## Open decision
+## Known limits
 
-How Neko runs Claude, Grok and other non-OpenAI models now that `ocx` is out of discovery. A previously saved `opencodex` runtime still runs; the picker no longer offers it.
-
-1. Claude Code / OpenCode as workers, with their own logins (Kibu's way)
-2. A Neko proxy in the daemon calling provider APIs with Keychain keys
-3. Codex account + local models only
+- Shell commands run by Claude Code and OpenCode workers can reach the network; Codex disables it. File writes are confined for all three.
+- Uninstall, ⌥Return, ⌘1/⌘2 and the floating capsule are unit-tested but weren't exercised in the running app.
+- The budget only counts runtimes that report cost; Codex subscriptions report none.
 

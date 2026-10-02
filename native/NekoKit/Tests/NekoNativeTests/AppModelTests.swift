@@ -33,6 +33,26 @@ private actor ControlledTransport {
         try state.finish(.object(["ClipboardHistoryEnabled": .object(["enabled": .bool(true)])]))
         XCTAssertEqual(state.enabled, true)
     }
+    func testSetupFinishesOnceTheDaemonAnswers() async {
+        let model = AppModel { request in
+            if request == .string("GetOnboardingState") { return .object(["OnboardingState": .object(["completed": .bool(true)])]) }
+            return .object(["Workbench": .object(["tasks": .array([])])])
+        }
+        XCTAssertTrue(model.loadingSetup)
+        await model.refresh()
+        await model.loadSetup()
+        XCTAssertFalse(model.loadingSetup)
+        XCTAssertFalse(model.onboarding)
+    }
+    func testSuccessfulRefreshClearsAStaleStartupConnectionError() async {
+        let model = AppModel { _ in .object(["Workbench": .object(["tasks": .array([])])]) }
+        model.error = "Daemon connection failed (system error 61)."
+        await model.refresh()
+        XCTAssertNil(model.error)
+        model.error = "That workspace no longer exists"
+        await model.refresh()
+        XCTAssertEqual(model.error, "That workspace no longer exists", "real errors stay until dismissed")
+    }
     func testReconnectClearsTransportBanner() async {
         let transport = ControlledTransport()
         let model = AppModel { try await transport.request($0) }

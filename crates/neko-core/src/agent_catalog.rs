@@ -97,6 +97,15 @@ fn with_checks(mut catalog: ModelCatalog, checks: &BTreeMap<String, (bool, Strin
     catalog
 }
 
+/// A GUI-launched daemon inherits a bare PATH, but npm-installed CLIs are
+/// scripts that need `node` beside them. Give discovery the same search
+/// path the task runner uses.
+fn agent_path(executable: &Path) -> std::ffi::OsString {
+    let mut paths: Vec<PathBuf> = executable.parent().map(Path::to_owned).into_iter().collect();
+    paths.extend(crate::native_runner::cli_workers::agent_directories());
+    std::env::join_paths(paths).unwrap_or_default()
+}
+
 fn failed_source(provider: &str, label: &str) -> ModelSource {
     ModelSource {
         provider: provider.into(),
@@ -143,6 +152,7 @@ pub(crate) fn discover_codex(executable: &Path, timeout: Duration) -> Result<Mod
     let mut child = Command::new(executable)
         .args(["app-server", "-c", "model_provider=\"openai\""])
         .current_dir(&scratch.0)
+        .env("PATH", agent_path(executable))
         .env_remove("CODEX_THREAD_ID")
         .env_remove("CODEX_INTERNAL_ORIGINATOR_OVERRIDE")
         .stdin(Stdio::piped())
@@ -303,6 +313,13 @@ fn claude_source() -> ModelSource {
     };
     match discover_claude(&executable, DISCOVERY_TIMEOUT) {
         Ok(source) => source,
+        // Seen live: launched from a Neko app that hasn't been allowed into a
+        // protected folder, Claude Code blocks on that file access.
+        Err(error) if error.contains("took too long") => base(
+            "Claude Code · not responding",
+            SourceStatus::Error,
+            "Claude Code didn’t answer. macOS may be holding a file it opens until Neko is allowed: check System Settings → Privacy & Security → Files and Folders, then refresh.",
+        ),
         Err(_) => base("Claude Code · couldn’t read models", SourceStatus::Error, "Update Claude Code or check its login, then refresh."),
     }
 }
@@ -315,6 +332,7 @@ fn discover_claude(executable: &Path, timeout: Duration) -> Result<ModelSource, 
         .args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence"])
         .current_dir(&scratch.0)
         .env_remove("CLAUDECODE")
+        .env("PATH", agent_path(executable))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -421,7 +439,7 @@ fn opencode_source() -> ModelSource {
         return base;
     };
     let Ok(scratch) = Scratch::new("neko-opencode-models") else { return base };
-    let output = run_bounded(Command::new(&executable).arg("models").current_dir(&scratch.0).env("OPENCODE_DISABLE_PROJECT_CONFIG", "1"), DISCOVERY_TIMEOUT);
+    let output = run_bounded(Command::new(&executable).arg("models").current_dir(&scratch.0).env("PATH", agent_path(&executable)).env("OPENCODE_DISABLE_PROJECT_CONFIG", "1"), DISCOVERY_TIMEOUT);
     match output {
         Some(text) => opencode_catalog(&text),
         None => ModelSource { connection: "OpenCode · couldn’t read models".into(), status: SourceStatus::Error, note: Some("Update OpenCode, then refresh.".into()), ..base },

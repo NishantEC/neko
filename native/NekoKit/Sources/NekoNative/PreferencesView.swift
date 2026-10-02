@@ -183,6 +183,9 @@ struct PreferencesView: View {
                             if agentProvider == "opencodex" { Text("Connected model (legacy)").tag("opencodex") }
                         }
                         .onChange(of: agentProvider) { _, _ in check = nil; if model.snapshot["agent_runtime"]["provider"].string != agentProvider { agentModel = ""; customModel = "" } }
+                        if catalog.sources.isEmpty {
+                            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Reading models from your runtimes…").foregroundStyle(.secondary) }
+                        }
                         if let source = catalog.source(agentProvider) {
                             LabeledContent("Connection") {
                                 Label(source.connection, systemImage: source.ready ? "checkmark.circle" : "exclamationmark.circle")
@@ -231,13 +234,15 @@ struct PreferencesView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Section("Budget") {
-                        HStack {
-                            Text("Stop a ticket after")
-                            TextField("No limit", text: $budget).frame(width: 90).textFieldStyle(.roundedBorder)
-                            Text("US$")
-                            Spacer()
-                            Button("Save budget") { saveBudget() }.disabled(pending || budgetCents == .invalid)
+                        LabeledContent("Stop a ticket after") {
+                            HStack {
+                                TextField("Budget", text: $budget, prompt: Text("No limit")).labelsHidden().frame(width: 90).textFieldStyle(.roundedBorder)
+                                Text("US$").foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Save budget") { saveBudget() }.disabled(pending || budgetCents == .invalid)
+                            }
                         }
+                        if budgetCents == .invalid { Text("Enter an amount between 0.01 and 1000, or leave it empty.").font(.caption).foregroundStyle(NekoStyle.amber) }
                         Text("Counts the cost Claude Code and OpenCode report for each ticket and stops the ticket when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
