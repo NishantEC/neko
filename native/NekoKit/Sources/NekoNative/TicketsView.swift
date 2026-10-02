@@ -78,6 +78,7 @@ struct TicketsView: View {
             Divider().opacity(0.5)
             if layout == "list" { list } else { board }
         }
+        .ignoresSafeArea(.container, edges: .top)
         .onChange(of: model.selectedWorkspace) { _, _ in selected = nil }
         .confirmationDialog("Cancel “\(confirmCancel?["title"].string ?? "")”?", isPresented: Binding(get: { confirmCancel != nil }, set: { if !$0 { confirmCancel = nil } })) {
             Button("Cancel Ticket", role: .destructive) {
@@ -104,6 +105,7 @@ struct TicketsView: View {
                     TicketDetail(model: model, id: selected, close: { self.selected = nil })
                 }
                 .inspectorColumnWidth(min: 340, ideal: 400, max: 760)
+                .ignoresSafeArea(.container, edges: .top)
             }
         }
     }

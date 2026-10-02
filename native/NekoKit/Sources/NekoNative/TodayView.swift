@@ -178,13 +178,18 @@ struct TodayView: View {
                 }
                 composer(availableWidth: outer.size.width)
             }
+            // Keep the transcript below the header row now that it reaches the window top.
+            .clipped()
         }
         }
         }
         .environment(\.replyActions, ReplyActions(send: { text in post(text) }, draft: { text in draft = text }))
+        // The inspector re-adds the toolbar inset; the header row is the toolbar.
+        .ignoresSafeArea(.container, edges: .top)
         .inspector(isPresented: $showInspector) {
             TicketInspector(model: model, id: inspectedTicket, openFull: { ticket = $0 })
                 .inspectorColumnWidth(min: 240, ideal: 272, max: 360)
+                .ignoresSafeArea(.container, edges: .top)
         }
         .onChange(of: scope) { _, _ in inspected = nil }
         .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: messages.count)
