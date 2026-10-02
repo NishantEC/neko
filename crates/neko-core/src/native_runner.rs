@@ -236,7 +236,8 @@ fn run_configured_mode(
         .map(Path::to_owned)
         .into_iter()
         .collect::<Vec<_>>();
-    paths.extend(executable_directories());
+    // A GUI-launched daemon has a bare PATH; npm/nvm installs need node beside them.
+    paths.extend(cli_workers::agent_directories());
     if let Ok(path) = std::env::join_paths(paths) {
         command.env("PATH", path);
     }

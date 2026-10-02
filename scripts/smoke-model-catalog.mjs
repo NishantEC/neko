@@ -13,7 +13,10 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const binary = process.env.NEKO_DAEMON || path.join(root, 'target/debug/neko-daemon');
 const data = mkdtempSync(path.join(os.tmpdir(), 'neko-models-'));
 const live = process.env.NEKO_SMOKE_LIVE === '1';
-const daemon = spawn(binary, [], { env: { ...process.env, NEKO_DATA_DIR: data }, stdio: ['ignore', 'ignore', 'pipe'] });
+// A GUI launch gives the daemon a bare PATH; discovery must still find npm-installed CLIs.
+const env = { ...process.env, NEKO_DATA_DIR: data };
+if (process.env.NEKO_SMOKE_BARE_PATH === '1') env.PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
+const daemon = spawn(binary, [], { env, stdio: ['ignore', 'ignore', 'pipe'] });
 let diagnostics = '';
 daemon.stderr.on('data', chunk => { diagnostics = (diagnostics + chunk).slice(-4000); });
 let socket; let buffered = Buffer.alloc(0); let nextId = 1; const pending = new Map();
