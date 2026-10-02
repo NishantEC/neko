@@ -5,6 +5,16 @@ import NekoKit
     @Published var snapshot: JSONValue = .object([:])
     @Published var selectedWorkspace: String?
     @Published var requestedPage: String?
+    /// A short confirmation shown for a few seconds, e.g. after Stop all work.
+    @Published var notice: String? {
+        didSet {
+            guard let notice else { return }
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(5))
+                if self?.notice == notice { self?.notice = nil }
+            }
+        }
+    }
     @Published private var actionError: String?
     @Published private var connectionError: String?
     /// Explicit action failures survive background reconnects. Dismissing the

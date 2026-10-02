@@ -18,6 +18,10 @@ import NekoKit
         .commands {
             CommandGroup(after: .newItem) { Button("Quick panel") { PaletteController.shared.toggle(model: model) }.keyboardShortcut("k", modifiers: [.command]) }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { model.requestedPage = "Settings"; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }.keyboardShortcut(",", modifiers: [.command]) }
+            CommandMenu("Work") {
+                Button("Stop all work") { Task { await StopAllWork.run(model) } }.keyboardShortcut(.escape, modifiers: [.command, .shift])
+                Button("Clear finished tickets") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
+            }
         }
         MenuBarExtra("Neko", systemImage: "cat") { StatusMenu(model: model) }
     }
@@ -33,6 +37,8 @@ struct StatusMenu: View {
         Button("Quick panel") { PaletteController.shared.toggle(model: model) }
         Button("Open Neko") { openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
         Button("Settings…") { model.requestedPage = "Settings"; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
+        Divider()
+        Button("Stop all work (\(StopAllWork.shortcutLabel))") { Task { await StopAllWork.run(model) } }
         Divider()
         Button("Quit Neko") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
@@ -93,6 +99,10 @@ struct WorkspaceView: View {
         .preferredColorScheme(.dark)
         .environment(\.nekoLook, NekoLook(rawValue: look) ?? .ambient)
         .safeAreaInset(edge: .top) {
+            if let notice = model.notice, model.error == nil {
+                HStack(spacing: 10) { Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint); Text(notice).font(NekoFont.body); Spacer(); Button { model.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
+                    .nekoCard(padding: 12, radius: 12).padding(.horizontal, 16).padding(.top, 8).transition(.move(edge: .top).combined(with: .opacity))
+            }
             if let error = model.error {
                 HStack(spacing: 10) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(NekoStyle.amber); Text(error).font(NekoFont.body).textSelection(.enabled).lineLimit(2); Spacer(); Button("Retry") { Task { await model.refresh() } }.nekoGlassButton(); Button { model.error = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
                     .nekoCard(padding: 12, radius: 12).padding(.horizontal, 16).padding(.top, 8).transition(.move(edge: .top).combined(with: .opacity))

@@ -61,6 +61,11 @@ struct TicketsView: View {
             PanelHeader(title: "Tickets", crumb: model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces") { EmptyView() }
             HStack(spacing: 8) {
                 Button(includeStopped ? "Showing failed & cancelled" : "Hiding failed & cancelled") { includeStopped.toggle() }.controlSize(.small).glassButton()
+                if model.tasks.contains(where: { ["Completed", "Cancelled"].contains($0["status"].string) }) {
+                    Button("Clear finished") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
+                        .controlSize(.small).glassButton()
+                        .help("Removes completed and cancelled tickets from history. Failed tickets stay so you can retry them. Files and worktrees are untouched.")
+                }
                 Spacer()
                 Text("\(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")").font(.system(size: 12)).foregroundStyle(N.text4)
             }
@@ -122,6 +127,7 @@ struct TicketDetail: View {
     let id: String
     @State private var note = ""
     @State private var childTicket: String?
+    @State private var confirmDelete = false
     @Environment(\.dismiss) private var dismiss
     private var ticket: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == id } ?? .null }
     var body: some View {
@@ -139,7 +145,17 @@ struct TicketDetail: View {
                     default: EmptyView()
                     }
                     if !["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { action("Cancel task", "CancelTask") }
+                    if ["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) {
+                        Button("Delete…", role: .destructive) { confirmDelete = true }
+                    }
                 }.disabled(model.busy)
+                .confirmationDialog("Delete this ticket?", isPresented: $confirmDelete) {
+                    Button("Delete ticket", role: .destructive) {
+                        Task { if await model.workbench(.command("DeleteTask", ["task_id": .string(id)])) { dismiss() } }
+                    }
+                } message: {
+                    Text("Removes the ticket, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.")
+                }
                 section("Goal", ticket["goal"].string)
                 section("Plan", ticket["plan"].string)
                 let review = TicketPresentation.review(ticket["result"].string)

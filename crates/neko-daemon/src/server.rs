@@ -9,7 +9,9 @@ use neko_core::cancel::Cancel;
 use neko_core::provider::Provider;
 use neko_core::search::Candidate;
 use neko_core::{AppEntry, Db};
-use neko_protocol::{Event, Frame, Request, Response, read_frame, write_frame};
+use neko_protocol::{Event, Frame, Request, Response, write_frame};
+#[cfg(test)]
+use neko_protocol::read_frame;
 
 /// One Dock badge count, assembled by the daemon instead of exposing each
 /// backend's raw attention state to clients.
@@ -557,8 +559,16 @@ pub fn handle_connection(state: Arc<AppState>, stream: UnixStream) {
     let in_flight_search: Arc<Mutex<Option<Cancel>>> = Arc::new(Mutex::new(None));
 
     loop {
-        match read_frame(&stream) {
-            Ok(Some(Frame::Request { id, request })) => {
+        match neko_protocol::read_frame_or_reject(&stream) {
+            Ok(Some(Err((id, reason)))) => {
+                // An unknown command or missing field: answer it, keep the connection.
+                let mut writer = writer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _ = write_frame(&mut *writer, &Frame::Response {
+                    id,
+                    response: Response::Error { message: format!("Neko couldn’t read this request. Update Neko if this keeps happening. ({reason})") },
+                });
+            }
+            Ok(Some(Ok(Frame::Request { id, request }))) => {
                 let cancel = match &request {
                     Request::Search { .. } => supersede_previous_search(&in_flight_search),
                     _ => Cancel::never(),
@@ -585,7 +595,7 @@ pub fn handle_connection(state: Arc<AppState>, stream: UnixStream) {
                     ctx.send(response);
                 });
             }
-            Ok(Some(_)) => {} // Clients never send Response/Event frames.
+            Ok(Some(Ok(_))) => {} // Clients never send Response/Event frames.
             Ok(None) | Err(_) => return,
         }
     }
@@ -683,6 +693,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         Request::AgentModels { refresh } => {
             Response::AgentModels(neko_core::agent_catalog::catalog(refresh))
         }
+        Request::Diagnostics => Response::Diagnostics(neko_core::agent_catalog::diagnostics(&neko_protocol::support_dir())),
         Request::CheckAgentModel { runtime, save } => {
             let check = neko_core::agent_catalog::check(&runtime);
             if check.ok && save {

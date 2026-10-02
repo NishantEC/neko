@@ -444,6 +444,8 @@ pub enum Request {
         runtime: workbench::AgentRuntime,
         save: bool,
     },
+    /// Time each runtime and report which installs Neko uses. Metadata only.
+    Diagnostics,
     /// `provider`, when set, scopes this search to exactly one provider's
     /// own `search()` — no cross-provider `allocate()`, no section
     /// reservation, just that provider's own candidates sorted by score.
@@ -556,6 +558,7 @@ pub enum Response {
     Pong,
     AgentModels(agent_models::ModelCatalog),
     AgentModelCheck(agent_models::ModelCheck),
+    Diagnostics(agent_models::DiagnosticsReport),
     /// One search reply. **A single `Request::Search` can be answered by
     /// more than one of these** — see [`Response::ends_request`] and
     /// `AGENTS.md`'s "Two-phase search" section.
@@ -757,9 +760,57 @@ pub fn read_frame<R: Read>(mut r: R) -> io::Result<Option<Frame>> {
     Ok(Some(frame))
 }
 
+/// Like [`read_frame`], but a well-formed request envelope whose body doesn't
+/// match the protocol (an unknown command or missing field) is returned as
+/// `Err((id, reason))` so the server can answer it instead of hanging up.
+pub fn read_frame_or_reject<R: Read>(mut r: R) -> io::Result<Option<Result<Frame, (u64, String)>>> {
+    let mut len_bytes = [0u8; 4];
+    match r.read_exact(&mut len_bytes) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e),
+    }
+    let len = u32::from_le_bytes(len_bytes) as usize;
+    if len > 16 * 1024 * 1024 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "IPC frame exceeds 16 MiB"));
+    }
+    let mut payload = vec![0u8; len];
+    r.read_exact(&mut payload)?;
+    match serde_json::from_slice::<Frame>(&payload) {
+        Ok(frame) => Ok(Some(Ok(frame))),
+        Err(error) => {
+            let id = serde_json::from_slice::<serde_json::Value>(&payload)
+                .ok()
+                .and_then(|v| v.get("Request")?.get("id")?.as_u64());
+            match id {
+                Some(id) => {
+                    let reason: String = error.to_string().chars().take(200).collect();
+                    Ok(Some(Err((id, reason))))
+                }
+                None => Err(io::Error::other(error)),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_request_bodies_are_reported_with_their_id() {
+        let payload = br#"{"Request":{"id":7,"request":{"Workbench":{"NoSuchCommand":{}}}}}"#;
+        let mut bytes = (payload.len() as u32).to_le_bytes().to_vec();
+        bytes.extend_from_slice(payload);
+        match read_frame_or_reject(&bytes[..]).unwrap() {
+            Some(Err((7, reason))) => assert!(reason.contains("NoSuchCommand"), "{reason}"),
+            other => panic!("expected a rejection, got {other:?}"),
+        }
+        let garbage = b"{not json";
+        let mut bytes = (garbage.len() as u32).to_le_bytes().to_vec();
+        bytes.extend_from_slice(garbage);
+        assert!(read_frame_or_reject(&bytes[..]).is_err(), "no id: still a protocol error");
+    }
 
     #[test]
     fn oversized_frame_is_rejected_before_allocating_payload() {

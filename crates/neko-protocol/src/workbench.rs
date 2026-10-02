@@ -387,6 +387,18 @@ pub enum Command {
     CompleteTask {
         task_id: String,
     },
+    /// Remove one finished (completed, failed or cancelled) ticket and its
+    /// subtasks from history. Worktrees on disk and files are untouched.
+    DeleteTask {
+        task_id: String,
+    },
+    /// Remove every completed or cancelled ticket, optionally in one
+    /// workspace. Failed tickets stay so they can be retried.
+    ClearFinishedTasks {
+        workspace_id: Option<String>,
+    },
+    /// Stop everything at once: every unfinished ticket and Neko's reply.
+    CancelAllWork,
     /// Talk to Neko. The reply arrives in a later snapshot.
     SendMessage {
         text: String,

@@ -485,6 +485,55 @@ fn has_status(text: &str, code: &str) -> bool {
 
 // ---------------------------------------------------------------- Scratch dir
 
+/// What Neko runs with on this Mac, and how long each part takes to answer.
+/// Generates no tokens; also refreshes the cached catalog.
+pub fn diagnostics(data_dir: &Path) -> neko_protocol::agent_models::DiagnosticsReport {
+    use neko_protocol::agent_models::{DiagnosticCheck, DiagnosticsReport};
+    let mut checks = Vec::new();
+    let started = Instant::now();
+    let installs: Vec<(PathBuf, Option<String>)> = crate::native_runner::codex_candidates()
+        .into_iter()
+        .map(|path| { let version = crate::native_runner::codex_version_label(&path); (path, version) })
+        .collect();
+    let chosen = crate::native_runner::resolve_codex().ok();
+    let describe = |(path, version): &(PathBuf, Option<String>)| format!("{} ({})", path.display(), version.as_deref().unwrap_or("version unknown"));
+    checks.push(DiagnosticCheck {
+        name: "Codex CLI".into(),
+        ok: chosen.is_some(),
+        detail: match &chosen {
+            Some(path) => {
+                let used = installs.iter().find(|(p, _)| p == path).map(describe).unwrap_or_else(|| path.display().to_string());
+                let others: Vec<String> = installs.iter().filter(|(p, _)| p != path).map(describe).collect();
+                if others.is_empty() { format!("Using {used}") } else { format!("Using {used}. Also installed: {}", others.join(", ")) }
+            }
+            None => "Not found. Install Codex, or set NEKO_CODEX_PATH.".into(),
+        },
+        millis: started.elapsed().as_millis() as u64,
+    });
+    for (name, read) in [("Codex account and models", codex_source as fn() -> ModelSource), ("Ollama", ollama_source), ("LM Studio", lmstudio_source)] {
+        let started = Instant::now();
+        let source = read();
+        let optional = source.provider != "codex" && source.status == SourceStatus::NotInstalled;
+        checks.push(DiagnosticCheck {
+            name: name.into(),
+            ok: source.status == SourceStatus::Ready || optional,
+            detail: format!("{} · {} models{}", source.connection, source.models.len(), source.default_model.as_ref().map(|d| format!(" · default {d}")).unwrap_or_default()),
+            millis: started.elapsed().as_millis() as u64,
+        });
+    }
+    checks.push(DiagnosticCheck {
+        name: "Neko daemon".into(),
+        ok: true,
+        detail: format!("Version {} · data in {}", env!("CARGO_PKG_VERSION"), data_dir.display()),
+        millis: 0,
+    });
+    // A fresh read: keep the picker in step with what was just measured.
+    let _ = catalog(true);
+    DiagnosticsReport { checks }
+}
+
+// ---------------------------------------------------------------- Scratch dir
+
 /// A private, empty working folder removed on drop, so no project's
 /// instructions or settings join a discovery or check.
 struct Scratch(PathBuf);

@@ -123,6 +123,30 @@ impl Controller {
                 }
                 Ok(result)
             }
+            Command::DeleteTask { task_id } => {
+                // A stopping worker could still write into the task it belongs to.
+                if self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|a| a.task_id == task_id) {
+                    return Err("This task’s worker is still stopping. Delete it in a moment.".into());
+                }
+                store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), Command::DeleteTask { task_id })
+            }
+            Command::CancelAllWork => {
+                let result = store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), Command::CancelAllWork)?;
+                for active in self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter() {
+                    active.cancelled.store(true, Ordering::SeqCst);
+                }
+                let turn = self.chat_active.lock().map_err(|_| "Chat state unavailable")?.as_ref().map(|active| {
+                    active.cancelled.store(true, Ordering::Release);
+                    active.task_id.clone()
+                });
+                if let Some(turn_id) = turn {
+                    self.mcp.cancel_chat(&turn_id);
+                    let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
+                    neko_chat::finish_turn(&db, &turn_id, "Stopped.", vec![], true)?;
+                    return store::load(&db);
+                }
+                Ok(result)
+            }
             Command::RetryTask { task_id } => {
                 // A cancelled worker may still be unwinding. Its late output
                 // must not mutate a freshly queued generation of this task.
@@ -582,7 +606,7 @@ impl Controller {
             };
             store::append_event(t, role, "Agent started in an isolated task worktree");
         })?;
-        let mut memory = neko_core::agent_profiles::context(&snapshot, Some(&workspace.id));
+        let mut memory = neko_core::agent_profiles::context_about(&snapshot, Some(&workspace.id), Some(&format!("{} {}", task.title, task.goal)));
         memory.push_str(&neko_core::skills::instructions(
             &*self.db.lock().map_err(|_| "Skill storage unavailable")?,
             &skill_workspaces,
@@ -672,7 +696,7 @@ impl Controller {
             let mut review_task = task.clone();
             review_task.result = result;
             // Re-read activation and hashes after the writable run.
-            let mut memory = neko_core::agent_profiles::context(&snapshot, Some(&workspace.id));
+            let mut memory = neko_core::agent_profiles::context_about(&snapshot, Some(&workspace.id), Some(&format!("{} {}", task.title, task.goal)));
             memory.push_str(&neko_core::skills::instructions(
                 &*self.db.lock().map_err(|_| "Skill storage unavailable")?,
                 &skill_workspaces,
@@ -823,6 +847,15 @@ fn converse(
     }
     snapshot.agent_profiles.active_profile_id = turn.agent_profile_id.clone();
     let chosen = preferred.filter(|id| snapshot.workspaces.iter().any(|w| &w.id == id));
+    if let Some(intent) = neko_memory::chat_intent(message) {
+        // Memory requests are answered by code, instantly and exactly.
+        let (text, remembered) = answer_memory_intent(db, &snapshot, chosen, intent);
+        let guard = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(error) = neko_chat::finish_turn_suggesting(&guard, pending, &text, vec![], remembered, vec![], false) {
+            eprintln!("neko chat: {error}");
+        }
+        return;
+    }
     // A chosen workspace runs in its repository. Otherwise the turn gets an
     // empty scratch directory, never Neko's own data directory.
     let scratch = match chosen {
@@ -929,6 +962,84 @@ fn converse(
     }
 }
 
+/// "Remember that …", "forget …", "what do you remember": handled without a
+/// model. Returns the reply and any newly remembered texts.
+fn answer_memory_intent(
+    db: &Arc<Mutex<Db>>,
+    snapshot: &neko_protocol::workbench::Snapshot,
+    chosen: Option<&str>,
+    intent: neko_memory::ChatIntent,
+) -> (String, Vec<String>) {
+    use neko_memory::ChatIntent;
+    use neko_protocol::workbench::{MemoryEntry, MemoryKind};
+    let profile = snapshot.agent_profiles.for_scope(chosen).to_owned();
+    let mine: Vec<MemoryEntry> = snapshot
+        .memory
+        .iter()
+        .filter(|m| m.agent_profile_id == profile && m.kind != MemoryKind::Decision && m.workspace_id.as_deref().is_none_or(|w| chosen == Some(w)))
+        .cloned()
+        .collect();
+    let guard = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    match intent {
+        ChatIntent::Remember(text) => {
+            let known: Vec<String> = snapshot.workspaces.iter().map(|w| w.id.clone()).collect();
+            let entry = MemoryEntry {
+                agent_profile_id: profile,
+                id: String::new(),
+                kind: if chosen.is_some() { MemoryKind::Workspace } else { MemoryKind::Profile },
+                workspace_id: chosen.map(str::to_owned),
+                text,
+                source: "chat".into(),
+                created_at_ms: 0,
+                updated_at_ms: 0,
+            };
+            match neko_memory::upsert(&guard, entry, &known) {
+                Ok(saved) => (format!("Got it. I’ll remember: “{}”. You can edit or forget it on the Memory page.", saved.text), vec![saved.text]),
+                Err(error) => (format!("I didn’t save that. {error}."), vec![]),
+            }
+        }
+        ChatIntent::List => {
+            if mine.is_empty() {
+                return ("I don’t have any memories here yet. Tell me “remember that …” to add one.".into(), vec![]);
+            }
+            let mut sorted = mine;
+            sorted.sort_by_key(|m| std::cmp::Reverse(m.updated_at_ms));
+            let lines: Vec<String> = sorted.iter().take(20).map(|m| format!("- {}", m.text)).collect();
+            let more = sorted.len().saturating_sub(20);
+            (
+                format!(
+                    "Here’s what I remember{}:\n{}{}\n\nSay “forget …” to remove one, or edit them on the Memory page.",
+                    if chosen.is_some() { " for this workspace and about you" } else { " about you" },
+                    lines.join("\n"),
+                    if more > 0 { format!("\n…and {more} more on the Memory page.") } else { String::new() }
+                ),
+                vec![],
+            )
+        }
+        ChatIntent::ForgetEverything => (
+            "To clear everything at once, use the Memory page, where you can review what goes first. Or tell me one thing to forget.".into(),
+            vec![],
+        ),
+        ChatIntent::Forget(query) => {
+            let candidates = neko_memory::forget_candidates(&mine, &query);
+            match candidates.as_slice() {
+                [] => (format!("I don’t have a memory matching “{query}”. Ask “what do you remember?” to see them all."), vec![]),
+                [one] => match neko_memory::delete(&guard, &one.id) {
+                    Ok(()) => (format!("Forgotten: “{}”.", one.text), vec![]),
+                    Err(error) => (format!("I couldn’t forget that: {error}."), vec![]),
+                },
+                several => (
+                    format!(
+                        "More than one memory matches. Which one should I forget?\n{}",
+                        several.iter().take(5).map(|m| format!("- {}", m.text)).collect::<Vec<_>>().join("\n")
+                    ),
+                    vec![],
+                ),
+            }
+        }
+    }
+}
+
 /// Use only an existing Git root explicitly present in the proposed answer.
 /// A path elsewhere on disk cannot silently escape the registered workspace.
 fn ticket_folder_in_reply(reply: &str, goal: &str, workspace_root: &str) -> Option<String> {
@@ -983,6 +1094,12 @@ fn complete_chat_reply(
     }
     snapshot.agent_profiles.active_profile_id = turn.agent_profile_id.clone();
     let reply_text = reply.text.clone();
+    let cited: Vec<String> = neko_memory::resolve_tags(&snapshot.memory, &reply.used_memory)
+        .into_iter()
+        .filter(|m| m.agent_profile_id == turn.agent_profile_id)
+        .map(|m| m.text.clone())
+        .collect();
+    let mut refused_memory = false;
     let mut opened = Vec::new();
     let mut skipped = false;
     for ticket in reply.tickets {
@@ -1066,7 +1183,10 @@ fn complete_chat_reply(
         };
         match neko_memory::upsert(&db, entry, &known) {
             Ok(saved) => remembered.push(saved.text),
-            Err(error) => eprintln!("neko chat: could not remember: {error}"),
+            Err(error) => {
+                refused_memory |= error.contains("doesn’t keep");
+                eprintln!("neko chat: could not remember: {error}");
+            }
         }
     }
     let (suggested, unplaced) =
@@ -1085,6 +1205,15 @@ fn complete_chat_reply(
     }
     if unplaced {
         text.push_str("\n\nI could not save every suggestion to watch. Connect a tool to that workspace in Tools & skills, then ask again.");
+    }
+    if refused_memory {
+        text.push_str("\n\nI didn’t save a password, key or card number to memory. Keep those in Keychain or a password manager.");
+    }
+    if !cited.is_empty() {
+        text.push_str(&format!(
+            "\n\nFrom memory: {}",
+            cited.iter().map(|t| format!("“{t}”")).collect::<Vec<_>>().join(" · ")
+        ));
     }
     let learning_ready = neko_core::memory_learning::has_capacity(&db)?;
     if !learning_ready {
@@ -1458,7 +1587,7 @@ mod tests {
     }
 
     fn reply_with_ticket_and_memory() -> neko_chat::Reply {
-        neko_chat::Reply {
+        neko_chat::Reply { used_memory: vec![],
             text: "Opened a ticket and remembered your preference.".into(),
             tickets: vec![neko_chat::ProposedTicket {
                 title: "New ticket".into(),
@@ -1513,7 +1642,7 @@ mod tests {
         let turn = neko_chat::begin_turn(&db.lock().unwrap(), "Plan my next step").unwrap();
         complete_chat_reply(&db, &AtomicBool::new(false), &turn,
             "Plan my next step", None,
-            neko_chat::Reply { text: format!("The active repo is `{}`.", repo.display()),
+            neko_chat::Reply { used_memory: vec![], text: format!("The active repo is `{}`.", repo.display()),
                 tickets: vec![neko_chat::ProposedTicket { title: "Repair repo".into(),
                     goal: "Make branch reproducible".into(), workspace_id: Some(workspace.clone()),
                     folder: None }], memories: vec![], responsibilities: vec![] }).unwrap();
@@ -1561,7 +1690,7 @@ mod tests {
             &turn,
             "What could you watch?",
             None,
-            neko_chat::Reply {
+            neko_chat::Reply { used_memory: vec![],
                 text: "Here are two ideas, paused until you turn them on.".into(),
                 tickets: vec![],
                 memories: vec![],

@@ -71,6 +71,20 @@ pub struct ModelCatalog {
     pub read_at_ms: i64,
 }
 
+/// One line of the diagnostics report: what was checked, how long it took.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiagnosticCheck {
+    pub name: String,
+    pub ok: bool,
+    pub detail: String,
+    pub millis: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiagnosticsReport {
+    pub checks: Vec<DiagnosticCheck>,
+}
+
 /// The outcome of one explicit model check. A failed check never changes
 /// the saved runtime; messages are credential-free by construction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

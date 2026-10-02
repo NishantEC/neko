@@ -216,6 +216,17 @@ struct TodayView: View {
                     }.controlSize(.small)
                 }.padding(.horizontal, 12).padding(.vertical, 8).nekoCard(padding: 0, radius: 10)
             }
+            let commands = SlashCommand.suggestions(for: draft)
+            if !commands.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(commands) { entry in
+                        SuggestionRow(title: entry.name, detail: entry.detail) {
+                            draft = ["/remember", "/forget"].contains(entry.name) ? entry.name + " " : entry.name
+                            if !["/remember", "/forget"].contains(entry.name) { send() }
+                        }
+                    }
+                }.padding(.vertical, 4).nekoCard(padding: 0, radius: 10)
+            }
             ComposerView(
                 text: Binding(get: { draft }, set: { draft = $0 }),
                 onSubmit: { send() },
@@ -522,11 +533,38 @@ struct TodayView: View {
         guard !sending, !model.busy else { return }
         let submission = model.chatDrafts.submission(for: scope)
         guard !submission.text.isEmpty else { return }
+        if let command = SlashCommand.parse(submission.text), command.chatText == nil {
+            run(command)
+            model.chatDrafts.complete(submission, succeeded: true)
+            return
+        }
+        let text = SlashCommand.parse(submission.text)?.chatText ?? submission.text
         model.sendingChatScopes.insert(submission.scope)
         Task {
-            let saved = await model.workbench(.command(interrupt ? "InterruptAndSendMessage" : "SendMessage", ["text": .string(submission.text), "workspace_id": submission.scope.workspaceID.map(JSONValue.string) ?? .null]))
+            let saved = await model.workbench(.command(interrupt ? "InterruptAndSendMessage" : "SendMessage", ["text": .string(text), "workspace_id": submission.scope.workspaceID.map(JSONValue.string) ?? .null]))
             model.chatDrafts.complete(submission, succeeded: saved)
             model.sendingChatScopes.remove(submission.scope)
+        }
+    }
+
+    private func run(_ command: SlashCommand) {
+        let open = { (page: String) in NotificationCenter.default.post(name: .nekoNavigate, object: page) }
+        switch command {
+        case .stop: Task { await StopAllWork.run(model) }
+        case .clearFinished:
+            Task {
+                let before = model.snapshot["tasks"].array.count
+                if await model.workbench(.command("ClearFinishedTasks", ["workspace_id": scope.workspaceID.map(JSONValue.string) ?? .null])) {
+                    let removed = before - model.snapshot["tasks"].array.count
+                    model.notice = removed == 0 ? "No finished tickets to clear." : "Cleared \(removed) finished \(removed == 1 ? "ticket" : "tickets"). Files and worktrees are untouched."
+                }
+            }
+        case .memory: open("Memory")
+        case .tickets: open("Tickets")
+        case .models, .permissions: open("Settings")
+        case .setup: model.onboarding = true
+        case .help: draft = "/"
+        case .remember, .forget, .recall: break
         }
     }
 }

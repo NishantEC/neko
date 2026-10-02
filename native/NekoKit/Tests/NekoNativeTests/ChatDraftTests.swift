@@ -25,6 +25,18 @@ final class ChatDraftTests: XCTestCase {
         XCTAssertTrue(composer.contains(".frame(width: cardWidth - 36)"))
     }
 
+    func testSlashCommandsParseLocallyAndOrdinaryTextPassesThrough() {
+        XCTAssertEqual(SlashCommand.parse(" /stop "), .stop)
+        XCTAssertEqual(SlashCommand.parse("/remember tests use pnpm"), .remember("tests use pnpm"))
+        XCTAssertEqual(SlashCommand.parse("/remember")?.chatText, nil, "an empty /remember is not a command")
+        XCTAssertEqual(SlashCommand.parse("/forget pnpm")?.chatText, "Forget pnpm")
+        XCTAssertEqual(SlashCommand.parse("/recall")?.chatText, "What do you remember?")
+        XCTAssertNil(SlashCommand.parse("fix /usr/local path handling"))
+        XCTAssertNil(SlashCommand.parse("/Users/nish/repo is broken"), "a path is a message")
+        XCTAssertEqual(SlashCommand.suggestions(for: "/re").map(\.name), ["/remember", "/recall"])
+        XCTAssertTrue(SlashCommand.suggestions(for: "/remember x").isEmpty)
+    }
+
     func testProtectedFoldersListOnlyWorkspacesMacOSGuards() {
         let found = PermissionCatalog.protectedFolders(["/Users/a/Documents/neko", "/Users/a/Documents/x", "/Users/a/Code/y", "/Users/a/DesktopStuff", "/Users/a/Library/Mobile Documents/z"], home: "/Users/a")
         XCTAssertEqual(found.map(\.folder), ["Documents", "iCloud Drive"])

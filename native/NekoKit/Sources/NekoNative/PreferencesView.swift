@@ -175,6 +175,8 @@ struct PreferencesView: View {
                 }.padding().tabItem { Label("Search", systemImage: "magnifyingglass") }
                 PermissionsView(model: model)
                     .tabItem { Label("Permissions", systemImage: "lock.shield") }
+                DiagnosticsView(model: model)
+                    .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
                 Form {
                     Text(agents.isEmpty ? "No agent provider is turned on." : "\(agents.count) agents visible from the configured provider.")
                     preferenceToggle("Show agents", "agents-enabled")

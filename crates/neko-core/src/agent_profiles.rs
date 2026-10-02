@@ -193,6 +193,11 @@ pub fn validate_memory(state: &Snapshot, entry: &MemoryEntry) -> Result<(), Stri
 /// Own workspace memory plus directional, explicitly granted global memories.
 /// Shared text is data, never the source profile's instructions or authority.
 pub fn context(state: &Snapshot, scope: Option<&str>) -> String {
+    context_about(state, scope, None)
+}
+
+/// Like `context`, narrowed to memory relevant to `about` (a request or goal).
+pub fn context_about(state: &Snapshot, scope: Option<&str>, about: Option<&str>) -> String {
     let p = &state.agent_profiles;
     let owner = p.for_scope(scope);
     let Some(profile) = p.profiles.iter().find(|p| p.id == owner) else {
@@ -209,7 +214,7 @@ pub fn context(state: &Snapshot, scope: Option<&str>) -> String {
         profile.name,
         profile.id,
         profile.instructions,
-        crate::neko_memory::for_prompt(&own, scope)
+        crate::neko_memory::for_prompt_about(&own, scope, about)
     );
     let mut shared: Vec<_> = state
         .memory

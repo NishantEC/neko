@@ -305,11 +305,139 @@ pub fn retain_workspaces(db: &Db, known_workspaces: &[String]) -> Result<(), Str
     Ok(())
 }
 
+
+/// Short, stable handle for one memory in a prompt, e.g. "m:3f9c2a".
+pub fn tag(entry: &MemoryEntry) -> String {
+    let id: String = entry.id.chars().filter(char::is_ascii_alphanumeric).take(6).collect();
+    format!("m:{id}")
+}
+
+/// Memories a reply named by tag, in the order named, without duplicates.
+pub fn resolve_tags<'a>(entries: &'a [MemoryEntry], tags: &[String]) -> Vec<&'a MemoryEntry> {
+    let mut found: Vec<&MemoryEntry> = Vec::new();
+    for wanted in tags {
+        let wanted = wanted.trim().trim_matches(|c| c == '[' || c == ']');
+        if let Some(entry) = entries.iter().find(|e| tag(e) == wanted && !e.id.is_empty()) {
+            if !found.iter().any(|f| f.id == entry.id) {
+                found.push(entry);
+            }
+        }
+    }
+    found
+}
+
+const STOPWORDS: &[&str] = &[
+    "the", "and", "for", "that", "this", "with", "from", "into", "your", "you", "are", "was", "were", "have",
+    "has", "had", "not", "but", "can", "will", "should", "would", "could", "about", "what", "when", "where",
+    "which", "who", "how", "why", "all", "any", "our", "out", "use", "uses", "using", "make", "made", "then",
+    "than", "them", "they", "their", "there", "here", "just", "also", "like", "want", "need", "please", "it's",
+    "its", "too", "very", "some", "more", "most", "only", "always", "never", "now", "new", "get", "got", "one",
+];
+
+/// Lowercase distinctive words: three or more letters, not a stopword, with
+/// a light plural/verb trim so "tests" matches "test".
+pub(crate) fn words(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = text
+        .to_lowercase()
+        .split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_'))
+        .map(|w| w.trim_matches(|c| c == '-' || c == '_'))
+        .filter(|w| w.chars().count() >= 3 && !STOPWORDS.contains(w))
+        .map(|w| {
+            let w = w.strip_suffix("ing").filter(|s| s.len() >= 4).unwrap_or(w);
+            let w = w.strip_suffix("es").filter(|s| s.len() >= 4).unwrap_or(w);
+            w.strip_suffix('s').filter(|s| s.len() >= 3).unwrap_or(w).to_owned()
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+pub(crate) fn overlap(wanted: &[String], text: &str) -> usize {
+    words(text).iter().filter(|w| wanted.contains(w)).count()
+}
+
+/// Memory requests handled by code, instantly and without a model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatIntent {
+    Remember(String),
+    Forget(String),
+    ForgetEverything,
+    List,
+}
+
+pub fn chat_intent(message: &str) -> Option<ChatIntent> {
+    let text = message.trim();
+    let lower = text.to_lowercase();
+    let bare = lower.trim_end_matches(['?', '!', '.', ' ']);
+    const LIST: &[&str] = &[
+        "what do you remember", "what do you remember about me", "what do you know about me",
+        "show my memories", "show memories", "list memories", "list my memories", "what have you remembered",
+    ];
+    if LIST.contains(&bare) {
+        return Some(ChatIntent::List);
+    }
+    if matches!(bare, "forget everything" | "forget all" | "forget everything about me" | "clear your memory" | "clear memory") {
+        return Some(ChatIntent::ForgetEverything);
+    }
+    let rest = |prefixes: &[&str]| {
+        prefixes.iter().find_map(|p| lower.strip_prefix(p).map(|_| text[p.len()..].trim().trim_end_matches('.').trim().to_owned()))
+    };
+    if let Some(fact) = rest(&["remember that ", "remember: ", "please remember that ", "note that i ", "from now on, ", "from now on "]) {
+        if lower.starts_with("note that i ") {
+            return (!fact.is_empty()).then(|| ChatIntent::Remember(format!("I {fact}")));
+        }
+        return (!fact.is_empty()).then(|| ChatIntent::Remember(capitalize(&fact)));
+    }
+    if let Some(query) = rest(&["forget that ", "forget about ", "please forget ", "forget "]) {
+        // "forget it" and friends are conversational, not a memory request.
+        if !query.is_empty() && !matches!(query.to_lowercase().as_str(), "it" | "that" | "this" | "about it") {
+            return Some(ChatIntent::Forget(query));
+        }
+    }
+    None
+}
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+}
+
+/// The memories a "forget …" request most plausibly means: the best word
+/// overlap, requiring at least half of the request's distinctive words.
+pub fn forget_candidates<'a>(entries: &'a [MemoryEntry], query: &str) -> Vec<&'a MemoryEntry> {
+    let wanted = words(query);
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+    let lower = query.to_lowercase();
+    let exact: Vec<&MemoryEntry> = entries.iter().filter(|e| e.text.to_lowercase().contains(&lower)).collect();
+    if !exact.is_empty() {
+        return exact;
+    }
+    let scored: Vec<(usize, &MemoryEntry)> = entries.iter().map(|e| (overlap(&wanted, &e.text), e)).collect();
+    let best = scored.iter().map(|(s, _)| *s).max().unwrap_or(0);
+    if best == 0 || best * 2 < wanted.len() {
+        return Vec::new();
+    }
+    scored.into_iter().filter(|(s, _)| *s == best).map(|(_, e)| e).collect()
+}
+
+
 /// Format already profile-filtered memory. Production callers must use
 /// `agent_profiles::context`, which enforces ownership and explicit sharing.
 /// This layer only narrows workspace scope and applies the fixed text budget.
 pub(crate) fn for_prompt(entries: &[MemoryEntry], scope: Option<&str>) -> String {
-    let mut relevant: Vec<&MemoryEntry> = entries
+    for_prompt_about(entries, scope, None)
+}
+
+/// With `about` (the request or task goal), only memories sharing a
+/// distinctive word with it are included, plus standing facts about the user,
+/// so the past is not dragged into every request. Each line carries a tag
+/// such as [m:ab12cd] so a reply can say which memories it relied on.
+pub(crate) fn for_prompt_about(entries: &[MemoryEntry], scope: Option<&str>, about: Option<&str>) -> String {
+    let wanted = about.map(words);
+    let mut relevant: Vec<(usize, &MemoryEntry)> = entries
         .iter()
         .filter(|e| match &e.workspace_id {
             None => true,
@@ -317,17 +445,19 @@ pub(crate) fn for_prompt(entries: &[MemoryEntry], scope: Option<&str>) -> String
         })
         // Entries saved before secret refusal existed never reach a model.
         .filter(|e| sensitive(&e.text).is_none())
+        .map(|e| (wanted.as_ref().map_or(0, |w| overlap(w, &e.text)), e))
+        .filter(|(score, e)| wanted.is_none() || *score > 0 || e.kind == MemoryKind::Profile)
         .collect();
-    relevant.sort_by_key(|e| std::cmp::Reverse(e.updated_at_ms));
+    relevant.sort_by_key(|(score, e)| (std::cmp::Reverse(*score), std::cmp::Reverse(e.updated_at_ms)));
     let mut lines = Vec::new();
     let mut used = 0;
-    for e in relevant {
+    for (_, e) in relevant {
         let label = match e.kind {
             MemoryKind::Profile => "about the user",
             MemoryKind::Workspace => "this workspace",
             MemoryKind::Decision => "past decision",
         };
-        let line = format!("- ({label}) {}", e.text);
+        let line = format!("- [{}] ({label}) {}", tag(e), e.text);
         used += line.len() + 1;
         if used > PROMPT_BUDGET {
             break;
@@ -344,6 +474,54 @@ pub(crate) fn for_prompt(entries: &[MemoryEntry], scope: Option<&str>) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mem(id: &str, kind: MemoryKind, text: &str, at: i64) -> MemoryEntry {
+        let mut e = entry(kind, if kind == MemoryKind::Profile { None } else { Some("w") }, text);
+        e.id = id.into();
+        e.updated_at_ms = at;
+        e
+    }
+
+    #[test]
+    fn prompts_carry_only_relevant_memory_with_tags() {
+        let entries = vec![
+            mem("aaaaaa11", MemoryKind::Profile, "Prefers short answers", 1),
+            mem("bbbbbb22", MemoryKind::Workspace, "Invoices go in the Finance folder", 2),
+            mem("cccccc33", MemoryKind::Workspace, "Run tests with pnpm test", 3),
+            mem("dddddd44", MemoryKind::Decision, "Ruled out Redis for caching", 4),
+        ];
+        let text = for_prompt_about(&entries, Some("w"), Some("Fix the failing tests in CI"));
+        assert!(text.contains("[m:cccccc] (this workspace) Run tests"), "{text}");
+        assert!(text.contains("Prefers short answers"), "standing facts about the user always apply");
+        assert!(!text.contains("Invoices") && !text.contains("Redis"), "{text}");
+        assert!(text.find("Run tests").unwrap() < text.find("Prefers").unwrap(), "relevant first");
+        let all = for_prompt(&entries, Some("w"));
+        assert!(all.contains("Invoices") && all.contains("Redis"), "no request means no narrowing");
+        let used = resolve_tags(&entries, &["m:cccccc".into(), "[m:cccccc]".into(), "m:zzzzzz".into()]);
+        assert_eq!(used.len(), 1);
+        assert_eq!(used[0].id, "cccccc33");
+    }
+
+    #[test]
+    fn chat_memory_verbs_are_recognised_by_code() {
+        assert_eq!(chat_intent("remember that my manager is Priya."), Some(ChatIntent::Remember("My manager is Priya".into())));
+        assert_eq!(chat_intent("From now on, invoices go in Finance"), Some(ChatIntent::Remember("Invoices go in Finance".into())));
+        assert_eq!(chat_intent("What do you remember about me?"), Some(ChatIntent::List));
+        assert_eq!(chat_intent("forget that I use Redis"), Some(ChatIntent::Forget("I use Redis".into())));
+        assert_eq!(chat_intent("Forget everything"), Some(ChatIntent::ForgetEverything));
+        assert_eq!(chat_intent("forget it"), None);
+        assert_eq!(chat_intent("remember to call mom"), None, "a reminder, not a memory");
+        assert_eq!(chat_intent("Fix the remember-me checkbox"), None);
+        let entries = vec![
+            mem("aaaaaa11", MemoryKind::Profile, "Uses Redis for queues", 1),
+            mem("bbbbbb22", MemoryKind::Profile, "Uses Redis for caching", 2),
+            mem("cccccc33", MemoryKind::Profile, "Uses Postgres for storage", 3),
+        ];
+        assert_eq!(forget_candidates(&entries, "postgres").len(), 1);
+        assert_eq!(forget_candidates(&entries, "redis").len(), 2, "ambiguous: both match");
+        assert_eq!(forget_candidates(&entries, "the redis caching thing").len(), 1);
+        assert!(forget_candidates(&entries, "kubernetes").is_empty());
+    }
 
     #[test]
     fn secret_values_are_refused_but_preferences_about_them_are_kept() {
