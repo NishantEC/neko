@@ -91,7 +91,7 @@ struct ResponsibilitiesView: View {
             Avatar(role: "neko")
             VStack(alignment: .leading, spacing: 6) {
                 if message["pending"].bool {
-                    ActivityCapsule(activity: .analyzing, label: "Looking through your tools…")
+                    ActivityCapsule(activity: .analyzing, label: "Looking through your tools…", plain: true)
                 } else {
                     ReadableText(text: message["text"].string)
                 }

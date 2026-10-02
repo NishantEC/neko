@@ -344,7 +344,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if message["pending"].bool {
                     let now = ChatActivity.describe(message, model: model)
-                    ActivityCapsule(activity: now.activity, label: now.label)
+                    ActivityCapsule(activity: now.activity, label: now.label, plain: true)
                 }
                 let receipts = model.snapshot["mcp"]["receipts"].array.filter { $0["run_id"].string == "chat:\(message.recordID)" }
                 ReplySteps(calls: message["tool_calls"].array, receipts: receipts, connectionName: connectionName, workedFor: nil)
