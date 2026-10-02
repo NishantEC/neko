@@ -174,7 +174,7 @@ struct PreferencesView: View {
                                 if let reason = selected.reason ?? selected.description { Text(reason).font(.caption).foregroundStyle(.secondary) }
                             }
                         } else if agentProvider == "opencodex" {
-                            Text("This model was set up through an external proxy. Choose a provider above to move to Neko’s own runtime list.")
+                            Text("This model runs through an external proxy. Choose Claude Code or OpenCode above to run Claude and other models with their own logins instead.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         HStack {
