@@ -558,6 +558,9 @@ impl Controller {
                 .sources
                 .iter()
                 .any(|s| s.task_id.as_ref() == Some(&task.id));
+        // Your "start without asking" setting applies to chat and manual
+        // tickets only; watched sources keep their own low-risk rules.
+        let start_without_approval = snapshot.start_without_approval && !source_linked;
         let workspace = snapshot
             .workspaces
             .iter()
@@ -708,6 +711,10 @@ impl Controller {
                     "supervisor",
                     "Investigation complete. Only eligible low-risk assigned bugs can proceed under the standing responsibility; other work requires your decision.",
                 );
+                if start_without_approval {
+                    t.status = TaskStatus::Building;
+                    store::append_event(t, "supervisor", "Started without asking, as your settings allow. It works in its own copy; nothing is pushed or published.");
+                }
             })?;
         } else {
             self.update_task_authorized(&task.id, authority, |t| {

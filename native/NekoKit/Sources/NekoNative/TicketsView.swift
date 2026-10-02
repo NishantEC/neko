@@ -48,83 +48,252 @@ struct TicketsView: View {
     @ObservedObject var model: AppModel
     @State private var selected: String?
     @State private var includeStopped = true
+    @State private var dropTarget: String?
+    @State private var search = ""
+    @State private var confirmCancel: JSONValue?
+    @AppStorage("neko.work.layout") private var layout = "board"
+    @AppStorage("neko.work.open") private var openAs = "drawer"
     var sidebarHidden = false
     private var collapsed: Bool { sidebarHidden }
-    private let columns: [(title: String, icon: String, color: Color, statuses: [String])] = [
-        ("Needs approval", "circle.lefthalf.filled", NekoStyle.amber, ["AwaitingApproval", "Failed"]),
-        ("In progress", "circle.dotted", NekoStyle.accent, ["Queued", "Planning", "Building", "Reviewing"]),
-        ("Ready to review", "checkmark.circle", NekoStyle.sky, ["ReadyForReview"]),
-        ("Done", "checkmark.circle.fill", NekoStyle.mint, ["Completed", "Cancelled"])
+    struct Column { let id: String; let title: String; let color: Color; let statuses: [String] }
+    static let columns: [Column] = [
+        Column(id: "approval", title: "Needs approval", color: NekoStyle.amber, statuses: ["AwaitingApproval", "Failed"]),
+        Column(id: "working", title: "Working", color: NekoStyle.accent, statuses: ["Queued", "Planning", "Building", "Reviewing"]),
+        Column(id: "review", title: "Ready to review", color: NekoStyle.sky, statuses: ["ReadyForReview"]),
+        Column(id: "done", title: "Done", color: NekoStyle.mint, statuses: ["Completed", "Cancelled"])
     ]
+    private func tasks(in column: Column) -> [JSONValue] {
+        model.tasks.filter { task in
+            column.statuses.contains(task["status"].string)
+            && (includeStopped || !["Failed", "Cancelled"].contains(task["status"].string))
+            && (search.isEmpty || task["title"].string.localizedCaseInsensitiveContains(search))
+        }.sorted { $0["updated_at_ms"].int > $1["updated_at_ms"].int }
+    }
+    private var workspaceLabel: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
+    private var startsWithoutAsking: Bool { model.snapshot["start_without_approval"].bool }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PanelHeader(title: "Tickets", crumb: model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces") { EmptyView() }
-            HStack(spacing: 8) {
-                Button(includeStopped ? "Showing failed & cancelled" : "Hiding failed & cancelled") { includeStopped.toggle() }.controlSize(.small).glassButton()
-                if model.tasks.contains(where: { ["Completed", "Cancelled"].contains($0["status"].string) }) {
-                    Button("Clear finished") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
-                        .controlSize(.small).glassButton()
-                        .help("Removes completed and cancelled tickets from history. Failed tickets stay so you can retry them. Files and worktrees are untouched.")
+            toolbar
+            Divider().opacity(0.5)
+            if layout == "list" { list } else { board }
+        }
+        .onChange(of: model.selectedWorkspace) { _, _ in selected = nil }
+        .confirmationDialog("Cancel “\(confirmCancel?["title"].string ?? "")”?", isPresented: Binding(get: { confirmCancel != nil }, set: { if !$0 { confirmCancel = nil } })) {
+            Button("Cancel Ticket", role: .destructive) {
+                if let task = confirmCancel { run("CancelTask", task, to: Self.columns[3]) }
+                confirmCancel = nil
+            }
+            Button("Keep Working", role: .cancel) { confirmCancel = nil }
+        } message: {
+            Text("It hasn’t been reviewed yet, so moving it to Done stops the work. Its files and worktree stay on disk.")
+        }
+        .sheet(isPresented: Binding(get: { openAs == "modal" && selected != nil }, set: { if !$0 { selected = nil } })) {
+            if let selected { TicketDetail(model: model, id: selected).frame(minWidth: 720, minHeight: 640) }
+        }
+        .inspector(isPresented: Binding(get: { openAs == "drawer" && selected != nil }, set: { if !$0 { selected = nil } })) {
+            if let selected {
+                VStack(spacing: 0) {
+                    HStack(spacing: 6) {
+                        Button { openAs = "modal" } label: { Image(systemName: "rectangle.center.inset.filled") }
+                            .buttonStyle(.borderless).help("Open tickets in a window instead")
+                        Spacer()
+                        Button { self.selected = nil } label: { Image(systemName: "xmark") }
+                            .buttonStyle(.borderless).help("Close")
+                    }.padding(.horizontal, 14).frame(height: 36)
+                    TicketDetail(model: model, id: selected, close: { self.selected = nil })
                 }
-                Spacer()
-                Text("\(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")").font(.system(size: 12)).foregroundStyle(N.text4)
+                .inspectorColumnWidth(min: 420, ideal: 520, max: 760)
             }
-            // With the sidebar hidden, the traffic lights and sidebar toggle float over
-            // this row, so it steps right to clear them.
-            .padding(.leading, collapsed ? 150 : 20).padding(.trailing, 20)
-            .frame(height: 52)
-            .animation(.snappy(duration: 0.25), value: collapsed)
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 16) {
-                    ForEach(columns, id: \.title) { column in
-                        let tasks = model.tasks.filter { column.statuses.contains($0["status"].string) && (includeStopped || !["Failed", "Cancelled"].contains($0["status"].string)) }.sorted { $0["updated_at_ms"].int > $1["updated_at_ms"].int }
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 8) {
-                                PixelGlyph(activity: .forTask(column.statuses.first { $0 != "Queued" } ?? column.statuses[0]), size: 13, animated: false)
-                                Text(column.title).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text)
-                                Text(String(tasks.count)).font(.system(size: 13).monospacedDigit()).foregroundStyle(N.text4)
-                                Spacer(minLength: 0)
-                            }.padding(.horizontal, 4).frame(height: 32)
-                            .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
-                            ScrollView(.vertical) {
-                                LazyVStack(spacing: 8) {
-                                    ForEach(tasks, id: \.recordID) { task in card(task, color: column.color) }
-                                    if tasks.isEmpty {
-                                        Text("Nothing here yet").font(.system(size: 12)).foregroundStyle(N.text4).frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.08), style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
-                                    }
-                                }
-                            }.scrollIndicators(.never)
-                        }.frame(width: 264).frame(maxHeight: .infinity, alignment: .top)
-                    }
-                }.padding(.horizontal, 20).padding(.vertical, 16)
-            }.scrollIndicators(.never)
-        }.onChange(of: model.selectedWorkspace) { _, _ in selected = nil }
-            .sheet(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } })) {
-                if let selected { TicketDetail(model: model, id: selected).frame(minWidth: 680, minHeight: 620) }
-            }
+        }
     }
-    private func card(_ task: JSONValue, color: Color) -> some View {
+
+    private var toolbar: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Work").font(.system(size: 15, weight: .semibold))
+                Text("\(workspaceLabel) · \(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")\(startsWithoutAsking ? " · starts without asking" : "")")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 12)
+            TextField("Search tickets", text: $search).textFieldStyle(.roundedBorder).frame(width: 180).controlSize(.small)
+            Picker("Layout", selection: $layout) {
+                Label("List", systemImage: "list.bullet").tag("list")
+                Label("Board", systemImage: "rectangle.split.3x1").tag("board")
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .help("Show tickets as a list or as a board")
+            Picker("Open tickets", selection: $openAs) {
+                Label("Drawer", systemImage: "sidebar.right").tag("drawer")
+                Label("Window", systemImage: "rectangle.center.inset.filled").tag("modal")
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            .help("Open a ticket in a drawer beside the list, or in a window on top")
+            Menu {
+                Toggle("Start tickets without asking", isOn: Binding(get: { startsWithoutAsking }, set: { value in
+                    Task { await model.workbench(.command("SetStartWithoutApproval", ["enabled": .bool(value)])) }
+                }))
+                Text("New tickets from chat begin working once planned. Watched sources keep their own rules. Nothing is pushed without you.")
+                Divider()
+                Toggle("Show failed and cancelled", isOn: $includeStopped)
+                Button("Clear finished tickets") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
+                    .disabled(!model.tasks.contains { ["Completed", "Cancelled"].contains($0["status"].string) })
+            } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("Work options")
+        }
+        .controlSize(.small)
+        .padding(.leading, collapsed ? 150 : 20).padding(.trailing, 16)
+        .frame(height: 52)
+        .animation(.snappy(duration: 0.25), value: collapsed)
+    }
+
+    // MARK: List
+
+    private var list: some View {
+        List(selection: Binding(get: { selected }, set: { selected = $0 })) {
+            ForEach(Self.columns, id: \.id) { column in
+                let items = tasks(in: column)
+                if !items.isEmpty {
+                    Section("\(column.title) · \(items.count)") {
+                        ForEach(items, id: \.recordID) { task in listRow(task, color: column.color).tag(task.recordID) }
+                    }
+                }
+            }
+        }
+        .listStyle(.inset)
+        .scrollContentBackground(.hidden)
+        .overlay { if Self.columns.allSatisfy({ tasks(in: $0).isEmpty }) { ContentUnavailableView("No tickets", systemImage: "tray", description: Text(search.isEmpty ? "Ask Neko for work in Today, and its tickets appear here." : "No ticket matches “\(search)”.")) } }
+    }
+    private func listRow(_ task: JSONValue, color: Color) -> some View {
+        let status = task["status"].string
+        return HStack(spacing: 10) {
+            Circle().fill(ticketStatusColor(status)).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(task["title"].string).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Text("\(workspaceName(task)) · \(friendlyTaskStatus(status))").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Text(relative(task["updated_at_ms"].int)).font(.system(size: 11)).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 3)
+        .contextMenu { moveMenu(task) }
+    }
+
+    // MARK: Board
+
+    private var board: some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(Self.columns, id: \.id) { column in
+                    let items = tasks(in: column)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Circle().fill(column.color).frame(width: 8, height: 8)
+                            Text(column.title).font(.system(size: 13, weight: .semibold))
+                            Text(String(items.count)).font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                        }.padding(.horizontal, 6).frame(height: 30)
+                        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
+                        ScrollView(.vertical) {
+                            LazyVStack(spacing: 8) {
+                                ForEach(items, id: \.recordID) { task in
+                                    card(task)
+                                        .draggable(task.recordID) { card(task).frame(width: 260).opacity(0.9) }
+                                }
+                                if items.isEmpty {
+                                    Text(dropTarget == column.id ? "Drop to move here" : "Nothing here")
+                                        .font(.system(size: 12)).foregroundStyle(.tertiary).frame(maxWidth: .infinity, minHeight: 60)
+                                }
+                            }.padding(6)
+                        }.scrollIndicators(.never)
+                    }
+                    .frame(width: 280).frame(maxHeight: .infinity, alignment: .top)
+                    .background(dropTarget == column.id ? column.color.opacity(0.10) : Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(dropTarget == column.id ? column.color.opacity(0.6) : Color.white.opacity(0.05)))
+                    .dropDestination(for: String.self) { ids, _ in
+                        guard let id = ids.first else { return false }
+                        return move(id, to: column)
+                    } isTargeted: { inside in
+                        withAnimation(.snappy(duration: 0.15)) { dropTarget = inside ? column.id : (dropTarget == column.id ? nil : dropTarget) }
+                    }
+                }
+            }.padding(.horizontal, 20).padding(.vertical, 14)
+        }.scrollIndicators(.never)
+    }
+    private func card(_ task: JSONValue) -> some View {
         let index = model.workspaces.firstIndex { $0.recordID == task["workspace_id"].string } ?? 0
-        let workspace = model.workspaces.first { $0.recordID == task["workspace_id"].string }?["name"].string ?? "Workspace"
         let status = task["status"].string
         return Button { selected = task.recordID } label: {
-            TicketCard(id: "NEK-" + String(task.recordID.prefix(4)).uppercased(), title: task["title"].string, workspace: workspace, workspaceColor: workspaceColor(index), meta: friendlyTaskStatus(status), highlighted: status == "AwaitingApproval", activity: .forTask(status))
-        }.buttonStyle(.plain).accessibilityLabel("\(task["title"].string), \(workspace), \(friendlyTaskStatus(status))").accessibilityHint("Open ticket details and available actions")
-    }
-    private func emptyText(_ column: String) -> String {
-        switch column {
-        case "Needs approval": "Nothing waiting on you."
-        case "In progress": "New plans will appear here."
-        case "Ready to review": "Finished work lands here for your review."
-        default: "Completed work stays here."
+            TicketCard(id: "NEK-" + String(task.recordID.prefix(4)).uppercased(), title: task["title"].string, workspace: workspaceName(task), workspaceColor: workspaceColor(index), meta: friendlyTaskStatus(status), highlighted: selected == task.recordID, activity: .forTask(status))
         }
+        .buttonStyle(.plain)
+        .contextMenu { moveMenu(task) }
+        .accessibilityLabel("\(task["title"].string), \(workspaceName(task)), \(friendlyTaskStatus(status))")
+        .accessibilityHint("Open the ticket. Drag to another column to move it.")
+    }
+
+    // MARK: Moving tickets
+
+    /// The command a move asks for, or why the move can't happen.
+    static func moveCommand(from status: String, to column: String) -> (command: String?, reason: String?) {
+        switch (column, status) {
+        case ("working", "AwaitingApproval"): return ("ApproveTask", nil)
+        case ("working", "Failed"), ("working", "Cancelled"): return ("RetryTask", nil)
+        case ("done", "ReadyForReview"): return ("CompleteTask", nil)
+        case ("done", "AwaitingApproval"), ("done", "Queued"), ("done", "Planning"), ("done", "Building"), ("done", "Reviewing"):
+            return ("CancelTask", nil)
+        case ("approval", "Queued"), ("approval", "Planning"), ("approval", "Building"), ("approval", "Reviewing"):
+            return (nil, "Work that has started can’t go back to waiting. Cancel it, or let it finish.")
+        case ("review", _): return (nil, "Neko moves a ticket to review once its work and checks are done.")
+        case ("working", "ReadyForReview"): return (nil, "Add a note on the ticket to send it back with changes.")
+        default: return (nil, nil)
+        }
+    }
+    @discardableResult private func move(_ id: String, to column: Column) -> Bool {
+        dropTarget = nil
+        guard let task = model.tasks.first(where: { $0.recordID == id }) else { return false }
+        let status = task["status"].string
+        if column.statuses.contains(status) { return false }
+        let plan = Self.moveCommand(from: status, to: column.id)
+        if let reason = plan.reason { model.notice = reason; return false }
+        guard let command = plan.command else { return false }
+        if command == "CancelTask" { confirmCancel = task; return true }
+        run(command, task, to: column)
+        return true
+    }
+    private func run(_ command: String, _ task: JSONValue, to column: Column) {
+        let id = task.recordID
+        Task {
+            if await model.workbench(.command(command, ["task_id": .string(id)])) {
+                model.notice = command == "CancelTask" ? "Cancelled “\(task["title"].string)”. Its files and worktree stay on disk." : "Moved “\(task["title"].string)” to \(column.title)."
+            }
+        }
+    }
+    @ViewBuilder private func moveMenu(_ task: JSONValue) -> some View {
+        Button("Open") { selected = task.recordID }
+        Divider()
+        ForEach(Self.columns, id: \.id) { column in
+            let status = task["status"].string
+            let plan = Self.moveCommand(from: status, to: column.id)
+            if !column.statuses.contains(status), plan.command != nil {
+                Button(column.id == "done" && plan.command == "CancelTask" ? "Cancel Ticket" : "Move to \(column.title)") { move(task.recordID, to: column) }
+            }
+        }
+    }
+
+    private func workspaceName(_ task: JSONValue) -> String { model.workspaces.first { $0.recordID == task["workspace_id"].string }?["name"].string ?? "Workspace" }
+    private func relative(_ ms: Int) -> String {
+        guard ms > 0 else { return "" }
+        return Date(timeIntervalSince1970: Double(ms) / 1000).formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
     }
 }
 
 struct TicketDetail: View {
     @ObservedObject var model: AppModel
     let id: String
+    /// Set when shown in a drawer, where there is no sheet to dismiss.
+    var close: (() -> Void)? = nil
     @State private var note = ""
     @State private var childTicket: String?
     @State private var confirmDelete = false
@@ -167,7 +336,7 @@ struct TicketDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                HStack(alignment: .top) { Text(ticket["title"].string).font(.title.bold()); Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
+                HStack(alignment: .top) { Text(ticket["title"].string).font(.title.bold()); Spacer(); Button("Done") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction) }
                 Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary)
                 HStack {
                     switch ticket["status"].string {

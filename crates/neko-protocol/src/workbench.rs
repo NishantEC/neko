@@ -170,6 +170,10 @@ pub struct Snapshot {
     /// Only runtimes that report a price (Claude Code, OpenCode) count.
     #[serde(default)]
     pub task_budget_cents: Option<u32>,
+    /// When on, a planned chat or manual ticket starts building without
+    /// waiting for approval. Off by default. Nothing is ever published.
+    #[serde(default)]
+    pub start_without_approval: bool,
     /// Every folder in a logical workspace. Legacy workspaces use `repository`.
     #[serde(default)]
     pub workspace_folders: BTreeMap<String, Vec<String>>,
@@ -453,6 +457,9 @@ pub enum Command {
     },
     SetTaskBudget {
         cents: Option<u32>,
+    },
+    SetStartWithoutApproval {
+        enabled: bool,
     },
 }
 

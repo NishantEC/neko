@@ -672,6 +672,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             }
             snapshot.task_budget_cents = cents;
         }
+        Command::SetStartWithoutApproval { enabled } => {
+            snapshot.start_without_approval = enabled;
+        }
         Command::DecideMemoryProposal { id, accept } => {
             crate::memory_learning::decide(db, &snapshot, &id, accept)?;
             return load(db);
@@ -1155,6 +1158,9 @@ mod tests {
         assert!(within_budget(&state, &ticket.id).unwrap_err().contains("$0.50 budget ($0.55 reported)"));
         assert!(apply(&db, Command::SetTaskBudget { cents: Some(0) }).is_err());
         let state = apply(&db, Command::SetTaskBudget { cents: None }).unwrap();
+        assert!(!state.start_without_approval, "tickets wait for approval unless you opt in");
+        assert!(apply(&db, Command::SetStartWithoutApproval { enabled: true }).unwrap().start_without_approval);
+        assert!(!apply(&db, Command::SetStartWithoutApproval { enabled: false }).unwrap().start_without_approval);
         assert!(within_budget(&state, &ticket.id).is_ok());
     }
 
