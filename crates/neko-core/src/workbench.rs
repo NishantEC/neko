@@ -181,6 +181,9 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
     if matches!(command, Command::Snapshot) {
         return load(db);
     }
+    if let Command::StartTask { task_id } = command {
+        return start_task(db, task_id);
+    }
     let completed = match &command {
         Command::CompleteTask { task_id } => Some(task_id.clone()),
         _ => None,
@@ -618,6 +621,40 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 "Requested a retry from planning. Previous results and the task worktree are preserved as evidence.",
             );
         }
+        Command::StartTask { .. } => return Err("Start a ticket through the workbench".into()),
+        Command::SetTaskFolder { task_id, folder } => {
+            let task = snapshot
+                .tasks
+                .iter()
+                .find(|t| t.id == task_id)
+                .ok_or("Task no longer exists")?;
+            if task.worktree.is_some() {
+                return Err("This ticket already works in its own copy of a repository".into());
+            }
+            if !matches!(
+                task.status,
+                TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::AwaitingApproval
+            ) {
+                return Err("Choose a folder once the ticket has stopped".into());
+            }
+            let folder = canonical_repository(&folder)
+                .map_err(|_| "Choose a folder that is a Git repository")?;
+            let workspace = snapshot
+                .workspaces
+                .iter()
+                .find(|w| w.id == task.workspace_id)
+                .ok_or("Workspace no longer exists")?;
+            if !snapshot
+                .folders_for(workspace)
+                .iter()
+                .any(|root| std::path::Path::new(&folder).starts_with(root))
+            {
+                return Err("That folder isn’t in this ticket’s workspace. Add it to the workspace first.".into());
+            }
+            snapshot.task_roots.insert(task_id.clone(), folder.clone());
+            let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).unwrap();
+            append_event(task, "user", &format!("Chose {folder} for this ticket."));
+        }
         Command::SetConnectionEnabled {
             connection_id,
             enabled,
@@ -792,6 +829,7 @@ fn remove_tasks(snapshot: &mut Snapshot, ids: &[String]) {
     snapshot.splits.retain(|s| !ids.contains(&s.parent_id));
     for id in ids {
         snapshot.task_roots.remove(id);
+        snapshot.start_when_planned.remove(id);
     }
     for schedule in &mut snapshot.schedules {
         if schedule.last_task_id.as_ref().is_some_and(|id| ids.contains(id)) {
@@ -808,6 +846,114 @@ fn terminal(status: TaskStatus) -> bool {
             | TaskStatus::Failed
             | TaskStatus::Cancelled
     )
+}
+
+/// Approve a waiting plan, or retry a stopped ticket and remember to build it
+/// as soon as it is planned. Runs as two writes because the store has no
+/// nested transactions; the daemon holds its database lock across both.
+fn start_task(db: &Db, task_id: String) -> Result<Snapshot, String> {
+    let snapshot = load(db)?;
+    let status = snapshot
+        .tasks
+        .iter()
+        .find(|t| t.id == task_id)
+        .ok_or("Task no longer exists")?
+        .status;
+    match status {
+        TaskStatus::AwaitingApproval => apply(db, Command::ApproveTask { task_id }),
+        TaskStatus::Failed | TaskStatus::Cancelled => {
+            apply(db, Command::RetryTask { task_id: task_id.clone() })?;
+            let mut snapshot = load(db)?;
+            snapshot.start_when_planned.insert(task_id);
+            save(db, &snapshot)?;
+            load(db)
+        }
+        TaskStatus::Completed => Err("This ticket is already done".into()),
+        _ => Err("This ticket is already working".into()),
+    }
+}
+
+/// A Git checkout found inside a workspace folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryCandidate {
+    pub path: String,
+    /// The origin remote URL, when the checkout has one.
+    pub remote: String,
+}
+
+const SKIPPED_FOLDERS: &[&str] = &[
+    "Library", "Applications", "Movies", "Music", "Pictures", "Public", "node_modules",
+    "target", "build", "dist", "Pods", "DerivedData", "vendor", "venv",
+];
+
+/// Main Git checkouts (with a `.git` directory) inside the given folders.
+/// Bounded in depth, directories visited and results; symlinks are not followed.
+pub fn discover_repositories(folders: &[String], cancel: &std::sync::atomic::AtomicBool) -> Vec<RepositoryCandidate> {
+    const MAX_DEPTH: usize = 5;
+    const MAX_VISITED: usize = 30_000;
+    const MAX_FOUND: usize = 300;
+    let mut found = Vec::new();
+    let mut seen = HashSet::new();
+    let mut visited = 0;
+    let mut queue: std::collections::VecDeque<(std::path::PathBuf, usize)> =
+        folders.iter().map(|f| (std::path::PathBuf::from(f), 0)).collect();
+    while let Some((dir, depth)) = queue.pop_front() {
+        if visited >= MAX_VISITED || found.len() >= MAX_FOUND || cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        visited += 1;
+        let git = dir.join(".git");
+        if git.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+            if let Some(path) = dir.to_str().filter(|p| seen.insert(p.to_string())) {
+                found.push(RepositoryCandidate { path: path.to_owned(), remote: origin_url(&git.join("config")) });
+            }
+            continue;
+        }
+        if depth >= MAX_DEPTH {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let mut children: Vec<_> = entries
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| !n.starts_with('.') && !SKIPPED_FOLDERS.contains(&n))
+            })
+            .collect();
+        children.sort();
+        queue.extend(children.into_iter().map(|p| (p, depth + 1)));
+    }
+    found
+}
+
+fn origin_url(config: &std::path::Path) -> String {
+    let Ok(text) = std::fs::read_to_string(config) else { return String::new() };
+    let mut in_origin = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_origin = line == "[remote \"origin\"]";
+        } else if in_origin {
+            if let Some(url) = line.strip_prefix("url").map(str::trim_start).and_then(|l| l.strip_prefix('=')) {
+                return url.trim().to_owned();
+            }
+        }
+    }
+    String::new()
+}
+
+/// The one repository whose folder or remote name appears in the ticket text.
+pub fn repository_named_in(candidates: &[RepositoryCandidate], title: &str, goal: &str) -> Option<String> {
+    let text = format!("{title} {goal}").to_lowercase();
+    let mut matches = candidates.iter().filter(|c| {
+        let folder = std::path::Path::new(&c.path).file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let remote = c.remote.trim_end_matches('/').trim_end_matches(".git").rsplit(['/', ':']).next().unwrap_or("");
+        [folder, remote].iter().any(|name| name.len() >= 4 && text.contains(&name.to_lowercase()))
+    });
+    let first = matches.next()?;
+    matches.next().is_none().then(|| first.path.clone())
 }
 
 fn route_folder(
@@ -1207,6 +1353,70 @@ mod tests {
         assert_eq!(survivor.status, TaskStatus::Cancelled);
         assert!(survivor.events.last().unwrap().message.contains("Stop all work"));
         assert!(repo.path().exists(), "files are never touched");
+    }
+
+    #[test]
+    fn starting_a_stopped_ticket_retries_it_and_builds_once_planned() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let stopped = task(&db, &ws);
+        let waiting = task(&db, &ws);
+        let mut state = load(&db).unwrap();
+        for t in &mut state.tasks {
+            t.status = if t.id == stopped.id { TaskStatus::Failed } else { TaskStatus::AwaitingApproval };
+        }
+        save(&db, &state).unwrap();
+
+        let state = apply(&db, Command::StartTask { task_id: stopped.id.clone() }).unwrap();
+        assert_eq!(state.tasks.iter().find(|t| t.id == stopped.id).unwrap().status, TaskStatus::Queued);
+        assert!(state.start_when_planned.contains(&stopped.id));
+        let state = apply(&db, Command::StartTask { task_id: waiting.id.clone() }).unwrap();
+        assert_eq!(state.tasks.iter().find(|t| t.id == waiting.id).unwrap().status, TaskStatus::Building);
+        assert!(!state.start_when_planned.contains(&waiting.id), "an approved plan needs no flag");
+        assert!(apply(&db, Command::StartTask { task_id: waiting.id.clone() }).unwrap_err().contains("already working"));
+    }
+
+    #[test]
+    fn a_stopped_ticket_can_be_pointed_at_a_repository_in_its_workspace() {
+        let db = Db::open_in_memory().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let repo = home.path().join("app");
+        std::fs::create_dir(&repo).unwrap();
+        assert!(std::process::Command::new("git").arg("init").arg("-q").arg(&repo).status().unwrap().success());
+        let ws = workspace(&db, repo.as_path());
+        let mut state = load(&db).unwrap();
+        state.workspaces[0].repository = home.path().canonicalize().unwrap().to_string_lossy().into();
+        state.workspace_folders.insert(ws.id.clone(), vec![state.workspaces[0].repository.clone()]);
+        let t = create_task(ws.id.clone(), None, "Fix login".into(), "Login fails".into()).unwrap();
+        let id = t.id.clone();
+        state.tasks.push(Task { status: TaskStatus::Failed, ..t });
+        save(&db, &state).unwrap();
+
+        let outside = repository();
+        assert!(apply(&db, Command::SetTaskFolder { task_id: id.clone(), folder: outside.path().to_string_lossy().into() })
+            .unwrap_err().contains("isn’t in this ticket’s workspace"));
+        assert!(apply(&db, Command::SetTaskFolder { task_id: id.clone(), folder: home.path().to_string_lossy().into() })
+            .unwrap_err().contains("Git repository"));
+        let state = apply(&db, Command::SetTaskFolder { task_id: id.clone(), folder: repo.to_string_lossy().into() }).unwrap();
+        assert_eq!(state.task_roots[&id], repo.canonicalize().unwrap().to_string_lossy());
+    }
+
+    #[test]
+    fn repositories_are_found_inside_workspace_folders_and_matched_by_name() {
+        let home = tempfile::tempdir().unwrap();
+        for path in ["Documents/webfrontend", "Documents/hme/athena", "Library/cache-repo", "Documents/webfrontend/nested"] {
+            std::fs::create_dir_all(home.path().join(path).join(".git")).unwrap();
+        }
+        std::fs::write(home.path().join("Documents/hme/athena/.git/config"), "[core]\n[remote \"origin\"]\n\turl = git@github.com:acme/diagnostics.git\n").unwrap();
+        let found = discover_repositories(&[home.path().to_string_lossy().into()], &std::sync::atomic::AtomicBool::new(false));
+        let paths: Vec<_> = found.iter().map(|c| c.path.rsplit('/').next().unwrap().to_owned()).collect();
+        assert_eq!(paths, ["webfrontend", "athena"], "shallow first; skips Library and does not descend into a checkout");
+        assert_eq!(found[1].remote, "git@github.com:acme/diagnostics.git");
+        let pick = |title: &str| repository_named_in(&found, title, "").map(|p| p.rsplit('/').next().unwrap().to_owned());
+        assert_eq!(pick("Error on GET /web/login in webfrontend-ssr").as_deref(), Some("webfrontend"));
+        assert_eq!(pick("Diagnostics booking fails").as_deref(), Some("athena"), "remote name counts");
+        assert_eq!(pick("Something vague"), None);
     }
 
     #[test]

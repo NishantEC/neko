@@ -78,7 +78,7 @@ struct TicketInspector: View {
             switch status {
             case "AwaitingApproval": wide("Approve Plan", "ApproveTask", prominent: true)
             case "ReadyForReview": wide("Mark Complete", "CompleteTask", prominent: true)
-            case "Failed", "Cancelled": wide("Retry", "RetryTask", prominent: true)
+            case "Failed", "Cancelled": wide("Start again", "StartTask", prominent: true)
             default: EmptyView()
             }
             HStack(spacing: 8) {
@@ -127,4 +127,3 @@ struct TicketInspector: View {
         loadedFor = id
     }
 }
-
