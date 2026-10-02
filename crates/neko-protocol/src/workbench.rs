@@ -1,6 +1,6 @@
 //! Neko-owned work. Credentials are write-only and never returned in snapshots.
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Secret(pub String);
@@ -174,6 +174,10 @@ pub struct Snapshot {
     /// waiting for approval. Off by default. Nothing is ever published.
     #[serde(default)]
     pub start_without_approval: bool,
+    /// Tickets you started by hand (for example by dropping them on Working).
+    /// Once planned they build without asking again.
+    #[serde(default)]
+    pub start_when_planned: BTreeSet<String>,
     /// Every folder in a logical workspace. Legacy workspaces use `repository`.
     #[serde(default)]
     pub workspace_folders: BTreeMap<String, Vec<String>>,
@@ -408,6 +412,16 @@ pub enum Command {
     },
     RetryTask {
         task_id: String,
+    },
+    /// Start a ticket as if you dropped it on Working: approve a waiting plan,
+    /// or retry a stopped ticket and build as soon as it is planned.
+    StartTask {
+        task_id: String,
+    },
+    /// Choose the repository a ticket works in, before it has a worktree.
+    SetTaskFolder {
+        task_id: String,
+        folder: String,
     },
     CompleteTask {
         task_id: String,

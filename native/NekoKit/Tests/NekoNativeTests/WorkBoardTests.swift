@@ -3,8 +3,9 @@ import XCTest
 
 final class WorkBoardTests: XCTestCase {
     func testDraggingAcrossColumnsMapsToTheRealTicketCommand() {
-        XCTAssertEqual(TicketsView.moveCommand(from: "AwaitingApproval", to: "working").command, "ApproveTask")
-        XCTAssertEqual(TicketsView.moveCommand(from: "Failed", to: "working").command, "RetryTask")
+        // Dropping on Working starts the ticket: approve, or retry and build once planned.
+        XCTAssertEqual(TicketsView.moveCommand(from: "AwaitingApproval", to: "working").command, "StartTask")
+        XCTAssertEqual(TicketsView.moveCommand(from: "Failed", to: "working").command, "StartTask")
         XCTAssertEqual(TicketsView.moveCommand(from: "ReadyForReview", to: "done").command, "CompleteTask")
         // Running work dropped on Done is a cancel, which the board confirms first.
         XCTAssertEqual(TicketsView.moveCommand(from: "Building", to: "done").command, "CancelTask")

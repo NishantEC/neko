@@ -2,6 +2,15 @@ import SwiftUI
 import NekoKit
 
 enum TicketPresentation {
+    /// The newest daemon message on a stopped ticket, in one readable line.
+    static func stopReason(_ task: JSONValue) -> String {
+        let message = task["events"].array.reversed().first { !["user", "note"].contains($0["role"].string) }?["message"].string ?? ""
+        let line = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.contains("not a git repository") {
+            return "This ticket isn’t linked to a Git repository yet, so Neko couldn’t make its working copy."
+        }
+        return line.isEmpty ? "Neko stopped without a reason. Start it again to retry." : String(line.prefix(400))
+    }
     struct Review: Decodable {
         let passed: Bool
         let findings: [String]
@@ -229,8 +238,7 @@ struct TicketsView: View {
     /// The command a move asks for, or why the move can't happen.
     static func moveCommand(from status: String, to column: String) -> (command: String?, reason: String?) {
         switch (column, status) {
-        case ("working", "AwaitingApproval"): return ("ApproveTask", nil)
-        case ("working", "Failed"), ("working", "Cancelled"): return ("RetryTask", nil)
+        case ("working", "AwaitingApproval"), ("working", "Failed"), ("working", "Cancelled"): return ("StartTask", nil)
         case ("done", "ReadyForReview"): return ("CompleteTask", nil)
         case ("done", "AwaitingApproval"), ("done", "Queued"), ("done", "Planning"), ("done", "Building"), ("done", "Reviewing"):
             return ("CancelTask", nil)
@@ -255,9 +263,32 @@ struct TicketsView: View {
     }
     private func run(_ command: String, _ task: JSONValue, to column: Column) {
         let id = task.recordID
+        let title = task["title"].string
         Task {
             if await model.workbench(.command(command, ["task_id": .string(id)])) {
-                model.notice = command == "CancelTask" ? "Cancelled “\(task["title"].string)”. Its files and worktree stay on disk." : "Moved “\(task["title"].string)” to \(column.title)."
+                switch command {
+                case "CancelTask": model.notice = "Cancelled “\(title)”. Its files and worktree stay on disk."
+                case "StartTask":
+                    model.notice = "Started “\(title)”. Neko finds its repository, plans, then builds."
+                    await reportIfItStops(id, title: title)
+                default: model.notice = "Moved “\(title)” to \(column.title)."
+                }
+            }
+        }
+    }
+    /// A started ticket that fails within a few seconds would otherwise just
+    /// jump back to its old column. Say why instead.
+    private func reportIfItStops(_ id: String, title: String) async {
+        for _ in 0..<30 {
+            try? await Task.sleep(for: .seconds(1))
+            guard let task = model.tasks.first(where: { $0.recordID == id }) else { return }
+            switch task["status"].string {
+            case "Failed":
+                model.notice = "“\(title)” stopped: \(TicketPresentation.stopReason(task))"
+                selected = id
+                return
+            case "Building", "Reviewing", "ReadyForReview", "Completed": return
+            default: continue
             }
         }
     }
@@ -333,13 +364,14 @@ struct TicketDetail: View {
                     Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
                 }
                 Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary)
+                if ticket["status"].string == "Failed" { stoppedCallout }
                 HStack {
                     switch ticket["status"].string {
                     case "AwaitingApproval":
                         action("Approve plan", "ApproveTask")
                         if TicketPresentation.canProposeSplit(ticket, splits: model.snapshot["splits"].array) { action("Propose parallel work", "ProposeSplit") }
                     case "ReadyForReview": action("Mark complete", "CompleteTask")
-                    case "Failed", "Cancelled": action("Retry", "RetryTask")
+                    case "Failed", "Cancelled": action("Start again", "StartTask")
                     default: EmptyView()
                     }
                     if !["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { action("Cancel task", "CancelTask") }
@@ -419,6 +451,38 @@ struct TicketDetail: View {
             .onChange(of: id) { _, _ in note = ""; childTicket = nil }
     }
     private func action(_ label: String, _ command: String) -> some View { Button(label) { Task { await model.workbench(.command(command, ["task_id": .string(id)])) } } }
+    private var stoppedCallout: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Why it stopped", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(NekoStyle.amber)
+            Text(TicketPresentation.stopReason(ticket)).textSelection(.enabled)
+            if ticket["worktree"].string.isEmpty {
+                HStack {
+                    Button("Choose folder…") { chooseFolder() }
+                    Text("Pick the repository this ticket is about, then Neko starts it.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(NekoStyle.amber.opacity(0.25)))
+    }
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use This Folder"
+        panel.message = "Choose the Git repository for “\(ticket["title"].string)”."
+        if let root = model.snapshot["workspace_folders"][ticket["workspace_id"].string].array.first?.string { panel.directoryURL = URL(fileURLWithPath: root) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            guard await model.workbench(.command("SetTaskFolder", ["task_id": .string(id), "folder": .string(url.path)])) else { return }
+            if await model.workbench(.command("StartTask", ["task_id": .string(id)])) {
+                model.notice = "Started “\(ticket["title"].string)” in \(url.lastPathComponent)."
+            }
+        }
+    }
     private func eventView(_ event: JSONValue) -> some View {
         let message = event["message"].string
         let prefix = "VERIFICATION_COMMAND "
