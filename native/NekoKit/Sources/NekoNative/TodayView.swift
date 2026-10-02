@@ -94,7 +94,7 @@ struct TodayView: View {
     @State private var ticket: String?
     @State private var addingWorkspace = false
     @State private var composerHeight: CGFloat = 0
-    @State private var availableModels: [AgentModel] = []
+    @State private var catalog = ModelCatalog()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.nekoLook) private var look
     private var workspaceName: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
@@ -197,7 +197,7 @@ struct TodayView: View {
         }
         }
         }.animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: messages.count)
-        .task { availableModels = await AgentModelCatalog.load() }
+        .task { catalog = await AgentModelCatalog.load(model) }
         .sheet(isPresented: Binding(get: { ticket != nil }, set: { if !$0 { ticket = nil } })) {
             if let id = ticket { VStack { HStack { Spacer(); Button("Done") { ticket = nil }.keyboardShortcut(.cancelAction) }.padding(); TicketDetail(model: model, id: id) }.frame(minWidth: 650, minHeight: 600) }
         }.sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
@@ -234,26 +234,24 @@ struct TodayView: View {
                 .help("Attach images or files; you can also paste or drop them")
                 .accessibilityLabel("Attach images or files")
                 Menu {
-                    Menu("OpenAI") {
-                        Button("Default model") { selectRuntime("codex") }
-                        ForEach(availableModels.filter(\.native)) { entry in
-                            Button(entry.model) { selectRuntime("codex", model: entry.model) }
-                        }
-                    }
-                    Button("Ollama · local") { selectRuntime("ollama") }
-                    Button("LM Studio · local") { selectRuntime("lmstudio") }
-                    if availableModels.contains(where: { !$0.native }) {
-                        Divider()
-                        ForEach(Array(Set(availableModels.filter { !$0.native }.map(\.provider))).sorted(), id: \.self) { provider in
-                            Menu(provider.capitalized) {
-                                ForEach(availableModels.filter { !$0.native && $0.provider == provider }) { entry in
-                                    Button(entry.model) { selectRuntime("opencodex", model: entry.id) }
+                    ForEach(catalog.sources) { source in
+                        Section(source.connection) {
+                            if source.ready {
+                                Button(source.defaultTitle) {
+                                    selectRuntime(source.provider)
                                 }
+                                ForEach(source.models) { entry in
+                                    Button(menuTitle(entry)) { selectRuntime(source.provider, model: entry.id) }
+                                        .disabled(!entry.usable)
+                                        .help(entry.reason ?? entry.description ?? "")
+                                }
+                            } else if let note = source.note {
+                                Text(note)
                             }
                         }
                     }
                     Button("Refresh models") {
-                        Task { availableModels = await AgentModelCatalog.load() }
+                        Task { catalog = await AgentModelCatalog.load(model, refresh: true) }
                     }
                     Divider()
                     Button("Model settings…") { NotificationCenter.default.post(name: .nekoNavigate, object: "Settings") }
@@ -303,13 +301,16 @@ struct TodayView: View {
 
     private var runtimeLabel: String {
         let runtime = model.snapshot["agent_runtime"]
-        let provider = runtime["provider"].string
-        let name = provider == "ollama" ? "Ollama" : provider == "lmstudio" ? "LM Studio" : provider == "opencodex" ? "Connected model" : "Codex"
-        let selectedModel = runtime["model"].string
-        if provider == "opencodex", let slash = selectedModel.firstIndex(of: "/") {
-            return "\(selectedModel[..<slash].capitalized) · \(selectedModel[selectedModel.index(after: slash)...])"
-        }
-        return selectedModel.isEmpty ? name : "\(name) · \(selectedModel)"
+        return AgentModelCatalog.label(provider: runtime["provider"].string, model: runtime["model"].string, catalog: catalog)
+    }
+
+    private func menuTitle(_ entry: CatalogModel) -> String {
+        let selected = model.snapshot["agent_runtime"]["model"].string == entry.id
+        var title = (selected ? "✓ " : "") + entry.label
+        if entry.recommended { title += " · Recommended" }
+        if entry.access == .checked { title += " · Checked" }
+        if !entry.usable { title += " · Unavailable" }
+        return title
     }
 
     private func selectRuntime(_ provider: String, model selectedModel: String = "") {

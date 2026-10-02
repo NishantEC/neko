@@ -91,7 +91,11 @@ struct PreferencesView: View {
     @State private var clipboard = ClipboardConsentState()
     @State private var agentProvider = "codex"
     @State private var agentModel = ""
-    @State private var availableModels: [AgentModel] = []
+    @State private var catalog = ModelCatalog()
+    @State private var customModel = ""
+    @State private var checking = false
+    @State private var check: ModelCheckResult?
+    @State private var refreshingModels = false
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Settings").font(.system(size: 24, weight: .semibold))
@@ -106,36 +110,60 @@ struct PreferencesView: View {
                 }.padding().tabItem { Label("General", systemImage: "gearshape") }
                 Form {
                     Section("Agent runtime") {
-                        Picker("Provider", selection: $agentProvider) {
-                            Text("Codex account").tag("codex")
-                            Text("Ollama (local)").tag("ollama")
-                            Text("LM Studio (local)").tag("lmstudio")
-                            ForEach(Array(Set(availableModels.filter { !$0.native }.map(\.provider))).sorted(), id: \.self) { provider in
-                                Text(provider.capitalized).tag("opencodex:\(provider)")
+                        Picker("Runs with", selection: $agentProvider) {
+                            ForEach(catalog.sources.isEmpty ? [] : catalog.sources) { source in
+                                Text(source.label).tag(source.provider)
                             }
+                            if catalog.sources.isEmpty { Text("Codex").tag("codex") }
+                            if agentProvider == "opencodex" { Text("Connected model (legacy)").tag("opencodex") }
                         }
-                        .onChange(of: agentProvider) { _, selected in
-                            guard selected.hasPrefix("opencodex:"),
-                                  !availableModels.contains(where: { $0.id == agentModel && "opencodex:\($0.provider)" == selected }) else { return }
-                            agentModel = availableModels.first(where: { "opencodex:\($0.provider)" == selected })?.id ?? ""
-                        }
-                        if agentProvider.hasPrefix("opencodex:") {
+                        .onChange(of: agentProvider) { _, _ in check = nil; if model.snapshot["agent_runtime"]["provider"].string != agentProvider { agentModel = ""; customModel = "" } }
+                        if let source = catalog.source(agentProvider) {
+                            LabeledContent("Connection") {
+                                Label(source.connection, systemImage: source.ready ? "checkmark.circle" : "exclamationmark.circle")
+                                    .foregroundStyle(source.ready ? Color.secondary : NekoStyle.amber)
+                            }
+                            if let note = source.note { Text(note).font(.caption).foregroundStyle(.secondary) }
                             Picker("Model", selection: $agentModel) {
-                                ForEach(availableModels.filter { "opencodex:\($0.provider)" == agentProvider }) { entry in
-                                    Text(entry.model).tag(entry.id)
+                                Text(source.defaultTitle).tag("")
+                                ForEach(source.models) { entry in
+                                    Text(pickerTitle(entry)).tag(entry.id)
+                                }
+                                if !agentModel.isEmpty, !source.models.contains(where: { $0.id == agentModel }) {
+                                    Text(agentModel).tag(agentModel)
                                 }
                             }
-                            if !availableModels.contains(where: { $0.id == agentModel }) {
-                                Text("This model is not currently available. Choose another model or check its connection.").foregroundStyle(.secondary)
+                            .onChange(of: agentModel) { _, _ in check = nil }
+                            if let selected = catalog.model(agentProvider, agentModel) {
+                                if let reason = selected.reason ?? selected.description { Text(reason).font(.caption).foregroundStyle(.secondary) }
                             }
-                        } else {
-                            TextField("Model (provider default if empty)", text: $agentModel)
-                                .textFieldStyle(.roundedBorder)
+                        } else if agentProvider == "opencodex" {
+                            Text("This model was set up through an external proxy. Choose a provider above to move to Neko’s own runtime list.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
-                        Text("New Neko conversations, tasks, and background checks use this model. Changing it does not interrupt work already in progress.")
+                        HStack {
+                            TextField("Or enter an exact model ID", text: $customModel)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Use ID") { agentModel = customModel.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                .disabled(!validModelID(customModel.trimmingCharacters(in: .whitespacesAndNewlines)))
+                        }
+                        HStack {
+                            Button(checking ? "Checking…" : "Check & use model") { checkAndUse() }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(checking || pending || selectedUnavailable)
+                            Button("Use without checking") { saveAgentRuntime() }
+                                .disabled(checking || pending || selectedUnavailable)
+                            Spacer()
+                            Button(refreshingModels ? "Refreshing…" : "Refresh models") { refreshModels() }
+                                .disabled(refreshingModels)
+                        }
+                        if let check {
+                            Label(check.message, systemImage: check.ok ? "checkmark.circle.fill" : "xmark.circle")
+                                .foregroundStyle(check.ok ? Color.green : (check.unavailable ? NekoStyle.amber : Color.red))
+                                .font(.callout)
+                        }
+                        Text("Checking sends one short reply through the same runner tasks use, so it may use quota. A failed check keeps your current model. New conversations, tasks and background checks use the saved model; work already running is not interrupted.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Button("Save agent runtime") { saveAgentRuntime() }
-                            .disabled(agentModel.count > 120 || pending || (agentProvider.hasPrefix("opencodex:") && !availableModels.contains { $0.id == agentModel && "opencodex:\($0.provider)" == agentProvider }))
                     }
                 }.padding().tabItem { Label("AI", systemImage: "cpu") }
                 VStack(alignment: .leading) {
@@ -145,6 +173,8 @@ struct PreferencesView: View {
                     }
                     HStack { TextField("Folder path", text: $path); Button("Choose…") { choose() }; Button("Add") { activate("folder-scope", path, action: "add") }.disabled(path.trimmingCharacters(in: .whitespaces).isEmpty) }
                 }.padding().tabItem { Label("Search", systemImage: "magnifyingglass") }
+                PermissionsView(model: model)
+                    .tabItem { Label("Permissions", systemImage: "lock.shield") }
                 Form {
                     Text(agents.isEmpty ? "No agent provider is turned on." : "\(agents.count) agents visible from the configured provider.")
                     preferenceToggle("Show agents", "agents-enabled")
@@ -165,7 +195,7 @@ struct PreferencesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await load()
-            availableModels = await AgentModelCatalog.load()
+            catalog = await AgentModelCatalog.load(model)
         }
     }
     private func preferenceToggle(_ title: String, _ id: String) -> some View {
@@ -175,9 +205,6 @@ struct PreferencesView: View {
         let runtime = model.snapshot["agent_runtime"]
         agentProvider = runtime["provider"].string.isEmpty ? "codex" : runtime["provider"].string
         agentModel = runtime["model"].string
-        if agentProvider == "opencodex", let slash = agentModel.firstIndex(of: "/") {
-            agentProvider = "opencodex:\(agentModel[..<slash])"
-        }
         await loadClipboard()
         do {
             settings = try await search("preference")
@@ -191,9 +218,41 @@ struct PreferencesView: View {
         pending = true
         Task {
             _ = await model.workbench(.command("SetAgentRuntime", ["runtime": .object([
-                "provider": .string(agentProvider.hasPrefix("opencodex:") ? "opencodex" : agentProvider), "model": .string(agentModel.trimmingCharacters(in: .whitespacesAndNewlines))
+                "provider": .string(agentProvider), "model": .string(agentModel.trimmingCharacters(in: .whitespacesAndNewlines))
             ])]))
             pending = false
+        }
+    }
+    private var selectedUnavailable: Bool {
+        catalog.source(agentProvider).map { !$0.ready } ?? false
+            || catalog.model(agentProvider, agentModel).map { !$0.usable } ?? false
+    }
+    private func pickerTitle(_ entry: CatalogModel) -> String {
+        var title = entry.label
+        if entry.recommended { title += " · Recommended" }
+        if entry.access == .checked { title += " · Checked" }
+        if !entry.usable { title += " · Unavailable" }
+        return title
+    }
+    private func validModelID(_ id: String) -> Bool {
+        !id.isEmpty && id.count <= 120 && !id.hasPrefix("-")
+            && id.unicodeScalars.allSatisfy { ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || ".-_:/@[]".unicodeScalars.contains($0) }
+    }
+    private func checkAndUse() {
+        checking = true
+        check = nil
+        let provider = agentProvider, id = agentModel
+        Task {
+            check = await AgentModelCatalog.check(model, provider: provider, id: id, save: true)
+            catalog = await AgentModelCatalog.load(model)
+            checking = false
+        }
+    }
+    private func refreshModels() {
+        refreshingModels = true
+        Task {
+            catalog = await AgentModelCatalog.load(model, refresh: true)
+            refreshingModels = false
         }
     }
     private func search(_ provider: String) async throws -> [JSONValue] {

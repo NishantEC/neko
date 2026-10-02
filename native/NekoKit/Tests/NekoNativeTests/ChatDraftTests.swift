@@ -25,13 +25,21 @@ final class ChatDraftTests: XCTestCase {
         XCTAssertTrue(composer.contains(".frame(width: cardWidth - 36)"))
     }
 
-    func testModelCatalogKeepsOnlyEnabledModels() throws {
-        let data = Data(#"[{"provider":"xai","id":"grok-4.5","namespaced":"xai/grok-4.5","disabled":false},{"provider":"anthropic","id":"claude-sonnet-5","namespaced":"anthropic/claude-sonnet-5","disabled":false},{"provider":"openai","id":"gpt-5.6-terra","namespaced":"gpt-5.6-terra","native":true,"disabled":false},{"provider":"xai","id":"grok-old","namespaced":"xai/grok-old","disabled":true},{"provider":"xai","id":"grok-4.5","namespaced":"xai/grok-4.5","disabled":false}]"#.utf8)
-        XCTAssertEqual(AgentModelCatalog.parse(data), [
-            AgentModel(provider: "anthropic", model: "claude-sonnet-5"),
-            AgentModel(provider: "openai", model: "gpt-5.6-terra", native: true),
-            AgentModel(provider: "xai", model: "grok-4.5")
-        ])
+    func testProtectedFoldersListOnlyWorkspacesMacOSGuards() {
+        let found = PermissionCatalog.protectedFolders(["/Users/a/Documents/neko", "/Users/a/Documents/x", "/Users/a/Code/y", "/Users/a/DesktopStuff", "/Users/a/Library/Mobile Documents/z"], home: "/Users/a")
+        XCTAssertEqual(found.map(\.folder), ["Documents", "iCloud Drive"])
+        XCTAssertEqual(found[0].workspaces.count, 2)
+    }
+
+    func testModelCatalogParsesDaemonSources() throws {
+        let data = Data(#"{"sources":[{"provider":"codex","label":"Codex","connection":"ChatGPT · Pro","status":"ready","default_model":"gpt-a","models":[{"id":"gpt-a","label":"GPT A","recommended":true,"access":"listed","reasoning_efforts":["low"]},{"id":"gpt-b","label":"GPT B","access":"unavailable","reason":"No plan"}]},{"provider":"ollama","label":"Ollama","connection":"Ollama · not running","status":"not_running","note":"Start it"},{"provider":"","status":"ready"}],"read_at_ms":1}"#.utf8)
+        let catalog = ModelCatalog.parse(try JSONDecoder().decode(JSONValue.self, from: data))
+        XCTAssertEqual(catalog.sources.map(\.provider), ["codex", "ollama"])
+        XCTAssertEqual(catalog.source("")?.defaultModel, "gpt-a")
+        XCTAssertTrue(catalog.model("codex", "gpt-a")?.recommended == true)
+        XCTAssertEqual(catalog.model("codex", "gpt-b")?.usable, false)
+        XCTAssertEqual(catalog.source("ollama")?.status, .notRunning)
+        XCTAssertEqual(AgentModelCatalog.label(provider: "codex", model: "gpt-a", catalog: catalog), "Codex · GPT A")
     }
 
     func testTodayComposerHasNoFocusHighlight() throws {
