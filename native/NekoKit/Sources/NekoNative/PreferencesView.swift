@@ -172,7 +172,7 @@ struct PreferencesView: View {
                     Toggle("Clipboard history", isOn: Binding(get: { clipboard.enabled ?? false }, set: { value in setClipboard(value) })).disabled(clipboard.enabled == nil)
                     Text("Saves copied content locally. Turning this off stops new capture; existing history remains.").font(.caption).foregroundStyle(.secondary)
                     if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
-                }.padding().tabItem { Label("General", systemImage: "gearshape") }
+                }.formStyle(.grouped).tabItem { Label("General", systemImage: "gearshape") }
                 Form {
                     Section("Agent runtime") {
                         Picker("Runs with", selection: $agentProvider) {
@@ -281,7 +281,7 @@ struct PreferencesView: View {
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled).padding() }
         }
         .frame(maxWidth: 860, maxHeight: .infinity)
-        .padding(.horizontal, 28).padding(.bottom, 20)
+        .padding(.horizontal, 28).padding(.top, 36).padding(.bottom, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await load()
