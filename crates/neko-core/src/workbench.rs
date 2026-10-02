@@ -7,6 +7,8 @@ use neko_protocol::workbench::{
 use std::collections::HashSet;
 
 const SETTING: &str = "workbench_snapshot_v1";
+const RESUMED: &str = "Resumed after a daemon restart";
+const MAX_RESTART_RESUMES: usize = 2;
 pub const MAX_CONTENT_BYTES: usize = 32_768;
 pub const MAX_EVENT_BYTES: usize = 2048;
 pub const MAX_RESULT_BYTES: usize = 132 * 1024;
@@ -628,7 +630,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 .iter()
                 .find(|t| t.id == task_id)
                 .ok_or("Task no longer exists")?;
-            if task.worktree.is_some() {
+            // A stopped ticket may move to another repository; its old working
+            // copy stays on disk as evidence. A waiting plan keeps its copy.
+            if task.worktree.is_some() && task.status == TaskStatus::AwaitingApproval {
                 return Err("This ticket already works in its own copy of a repository".into());
             }
             if !matches!(
@@ -653,7 +657,12 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             }
             snapshot.task_roots.insert(task_id.clone(), folder.clone());
             let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).unwrap();
-            append_event(task, "user", &format!("Chose {folder} for this ticket."));
+            match task.worktree.take() {
+                Some(old) => append_event(task, "user", &format!("Chose {folder} for this ticket. The previous working copy stays at {old}.")),
+                None => append_event(task, "user", &format!("Chose {folder} for this ticket.")),
+            }
+            task.plan.clear();
+            task.supervision = None;
         }
         Command::SetConnectionEnabled {
             connection_id,
@@ -767,7 +776,10 @@ pub fn append_event(task: &mut Task, role: &str, message: &str) {
     task.updated_at_ms = at_ms;
 }
 
-/// A restarted daemon cannot promise that an interrupted child completed work.
+/// A restarted daemon cannot promise that an interrupted child completed work,
+/// so interrupted work runs again from a safe point: planning re-plans
+/// read-only, building and review rebuild in the preserved task worktree.
+/// After `MAX_RESTART_RESUMES` such resumes the ticket stops for a person.
 /// Queued work and explicit approval waits retain their original state.
 pub fn recover_interrupted(db: &Db) -> Result<Snapshot, String> {
     let mut snapshot = load(db)?;
@@ -777,8 +789,20 @@ pub fn recover_interrupted(db: &Db) -> Result<Snapshot, String> {
             task.status,
             TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing
         ) {
+            let resumes = task.events.iter().filter(|e| e.message.starts_with(RESUMED)).count();
+            if resumes < MAX_RESTART_RESUMES {
+                let (status, step) = if task.status == TaskStatus::Planning {
+                    (TaskStatus::Queued, "planning")
+                } else {
+                    (TaskStatus::Building, "building in the same worktree")
+                };
+                task.status = status;
+                append_event(task, "system", &format!("{RESUMED}: {step} again."));
+                changed = true;
+                continue;
+            }
             task.status = TaskStatus::Failed;
-            let message = "Interrupted by a daemon restart. Inspect any existing worktree before starting another task.";
+            let message = "Interrupted by a daemon restart again after resuming twice. Inspect the worktree, then start it again.";
             if task.result.is_empty() {
                 task.result = message.into();
             }
@@ -879,6 +903,8 @@ pub struct RepositoryCandidate {
     pub path: String,
     /// The origin remote URL, when the checkout has one.
     pub remote: String,
+    /// The `name` in its top-level package.json, when it has one.
+    pub package: String,
 }
 
 const SKIPPED_FOLDERS: &[&str] = &[
@@ -905,7 +931,7 @@ pub fn discover_repositories(folders: &[String], cancel: &std::sync::atomic::Ato
         let git = dir.join(".git");
         if git.symlink_metadata().is_ok_and(|m| m.is_dir()) {
             if let Some(path) = dir.to_str().filter(|p| seen.insert(p.to_string())) {
-                found.push(RepositoryCandidate { path: path.to_owned(), remote: origin_url(&git.join("config")) });
+                found.push(RepositoryCandidate { path: path.to_owned(), remote: origin_url(&git.join("config")), package: package_name(&dir) });
             }
             continue;
         }
@@ -944,13 +970,42 @@ fn origin_url(config: &std::path::Path) -> String {
     String::new()
 }
 
-/// The one repository whose folder or remote name appears in the ticket text.
+fn package_name(dir: &std::path::Path) -> String {
+    std::fs::read(dir.join("package.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// Names too generic to identify a repository from ticket text.
+const GENERIC_NAMES: &[&str] = &[
+    "init", "app", "apps", "web", "main", "repo", "test", "tests", "code", "site", "src", "core",
+    "api", "server", "client", "frontend", "backend", "project", "demo", "docs", "data", "tools",
+];
+
+/// Lowercase words separated by single spaces, padded so ` word ` matches whole words only.
+fn words(text: &str) -> String {
+    let mut out = String::from(" ");
+    for word in text.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()) {
+        out.push_str(word);
+        out.push(' ');
+    }
+    out
+}
+
+/// The one repository whose folder, remote or package name appears in the
+/// ticket as whole words. Generic names like `init` or `web` never count.
 pub fn repository_named_in(candidates: &[RepositoryCandidate], title: &str, goal: &str) -> Option<String> {
-    let text = format!("{title} {goal}").to_lowercase();
+    let text = words(&format!("{title} {goal}"));
     let mut matches = candidates.iter().filter(|c| {
         let folder = std::path::Path::new(&c.path).file_name().and_then(|n| n.to_str()).unwrap_or("");
         let remote = c.remote.trim_end_matches('/').trim_end_matches(".git").rsplit(['/', ':']).next().unwrap_or("");
-        [folder, remote].iter().any(|name| name.len() >= 4 && text.contains(&name.to_lowercase()))
+        let package = c.package.rsplit('/').next().unwrap_or("");
+        [folder, remote, package].iter().any(|name| {
+            let name = words(name);
+            name.trim().len() >= 4 && !GENERIC_NAMES.contains(&name.trim()) && text.contains(&name)
+        })
     });
     let first = matches.next()?;
     matches.next().is_none().then(|| first.path.clone())
@@ -1417,6 +1472,9 @@ mod tests {
         assert_eq!(pick("Error on GET /web/login in webfrontend-ssr").as_deref(), Some("webfrontend"));
         assert_eq!(pick("Diagnostics booking fails").as_deref(), Some("athena"), "remote name counts");
         assert_eq!(pick("Something vague"), None);
+        let tricky = vec![RepositoryCandidate { path: "/x/basel".into(), remote: "https://github.com/curtainbasel/init.git".into(), package: "basel".into() }];
+        assert_eq!(repository_named_in(&tricky, "Channel hasn't been initialized", "uninitialized channel"), None, "no substring or generic-name matches");
+        assert!(repository_named_in(&tricky, "Basel checkout breaks", "").is_some());
     }
 
     #[test]
@@ -2381,7 +2439,7 @@ mod tests {
     }
 
     #[test]
-    fn interrupted_work_fails_once_and_queued_work_survives() {
+    fn interrupted_work_resumes_twice_then_stops_and_queued_work_survives() {
         let db = Db::open_in_memory().unwrap();
         let repo = repository();
         let ws = workspace(&db, repo.path());
@@ -2399,14 +2457,22 @@ mod tests {
         }
         save(&db, &snapshot).unwrap();
         let recovered = recover_interrupted(&db).unwrap();
-        assert!(
-            recovered.tasks[..3]
-                .iter()
-                .all(|task| task.status == TaskStatus::Failed
-                    && task.events.last().unwrap().message.contains("restart"))
-        );
+        let states: Vec<_> = recovered.tasks.iter().map(|t| t.status).collect();
+        assert_eq!(states, [TaskStatus::Queued, TaskStatus::Building, TaskStatus::Building, TaskStatus::Queued], "interrupted work resumes");
+        assert!(recovered.tasks[..3].iter().all(|t| t.events.last().unwrap().message.starts_with(RESUMED)));
         assert_eq!(recovered.tasks[3], snapshot.tasks[3]);
-        assert_eq!(recover_interrupted(&db).unwrap(), recovered);
+
+        // A ticket that keeps getting interrupted stops after two resumes.
+        // Recovery runs once per daemon start, so each call is one restart.
+        for _ in 0..2 {
+            let mut state = load(&db).unwrap();
+            state.tasks[1].status = TaskStatus::Building;
+            save(&db, &state).unwrap();
+            recover_interrupted(&db).unwrap();
+        }
+        let stopped = load(&db).unwrap();
+        assert_eq!(stopped.tasks[1].status, TaskStatus::Failed);
+        assert!(stopped.tasks[1].events.last().unwrap().message.contains("restart"));
     }
 
     #[test]
@@ -2421,7 +2487,7 @@ mod tests {
         snapshot.tasks[0].worktree = Some("/partial/worktree".into());
         save(&db, &snapshot).unwrap();
         let recovered = recover_interrupted(&db).unwrap();
-        assert_eq!(recovered.tasks[0].status, TaskStatus::Failed);
+        assert_eq!(recovered.tasks[0].status, TaskStatus::Queued);
         assert_eq!(recovered.tasks[0].result, snapshot.tasks[0].result);
         assert_eq!(recovered.tasks[0].worktree, snapshot.tasks[0].worktree);
         assert!(
