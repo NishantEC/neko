@@ -63,9 +63,11 @@ struct WorkspaceView: View {
                         .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
                 } detail: {
                     // Work and Today (the default page) draw their own toolbar row.
-                    let ownsToolbarRow = !["Workspaces", "Responsibilities", "Tools & skills", "Memory", "Profiles", "Schedules", "Settings", "Activity"].contains(page)
+                    let ownsToolbarRow = !["Workspaces", "Responsibilities", "Tools & skills", "Memory", "Profiles", "Schedules", "Settings", "Activity", "Reply views"].contains(page)
+                    let isToday = ownsToolbarRow && page != "Tickets"
                     VStack(spacing: 0) {
-                    FullDiskAccessBanner().padding(.top, ownsToolbarRow ? 40 : 0)
+                    // Today places the banner under its own toolbar row.
+                    if !isToday { FullDiskAccessBanner().padding(.top, ownsToolbarRow ? 40 : 0) }
                     Group {
                         switch page {
                         case "Tickets": TicketsView(model: model, sidebarHidden: columns == .detailOnly)
@@ -77,6 +79,7 @@ struct WorkspaceView: View {
                         case "Schedules": SchedulesView(model: model)
                         case "Settings": PreferencesView(model: model)
                         case "Activity": ActivityGallery()
+                        case "Reply views": ReplyGallery()
                         default: TodayView(model: model)
                         }
                     }

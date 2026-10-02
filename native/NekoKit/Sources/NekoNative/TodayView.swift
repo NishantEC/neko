@@ -132,6 +132,7 @@ struct TodayView: View {
         GeometryReader { outer in
         VStack(spacing: 0) {
         todayHeader
+        FullDiskAccessBanner().padding(.bottom, 4)
         HStack(spacing: 0) {
             ZStack(alignment: .bottom) {
                 GeometryReader { viewport in
@@ -168,7 +169,11 @@ struct TodayView: View {
                             scrollFollow = ChatScrollFollowState()
                             reader.scrollTo("bottom", anchor: .bottom)
                         }
-                        .onAppear { reader.scrollTo("bottom", anchor: .bottom) }
+                        .onAppear {
+                            reader.scrollTo("bottom", anchor: .bottom)
+                            // The inspector and composer settle a moment later; follow them.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { reader.scrollTo("bottom", anchor: .bottom) }
+                        }
                 }
                 }
                 composer(availableWidth: outer.size.width)
