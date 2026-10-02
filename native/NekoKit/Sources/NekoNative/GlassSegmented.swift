@@ -65,7 +65,7 @@ struct GlassSegmented<Value: Hashable>: View {
             }
             .foregroundStyle(selected ? Color.primary : Color.secondary)
             .frame(height: height)
-            .background { thumb(selected, index: index) }
+            .modifier(GlassThumb(selected: selected, id: "thumb-\(index)", space: thumbSpace))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -74,18 +74,27 @@ struct GlassSegmented<Value: Hashable>: View {
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
-    /// Present only under the chosen option, so changing selection removes one
-    /// glass shape and inserts another: the system morphs between them.
-    @ViewBuilder private func thumb(_ selected: Bool, index: Int) -> some View {
-        if selected {
-            if #available(macOS 26, *) {
-                Color.clear
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                    .glassEffectID("thumb-\(index)", in: thumbSpace)
-            } else {
-                Capsule().fill(.regularMaterial)
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.14)))
-                    .matchedGeometryEffect(id: "thumb", in: thumbSpace)
+}
+
+/// Glass goes on the label itself so the system renders the label above the
+/// glass. Unselected options use `.identity`, so selection morphs one shape.
+private struct GlassThumb: ViewModifier {
+    let selected: Bool
+    let id: String
+    let space: Namespace.ID
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content
+                .glassEffect(selected ? .regular.interactive() : .identity, in: .capsule)
+                .glassEffectID(id, in: space)
+        } else {
+            content.background {
+                if selected {
+                    Capsule().fill(.regularMaterial)
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14)))
+                        .matchedGeometryEffect(id: "thumb", in: space)
+                }
             }
         }
     }
