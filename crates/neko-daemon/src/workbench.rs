@@ -688,34 +688,68 @@ impl Controller {
             self.integrate_split(split.unwrap(), &directory, cancel, authority)?
         } else {
             self.check_budget(&task.id)?;
-            self.run_native(
-                &native_runner::RunSpec {
-                    directory: directory.clone(),
-                    prompt: prompt(
-                        workspace,
-                        task,
-                        if planning && split.is_some() {
-                            "splitter"
-                        } else {
-                            role
-                        },
-                        &memory,
-                    ),
-                    writable: !planning,
-                    timeout: Duration::from_secs(if planning { 600 } else { 1800 }),
-                    runtime: snapshot.agent_runtime.clone(),
-                },
-                &store::new_id(),
-                &authority,
-                cancel,
-                |event| {
-                    let usage = event.starts_with("USAGE ");
-                    let _ = self.update_task_authorized(&task.id, authority, |t| {
-                        store::append_event(t, role, &event)
+            let spec = native_runner::RunSpec {
+                directory: directory.clone(),
+                prompt: prompt(
+                    workspace,
+                    task,
+                    if planning && split.is_some() {
+                        "splitter"
+                    } else {
+                        role
+                    },
+                    &memory,
+                ),
+                writable: !planning,
+                timeout: Duration::from_secs(if planning { 600 } else { 1800 }),
+                runtime: snapshot.agent_runtime.clone(),
+            };
+            // Planning and building continue the ticket's own agent session,
+            // so it remembers what it already investigated and your replies.
+            let session = if native_runner::supports_sessions(&snapshot.agent_runtime) {
+                match snapshot.task_sessions.get(&task.id) {
+                    Some(id) => native_runner::Session::Resume(id.clone()),
+                    None => native_runner::Session::Start,
+                }
+            } else {
+                native_runner::Session::Ephemeral
+            };
+            let on_event = |event: String| {
+                if let Some(id) = event.strip_prefix(native_runner::SESSION_EVENT) {
+                    let id = id.to_owned();
+                    let _ = self.commit_authorized(authority, |s| {
+                        s.task_sessions.insert(task.id.clone(), id);
+                        Ok(())
                     });
-                    if usage { self.stop_if_over_budget(&task.id, cancel); }
-                },
-            )?
+                    return;
+                }
+                let usage = event.starts_with("USAGE ");
+                let _ = self.update_task_authorized(&task.id, authority, |t| {
+                    store::append_event(t, role, &event)
+                });
+                if usage { self.stop_if_over_budget(&task.id, cancel); }
+            };
+            let started = std::time::Instant::now();
+            match self.run_native_session(&spec, &session, &store::new_id(), authority, cancel, &on_event) {
+                // A saved session that can't be continued (expired, removed,
+                // or from another Codex) falls back to a fresh agent that
+                // reads the ticket's history from its prompt.
+                Err(error)
+                    if matches!(session, native_runner::Session::Resume(_))
+                        && !cancel.load(Ordering::SeqCst)
+                        && started.elapsed() < Duration::from_secs(45) =>
+                {
+                    self.commit_authorized(authority, |s| {
+                        s.task_sessions.remove(&task.id);
+                        if let Some(t) = s.tasks.iter_mut().find(|t| t.id == task.id) {
+                            store::append_event(t, "system", &format!("Couldn’t continue the saved session ({}); starting fresh from the ticket’s history.", error.chars().take(200).collect::<String>()));
+                        }
+                        Ok(())
+                    })?;
+                    self.run_native_session(&spec, &native_runner::Session::Start, &store::new_id(), authority, cancel, &on_event)?
+                }
+                other => other?,
+            }
         };
         if planning {
             if split.is_some() {
@@ -749,26 +783,31 @@ impl Controller {
                 store::append_event(
                     t,
                     "supervisor",
-                    "Investigation complete. Only eligible low-risk assigned bugs can proceed under the standing responsibility; other work requires your decision.",
+                    if source_linked {
+                        "Investigation complete. Only eligible low-risk assigned bugs can proceed under the standing responsibility; other work requires your decision."
+                    } else {
+                        "Plan ready."
+                    },
                 );
-                if start_without_approval {
+                // The agent decides: a question or "nothing to fix" waits for
+                // you; a fix builds when you started it or allow starting.
+                let waiting = match t.supervision.as_ref().map(|d| (d.action.clone(), d.reason.clone())) {
+                    Some((neko_protocol::workbench::SupervisorAction::AskUser, reason)) => Some(format!("Needs your input before building: {reason}")),
+                    Some((neko_protocol::workbench::SupervisorAction::Skip, reason)) => Some(format!("Nothing to build: {reason}")),
+                    _ => plan_question(&t.plan).map(|q| format!("Needs your input before building: {q}")),
+                };
+                if let Some(message) = waiting {
+                    store::append_event(t, "supervisor", &message);
+                    if started_by_you {
+                        // Keep your go-ahead: once you answer and the plan is a fix, it builds.
+                        snapshot.start_when_planned.insert(task.id.clone());
+                    }
+                } else if start_without_approval {
                     t.status = TaskStatus::Building;
                     store::append_event(t, "supervisor", "Started without asking, as your settings allow. It works in its own copy; nothing is pushed or published.");
                 } else if started_by_you {
-                    // A plan that asks a question or finds nothing to fix has
-                    // nothing to build; it waits with its question instead.
-                    match t.supervision.as_ref().map(|d| (d.action.clone(), d.reason.clone())) {
-                        Some((neko_protocol::workbench::SupervisorAction::AskUser, reason)) => {
-                            store::append_event(t, "supervisor", &format!("Needs your input before building: {reason}"));
-                        }
-                        Some((neko_protocol::workbench::SupervisorAction::Skip, reason)) => {
-                            store::append_event(t, "supervisor", &format!("Nothing to build: {reason}"));
-                        }
-                        _ => {
-                            t.status = TaskStatus::Building;
-                            store::append_event(t, "user", "Started from the board, so the plan goes straight to building. It works in its own copy; nothing is pushed or published.");
-                        }
-                    }
+                    t.status = TaskStatus::Building;
+                    store::append_event(t, "user", "You started this ticket, so the plan goes straight to building. It works in its own copy; nothing is pushed or published.");
                 }
                 Ok(())
             })?;
@@ -1554,6 +1593,13 @@ fn propose_ticket_skill(
     memory_learning::commit_ticket_skill(db, task, learning_job, Some(body.trim()))
 }
 
+/// The planner's closing `QUESTION:` line, when it needs an answer first.
+fn plan_question(plan: &str) -> Option<String> {
+    let line = plan.lines().rev().map(str::trim).find(|l| !l.is_empty())?;
+    let question = line.trim_start_matches(['*', '_', '#', ' ']).strip_prefix("QUESTION:")?.trim_start_matches(['*', '_', ' ']).trim();
+    (!question.is_empty()).then(|| question.chars().take(1000).collect())
+}
+
 fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str) -> String {
     let mut result_end = task.result.len().min(64 * 1024);
     while !task.result.is_char_boundary(result_end) {
@@ -1571,7 +1617,7 @@ fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str) -> Strin
         "splitter" => splits::INSTRUCTION,
         "supervisor" => supervision::INSTRUCTION,
         "scout" => {
-            "Read the repository, identify evidence and a bounded implementation plan with risks and specific tests. Do not edit files. Clearly flag missing information. Return the plan."
+            "Read the repository, identify evidence and a bounded implementation plan with risks and specific tests. Do not edit files. Clearly flag missing information. Return the plan. If you cannot plan responsibly without an answer from the user, end with one final line: QUESTION: <your single most important question>. Read the user's notes on this ticket first; they may already answer it."
         }
         "builder" => {
             "Implement only the approved plan in this task worktree. Run relevant tests within the sandbox. Report changed files, exact test commands and results, and any remaining blockers. Never claim checks you did not run."
@@ -1599,6 +1645,14 @@ fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plan_ending_in_a_question_waits_for_the_user() {
+        assert_eq!(plan_question("1. Inspect X\n2. Fix Y\n\nQUESTION: Which tenant reproduces it?").as_deref(), Some("Which tenant reproduces it?"));
+        assert_eq!(plan_question("Plan\n**QUESTION:** Staging or prod?\n").as_deref(), Some("Staging or prod?"), "markdown emphasis is ignored");
+        assert_eq!(plan_question("QUESTION: early\n1. Then a full plan"), None, "only a closing question counts");
+        assert_eq!(plan_question("1. Fix it"), None);
+    }
 
     #[test]
     fn profile_edit_after_worker_return_rejects_all_result_status_commits() {

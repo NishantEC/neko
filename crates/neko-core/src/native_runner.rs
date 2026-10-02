@@ -113,6 +113,37 @@ pub fn run_with_bridge(
     run_configured(&resolve_codex()?, spec, Some(bridge), cancel, on_event)
 }
 
+/// How a run relates to a ticket's saved agent session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Session {
+    /// Nothing is saved (reviews, extraction, background checks).
+    Ephemeral,
+    /// Save a new session; its id arrives as a `SESSION <id>` event.
+    Start,
+    /// Continue a saved session, keeping what the agent already learned.
+    Resume(String),
+}
+
+/// Prefix of the event that reports a saved session's id.
+pub const SESSION_EVENT: &str = "SESSION ";
+
+/// A ticket run that keeps its agent's memory between turns where the
+/// runtime supports it. Other runtimes run as before, without a session.
+pub fn run_session_with_bridge(
+    spec: &RunSpec,
+    bridge: &BridgeConfig,
+    session: &Session,
+    cancel: &AtomicBool,
+    on_event: impl FnMut(String),
+) -> Result<String, String> {
+    run_configured_session(&resolve_codex()?, spec, Some(bridge), session, cancel, on_event, false)
+}
+
+/// Sessions need Codex's own `exec resume`, which local OSS providers lack.
+pub fn supports_sessions(runtime: &neko_protocol::workbench::AgentRuntime) -> bool {
+    matches!(runtime.provider.as_str(), "" | "codex" | "opencodex")
+}
+
 pub fn run(
     spec: &RunSpec,
     cancel: &AtomicBool,
@@ -150,6 +181,18 @@ fn run_configured_mode(
     spec: &RunSpec,
     bridge: Option<&BridgeConfig>,
     cancel: &AtomicBool,
+    on_event: impl FnMut(String),
+    extraction: bool,
+) -> Result<String, String> {
+    run_configured_session(executable, spec, bridge, &Session::Ephemeral, cancel, on_event, extraction)
+}
+
+fn run_configured_session(
+    executable: &Path,
+    spec: &RunSpec,
+    bridge: Option<&BridgeConfig>,
+    session: &Session,
+    cancel: &AtomicBool,
     mut on_event: impl FnMut(String),
     extraction: bool,
 ) -> Result<String, String> {
@@ -173,6 +216,10 @@ fn run_configured_mode(
     }
     let mut command = Command::new(executable);
     command.arg("exec");
+    let session = if extraction || !supports_sessions(&spec.runtime) { &Session::Ephemeral } else { session };
+    if matches!(session, Session::Resume(_)) {
+        command.arg("resume");
+    }
     match spec.runtime.provider.as_str() {
         "" | "codex" => {}
         "ollama" | "lmstudio" => {
@@ -184,20 +231,20 @@ fn run_configured_mode(
     if !spec.runtime.model.is_empty() {
         command.args(["-m", spec.runtime.model.as_str()]);
     }
+    command.current_dir(&directory).args(["--json"]);
+    if *session == Session::Ephemeral {
+        command.arg("--ephemeral");
+    }
+    command.args(["--ignore-user-config", "--ignore-rules", "--skip-git-repo-check"]);
+    // `exec resume` takes neither -s nor -C: the sandbox comes from config
+    // and the directory from the process's own working directory.
+    let sandbox = if spec.writable { "workspace-write" } else { "read-only" };
+    match session {
+        Session::Resume(_) => command.args(["-c", &format!("sandbox_mode=\"{sandbox}\"")]),
+        _ => command.args(["-s", sandbox]),
+    };
     command
-        .current_dir(&directory)
         .args([
-            "--json",
-            "--ephemeral",
-            "--ignore-user-config",
-            "--ignore-rules",
-            "--skip-git-repo-check",
-            "-s",
-            if spec.writable {
-                "workspace-write"
-            } else {
-                "read-only"
-            },
             "-c",
             "approval_policy=\"never\"",
             "-c",
@@ -210,10 +257,19 @@ fn run_configured_mode(
             "sandbox_workspace_write.exclude_slash_tmp=true",
             "-c",
             "web_search=\"disabled\"",
-            "-C",
-        ])
-        .arg(&directory)
-        .arg("-");
+        ]);
+    match session {
+        Session::Resume(id) => {
+            if id.is_empty() || id.len() > 128 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+                return Err("Invalid saved session id".into());
+            }
+            command.arg(id);
+        }
+        _ => {
+            command.arg("-C").arg(&directory);
+        }
+    }
+    command.arg("-");
     if let Some(bridge) = bridge {
         configure_bridge(&mut command, bridge)?;
     }
@@ -274,6 +330,11 @@ fn run_configured_mode(
         }
         match value["type"].as_str() {
             Some("turn.completed") => completed = true,
+            Some("thread.started") if *session != Session::Ephemeral => {
+                if let Some(id) = value["thread_id"].as_str().filter(|id| id.len() <= 128) {
+                    on_event(format!("{SESSION_EVENT}{id}"));
+                }
+            }
             Some("turn.failed" | "error") => {
                 let detail = value["error"]["message"]
                     .as_str()
@@ -2066,6 +2127,38 @@ printf '%s\n' '{"type":"turn.completed"}'
             fs::read_to_string(path.join("file.txt")).unwrap(),
             "committed\n"
         );
+    }
+
+    #[test]
+    fn ticket_sessions_are_saved_reported_and_resumed() {
+        let (temp, executable, mut spec) = fixture(
+            r#"
+printf '%s\n' "$@" > args
+cat > /dev/null
+printf '%s\n' '{"type":"thread.started","thread_id":"0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000"}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"Planned"}}'
+printf '%s\n' '{"type":"turn.completed"}'
+"#,
+        );
+        let mut events = Vec::new();
+        run_configured_session(&executable, &spec, None, &Session::Start, &AtomicBool::new(false), |e| events.push(e), false).unwrap();
+        let args = fs::read_to_string(temp.path().join("args")).unwrap();
+        assert!(!args.lines().any(|a| a == "--ephemeral"), "a ticket session is saved");
+        assert!(events.contains(&format!("{SESSION_EVENT}0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000")));
+
+        spec.writable = true;
+        run_configured_session(&executable, &spec, None, &Session::Resume("0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000".into()), &AtomicBool::new(false), |_| {}, false).unwrap();
+        let args: Vec<String> = fs::read_to_string(temp.path().join("args")).unwrap().lines().map(str::to_owned).collect();
+        assert_eq!(&args[..2], ["exec", "resume"]);
+        assert!(args.contains(&"sandbox_mode=\"workspace-write\"".to_owned()), "resume takes its sandbox from config");
+        assert!(!args.iter().any(|a| a == "-s" || a == "-C"));
+        assert!(args.contains(&"0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000".to_owned()));
+
+        let mut events = Vec::new();
+        run_configured_session(&executable, &spec, None, &Session::Ephemeral, &AtomicBool::new(false), |e| events.push(e), false).unwrap();
+        assert!(fs::read_to_string(temp.path().join("args")).unwrap().lines().any(|a| a == "--ephemeral"));
+        assert!(!events.iter().any(|e| e.starts_with(SESSION_EVENT)), "reviews never report a session");
+        assert!(run_configured_session(&executable, &spec, None, &Session::Resume("bad id;rm".into()), &AtomicBool::new(false), |_| {}, false).is_err());
     }
 
     #[test]

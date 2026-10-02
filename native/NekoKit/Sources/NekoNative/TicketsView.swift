@@ -83,7 +83,7 @@ struct TicketsView: View {
     private var collapsed: Bool { sidebarHidden }
     struct Column { let id: String; let title: String; let color: Color; let statuses: [String] }
     static let columns: [Column] = [
-        Column(id: "approval", title: "Needs approval", color: NekoStyle.amber, statuses: ["AwaitingApproval", "Failed"]),
+        Column(id: "approval", title: "Needs you", color: NekoStyle.amber, statuses: ["AwaitingApproval", "Failed"]),
         Column(id: "working", title: "Working", color: NekoStyle.accent, statuses: ["Queued", "Planning", "Building", "Reviewing"]),
         Column(id: "review", title: "Ready to review", color: NekoStyle.sky, statuses: ["ReadyForReview"]),
         Column(id: "done", title: "Done", color: NekoStyle.mint, statuses: ["Completed", "Cancelled"])
@@ -374,6 +374,7 @@ struct TicketDetail: View {
     @Environment(\.dismiss) private var dismiss
     private var ticket: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == id } ?? .null }
     var body: some View {
+        VStack(spacing: 0) {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 HStack(alignment: .top) {
@@ -382,12 +383,13 @@ struct TicketDetail: View {
                     Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
                 }
                 Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary)
+                TicketThreadView(ticket: ticket)
                 if ticket["status"].string == "Failed" { stoppedCallout }
                 if let question = TicketPresentation.waitingReason(ticket) {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Neko is waiting on you", systemImage: "questionmark.bubble.fill").font(.headline).foregroundStyle(NekoStyle.amber)
                         Text(question).textSelection(.enabled)
-                        Text("Answer with a note below, then approve the plan. Or approve as is to build anyway.").font(.caption).foregroundStyle(.secondary)
+                        Text("Answer in the box below and the agent picks it up from there. Or approve the plan to build it as is.").font(.caption).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                     .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
@@ -414,7 +416,6 @@ struct TicketDetail: View {
                 } message: {
                     Text("Removes the ticket, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.")
                 }
-                section("Goal", ticket["goal"].string)
                 section("Plan", ticket["plan"].string)
                 let review = TicketPresentation.review(ticket["result"].string)
                 section("Result", review.body)
@@ -469,9 +470,10 @@ struct TicketDetail: View {
                         ForEach(Array(ticket["events"].array.enumerated()), id: \.offset) { _, event in eventView(event) }
                     }.padding(.top, 10)
                 }
-                TextField("Add a note…", text: $note, axis: .vertical).lineLimit(2...5).textFieldStyle(.roundedBorder)
-                Button("Add note") { let text = note; Task { if await model.workbench(.command("AddTicketNote", ["task_id": .string(id), "text": .string(text)])) { note = "" } } }.disabled(note.isEmpty || model.busy)
             }.padding(28).frame(maxWidth: 900, alignment: .leading)
+        }.frame(maxWidth: .infinity).defaultScrollAnchor(.bottom)
+        Divider().opacity(0.5)
+        TicketComposer(model: model, id: id, status: ticket["status"].string).frame(maxWidth: 900)
         }.frame(maxWidth: .infinity)
             .sheet(isPresented: Binding(get: { childTicket != nil }, set: { if !$0 { childTicket = nil } })) {
                 if let childTicket { TicketDetail(model: model, id: childTicket).frame(minWidth: 650, minHeight: 600) }
