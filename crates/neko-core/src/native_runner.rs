@@ -724,7 +724,7 @@ pub fn apply_task_patch(directory: &Path, patch: &[u8], cancel: &AtomicBool) -> 
     Ok(())
 }
 
-fn executable_directories() -> Vec<PathBuf> {
+pub(crate) fn executable_directories() -> Vec<PathBuf> {
     let mut directories = std::env::var_os("PATH")
         .map(|p| {
             std::env::split_paths(&p)
@@ -755,17 +755,78 @@ fn executable_directories() -> Vec<PathBuf> {
     directories
 }
 
-fn resolve_codex() -> Result<PathBuf, String> {
-    let candidates = if let Some(path) = std::env::var_os("NEKO_CODEX_PATH") {
-        vec![PathBuf::from(path)]
-    } else {
-        executable_directories()
-            .into_iter()
-            .map(|directory| directory.join("codex"))
-            .collect()
-    };
-    candidates.into_iter().find(|path| path.is_absolute() && fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
-        .ok_or_else(|| "Codex CLI is not installed or executable. Install Codex, or set NEKO_CODEX_PATH to its absolute path.".into())
+pub(crate) fn resolve_codex() -> Result<PathBuf, String> {
+    let executable = |path: &PathBuf| path.is_absolute() && fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
+    let missing = || "Codex CLI is not installed or executable. Install Codex, or set NEKO_CODEX_PATH to its absolute path.".to_string();
+    if let Some(path) = std::env::var_os("NEKO_CODEX_PATH") {
+        let path = PathBuf::from(path);
+        return if executable(&path) { Ok(path) } else { Err(missing()) };
+    }
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for path in executable_directories().into_iter().map(|directory| directory.join("codex")) {
+        if executable(&path) && !candidates.iter().any(|seen| same_file(seen, &path)) {
+            candidates.push(path);
+        }
+    }
+    newest_codex(candidates).ok_or_else(missing)
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+}
+
+/// Several Codex installs are common (Homebrew, npm/nvm, the Codex app). The
+/// first one on PATH can be stale and reject current models, so prefer the
+/// newest reported version; PATH order breaks ties and covers unreadable ones.
+fn newest_codex(candidates: Vec<PathBuf>) -> Option<PathBuf> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static VERSIONS: OnceLock<Mutex<HashMap<PathBuf, (std::time::SystemTime, Option<Vec<u64>>)>>> = OnceLock::new();
+    if candidates.len() <= 1 {
+        return candidates.into_iter().next();
+    }
+    let cache = VERSIONS.get_or_init(Default::default);
+    let mut best: Option<(Vec<u64>, PathBuf)> = None;
+    for path in &candidates {
+        let modified = fs::metadata(path).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+        let cached = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(path).filter(|(at, _)| *at == modified).map(|(_, v)| v.clone());
+        let version = cached.unwrap_or_else(|| {
+            let version = codex_version(path);
+            cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path.clone(), (modified, version.clone()));
+            version
+        });
+        if let Some(version) = version {
+            if best.as_ref().is_none_or(|(current, _)| version > *current) {
+                best = Some((version, path.clone()));
+            }
+        }
+    }
+    best.map(|(_, path)| path).or_else(|| candidates.into_iter().next())
+}
+
+fn codex_version(path: &Path) -> Option<Vec<u64>> {
+    let mut child = Command::new(path).arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut text = String::new();
+    child.stdout.take()?.take(256).read_to_string(&mut text).ok()?;
+    parse_codex_version(&text)
+}
+
+fn parse_codex_version(text: &str) -> Option<Vec<u64>> {
+    let token = text.split_whitespace().find(|t| t.chars().next().is_some_and(|c| c.is_ascii_digit()))?;
+    let parts: Vec<u64> = token.split(['.', '-', '+']).map_while(|p| p.parse().ok()).collect();
+    (!parts.is_empty()).then_some(parts)
 }
 
 fn configure_opencodex(command: &mut Command, port: u16) {
@@ -1242,6 +1303,14 @@ mod tests {
         run_with_executable(&executable, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         let args = fs::read_to_string(temp.path().join("arguments")).unwrap();
         assert!(args.starts_with("exec\n--oss\n--local-provider\nollama\n-m\nqwen3:8b\n"));
+    }
+
+    #[test]
+    fn codex_versions_compare_numerically() {
+        assert_eq!(parse_codex_version("codex-cli 0.155.1\n"), Some(vec![0, 155, 1]));
+        assert!(parse_codex_version("codex-cli 0.155.1") > parse_codex_version("codex-cli 0.146.10"));
+        assert_eq!(parse_codex_version("codex-cli 0.150.0-alpha.2"), Some(vec![0, 150, 0]));
+        assert_eq!(parse_codex_version("garbage"), None);
     }
 
     #[test]

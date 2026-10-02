@@ -70,7 +70,10 @@ public actor DaemonClient {
     nonisolated static func requestTimeout(_ request: JSONValue, defaultTimeout: TimeInterval = 30) -> TimeInterval {
         // The daemon's browser OAuth callback accepts up to 120 seconds, plus
         // discovery/token exchange. Keep ordinary IPC bounded at 30 seconds.
-        request["Workbench"]["Mcp"].object["Authenticate"] != nil ? max(150, defaultTimeout) : defaultTimeout
+        if request["Workbench"]["Mcp"].object["Authenticate"] != nil { return max(150, defaultTimeout) }
+        // A model check runs one real, bounded (90 s) runner turn.
+        if request.object["CheckAgentModel"] != nil { return max(120, defaultTimeout) }
+        return defaultTimeout
     }
 }
 

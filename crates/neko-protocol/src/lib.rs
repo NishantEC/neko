@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 pub mod agent_profiles;
+pub mod agent_models;
 pub mod mcp_host;
 pub mod scheduled_plans;
 pub mod setup_import;
@@ -431,6 +432,18 @@ pub enum Request {
     McpBridge(mcp_host::BridgeRequest),
     Workbench(workbench::Command),
     Ping,
+    /// The daemon-owned model catalog. `refresh: false` may answer from a
+    /// short-lived cache; discovery never generates tokens.
+    AgentModels {
+        refresh: bool,
+    },
+    /// Send one minimal prompt through the real task runner with this
+    /// runtime. With `save`, the runtime becomes the default only when the
+    /// check succeeds; a failure always preserves the previous choice.
+    CheckAgentModel {
+        runtime: workbench::AgentRuntime,
+        save: bool,
+    },
     /// `provider`, when set, scopes this search to exactly one provider's
     /// own `search()` — no cross-provider `allocate()`, no section
     /// reservation, just that provider's own candidates sorted by score.
@@ -541,6 +554,8 @@ pub enum Response {
     },
     Workbench(workbench::Snapshot),
     Pong,
+    AgentModels(agent_models::ModelCatalog),
+    AgentModelCheck(agent_models::ModelCheck),
     /// One search reply. **A single `Request::Search` can be answered by
     /// more than one of these** — see [`Response::ends_request`] and
     /// `AGENTS.md`'s "Two-phase search" section.

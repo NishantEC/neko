@@ -366,6 +366,10 @@ pub fn finish(
             if text.is_empty() || text.len() > crate::neko_memory::MAX_TEXT {
                 return Err("Memory proposal text exceeds its bound".into());
             }
+            // Never even propose a secret value; drop it silently.
+            if crate::neko_memory::sensitive(&text).is_some() {
+                continue;
+            }
             let kind = match (candidate.kind, job.workspace_id.is_some()) {
                 (MemoryKind::Profile, true) => MemoryKind::Workspace,
                 (MemoryKind::Workspace, false) => {

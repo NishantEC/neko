@@ -37,8 +37,145 @@ fn clean(text: &str) -> Result<String, String> {
     if text.len() > MAX_TEXT {
         return Err(format!("Keep a memory under {MAX_TEXT} characters"));
     }
+    if let Some(kind) = sensitive(&text) {
+        return Err(format!("Neko doesn’t keep {kind} in memory. Store them in Keychain or a password manager instead"));
+    }
     Ok(text)
 }
+
+/// Why a text must never become a memory, or None when it is fine.
+///
+/// Memory is sent to models and kept on disk, so it refuses actual secret
+/// values whoever proposes them: the user, a learning job or a decision.
+/// It targets values (a key, a card number, "password is ..."), so a
+/// preference such as "never commit API keys" is still allowed.
+pub fn sensitive(text: &str) -> Option<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("-----begin") && lower.contains("private key") {
+        return Some("private keys");
+    }
+    for word in text.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '\x60' | ',' | ';' | '(' | ')' | '<' | '>')) {
+        if looks_like_credential(word) {
+            return Some("keys and tokens");
+        }
+    }
+    if has_card_number(text) {
+        return Some("card numbers");
+    }
+    if has_government_id(text) {
+        return Some("government ID numbers");
+    }
+    if has_labelled_secret(&lower) {
+        return Some("passwords, codes and keys");
+    }
+    None
+}
+
+fn looks_like_credential(word: &str) -> bool {
+    let word = word.trim_matches(|c: char| matches!(c, '.' | ':' | '='));
+    let after_eq = word.rsplit_once('=').map_or(word, |(_, value)| value);
+    const PREFIXES: &[(&str, usize)] = &[
+        ("sk-", 20), ("sk_live_", 16), ("rk_live_", 16), ("ghp_", 30), ("gho_", 30), ("ghs_", 30),
+        ("github_pat_", 30), ("glpat-", 20), ("xoxb-", 20), ("xoxp-", 20), ("xoxa-", 20),
+        ("akia", 20), ("aiza", 35), ("lin_api_", 30), ("npm_", 30),
+    ];
+    let lower = after_eq.to_ascii_lowercase();
+    if PREFIXES.iter().any(|(prefix, min)| lower.starts_with(prefix) && after_eq.len() >= *min) {
+        return true;
+    }
+    // JSON Web Tokens: three base64url segments, the first a JSON header.
+    if after_eq.starts_with("eyJ") && after_eq.matches('.').count() == 2 && after_eq.len() >= 40 {
+        return true;
+    }
+    // A long random token: mixed case and digits, no path or URL structure.
+    after_eq.len() >= 32
+        && !after_eq.contains('/')
+        && after_eq.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        && after_eq.chars().any(|c| c.is_ascii_uppercase())
+        && after_eq.chars().any(|c| c.is_ascii_lowercase())
+        && after_eq.chars().any(|c| c.is_ascii_digit())
+}
+
+/// 13–19 digits, optionally grouped by spaces or dashes, passing Luhn.
+fn has_card_number(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    let mut start = 0;
+    while start < chars.len() {
+        if !chars[start].is_ascii_digit() || (start > 0 && chars[start - 1].is_ascii_digit()) {
+            start += 1;
+            continue;
+        }
+        let mut digits = Vec::new();
+        let mut i = start;
+        while i < chars.len() && (chars[i].is_ascii_digit() || (matches!(chars[i], ' ' | '-') && i + 1 < chars.len() && chars[i + 1].is_ascii_digit() && !digits.is_empty())) {
+            if let Some(d) = chars[i].to_digit(10) {
+                digits.push(d);
+            }
+            i += 1;
+        }
+        if (13..=19).contains(&digits.len()) && luhn(&digits) {
+            return true;
+        }
+        start = i.max(start + 1);
+    }
+    false
+}
+
+fn luhn(digits: &[u32]) -> bool {
+    let sum: u32 = digits.iter().rev().enumerate().map(|(i, &d)| if i % 2 == 1 { let x = d * 2; if x > 9 { x - 9 } else { x } } else { d }).sum();
+    sum % 10 == 0 && digits.iter().any(|&d| d != 0)
+}
+
+/// US SSN (123-45-6789) and Aadhaar (1234 5678 9012) shapes.
+fn has_government_id(text: &str) -> bool {
+    let groups = |sep: char, sizes: &[usize]| {
+        text.split(|c: char| !(c.is_ascii_digit() || c == sep)).any(|token| {
+            let parts: Vec<&str> = token.split(sep).collect();
+            parts.len() == sizes.len() && parts.iter().zip(sizes).all(|(p, n)| p.len() == *n && p.bytes().all(|b| b.is_ascii_digit()))
+        })
+    };
+    groups('-', &[3, 2, 4]) || {
+        let words: Vec<&str> = text.split_whitespace().map(|w| w.trim_matches(|c: char| !c.is_ascii_digit())).collect();
+        words.windows(3).any(|w| w.iter().all(|p| p.len() == 4 && p.bytes().all(|b| b.is_ascii_digit())))
+            && !words.windows(4).any(|w| w.iter().all(|p| p.len() == 4 && p.bytes().all(|b| b.is_ascii_digit())))
+    }
+}
+
+/// "password is hunter2", "OTP: 482913", "api key = abc...".
+fn has_labelled_secret(lower: &str) -> bool {
+    const LABELS: &[&str] = &[
+        "password", "passcode", "passwd", "pin", "pin code", "otp", "one-time code", "one time code",
+        "2fa code", "verification code", "security code", "cvv", "api key", "api token", "access token",
+        "secret key", "private key", "seed phrase", "recovery phrase", "token",
+    ];
+    for label in LABELS {
+        for (at, _) in lower.match_indices(label) {
+            let before_ok = at == 0 || !lower.as_bytes()[at - 1].is_ascii_alphanumeric();
+            let rest = &lower[at + label.len()..];
+            if !before_ok || rest.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric) {
+                continue;
+            }
+            let rest = rest.trim_start();
+            let value = if let Some(v) = rest.strip_prefix(':').or_else(|| rest.strip_prefix('=')) {
+                v
+            } else if let Some(v) = rest.strip_prefix("is ") {
+                v
+            } else {
+                continue;
+            };
+            let value = value.trim_start().trim_start_matches(['"', '\'', '\x60']);
+            let token: String = value.chars().take_while(|c| !c.is_whitespace()).collect();
+            let token = token.trim_end_matches(['.', ',', '"', '\'', '\x60']);
+            // A value, not a description: "is required", "is stored in Keychain".
+            const WORDS: &[&str] = &["required", "stored", "kept", "saved", "needed", "in", "the", "a", "an", "not", "never", "always", "managed", "set", "missing", "optional", "secret", "private", "rotated", "changed", "expired", "valid", "invalid"];
+            if token.len() >= 4 && !WORDS.contains(&token) && (token.chars().any(|c| c.is_ascii_digit()) || token.len() >= 6) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 
 /// Add (empty id) or replace an entry. Workspace notes must name a workspace;
 /// profile entries never do. Returns the saved entry.
@@ -178,6 +315,8 @@ pub(crate) fn for_prompt(entries: &[MemoryEntry], scope: Option<&str>) -> String
             None => true,
             Some(w) => scope == Some(w.as_str()),
         })
+        // Entries saved before secret refusal existed never reach a model.
+        .filter(|e| sensitive(&e.text).is_none())
         .collect();
     relevant.sort_by_key(|e| std::cmp::Reverse(e.updated_at_ms));
     let mut lines = Vec::new();
@@ -205,6 +344,38 @@ pub(crate) fn for_prompt(entries: &[MemoryEntry], scope: Option<&str>) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secret_values_are_refused_but_preferences_about_them_are_kept() {
+        for secret in [
+            "my openai key is sk-proj-abcdefghijklmnopqrstuvwxyz123456",
+            "github token ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            "card 4242 4242 4242 4242 for the test account",
+            "wifi password is hunter22",
+            "OTP: 482913",
+            "api key = Zq81jdLmnPq",
+            "SSN 123-45-6789",
+            "aadhaar 2345 6789 0123",
+            "use AKIAIOSFODNN7EXAMPLE for staging",
+            "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+            "-----BEGIN OPENSSH PRIVATE KEY----- abc",
+        ] {
+            assert!(sensitive(secret).is_some(), "should refuse: {secret}");
+            assert!(clean(secret).unwrap_err().contains("doesn’t keep"), "{secret}");
+        }
+        for fine in [
+            "Never commit API keys; store them in Keychain",
+            "The password is stored in 1Password",
+            "Prefer pnpm over npm in this repo",
+            "Base branch is main; commit 3f9c2a1b7e8d4c6a9b0e1f2a3b4c5d6e7f8a9b0c is the release",
+            "Call 4111 when the build breaks",
+            "Phone OTP flow lives in auth/otp.rs",
+            "Run tests with cargo test --workspace -- --test-threads=4",
+            "The token is required for the staging API",
+        ] {
+            assert_eq!(sensitive(fine), None, "should keep: {fine}");
+        }
+    }
 
     fn entry(kind: MemoryKind, ws: Option<&str>, text: &str) -> MemoryEntry {
         MemoryEntry {
