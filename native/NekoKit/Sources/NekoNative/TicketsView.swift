@@ -383,7 +383,9 @@ struct TicketDetail: View {
                     Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
                 }
                 Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary)
+                DisclosureGroup { VStack(alignment: .leading, spacing: 22) { detailsBody }.padding(.top, 10) } label: { Text("Details: result, changes, risk, activity").font(.system(size: 12)).foregroundStyle(.secondary) }
                 TicketThreadView(ticket: ticket)
+                section("Plan", ticket["plan"].string)
                 if ticket["status"].string == "Failed" { stoppedCallout }
                 if let question = TicketPresentation.waitingReason(ticket) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -416,60 +418,6 @@ struct TicketDetail: View {
                 } message: {
                     Text("Removes the ticket, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.")
                 }
-                section("Plan", ticket["plan"].string)
-                let review = TicketPresentation.review(ticket["result"].string)
-                section("Result", review.body)
-                if !ticket["worktree"].string.isEmpty { changesSection }
-                if let verdict = review.verdict {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label(verdict.passed ? "Reviewer reported passed" : "Reviewer found issues", systemImage: verdict.passed ? "checkmark.shield" : "exclamationmark.shield").font(.headline).foregroundStyle(verdict.passed ? .green : .orange)
-                        ReadableText(text: verdict.summary)
-                        if !verdict.findings.isEmpty { ForEach(Array(verdict.findings.enumerated()), id: \.offset) { _, finding in ReadableText(text: "• " + finding) } }
-                        Text("\(verdict.files.count) files reviewed · \(verdict.tests.count) checks reported").font(.caption).foregroundStyle(.secondary)
-                        DisclosureGroup("Reviewed files and checks") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ForEach(Array(verdict.files.enumerated()), id: \.offset) { _, file in Label(file, systemImage: "doc").textSelection(.enabled) }
-                                ForEach(Array(verdict.tests.enumerated()), id: \.offset) { _, test in Label(test, systemImage: "terminal").textSelection(.enabled) }
-                            }.font(.caption)
-                        }
-                        Text("This summarizes the reviewer response. The ticket status reflects the daemon’s verification gate.").font(.caption).foregroundStyle(.secondary)
-                    }.padding(16).nekoCard(padding: 0, radius: 12)
-                    DisclosureGroup("Full result and raw reviewer response") { Text(ticket["result"].string).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
-                }
-                if ticket["supervision"] != .null {
-                    let assessment = ticket["supervision"]
-                    Text("Risk assessment · \(assessment["risk"].string.capitalized)").font(.headline)
-                    ReadableText(text: assessment["reason"].string)
-                    ForEach(["evidence", "files", "tests", "sensitive_areas", "uncertainties"], id: \.self) { key in
-                        if !assessment[key].array.isEmpty {
-                            DisclosureGroup(key.replacingOccurrences(of: "_", with: " ").capitalized) { ForEach(assessment[key].array, id: \.self) { item in ReadableText(text: item.string) } }
-                        }
-                    }
-                }
-                ForEach(model.snapshot["splits"].array.filter { $0["parent_id"].string == id }, id: \.self) { split in
-                    Text(split["approved"].bool ? "Approved parallel work" : "Parallel proposal · approval required").font(.headline)
-                    if split["approved"].bool { Text(split["integrated"].bool ? "Child changes integrated into the parent worktree." : "Child changes are not yet integrated.").foregroundStyle(.secondary) }
-                    ForEach(Array(split["subtasks"].array.enumerated()), id: \.offset) { index, child in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("\(index + 1). \(child["title"].string)").bold()
-                            ReadableText(text: child["goal"].string)
-                            Text(child["files"].array.map(\.string).joined(separator: "\n")).font(.system(.caption, design: .monospaced))
-                            if !child["tests"].array.isEmpty { Text("Checks: " + child["tests"].array.map(\.string).joined(separator: ", ")).font(.caption) }
-                            if !child["depends_on"].array.isEmpty { Text("After subtasks: " + child["depends_on"].array.map { String($0.int + 1) }.joined(separator: ", ")).font(.caption) }
-                            if let task = model.snapshot["tasks"].array.first(where: { $0["id"] == child["task_id"] }) {
-                                Text(friendlyTaskStatus(task["status"].string)).foregroundStyle(.secondary)
-                                Button("Open subtask") { childTicket = task.recordID }
-                            } else { Text(split["approved"].bool ? "Subtask not available in this snapshot" : "Awaiting approval").foregroundStyle(.secondary) }
-                        }.padding(12).nekoCard(padding: 0, radius: 12)
-                    }
-                }
-                if !ticket["worktree"].string.isEmpty { Button("Reveal working folder", systemImage: "folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
-                Divider()
-                DisclosureGroup("Activity · \(ticket["events"].array.count) events") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(ticket["events"].array.enumerated()), id: \.offset) { _, event in eventView(event) }
-                    }.padding(.top, 10)
-                }
             }.padding(28).frame(maxWidth: 900, alignment: .leading)
         }.frame(maxWidth: .infinity).defaultScrollAnchor(.bottom)
         Divider().opacity(0.5)
@@ -479,6 +427,61 @@ struct TicketDetail: View {
                 if let childTicket { TicketDetail(model: model, id: childTicket).frame(minWidth: 650, minHeight: 600) }
             }
             .onChange(of: id) { _, _ in note = ""; childTicket = nil }
+    }
+    @ViewBuilder private var detailsBody: some View {
+            let review = TicketPresentation.review(ticket["result"].string)
+            section("Result", review.body)
+            if !ticket["worktree"].string.isEmpty { changesSection }
+            if let verdict = review.verdict {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(verdict.passed ? "Reviewer reported passed" : "Reviewer found issues", systemImage: verdict.passed ? "checkmark.shield" : "exclamationmark.shield").font(.headline).foregroundStyle(verdict.passed ? .green : .orange)
+                    ReadableText(text: verdict.summary)
+                    if !verdict.findings.isEmpty { ForEach(Array(verdict.findings.enumerated()), id: \.offset) { _, finding in ReadableText(text: "• " + finding) } }
+                    Text("\(verdict.files.count) files reviewed · \(verdict.tests.count) checks reported").font(.caption).foregroundStyle(.secondary)
+                    DisclosureGroup("Reviewed files and checks") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(verdict.files.enumerated()), id: \.offset) { _, file in Label(file, systemImage: "doc").textSelection(.enabled) }
+                            ForEach(Array(verdict.tests.enumerated()), id: \.offset) { _, test in Label(test, systemImage: "terminal").textSelection(.enabled) }
+                        }.font(.caption)
+                    }
+                    Text("This summarizes the reviewer response. The ticket status reflects the daemon’s verification gate.").font(.caption).foregroundStyle(.secondary)
+                }.padding(16).nekoCard(padding: 0, radius: 12)
+                DisclosureGroup("Full result and raw reviewer response") { Text(ticket["result"].string).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+            }
+            if ticket["supervision"] != .null {
+                let assessment = ticket["supervision"]
+                Text("Risk assessment · \(assessment["risk"].string.capitalized)").font(.headline)
+                ReadableText(text: assessment["reason"].string)
+                ForEach(["evidence", "files", "tests", "sensitive_areas", "uncertainties"], id: \.self) { key in
+                    if !assessment[key].array.isEmpty {
+                        DisclosureGroup(key.replacingOccurrences(of: "_", with: " ").capitalized) { ForEach(assessment[key].array, id: \.self) { item in ReadableText(text: item.string) } }
+                    }
+                }
+            }
+            ForEach(model.snapshot["splits"].array.filter { $0["parent_id"].string == id }, id: \.self) { split in
+                Text(split["approved"].bool ? "Approved parallel work" : "Parallel proposal · approval required").font(.headline)
+                if split["approved"].bool { Text(split["integrated"].bool ? "Child changes integrated into the parent worktree." : "Child changes are not yet integrated.").foregroundStyle(.secondary) }
+                ForEach(Array(split["subtasks"].array.enumerated()), id: \.offset) { index, child in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(index + 1). \(child["title"].string)").bold()
+                        ReadableText(text: child["goal"].string)
+                        Text(child["files"].array.map(\.string).joined(separator: "\n")).font(.system(.caption, design: .monospaced))
+                        if !child["tests"].array.isEmpty { Text("Checks: " + child["tests"].array.map(\.string).joined(separator: ", ")).font(.caption) }
+                        if !child["depends_on"].array.isEmpty { Text("After subtasks: " + child["depends_on"].array.map { String($0.int + 1) }.joined(separator: ", ")).font(.caption) }
+                        if let task = model.snapshot["tasks"].array.first(where: { $0["id"] == child["task_id"] }) {
+                            Text(friendlyTaskStatus(task["status"].string)).foregroundStyle(.secondary)
+                            Button("Open subtask") { childTicket = task.recordID }
+                        } else { Text(split["approved"].bool ? "Subtask not available in this snapshot" : "Awaiting approval").foregroundStyle(.secondary) }
+                    }.padding(12).nekoCard(padding: 0, radius: 12)
+                }
+            }
+            if !ticket["worktree"].string.isEmpty { Button("Reveal working folder", systemImage: "folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
+            Divider()
+            DisclosureGroup("Activity · \(ticket["events"].array.count) events") {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(ticket["events"].array.enumerated()), id: \.offset) { _, event in eventView(event) }
+                }.padding(.top, 10)
+            }
     }
     private func action(_ label: String, _ command: String) -> some View { Button(label) { Task { await model.workbench(.command(command, ["task_id": .string(id)])) } } }
     private var stoppedCallout: some View {

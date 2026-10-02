@@ -28,6 +28,20 @@ closed. Cancellation/restart preserve child worktrees. See
 guaranteed by the current Codex sandbox; do not describe scoped prompts as a
 security boundary. Task worktrees are preserved, including failed work.
 
+Tickets are agents (2026-10-03). Each ticket opens as a conversation
+(`TicketThread.swift`) and `ReplyToTask` hands your reply to its agent:
+waiting/stopped/done tickets re-plan, ready-for-review goes back to
+building, running work reads it next step. Planning and building continue
+one saved Codex session per ticket (`task_sessions`, `exec resume`, sandbox
+via `-c sandbox_mode`); reviewers are always fresh and ephemeral; a session
+that can't resume falls back to a fresh start from the ticket history.
+Codex exec sessions did not appear in the Codex app's thread list when
+checked. The agent decides the next move: a supervisor `ask_user`/`skip` or a
+scout's closing `QUESTION:` line waits for you; a fix builds only when you
+started the ticket (`StartTask`, drag to Working) or allow starting.
+Daemon restarts resume interrupted work up to twice. Repository discovery
+matches whole words and ignores generic names (`init`, `web`, ...).
+
 User-owned MCP replaces the built-in Linear integration. The separate
 `neko-core::mcp_host` module owns SDK transport, workspace-scoped tool access,
 Keychain credentials/OAuth, run capabilities, source receipts and generic
