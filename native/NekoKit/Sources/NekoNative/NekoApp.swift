@@ -100,6 +100,7 @@ struct WorkspaceView: View {
         .preferredColorScheme(.dark)
         .environment(\.nekoLook, NekoLook(rawValue: look) ?? .ambient)
         .safeAreaInset(edge: .top) {
+            if !model.onboarding && !model.loadingSetup { FullDiskAccessBanner() }
             if let notice = model.notice, model.error == nil {
                 HStack(spacing: 10) { Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint); Text(notice).font(NekoFont.body); Spacer(); Button { model.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
                     .nekoCard(padding: 12, radius: 12).padding(.horizontal, 16).padding(.top, 8).transition(.move(edge: .top).combined(with: .opacity))

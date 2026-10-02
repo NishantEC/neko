@@ -20,5 +20,15 @@
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Neko searches your Desktop and opens workspaces kept there.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Neko searches your Documents and opens workspaces kept there.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Neko searches your Downloads.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Neko opens workspaces kept on external drives.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>Neko opens workspaces kept on network drives.</string>
 </dict>
 </plist>

@@ -25,6 +25,7 @@ enum PermissionCatalog {
 struct PermissionsView: View {
     @ObservedObject var model: AppModel
     @State private var trusted = AXIsProcessTrusted()
+    @State private var fullDisk = FullDiskAccess.granted
     @State private var clipboard = ClipboardConsentState()
     @State private var pending = false
     private var workspacePaths: [String] {
@@ -36,6 +37,10 @@ struct PermissionsView: View {
     var body: some View {
         Form {
             Section {
+                row("Full Disk Access", "One switch that lets search and agents open any folder (Documents, Desktop, Downloads, iCloud Drive, other drives) without asking folder by folder.",
+                    status: fullDisk ? "Allowed" : "Not allowed", ok: fullDisk) {
+                    Button(fullDisk ? "Open Settings" : "Allow…") { FullDiskAccess.openSettings() }
+                }
                 row("Accessibility", "Lets Neko paste for you and read the text you have selected. Nothing else on screen is read.",
                     status: trusted ? "Allowed" : "Not allowed", ok: trusted) {
                     if trusted {
@@ -56,14 +61,17 @@ struct PermissionsView: View {
             } header: { Text("This Mac") }
             Section {
                 let protected = PermissionCatalog.protectedFolders(workspacePaths, home: FileManager.default.homeDirectoryForCurrentUser.path)
-                if protected.isEmpty {
+                if fullDisk {
+                    Text("Full Disk Access is on, so tasks open every workspace without asking.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else if protected.isEmpty {
                     Text("None of your workspaces are in a folder macOS protects, so tasks open them without asking.")
                         .font(.callout).foregroundStyle(.secondary)
                 } else {
                     ForEach(protected, id: \.folder) { entry in
                         row(entry.folder, "\(entry.workspaces.count == 1 ? "1 workspace is" : "\(entry.workspaces.count) workspaces are") here. macOS asks once, the first time a task opens it, and there is no way to check the answer without asking.",
                             status: "Asked on first use", ok: true) {
-                            Button("Open Settings") { NSWorkspace.shared.open(PermissionCatalog.filesSettings) }
+                            Button("Allow all folders…") { FullDiskAccess.openSettings() }
                         }
                     }
                 }
@@ -78,6 +86,7 @@ struct PermissionsView: View {
             if let reply = try? await model.request(.string("GetClipboardHistoryEnabled")) { try? clipboard.load(reply) }
             while !Task.isCancelled {
                 trusted = AXIsProcessTrusted()
+                fullDisk = FullDiskAccess.granted
                 try? await Task.sleep(for: .seconds(1))
             }
         }
