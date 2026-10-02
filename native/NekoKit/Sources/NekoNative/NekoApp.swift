@@ -62,6 +62,8 @@ struct WorkspaceView: View {
                     NativeSidebar(model: model, page: $page, pages: pages, addingWorkspace: $addingWorkspace, look: $look)
                         .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
                 } detail: {
+                    VStack(spacing: 0) {
+                    FullDiskAccessBanner().padding(.top, page == "Tickets" ? 40 : 0)
                     Group {
                         switch page {
                         case "Tickets": TicketsView(model: model, sidebarHidden: columns == .detailOnly)
@@ -75,6 +77,7 @@ struct WorkspaceView: View {
                         case "Activity": ActivityGallery()
                         default: TodayView(model: model)
                         }
+                    }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background { LookBackground(look: look) }
@@ -100,7 +103,6 @@ struct WorkspaceView: View {
         .preferredColorScheme(.dark)
         .environment(\.nekoLook, NekoLook(rawValue: look) ?? .ambient)
         .safeAreaInset(edge: .top) {
-            if !model.onboarding && !model.loadingSetup { FullDiskAccessBanner() }
             if let notice = model.notice, model.error == nil {
                 HStack(spacing: 10) { Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint); Text(notice).font(NekoFont.body); Spacer(); Button { model.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
                     .nekoCard(padding: 12, radius: 12).padding(.horizontal, 16).padding(.top, 8).transition(.move(edge: .top).combined(with: .opacity))
