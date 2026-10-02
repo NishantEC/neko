@@ -356,6 +356,19 @@ impl Controller {
             native_runner::run_with_bridge(spec, bridge, cancel, on_event)
         })
     }
+    pub(super) fn run_native_session(
+        &self,
+        spec: &native_runner::RunSpec,
+        session: &native_runner::Session,
+        run_id: &str,
+        authority: &RunAuthority,
+        cancel: &AtomicBool,
+        on_event: impl FnMut(String),
+    ) -> Result<String, String> {
+        self.with_lease(run_id, authority, cancel, |bridge| {
+            native_runner::run_session_with_bridge(spec, bridge, session, cancel, on_event)
+        })
+    }
     fn with_lease(
         &self,
         run_id: &str,

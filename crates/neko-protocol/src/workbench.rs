@@ -178,6 +178,11 @@ pub struct Snapshot {
     /// Once planned they build without asking again.
     #[serde(default)]
     pub start_when_planned: BTreeSet<String>,
+    /// Each ticket's saved agent session (Codex thread id). Planning and
+    /// building continue it so the agent keeps what it learned; reviews
+    /// never use it.
+    #[serde(default)]
+    pub task_sessions: BTreeMap<String, String>,
     /// Every folder in a logical workspace. Legacy workspaces use `repository`.
     #[serde(default)]
     pub workspace_folders: BTreeMap<String, Vec<String>>,
@@ -422,6 +427,13 @@ pub enum Command {
     SetTaskFolder {
         task_id: String,
         folder: String,
+    },
+    /// Talk to a ticket's agent. A waiting or stopped ticket picks up your
+    /// reply and decides what to do next; a ticket ready for review goes
+    /// back to building with it; running work reads it at its next step.
+    ReplyToTask {
+        task_id: String,
+        text: String,
     },
     CompleteTask {
         task_id: String,

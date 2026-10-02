@@ -624,6 +624,29 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             );
         }
         Command::StartTask { .. } => return Err("Start a ticket through the workbench".into()),
+        Command::ReplyToTask { task_id, text } => {
+            let text = text.trim().to_owned();
+            required("Reply", &text, MAX_NOTE_BYTES)?;
+            let task = snapshot
+                .tasks
+                .iter_mut()
+                .find(|t| t.id == task_id)
+                .ok_or("Task no longer exists")?;
+            append_event(task, NOTE_ROLE, &text);
+            match task.status {
+                TaskStatus::AwaitingApproval | TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Completed => {
+                    let reopened = task.status == TaskStatus::Completed;
+                    task.status = TaskStatus::Queued;
+                    task.supervision = None;
+                    append_event(task, "system", if reopened { "Reopened with your reply; the agent decides what to do next." } else { "Picked up your reply; the agent decides what to do next." });
+                }
+                TaskStatus::ReadyForReview => {
+                    task.status = TaskStatus::Building;
+                    append_event(task, "system", "Sent back to building with your reply.");
+                }
+                _ => {}
+            }
+        }
         Command::SetTaskFolder { task_id, folder } => {
             let task = snapshot
                 .tasks
@@ -655,6 +678,8 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             {
                 return Err("That folder isn’t in this ticket’s workspace. Add it to the workspace first.".into());
             }
+            // The old session worked in another repository.
+            snapshot.task_sessions.remove(&task_id);
             snapshot.task_roots.insert(task_id.clone(), folder.clone());
             let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).unwrap();
             match task.worktree.take() {
@@ -854,6 +879,7 @@ fn remove_tasks(snapshot: &mut Snapshot, ids: &[String]) {
     for id in ids {
         snapshot.task_roots.remove(id);
         snapshot.start_when_planned.remove(id);
+        snapshot.task_sessions.remove(id);
     }
     for schedule in &mut snapshot.schedules {
         if schedule.last_task_id.as_ref().is_some_and(|id| ids.contains(id)) {
@@ -1430,6 +1456,30 @@ mod tests {
         assert_eq!(state.tasks.iter().find(|t| t.id == waiting.id).unwrap().status, TaskStatus::Building);
         assert!(!state.start_when_planned.contains(&waiting.id), "an approved plan needs no flag");
         assert!(apply(&db, Command::StartTask { task_id: waiting.id.clone() }).unwrap_err().contains("already working"));
+    }
+
+    #[test]
+    fn replying_to_a_ticket_hands_the_next_move_to_its_agent() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let ids: Vec<String> = (0..4).map(|_| task(&db, &ws).id).collect();
+        let mut state = load(&db).unwrap();
+        for (t, status) in state.tasks.iter_mut().zip([TaskStatus::AwaitingApproval, TaskStatus::ReadyForReview, TaskStatus::Building, TaskStatus::Failed]) {
+            t.status = status;
+        }
+        state.task_sessions.insert(ids[0].clone(), "session".into());
+        save(&db, &state).unwrap();
+        let reply = |id: &String| apply(&db, Command::ReplyToTask { task_id: id.clone(), text: "Use the staging config".into() }).unwrap();
+        let status = |s: &Snapshot, id: &String| s.tasks.iter().find(|t| &t.id == id).unwrap().status;
+        let s = reply(&ids[0]);
+        assert_eq!(status(&s, &ids[0]), TaskStatus::Queued, "a waiting agent picks the reply up");
+        assert_eq!(s.task_sessions[&ids[0]], "session", "and keeps its memory");
+        assert!(s.tasks.iter().find(|t| t.id == ids[0]).unwrap().events.iter().any(|e| e.role == NOTE_ROLE && e.message == "Use the staging config"));
+        assert_eq!(status(&reply(&ids[1]), &ids[1]), TaskStatus::Building, "review feedback goes back to building");
+        assert_eq!(status(&reply(&ids[2]), &ids[2]), TaskStatus::Building, "running work reads it next step");
+        assert_eq!(status(&reply(&ids[3]), &ids[3]), TaskStatus::Queued);
+        assert!(apply(&db, Command::ReplyToTask { task_id: ids[0].clone(), text: "  ".into() }).is_err());
     }
 
     #[test]
