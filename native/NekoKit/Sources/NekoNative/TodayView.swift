@@ -188,6 +188,7 @@ struct TodayView: View {
         .ignoresSafeArea(.container, edges: .top)
         .inspector(isPresented: $showInspector) {
             TicketInspector(model: model, id: inspectedTicket, openFull: { ticket = $0 })
+                .stableSplitPane()
                 .inspectorColumnWidth(min: 240, ideal: 272, max: 360)
                 .ignoresSafeArea(.container, edges: .top)
         }
