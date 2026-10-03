@@ -17,6 +17,7 @@ pub mod codex;
 pub mod commands;
 pub mod conversation;
 pub mod db;
+pub mod decision_context;
 pub mod decomposition;
 pub mod files;
 pub mod hotkey;

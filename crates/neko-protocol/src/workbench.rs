@@ -220,6 +220,12 @@ pub struct Snapshot {
     /// Whether Neko suggests new memories and uses memory at all.
     #[serde(default)]
     pub memory_options: MemoryOptions,
+    /// Separate bounded storage; host observations cannot be injected by clients.
+    #[serde(default)]
+    pub decision_records: Vec<crate::decision_context::DecisionRecord>,
+    /// Contextual guidance only. Keeping one never starts work or grants tools.
+    #[serde(default)]
+    pub working_preferences: Vec<crate::decision_context::WorkingPreference>,
 }
 
 /// Both on by default. Off means off: no suggestions are queued, and no
@@ -354,6 +360,7 @@ pub enum ChatToolStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
+    DecisionContext(crate::decision_context::DecisionContextCommand),
     SetAgentRuntime { runtime: AgentRuntime },
     AgentProfiles(crate::agent_profiles::ProfileCommand),
     Schedules(crate::scheduled_plans::ScheduleCommand),
@@ -492,6 +499,35 @@ pub enum Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn old_snapshots_expose_empty_decision_context() {
+        let mut value = serde_json::to_value(Snapshot::default()).unwrap();
+        value.as_object_mut().unwrap().remove("decision_records");
+        value.as_object_mut().unwrap().remove("working_preferences");
+        let restored: Snapshot = serde_json::from_value(value).unwrap();
+        let value = serde_json::to_value(restored).unwrap();
+        assert_eq!(value["decision_records"], serde_json::json!([]));
+        assert_eq!(value["working_preferences"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn preference_commands_are_narrow_and_round_trip() {
+        let value = serde_json::json!({"DecisionContext": {"KeepPreference": {
+            "workspace_id": "w", "id": "p", "expected_version": 1
+        }}});
+        let parsed = serde_json::from_value::<Command>(value.clone());
+        assert!(parsed.is_ok(), "missing preference command: {parsed:?}");
+        assert_eq!(serde_json::to_value(parsed.unwrap()).unwrap(), value);
+        assert!(serde_json::from_value::<Command>(serde_json::json!({
+            "DecisionContext": {"SaveDecision": {"action": "prepare_fix"}}
+        })).is_err(), "clients cannot inject host observations");
+        assert!(serde_json::from_value::<Command>(serde_json::json!({
+            "DecisionContext": {"KeepPreference": {
+                "workspace_id": "w", "id": "p", "expected_version": 1,
+                "execute": true
+            }}
+        })).is_err(), "preference commands cannot carry execution fields");
+    }
     #[test]
     fn workspace_folders_and_task_roots_survive_snapshot_round_trip() {
         let mut value = serde_json::to_value(Snapshot::default()).unwrap();
