@@ -186,11 +186,18 @@ struct TodayView: View {
         .environment(\.replyActions, ReplyActions(send: { text in post(text) }, draft: { text in draft = text }))
         // The inspector re-adds the toolbar inset; the header row is the toolbar.
         .ignoresSafeArea(.container, edges: .top)
-        .inspector(isPresented: $showInspector) {
-            TicketInspector(model: model, id: inspectedTicket, openFull: { ticket = $0 })
-                .stableSplitPane()
-                .inspectorColumnWidth(min: 240, ideal: 272, max: 360)
-                .ignoresSafeArea(.container, edges: .top)
+        // Opens when you click a ticket in the conversation; ✕ closes it.
+        .sidePanel(isPresented: showInspector && inspectedTicket != nil, key: "neko.today.panelWidth", range: 260...480, ideal: 300) {
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button { withAnimation(.snappy(duration: 0.25)) { showInspector = false } } label: {
+                        Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).frame(width: 24, height: 24).contentShape(Rectangle())
+                    }.buttonStyle(.plain).help("Close").accessibilityLabel("Close ticket panel")
+                }.padding(.horizontal, 10).padding(.top, 14)
+                TicketInspector(model: model, id: inspectedTicket, openFull: { ticket = $0 })
+            }
+            .ignoresSafeArea(.container, edges: .top)
         }
         .onChange(of: scope) { _, _ in inspected = nil }
         .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: messages.count)
@@ -302,24 +309,13 @@ struct TodayView: View {
                 Text(headerSubtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 12)
-            let waiting = workSummary.needsYou.count
-            if waiting > 0 {
-                Button { NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets") } label: {
-                    HStack(spacing: 6) {
-                        Circle().fill(ReplyStyle.orange).frame(width: 7, height: 7)
-                        Text(waiting == 1 ? "1 needs you" : "\(waiting) need you").font(.system(size: 12))
-                    }.padding(.horizontal, 12).frame(height: 28).liquidGlassCapsule(interactive: true)
-                }.buttonStyle(.plain).help("Open tickets waiting for you")
+            // Work in the sidebar already counts tickets that need you, and a
+            // ticket's panel opens from the conversation, so only Stop lives here.
+            if replying {
+                toolbarIcon("stop.fill", help: "Stop the current reply") {
+                    if let current = messages.last(where: { $0["pending"].bool }) { Task { await model.workbench(.command("CancelChat", ["turn_id": current["id"]])) } }
+                }.padding(.horizontal, 2).frame(height: 28).liquidGlassCapsule()
             }
-            HStack(spacing: 0) {
-                if replying {
-                    toolbarIcon("stop.fill", help: "Stop the current reply") {
-                        if let current = messages.last(where: { $0["pending"].bool }) { Task { await model.workbench(.command("CancelChat", ["turn_id": current["id"]])) } }
-                    }
-                }
-                toolbarIcon("tray", help: "Open tickets") { NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets") }
-                toolbarIcon("sidebar.right", help: showInspector ? "Hide inspector" : "Show inspector") { withAnimation(.snappy(duration: 0.25)) { showInspector.toggle() } }
-            }.padding(.horizontal, 2).frame(height: 28).liquidGlassCapsule()
         }
         .padding(.leading, sidebarCollapsed ? 88 : 20).padding(.trailing, 14)
         .frame(height: 52)
