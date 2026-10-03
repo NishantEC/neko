@@ -20,6 +20,15 @@ import NekoKit
         XCTAssertFalse(model.includeStoppedAgents)
         XCTAssertEqual(model.ticketDrafts["a"], "Use the staging environment")
     }
+    func testExplicitAllAgentsClearsGroupWhileMemoryReturnStaysInMemory() {
+        let model = AppModel { _ in .null }
+        model.agentFilter = "needs_you"
+        model.showAgents()
+        XCTAssertEqual(model.agentFilter, "all")
+        model.openAgent("a", from: "Memory")
+        model.closeAgent()
+        XCTAssertEqual(model.requestedPage, "Memory")
+    }
     func testSidebarGroupsAreDisjointAndNewestFirst() {
         let rows: [JSONValue] = ["AwaitingApproval", "ReadyForReview", "Failed", "Queued", "Planning", "Building", "Reviewing", "Completed", "Cancelled"].enumerated().map {
             .object(["id": .string("\($0.offset)"), "status": .string($0.element), "updated_at_ms": .number(Double($0.offset))])

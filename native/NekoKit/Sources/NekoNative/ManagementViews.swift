@@ -112,12 +112,12 @@ struct MemoryView: View {
         let proposals = model.snapshot["memory_proposals"].array.filter(inScope)
         ManagementScroll {
             PageIntro(title: "Memory", message: "What Neko has learned about how you work: preferences, decisions and facts about your projects. Neko suggests new memories; nothing is kept until you accept it.") {
-                Button("Add memory", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) }
+                if tab == "memories" { Button("Add memory", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) } }
             }
             Picker("Memory view", selection: $tab) {
                 Text("Saved memories").tag("memories")
                 Text("Working style").tag("style")
-            }.pickerStyle(.segmented).frame(maxWidth: 300)
+            }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 300)
             if tab == "style" { WorkingStyleView(model: model) } else {
             HStack(spacing: 18) {
                 memoryToggle("Suggest new memories", key: "learning", help: "When off, Neko stops proposing memories from chats and tickets. Things you tell it to remember are still saved.")

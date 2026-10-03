@@ -24,10 +24,16 @@ Before any installer restart, inspect live task state and verify no ticket is Pl
 
 ## Current verification
 
-Rust foundation committed locally as `10c70a3`: 23 focused tests, 636 core tests
-passed (9 ignored), 11 protocol tests. Native: 75 XCTest + 11 Swift Testing,
-including a real isolated daemon persistence/versioning/restart contract. Daemon:
-142 + 143 passing tests with two threads. Initial unconstrained singleton harness
-races passed in isolation and in the full reduced-concurrency suite. Spec review
-found five issues; fixes and regression tests are complete, re-review pending.
-Signed release builds successfully. Installed UI verification is still pending.
+Rust foundation committed locally as `10c70a3`, with quality fixes in `304b1c7`.
+Full core: 641 passed (9 ignored), including 28 focused decision-context tests;
+11 protocol tests passed in the foundation pass. Fresh native: 76 XCTest + 11
+Swift Testing. The isolated daemon contract covers preference persistence,
+versioning and restart. Fresh daemon: 142 + 143 passing tests with two threads.
+Initial unconstrained singleton harness races pass in isolation and in the full
+reduced-concurrency suite. Spec review passed at `e394572`; targeted quality
+re-review passed for R1-R5. Signed native release build passes.
+
+Installed `e394572` was checked on screen: Home, full-page agent chat, per-agent
+draft retention, question without Approve, filtered board/search return and
+Working style editor. Temporary drafts were cleared without sending or saving.
+The final native navigation fixes still need installation and on-screen checks.
