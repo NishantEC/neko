@@ -45,5 +45,26 @@ Installed `e394572` was checked on screen: Home and system sidebar, full-page
 agent conversation, per-agent draft retention, a genuine awaiting-question ticket
 without Approve, filtered board/search return, List/Board and Memory / Working
 style. Temporary drafts were cleared, and the guidance editor was cancelled
-without saving. No existing ticket was started. Final quality fixes still need
-installation and checks for explicit All agents reset and Preferences routing.
+without saving. No existing ticket was started. Installed `a93459a` on 2026-10-04 after verifying 64 tickets, zero Planning /
+Building / Reviewing tasks and zero pending/queued main-chat turns. The installed
+app passed explicit All agents reset from Needs you while All agents remained
+selected, and Command-comma opened Preferences from NEK-2AE2. Working style's
+segmented picker is readable; Add memory is absent from that tab, and adding
+guidance correctly requires a selected workspace. Neko was returned to Home.
+
+Spec review passed at `e394572`; final targeted quality review passed R1-R5 with
+core fixes at `304b1c7` and native changes now in `a93459a`. The signed bundle uses
+the existing Apple Development identity and installation preserves credentials,
+preferences and user data. No remote push occurred.
+
+Screenshots are in
+`/Users/nish/.codex/visualizations/2026/10/03/01a10201-5799-7f91-b260-fb1e1fc9cb43/`:
+`neko-installed-home.png`, `neko-installed-agent-chat.png`,
+`neko-installed-all-agents.png`, `neko-installed-preferences.png` and
+`neko-installed-working-style.png`.
+
+Latest logs: `/tmp/neko-native-final-tests.log`,
+`/tmp/neko-judgment-followup-core.log`, `/tmp/neko-core-final-tests.log`,
+`/tmp/neko-decision-final-tests.log`, `/tmp/neko-daemon-final-tests.log` and
+`/tmp/neko-final-reviewed-signed-build.log`. Learning accuracy and the real divider
+drag remain unmeasured.

@@ -10,7 +10,7 @@ Existing local edits were backed up at `/tmp/neko-main-local-fxjuqqzf`, then res
 2. [x] Daemon learning intake and attribution to existing grants; relevant confirmed working style reaches agent prompts.
 3. [x] Native Home, full-page agent chats and bounded live sidebar using the approved Paper shell.
 4. [x] Native decision explanations and Working style controls with observed evidence and explicit limits.
-5. [ ] Contract tests, focused review, local build/install/launch and real screenshots.
+5. [x] Contract tests, focused review, local build/install/launch and real screenshots.
 
 ## Product contracts
 
@@ -36,4 +36,12 @@ re-review passed for R1-R5. Signed native release build passes.
 Installed `e394572` was checked on screen: Home, full-page agent chat, per-agent
 draft retention, question without Approve, filtered board/search return and
 Working style editor. Temporary drafts were cleared without sending or saving.
-The final native navigation fixes still need installation and on-screen checks.
+Installed `a93459a` on 2026-10-04 after checking 64 tickets, zero active workers
+and zero pending/queued chat turns. On-screen checks confirm All agents clears
+Needs you even when the page is already selected; Command-comma leaves an agent
+chat for Preferences. Working style has a readable segmented picker and no
+unrelated Add memory action. Neko was returned to Home. No ticket was started.
+
+Completion boundary: contextual learning infrastructure and native controls are
+implemented and verified. Learning accuracy, a real model build inside a resumed
+ticket session and real divider dragging remain unmeasured. No remote push.
