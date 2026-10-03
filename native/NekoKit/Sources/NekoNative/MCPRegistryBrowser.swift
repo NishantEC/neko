@@ -71,8 +71,7 @@ struct MCPRegistryBrowser: View {
                 Button("Done") { dismiss() }
             }
             .padding(.bottom, 20)
-            TextField("Search the MCP Registry", text: $query)
-                .textFieldStyle(.roundedBorder)
+            NekoSearchField(title: "Search the MCP Registry", text: $query)
                 .padding(.bottom, 14)
             HStack(spacing: 8) {
                 Image(systemName: "folder").foregroundStyle(.secondary)

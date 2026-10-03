@@ -421,7 +421,7 @@ struct ToolsView: View {
             HStack {
                 Text("Tools").font(.headline)
                 Spacer()
-                if count > 0 { TextField("Search tools", text: $toolSearch).textFieldStyle(.roundedBorder).frame(width: 220) }
+                if count > 0 { NekoSearchField(title: "Search tools", text: $toolSearch).frame(width: 220) }
             }
             .padding(.bottom, 10)
             Divider()
@@ -559,7 +559,7 @@ struct ToolsView: View {
                 Spacer(minLength: 12)
                 Button("Refresh", systemImage: "arrow.clockwise") { send("Skills", "Refresh") }.controlSize(.small)
             }
-            TextField("Search skills", text: $search).textFieldStyle(.roundedBorder)
+            NekoSearchField(title: "Search skills", text: $search)
             if !visibleSkills.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(visibleSkills.enumerated()), id: \.offset) { index, skill in
