@@ -47,11 +47,11 @@ struct StatusMenu: View {
 
 struct WorkspaceView: View {
     @ObservedObject var model: AppModel
-    @State private var page = ProcessInfo.processInfo.environment["NEKO_START_PAGE"] ?? "Today"
+    @State private var page = ProcessInfo.processInfo.environment["NEKO_START_PAGE"] ?? "Home"
     @State private var columns: NavigationSplitViewVisibility = ProcessInfo.processInfo.environment["NEKO_SIDEBAR"] == "hidden" ? .detailOnly : .all
     @AppStorage("neko.look") private var look = ProcessInfo.processInfo.environment["NEKO_LOOK"] ?? NekoLook.ambient.rawValue
     @State private var addingWorkspace = false
-    private let pages = [("Today", "sun.max"), ("Tickets", "tray"), ("Responsibilities", "waveform.path"), ("Tools & skills", "shippingbox"), ("Schedules", "calendar"), ("Memory", "text.alignleft"), ("Profiles", "person.2"), ("Settings", "gearshape")]
+    private let pages = [("Home", "house"), ("Tickets", "tray"), ("Responsibilities", "waveform.path"), ("Tools & skills", "shippingbox"), ("Schedules", "calendar"), ("Memory", "text.alignleft"), ("Profiles", "person.2"), ("Settings", "gearshape")]
     var body: some View {
         Group {
             if model.loadingSetup {
@@ -61,16 +61,18 @@ struct WorkspaceView: View {
                 NavigationSplitView(columnVisibility: $columns) {
                     NativeSidebar(model: model, page: $page, pages: pages, addingWorkspace: $addingWorkspace, look: $look)
                         .stableSplitPane()
-                        .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
+                        .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 300)
                 } detail: {
                     // Work and Today (the default page) draw their own toolbar row.
                     let ownsToolbarRow = !["Workspaces", "Responsibilities", "Tools & skills", "Memory", "Profiles", "Schedules", "Settings", "Activity", "Reply views"].contains(page)
-                    let isToday = ownsToolbarRow && page != "Tickets"
+                    let isToday = ownsToolbarRow && page != "Tickets" && model.agentID == nil
                     VStack(spacing: 0) {
                     // Today places the banner under its own toolbar row.
-                    if !isToday { FullDiskAccessBanner().padding(.top, 40) }
+                    if !isToday && model.agentID == nil { FullDiskAccessBanner().padding(.top, 40) }
                     Group {
-                        switch page {
+                        if let agentID = model.agentID {
+                            TicketDetail(model: model, id: agentID, close: { model.closeAgent() }, fullPage: true).id(agentID)
+                        } else { switch page {
                         case "Tickets": TicketsView(model: model, sidebarHidden: columns == .detailOnly)
                         case "Workspaces": WorkspacesView(model: model)
                         case "Responsibilities": ResponsibilitiesView(model: model)
@@ -82,7 +84,7 @@ struct WorkspaceView: View {
                         case "Activity": ActivityGallery()
                         case "Reply views": ReplyGallery()
                         default: TodayView(model: model)
-                        }
+                        } }
                     }
                     }
                     .stableSplitPane()
@@ -99,7 +101,7 @@ struct WorkspaceView: View {
                     .hiddenWindowToolbarBackground()
                     .ignoresSafeArea(.container, edges: .top)
 
-                    .onReceive(NotificationCenter.default.publisher(for: .nekoNavigate)) { note in if let key = note.object as? String { page = key } }
+                    .onReceive(NotificationCenter.default.publisher(for: .nekoNavigate)) { note in if let key = note.object as? String { model.agentID = nil; page = key == "Today" ? "Home" : key } }
                 }
             }
         }
@@ -122,7 +124,7 @@ struct WorkspaceView: View {
         }
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
         .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in page = "Settings" }
-        .onChange(of: model.requestedPage) { _, requested in if let requested { page = requested; model.requestedPage = nil } }
+        .onChange(of: model.requestedPage) { _, requested in if let requested { model.agentID = nil; page = requested == "Today" ? "Home" : requested; model.requestedPage = nil } }
         .onAppear {
             if let requested = model.requestedPage { page = requested; model.requestedPage = nil }
             // Development only: NEKO_NOTICE_DEMO="text" shows a notice to check the toast's look.
@@ -227,7 +229,29 @@ struct NativeSidebar: View {
     @Binding var look: String
     var body: some View {
         List(selection: $selection) {
-            ForEach(PageInfo.groups, id: \.title) { group in
+            Section {
+                row("Home")
+                row("Tickets")
+            }
+            ForEach(AgentSidebarGroup.allCases) { group in
+                let tasks = group.tasks(in: model.tasks)
+                if !tasks.isEmpty {
+                    Section(group.title) {
+                        ForEach(tasks.prefix(5), id: \.recordID) { task in
+                            HStack(spacing: 8) {
+                                Circle().fill(ticketStatusColor(task["status"].string)).frame(width: 6, height: 6)
+                                Text(task["title"].string).lineLimit(1)
+                            }
+                            .tag("agent:" + task.recordID)
+                            .help("NEK-" + String(task.recordID.prefix(4)).uppercased() + " · " + friendlyTaskStatus(task["status"].string))
+                        }
+                        if tasks.count > 5 {
+                            Text("Show all \(tasks.count)").foregroundStyle(.secondary).tag("group:" + group.rawValue)
+                        }
+                    }
+                }
+            }
+            ForEach(PageInfo.groups.filter { $0.title != "Your day" }, id: \.title) { group in
                 Section(group.title) {
                     ForEach(group.keys, id: \.self) { key in row(key) }
                 }
@@ -259,12 +283,19 @@ struct NativeSidebar: View {
             .overlay(alignment: .top) { N.line.frame(height: 1) }
         }
         .onAppear { selection = page }
-        .onChange(of: selection) { _, v in if let v, v != page { page = v } }
-        .onChange(of: page) { _, v in if selection != v { selection = v } }
+        .onChange(of: selection) { _, value in
+            guard let value else { return }
+            if value.hasPrefix("agent:") { model.openAgent(String(value.dropFirst(6)), from: page) }
+            else if value.hasPrefix("group:") { model.showAgents(String(value.dropFirst(6))); page = "Tickets" }
+            else { guard value != page || model.agentID != nil else { return }; model.agentID = nil; if value == "Tickets" { model.agentFilter = "all" }; page = value }
+        }
+        .onChange(of: model.agentID) { _, id in selection = id.map { "agent:" + $0 } ?? page }
+        .onChange(of: page) { _, value in if model.agentID == nil { selection = value } }
+        .onChange(of: model.selectedWorkspace) { _, _ in model.agentID = nil }
     }
     private func row(_ key: String) -> some View {
-        let attention = key == "Tickets" ? StatusSummary(snapshot: model.snapshot).needsAttention : 0
-        return Label(PageInfo.title(key), systemImage: PageInfo.icon(key)).badge(attention)
+        let attention = key == "Tickets" ? AgentSidebarGroup.needsYou.tasks(in: model.tasks).count : 0
+        return Label(PageInfo.title(key), systemImage: PageInfo.icon(key)).badge(attention).tag(key)
     }
     private func workspaceRow(_ id: String?, name: String, color: Color) -> some View {
         let selected = model.selectedWorkspace == id
@@ -305,14 +336,14 @@ struct WatchingPresentation {
 /// User-facing names follow the product loop: Neko watches, plans, then asks you.
 enum PageInfo {
     static let groups: [(title: String, keys: [String])] = [
-        ("Your day", ["Today", "Tickets"]),
+        ("Your day", ["Home", "Tickets"]),
         ("What Neko watches", ["Workspaces", "Responsibilities", "Schedules"]),
         ("Teach Neko", ["Tools & skills", "Memory", "Profiles"]),
         ("Neko", ["Settings"])
     ]
     static func title(_ key: String) -> String {
         switch key {
-        case "Tickets": "Work"
+        case "Tickets": "All agents"
         case "Responsibilities": "Watching"
         case "Tools & skills": "Tools & skills"
         default: key
@@ -320,7 +351,7 @@ enum PageInfo {
     }
     static func icon(_ key: String) -> String {
         switch key {
-        case "Today": "sun.max"
+        case "Home", "Today": "house"
         case "Workspaces": "square.stack.3d.up"
         case "Tickets": "checklist"
         case "Responsibilities": "eye"

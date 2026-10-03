@@ -90,6 +90,7 @@ struct ProfilesView: View {
 
 struct MemoryView: View {
     @ObservedObject var model: AppModel
+    @State private var tab = "memories"
     @State private var draft: ManagementDraft?
     private func memoryToggle(_ title: String, key: String, help: String) -> some View {
         let options = model.snapshot["memory_options"]
@@ -113,6 +114,11 @@ struct MemoryView: View {
             PageIntro(title: "Memory", message: "What Neko has learned about how you work: preferences, decisions and facts about your projects. Neko suggests new memories; nothing is kept until you accept it.") {
                 Button("Add memory", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) }
             }
+            Picker("Memory view", selection: $tab) {
+                Text("Saved memories").tag("memories")
+                Text("Working style").tag("style")
+            }.pickerStyle(.segmented).frame(maxWidth: 300)
+            if tab == "style" { WorkingStyleView(model: model) } else {
             HStack(spacing: 18) {
                 memoryToggle("Suggest new memories", key: "learning", help: "When off, Neko stops proposing memories from chats and tickets. Things you tell it to remember are still saved.")
                 memoryToggle("Use memory in replies and tasks", key: "use_memory", help: "When off, no memory is sent to any model. Saved memories stay here.")
@@ -134,7 +140,7 @@ struct MemoryView: View {
                 }
             }
             WorkspaceSection(name: "Remembered", color: N.text4, detail: memories.isEmpty ? nil : "\(memories.count)") { EmptyView() } content: {
-                if memories.isEmpty { EmptyRow(text: "Nothing yet. Tell Neko \"remember that…\" in Today, or add one here.") }
+                if memories.isEmpty { EmptyRow(text: "Nothing yet. Tell Neko \"remember that…\" in Home, or add one here.") }
                 ForEach(memories, id: \.self) { entry in
                     HStack(alignment: .top, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -149,6 +155,7 @@ struct MemoryView: View {
                     }.padding(.vertical, 6).overlay(alignment: .top) { N.line.frame(height: 1) }
                 }
             }
+        }
         }.sheet(item: $draft) { item in
             ManagementEditor(model: model, kind: .memory, original: item.value, workspace: model.selectedWorkspace, profileID: profileFor(model))
         }

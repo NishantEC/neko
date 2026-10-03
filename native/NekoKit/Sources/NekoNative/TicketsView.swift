@@ -5,12 +5,14 @@ enum TicketPresentation {
     /// The planner's question for a ticket waiting on you, if it asked one.
     static func waitingReason(_ task: JSONValue) -> String? {
         guard task["status"].string == "AwaitingApproval" else { return nil }
-        for event in task["events"].array.reversed() {
+        let decision = task["supervision"]
+        if decision["action"].string == "AskUser" { return "Needs your input: " + decision["reason"].string }
+        if decision["action"].string == "Skip" { return "Nothing to build: " + decision["reason"].string }
+        if let event = task["events"].array.last(where: { $0["role"].string == "supervisor" }) {
             let message = event["message"].string
             for prefix in ["Needs your input before building: ", "Nothing to build: "] where message.hasPrefix(prefix) {
                 return (prefix.hasPrefix("Needs") ? "Needs your input: " : "Nothing to build: ") + message.dropFirst(prefix.count)
             }
-            if event["role"].string == "user" { return nil }
         }
         return nil
     }
@@ -73,12 +75,11 @@ enum TicketPresentation {
 struct TicketsView: View {
     @ObservedObject var model: AppModel
     @State private var selected: String?
-    @State private var includeStopped = true
+    private var includeStopped: Bool { model.includeStoppedAgents }
     @State private var dropTarget: String?
-    @State private var search = ""
+    private var search: String { model.agentSearch }
     @State private var confirmCancel: JSONValue?
     @AppStorage("neko.work.layout") private var layout = "board"
-    @AppStorage("neko.work.open") private var openAs = "drawer"
     var sidebarHidden = false
     private var collapsed: Bool { sidebarHidden }
     struct Column { let id: String; let title: String; let color: Color; let statuses: [String] }
@@ -90,7 +91,8 @@ struct TicketsView: View {
     ]
     private func tasks(in column: Column) -> [JSONValue] {
         model.tasks.filter { task in
-            column.statuses.contains(task["status"].string)
+            AgentSidebarGroup.matches(model.agentFilter, task: task)
+            && column.statuses.contains(task["status"].string)
             && (includeStopped || !["Failed", "Cancelled"].contains(task["status"].string))
             && (search.isEmpty || task["title"].string.localizedCaseInsensitiveContains(search))
         }.sorted { $0["updated_at_ms"].int > $1["updated_at_ms"].int }
@@ -102,9 +104,7 @@ struct TicketsView: View {
         VStack(alignment: .leading, spacing: 0) {
             toolbar
             Divider().opacity(0.5)
-            if openAs == "full", let selected {
-                TicketPeek(model: model, id: selected, mode: $openAs, close: { self.selected = nil })
-            } else if layout == "list" { list } else { board }
+            if layout == "list" { list } else { board }
         }
         .ignoresSafeArea(.container, edges: .top)
         .onChange(of: model.selectedWorkspace) { _, _ in selected = nil }
@@ -117,30 +117,20 @@ struct TicketsView: View {
         } message: {
             Text("It hasn’t been reviewed yet, so moving it to Done stops the work. Its files and worktree stay on disk.")
         }
-        .sheet(isPresented: Binding(get: { openAs == "modal" && selected != nil }, set: { if !$0 { selected = nil } })) {
-            if let selected {
-                TicketPeek(model: model, id: selected, mode: $openAs, close: { self.selected = nil })
-                    .frame(minWidth: 720, minHeight: 640)
-            }
-        }
-        .sidePanel(isPresented: openAs == "drawer" && selected != nil, key: "neko.work.panelWidth", range: 340...760, ideal: 420) {
-            if let selected {
-                TicketPeek(model: model, id: selected, mode: $openAs, close: { self.selected = nil })
-                    .ignoresSafeArea(.container, edges: .top)
-            }
-        }
+        .onChange(of: selected) { _, id in if let id { model.openAgent(id, from: "Tickets") } }
+
     }
 
     private var toolbar: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("Work").font(.system(size: 15, weight: .semibold))
+                Text(model.agentFilter == "all" ? "All agents" : (AgentSidebarGroup(rawValue: model.agentFilter)?.title ?? "All agents")).font(.system(size: 15, weight: .semibold))
                 Text("\(workspaceLabel) · \(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")\(startsWithoutAsking ? " · starts without asking" : "")")
                     .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
             .layoutPriority(-1)
             Spacer(minLength: 12)
-            TextField("Search tickets", text: $search).textFieldStyle(.roundedBorder).frame(minWidth: 90, maxWidth: 180).controlSize(.small)
+            TextField("Search tickets", text: $model.agentSearch).textFieldStyle(.roundedBorder).frame(minWidth: 90, maxWidth: 180).controlSize(.small)
             GlassSegmented(selection: $layout, options: [
                 .init(value: "list", title: "List", symbol: "list.bullet", help: "Show tickets as a list"),
                 .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tickets as a board")
@@ -151,7 +141,7 @@ struct TicketsView: View {
                 }))
                 Text("New tickets from chat begin working once planned. Watched sources keep their own rules. Nothing is pushed without you.")
                 Divider()
-                Toggle("Show failed and cancelled", isOn: $includeStopped)
+                Toggle("Show failed and cancelled", isOn: $model.includeStoppedAgents)
                 Button("Clear finished tickets") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
                     .disabled(!model.tasks.contains { ["Completed", "Cancelled"].contains($0["status"].string) })
             } label: { Image(systemName: "ellipsis.circle") }
@@ -179,7 +169,7 @@ struct TicketsView: View {
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
-        .overlay { if Self.columns.allSatisfy({ tasks(in: $0).isEmpty }) { ContentUnavailableView("No tickets", systemImage: "tray", description: Text(search.isEmpty ? "Ask Neko for work in Today, and its tickets appear here." : "No ticket matches “\(search)”.")) } }
+        .overlay { if Self.columns.allSatisfy({ tasks(in: $0).isEmpty }) { ContentUnavailableView("No tickets", systemImage: "tray", description: Text(search.isEmpty ? "Ask Neko for work in Home, and its tickets appear here." : "No ticket matches “\(search)”.")) } }
     }
     private func listRow(_ task: JSONValue, color: Color) -> some View {
         let status = task["status"].string
@@ -333,10 +323,10 @@ struct TicketDetail: View {
     let id: String
     /// Set when shown in a drawer, where there is no sheet to dismiss.
     var close: (() -> Void)? = nil
-    @State private var note = ""
-    @State private var childTicket: String?
+    var fullPage = false
+    @Environment(\.sidebarCollapsed) private var sidebarCollapsed
     @State private var confirmDelete = false
-    @State private var changes: (files: [String], patch: String)?
+    @State private var changes: (files: [String], patch: String, truncated: Bool)?
     @State private var changesError: String?
     @State private var loadingChanges = false
     private var changesSection: some View {
@@ -349,6 +339,7 @@ struct TicketDetail: View {
             Text("What this ticket changed in its own worktree. Nothing here is in your repository until you bring it over.").font(.caption).foregroundStyle(.secondary)
             if let changesError { Text(changesError).font(.caption).foregroundStyle(NekoStyle.amber) }
             if let changes {
+                if changes.truncated { Label("This diff is incomplete. Open the working folder to inspect the full change.", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(NekoStyle.amber) }
                 if changes.files.isEmpty { Text("No changes yet.").foregroundStyle(.secondary) }
                 else {
                     Text("\(changes.files.count) \(changes.files.count == 1 ? "file" : "files"): \(changes.files.prefix(12).joined(separator: ", "))\(changes.files.count > 12 ? "…" : "")").font(.caption)
@@ -364,7 +355,7 @@ struct TicketDetail: View {
         Task {
             do {
                 let reply = try await model.request(.command("TaskChanges", ["task_id": .string(id)]))["TaskChanges"]
-                changes = (reply["files"].array.map(\.string), reply["patch"].string)
+                changes = (reply["files"].array.map(\.string), reply["patch"].string, reply["truncated"].bool)
                 changesError = nil
             } catch { changesError = error.localizedDescription }
             loadingChanges = false
@@ -374,14 +365,16 @@ struct TicketDetail: View {
     private var ticket: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == id } ?? .null }
     var body: some View {
         VStack(spacing: 0) {
+        if fullPage { agentHeader; Divider().opacity(0.5); FullDiskAccessBanner() }
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                HStack(alignment: .top) {
+                if !fullPage { HStack(alignment: .top) {
                     Text(ticket["title"].string).font(.title2.bold()).textSelection(.enabled)
                     Spacer()
                     Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
                 }
-                Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary)
+                Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary) }
+                ForEach(DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { $0["task_id"].string == id }).prefix(3), id: \.recordID) { DecisionCard(model: model, record: $0) }
                 DisclosureGroup { VStack(alignment: .leading, spacing: 22) { detailsBody }.padding(.top, 10) } label: { Text("Details: result, changes, risk, activity").font(.system(size: 12)).foregroundStyle(.secondary) }
                 TicketThreadView(ticket: ticket)
                 section("Plan", ticket["plan"].string)
@@ -390,18 +383,18 @@ struct TicketDetail: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Neko is waiting on you", systemImage: "questionmark.bubble.fill").font(.headline).foregroundStyle(NekoStyle.amber)
                         Text(question).textSelection(.enabled)
-                        Text("Answer in the box below and the agent picks it up from there. Or approve the plan to build it as is.").font(.caption).foregroundStyle(.secondary)
+                        Text("Reply below so the agent can reassess its plan.").font(.caption).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                     .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(NekoStyle.amber.opacity(0.25)))
                 }
-                HStack {
+                if !fullPage { HStack {
                     switch ticket["status"].string {
                     case "AwaitingApproval":
-                        action("Approve plan", "ApproveTask")
+                        if TicketPresentation.waitingReason(ticket) == nil { action("Approve plan", "ApproveTask") }
                         if TicketPresentation.canProposeSplit(ticket, splits: model.snapshot["splits"].array) { action("Propose parallel work", "ProposeSplit") }
-                    case "ReadyForReview": action("Mark complete", "CompleteTask")
+                    case "ReadyForReview": action("Accept locally", "CompleteTask")
                     case "Failed", "Cancelled": action("Start again", "StartTask")
                     default: EmptyView()
                     }
@@ -409,23 +402,42 @@ struct TicketDetail: View {
                     if ["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) {
                         Button("Delete…", role: .destructive) { confirmDelete = true }
                     }
-                }.disabled(model.busy)
+                }.disabled(model.busy) }
+            }.padding(28).frame(maxWidth: 760, alignment: .leading)
+        }.frame(maxWidth: .infinity).defaultScrollAnchor(.bottom)
+        Divider().opacity(0.5)
+        TicketComposer(model: model, id: id, status: ticket["status"].string).frame(maxWidth: 760)
+        }.frame(maxWidth: .infinity)
                 .confirmationDialog("Delete this ticket?", isPresented: $confirmDelete) {
                     Button("Delete ticket", role: .destructive) {
-                        Task { if await model.workbench(.command("DeleteTask", ["task_id": .string(id)])) { dismiss() } }
+                        Task { if await model.workbench(.command("DeleteTask", ["task_id": .string(id)])) { if let close { close() } else { dismiss() } } }
                     }
                 } message: {
                     Text("Removes the ticket, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.")
                 }
-            }.padding(28).frame(maxWidth: 900, alignment: .leading)
-        }.frame(maxWidth: .infinity).defaultScrollAnchor(.bottom)
-        Divider().opacity(0.5)
-        TicketComposer(model: model, id: id, status: ticket["status"].string).frame(maxWidth: 900)
-        }.frame(maxWidth: .infinity)
-            .sheet(isPresented: Binding(get: { childTicket != nil }, set: { if !$0 { childTicket = nil } })) {
-                if let childTicket { TicketDetail(model: model, id: childTicket).frame(minWidth: 650, minHeight: 600) }
+    }
+    private var agentHeader: some View {
+        HStack(spacing: 10) {
+            Button { close?() } label: { Label("Neko", systemImage: "arrow.left") }
+                .buttonStyle(.plain).keyboardShortcut(.cancelAction).help("Back to \(model.agentReturnPage == "Tickets" ? "All agents" : model.agentReturnPage)")
+            Text("·").foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("NEK-" + String(id.prefix(4)).uppercased() + "  " + ticket["title"].string).font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                Text(friendlyTaskStatus(ticket["status"].string)).font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            .onChange(of: id) { _, _ in note = ""; childTicket = nil }
+            Spacer(minLength: 12)
+            if ticket["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason(ticket) == nil { action("Approve", "ApproveTask").buttonStyle(.borderedProminent) }
+            if ticket["status"].string == "ReadyForReview" { action("Accept locally", "CompleteTask").buttonStyle(.borderedProminent) }
+            if ["Failed", "Cancelled"].contains(ticket["status"].string) { action("Start again", "StartTask") }
+            if !["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { action("Stop", "CancelTask") }
+            Menu {
+                if TicketPresentation.waitingReason(ticket) == nil && TicketPresentation.canProposeSplit(ticket, splits: model.snapshot["splits"].array) { action("Propose parallel work", "ProposeSplit") }
+                if !ticket["worktree"].string.isEmpty { Button("Reveal working folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
+                if ["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { Button("Delete…", role: .destructive) { confirmDelete = true } }
+            } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Agent actions")
+        }
+        .controlSize(.small).disabled(model.busy)
+        .padding(.leading, sidebarCollapsed ? 150 : 20).padding(.trailing, 16).frame(height: 52)
     }
     @ViewBuilder private var detailsBody: some View {
             let review = TicketPresentation.review(ticket["result"].string)
@@ -469,7 +481,7 @@ struct TicketDetail: View {
                         if !child["depends_on"].array.isEmpty { Text("After subtasks: " + child["depends_on"].array.map { String($0.int + 1) }.joined(separator: ", ")).font(.caption) }
                         if let task = model.snapshot["tasks"].array.first(where: { $0["id"] == child["task_id"] }) {
                             Text(friendlyTaskStatus(task["status"].string)).foregroundStyle(.secondary)
-                            Button("Open subtask") { childTicket = task.recordID }
+                            Button("Open subtask") { model.openAgent(task.recordID) }
                         } else { Text(split["approved"].bool ? "Subtask not available in this snapshot" : "Awaiting approval").foregroundStyle(.secondary) }
                     }.padding(12).nekoCard(padding: 0, radius: 12)
                 }

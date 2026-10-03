@@ -2,6 +2,13 @@
 
 ## Current standalone workspace (2026-09-24)
 
+As of 2026-10-03, the native client has Home, All agents (List/Board), full-page
+agent chats and a system source-list sidebar with bounded live agent groups.
+Ticket drafts and return filters survive navigation. Memory / Working style
+manages confirmed contextual preferences. Decision episodes persist independently
+of task status, with immutable observations and contextual corrections; preferences
+never grant execution or publication authority. See `docs/architecture.md`.
+
 As of 2026-10-02, `/Applications/Neko.app` is built from `native/NekoKit`
 (SwiftUI/AppKit) over the same daemon and workbench protocol. The GPUI
 `workspace.rs` client described in the historical implementation record below

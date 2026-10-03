@@ -22,12 +22,15 @@ workspace without holding the
 database mutex during model/network calls. A two-second supervisor heartbeat
 is separate from task progress; it does not claim the model made progress.
 
-The native main window (`native/NekoKit/Sources/NekoNative/NekoApp.swift`) is organised around
-Neko, tickets and responsibilities. Tickets are workbench tasks; status alone
-places each in *needs you*, *working* or *done* (`home::group`). **Today** is a
-conversation with Neko: a brief built from those groups, ticket cards, the
-chat, and a rail of running work and responsibility health. Opening a ticket
-shows a panel with its actions, activity and the user's steering notes.
+The native main window (`native/NekoKit/Sources/NekoNative/NekoApp.swift`) uses a
+system source-list sidebar: Home and All agents, then the five newest Needs you,
+Working and Recent agents in the selected workspace, with Show all for each group.
+Home is the main Neko conversation. Ticket entry points route to full-page agent
+chats; their drafts, originating page and board filter persist in `AppModel`.
+All agents retains the List/Board switch and task move commands. Agent headers
+show status and approval/stop actions. An unanswered question or a no-work decision
+cannot be approved into a build. Accept locally records human acceptance of an
+isolated result; it does not apply changes to the project or publish them.
 `neko-core::neko_chat` stores the conversation in its own bounded setting,
 outside the task store's reserved capacity. Each message is one Codex turn with
 read-only filesystem access (`neko-daemon::workbench::converse`). A selected
@@ -78,7 +81,7 @@ OpenCodex's live model list through `ocx models live --json`, discards disabled
 entries, and displays real provider names; Neko does not independently fetch
 those providers' catalogs or import their credentials. Runs still use the Codex
 CLI with ephemeral configuration. Selection does not alter already-running
-work. The Today composer and main-window Settings → AI page both update it.
+work. The Home composer and main-window Settings → AI page both update it.
 A scoped, expiring capability in environment variables connects a temporary
 stdio bridge back to the daemon. Only `neko_list_tools` and `neko_call_tool`
 are enabled and preapproved. Upstream configurations and credentials are not
@@ -773,3 +776,27 @@ reject stale output. The Memory page accepts or dismisses proposals explicitly;
 accepting the exact stored proposal and resolving it share one transaction.
 Ticket decisions have a separate bounded allowance from user-created memories.
 See `docs/evidence/memory-learning.md` for limits and verification boundaries.
+
+
+## Contextual decision records and working style
+
+`neko-protocol::decision_context` defines bounded decision episodes and contextual
+working preferences. `neko-core::decision_context` persists them in a separate
+versioned setting on the existing single-writer database. Snapshot overlays expose
+records and preferences to the native client; public commands allow scoped
+correction and preference save/keep/dismiss/forget, never arbitrary host evidence
+or outcome injection. Corrections append a revision without rewriting the original
+observation. With learning enabled, a correction proposes guidance for that exact
+ticket. Changed guidance returns to proposed until explicitly kept.
+
+Daemon planning, verification and failure commits capture host observations in the
+same transaction as task state. Decisions record the runtime and relevant confirmed
+preference versions from the actual prompt snapshot. Confirmed guidance reaches
+scoped chat, responsibility and task prompts only when memory use is enabled and
+complete context words or ticket identifiers match, subject to exceptions. Existing
+RunAuthority, receipt freshness, responsibility and sandbox rules still gate work.
+Guidance never creates capabilities. Cancellation records an unknown reason;
+expected effect and observed host status remain separate. Useful interaction
+outcomes remain unknown until observed, and local acceptance makes no application
+or publication claim. Home and agent chats show real records; Memory / Working
+style offers contextual controls. No passive cross-app capture is added.

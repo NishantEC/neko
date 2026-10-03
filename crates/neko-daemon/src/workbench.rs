@@ -1,5 +1,5 @@
 //! Resident Neko supervisor. Model work never holds the database lock.
-use neko_core::{Db, native_runner, neko_chat, neko_memory, supervision, workbench as store};
+use neko_core::{Db, native_runner, neko_chat, neko_memory, supervision, decision_context, workbench as store};
 use neko_protocol::workbench::*;
 use std::sync::{
     Arc, Mutex,
@@ -35,6 +35,29 @@ pub struct Controller {
     active: Mutex<Vec<Active>>,
     chat_active: Arc<Mutex<Option<Active>>>,
     waking: Mutex<()>,
+}
+
+fn record_host_failure(db: &Db, snapshot: &Snapshot, id: &str) -> Result<(), String> {
+    // A failure may precede a model run or discard its stale output.
+    let mut host_context = snapshot.clone();
+    host_context.agent_runtime = AgentRuntime { provider: "host".into(), model: String::new() };
+    host_context.working_preferences.clear();
+    decision_context::record_task_observation_with_context(db, snapshot, id, decision_context::HostObservation::Failure, &host_context)?;
+    Ok(())
+}
+
+fn failed_ids(snapshot: &Snapshot) -> std::collections::HashSet<String> {
+    snapshot.tasks.iter().filter(|t| t.status == TaskStatus::Failed).map(|t| t.id.clone()).collect()
+}
+
+fn save_with_failure_records(db: &Db, snapshot: &Snapshot, already_failed: &std::collections::HashSet<String>) -> Result<(), String> {
+    db.atomic(|| {
+        store::save(db, snapshot)?;
+        for task in snapshot.tasks.iter().filter(|t| t.status == TaskStatus::Failed && !already_failed.contains(&t.id)) {
+            record_host_failure(db, snapshot, &task.id)?;
+        }
+        Ok(())
+    })
 }
 
 impl Controller {
@@ -267,6 +290,7 @@ impl Controller {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut snapshot = store::load(&db)?;
+        let already_failed = failed_ids(&snapshot);
         let task = snapshot
             .tasks
             .iter_mut()
@@ -277,7 +301,7 @@ impl Controller {
         }
         update(task);
         task.updated_at_ms = store::now_ms();
-        store::save(&db, &snapshot)
+        save_with_failure_records(&db, &snapshot, &already_failed)
     }
 
     /// Validate the captured worker authority and commit its output under the
@@ -287,6 +311,15 @@ impl Controller {
         authority: &responsibilities::RunAuthority,
         update: impl FnOnce(&mut Snapshot) -> Result<(), String>,
     ) -> Result<(), String> {
+        self.commit_phase_authorized(authority, None, update)
+    }
+
+    fn commit_phase_authorized(
+        &self,
+        authority: &responsibilities::RunAuthority,
+        decision_snapshot: Option<&Snapshot>,
+        update: impl FnOnce(&mut Snapshot) -> Result<(), String>,
+    ) -> Result<(), String> {
         let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
         let mut snapshot = store::load(&db)?;
         if !authority.valid(&snapshot) {
@@ -294,8 +327,26 @@ impl Controller {
                 "Task authority changed before result commit; stale output discarded".into(),
             );
         }
-        update(&mut snapshot)?;
-        store::save(&db, &snapshot)
+        db.atomic(|| {
+            let before = snapshot.clone();
+            update(&mut snapshot)?;
+            store::save(&db, &snapshot)?;
+            for task in &snapshot.tasks {
+                let previous = before.tasks.iter().find(|t| t.id == task.id);
+                let observation = match task.status {
+                    TaskStatus::AwaitingApproval | TaskStatus::Building if previous.is_some_and(|t| t.status == TaskStatus::Planning && (task.supervision.is_some() || !task.plan.is_empty())) => {
+                        Some(if task.supervision.is_some() { decision_context::HostObservation::Supervisor } else { decision_context::HostObservation::Plan })
+                    }
+                    TaskStatus::ReadyForReview if previous.is_some_and(|t| t.status != task.status) => Some(decision_context::HostObservation::Review),
+                    _ => None,
+                };
+                if let Some(observation) = observation {
+                    let context = decision_snapshot.unwrap_or(&before);
+                    decision_context::record_task_observation_with_context(&db, &snapshot, &task.id, observation, context)?;
+                }
+            }
+            Ok(())
+        })
     }
 
     fn update_task_authorized(
@@ -350,16 +401,27 @@ impl Controller {
             },
         );
         task.updated_at_ms = store::now_ms();
-        store::save(&db, &snapshot)
+        db.atomic(|| {
+            store::save(&db, &snapshot)?;
+            record_host_failure(&db, &snapshot, id)?;
+            Ok(())
+        })
     }
 
     pub fn start(self: &Arc<Self>) {
-        if let Err(error) = store::recover_interrupted(
-            &self
-                .db
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        ) {
+        let recovery = (|| {
+            let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
+            db.atomic(|| {
+                let before = store::load(&db)?;
+                let recovered = store::recover_interrupted(&db)?;
+                let already_failed = failed_ids(&before);
+                for task in recovered.tasks.iter().filter(|t| t.status == TaskStatus::Failed && !already_failed.contains(&t.id)) {
+                    record_host_failure(&db, &recovered, &task.id)?;
+                }
+                Ok(())
+            })
+        })();
+        if let Err(error) = recovery {
             eprintln!("neko: cannot recover tasks: {error}");
             return;
         }
@@ -449,6 +511,7 @@ impl Controller {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut snapshot = store::load(&db)?;
+            let already_failed = failed_ids(&snapshot);
             snapshot.heartbeat_ms = store::now_ms();
             splits::reconcile(&mut snapshot);
             for worker in active.iter() {
@@ -494,7 +557,7 @@ impl Controller {
             } else {
                 None
             };
-            store::save(&db, &snapshot)?;
+            save_with_failure_records(&db, &snapshot, &already_failed)?;
             next
         };
         if let Some(claim) = next {
@@ -678,6 +741,7 @@ impl Controller {
             store::append_event(t, role, "Agent started in an isolated task worktree");
         })?;
         let mut memory = neko_core::agent_profiles::context_about(&snapshot, Some(&workspace.id), Some(&format!("{} {}", task.title, task.goal)));
+        memory.push_str(&decision_context::context_about(&snapshot, &workspace.id, Some(&task.id), &format!("{} {}", task.title, task.goal)));
         memory.push_str(&neko_core::skills::instructions(
             &*self.db.lock().map_err(|_| "Skill storage unavailable")?,
             &skill_workspaces,
@@ -764,11 +828,11 @@ impl Controller {
         };
         if planning {
             if split.is_some() {
-                return self.save_split_proposal(task, &result, &base, authority);
+                return self.save_split_proposal(task, &result, &base, authority, &snapshot);
             }
             // The next scheduler claim checks the latest grant in the same
             // transaction that authorizes the build, never a stale read here.
-            self.commit_authorized(authority, |snapshot| {
+            self.commit_phase_authorized(authority, Some(&snapshot), |snapshot| {
                 let started_by_you = snapshot.start_when_planned.remove(&task.id);
                 let t = snapshot
                     .tasks
@@ -837,6 +901,7 @@ impl Controller {
             review_task.result = result;
             // Re-read activation and hashes after the writable run.
             let mut memory = neko_core::agent_profiles::context_about(&snapshot, Some(&workspace.id), Some(&format!("{} {}", task.title, task.goal)));
+        memory.push_str(&decision_context::context_about(&snapshot, &workspace.id, Some(&task.id), &format!("{} {}", task.title, task.goal)));
             memory.push_str(&neko_core::skills::instructions(
                 &*self.db.lock().map_err(|_| "Skill storage unavailable")?,
                 &skill_workspaces,
@@ -898,13 +963,15 @@ impl Controller {
                 &receipts,
                 &required_checks,
             )?;
-            self.update_task_authorized(&task.id, authority, |t| {
+            self.commit_phase_authorized(authority, Some(&snapshot), |state| {
+                let t = state.tasks.iter_mut().find(|t| t.id == task.id).ok_or("Task no longer exists")?;
                 t.status = TaskStatus::ReadyForReview;
                 store::append_event(
                     t,
                     "supervisor",
                     "Local result ready for your review. Nothing pushed or published.",
                 );
+                Ok(())
             })?;
         }
         Ok(())
@@ -1110,8 +1177,9 @@ fn converse(
     let spec = native_runner::RunSpec {
         directory,
         prompt: format!(
-            "{}\n{}",
+            "{}\n{}\n{}",
             neko_chat::prompt(&snapshot, chosen, history, message),
+            chosen.map(|workspace| decision_context::context_about(&snapshot, workspace, None, message)).unwrap_or_default(),
             skill_instructions
         ),
         writable: false,
@@ -1661,6 +1729,74 @@ fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn planned_and_verified_phases_create_host_records_without_claiming_useful_outcomes() {
+        let controller = controller_with_task(TaskStatus::Planning);
+        let before = controller.command(Command::Snapshot).unwrap();
+        let authority = responsibilities::RunAuthority::for_task(&before, &before.tasks[0]).unwrap();
+        controller.commit_phase_authorized(&authority, Some(&before), |state| {
+            state.tasks[0].plan = "Inspect and fix one thing".into();
+            state.tasks[0].status = TaskStatus::Building;
+            Ok(())
+        }).unwrap();
+        let planned = controller.command(Command::Snapshot).unwrap();
+        assert_eq!(planned.decision_records.len(), 1);
+        assert_eq!(planned.decision_records[0].action, neko_protocol::decision_context::DecisionAction::ProposePlan);
+        assert_eq!(planned.decision_records[0].observed_outcome, None);
+        controller.commit_phase_authorized(&authority, Some(&planned), |state| {
+            state.tasks[0].result = "Builder says every user interaction is fixed".into();
+            state.tasks[0].status = TaskStatus::ReadyForReview;
+            Ok(())
+        }).unwrap();
+        let reviewed = controller.command(Command::Snapshot).unwrap();
+        assert_eq!(reviewed.decision_records.len(), 2);
+        let record = reviewed.decision_records.iter().find(|r| r.action == neko_protocol::decision_context::DecisionAction::ReviewLocalResult).unwrap();
+        assert!(!record.observed_outcome.as_deref().unwrap().contains("every user interaction is fixed"));
+        assert_eq!(record.delivery_stage, neko_protocol::decision_context::DeliveryStage::Unknown);
+    }
+
+    #[test]
+    fn structured_ask_and_skip_are_recorded_even_without_a_plan() {
+        for action in [SupervisorAction::AskUser, SupervisorAction::Skip] {
+            let controller = controller_with_task(TaskStatus::Planning);
+            let before = controller.command(Command::Snapshot).unwrap();
+            let authority = responsibilities::RunAuthority::for_task(&before, &before.tasks[0]).unwrap();
+            controller.commit_phase_authorized(&authority, Some(&before), |state| {
+                state.tasks[0].status = TaskStatus::AwaitingApproval;
+                state.tasks[0].supervision = Some(SupervisorDecision {
+                    action, risk: Risk::Unknown, is_bug: false,
+                    reason: "Needs a user decision".into(), evidence: vec![], files: vec![], tests: vec![],
+                    sensitive_areas: vec![], uncertainties: vec![], plan: String::new(),
+                });
+                Ok(())
+            }).unwrap();
+            let state = controller.command(Command::Snapshot).unwrap();
+            assert_eq!(state.decision_records.len(), 1);
+            assert_ne!(state.decision_records[0].action, neko_protocol::decision_context::DecisionAction::ProposePlan);
+            assert!(state.tasks[0].plan.is_empty());
+        }
+    }
+
+    #[test]
+    fn failed_worker_records_host_failure_but_cancelled_worker_does_not_invent_failure() {
+        let controller = controller_with_task(TaskStatus::Planning);
+        let before = controller.command(Command::Snapshot).unwrap();
+        let authority = responsibilities::RunAuthority::for_task(&before, &before.tasks[0]).unwrap();
+        controller.record_worker_failure("t", &authority, "Required check blocked").unwrap();
+        let failed = controller.command(Command::Snapshot).unwrap();
+        assert_eq!(failed.decision_records.len(), 1);
+        assert!(failed.decision_records[0].observed_outcome.as_deref().unwrap().contains("Required check blocked"));
+        let cancelled = controller_with_task(TaskStatus::Planning);
+        let before = cancelled.command(Command::Snapshot).unwrap();
+        let authority = responsibilities::RunAuthority::for_task(&before, &before.tasks[0]).unwrap();
+        cancelled.command(Command::CancelTask { task_id: "t".into() }).unwrap();
+        cancelled.record_worker_failure("t", &authority, "invented reason").unwrap();
+        let state = cancelled.command(Command::Snapshot).unwrap();
+        assert_eq!(state.decision_records.len(), 1);
+        assert_eq!(state.decision_records[0].action, neko_protocol::decision_context::DecisionAction::CancelTask);
+        assert!(!state.decision_records[0].rationale.contains("invented reason"));
+    }
 
     #[test]
     fn a_plan_ending_in_a_question_waits_for_the_user() {

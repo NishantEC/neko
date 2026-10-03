@@ -150,7 +150,11 @@ struct TicketComposer: View {
     @ObservedObject var model: AppModel
     let id: String
     let status: String
-    @State private var text = ""
+    private var draft: Binding<String> {
+        Binding(get: { model.ticketDrafts[id] ?? "" }, set: { model.ticketDrafts[id] = $0 })
+    }
+    private var text: String { model.ticketDrafts[id] ?? "" }
+    private var sendLabel: String { status == "ReadyForReview" ? "Send feedback & rebuild" : "Send to agent" }
     private var placeholder: String {
         switch status {
         case "AwaitingApproval": "Answer the agent, or tell it what to change…"
@@ -162,22 +166,23 @@ struct TicketComposer: View {
     }
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField(placeholder, text: $text, axis: .vertical)
+            TextField(placeholder, text: draft, axis: .vertical)
                 .textFieldStyle(.plain).font(.system(size: 13)).lineLimit(1...6)
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.1)))
                 .onSubmit(send)
-            Button(action: send) { Image(systemName: "arrow.up").font(.system(size: 12, weight: .bold)).frame(width: 28, height: 28) }
-                .buttonStyle(.borderedProminent).clipShape(Circle())
+            Button(sendLabel, systemImage: "arrow.up", action: send)
+                .buttonStyle(.borderedProminent)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
-                .help("Send to the ticket’s agent (Return)")
+                .help(sendLabel + " (Return)")
         }
         .padding(12)
     }
     private func send() {
-        let reply = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let submittedDraft = text
+        let reply = submittedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty else { return }
-        Task { if await model.workbench(.command("ReplyToTask", ["task_id": .string(id), "text": .string(reply)])) { text = "" } }
+        Task { if await model.workbench(.command("ReplyToTask", ["task_id": .string(id), "text": .string(reply)])) { if model.ticketDrafts[id] == submittedDraft { model.ticketDrafts[id] = "" } } }
     }
 }

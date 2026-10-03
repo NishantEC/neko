@@ -102,12 +102,9 @@ struct TodayView: View {
     @State private var escapeMonitor: Any?
     @State private var lastEscape: Date = .distantPast
     @State private var transcriptHeight: CGFloat = 0
-    @State private var ticket: String?
     @State private var addingWorkspace = false
     @State private var composerHeight: CGFloat = 0
     @State private var catalog = ModelCatalog()
-    @State private var inspected: String?
-    @AppStorage("neko.today.inspector") private var showInspector = true
     @AppStorage("neko.composer.mode") private var mode = "ask"
     @State private var menuIndex = 0
     @State private var menuDismissed: String?
@@ -153,6 +150,7 @@ struct TodayView: View {
                                 todayHero
                                 if model.workspaces.isEmpty { howNekoWorks } else { brief }
                             }
+                            ForEach(DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace }).prefix(3), id: \.recordID) { DecisionCard(model: model, record: $0) }
                             ForEach(messages, id: \.recordID) { message in
                                 messageView(message)
                                 .id(message.recordID)
@@ -205,22 +203,7 @@ struct TodayView: View {
         }
         }
         .environment(\.replyActions, ReplyActions(send: { text in post(text) }, draft: { text in draft = text }))
-        // The inspector re-adds the toolbar inset; the header row is the toolbar.
         .ignoresSafeArea(.container, edges: .top)
-        // Opens when you click a ticket in the conversation; ✕ closes it.
-        .sidePanel(isPresented: showInspector && inspectedTicket != nil, key: "neko.today.panelWidth", range: 260...480, ideal: 300) {
-            VStack(spacing: 0) {
-                HStack {
-                    Spacer()
-                    Button { withAnimation(.snappy(duration: 0.25)) { showInspector = false } } label: {
-                        Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).frame(width: 24, height: 24).contentShape(Rectangle())
-                    }.buttonStyle(.plain).help("Close").accessibilityLabel("Close ticket panel")
-                }.padding(.horizontal, 10).padding(.top, 14)
-                TicketInspector(model: model, id: inspectedTicket, openFull: { ticket = $0 })
-            }
-            .ignoresSafeArea(.container, edges: .top)
-        }
-        .onChange(of: scope) { _, _ in inspected = nil }
         .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: messages.count)
         .task { catalog = await AgentModelCatalog.load(model) }
         .onAppear {
@@ -235,9 +218,7 @@ struct TodayView: View {
             }
         }
         .onDisappear { if let monitor = escapeMonitor { NSEvent.removeMonitor(monitor) }; escapeMonitor = nil }
-        .sheet(isPresented: Binding(get: { ticket != nil }, set: { if !$0 { ticket = nil } })) {
-            if let id = ticket { VStack { HStack { Spacer(); Button("Done") { ticket = nil }.keyboardShortcut(.cancelAction) }.padding(); TicketDetail(model: model, id: id) }.frame(minWidth: 650, minHeight: 600) }
-        }.sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
+        .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
     }
     private func composer(availableWidth: CGFloat) -> some View {
         let width = min(720, max(360, availableWidth - 96))
@@ -324,7 +305,6 @@ struct TodayView: View {
         let ids = messages.flatMap { $0["ticket_ids"].array.map(\.string) }
         return ids.compactMap { id in model.snapshot["tasks"].array.first { $0.recordID == id } }
     }
-    private var inspectedTicket: String? { inspected ?? conversationTickets.last?.recordID }
     private var pendingApproval: (turn: String, call: JSONValue)? {
         for message in messages where message["pending"].bool {
             if let call = message["tool_calls"].array.first(where: { $0["status"].string == "awaiting_approval" }) { return (message.recordID, call) }
@@ -338,7 +318,7 @@ struct TodayView: View {
     private var todayHeader: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("Today").font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                Text("Home").font(.system(size: 15, weight: .semibold)).lineLimit(1)
                 Text(headerSubtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 12)
@@ -404,8 +384,7 @@ struct TodayView: View {
                     ReplyTicketRow(title: task["title"].string.isEmpty ? "Ticket" : task["title"].string,
                                    status: task["status"].string,
                                    workspace: model.workspaces.first { $0.recordID == task["workspace_id"].string }?["name"].string ?? "") {
-                        inspected = id.string
-                        withAnimation(.snappy(duration: 0.25)) { showInspector = true }
+                        model.openAgent(id.string, from: "Home")
                     }
                 }
             }
@@ -427,7 +406,7 @@ struct TodayView: View {
                          detail: argumentSummary(pending.call["arguments_json"].string),
                          secondary: ("Deny", KeyboardShortcut("2", modifiers: .command), { decide(pending, false) }),
                          primary: ("Allow", KeyboardShortcut("1", modifiers: .command), { decide(pending, true) }))
-        } else if let task = conversationTickets.last(where: { $0["status"].string == "AwaitingApproval" }) {
+        } else if let task = conversationTickets.last(where: { $0["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason($0) == nil }) {
             approvalCard(symbol: "exclamationmark.triangle.fill",
                          title: "Approve the plan for “\(task["title"].string)”?",
                          detail: "Work starts in its own copy of the folder. Nothing is pushed.",
@@ -436,9 +415,9 @@ struct TodayView: View {
         } else if let task = conversationTickets.last(where: { $0["status"].string == "ReadyForReview" }) {
             approvalCard(symbol: "checkmark.seal.fill",
                          title: "“\(task["title"].string)” is ready for review",
-                         detail: "Its changes and checks are in the inspector.",
+                         detail: "Its changes and checks are in the agent chat.",
                          secondary: ("Show Ticket", nil, { inspect(task.recordID) }),
-                         primary: ("Mark Complete", KeyboardShortcut("1", modifiers: .command), { ticketCommand("CompleteTask", task.recordID) }))
+                         primary: ("Accept locally", KeyboardShortcut("1", modifiers: .command), { ticketCommand("CompleteTask", task.recordID) }))
         }
     }
     private func approvalCard(symbol: String, title: String, detail: String,
@@ -474,8 +453,7 @@ struct TodayView: View {
         Task { await model.workbench(.command(command, ["task_id": .string(id)])) }
     }
     private func inspect(_ id: String) {
-        inspected = id
-        withAnimation(.snappy(duration: 0.25)) { showInspector = true }
+        model.openAgent(id, from: "Home")
     }
 
     // MARK: / and @ menus
@@ -798,7 +776,7 @@ struct TodayView: View {
             } else {
                 ForEach(Array(recent), id: \.recordID) { task in
                     let status = task["status"].string
-                    BriefRow(dot: taskColor(status), title: task["title"].string, meta: friendlyTaskStatus(status) + (task["goal"].string.isEmpty ? "" : " · " + task["goal"].string), action: status == "AwaitingApproval" ? "Review plan" : status == "ReadyForReview" ? "Review" : "Open") { ticket = task.recordID }
+                    BriefRow(dot: taskColor(status), title: task["title"].string, meta: friendlyTaskStatus(status) + (task["goal"].string.isEmpty ? "" : " · " + task["goal"].string), action: status == "AwaitingApproval" ? "Review plan" : status == "ReadyForReview" ? "Review" : "Open") { model.openAgent(task.recordID, from: "Home") }
                 }
             }
         }

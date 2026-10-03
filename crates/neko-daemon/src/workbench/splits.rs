@@ -79,9 +79,10 @@ impl Controller {
         answer: &str,
         base: &str,
         authority: &responsibilities::RunAuthority,
+        decision_snapshot: &Snapshot,
     ) -> Result<(), String> {
         let plans = neko_core::decomposition::parse(answer)?;
-        self.commit_authorized(authority, |state| {
+        self.commit_phase_authorized(authority, Some(decision_snapshot), |state| {
             let split = state
                 .splits
                 .iter_mut()
@@ -273,7 +274,7 @@ mod tests {
         let answer = r#"[{"title":"Left","goal":"Fix left","files":["left.rs"],"tests":["cargo test left"],"depends_on":[]},{"title":"Right","goal":"Fix right","files":["right.rs"],"tests":["cargo test right"],"depends_on":[]}]"#;
         assert!(
             controller
-                .save_split_proposal(&state.tasks[0], answer, "base", &authority)
+                .save_split_proposal(&state.tasks[0], answer, "base", &authority, &state)
                 .unwrap_err()
                 .contains("authority changed")
         );
@@ -293,11 +294,66 @@ mod tests {
         assert_eq!(after.tasks, state.tasks);
         let fresh = responsibilities::RunAuthority::for_task(&after, &after.tasks[0]).unwrap();
         controller
-            .save_split_proposal(&after.tasks[0], answer, "base", &fresh)
+            .save_split_proposal(&after.tasks[0], answer, "base", &fresh, &after)
             .unwrap();
         let after = controller.command(Command::Snapshot).unwrap();
         assert_eq!(after.tasks[0].status, TaskStatus::AwaitingApproval);
         assert_eq!(after.splits[0].subtasks.len(), 2);
+    }
+
+    #[test]
+    fn split_proposal_uses_decision_time_guidance_after_an_edit() {
+        use neko_protocol::decision_context::*;
+        let controller = super::super::tests::controller_with_task(TaskStatus::Planning);
+        let mut state = controller.command(Command::Snapshot).unwrap();
+        state.splits.push(TaskSplit { parent_id: "t".into(), subtasks: vec![], approved: false, integrated: false, base: None });
+        store::save(&controller.db.lock().unwrap(), &state).unwrap();
+        let proposed = controller.command(Command::DecisionContext(DecisionContextCommand::SavePreference {
+            workspace_id: "w".into(), id: String::new(), expected_version: None,
+            applicability: PreferenceApplicability { terms: vec!["Task".into()], task_ids: vec![] },
+            instruction: "Use bounded subtasks".into(), supporting_record_ids: vec![], exceptions: vec![],
+        })).unwrap();
+        let preference = proposed.working_preferences[0].clone();
+        let prompt_snapshot = controller.command(Command::DecisionContext(DecisionContextCommand::KeepPreference {
+            workspace_id: "w".into(), id: preference.id, expected_version: preference.version,
+        })).unwrap();
+        let preference = prompt_snapshot.working_preferences[0].clone();
+        controller.command(Command::DecisionContext(DecisionContextCommand::SavePreference {
+            workspace_id: "w".into(), id: preference.id.clone(), expected_version: Some(preference.version),
+            applicability: preference.applicability, instruction: "Changed while splitting".into(),
+            supporting_record_ids: vec![], exceptions: vec![],
+        })).unwrap();
+        let authority = responsibilities::RunAuthority::for_task(&prompt_snapshot, &prompt_snapshot.tasks[0]).unwrap();
+        let answer = r#"[{"title":"Left","goal":"Fix left","files":["left.rs"],"tests":["cargo test left"],"depends_on":[]},{"title":"Right","goal":"Fix right","files":["right.rs"],"tests":["cargo test right"],"depends_on":[]}]"#;
+        controller.save_split_proposal(&prompt_snapshot.tasks[0], answer, "base", &authority, &prompt_snapshot).unwrap();
+        let result = controller.command(Command::Snapshot).unwrap();
+        assert_eq!(result.decision_records[0].preference_versions, vec![PreferenceVersion { id: preference.id, version: preference.version }]);
+        assert_eq!(result.decision_records[0].runtime, prompt_snapshot.agent_runtime);
+    }
+
+    #[test]
+    fn failed_child_records_parent_failure_in_the_scheduling_transaction() {
+        let controller = Arc::new(super::super::tests::controller_with_task(TaskStatus::Reviewing));
+        let mut state = controller.command(Command::Snapshot).unwrap();
+        let mut child = state.tasks[0].clone();
+        child.id = "child".into(); child.status = TaskStatus::Failed;
+        state.tasks.push(child);
+        let mut sibling = state.tasks[0].clone(); sibling.id = "sibling".into(); sibling.status = TaskStatus::Completed;
+        state.tasks.push(sibling);
+        state.splits.push(TaskSplit {
+            parent_id: "t".into(), approved: true, integrated: false, base: None,
+            subtasks: vec![
+                SubtaskPlan { title: "Child".into(), goal: "G".into(), files: vec!["a".into()], tests: vec!["check".into()], depends_on: vec![], task_id: Some("child".into()), base: None },
+                SubtaskPlan { title: "Sibling".into(), goal: "H".into(), files: vec!["b".into()], tests: vec!["check".into()], depends_on: vec![], task_id: Some("sibling".into()), base: None },
+            ],
+        });
+        store::save(&controller.db.lock().unwrap(), &state).unwrap();
+        controller.tick_with(|_, _, _| panic!("Failed dependency must not start work")).unwrap();
+        let result = controller.command(Command::Snapshot).unwrap();
+        assert_eq!(result.tasks[0].status, TaskStatus::Failed);
+        let record = result.decision_records.iter().find(|r| r.task_id.as_deref() == Some("t")).unwrap();
+        assert_eq!(record.action, neko_protocol::decision_context::DecisionAction::ReportFailure);
+        assert_eq!(record.runtime.provider, "host");
     }
 
     #[test]
