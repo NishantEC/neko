@@ -101,18 +101,10 @@ struct ToolsView: View {
                         Button("Import from this Mac", systemImage: "square.and.arrow.down") { showImportSheet = true }
                         Button("Add connection manually", systemImage: "plus") { showManualSheet = true }
                     } label: {
-                        HStack(spacing: 8) {
-                            Label("Add connection", systemImage: "plus")
-                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-                        }
-                        .font(.system(size: 13))
-                        .padding(.horizontal, 10)
-                        .frame(height: NekoControlMetrics.height())
-                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
-                        .contentShape(Rectangle())
+                        Label("Add connection", systemImage: "plus")
                     }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .menuStyle(.button).buttonStyle(.bordered).controlSize(.large)
+                    .frame(height: NekoControlMetrics.height())
                 }
             }
             .padding(.bottom, 16)
