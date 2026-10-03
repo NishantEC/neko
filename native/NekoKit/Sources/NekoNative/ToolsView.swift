@@ -16,10 +16,20 @@ enum SkillPresentation {
 }
 
 enum ToolsPresentation {
+    static func connectionStatus(_ connection: JSONValue) -> String {
+        if !connection["enabled"].bool { return "Paused" }
+        let error = connection["error"].string.lowercased()
+        if error.contains("auth") || error.contains("oauth") || error.contains("sign-in") || error.contains("401") { return "Sign in needed" }
+        if !error.isEmpty { return "Needs attention" }
+        if connection["tools"].array.isEmpty {
+            return connection["discovered_ms"] == .null ? "Discovering" : "No tools"
+        }
+        return "Available"
+    }
     static func toolSummary(_ connection: JSONValue) -> String {
         let count = connection["tools"].array.count
         if count > 0 { return "\(count) \(count == 1 ? "tool" : "tools")" }
-        return connection["discovered_ms"] == .null ? "Not discovered" : "No tools"
+        return connection["discovered_ms"] == .null ? "Discovering" : "No tools"
     }
 }
 
@@ -49,6 +59,7 @@ struct ToolsView: View {
     @State private var selectedConnection: ConnectionSelection?
     @State private var showImportSheet = false
     @State private var showManualSheet = false
+    @State private var showRegistrySheet = false
     @State private var toolSearch = ""
     @State private var showFindSkill = false
     @State private var expandedCandidates: Set<String> = []
@@ -86,6 +97,7 @@ struct ToolsView: View {
                 Spacer()
                 if tab == 0 {
                     Menu {
+                        Button("Browse MCP servers", systemImage: "square.grid.2x2") { showRegistrySheet = true }
                         Button("Import from this Mac", systemImage: "square.and.arrow.down") { showImportSheet = true }
                         Button("Add connection manually", systemImage: "plus") { showManualSheet = true }
                     } label: {
@@ -128,6 +140,7 @@ struct ToolsView: View {
         }
         .sheet(isPresented: $showImportSheet) { importSheet }
         .sheet(isPresented: $showManualSheet) { manualSheet }
+        .sheet(isPresented: $showRegistrySheet) { MCPRegistryBrowser(model: model) }
     }
 
     private func send(_ family: String, _ name: String, _ fields: [String: JSONValue]? = nil, onSuccess: (() -> Void)? = nil) {
@@ -162,7 +175,7 @@ struct ToolsView: View {
                     .padding(.bottom, 14)
             }
             if connections.isEmpty {
-                ContentUnavailableView("No connections yet", systemImage: "link", description: Text("Import a connection from this Mac or add one manually."))
+                ContentUnavailableView("No connections yet", systemImage: "link", description: Text("Browse MCP servers, import from this Mac, or add a URL manually."))
                     .frame(maxWidth: .infinity, minHeight: 240)
             } else {
                 VStack(spacing: 0) {
@@ -244,7 +257,7 @@ struct ToolsView: View {
                     LabeledContent("OAuth client ID (advanced)") { TextField("Only if the tool asks for one", text: $clientID).labelsHidden() }
                     Text("Connecting makes discovered tools available here. Neko asks before chat actions that may change data.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Link("Browse the MCP Registry", destination: URL(string: "https://registry.modelcontextprotocol.io")!)
+                    Button("Browse hosted MCP servers") { showManualSheet = false; showRegistrySheet = true }
                 }
             }
         }
@@ -336,7 +349,7 @@ struct ToolsView: View {
     private func connectionRow(_ connection: JSONValue) -> some View {
         let summary = ToolsPresentation.toolSummary(connection)
         let scope = connection["workspace_id"].string.isEmpty ? "All workspaces" : (model.workspaces.first { $0.recordID == connection["workspace_id"].string }?["name"].string ?? "Workspace")
-        let status = !connection["error"].string.isEmpty ? "Needs attention" : (connection["enabled"].bool ? "Available" : "Paused")
+        let status = ToolsPresentation.connectionStatus(connection)
         return Button {
             toolSearch = ""
             selectedConnection = ConnectionSelection(id: connection.recordID)
@@ -384,13 +397,13 @@ struct ToolsView: View {
                     .font(.callout).foregroundStyle(.orange).textSelection(.enabled).padding(.bottom, 14)
             }
             HStack {
-                Button("Discover tools") { send("Mcp", "Discover", ["connection_id": connection["id"]]) }
+                Button("Refresh tools") { send("Mcp", "Discover", ["connection_id": connection["id"]]) }
                     .disabled(!connection["enabled"].bool)
                 Button(connection["enabled"].bool ? "Pause connection" : "Enable connection") {
                     send("Mcp", "SetEnabled", ["connection_id": connection["id"], "enabled": .bool(!connection["enabled"].bool)])
                 }
                 if connection["config"]["transport"].string == "http" {
-                    Button("Sign in") {
+                    Button(ToolsPresentation.connectionStatus(connection) == "Sign in needed" ? "Retry sign-in" : "Sign in") {
                         send("Mcp", "Authenticate", ["connection_id": connection["id"], "client_id": clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .null : .string(clientID.trimmingCharacters(in: .whitespacesAndNewlines))])
                     }.disabled(!connection["enabled"].bool)
                 }
@@ -415,7 +428,7 @@ struct ToolsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if count == 0 {
-                        Text("No tools discovered. Use Discover tools to load what this connection offers.")
+                        Text(ToolsPresentation.connectionStatus(connection) == "Sign in needed" ? "Sign in again. Neko will discover its tools automatically, then watch for relevant work when the server offers a read-only source." : connection["discovered_ms"] == .null ? "Neko is discovering this connection's tools automatically. You can refresh if it takes too long." : "This connection did not expose any tools. Use Refresh tools to check again.")
                             .font(.callout).foregroundStyle(.secondary).padding(.vertical, 22)
                     } else if filtered.isEmpty {
                         Text("No tools match your search.").font(.callout).foregroundStyle(.secondary).padding(.vertical, 22)

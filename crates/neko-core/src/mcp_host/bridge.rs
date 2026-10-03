@@ -119,7 +119,7 @@ fn exchange(socket: PathBuf, token: String, action: BridgeAction) -> Result<Stri
     };
     let stream = UnixStream::connect(socket).map_err(|_| "Neko daemon is unavailable")?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(150)))
+        .set_read_timeout(Some(Duration::from_secs(600)))
         .map_err(|_| "Cannot configure bridge timeout")?;
     stream
         .set_write_timeout(Some(Duration::from_secs(5)))
@@ -137,7 +137,7 @@ fn exchange(socket: PathBuf, token: String, action: BridgeAction) -> Result<Stri
     .map_err(|_| "Cannot send MCP request")?;
     let start = Instant::now();
     for _ in 0..1024 {
-        if start.elapsed() > Duration::from_secs(150) {
+        if start.elapsed() > Duration::from_secs(600) {
             break;
         }
         match neko_protocol::read_frame(&stream).map_err(|_| "Neko bridge connection failed")? {

@@ -15,13 +15,14 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::BTreeMap, path::PathBuf, time::{Duration, Instant}};
 
 pub struct Host {
     db: Arc<Mutex<Db>>,
     registry: Registry,
     call_slot: Mutex<()>,
     auth: Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
+    discovery_retry: Mutex<std::collections::HashMap<String, Instant>>,
 }
 
 /// Removes an in-flight authentication marker on success, failure or unwind.
@@ -258,7 +259,42 @@ impl Host {
             registry: Registry::default(),
             call_slot: Mutex::new(()),
             auth: Mutex::new(Default::default()),
+            discovery_retry: Mutex::new(Default::default()),
         }
+    }
+
+    /// Discover one new or previously failed trusted connection per tick. A
+    /// transient server failure is retried without spinning on every tick;
+    /// restarting the daemon also retries connections left undiscovered.
+    pub fn discovery_tick(self: &Arc<Self>) -> Result<(), String> {
+        let now = Instant::now();
+        let state = store::load(&*self.db.lock().map_err(|_| "Workspace storage unavailable")?)?;
+        let auth = self.auth.lock().map_err(|_| "Authentication state unavailable")?;
+        let retry = self.discovery_retry.lock().map_err(|_| "Discovery state unavailable")?;
+        let candidate = state.mcp.connections.iter().find(|connection| {
+            connection.enabled && connection.trusted && connection.discovered_ms.is_none()
+                && !auth.contains_key(&connection.id)
+                && retry.get(&connection.id).is_none_or(|due| *due <= now)
+        }).map(|connection| connection.id.clone());
+        drop(auth);
+        drop(retry);
+        let Some(id) = candidate else { return Ok(()); };
+        // The ordinary command keeps manual and automatic discovery on the
+        // same validation, credential, grant and persistence path.
+        let result = self.command(McpCommand::Discover { connection_id: id.clone() });
+        let mut retry = self.discovery_retry.lock().map_err(|_| "Discovery state unavailable")?;
+        match result {
+            Ok(snapshot) if snapshot.mcp.connections.iter().any(|c| c.id == id && c.discovered_ms.is_some() && c.error.is_none()) => {
+                retry.remove(&id);
+            }
+            Ok(_) => { retry.insert(id, Instant::now() + Duration::from_secs(60)); }
+            Err(error) if error.contains("Another MCP operation") => {}
+            Err(error) => {
+                retry.insert(id, Instant::now() + Duration::from_secs(60));
+                return Err(error);
+            }
+        }
+        Ok(())
     }
     pub fn command(self: &Arc<Self>, command: McpCommand) -> Result<Snapshot, String> {
         match command {
@@ -425,13 +461,12 @@ impl Host {
                         .mcp
                         .grants
                         .retain(|g| g.connection_id != connection_id);
-                    state
-                        .mcp
-                        .connections
-                        .iter_mut()
+                    let connection = state.mcp.connections.iter_mut()
                         .find(|c| c.id == connection_id)
-                        .ok_or("Connection missing")?
-                        .error = Some("Waiting for browser sign-in (up to 120 seconds)…".into());
+                        .ok_or("Connection missing")?;
+                    connection.tools.clear();
+                    connection.discovered_ms = None;
+                    connection.error = Some("Waiting for browser sign-in (up to 120 seconds)…".into());
                     store::save(&db, &state)?;
                 }
                 auth.insert(connection_id.clone(), cancel.clone());
@@ -478,6 +513,9 @@ impl Host {
                                                         c.oauth = true;
                                                         c.has_credentials = true;
                                                         c.error = None;
+                                                        if let Ok(mut retry) = host.discovery_retry.lock() {
+                                                            retry.remove(&worker_id);
+                                                        }
                                                     }
                                                     Err(error) => c.error = Some(error),
                                                 }
@@ -866,7 +904,7 @@ impl Host {
                     &connection_id,
                     &tool,
                     &arguments_json,
-                    std::time::Duration::from_secs(120),
+                    std::time::Duration::from_secs(540),
                 )?;
                 let _slot = self.call_slot.try_lock().map_err(|_| {
                     if let Some(call_id) = &chat_call {
@@ -1518,15 +1556,24 @@ mod tests {
                 .unwrap();
             connection.oauth = true;
             connection.has_credentials = true;
+            connection.discovered_ms = Some(1);
+            connection.tools.push(McpTool {
+                read_only: true, name: "list_issues".into(), description: "Old schema".into(),
+                input_schema: "{}".into(), schema_hash: "old".into(),
+            });
             store::save(&db, &state).unwrap();
         }
 
         let result = host.command(McpCommand::Authenticate {
-            connection_id,
+            connection_id: connection_id.clone(),
             client_id: None,
         });
 
         assert!(result.is_ok(), "a broken old token must not block a fresh sign-in: {result:?}");
+        let state = store::load(&host.db.lock().unwrap()).unwrap();
+        let connection = state.mcp.connections.iter().find(|c| c.id == connection_id).unwrap();
+        assert!(connection.tools.is_empty(), "stale tool schemas must not survive re-authentication");
+        assert!(connection.discovered_ms.is_none(), "successful sign-in must trigger fresh discovery");
     }
 
     #[test]

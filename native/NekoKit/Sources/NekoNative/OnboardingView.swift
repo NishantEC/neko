@@ -9,6 +9,7 @@ struct OnboardingView: View {
     @State private var clipboard: Bool?
     @State private var pending = false
     @State private var workspaceSheet = false
+    @State private var registrySheet = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +48,7 @@ struct OnboardingView: View {
         .navigationTitle("")
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: step)
             .sheet(isPresented: $workspaceSheet) { WorkspaceEditor(model: model) }
+            .sheet(isPresented: $registrySheet) { MCPRegistryBrowser(model: model) }
             .task {
                 do { clipboard = (try await model.request(.string("GetClipboardHistoryEnabled")))["ClipboardHistoryEnabled"]["enabled"].bool }
                 catch { model.error = error.localizedDescription }
@@ -96,6 +98,7 @@ struct OnboardingView: View {
         }
     }
     private var workspaceStep: some View {
+        VStack(spacing: 14) {
         stepCard(title: "Where do you work?", subtitle: "Add a folder you already work in. Each workspace can have its own tools, such as its own Linear.") {
             if model.homeWorkspaceID == nil {
                 Button { Task { await model.addHomeWorkspace() } } label: {
@@ -133,6 +136,14 @@ struct OnboardingView: View {
                 }
                 Button("Add another workspace…") { model.selectedWorkspace = nil; workspaceSheet = true }.buttonStyle(PillButtonStyle())
             }
+        }
+        Button { registrySheet = true } label: {
+            Label("Find Sentry and other MCP servers", systemImage: "network")
+                .font(.system(size: 13, weight: .medium))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white.opacity(0.8))
+        .accessibilityHint("Browse hosted connections in the public MCP Registry")
         }
     }
     private func stepCard<Content: View>(title: String, subtitle: String, @ViewBuilder content: () -> Content) -> some View {

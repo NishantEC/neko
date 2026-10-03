@@ -49,7 +49,15 @@ struct ChatScrollMetrics: Equatable {
 struct ChatScrollFollowState {
     private(set) var followsLatest = true
     private var previous: ChatScrollMetrics?
-    mutating func update(_ metrics: ChatScrollMetrics) {
+    private var pinnedUntil: Date = .distantPast
+    /// Sending a message always jumps to it, and the insertion animation's
+    /// intermediate offsets must not read as the user scrolling away.
+    mutating func pin(for seconds: TimeInterval = 1.2, now: Date = Date()) {
+        followsLatest = true
+        pinnedUntil = now.addingTimeInterval(seconds)
+    }
+    mutating func update(_ metrics: ChatScrollMetrics, now: Date = Date()) {
+        if now < pinnedUntil { followsLatest = true; previous = metrics; return }
         // Reply growth must not look like the reader scrolling away. Only an
         // offset change or unchanged content size updates their follow intent.
         if let previous, abs(metrics.contentHeight - previous.contentHeight) < 1 || abs(metrics.originY - previous.originY) > 1 {
@@ -91,6 +99,8 @@ struct ChatToolActivitySummary {
 struct TodayView: View {
     @ObservedObject var model: AppModel
     @State private var scrollFollow = ChatScrollFollowState()
+    @State private var escapeMonitor: Any?
+    @State private var lastEscape: Date = .distantPast
     @State private var transcriptHeight: CGFloat = 0
     @State private var ticket: String?
     @State private var addingWorkspace = false
@@ -163,7 +173,18 @@ struct TodayView: View {
                             if resized, scrollFollow.followsLatest { DispatchQueue.main.async { reader.scrollTo("bottom", anchor: .bottom) } }
                         }
                         .onChange(of: messages.last) { _, _ in
-                            if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) }
+                            if messages.last?["role"].string == "user" { scrollFollow.pin() }
+                            guard scrollFollow.followsLatest else { return }
+                            reader.scrollTo("bottom", anchor: .bottom)
+                            DispatchQueue.main.async { reader.scrollTo("bottom", anchor: .bottom) }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
+                        }
+                        .onChange(of: messages.count) { old, new in
+                            guard new > old else { return }
+                            guard messages.suffix(new - old).contains(where: { $0["role"].string == "user" }) else { return }
+                            scrollFollow.pin()
+                            DispatchQueue.main.async { reader.scrollTo("bottom", anchor: .bottom) }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reader.scrollTo("bottom", anchor: .bottom) }
                         }
                         .onChange(of: scope) { _, _ in
                             scrollFollow = ChatScrollFollowState()
@@ -202,6 +223,18 @@ struct TodayView: View {
         .onChange(of: scope) { _, _ in inspected = nil }
         .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: messages.count)
         .task { catalog = await AgentModelCatalog.load(model) }
+        .onAppear {
+            guard escapeMonitor == nil else { return }
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard event.keyCode == 53, !event.isARepeat else { return event }
+                guard pendingTurn != nil else { lastEscape = .distantPast; return event }
+                let now = Date()
+                if now.timeIntervalSince(lastEscape) < 0.6 { lastEscape = .distantPast; stopReply(); return nil }
+                lastEscape = now
+                return event
+            }
+        }
+        .onDisappear { if let monitor = escapeMonitor { NSEvent.removeMonitor(monitor) }; escapeMonitor = nil }
         .sheet(isPresented: Binding(get: { ticket != nil }, set: { if !$0 { ticket = nil } })) {
             if let id = ticket { VStack { HStack { Spacer(); Button("Done") { ticket = nil }.keyboardShortcut(.cancelAction) }.padding(); TicketDetail(model: model, id: id) }.frame(minWidth: 650, minHeight: 600) }
         }.sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
@@ -347,7 +380,8 @@ struct TodayView: View {
                     ActivityCapsule(activity: now.activity, label: now.label, plain: true)
                 }
                 let receipts = model.snapshot["mcp"]["receipts"].array.filter { $0["run_id"].string == "chat:\(message.recordID)" }
-                ReplySteps(calls: message["tool_calls"].array, receipts: receipts, connectionName: connectionName, workedFor: nil)
+                let activity = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: receipts)
+                if activity.count > 0 { toolActivity(activity, turn: message.recordID, pending: message["pending"].bool) }
                 if message["ticket_ids"].array.isEmpty &&
                     (message["text"].string.contains("I could not open every ticket") || message["text"].string.contains("No ticket was created")) {
                     Label("No ticket was created from this reply", systemImage: "exclamationmark.triangle.fill")
@@ -606,6 +640,29 @@ struct TodayView: View {
     }
 
     private var canSend: Bool { !model.chatDrafts.submission(for: scope).text.isEmpty && !sending && !model.busy }
+    private var pendingTurn: JSONValue? { messages.last { $0["pending"].bool && $0["role"].string != "user" } ?? messages.last { $0["pending"].bool } }
+    /// With an empty draft the send button becomes Stop; typing while a reply
+    /// runs turns it back into Send so the new message queues.
+    private var showsStop: Bool { pendingTurn != nil && !sending && model.chatDrafts.submission(for: scope).text.isEmpty }
+    private func stopReply() {
+        guard let turn = pendingTurn else { return }
+        Task { await model.workbench(.command("CancelChat", ["turn_id": turn["id"]])) }
+    }
+    /// The user message that produced a failed reply, so Retry can resend it.
+    private func retryText(before reply: JSONValue) -> String? {
+        guard let index = messages.firstIndex(where: { $0.recordID == reply.recordID }) else { return nil }
+        let text = messages[..<index].last { $0["role"].string == "user" }?["text"].string ?? ""
+        return text.isEmpty ? nil : text
+    }
+    private func retry(_ text: String) {
+        scrollFollow.pin()
+        model.sendingChatScopes.insert(scope)
+        let target = scope
+        Task {
+            _ = await model.workbench(.command("SendMessage", ["text": .string(text), "workspace_id": target.workspaceID.map(JSONValue.string) ?? .null]))
+            model.sendingChatScopes.remove(target)
+        }
+    }
 
     private var runtimeLabel: String {
         let runtime = model.snapshot["agent_runtime"]
@@ -676,7 +733,7 @@ struct TodayView: View {
             }
             Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.system(size: 12)).foregroundStyle(N.text4)
             Text("\(part).").font(.system(size: look == .mascot ? 34 : look == .dense ? 20 : 26, weight: .semibold)).tracking(-0.5).foregroundStyle(N.text)
-            Text(waiting == 0 ? (model.workspaces.isEmpty ? "I watch your work while you're away, plan the next step the way you would, and ask before I act." : "Nothing needs you right now. I'm watching.") : "\(waiting) \(waiting == 1 ? "thing needs" : "things need") you. Everything else is being watched.")
+            Text(waiting == 0 ? (WatchingPresentation(connected: model.connected, snapshot: model.snapshot).active ? "Nothing needs you right now. I'm watching." : "Connect a work source and start a watch to get useful updates here.") : "\(waiting) \(waiting == 1 ? "thing needs" : "things need") you. Review it in Work.")
                 .font(.system(size: 14)).lineSpacing(4).foregroundStyle(N.text3)
         }
     }
@@ -715,7 +772,7 @@ struct TodayView: View {
         .padding(.top, 56)
     }
     private var howNekoWorks: some View {
-        let watching = !model.snapshot["mcp"]["responsibilities"].array.isEmpty
+        let watching = model.snapshot["mcp"]["responsibilities"].array.contains { $0["enabled"].bool }
         return VStack(alignment: .leading, spacing: 0) {
             Text("How Neko works").font(.system(size: 12, weight: .medium)).foregroundStyle(N.text4).padding(.bottom, 8)
             LoopStep(number: 1, title: "Watch", detail: "Add a folder you work in, then the sources to keep an eye on: Linear, Sentry, GitHub, Slack.", done: !model.workspaces.isEmpty && watching,

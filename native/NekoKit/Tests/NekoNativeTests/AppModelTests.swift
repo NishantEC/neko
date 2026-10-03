@@ -17,6 +17,38 @@ private actor ControlledTransport {
 }
 
 @MainActor final class AppModelTests: XCTestCase {
+    func testWatchingStatusRequiresAnEnabledResponsibility() {
+        XCTAssertEqual(WatchingPresentation(connected: true, snapshot: .null).title, "Ready")
+        let paused: JSONValue = .object(["mcp": .object(["responsibilities": .array([
+            .object(["enabled": .bool(false)])
+        ])])])
+        XCTAssertEqual(WatchingPresentation(connected: true, snapshot: paused).title, "Ready")
+        let active: JSONValue = .object(["mcp": .object(["responsibilities": .array([
+            .object(["enabled": .bool(true)])
+        ])])])
+        XCTAssertEqual(WatchingPresentation(connected: true, snapshot: active).title, "Watching 1")
+        XCTAssertEqual(WatchingPresentation(connected: false, snapshot: active).title, "Reconnecting…")
+    }
+
+    func testRegistryCatalogAcceptsOnlyHostedHTTPServers() throws {
+        let payload = """
+        {"servers":[
+          {"server":{"name":"io.github.getsentry/sentry-mcp","description":"Sentry errors","remotes":[{"type":"streamable-http","url":"https://mcp.sentry.dev/mcp"}]}},
+          {"server":{"name":"local-only","packages":[{"registryType":"npm","identifier":"example"}]}},
+          {"server":{"name":"unsafe","remotes":[{"type":"streamable-http","url":"http://example.com/mcp"}]}}
+        ]}
+        """
+        let servers = try RegistryCatalog.parse(Data(payload.utf8))
+        XCTAssertEqual(servers.map(\.name), ["io.github.getsentry/sentry-mcp"])
+        XCTAssertEqual(servers.first?.url.absoluteString, "https://mcp.sentry.dev/mcp")
+    }
+
+    func testConnectionStatusExplainsTimedOutOAuth() {
+        let timedOut: JSONValue = .object(["enabled": .bool(true), "error": .string("Authentication timed out. Try again."), "tools": .array([])])
+        XCTAssertEqual(ToolsPresentation.connectionStatus(timedOut), "Sign in needed")
+        let available: JSONValue = .object(["enabled": .bool(true), "error": .null, "tools": .array([.object(["name": .string("list_issues")])])])
+        XCTAssertEqual(ToolsPresentation.connectionStatus(available), "Available")
+    }
     func testClipboardConsentWaitsForExactAcknowledgment() throws {
         var state = ClipboardConsentState()
         XCTAssertFalse(state.begin(true))
@@ -180,7 +212,7 @@ private actor ControlledTransport {
         ]
         let connection: JSONValue = .object(["id": .string("server"), "tools": .array(tools)])
         XCTAssertEqual(ToolsPresentation.toolSummary(connection), "2 tools")
-        XCTAssertEqual(ToolsPresentation.toolSummary(replacing(connection, ["tools": .array([])])), "Not discovered")
+        XCTAssertEqual(ToolsPresentation.toolSummary(replacing(connection, ["tools": .array([])])), "Discovering")
         XCTAssertEqual(ToolsPresentation.toolSummary(replacing(connection, ["tools": .array([]), "discovered_ms": .number(1)])), "No tools")
     }
 

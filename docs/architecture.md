@@ -61,6 +61,15 @@ in their original setup. OAuth uses discovered metadata, PKCE/state/issuer check
 browser callbacks. Legacy Linear data remains historical; old polling and
 permissions are disabled, not converted into grants.
 
+The native client can search the public MCP Registry for hosted HTTPS
+Streamable HTTP endpoints and offers Sentry's official hosted endpoint as a
+featured entry. Registry metadata stays client-side until the user reviews a
+server URL and adds it through the existing `AddConnection` command. Browser
+sign-in remains user-driven. The daemon automatically discovers tools on new,
+trusted connections and after sign-in, retrying failures without blocking the
+client. The responsibility scheduler then evaluates eligibility for a
+plan-only source watch. Package listings are not installed automatically.
+
 `native_runner` starts ephemeral Codex processes in isolated task worktrees.
 The saved `agent_runtime` snapshot chooses the Codex account (default), the
 CLI's Ollama/LM Studio local adapter, or an available model routed through an

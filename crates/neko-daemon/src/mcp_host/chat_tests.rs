@@ -63,6 +63,41 @@ fn fixture(read_only: bool) -> (Arc<Host>, String, Lease, String) {
     (host, turn, lease, connection)
 }
 
+#[test]
+fn new_trusted_connection_is_discovered_by_background_tick() {
+    let db = Db::open_in_memory().unwrap();
+    let mut state = Snapshot::default();
+    state.workspaces.push(Workspace {
+        id: "a".into(), name: "A".into(), repository: "/tmp".into(),
+        instructions: String::new(), away_enabled: false,
+    });
+    store::save(&db, &state).unwrap();
+    let host = Arc::new(Host::new(Arc::new(Mutex::new(db))));
+    let node = std::process::Command::new("which").arg("node").output().unwrap();
+    let command = String::from_utf8(node.stdout).unwrap().trim().to_owned();
+    let added = host.command(McpCommand::AddConnection {
+        workspace_id: "a".into(), label: "Fixture".into(),
+        config: ServerConfig::Stdio {
+            command,
+            args: vec![format!("{}/../../scripts/fixtures/mcp-host.mjs", env!("CARGO_MANIFEST_DIR")), "work".into()],
+            cwd: None,
+        },
+        trust_local_process: true,
+        credentials: None,
+    }).unwrap();
+    assert!(added.mcp.connections[0].tools.is_empty());
+
+    host.discovery_tick().unwrap();
+    let mut state = store::load(&host.db.lock().unwrap()).unwrap();
+    assert_eq!(state.mcp.connections[0].tools[0].name, "list_issues");
+    assert!(state.mcp.connections[0].discovered_ms.is_some());
+    assert!(state.mcp.connections[0].error.is_none());
+    assert!(policy::seed_source_watches(&mut state, store::now_ms()));
+    assert_eq!(state.mcp.responsibilities.len(), 1);
+    assert!(state.mcp.responsibilities[0].enabled);
+    assert!(!state.mcp.responsibilities[0].prepare_low_risk);
+}
+
 fn call(host: &Host, lease: &Lease, connection: &str) -> Result<String, String> {
     host.bridge(BridgeRequest {
         token: Secret(lease.token().into()),

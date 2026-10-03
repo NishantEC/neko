@@ -96,7 +96,7 @@ fn configure_bridge(command: &mut Command, bridge: &BridgeConfig) -> Result<(), 
     }
     let executable = serde_json::to_string(&bridge.executable.to_string_lossy())
         .map_err(|_| "Invalid bridge executable")?;
-    command.args(["-c", &format!("mcp_servers.neko={{command={executable},args=[\"--mcp-bridge\"],env_vars=[\"NEKO_MCP_TOKEN\",\"NEKO_MCP_SOCKET\"],required=true,tool_timeout_sec=150,enabled_tools=[\"neko_list_tools\",\"neko_call_tool\"],default_tools_approval_mode=\"prompt\",tools={{neko_list_tools={{approval_mode=\"approve\"}},neko_call_tool={{approval_mode=\"approve\"}}}}}}")]);
+    command.args(["-c", &format!("mcp_servers.neko={{command={executable},args=[\"--mcp-bridge\"],env_vars=[\"NEKO_MCP_TOKEN\",\"NEKO_MCP_SOCKET\"],required=true,tool_timeout_sec=600,enabled_tools=[\"neko_list_tools\",\"neko_call_tool\"],default_tools_approval_mode=\"prompt\",tools={{neko_list_tools={{approval_mode=\"approve\"}},neko_call_tool={{approval_mode=\"approve\"}}}}}}")]);
     command.args(["-c", "shell_environment_policy.exclude=[\"NEKO_MCP_*\"]"]);
     command
         .env("NEKO_MCP_TOKEN", &bridge.token)
@@ -236,25 +236,16 @@ fn run_configured_session(
         command.arg("--ephemeral");
     }
     command.args(["--ignore-user-config", "--ignore-rules", "--skip-git-repo-check"]);
-    // `exec resume` takes neither -s nor -C: the sandbox comes from config
-    // and the directory from the process's own working directory.
-    let sandbox = if spec.writable { "workspace-write" } else { "read-only" };
-    match session {
-        Session::Resume(_) => command.args(["-c", &format!("sandbox_mode=\"{sandbox}\"")]),
-        _ => command.args(["-s", sandbox]),
-    };
+    // Saved sessions and fresh runs use the same permission profile.
+    // Resume uses the process working directory rather than unsupported -C.
+    command.args(["-c", "default_permissions=\"neko\""]);
+    command.args(["-c", &permission_profile(spec.writable)]);
     command
         .args([
             "-c",
             "approval_policy=\"never\"",
             "-c",
             "skills.include_instructions=false",
-            "-c",
-            "sandbox_workspace_write.network_access=false",
-            "-c",
-            "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-            "-c",
-            "sandbox_workspace_write.exclude_slash_tmp=true",
             "-c",
             "web_search=\"disabled\"",
         ]);
@@ -305,6 +296,7 @@ fn run_configured_session(
     ] {
         command.env_remove(name);
     }
+    let home_scoped = privacy_guard(&mut command, &directory);
 
     let mut pending = Vec::new();
     let mut answer = None;
@@ -397,6 +389,11 @@ fn run_configured_session(
         spec.prompt.clone()
     } else {
         prompt_with_git(&spec.prompt)
+    };
+    let prompt = if home_scoped && !extraction {
+        format!("{prompt}\n\n{HOME_PRIVACY_NOTE}")
+    } else {
+        prompt
     };
     let output = execute(command, prompt.as_bytes(), cancel, spec.timeout, |bytes| {
         for &byte in bytes {
@@ -586,6 +583,82 @@ fn developer_git_from(candidates: &[&Path]) -> Option<PathBuf> {
 
 fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+/// Home folders whose contents macOS guards with a privacy prompt (Photos,
+/// Apple Music, TV, Mail, Messages, iCloud, other apps' data...). Searching
+/// them from a home-folder workspace makes Neko look like it is snooping.
+const HOME_PRIVATE_FOLDERS: &[&str] = &["Pictures", "Music", "Movies", "Library", "Public", ".Trash"];
+/// Hard sandbox read denials, relative to HOME. Reads fail with "Operation
+/// not permitted" before macOS would ask the user anything.
+const SANDBOX_DENIED_HOME_PATHS: &[&str] = &[
+    "Pictures",
+    "Music",
+    "Movies",
+    ".Trash",
+    "Library/Mail",
+    "Library/Messages",
+    "Library/Safari",
+    "Library/Calendars",
+    "Library/Reminders",
+    "Library/Photos",
+    "Library/HomeKit",
+    "Library/Containers",
+    "Library/Group Containers",
+    "Library/Mobile Documents",
+    "Library/CloudStorage",
+    "Library/Application Support/AddressBook",
+    "Library/Application Support/CallHistoryDB",
+    "Library/Application Support/com.apple.TCC",
+];
+const HOME_PRIVACY_NOTE: &str = "Your working folder is the user's whole home folder. Personal folders such as ~/Pictures, ~/Music, ~/Movies and app data in ~/Library are blocked; do not try to read them. Search inside the specific project folders instead of the whole home folder.";
+
+/// Inline TOML for `permissions.neko`: the built-in read-only or workspace
+/// profile plus read denials for privacy-guarded folders.
+fn permission_profile(writable: bool) -> String {
+    let base = if writable { ":workspace" } else { ":read-only" };
+    let mut entries = Vec::new();
+    if writable {
+        entries.push("\":tmpdir\"=\"read\"".to_owned());
+        entries.push("\":slash_tmp\"=\"read\"".to_owned());
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from).filter(|h| h.is_absolute()) {
+        for relative in SANDBOX_DENIED_HOME_PATHS {
+            let path = home.join(relative);
+            if let Ok(key) = serde_json::to_string(&path.to_string_lossy()) {
+                entries.push(format!("{key}=\"none\""));
+            }
+        }
+    }
+    format!("permissions.neko={{extends=\"{base}\",filesystem={{{}}}}}", entries.join(","))
+}
+
+fn ripgrep_privacy_config() -> String {
+    let mut config = String::new();
+    for folder in HOME_PRIVATE_FOLDERS {
+        config.push_str(&format!("--glob=!/{folder}\n"));
+    }
+    for bundle in ["*.photoslibrary", "*.musiclibrary", "*.tvlibrary", "*.photolibrary"] {
+        config.push_str(&format!("--glob=!{bundle}\n"));
+    }
+    config
+}
+
+/// When a run's folder is the home folder, keep ripgrep out of the guarded
+/// folders and tell the agent why. Returns whether the guard applies.
+fn privacy_guard(command: &mut Command, directory: &Path) -> bool {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return false };
+    let home = home.canonicalize().unwrap_or(home);
+    if directory != home {
+        return false;
+    }
+    let path = std::env::temp_dir().join("neko-ripgrep-privacy.conf");
+    let config = ripgrep_privacy_config();
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(config.as_str()) {
+        let _ = std::fs::write(&path, &config);
+    }
+    command.env("RIPGREP_CONFIG_PATH", &path);
+    true
 }
 
 fn prompt_with_git(prompt: &str) -> String {
@@ -1810,15 +1883,16 @@ printf '%s\n' '{"type":"turn.completed"}'
             "--ephemeral",
             "--ignore-user-config",
             "--ignore-rules",
-            "read-only",
             "approval_policy=\"never\"",
-            "sandbox_workspace_write.network_access=false",
+            "default_permissions=\"neko\"",
         ] {
             assert!(
                 args.lines().any(|arg| arg == expected),
                 "Missing {expected}: {args}"
             );
         }
+        assert!(args.contains("extends=\":read-only\""), "{args}");
+        assert!(args.contains("/Pictures\"=\"none\""), "privacy folders must be denied: {args}");
         assert!(!events.is_empty());
     }
 
@@ -2150,7 +2224,8 @@ printf '%s\n' '{"type":"turn.completed"}'
         run_configured_session(&executable, &spec, None, &Session::Resume("0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000".into()), &AtomicBool::new(false), |_| {}, false).unwrap();
         let args: Vec<String> = fs::read_to_string(temp.path().join("args")).unwrap().lines().map(str::to_owned).collect();
         assert_eq!(&args[..2], ["exec", "resume"]);
-        assert!(args.contains(&"sandbox_mode=\"workspace-write\"".to_owned()), "resume takes its sandbox from config");
+        assert!(args.contains(&"default_permissions=\"neko\"".to_owned()), "resume takes its permission profile from config");
+        assert!(args.iter().any(|arg| arg.contains("extends=\":workspace\"")), "resume retains write authority");
         assert!(!args.iter().any(|a| a == "-s" || a == "-C"));
         assert!(args.contains(&"0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000".to_owned()));
 
@@ -2177,9 +2252,9 @@ printf '%s' '{"type":"turn.completed"}'
             "Done"
         );
         let args = fs::read_to_string(temp.path().join("args")).unwrap();
-        assert!(args.lines().any(|arg| arg == "workspace-write"));
-        assert!(args.contains("exclude_slash_tmp=true"));
-        assert!(args.contains("exclude_tmpdir_env_var=true"));
+        assert!(args.contains("extends=\":workspace\""), "{args}");
+        assert!(args.contains("\":slash_tmp\"=\"read\""));
+        assert!(args.contains("\":tmpdir\"=\"read\""));
     }
 
     #[test]
