@@ -24,7 +24,7 @@ struct ResponsibilitiesView: View {
 
     var body: some View {
         ManagementScroll {
-            PageIntro(title: "What Neko watches", message: "Connected sources that can list changing work start watching automatically. Neko checks every 10 minutes and brings changes to Today. Pause a watch here whenever you want; external changes still need your direction.") { EmptyView() }
+            PageIntro(title: "What Neko watches", message: "Connected sources that can list changing work start watching automatically. Neko checks every 10 minutes and brings changes to Home. Pause a watch here whenever you want; external changes still need your direction.") { EmptyView() }
             if model.workspaces.isEmpty {
                 EmptyRow(text: "Add a workspace first, then tell Neko what to watch in it.")
             } else {

@@ -18,7 +18,7 @@ struct SuggestedResponsibilityCard: View {
                     .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             }
             VStack(alignment: .leading, spacing: 4) {
-                promise("checkmark", "Reads \(tools.joined(separator: ", ")) every 10 minutes in \(workspace) and brings what matters to Today.")
+                promise("checkmark", "Reads \(tools.joined(separator: ", ")) every 10 minutes in \(workspace) and brings what matters to Home.")
                 promise("hand.raised", item["prepare_low_risk"].bool ? "May prepare low-risk local fixes; never publishes or messages anyone." : "Never changes, posts or replies to anything. Plans wait for your approval.")
                 if !missing.isEmpty {
                     promise("exclamationmark.circle", "Connect or discover tools for \(missing.joined(separator: ", ")) before this check can run.", color: NekoStyle.amber)
