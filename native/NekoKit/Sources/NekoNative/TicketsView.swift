@@ -123,11 +123,9 @@ struct TicketsView: View {
                     .frame(minWidth: 720, minHeight: 640)
             }
         }
-        .inspector(isPresented: Binding(get: { openAs == "drawer" && selected != nil }, set: { if !$0 { selected = nil } })) {
+        .sidePanel(isPresented: openAs == "drawer" && selected != nil, key: "neko.work.panelWidth", range: 340...760, ideal: 420) {
             if let selected {
                 TicketPeek(model: model, id: selected, mode: $openAs, close: { self.selected = nil })
-                    .stableSplitPane()
-                    .inspectorColumnWidth(min: 340, ideal: 400, max: 760)
                     .ignoresSafeArea(.container, edges: .top)
             }
         }
