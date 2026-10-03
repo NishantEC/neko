@@ -711,7 +711,7 @@ struct TodayView: View {
             }
             Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.system(size: 12)).foregroundStyle(N.text4)
             Text("\(part).").font(.system(size: look == .mascot ? 34 : look == .dense ? 20 : 26, weight: .semibold)).tracking(-0.5).foregroundStyle(N.text)
-            Text(waiting == 0 ? (WatchingPresentation(connected: model.connected, snapshot: model.snapshot).active ? "Nothing needs you right now. I'm watching." : "Connect a work source and start a watch to get useful updates here.") : "\(waiting) \(waiting == 1 ? "thing needs" : "things need") you. Review it in Work.")
+            Text(waiting == 0 ? (WatchingPresentation(connected: model.connected, snapshot: model.snapshot).active ? "Nothing needs you right now. I'm watching." : "Connect a work source and start a watch to get useful updates here.") : "\(waiting) \(waiting == 1 ? "thing needs" : "things need") you. Review it in All agents.")
                 .font(.system(size: 14)).lineSpacing(4).foregroundStyle(N.text3)
         }
     }
@@ -760,7 +760,7 @@ struct TodayView: View {
             LoopStep(number: 2, title: "Plan", detail: "When something changes, Neko reads it and drafts the next step the way you would. Read only.", done: !model.tasks.isEmpty, action: "Try a plan") {
                 draft = "Look at this workspace and plan the most useful next step. Read only; explain your reasoning."
             }
-            LoopStep(number: 3, title: "Ask you", detail: "Nothing changes without your approval. Plans and finished fixes wait for you in Work.", done: model.tasks.contains { $0["status"].string == "Completed" }, action: "Open Work") {
+            LoopStep(number: 3, title: "Ask you", detail: "Nothing changes without your approval. Plans and finished fixes wait for you in All agents.", done: model.tasks.contains { $0["status"].string == "Completed" }, action: "Open All agents") {
                 NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
             }
         }

@@ -221,7 +221,7 @@ struct SchedulesView: View {
     @State private var draft: ManagementDraft?
     var body: some View {
         ManagementScroll {
-            PageIntro(title: "Schedules", message: "Ask Neko to prepare something at a set time, such as a morning brief or a weekly review. Every result waits for you in Work.") { EmptyView() }
+            PageIntro(title: "Schedules", message: "Ask Neko to prepare something at a set time, such as a morning brief or a weekly review. Every result waits for you in All agents.") { EmptyView() }
             if model.workspaces.isEmpty { EmptyRow(text: "Add a workspace first.") }
             ForEach(scopedWorkspaces(model), id: \.element.recordID) { index, workspace in
                 let items = model.snapshot["schedules"].array.filter { $0["workspace_id"].string == workspace.recordID }
