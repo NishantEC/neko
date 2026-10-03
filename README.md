@@ -6,8 +6,8 @@ press ⌥Space for quick search, clipboard history, and task attention.
 
 ## Neko-owned work
 
-Create a named workspace with one or more existing folders using the native multi-folder picker, then link an MCP definition already
-in your local Codex/Claude setup or add your own server in **Tools & skills → Connections**. No Linear, Slack, or other service is bundled
+Create a named workspace with one or more existing folders using the native multi-folder picker, then browse hosted servers in the app, link an MCP definition already
+in your local Codex/Claude setup, or add your own server in **Tools & skills → Connections**. Sentry's official hosted server is featured; no Linear, Slack, or other service is bundled
 or required. Multiple connections, including instances of the same server,
 have separate workspace scope, credentials, and permissions.
 
@@ -17,9 +17,11 @@ Neko's agent can name the folder for a ticket; an ambiguous task is held rather
 than silently run in the first folder. Setup never requires Git just to register
 a workspace.
 
-1. Link one existing definition from **Found in your setup**, or add a remote
-   Streamable HTTP URL or explicitly trusted local executable and JSON argument
-   array. Neko does not download or install server packages.
+1. Choose **Add connection → Browse MCP servers** to search the public MCP Registry
+   for hosted HTTPS servers, select and review the destination, or import an existing
+   definition from this Mac. You can also add a remote Streamable HTTP URL or an
+   explicitly trusted local executable and JSON argument array. Registry listings
+   are third-party metadata, not a trust guarantee. Neko does not download or install server packages.
 2. Sign in through the browser if the server supports OAuth, or supply optional
    credential JSON in the masked field. Secrets are stored in macOS Keychain.
 3. Discover tools and inspect their schemas. Discovered tools are available in
@@ -68,8 +70,9 @@ until you choose **Remember this**; **Dismiss** rejects them across restarts.
 hourly-or-slower recurrence and IANA timezone, then enable it explicitly. Due
 runs create ordinary approval-gated tickets, with no catch-up burst after sleep.
 Codex and Claude imports preserve available instructions as paused drafts;
-missing schedule metadata must be filled in rather than guessed. **Browse** links
-the MCP Registry and skills.sh; skill installation previews standalone SKILL.md
+missing schedule metadata must be filled in rather than guessed. The in-app
+connection browser searches the MCP Registry; **Browse skills.sh** opens the
+skill catalog. Skill installation previews standalone SKILL.md
 content and requires source/audit review before saving and separate activation.
 
 Automatic local preparation requires successful scoped tool receipts no older
@@ -81,6 +84,11 @@ judgment, not proof. **Ready for review** does not mean tests passed or merged.
 
 Pausing a connection removes its tool access; resuming restores the currently
 discovered tools in its workspace.
+After a trusted connection is added or signed in, the daemon discovers its
+tools in the background and retries transient failures. A read-declared tool
+that lists changing work starts one plan-only watch for its workspace. Other
+tools stay available for on-demand use; discovery alone does not authorize
+remote writes or publication.
 The tool-access migration pauses existing responsibilities once. Untried chat
 suggestions for readable sources then start automatically, while an existing
 manual pause remains in effect.

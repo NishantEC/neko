@@ -163,7 +163,7 @@ struct NekoSidebar: View {
                 }.padding(.top, 12)
             }.scrollIndicators(.never)
             HStack(spacing: 8) {
-                StatusPill(text: model.connected ? "Watching" : "Reconnecting…", live: model.connected)
+                StatusPill(text: WatchingPresentation(connected: model.connected, snapshot: model.snapshot).title, live: WatchingPresentation(connected: model.connected, snapshot: model.snapshot).active)
                 Spacer()
                 if model.selectedWorkspace != nil {
                     Button { addingWorkspace = true } label: { Image(systemName: "gearshape").font(.system(size: 11)).foregroundStyle(N.text4) }.buttonStyle(.plain).help("Workspace settings").accessibilityLabel("Workspace settings")
@@ -244,7 +244,7 @@ struct NativeSidebar: View {
         // Status and app controls live in the sidebar footer.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack(spacing: 10) {
-                WatchingStatus(connected: model.connected)
+                WatchingStatus(connected: model.connected, snapshot: model.snapshot)
                 Spacer()
                 Menu {
                     Picker("Look", selection: $look) { ForEach(NekoLook.allCases) { Text($0.title).tag($0.rawValue) } }.pickerStyle(.inline)
@@ -281,11 +281,24 @@ struct NativeSidebar: View {
 
 struct WatchingStatus: View {
     let connected: Bool
+    let snapshot: JSONValue
     var body: some View {
+        let status = WatchingPresentation(connected: connected, snapshot: snapshot)
         HStack(spacing: 6) {
-            PixelGlyph(activity: connected ? .watching : .idle, size: 11)
-            Text(connected ? "Watching" : "Reconnecting…").font(.callout)
+            PixelGlyph(activity: status.active ? .watching : .idle, size: 11)
+            Text(status.title).font(.callout)
         }.padding(.horizontal, 8).accessibilityElement(children: .combine)
+    }
+}
+
+struct WatchingPresentation {
+    let connected: Bool
+    let snapshot: JSONValue
+    var count: Int { snapshot["mcp"]["responsibilities"].array.filter { $0["enabled"].bool }.count }
+    var active: Bool { connected && count > 0 }
+    var title: String {
+        if !connected { return "Reconnecting…" }
+        return count == 0 ? "Ready" : "Watching \(count)"
     }
 }
 

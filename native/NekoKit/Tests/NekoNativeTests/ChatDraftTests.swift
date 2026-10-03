@@ -217,6 +217,19 @@ final class ChatDraftTests: XCTestCase {
         XCTAssertTrue(follow.followsLatest)
     }
 
+    func testSendingPinsTranscriptToLatestDuringInsertion() {
+        var follow = ChatScrollFollowState()
+        let start = Date()
+        follow.update(ChatScrollMetrics(contentHeight: 1400, originY: -200, viewportHeight: 500), now: start)
+        follow.update(ChatScrollMetrics(contentHeight: 1400, originY: -100, viewportHeight: 500), now: start)
+        XCTAssertFalse(follow.followsLatest)
+        follow.pin(now: start)
+        follow.update(ChatScrollMetrics(contentHeight: 1600, originY: -300, viewportHeight: 500), now: start.addingTimeInterval(0.3))
+        XCTAssertTrue(follow.followsLatest, "Animation offsets after a send must not stop following")
+        follow.update(ChatScrollMetrics(contentHeight: 1600, originY: -200, viewportHeight: 500), now: start.addingTimeInterval(2))
+        XCTAssertFalse(follow.followsLatest, "Scrolling up after the pin expires stops following")
+    }
+
     func testTodayWorkSummaryIncludesOnlySelectedWorkspaceAndActionableWork() {
         let tasks: [JSONValue] = [
             .object(["id": .string("a"), "workspace_id": .string("one"), "status": .string("AwaitingApproval")]),

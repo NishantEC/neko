@@ -385,6 +385,17 @@ impl Controller {
         };
         if let Some(turn) = queued { self.spawn_chat_worker(turn); }
         self.start_learning();
+        let mcp = self.mcp.clone();
+        std::thread::spawn(move || {
+            loop {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mcp.discovery_tick())) {
+                    Ok(Err(error)) => eprintln!("neko MCP discovery: {error}"),
+                    Err(_) => eprintln!("neko MCP discovery: tick panicked; continuing"),
+                    Ok(Ok(())) => {}
+                }
+                std::thread::sleep(Duration::from_secs(2));
+            }
+        });
         let controller = self.clone();
         std::thread::spawn(move || {
             loop {
@@ -1104,7 +1115,9 @@ fn converse(
             skill_instructions
         ),
         writable: false,
-        timeout: Duration::from_secs(180),
+        // Long enough for the user to answer a tool approval or a macOS
+        // privacy prompt; Stop and double Escape end it sooner.
+        timeout: Duration::from_secs(900),
         runtime: snapshot.agent_runtime.clone(),
     };
     let result = (|| {
@@ -1154,6 +1167,9 @@ fn converse(
     let answer = match result {
         Ok(answer) => answer,
         Err(error) => {
+            if error == "Task timed out" {
+                return finish("I ran out of time on this one. If a permission prompt was waiting, answer it, then retry.", vec![], true);
+            }
             let short: String = error.chars().take(300).collect();
             return finish(&format!("I couldn't reply just now: {short}"), vec![], true);
         }
