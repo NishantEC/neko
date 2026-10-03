@@ -20,6 +20,8 @@
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>LSMultipleInstancesProhibited</key>
+    <true/>
     <key>NSDesktopFolderUsageDescription</key>
     <string>Neko searches your Desktop and opens workspaces kept there.</string>
     <key>NSDocumentsFolderUsageDescription</key>
