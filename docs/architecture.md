@@ -9,6 +9,12 @@ arbitrary; several of these decisions cost days to learn.
 `neko-protocol::workbench` supplies typed commands and snapshots. The installed
 client is `native/NekoKit` (SwiftUI/AppKit); the earlier GPUI `workspace.rs`
 window remains a separate legacy client. Both are clients of the same daemon.
+The native bundle prohibits multiple macOS app instances. Its installer stops
+the installed client/daemon and any copies running from installer backups,
+unregisters the build output and recovery bundles from Launch Services, and registers
+`/Applications/Neko.app` as the current launch target. The client keeps checking
+daemon health and relaunches its bundled daemon after a connection failure;
+the daemon owns socket singleton detection.
 `neko-core::workbench` stores bounded,
 validated snapshots atomically in the daemon-owned SQLite settings table.
 Workspace identity is a canonical existing folder, including a non-Git folder.

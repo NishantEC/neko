@@ -217,9 +217,11 @@ bash scripts/install-native.sh --dry-run
 ```
 
 When ready to install, `bash scripts/install-native.sh` builds and verifies
-the native bundle, stops only processes running from the exact installed
-`/Applications/Neko.app` paths, and moves the previous app into a recoverable
-backup. User data, Keychain credentials, and preferences remain intact. Set
+the native bundle, stops processes running from `/Applications/Neko.app` or
+its installer-created app backups, and moves the previous app into a recoverable
+backup. It unregisters the build output and app backups from Launch Services and registers the current
+installation; macOS app launches use one Neko instance. User data, Keychain
+credentials, and preferences remain intact. Set
 `NEKO_CODESIGN_IDENTITY` to a stable Apple Development identity if desired;
 otherwise the build uses ad-hoc signing. Use `--skip-build` to install an
 already-built, verified native bundle.

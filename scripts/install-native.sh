@@ -18,11 +18,15 @@ for option in "$@"; do
   esac
 done
 [[ ! -L "$application" && ! -L "$data_directory" ]] || { printf 'Refusing symlinked installation or data targets.\n' >&2; exit 2; }
+is_installed_executable() {
+  case "$1" in
+    '/Applications/Neko.app/Contents/MacOS/neko'|'/Applications/Neko.app/Contents/MacOS/neko-daemon'|/Applications/.neko-native-backup.*/previous-Neko.app/Contents/MacOS/neko|/Applications/.neko-native-backup.*/previous-Neko.app/Contents/MacOS/neko-daemon) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 installed_pids() {
   /bin/ps -axo pid=,comm= | while read -r process_id executable; do
-    case "$executable" in
-      '/Applications/Neko.app/Contents/MacOS/neko'|'/Applications/Neko.app/Contents/MacOS/neko-daemon') printf '%s\n' "$process_id" ;;
-    esac
+    if is_installed_executable "$executable"; then printf '%s\n' "$process_id"; fi
   done
 }
 validate_bundle() {
@@ -38,9 +42,10 @@ if (( dry_run )); then
   printf 'Source: %s\nTarget: %s\n' "$bundle" "$application"
   if (( skip_build )); then validate_bundle "$bundle"; printf 'Existing signed native source bundle verified.\n'
   else printf 'Would run scripts/build-native.sh and verify the resulting signed SwiftUI bundle.\n'; fi
-  printf 'Would stop only exact installed executable paths; matching PIDs:\n'
+  printf 'Would stop only installed Neko executables, including installer backups; matching PIDs:\n'
   installed_pids
   printf 'Would back up the existing app in a unique /Applications/.neko-native-backup.* directory.\n'
+  printf 'Would unregister the build output and installer backups, then register /Applications/Neko.app with Launch Services.\n'
   if (( clean_data )); then printf 'Would move %s into a sibling recoverable backup after checking its socket is unused.\n' "$data_directory"
   else printf 'User data remains in place.\n'; fi
   printf 'Keychain credentials and macOS preferences remain unchanged.\n'
@@ -56,9 +61,7 @@ validate_bundle "$staged" || { printf 'Staged bundle failed verification; retain
 while read -r process_id; do
   [[ -n "$process_id" ]] || continue
   executable="$(/bin/ps -p "$process_id" -o comm= || true)"
-  case "$executable" in
-    '/Applications/Neko.app/Contents/MacOS/neko'|'/Applications/Neko.app/Contents/MacOS/neko-daemon') /bin/kill -TERM "$process_id" 2>/dev/null || true ;;
-  esac
+  if is_installed_executable "$executable"; then /bin/kill -TERM "$process_id" 2>/dev/null || true; fi
 done < <(installed_pids)
 for ((attempt=0; attempt<50; attempt++)); do
   [[ -z "$(installed_pids)" ]] && break
@@ -89,6 +92,15 @@ if [[ -e "$application" ]]; then mv "$application" "$backup_root/previous-Neko.a
 mv "$staged" "$application"
 new_installed=1
 validate_bundle "$application"
+# Launch Services can retain the moved bundle's identity and reopen a backup.
+# Keep recovery bundles on disk, but make the installed app the launch target.
+launch_services='/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
+"$launch_services" -u "$bundle" || true
+for previous_bundle in /Applications/.neko-native-backup.*/previous-Neko.app; do
+  [[ -d "$previous_bundle" ]] || continue
+  "$launch_services" -u "$previous_bundle" || true
+done
+"$launch_services" -f "$application"
 printf 'Installed native /Applications/Neko.app. Previous bundle backup: %s\n' "$backup_root"
 if [[ -n "$data_backup" ]]; then printf 'Previous Neko data backup: %s/neko\n' "$data_backup"; fi
 printf 'Credentials and preferences preserved. Launch /Applications/Neko.app when ready.\n'
