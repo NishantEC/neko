@@ -13,8 +13,12 @@ have separate workspace scope, credentials, and permissions.
 
 Code tasks need a Git repository because Neko builds in an isolated worktree;
 non-Git folders can still be attached. When a workspace has multiple folders,
-Neko's agent can name the folder for a ticket; an ambiguous task is held rather
-than silently run in the first folder. Setup never requires Git just to register
+Neko's agent can name the folder for a ticket. For a home folder or another
+container of repositories, Neko matches source paths in the ticket against local
+Git-tracked files before comparing project names. Among matching copies with the
+same origin, it reuses the one checkout already used by other tickets in that
+workspace. Unresolved ambiguity is held for a folder choice. The ticket activity
+shows the checkout and matching files. Setup never requires Git just to register
 a workspace.
 
 1. Choose **Add connection → Browse MCP servers** to search the public MCP Registry
