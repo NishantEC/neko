@@ -107,6 +107,14 @@ struct NoiseOverlay: View { var body: some View { Color.clear } }
 }
 
 extension View {
+    /// Split-view panes must report a size range that doesn't change with
+    /// their content. Text that rewraps as a divider moves (a ticket thread,
+    /// a growing reply box) otherwise changes the pane's minimum size during
+    /// AppKit's constraint pass, which loops until AppKit aborts the app.
+    /// The column width limits still apply.
+    func stableSplitPane() -> some View {
+        frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
+    }
     /// A floating notice over page content: opaque so the page never shows
     /// through its text, with a hairline edge and a soft lift.
     func nekoToast() -> some View {

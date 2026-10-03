@@ -126,6 +126,7 @@ struct TicketsView: View {
         .inspector(isPresented: Binding(get: { openAs == "drawer" && selected != nil }, set: { if !$0 { selected = nil } })) {
             if let selected {
                 TicketPeek(model: model, id: selected, mode: $openAs, close: { self.selected = nil })
+                    .stableSplitPane()
                     .inspectorColumnWidth(min: 340, ideal: 400, max: 760)
                     .ignoresSafeArea(.container, edges: .top)
             }

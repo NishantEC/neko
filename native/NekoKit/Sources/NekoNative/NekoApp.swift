@@ -60,6 +60,7 @@ struct WorkspaceView: View {
             else {
                 NavigationSplitView(columnVisibility: $columns) {
                     NativeSidebar(model: model, page: $page, pages: pages, addingWorkspace: $addingWorkspace, look: $look)
+                        .stableSplitPane()
                         .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
                 } detail: {
                     // Work and Today (the default page) draw their own toolbar row.
@@ -84,7 +85,7 @@ struct WorkspaceView: View {
                         }
                     }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .stableSplitPane()
                     .background { LookBackground(look: look) }
                     .softScrollEdges()
                     // No title strip: the page is named by the sidebar selection, and the
