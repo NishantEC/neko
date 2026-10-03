@@ -317,7 +317,8 @@ impl Controller {
                     "{}\nThis wake is read-only: do not mutate external systems, publish, send messages, or edit files. A tool grant is not permission to exceed this read-only wake.\nWorkspace preferences:\n{}\nAgent context:\n{}\nUser-enabled workspace skills:\n{skills}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context, recheck them using current tools):\n{}",
                     responsibility::INSTRUCTION,
                     claim.workspace.instructions,
-                    neko_core::agent_profiles::context(&state, Some(&claim.workspace.id)),
+                    format!("{}\n{}", neko_core::agent_profiles::context(&state, Some(&claim.workspace.id)),
+                        neko_core::decision_context::context_about(&state, &claim.workspace.id, None, &claim.responsibility.instruction)),
                     claim.responsibility.instruction,
                     serde_json::to_string(
                         &state

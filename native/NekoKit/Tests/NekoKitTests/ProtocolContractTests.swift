@@ -48,6 +48,23 @@ func realDaemonPersistsNativeProtocolCommands() async throws {
     #expect(assigned["agent_profiles"]["assignments"].array.contains { $0["workspace_id"].string == workspaceID && $0["profile_id"].string == profileID })
     #expect(assigned["agent_profiles"]["read_grants"].array.contains { $0["reader_id"].string == profileID && $0["source_id"].string == "default" })
 
+    let proposed = try await contractCommand(client, .object(["DecisionContext": .command("SavePreference", [
+        "workspace_id": .string(workspaceID), "id": .string(""), "expected_version": .null,
+        "applicability": .object(["terms": .array([.string("native navigation")]), "task_ids": .array([])]),
+        "instruction": .string("Use full-page agent conversations for native navigation."),
+        "supporting_record_ids": .array([]), "exceptions": .array([.string("quick panel")])
+    ])]))
+    let preference = try #require(proposed["working_preferences"].array.first)
+    #expect(preference["state"] == .string("proposed"))
+    let confirmed = try await contractCommand(client, .object(["DecisionContext": .command("KeepPreference", [
+        "workspace_id": .string(workspaceID), "id": preference["id"], "expected_version": preference["version"]
+    ])]))
+    #expect(confirmed["working_preferences"].array.first?["state"] == .string("confirmed"))
+    let stale = try await client.request(.object(["Workbench": .object(["DecisionContext": .command("DismissPreference", [
+        "workspace_id": .string(workspaceID), "id": preference["id"], "expected_version": preference["version"]
+    ])])]))
+    #expect(stale["Error"] != .null)
+
     let now = JSONValue.number(Double(Int64(Date().timeIntervalSince1970 * 1000)))
     let memory: JSONValue = .object(["id": .string(""), "agent_profile_id": .string(profileID), "workspace_id": .string(workspaceID), "kind": .string("workspace"), "text": .string("Native protocol persistence fixture"), "source": .string("user"), "created_at_ms": now, "updated_at_ms": now])
     let remembered = try await contractCommand(client, .command("SaveMemory", ["entry": memory]))
@@ -66,6 +83,7 @@ func realDaemonPersistsNativeProtocolCommands() async throws {
     #expect(restored["workspace_folders"][workspaceID] == saved["workspace_folders"][workspaceID])
     #expect(restored["agent_profiles"] == scheduled["agent_profiles"])
     #expect(restored["memory"] == scheduled["memory"])
+    #expect(restored["working_preferences"] == confirmed["working_preferences"])
     #expect(restored["schedules"] == scheduled["schedules"])
     #expect((try await client.request(.string("GetOnboardingState")))["OnboardingState"]["completed"] == .bool(true))
     #expect((try await client.request(.string("GetClipboardHistoryEnabled")))["ClipboardHistoryEnabled"]["enabled"] == .bool(false))

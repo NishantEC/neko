@@ -5,6 +5,23 @@ import NekoKit
     @Published var snapshot: JSONValue = .object([:])
     @Published var selectedWorkspace: String?
     @Published var requestedPage: String?
+    @Published var agentID: String?
+    @Published var agentReturnPage = "Home"
+    @Published var agentFilter = "all"
+    @Published var agentSearch = ""
+    @Published var includeStoppedAgents = true
+    @Published var ticketDrafts: [String: String] = [:]
+
+    func openAgent(_ id: String, from page: String? = nil) {
+        if agentID == nil { agentReturnPage = page ?? "Home" }
+        agentID = id
+    }
+    func closeAgent() { agentID = nil; requestedPage = agentReturnPage }
+    func showAgents(_ filter: String = "all") {
+        agentFilter = filter
+        agentID = nil
+        requestedPage = "Tickets"
+    }
     /// A short confirmation shown for a few seconds, e.g. after Stop all work.
     @Published var notice: String? {
         didSet {

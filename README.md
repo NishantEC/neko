@@ -39,14 +39,17 @@ a workspace.
    Findings or missing evidence block the result from becoming ready for review.
 
 Open the full app from the Dock, menu bar **Open Neko Workspace**, or the
-palette's **Open Neko Workspace** command. **Today** is a conversation with
+palette's **Open Neko Workspace** command. **Home** is a conversation with
 Neko: its brief lists tickets that need you, and asking for work opens a
 ticket that is planned read-only and waits for your approval. Its composer
 accepts pasted or dropped images and files as local attachments. Return sends
 or queues a message, Shift-Return inserts a line, and Command-Return interrupts
-the current reply and sends. **Work**
-lists everything by needs you, working and done; open one to approve, retry,
-or add a note that steers its next plan or build. **Propose parallel subtasks**
+the current reply and sends. **All agents**
+keeps List and Board views. Each ticket opens its own full-page conversation;
+the native sidebar shows the five newest agents in Needs you, Working and Recent.
+Reply drafts and the return filter survive switching agents. Open a chat to
+approve, stop, retry or reply. Questions and no-work decisions wait for a reply;
+Accept locally marks a reviewed result accepted without applying or publishing it. **Propose parallel subtasks**
 on an awaiting plan generates two or three scoped proposals for your approval.
 Approved children run in isolated worktrees (three workers globally, two per
 workspace), then integrate into the parent task worktree for a final independent
@@ -101,7 +104,7 @@ push, PR creation, messages, or deployment.
 
 The local Codex CLI must be installed and authenticated. `NEKO_CODEX_PATH`
 can select an absolute executable path. You can select a model in the
-main-window Settings → AI page or the Today composer. The default uses the
+main-window Settings → AI page or the Home composer. The default uses the
 signed-in Codex account; Ollama and LM Studio use the Codex CLI's local-provider
 adapter and require their local server to be installed and running. If the
 optional OpenCodex CLI is installed, Neko reads its live model catalog and
