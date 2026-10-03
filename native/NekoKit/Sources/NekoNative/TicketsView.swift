@@ -130,7 +130,7 @@ struct TicketsView: View {
             }
             .layoutPriority(-1)
             Spacer(minLength: 12)
-            TextField("Search tickets", text: $model.agentSearch).textFieldStyle(.roundedBorder).frame(minWidth: 90, maxWidth: 180).controlSize(.small)
+            NekoSearchField(title: "Search tickets", text: $model.agentSearch).frame(minWidth: 90, maxWidth: 180)
             GlassSegmented(selection: $layout, options: [
                 .init(value: "list", title: "List", symbol: "list.bullet", help: "Show tickets as a list"),
                 .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tickets as a board")
@@ -144,7 +144,11 @@ struct TicketsView: View {
                 Toggle("Show failed and cancelled", isOn: $model.includeStoppedAgents)
                 Button("Clear finished tickets") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
                     .disabled(!model.tasks.contains { ["Completed", "Cancelled"].contains($0["status"].string) })
-            } label: { Image(systemName: "ellipsis.circle") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(width: NekoControlMetrics.height(), height: NekoControlMetrics.height())
+                    .contentShape(Rectangle())
+            }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .help("Work options")
         }

@@ -19,7 +19,7 @@ struct GlassSegmented<Value: Hashable>: View {
     @Namespace private var thumbSpace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var height: CGFloat { size == .small ? 22 : 26 }
+    private var height: CGFloat { NekoControlMetrics.segmentHeight(for: size) }
 
     var body: some View {
         container {
@@ -28,7 +28,7 @@ struct GlassSegmented<Value: Hashable>: View {
                     segment(option, index: index)
                 }
             }
-            .padding(2)
+            .padding(NekoControlMetrics.segmentInset)
             .background(Capsule().fill(Color.white.opacity(0.06)))
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.09)))
         }
@@ -66,7 +66,7 @@ struct GlassSegmented<Value: Hashable>: View {
             .foregroundStyle(selected ? Color.primary : Color.secondary)
             .frame(height: height)
             .modifier(GlassThumb(selected: selected, id: "thumb-\(index)", space: thumbSpace))
-            .contentShape(Capsule())
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(option.help ?? option.title)
