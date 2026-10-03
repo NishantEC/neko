@@ -23,6 +23,15 @@ to a Git repository, because execution requires an isolated worktree. Import
 review places dated Codex output, Neko smoke fixtures and linked Git worktrees
 under an optional **Other folders** disclosure; classification does not remove
 their selection capability.
+Before creating a task worktree, repository discovery compares source paths in
+the title and goal with bounded, cancellable `git ls-files` reads from checkouts
+under the workspace folders. Path suffixes accommodate omitted monorepo prefixes
+and stack line/column annotations. Bare filenames, untracked files and traversal
+paths do not identify a checkout. A unique file match precedes name/model routing;
+matching clones with an identical origin may reuse the single checkout already
+recorded for other tasks in this workspace. Different origins or multiple known
+copies remain ambiguous. The host saves the root and file evidence on the ticket;
+this discovery does not run repository code or change approval/sandbox policy.
 `neko-daemon::workbench` supervises up to three tasks globally and two per
 workspace without holding the
 database mutex during model/network calls. A two-second supervisor heartbeat

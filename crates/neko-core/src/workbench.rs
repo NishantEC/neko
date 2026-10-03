@@ -1064,6 +1064,82 @@ pub fn repository_named_in(candidates: &[RepositoryCandidate], title: &str, goal
     matches.next().is_none().then(|| first.path.clone())
 }
 
+/// Match source paths in a ticket to Git's tracked file names. A deployed app
+/// can have a different name from its checkout, and stack traces often omit a
+/// monorepo prefix such as `packages/`. Only tracked names are read; no
+/// repository code is run. Known roots can disambiguate same-origin clones.
+pub fn repository_matching_ticket_files(
+    candidates: &[RepositoryCandidate],
+    evidence: &str,
+    known_roots: &[String],
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Option<(String, Vec<String>)>, String> {
+    use std::{path::Path, sync::atomic::Ordering, time::{Duration, Instant}};
+    if cancel.load(Ordering::Relaxed) { return Err("Task cancelled".into()); }
+    let hints = ticket_file_paths(evidence);
+    if hints.is_empty() { return Ok(None); }
+    let mut patterns: Vec<_> = hints.iter()
+        .filter_map(|path| Path::new(path).file_name()?.to_str())
+        .map(|name| format!(":(glob)**/{name}"))
+        .collect();
+    patterns.sort();
+    patterns.dedup();
+    let mut args = vec!["ls-files", "--cached", "-z", "--"];
+    args.extend(patterns.iter().map(String::as_str));
+    let started = Instant::now();
+    let mut matches = Vec::new();
+    for candidate in candidates {
+        if cancel.load(Ordering::Relaxed) { return Err("Task cancelled".into()); }
+        // Each cancellable Git read also has its own 15-second/output bound.
+        if started.elapsed() > Duration::from_secs(30) {
+            return Err("Local repository discovery took too long. Try again or choose a folder.".into());
+        }
+        let tracked = crate::native_runner::git_output(Path::new(&candidate.path), &args, cancel)
+            .map_err(|error| format!("Couldn’t inspect tracked files in {}: {error}", candidate.path))?;
+        let mut files: Vec<_> = tracked.split('\0').filter(|file| !file.is_empty())
+            .filter(|file| hints.iter().any(|hint| {
+                Path::new(file).ends_with(hint) || Path::new(&candidate.path).join(file).ends_with(hint)
+            }))
+            .map(str::to_owned).collect();
+        files.sort();
+        files.dedup();
+        if !files.is_empty() {
+            matches.push((candidate, files));
+        }
+    }
+    let selected = match matches.as_slice() {
+        [] => return Ok(None),
+        [only] => only,
+        _ => {
+            // Reuse an established checkout only among copies of the same
+            // upstream. A familiar folder never outweighs conflicting projects.
+            let remote = &matches[0].0.remote;
+            let same_upstream = !remote.is_empty() && matches.iter().all(|(candidate, _)| candidate.remote == *remote);
+            let known: Vec<_> = matches.iter().filter(|(candidate, _)| known_roots.contains(&candidate.path)).collect();
+            if same_upstream && known.len() == 1 { known[0] }
+            else { return Err("The ticket’s source files match more than one local repository. Choose which checkout to use.".into()); }
+        }
+    };
+    Ok(Some((selected.0.path.clone(), selected.1.clone())))
+}
+
+fn ticket_file_paths(evidence: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    // Delimiters discard prose, quotes and stack line/column numbers. Only
+    // literal filename characters reach the Git pathspec; no user glob syntax.
+    for token in evidence.split(|c: char| !c.is_alphanumeric() && !"/._-$@".contains(c)) {
+        let token = token.rsplit("/./").next().unwrap_or(token).trim_matches('/').trim_end_matches('.');
+        let parts: Vec<_> = token.split('/').filter(|part| !part.is_empty() && *part != ".").collect();
+        if parts.len() < 2 || parts.iter().any(|part| *part == "..") { continue; }
+        let Some((_, extension)) = parts.last().and_then(|name| name.rsplit_once('.')) else { continue; };
+        if extension.is_empty() || extension.len() > 10 || !extension.chars().all(|c| c.is_ascii_alphanumeric()) { continue; }
+        let path = parts.join("/");
+        if path.len() <= 1024 && !paths.contains(&path) { paths.push(path); }
+        if paths.len() == 64 { break; }
+    }
+    paths
+}
+
 fn route_folder(
     snapshot: &Snapshot,
     workspace: &neko_protocol::workbench::Workspace,
@@ -1552,6 +1628,80 @@ mod tests {
         let tricky = vec![RepositoryCandidate { path: "/x/basel".into(), remote: "https://github.com/curtainbasel/init.git".into(), package: "basel".into() }];
         assert_eq!(repository_named_in(&tricky, "Channel hasn't been initialized", "uninitialized channel"), None, "no substring or generic-name matches");
         assert!(repository_named_in(&tricky, "Basel checkout breaks", "").is_some());
+    }
+
+    fn candidate_with_tracked_source(relative: &str) -> (tempfile::TempDir, RepositoryCandidate) {
+        let repo = repository();
+        let file = repo.path().join(relative);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "source fixture\n").unwrap();
+        assert!(std::process::Command::new("git").current_dir(repo.path())
+            .args(["add", "--", relative]).status().unwrap().success());
+        let candidate = RepositoryCandidate {
+            path: repo.path().to_string_lossy().into(), remote: String::new(), package: String::new(),
+        };
+        (repo, candidate)
+    }
+
+    #[test]
+    fn ticket_source_paths_identify_a_monorepo_without_its_package_prefix() {
+        let relative = "packages/webapps/connect/src/App/UnifiedMessenger.hooks.tsx";
+        let (_repo, candidate) = candidate_with_tracked_source(relative);
+        for evidence in [
+            "Stack: webapps/connect/src/App/UnifiedMessenger.hooks.tsx:84:9".to_owned(),
+            "at channel (webpack://app/./webapps/connect/src/App/UnifiedMessenger.hooks.tsx:84:9)".to_owned(),
+            format!("Source: `{}/{relative}:84:9`", candidate.path),
+        ] {
+            assert_eq!(repository_matching_ticket_files(std::slice::from_ref(&candidate), &evidence, &[], &std::sync::atomic::AtomicBool::new(false)).unwrap(),
+                Some((candidate.path.clone(), vec![relative.to_owned()])));
+        }
+    }
+
+    #[test]
+    fn ticket_source_paths_do_not_guess_between_checkouts() {
+        let (_one, one) = candidate_with_tracked_source("packages/connect/src/Channel.tsx");
+        let (_two, two) = candidate_with_tracked_source("connect/src/Channel.tsx");
+        let error = repository_matching_ticket_files(&[one, two], "at connect/src/Channel.tsx:8", &[], &std::sync::atomic::AtomicBool::new(false)).unwrap_err();
+        assert!(error.contains("more than one local repository"));
+    }
+
+    #[test]
+    fn ticket_source_paths_reuse_a_known_checkout_only_for_the_same_upstream() {
+        let home = tempfile::tempdir().unwrap();
+        let relative = "packages/connect/src/Channel.tsx";
+        let mut candidates = Vec::new();
+        for name in ["atlas-vitest-rollout", "atlas"] {
+            let root = home.path().join(name);
+            let file = root.join(relative);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, "source fixture\n").unwrap();
+            assert!(std::process::Command::new("git").args(["init", "-q"]).arg(&root).status().unwrap().success());
+            assert!(std::process::Command::new("git").current_dir(&root).args(["add", "--", relative]).status().unwrap().success());
+            candidates.push(RepositoryCandidate { path: root.to_string_lossy().into(), remote: "https://github.com/acme/atlas.git".into(), package: String::new() });
+        }
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let evidence = "Stack: connect/src/Channel.tsx:8";
+        let known = vec![candidates[1].path.clone()];
+        assert_eq!(repository_matching_ticket_files(&candidates, evidence, &known, &cancel).unwrap().unwrap().0, candidates[1].path);
+        assert!(repository_matching_ticket_files(&candidates, evidence, &[], &cancel).is_err(), "names alone do not choose between copies");
+        assert!(repository_matching_ticket_files(&candidates, evidence, &[candidates[0].path.clone(), candidates[1].path.clone()], &cancel).is_err(), "two established copies remain ambiguous");
+        candidates[0].remote = "https://github.com/another-team/atlas.git".into();
+        assert!(repository_matching_ticket_files(&candidates, evidence, &known, &cancel).is_err(), "different upstreams are not interchangeable");
+    }
+
+    #[test]
+    fn ticket_source_paths_require_a_tracked_path_with_matching_directories() {
+        let (repo, candidate) = candidate_with_tracked_source("packages/connect/src/Channel.tsx");
+        std::fs::write(repo.path().join("packages/connect/src/Untracked.tsx"), "local only").unwrap();
+        for evidence in ["Channel.tsx:8", "other/src/Channel.tsx:8", "connect/src/Untracked.tsx:8", "../connect/src/Channel.tsx", "connect/src/*.tsx"] {
+            assert_eq!(repository_matching_ticket_files(std::slice::from_ref(&candidate), evidence, &[], &std::sync::atomic::AtomicBool::new(false)).unwrap(), None, "{evidence}");
+        }
+    }
+
+    #[test]
+    fn cancelled_ticket_source_discovery_does_not_start_git() {
+        let candidate = RepositoryCandidate { path: "/missing".into(), remote: String::new(), package: String::new() };
+        assert_eq!(repository_matching_ticket_files(&[candidate], "connect/src/Channel.tsx", &[], &std::sync::atomic::AtomicBool::new(true)).unwrap_err(), "Task cancelled");
     }
 
     #[test]

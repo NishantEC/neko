@@ -629,7 +629,7 @@ impl Controller {
         if split_child || store::canonical_repository(&snapshot.root_for(task, workspace)).is_ok() {
             return Ok(());
         }
-        self.locate_repository(task, &snapshot.folders_for(workspace), &snapshot.agent_runtime, &claim.authority, cancel)
+        self.locate_repository(task, workspace, &snapshot, &claim.authority, cancel)
             .map(|_| ())
     }
 
@@ -994,20 +994,32 @@ impl Controller {
     }
 
     /// A ticket without a Git folder (for example one filed by a watched
-    /// source in a home-folder workspace) gets one here: the only repository,
-    /// one named in the ticket, or the model's pick from the real list. The
-    /// choice is saved on the ticket and shown in its activity.
+    /// source in a home-folder workspace) first matches its tracked source
+    /// paths, reusing an established workspace checkout among same-origin copies.
+    /// Names and a model's pick from the real list remain the fallback. The
+    /// choice and local file evidence are saved in the ticket's activity.
     fn locate_repository(
         &self,
         task: &Task,
-        folders: &[String],
-        runtime: &neko_protocol::workbench::AgentRuntime,
+        workspace: &Workspace,
+        snapshot: &Snapshot,
         authority: &responsibilities::RunAuthority,
         cancel: &AtomicBool,
     ) -> Result<String, String> {
         const NOT_FOUND: &str = "Neko couldn’t tell which repository this ticket is about. Open the ticket and choose a folder.";
-        let candidates = store::discover_repositories(folders, cancel);
-        let (path, reason) = match candidates.as_slice() {
+        let folders = snapshot.folders_for(workspace);
+        let candidates = store::discover_repositories(&folders, cancel);
+        let known_roots: Vec<_> = snapshot.tasks.iter()
+            .filter(|other| other.workspace_id == task.workspace_id && other.id != task.id)
+            .filter_map(|other| snapshot.task_roots.get(&other.id).cloned())
+            .collect();
+        let file_match = store::repository_matching_ticket_files(
+            &candidates, &format!("{}\n{}", task.title, task.goal), &known_roots, cancel,
+        )?;
+        let (path, reason) = if let Some((path, files)) = file_match {
+            let known = if known_roots.contains(&path) { "; this workspace already uses this checkout" } else { "" };
+            (path, format!("the ticket’s source paths match tracked files: {}{known}", files.iter().take(4).cloned().collect::<Vec<_>>().join(", ")))
+        } else { match candidates.as_slice() {
             [] => return Err("No Git repository was found in this workspace. Open the ticket and choose a folder.".into()),
             [only] => (only.path.clone(), "the only repository in this workspace".to_owned()),
             _ => match store::repository_named_in(&candidates, &task.title, &task.goal) {
@@ -1033,7 +1045,7 @@ impl Controller {
                             ),
                             writable: false,
                             timeout: Duration::from_secs(120),
-                            runtime: runtime.clone(),
+                            runtime: snapshot.agent_runtime.clone(),
                         },
                         cancel,
                     )?;
@@ -1044,7 +1056,7 @@ impl Controller {
                     (path, why)
                 }
             },
-        };
+        } };
         let root = store::canonical_repository(&path).map_err(|_| NOT_FOUND.to_owned())?;
         self.commit_authorized(authority, |snapshot| {
             snapshot.task_roots.insert(task.id.clone(), root.clone());
@@ -1729,6 +1741,42 @@ fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repository_discovery_uses_tracked_stack_paths_before_project_names() {
+        let home = tempfile::tempdir().unwrap();
+        let alpha = home.path().join("alpha");
+        let beta = home.path().join("beta");
+        for repo in [&alpha, &beta] {
+            std::fs::create_dir(repo).unwrap();
+            assert!(std::process::Command::new("git").args(["init", "-q"])
+                .arg(repo).status().unwrap().success());
+        }
+        let relative = "packages/webapps/connect/src/UnifiedMessenger.hooks.tsx";
+        let file = alpha.join(relative);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "export const channel = null;\n").unwrap();
+        assert!(std::process::Command::new("git").current_dir(&alpha)
+            .args(["add", "--", relative]).status().unwrap().success());
+        let controller = controller_with_task(TaskStatus::Queued);
+        let mut state = controller.command(Command::Snapshot).unwrap();
+        state.workspaces[0].repository = home.path().to_string_lossy().into();
+        state.tasks[0].title = "Gateway timeout in the beta deployment".into();
+        state.tasks[0].goal = "Stack: webapps/connect/src/UnifiedMessenger.hooks.tsx:84:9".into();
+        store::save(&controller.db.lock().unwrap(), &state).unwrap();
+        let claim = TaskClaim {
+            task: state.tasks[0].clone(),
+            authority: responsibilities::RunAuthority::for_task(&state, &state.tasks[0]).unwrap(),
+        };
+        controller.ensure_task_root(&claim, &AtomicBool::new(false)).unwrap();
+        let saved = controller.command(Command::Snapshot).unwrap();
+        assert_eq!(saved.task_roots["t"], alpha.canonicalize().unwrap().to_string_lossy(),
+            "a deployed project name need not be its repository name");
+        assert!(saved.tasks[0].events.iter().any(|e| e.message.contains(relative)),
+            "the activity should show the actual local file that identified the repository");
+        assert_eq!(saved.tasks[0].status, TaskStatus::Queued);
+        assert!(saved.tasks[0].worktree.is_none(), "discovery alone never starts a build");
+    }
 
     #[test]
     fn planned_and_verified_phases_create_host_records_without_claiming_useful_outcomes() {
