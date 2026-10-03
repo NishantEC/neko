@@ -1252,3 +1252,325 @@ fn user_and_host_actions_do_not_claim_to_have_consulted_model_preferences() {
     assert_eq!(observation.runtime.provider, "host");
     assert!(observation.preference_versions.is_empty());
 }
+
+#[test]
+fn duplicate_scoped_source_receipts_capture_once_without_mutating_the_source() {
+    let db = Db::open_in_memory().unwrap();
+    let mut s = source_fixture(&db);
+    s.mcp.sources[0].receipt_ids = vec!["receipt".into(), "receipt".into()];
+    workbench::save(&db, &s).unwrap();
+    let s = workbench::load(&db).unwrap();
+    let record = context::record_task_observation(
+        &db,
+        &s,
+        "task-w",
+        HostObservation::Plan,
+        &s.agent_runtime,
+    )
+    .unwrap();
+    assert_eq!(record.source.evidence[0].receipt_ids, ["receipt"]);
+    assert_eq!(
+        record.source.evidence[0].description,
+        "Actual source snapshot"
+    );
+    assert_eq!(workbench::load(&db).unwrap().mcp, s.mcp);
+    let repeated = context::record_task_observation(
+        &db,
+        &s,
+        "task-w",
+        HostObservation::Plan,
+        &s.agent_runtime,
+    )
+    .unwrap();
+    assert_eq!(record, repeated);
+    let mut invalid = s;
+    invalid.mcp.sources[0]
+        .receipt_ids
+        .push("missing-receipt".into());
+    assert!(
+        context::record_task_observation(
+            &db,
+            &invalid,
+            "task-w",
+            HostObservation::Plan,
+            &invalid.agent_runtime
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn duplicate_scoped_source_receipts_never_roll_back_cancellation() {
+    let db = Db::open_in_memory().unwrap();
+    let mut s = source_fixture(&db);
+    s.mcp.sources[0].receipt_ids = vec!["receipt".into(), "receipt".into()];
+    workbench::save(&db, &s).unwrap();
+    let cancelled = workbench::apply(
+        &db,
+        Command::CancelTask {
+            task_id: "task-w".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(cancelled.tasks[0].status, TaskStatus::Cancelled);
+    assert_eq!(
+        cancelled.decision_records[0].source.evidence[0].receipt_ids,
+        ["receipt"]
+    );
+    assert_eq!(
+        cancelled.decision_records[0].rationale,
+        "User cancelled the task; reason unknown."
+    );
+    assert_eq!(
+        workbench::load(&db).unwrap().tasks[0].status,
+        TaskStatus::Cancelled
+    );
+    assert_eq!(
+        cancelled.mcp, s.mcp,
+        "normalization doesn't change the retained intake or grants"
+    );
+}
+
+#[test]
+fn duplicate_scoped_receipts_survive_atomic_failure_and_restart_recovery() {
+    for restart in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite");
+        {
+            let db = Db::open(&path).unwrap();
+            let mut s = source_fixture(&db);
+            s.mcp.sources[0].receipt_ids = vec!["receipt".into(), "receipt".into()];
+            s.tasks[0].status = TaskStatus::Building;
+            workbench::save(&db, &s).unwrap();
+            if restart {
+                for _ in 0..2 {
+                    assert_eq!(
+                        workbench::recover_interrupted(&db).unwrap().tasks[0].status,
+                        TaskStatus::Building
+                    );
+                }
+            }
+        }
+        let db = Db::open(&path).unwrap();
+        let record = db
+            .atomic(|| {
+                let failed = if restart {
+                    workbench::recover_interrupted(&db)?
+                } else {
+                    let mut s = workbench::load(&db)?;
+                    s.tasks[0].status = TaskStatus::Failed;
+                    workbench::append_event(
+                        &mut s.tasks[0],
+                        "supervisor",
+                        "Worker exited before completion",
+                    );
+                    workbench::save(&db, &s)?;
+                    s
+                };
+                assert_eq!(failed.tasks[0].status, TaskStatus::Failed);
+                let host = neko_protocol::workbench::AgentRuntime {
+                    provider: "host".into(),
+                    model: String::new(),
+                };
+                context::record_task_observation(
+                    &db,
+                    &failed,
+                    "task-w",
+                    HostObservation::Failure,
+                    &host,
+                )
+            })
+            .unwrap();
+        assert_eq!(record.action, DecisionAction::ReportFailure);
+        assert_eq!(record.source.evidence[0].receipt_ids, ["receipt"]);
+        let persisted = workbench::load(&db).unwrap();
+        assert_eq!(persisted.tasks[0].status, TaskStatus::Failed);
+        assert_eq!(persisted.mcp.sources[0].receipt_ids, ["receipt", "receipt"]);
+        drop(db);
+        assert_eq!(
+            workbench::load(&Db::open(&path).unwrap())
+                .unwrap()
+                .decision_records,
+            [record]
+        );
+    }
+}
+
+fn edit_retained_preference(p: &WorkingPreference) -> Command {
+    Command::DecisionContext(DecisionContextCommand::SavePreference {
+        workspace_id: p.workspace_id.clone(),
+        id: p.id.clone(),
+        expected_version: Some(p.version),
+        applicability: p.applicability.clone(),
+        instruction: "Updated guidance after history was pruned".into(),
+        supporting_record_ids: p.supporting_record_ids.clone(),
+        exceptions: p.exceptions.clone(),
+    })
+}
+
+#[test]
+fn retained_preference_edit_survives_fifo_eviction_and_ticket_deletion() {
+    let db = Db::open_in_memory().unwrap();
+    let mut s = fixture(&db);
+    let original = context::record_task_observation(
+        &db,
+        &s,
+        "task-w",
+        HostObservation::Plan,
+        &s.agent_runtime,
+    )
+    .unwrap();
+    let proposed = workbench::apply(
+        &db,
+        Command::DecisionContext(DecisionContextCommand::SavePreference {
+            workspace_id: "w".into(),
+            id: String::new(),
+            expected_version: None,
+            applicability: PreferenceApplicability {
+                terms: vec![],
+                task_ids: vec!["task-w".into()],
+            },
+            instruction: "Keep this task focused".into(),
+            supporting_record_ids: vec![original.id.clone()],
+            exceptions: vec![],
+        }),
+    )
+    .unwrap();
+    let confirmed = keep(&db, &proposed.working_preferences[0]);
+    let p = confirmed.working_preferences[0].clone();
+    for i in 0..context::MAX_RECORDS {
+        s.tasks[1].source_revision = Some(format!("eviction-{i}"));
+        context::record_task_observation(
+            &db,
+            &s,
+            "task-other",
+            HostObservation::Plan,
+            &s.agent_runtime,
+        )
+        .unwrap();
+    }
+    let mut s = workbench::load(&db).unwrap();
+    assert!(
+        !s.decision_records.iter().any(|r| r.id == original.id),
+        "use real FIFO eviction"
+    );
+    s.tasks[0].status = TaskStatus::Cancelled;
+    workbench::save(&db, &s).unwrap();
+    let before = workbench::apply(
+        &db,
+        Command::DeleteTask {
+            task_id: "task-w".into(),
+        },
+    )
+    .unwrap();
+    let edited = workbench::apply(&db, edit_retained_preference(&p)).unwrap();
+    let updated = &edited.working_preferences[0];
+    assert_eq!(updated.version, p.version + 1);
+    assert_eq!(updated.state, PreferenceState::Proposed);
+    assert_eq!(updated.supporting_record_ids, p.supporting_record_ids);
+    assert_eq!(updated.applicability, p.applicability);
+    assert_eq!(updated.created_at_ms, p.created_at_ms);
+    assert_eq!(edited.tasks, before.tasks);
+    assert_eq!(edited.mcp, before.mcp);
+    assert_eq!(edited.start_when_planned, before.start_when_planned);
+    assert!(context::context_about(&edited, "w", Some("task-other"), "tests").is_empty());
+    assert!(context::context_about(&edited, "w", Some("task-w"), "tests").is_empty());
+    assert_eq!(
+        workbench::load(&db).unwrap().working_preferences[0],
+        *updated
+    );
+}
+
+#[test]
+fn retained_reference_edit_exemption_rejects_new_missing_cross_scope_and_stale_refs() {
+    let db = Db::open_in_memory().unwrap();
+    let s = fixture(&db);
+    let foreign = context::record_task_observation(
+        &db,
+        &s,
+        "task-other",
+        HostObservation::Plan,
+        &s.agent_runtime,
+    )
+    .unwrap();
+    let proposed = workbench::apply(
+        &db,
+        Command::DecisionContext(DecisionContextCommand::SavePreference {
+            workspace_id: "w".into(),
+            id: String::new(),
+            expected_version: None,
+            applicability: PreferenceApplicability {
+                terms: vec![],
+                task_ids: vec!["task-w".into()],
+            },
+            instruction: "Task-scoped guidance".into(),
+            supporting_record_ids: vec![],
+            exceptions: vec![],
+        }),
+    )
+    .unwrap();
+    let p = &proposed.working_preferences[0];
+    let mut state = workbench::load(&db).unwrap();
+    state.tasks[0].status = TaskStatus::Cancelled;
+    workbench::save(&db, &state).unwrap();
+    let before = workbench::apply(
+        &db,
+        Command::DeleteTask {
+            task_id: "task-w".into(),
+        },
+    )
+    .unwrap();
+    for (new_task, new_record) in [
+        (Some("missing-task"), None),
+        (Some("task-other"), None),
+        (None, Some("missing-record")),
+        (None, Some(foreign.id.as_str())),
+    ] {
+        let mut command = edit_retained_preference(p);
+        if let Command::DecisionContext(DecisionContextCommand::SavePreference {
+            applicability,
+            supporting_record_ids,
+            ..
+        }) = &mut command
+        {
+            if let Some(id) = new_task {
+                applicability.task_ids.push(id.into());
+            }
+            if let Some(id) = new_record {
+                supporting_record_ids.push(id.into());
+            }
+        }
+        assert!(workbench::apply(&db, command).is_err());
+        assert_eq!(
+            workbench::load(&db).unwrap().working_preferences,
+            before.working_preferences
+        );
+    }
+    let mut wrong_scope = edit_retained_preference(p);
+    if let Command::DecisionContext(DecisionContextCommand::SavePreference {
+        workspace_id, ..
+    }) = &mut wrong_scope
+    {
+        *workspace_id = "other".into();
+    }
+    assert!(workbench::apply(&db, wrong_scope).is_err());
+    let edited = workbench::apply(&db, edit_retained_preference(p)).unwrap();
+    assert!(
+        workbench::apply(&db, edit_retained_preference(p)).is_err(),
+        "stale versions must still fail"
+    );
+    let mut recreate = edit_retained_preference(&edited.working_preferences[0]);
+    if let Command::DecisionContext(DecisionContextCommand::SavePreference {
+        id,
+        expected_version,
+        ..
+    }) = &mut recreate
+    {
+        id.clear();
+        *expected_version = None;
+    }
+    assert!(
+        workbench::apply(&db, recreate).is_err(),
+        "new preferences cannot inherit another row's exemption"
+    );
+}

@@ -245,7 +245,7 @@ fn validate(state: &State, snapshot: &Snapshot) -> Result<(), String> {
         if p.version == 0 || !preference_ids.insert(&p.id) {
             return Err("Invalid or duplicate working preference version".into());
         }
-        validate_preference(snapshot, state, p, false)?;
+        validate_preference(snapshot, state, p, false, None)?;
     }
     Ok(())
 }
@@ -255,6 +255,7 @@ fn validate_preference(
     state: &State,
     p: &WorkingPreference,
     require_refs: bool,
+    previous: Option<&WorkingPreference>,
 ) -> Result<(), String> {
     text(&p.instruction, MAX_TEXT_BYTES, true)?;
     if crate::neko_memory::sensitive(&p.instruction).is_some() {
@@ -275,14 +276,21 @@ fn validate_preference(
         }
     }
     for task in &p.applicability.task_ids {
-        task_scope(snapshot, &p.workspace_id, task, require_refs)?;
+        // Existing rows retain references after ticket-history deletion. Only
+        // references already validated on this row may be resubmitted missing.
+        let retained = previous.is_some_and(|old| old.applicability.task_ids.contains(task));
+        task_scope(snapshot, &p.workspace_id, task, require_refs && !retained)?;
     }
     for id in &p.supporting_record_ids {
         match state.decision_records.iter().find(|r| r.id == *id) {
             Some(r) if r.workspace_id != p.workspace_id => {
                 return Err("Supporting record belongs to another workspace".into());
             }
-            None if require_refs => return Err("Supporting record no longer exists".into()),
+            None if require_refs
+                && !previous.is_some_and(|old| old.supporting_record_ids.contains(id)) =>
+            {
+                return Err("Supporting record no longer exists".into());
+            }
             _ => {} // Evicted history leaves an honest reference, never fabricated evidence.
         }
     }
@@ -337,7 +345,7 @@ pub(crate) fn apply(
                 created_at_ms: now,
                 updated_at_ms: now,
             };
-            if id.is_empty() {
+            let previous = if id.is_empty() {
                 if expected_version.is_some() {
                     return Err("New preferences have no expected version".into());
                 }
@@ -345,6 +353,7 @@ pub(crate) fn apply(
                     return Err("Working preference storage is full; forget one first".into());
                 }
                 p.id = workbench::new_id();
+                None
             } else {
                 let previous = state
                     .working_preferences
@@ -360,8 +369,9 @@ pub(crate) fn apply(
                 )?;
                 p.version = next_version(previous.version)?;
                 p.created_at_ms = previous.created_at_ms;
-            }
-            validate_preference(snapshot, &state, &p, true)?;
+                Some(previous)
+            };
+            validate_preference(snapshot, &state, &p, true, previous)?;
             state.working_preferences.retain(|old| old.id != p.id);
             state.working_preferences.push(p);
         }
@@ -783,6 +793,7 @@ fn record(
         if needs_current_grant && source.receipt_ids.is_empty() {
             return Err("Decision source needs successful scoped receipts".into());
         }
+        let mut receipt_ids = Vec::new();
         for id in &source.receipt_ids {
             let receipt = snapshot
                 .mcp
@@ -809,6 +820,11 @@ fn record(
             {
                 return Err("Decision source receipt has no current scoped schema grant".into());
             }
+            // Repeated intake references are the same successful receipt, not
+            // independent observations. Normalize after validating every input.
+            if !receipt_ids.contains(id) {
+                receipt_ids.push(id.clone());
+            }
         }
         if !responsibility_ids.contains(&responsibility.id) {
             responsibility_ids.push(responsibility.id.clone());
@@ -821,7 +837,7 @@ fn record(
             connection_id: connection.id.clone(),
             revision: source.revision.clone(),
             retrieved_ms: source.retrieved_ms,
-            receipt_ids: source.receipt_ids.clone(),
+            receipt_ids,
             title: source.title.clone(),
             description: source.description.clone(),
         });
