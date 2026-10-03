@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod agent_profiles;
 pub mod agent_models;
+pub mod decision_context;
 pub mod mcp_host;
 pub mod scheduled_plans;
 pub mod setup_import;

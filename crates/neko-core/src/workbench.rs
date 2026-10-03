@@ -62,6 +62,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     snapshot.memory_proposals = crate::memory_learning::proposals(db, &snapshot)?;
     snapshot.skills = crate::skills::load(db)?;
     snapshot.import_preview = crate::setup_import::load_preview(db)?;
+    crate::decision_context::attach(db, &mut snapshot)?;
     Ok(snapshot)
 }
 
@@ -86,6 +87,8 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     compacted.conversation.clear();
     compacted.memory.clear();
     compacted.memory_proposals.clear();
+    compacted.decision_records.clear();
+    compacted.working_preferences.clear();
     compacted.skills = Default::default();
     compacted.import_preview = Default::default();
     for task in &mut compacted.tasks {
@@ -145,6 +148,8 @@ fn reserved_capacity(snapshot: &Snapshot) -> Result<usize, String> {
     metadata.conversation.clear();
     metadata.memory.clear();
     metadata.memory_proposals.clear();
+    metadata.decision_records.clear();
+    metadata.working_preferences.clear();
     for task in &mut metadata.tasks {
         task.events.clear();
     }
@@ -190,6 +195,13 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::CompleteTask { task_id } => Some(task_id.clone()),
         _ => None,
     };
+    let contextual_decision = match &command {
+        Command::ApproveTask { task_id } => Some((task_id.clone(), neko_protocol::decision_context::DecisionAction::ApproveLocalBuild, None)),
+        Command::CancelTask { task_id } => Some((task_id.clone(), neko_protocol::decision_context::DecisionAction::CancelTask, None)),
+        Command::CompleteTask { task_id } => Some((task_id.clone(), neko_protocol::decision_context::DecisionAction::AcceptLocalResult, None)),
+        Command::AddTicketNote { task_id, text } | Command::ReplyToTask { task_id, text } => Some((task_id.clone(), neko_protocol::decision_context::DecisionAction::AddNote, Some(text.trim().to_owned()))),
+        _ => None,
+    };
     let decision = match &command {
         Command::ApproveTask { task_id } => Some((task_id.clone(), "approval", None)),
         Command::CancelTask { task_id } => Some((
@@ -230,6 +242,9 @@ pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
             };
             crate::neko_memory::record_decision(db, entry)?;
         }
+        if let Some((id, action, note)) = contextual_decision {
+            crate::decision_context::record_user_command(db, &snapshot, &id, action, note.as_deref())?;
+        }
         load(db)
     })
 }
@@ -263,6 +278,10 @@ fn stage_workspace(snapshot: &mut Snapshot, mut workspace: neko_protocol::workbe
 fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
     let mut snapshot = load(db)?;
     match command {
+        Command::DecisionContext(command) => {
+            crate::decision_context::apply(db, &snapshot, command)?;
+            return load(db);
+        }
         Command::SetAgentRuntime { runtime } => {
             if !matches!(runtime.provider.as_str(), "" | "codex" | "ollama" | "lmstudio" | "opencodex" | "claude" | "opencode") {
                 return Err("Choose Codex, Claude Code, OpenCode, Ollama or LM Studio".into());
@@ -442,6 +461,14 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             });
         }
         Command::ApproveTask { task_id } => {
+            let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("Task no longer exists")?;
+            let waiting = task.supervision.as_ref().is_some_and(|s| matches!(s.action, SupervisorAction::AskUser | SupervisorAction::Skip))
+                || task.events.iter().rev().find(|e| e.role == "supervisor").is_some_and(|e| {
+                    e.message.starts_with("Needs your input before building:") || e.message.starts_with("Nothing to build:")
+                });
+            if task.status == TaskStatus::AwaitingApproval && waiting {
+                return Err("This agent needs a reply and a new plan before building".into());
+            }
             if let Some(index) = snapshot.splits.iter().position(|s| s.parent_id == task_id) {
                 let split = snapshot.splits[index].clone();
                 if split.approved {
