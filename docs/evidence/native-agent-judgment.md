@@ -5,7 +5,7 @@ user's current instruction. No remote branches or publication are part of this p
 
 ## Verified source and protocol behavior
 
-- Native tests pass: 75 XCTest tests and 11 Swift Testing tests. The real-daemon
+- Native tests pass: 76 XCTest tests and 11 Swift Testing tests. The real-daemon
   contract test uses a disposable `NEKO_DATA_DIR`; it creates and confirms scoped
   Working style guidance, rejects a stale edit, restarts its own daemon and reads
   the same preference back. User data and the installed daemon are not used.
@@ -19,9 +19,11 @@ user's current instruction. No remote branches or publication are part of this p
 - Native state tests cover per-agent drafts, return filters, newest-first disjoint
   sidebar groups, correction revision presentation and versioned preference commands.
 
-- Rust foundation tests: 23 focused decision-context cases, 636 core tests passed
-  with 9 ignored, and 11 protocol tests. Historical source rollover and missing
-  responsibility/receipt stop transitions have regression coverage.
+- Rust foundation tests: 28 focused decision-context cases, 641 core tests passed
+  with 9 ignored, and 11 protocol tests. Historical source rollover, duplicate scoped receipts, cancellation/failure/restart
+  transactions and preference edits after FIFO eviction or ticket deletion have
+  regression coverage. New missing/cross-workspace references and stale edits
+  remain rejected.
 
 ## Product boundary
 
@@ -39,6 +41,9 @@ live behavior. The reviewer sandbox remains read-only.
 
 ## Installed verification
 
-Pending final review and installation. Capture the real Home, All agents, full-page
-agent conversation and Memory / Working style. Check opening/back routes, per-agent
-draft retention and scoped Show all without starting any existing ticket.
+Installed `e394572` was checked on screen: Home and system sidebar, full-page
+agent conversation, per-agent draft retention, a genuine awaiting-question ticket
+without Approve, filtered board/search return, List/Board and Memory / Working
+style. Temporary drafts were cleared, and the guidance editor was cancelled
+without saving. No existing ticket was started. Final quality fixes still need
+installation and checks for explicit All agents reset and Preferences routing.

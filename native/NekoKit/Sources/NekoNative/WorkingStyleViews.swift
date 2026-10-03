@@ -33,6 +33,7 @@ enum DecisionPresentation {
 struct DecisionCard: View {
     @ObservedObject var model: AppModel
     let record: JSONValue
+    var originPage = "Home"
     @State private var correcting = false
     @State private var correction = ""
     var body: some View {
@@ -41,7 +42,7 @@ struct DecisionCard: View {
                 Label(DecisionPresentation.title(record["action"].string), systemImage: "arrow.triangle.branch").font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if let taskID = record["task_id"].string.nonEmpty, model.agentID != taskID {
-                    Button("Open agent") { model.openAgent(taskID, from: "Home") }.controlSize(.small)
+                    Button("Open agent") { model.openAgent(taskID, from: originPage) }.controlSize(.small)
                 }
             }
             Text(record["rationale"].string).font(.system(size: 13)).textSelection(.enabled)
@@ -116,7 +117,7 @@ struct WorkingStyleView: View {
             let records = DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace })
             if !records.isEmpty {
                 Text("Recent decisions").font(.system(size: 15, weight: .semibold)).padding(.top, 8)
-                ForEach(records.prefix(12), id: \.recordID) { DecisionCard(model: model, record: $0) }
+                ForEach(records.prefix(12), id: \.recordID) { DecisionCard(model: model, record: $0, originPage: "Memory") }
             }
         }.frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
         .sheet(item: $editor) { WorkingPreferenceEditor(model: model, original: $0.value) }

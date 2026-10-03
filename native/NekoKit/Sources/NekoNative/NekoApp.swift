@@ -123,7 +123,7 @@ struct WorkspaceView: View {
             }
         }
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
-        .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in page = "Settings" }
+        .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in model.requestedPage = "Settings" }
         .onChange(of: model.requestedPage) { _, requested in if let requested { model.agentID = nil; page = requested == "Today" ? "Home" : requested; model.requestedPage = nil } }
         .onAppear {
             if let requested = model.requestedPage { page = requested; model.requestedPage = nil }
@@ -295,7 +295,13 @@ struct NativeSidebar: View {
     }
     private func row(_ key: String) -> some View {
         let attention = key == "Tickets" ? AgentSidebarGroup.needsYou.tasks(in: model.tasks).count : 0
-        return Label(PageInfo.title(key), systemImage: PageInfo.icon(key)).badge(attention).tag(key)
+        return Button {
+            model.agentID = nil
+            if key == "Tickets" { model.showAgents() }
+            page = key
+        } label: {
+            Label(PageInfo.title(key), systemImage: PageInfo.icon(key)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }.buttonStyle(.plain).badge(attention).tag(key)
     }
     private func workspaceRow(_ id: String?, name: String, color: Color) -> some View {
         let selected = model.selectedWorkspace == id

@@ -591,7 +591,7 @@ struct ReplyTicketRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help("Show this ticket in the inspector")
+        .help("Open this agent’s conversation")
     }
 }
 
