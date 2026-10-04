@@ -202,7 +202,9 @@ fn asking_or_skipping_needs_a_reply_and_replanning_before_approval() {
         )
         .unwrap();
         assert_eq!(replied.tasks[0].status, TaskStatus::Queued);
-        assert_eq!(replied.tasks[0].supervision, None);
+        assert_eq!(replied.tasks[0].supervision, s.tasks[0].supervision,
+            "factual context preserves scope until the worker interprets the reply");
+        assert!(!replied.task_replies["task-w"].handled);
         assert!(
             replied.working_preferences.is_empty(),
             "a reply does not imply a preference"
@@ -1026,6 +1028,7 @@ fn source_receipts_and_current_grants_are_validated_in_result_scope() {
     assert_eq!(observed.source.evidence[0].receipt_ids, ["receipt"]);
     assert_eq!(observed.scope.connection_ids, ["connection"]);
     let mut bad = s.clone();
+    bad.mcp.sources[0].receipt_ids.insert(0, "pruned-receipt".into());
     bad.mcp.receipts[0].workspace_id = "other".into();
     assert!(
         context::record_task_observation_with_context(
@@ -1092,6 +1095,34 @@ fn source_receipts_and_current_grants_are_validated_in_result_scope() {
     refreshed.mcp.sources.clear();
     workbench::save(&db, &refreshed).unwrap();
     assert_eq!(workbench::load(&db).unwrap().decision_records, history);
+}
+
+#[test]
+fn pruned_source_receipts_do_not_block_replies_or_claim_fresh_evidence() {
+    let db = Db::open_in_memory().unwrap();
+    let mut s = source_fixture(&db);
+    s.mcp.receipts.clear(); // Bounded receipt history can expire before a ticket.
+    workbench::save(&db, &s).unwrap();
+    let replied = workbench::apply(&db, Command::ReplyToTask {
+        task_id: "task-w".into(), text: "Investigate and fix it".into(),
+    }).unwrap();
+    assert_eq!(replied.tasks[0].status, TaskStatus::Queued);
+    assert_eq!(replied.task_replies["task-w"].pending, ["Investigate and fix it"]);
+    assert!(!replied.start_when_planned.contains("task-w"));
+    let note = replied.decision_records.last().unwrap();
+    assert_eq!(note.provenance, DecisionProvenance::UserCommand);
+    assert!(note.source.evidence.is_empty());
+    assert!(note.rationale.contains("Source evidence unavailable"));
+    assert!(note.scope.connection_ids.is_empty());
+
+    let mut planned = replied;
+    planned.tasks[0].status = TaskStatus::AwaitingApproval;
+    let record = context::record_task_observation_with_context(
+        &db, &planned, "task-w", HostObservation::Plan, &planned,
+    ).unwrap();
+    assert!(record.source.evidence.is_empty());
+    assert!(record.rationale.contains("no longer retained"));
+    assert!(planned.mcp.receipts.is_empty(), "history never fabricates receipts");
 }
 
 #[test]
@@ -1287,16 +1318,15 @@ fn duplicate_scoped_source_receipts_capture_once_without_mutating_the_source() {
     invalid.mcp.sources[0]
         .receipt_ids
         .push("missing-receipt".into());
-    assert!(
-        context::record_task_observation(
+    let incomplete = context::record_task_observation(
             &db,
             &invalid,
             "task-w",
             HostObservation::Plan,
             &invalid.agent_runtime
-        )
-        .is_err()
-    );
+        ).unwrap();
+    assert!(incomplete.source.evidence.is_empty(), "partial receipts cannot prove the source");
+    assert!(incomplete.rationale.contains("Source evidence unavailable"));
 }
 
 #[test]
