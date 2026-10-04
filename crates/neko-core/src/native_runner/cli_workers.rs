@@ -1,15 +1,14 @@
 //! Claude Code and OpenCode as Neko workers, each using its own login.
 //!
-//! Neither CLI has an OS sandbox like Codex's, so Neko supplies one: every
-//! run executes under macOS `sandbox-exec` with a Neko-written profile that
-//! denies file writes everywhere except the task worktree (writable runs
-//! only), the CLI's own state and cache folders, and a private temp folder.
+//! Writable runs execute directly with full local filesystem and shell
+//! network access. Nonwritable/extraction runs use macOS `sandbox-exec`,
+//! allowing writes only to CLI state/cache folders and a private temp folder.
 //! The CLI's tool allowlist adds a second layer: read-only roles get no edit
 //! tools, extraction gets no tools, and web tools are never enabled.
 //!
 //! Known difference from Codex: shell commands these agents run may reach
 //! the network, because the CLI itself must, and Seatbelt can't tell them
-//! apart by host. File writes are still confined.
+//! apart by host. Nonwritable file writes are still confined.
 
 use super::*;
 
@@ -95,7 +94,7 @@ fn regex_escape(text: &str) -> String {
 
 /// The Seatbelt profile for one run. Reads are unrestricted (as with Codex's
 /// legacy modes); writes are limited to the listed places.
-pub(crate) fn sandbox_profile(agent: Agent, writable: Option<&Path>, home: &Path, temp: &Path) -> Result<String, String> {
+pub(crate) fn sandbox_profile(agent: Agent, home: &Path, temp: &Path) -> Result<String, String> {
     let home_text = sbpl_path(home)?;
     let mut allow = vec![
         format!("(subpath \"{}\")", sbpl_path(temp)?),
@@ -105,9 +104,6 @@ pub(crate) fn sandbox_profile(agent: Agent, writable: Option<&Path>, home: &Path
         "(regex #\"^/dev/ttys[0-9]+$\")".into(),
         format!("(subpath \"{home_text}/Library/Caches\")"),
     ];
-    if let Some(dir) = writable {
-        allow.push(format!("(subpath \"{}\")", sbpl_path(dir)?));
-    }
     match agent {
         Agent::Claude => {
             allow.push(format!("(subpath \"{home_text}/.claude\")"));
@@ -131,11 +127,12 @@ const BRIDGE_TOOLS: &[&str] = &["mcp__neko__neko_list_tools", "mcp__neko__neko_c
 pub(crate) fn claude_args(spec: &RunSpec, bridge: Option<&BridgeConfig>, extraction: bool) -> Result<Vec<String>, String> {
     let mut args: Vec<String> = [
         "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "", "--strict-mcp-config",
-        "--disable-slash-commands", "--no-session-persistence", "--permission-mode", "dontAsk",
+        "--disable-slash-commands", "--no-session-persistence", "--permission-mode",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect();
+    args.push(if spec.writable && !extraction { "bypassPermissions" } else { "dontAsk" }.into());
     if !spec.runtime.model.is_empty() && spec.runtime.model != "default" {
         args.extend(["--model".into(), spec.runtime.model.clone()]);
     }
@@ -161,7 +158,7 @@ pub(crate) fn claude_args(spec: &RunSpec, bridge: Option<&BridgeConfig>, extract
 }
 
 pub(crate) fn opencode_config(spec: &RunSpec, bridge: Option<&BridgeConfig>, extraction: bool) -> serde_json::Value {
-    let permission = if extraction {
+    let mut permission = if extraction {
         // "ask" auto-rejects in non-interactive runs. Denying every tool makes
         // OpenCode's free tier refuse the request, and any tool call in an
         // extraction run is discarded by the parser anyway.
@@ -169,6 +166,11 @@ pub(crate) fn opencode_config(spec: &RunSpec, bridge: Option<&BridgeConfig>, ext
     } else {
         serde_json::json!({"edit": if spec.writable { "allow" } else { "deny" }, "bash": "allow", "webfetch": "deny"})
     };
+    if spec.writable && !extraction {
+        // Permit ordinary local tools outside the project without globally
+        // auto-approving tools or widening the scoped MCP bridge.
+        permission["external_directory"] = serde_json::json!("allow");
+    }
     let mut config = serde_json::json!({"permission": permission, "autoupdate": false, "share": "disabled"});
     if let (Some(bridge), false) = (bridge, extraction) {
         config["mcp"] = serde_json::json!({"neko": {"type": "local", "command": [bridge.executable, "--mcp-bridge"], "enabled": true}});
@@ -349,6 +351,15 @@ fn claude_exit(output: &str, is_error: bool) -> (i64, &str) {
     (if is_error { 1 } else { 0 }, output)
 }
 
+fn worker_command(agent: Agent, executable: &Path, writable: bool, home: &Path, scratch: &Path) -> Result<Command, String> {
+    if writable {
+        return Ok(Command::new(executable));
+    }
+    let mut command = Command::new("/usr/bin/sandbox-exec");
+    command.arg("-p").arg(sandbox_profile(agent, home, scratch)?).arg(executable);
+    Ok(command)
+}
+
 pub(crate) fn run(
     agent: Agent,
     spec: &RunSpec,
@@ -358,6 +369,9 @@ pub(crate) fn run(
     on_event: &mut dyn FnMut(String),
     extraction: bool,
 ) -> Result<String, String> {
+    if extraction && (spec.writable || bridge.is_some()) {
+        return Err("Extraction cannot receive write or tool authority".into());
+    }
     let executable = resolve(agent)?;
     let home = std::env::var_os("HOME").map(PathBuf::from).ok_or("HOME is not set")?;
     let home = home.canonicalize().unwrap_or(home);
@@ -372,9 +386,7 @@ pub(crate) fn run(
         }
     }
     let _cleanup = Cleanup(scratch.clone());
-    let profile = sandbox_profile(agent, spec.writable.then_some(directory), &home, &scratch)?;
-    let mut command = Command::new("/usr/bin/sandbox-exec");
-    command.arg("-p").arg(&profile).arg(&executable);
+    let mut command = worker_command(agent, &executable, spec.writable, &home, &scratch)?;
     match agent {
         Agent::Claude => {
             command.args(claude_args(spec, bridge, extraction)?);
@@ -441,15 +453,15 @@ mod tests {
     }
 
     #[test]
-    fn profiles_confine_writes_to_the_worktree_and_agent_state() {
-        let p = sandbox_profile(Agent::Claude, Some(Path::new("/w/task")), Path::new("/Users/a"), Path::new("/t/run")).unwrap();
+    fn nonwritable_profiles_confine_writes_to_agent_state() {
+        let p = sandbox_profile(Agent::Claude, Path::new("/Users/a"), Path::new("/t/run")).unwrap();
         assert!(p.contains("(deny file-write*)"));
-        assert!(p.contains("(subpath \"/w/task\")") && p.contains("(subpath \"/Users/a/.claude\")"));
+        assert!(!p.contains("/w/task") && p.contains("(subpath \"/Users/a/.claude\")"));
         assert!(p.contains("^/Users/a/\\.claude\\.json"));
         assert!(!p.contains("(subpath \"/Users/a\")"), "never the whole home folder");
-        let read_only = sandbox_profile(Agent::OpenCode, None, Path::new("/Users/a"), Path::new("/t/run")).unwrap();
+        let read_only = sandbox_profile(Agent::OpenCode, Path::new("/Users/a"), Path::new("/t/run")).unwrap();
         assert!(!read_only.contains("/w/task") && read_only.contains(".local/share/opencode"));
-        assert!(sandbox_profile(Agent::Claude, Some(Path::new("/w/\"x")), Path::new("/Users/a"), Path::new("/t")).is_err());
+        assert!(sandbox_profile(Agent::Claude, Path::new("/Users/a"), Path::new("/t/\"x")).is_err());
     }
 
     #[test]
@@ -457,12 +469,15 @@ mod tests {
         let read = claude_args(&spec(false), None, false).unwrap();
         assert!(read.contains(&"Bash".to_string()) && !read.contains(&"Edit".to_string()));
         assert!(read.windows(2).any(|w| w == ["--model", "sonnet"]));
+        assert!(read.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]));
         let write = claude_args(&spec(true), None, false).unwrap();
         assert!(write.contains(&"Edit".to_string()));
+        assert!(write.windows(2).any(|w| w == ["--permission-mode", "bypassPermissions"]));
         assert!(!write.iter().any(|a| a.contains("WebFetch") || a.contains("WebSearch")));
         let extract = claude_args(&spec(false), None, true).unwrap();
         assert!(extract.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()));
         assert!(!extract.contains(&"Bash".to_string()));
+        assert!(extract.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]));
         let bridge = BridgeConfig { executable: "/bin/neko-daemon".into(), socket: "/s".into(), token: "secret".into() };
         let bridged = claude_args(&spec(false), Some(&bridge), false).unwrap();
         assert!(bridged.contains(&"mcp__neko__neko_call_tool".to_string()));
@@ -474,9 +489,29 @@ mod tests {
         assert_eq!(opencode_config(&spec(false), None, false)["permission"]["edit"], "deny");
         assert_eq!(opencode_config(&spec(true), None, false)["permission"]["edit"], "allow");
         assert_eq!(opencode_config(&spec(true), None, false)["permission"]["webfetch"], "deny");
+        assert_eq!(opencode_config(&spec(true), None, false)["permission"]["external_directory"], "allow");
+        assert!(opencode_config(&spec(false), None, false)["permission"]["external_directory"].is_null());
         let extraction = opencode_config(&spec(true), None, true);
         assert_eq!(extraction["permission"]["edit"], "deny");
         assert_eq!(extraction["permission"]["bash"], "ask");
+        assert!(extraction["permission"]["external_directory"].is_null());
+    }
+
+    #[test]
+    fn writable_workers_launch_directly_and_can_write_outside_the_task() {
+        let home = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let task = tempfile::tempdir().unwrap();
+        for agent in [Agent::Claude, Agent::OpenCode] {
+            let mut command = worker_command(agent, Path::new("/bin/sh"), true, home.path(), scratch.path()).unwrap();
+            assert_eq!(command.get_program(), "/bin/sh");
+            command.current_dir(task.path()).args(["-c", "printf setup > \"$1/dependency\"", "fixture"]).arg(home.path());
+            assert!(command.status().unwrap().success());
+            assert_eq!(fs::read_to_string(home.path().join("dependency")).unwrap(), "setup");
+            let read = worker_command(agent, Path::new("/bin/sh"), false, home.path(), scratch.path()).unwrap();
+            assert_eq!(read.get_program(), "/usr/bin/sandbox-exec");
+            assert!(read.get_args().any(|a| a.to_string_lossy().contains("(deny file-write*)")));
+        }
     }
 
     #[test]
@@ -516,17 +551,18 @@ mod tests {
     }
 
     /// Live: a writable run edits inside its worktree, reports receipts, and
-    /// cannot write to the home folder. NEKO_LIVE_AGENT=claude:haiku or
+    /// can set up dependencies outside it. NEKO_LIVE_AGENT=claude:haiku or
     /// opencode:opencode/big-pickle. Uses a little quota.
     #[test]
     #[ignore = "Uses an authenticated agent CLI"]
-    fn live_sandboxed_worker() {
+    fn live_full_access_worker() {
         let target = std::env::var("NEKO_LIVE_AGENT").unwrap_or_else(|_| "claude:haiku".into());
         let (provider, model) = target.split_once(':').unwrap();
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().canonicalize().unwrap();
         assert!(Command::new("git").arg("init").arg("-q").arg(&repo).status().unwrap().success(), "task worktrees are Git checkouts");
-        let escape = PathBuf::from(std::env::var("HOME").unwrap()).join(format!("neko-escape-{}", std::process::id()));
+        let external = tempfile::tempdir().unwrap();
+        let escape = external.path().join("dependency");
         let spec = RunSpec {
             directory: repo.clone(),
             prompt: format!("Do exactly these three steps with your tools, then reply DONE.\n1. Create the file hello.txt containing the word hi.\n2. Run this shell command: cat hello.txt\n3. Run this shell command: touch {}", escape.display()),
@@ -541,7 +577,7 @@ mod tests {
         for e in events.iter().filter(|e| e.starts_with("VERIFICATION_COMMAND")) { eprintln!("{e}"); }
         assert_eq!(fs::read_to_string(repo.join("hello.txt")).unwrap().trim(), "hi");
         assert!(events.iter().any(|e| e.contains("cat ") && e.contains("hello.txt") && e.contains("\"exit_code\":0")), "receipt for cat");
-        assert!(!escape.exists(), "the sandbox must block writes outside the worktree");
+        assert!(escape.exists(), "writable workers can set up files outside the worktree");
     }
 
     #[test]

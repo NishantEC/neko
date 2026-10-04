@@ -1,5 +1,11 @@
 # Review repair and the NEK-7E33 stop
 
+Historical evidence for b695926. Superseded by
+[full-access supervision](full-access-supervision.md): the user subsequently
+authorized full local filesystem access, superseding the private-temp proposal
+and the read-only reviewer rule below. These earlier test counts describe that
+commit, not the current implementation.
+
 NEK-7E33 retained its direct-work grant and saved Codex session, built a local
 two-file patch, and reached independent review. It failed because validation
 could not run and the planned deferred-response/channel-switch coverage was

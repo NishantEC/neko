@@ -23,7 +23,8 @@ Native work uses `neko-protocol::workbench`, daemon-owned bounded SQLite
 snapshots in `neko-core::workbench`, the daemon's `workbench` supervisor, and
 `native_runner` ephemeral Codex CLI processes. A scout plans read-only,
 explicit approval or a direct human work request allows an isolated-worktree build, and a
-read-only reviewer returns a result for human review. No publication occurs.
+independent reviewer returns a result for human review. Authorized builders and
+reviewers have full local filesystem access for dependency setup, caches and tests. No publication occurs.
 Every eligible ticket starts its own worker on the next two-second supervisor
 tick, without a fixed global or workspace cap. Active claims prevent duplicate
 workers for one ticket; dependencies, approvals and scope checks still apply.
@@ -36,15 +37,22 @@ creates isolated child tickets using those same admission checks. Verified child
 integrate only into the parent task worktree, followed by independent review.
 Structured reviewer verdicts require successful command receipts and complete
 host-observed diff coverage; findings, missing evidence and conflicts fail
-closed. A rejected structured review returns its findings to the same authorized
-builder for up to two repair passes per worker, with a fresh read-only review
-after each. An unchanged rejected patch stops early. The original diff base,
-captured authority, budget and dependency scope survive the loop; split parents
-do not gain a builder that could rewrite child work. Sandbox and publication
-authority do not expand. Cancellation/restart preserve child worktrees. See
-`docs/evidence/parallel-verifier.md`. Cross-workspace filesystem read isolation is NOT
-guaranteed by the current Codex sandbox; do not describe scoped prompts as a
-security boundary. Task worktrees are preserved, including failed work.
+closed. A fresh recovery supervisor investigates worker errors, rejected reviews
+and scout questions on directly authorized work. It directs the same saved
+agent through up to three recovery attempts, or asks one necessary user-owned
+question. Unchanged patches may still represent dependency/test setup progress.
+Every repaired result receives a fresh independent review. HEAD, index, Git
+control metadata, tracked content (including preexisting dirty files) and
+nonignored untracked files are captured before/after reviewers and recovery
+supervisors; mutations or snapshot failures reject the run. Ignored caches and
+dependencies may change. This is detection, not isolation or a preventive sandbox.
+The original diff base, captured authority, budget and dependency scope survive
+the loop; split parents do not gain a builder that could rewrite child work.
+Read-only human requests, planning, chat, background source checks and tool-free
+extraction remain restricted. Publication and scoped MCP authority do not expand.
+Cancellation/restart preserve task worktrees, including failed work. Full-access
+workers are trusted local processes; do not describe worktrees or scoped prompts
+as filesystem security boundaries. See `docs/evidence/full-access-supervision.md`.
 
 Tickets are agents (2026-10-03). Each ticket opens as a conversation
 (`TicketThread.swift`) and `ReplyToTask` hands your reply to its agent:
@@ -58,17 +66,19 @@ fails read-only. Durable reply revisions prevent stale results, duplicate
 interpretation, rapid clarifications swallowing unread restrictions, and old notes
 overriding a newer Start/Approve action. Source
 text never enters this interpreter. Planning and building continue
-one saved Codex session per ticket (`task_sessions`, `exec resume`, sandbox
-via `-c sandbox_mode`); reviewers are always fresh and ephemeral; a session
+one saved Codex session per ticket (`task_sessions`, `exec resume`; authorized
+execution uses `--dangerously-bypass-approvals-and-sandbox`); reviewers are always fresh and ephemeral; a session
 that can't resume falls back to a fresh start from the ticket history.
 Codex exec sessions did not appear in the Codex app's thread list when
 checked. The agent decides the next move: a supervisor `ask_user`/`skip` or a
-scout's closing `QUESTION:` line waits for you; a fix builds only when you
+scout's closing `QUESTION:` line on plan-only work waits for you. Directly
+authorized scout questions first reach the recovery supervisor. A fix builds only when you
 started the ticket (`StartTask`, drag to Working), directly requested local work
 in its chat, or allow starting. Directly requested work uses the scout instead of
 unattended source triage; missing reproduction or tests become investigation
-steps, not automatic questions. Unattended watch policy, tool grants, reviewer
-sandbox and publication boundaries are unchanged.
+steps, not automatic questions. Unattended watch policy, scoped tool grants
+and publication boundaries are unchanged. A supervisor question prevents
+automatic readmission under an old prepare-fix assessment.
 Daemon restarts resume interrupted work up to twice. Repository discovery
 matches whole words and ignores generic names (`init`, `web`, ...).
 
@@ -87,7 +97,9 @@ with selected connections separately authorizes unattended checks. Local
 executable trust is separate; server annotations are not a security boundary.
 A per-run daemon bridge keeps upstream credentials out of worker configuration
 and rechecks current connection scope and schema.
-Its two tools alone are preapproved; shell networking remains disabled.
+Its two tools alone are preapproved within the bridge. Restricted planning and
+watch runs keep shell networking disabled; authorized full-access task phases
+can use shell networking for dependency setup.
 Remote tools may mutate systems when called: local-fix authority is not
 publication authority and cancellation cannot undo completed remote effects.
 

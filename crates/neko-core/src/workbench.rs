@@ -465,10 +465,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             acknowledge_task_reply(&mut snapshot, &task_id);
             snapshot.start_when_planned.insert(task_id.clone());
             let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("Task no longer exists")?;
-            let waiting = task.supervision.as_ref().is_some_and(|s| matches!(s.action, SupervisorAction::AskUser | SupervisorAction::Skip))
-                || task.events.iter().rev().find(|e| e.role == "supervisor").is_some_and(|e| {
-                    e.message.starts_with("Needs your input before building:") || e.message.starts_with("Nothing to build:")
-                });
+            let waiting = waiting_for_reply(task);
             if task.status == TaskStatus::AwaitingApproval && waiting {
                 return Err("This agent needs a reply and a new plan before building".into());
             }
@@ -944,6 +941,18 @@ fn terminal(status: TaskStatus) -> bool {
 /// Approve a waiting plan, or retry a stopped ticket and remember to build it
 /// as soon as it is planned. Runs as two writes because the store has no
 /// nested transactions; the daemon holds its database lock across both.
+/// A completed phase requested an answer, so neither approval nor standing
+/// delegation can readmit it. A reply queues a fresh plan and supersedes this
+/// wait without discarding the existing approved scope.
+pub fn waiting_for_reply(task: &Task) -> bool {
+    task.status == TaskStatus::AwaitingApproval && (
+        task.supervision.as_ref().is_some_and(|s| matches!(s.action, SupervisorAction::AskUser | SupervisorAction::Skip))
+        || task.events.iter().rev().find(|e| matches!(e.role.as_str(), "supervisor" | "coordinator")).is_some_and(|e| {
+            e.message.starts_with("Needs your input before building:") || e.message.starts_with("Nothing to build:")
+        })
+    )
+}
+
 fn start_task(db: &Db, task_id: String) -> Result<Snapshot, String> {
     let snapshot = load(db)?;
     let status = snapshot
@@ -1561,6 +1570,29 @@ mod tests {
         assert_eq!(survivor.status, TaskStatus::Cancelled);
         assert!(survivor.events.last().unwrap().message.contains("Stop all work"));
         assert!(repo.path().exists(), "files are never touched");
+    }
+
+    #[test]
+    fn recovery_question_requires_a_reply_then_a_new_plan() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let ticket = task(&db, &ws);
+        let mut state = load(&db).unwrap();
+        let t = state.tasks.iter_mut().find(|t| t.id == ticket.id).unwrap();
+        t.status = TaskStatus::AwaitingApproval;
+        t.plan = "Existing bounded plan".into();
+        append_event(t, "coordinator", "Needs your input before building: Which deployment?");
+        assert!(waiting_for_reply(t));
+        save(&db, &state).unwrap();
+        assert!(apply(&db, Command::ApproveTask { task_id: ticket.id.clone() }).unwrap_err().contains("needs a reply"));
+        let state = apply(&db, Command::ReplyToTask { task_id: ticket.id.clone(), text: "Use the development deployment.".into() }).unwrap();
+        let mut t = state.tasks.iter().find(|t| t.id == ticket.id).unwrap().clone();
+        assert_eq!(t.status, TaskStatus::Queued);
+        assert!(!waiting_for_reply(&t), "a reply admits fresh planning");
+        t.status = TaskStatus::AwaitingApproval;
+        append_event(&mut t, "supervisor", "Plan ready.");
+        assert!(!waiting_for_reply(&t), "the new plan supersedes the old question");
     }
 
     #[test]

@@ -125,8 +125,8 @@ usage limits; starting another session does not reset those limits.
 A scoped, expiring capability in environment variables connects a temporary
 stdio bridge back to the daemon. Only `neko_list_tools` and `neko_call_tool`
 are enabled and preapproved. Upstream configurations and credentials are not
-passed to workers. Global user config/rules are ignored and shell networking
-stays disabled. Current workspace scope, connection state and schema are checked before
+passed to workers. Global user config/rules are ignored. Shell networking stays
+disabled for restricted Codex runs; full-access task phases can use it for setup. Current workspace scope, connection state and schema are checked before
 each call, including after upstream rediscovery. Revocation prevents subsequent
 dispatch; cancellation cannot undo a request already delivered upstream.
 
@@ -146,29 +146,42 @@ automatic local preparation. Sensitive or uncertain work holds for approval.
 An instruction/connection change invalidates prior source eligibility.
 
 Explicit approval, a direct human work request, or qualifying standing authority
-allows a builder. A separate
-read-only reviewer must return a structured passing verdict, no findings,
-complete host-observed changed-file coverage, and successful command receipts
-for its checks before the result becomes ready for human review.
-Rejected structured findings return to the same saved builder session for up to
-two repair passes per worker. Each pass gets a fresh read-only reviewer and the
-original diff base. An unchanged rejected patch stops early; malformed verdicts,
-unproven success and scope escapes remain failures. The original captured
-authority guards every run and commit, including cancellation, newer replies,
-standing grants and budgets. Split parents never use this builder repair loop.
-Builders receive their original checkout as a read-only reference for local
-dependency setup; preparing tests must stay within their existing sandbox.
+allows a builder. Authorized builders, independent reviewers and recovery
+supervisors use full local filesystem access, including dependency setup,
+caches, temporary directories and shell networking. Codex applies its full-access
+flag to both new and resumed sessions. Explicit read-only requests, planning,
+chat, background source checks and tool-free extraction retain restricted runs.
+A reviewer must return a structured passing verdict, no findings, complete
+host-observed changed-file coverage and successful command receipts. The host
+compares HEAD, index, Git control metadata, tracked contents (including existing
+dirty files) and nonignored untracked content before and after review. Source
+mutations or an unavailable snapshot reject the review; ignored test output is
+allowed. These observations detect changes, not prevent them or establish
+filesystem isolation for full-access processes.
+
+A fresh recovery supervisor investigates worker errors, rejected reviews and
+questions raised during directly authorized planning. It may direct concrete
+next steps to the same saved ticket session or ask one necessary user-owned
+question, never accept a failed review or grant authority. Setup can improve
+without a code diff, so unchanged patches alone do not stop recovery. Three
+supervised retries per worker bound repeated failure. The original diff base,
+captured authority, cancellation, reply revisions, grants, budgets and dependency
+scope remain in force. Recovery supervisors may prepare ignored dependencies
+but their source changes also fail the host snapshot check. Split parents never
+use the builder repair loop. A pending supervisor question blocks automatic readmission and approval until
+a reply produces a new plan, preserving the existing approved scope.
+Builders receive the original checkout as a reference for local dependency
+setup and must preserve unrelated files and shared dependencies.
 `decomposition` validates bounded two/three-subtask proposals. Explicit approval
 creates ordinary child tickets, sharing the same scheduler limits. Dependencies
 receive earlier verified patches in separate scopes. The daemon integrates
 child patches into the isolated parent and independently verifies that result;
 conflicts preserve every worktree and block completion. No original-checkout
 merge or publication occurs. See `docs/evidence/parallel-verifier.md` for proof
-and read-only verification limits.
+and historical verification limits; `docs/evidence/full-access-supervision.md` records the current execution model.
 Cancellation terminates the process group; interrupted tasks fail on restart
 with worktrees retained. Model risk and source interpretation are judgments,
-not proof. Codex write sandboxing does not establish filesystem read privacy
-between workspaces. Local MCP executables are explicitly trusted host software,
+not proof. Full-access task processes have no filesystem isolation between workspaces. Local MCP executables are explicitly trusted host software,
 not sandboxed plugins. No cross-workspace context is deliberately injected.
 
 The full workspace is a regular Dock/Cmd-Tab window. The quick panel remains
