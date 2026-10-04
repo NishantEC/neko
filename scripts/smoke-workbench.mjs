@@ -156,6 +156,25 @@ try {
     const rejected = await waitFor(id,'Failed');
     assert.ok(rejected.events.some(e => e.message.includes('Independent verification failed')));
     assert.match(rejected.result,/Broken builder output/);
+    assert.equal(rejected.events.filter(e => e.message.includes('Repair pass')).length, 1, 'Unchanged rejected output must stop after one repair');
+    const repair = await command({CreateTask:{workspace_id:workspaceId,title:'Repair review feedback',goal:'REPAIR_REQUIRED COMMITTED_REPAIR: create and independently verify the requested file'}});
+    const repairId = repair.tasks.at(-1).id;
+    await waitFor(repairId,'AwaitingApproval');
+    const repairSession = (await command('Snapshot')).task_sessions[repairId];
+    await command({ApproveTask:{task_id:repairId}});
+    const repaired = await waitFor(repairId,'ReadyForReview');
+    assert.equal(repaired.events.filter(e => e.message.includes('Repair pass')).length, 1);
+    assert.equal((await command('Snapshot')).task_sessions[repairId], repairSession, 'Repair must resume the ticket session');
+    assert.equal(fs.readFileSync(path.join(repaired.worktree,'neko-smoke.txt'),'utf8'),'Isolated task output\n');
+    assert.match(repaired.result,/committed.txt/);
+    const stopRepair = await command({CreateTask:{workspace_id:workspaceId,title:'Stop during repair',goal:'REPAIR_REQUIRED REPAIR_HOLD: create and verify the requested file'}});
+    const stopRepairId = stopRepair.tasks.at(-1).id;
+    await waitFor(stopRepairId,'AwaitingApproval');
+    await command({ApproveTask:{task_id:stopRepairId}});
+    await waitSnapshot(s=>s.tasks.some(t=>t.id===stopRepairId && t.status==='Building' && t.events.some(e=>e.message.includes('Repair pass'))),'Repair did not start');
+    await command({CancelTask:{task_id:stopRepairId}});
+    await waitFor(stopRepairId,'Cancelled');
+    console.log('Review repair reused the session and original diff base; unchanged failures stop and repair remains cancellable.');
     for (const conflict of [false,true]) {
       const created = await command({CreateTask:{workspace_id:workspaceId,title:conflict?'Conflicting split':'Parallel split',goal:conflict?'SPLIT_CONFLICT':'Split into independent left and right files'}});
       const parentId = created.tasks.at(-1).id;

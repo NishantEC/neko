@@ -41,6 +41,8 @@ a workspace.
    supervisor investigates, a builder uses an isolated Git worktree, and an
    independent read-only reviewer checks the actual diff and executes checks.
    Findings or missing evidence block the result from becoming ready for review.
+   Rejected findings get up to two local repair passes with fresh reviews;
+   unchanged rejected patches stop early with the worktree preserved.
 
 Open the full app from the Dock, menu bar **Open Neko Workspace**, or the
 palette's **Open Neko Workspace** command. **Home** is a conversation with

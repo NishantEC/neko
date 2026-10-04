@@ -36,7 +36,12 @@ creates isolated child tickets using those same admission checks. Verified child
 integrate only into the parent task worktree, followed by independent review.
 Structured reviewer verdicts require successful command receipts and complete
 host-observed diff coverage; findings, missing evidence and conflicts fail
-closed. Cancellation/restart preserve child worktrees. See
+closed. A rejected structured review returns its findings to the same authorized
+builder for up to two repair passes per worker, with a fresh read-only review
+after each. An unchanged rejected patch stops early. The original diff base,
+captured authority, budget and dependency scope survive the loop; split parents
+do not gain a builder that could rewrite child work. Sandbox and publication
+authority do not expand. Cancellation/restart preserve child worktrees. See
 `docs/evidence/parallel-verifier.md`. Cross-workspace filesystem read isolation is NOT
 guaranteed by the current Codex sandbox; do not describe scoped prompts as a
 security boundary. Task worktrees are preserved, including failed work.
