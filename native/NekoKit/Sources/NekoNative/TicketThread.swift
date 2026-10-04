@@ -154,14 +154,14 @@ struct TicketComposer: View {
         Binding(get: { model.ticketDrafts[id] ?? "" }, set: { model.ticketDrafts[id] = $0 })
     }
     private var text: String { model.ticketDrafts[id] ?? "" }
-    private var sendLabel: String { status == "ReadyForReview" ? "Send feedback & rebuild" : "Send to agent" }
+    private var sendLabel: String { "Send to agent" }
     private var placeholder: String {
         switch status {
         case "AwaitingApproval": "Answer the agent, or tell it what to change…"
-        case "ReadyForReview": "Ask for changes…"
+        case "ReadyForReview": "Ask a question or request changes…"
         case "Failed", "Cancelled": "Tell the agent how to try again…"
         case "Completed": "Reopen with a follow-up…"
-        default: "Add direction; the agent reads it at its next step…"
+        default: "Send new direction; the agent pauses and replans…"
         }
     }
     var body: some View {

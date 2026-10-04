@@ -461,6 +461,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             });
         }
         Command::ApproveTask { task_id } => {
+            snapshot.task_read_only.remove(&task_id);
+            acknowledge_task_reply(&mut snapshot, &task_id);
+            snapshot.start_when_planned.insert(task_id.clone());
             let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("Task no longer exists")?;
             let waiting = task.supervision.as_ref().is_some_and(|s| matches!(s.action, SupervisorAction::AskUser | SupervisorAction::Skip))
                 || task.events.iter().rev().find(|e| e.role == "supervisor").is_some_and(|e| {
@@ -469,7 +472,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             if task.status == TaskStatus::AwaitingApproval && waiting {
                 return Err("This agent needs a reply and a new plan before building".into());
             }
-            if let Some(index) = snapshot.splits.iter().position(|s| s.parent_id == task_id) {
+            if let Some(index) = snapshot.splits.iter().position(|s| s.parent_id == task_id && !s.integrated) {
                 let split = snapshot.splits[index].clone();
                 if split.approved {
                     return Err("Split already approved; retry the parent after failure".into());
@@ -567,6 +570,11 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             }
             task.status = TaskStatus::Cancelled;
             append_event(task, "user", "Cancelled this task.");
+            for id in children.iter().chain(std::iter::once(&task_id)) {
+                snapshot.start_when_planned.remove(id);
+                snapshot.task_read_only.insert(id.clone());
+                acknowledge_task_reply(&mut snapshot, id);
+            }
         }
         Command::CompleteTask { task_id } => {
             let task = snapshot
@@ -616,9 +624,16 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             remove_tasks(&mut snapshot, &ids);
         }
         Command::CancelAllWork => {
+            let mut stopped = vec![];
             for task in snapshot.tasks.iter_mut().filter(|t| !terminal(t.status)) {
                 task.status = TaskStatus::Cancelled;
                 append_event(task, "user", "Stopped with Stop all work. Worktree preserved.");
+                stopped.push(task.id.clone());
+            }
+            for id in stopped {
+                snapshot.start_when_planned.remove(&id);
+                snapshot.task_read_only.insert(id.clone());
+                acknowledge_task_reply(&mut snapshot, &id);
             }
         }
         Command::RetryTask { task_id } => {
@@ -654,25 +669,24 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::ReplyToTask { task_id, text } => {
             let text = text.trim().to_owned();
             required("Reply", &text, MAX_NOTE_BYTES)?;
+            let mut pending = snapshot.task_replies.get(&task_id)
+                .map(|r| r.pending.clone()).unwrap_or_default();
+            if pending.len() >= 32 {
+                return Err("The agent still has 32 unread replies. Let it catch up before sending another.".into());
+            }
+            pending.push(text.clone());
             let task = snapshot
                 .tasks
                 .iter_mut()
                 .find(|t| t.id == task_id)
                 .ok_or("Task no longer exists")?;
             append_event(task, NOTE_ROLE, &text);
-            match task.status {
-                TaskStatus::AwaitingApproval | TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Completed => {
-                    let reopened = task.status == TaskStatus::Completed;
-                    task.status = TaskStatus::Queued;
-                    task.supervision = None;
-                    append_event(task, "system", if reopened { "Reopened with your reply; the agent decides what to do next." } else { "Picked up your reply; the agent decides what to do next." });
-                }
-                TaskStatus::ReadyForReview => {
-                    task.status = TaskStatus::Building;
-                    append_event(task, "system", "Sent back to building with your reply.");
-                }
-                _ => {}
-            }
+            let reopened = task.status == TaskStatus::Completed;
+            task.status = TaskStatus::Queued;
+            append_event(task, "system", if reopened { "Reopened with your reply; the agent decides what to do next." } else { "Picked up your reply; the agent decides what to do next." });
+            snapshot.task_replies.insert(task_id, neko_protocol::workbench::TaskReplyState {
+                revision: new_id(), handled: false, pending,
+            });
         }
         Command::SetTaskFolder { task_id, folder } => {
             let task = snapshot
@@ -906,6 +920,8 @@ fn remove_tasks(snapshot: &mut Snapshot, ids: &[String]) {
     for id in ids {
         snapshot.task_roots.remove(id);
         snapshot.start_when_planned.remove(id);
+        snapshot.task_read_only.remove(id);
+        snapshot.task_replies.remove(id);
         snapshot.task_sessions.remove(id);
     }
     for schedule in &mut snapshot.schedules {
@@ -941,6 +957,8 @@ fn start_task(db: &Db, task_id: String) -> Result<Snapshot, String> {
         TaskStatus::Failed | TaskStatus::Cancelled => {
             apply(db, Command::RetryTask { task_id: task_id.clone() })?;
             let mut snapshot = load(db)?;
+            snapshot.task_read_only.remove(&task_id);
+            acknowledge_task_reply(&mut snapshot, &task_id);
             snapshot.start_when_planned.insert(task_id);
             save(db, &snapshot)?;
             load(db)
@@ -948,6 +966,12 @@ fn start_task(db: &Db, task_id: String) -> Result<Snapshot, String> {
         TaskStatus::Completed => Err("This ticket is already done".into()),
         _ => Err("This ticket is already working".into()),
     }
+}
+
+fn acknowledge_task_reply(snapshot: &mut Snapshot, task_id: &str) {
+    snapshot.task_replies.insert(task_id.into(), neko_protocol::workbench::TaskReplyState {
+        revision: new_id(), handled: true, pending: vec![],
+    });
 }
 
 /// A Git checkout found inside a workspace folder.
@@ -1557,8 +1581,35 @@ mod tests {
         assert!(state.start_when_planned.contains(&stopped.id));
         let state = apply(&db, Command::StartTask { task_id: waiting.id.clone() }).unwrap();
         assert_eq!(state.tasks.iter().find(|t| t.id == waiting.id).unwrap().status, TaskStatus::Building);
-        assert!(!state.start_when_planned.contains(&waiting.id), "an approved plan needs no flag");
+        assert!(state.start_when_planned.contains(&waiting.id), "human approval survives follow-up context during building");
         assert!(apply(&db, Command::StartTask { task_id: waiting.id.clone() }).unwrap_err().contains("already working"));
+    }
+
+    #[test]
+    fn follow_up_to_integrated_parent_preserves_split_and_can_be_approved() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let parent = task(&db, &ws);
+        let children = [task(&db, &ws), task(&db, &ws)];
+        let mut state = load(&db).unwrap();
+        for t in &mut state.tasks { t.status = TaskStatus::ReadyForReview; }
+        let split = TaskSplit {
+            parent_id: parent.id.clone(), approved: true, integrated: true, base: Some("base".into()),
+            subtasks: children.iter().enumerate().map(|(i, child)| neko_protocol::workbench::SubtaskPlan {
+                title: "Child".into(), goal: "Scoped fix".into(), files: vec![format!("{i}.txt")], tests: vec![format!("test -f {i}.txt")],
+                depends_on: vec![], task_id: Some(child.id.clone()), base: Some("child-base".into()),
+            }).collect(),
+        };
+        state.splits.push(split.clone());
+        save(&db, &state).unwrap();
+        let mut state = apply(&db, Command::ReplyToTask { task_id: parent.id.clone(), text: "Explain the fix".into() }).unwrap();
+        assert_eq!(state.splits[0], split);
+        state.tasks[0].status = TaskStatus::AwaitingApproval;
+        save(&db, &state).unwrap();
+        let approved = apply(&db, Command::ApproveTask { task_id: parent.id }).unwrap();
+        assert_eq!(approved.tasks[0].status, TaskStatus::Building);
+        assert_eq!(approved.splits[0], split);
     }
 
     #[test]
@@ -1579,8 +1630,8 @@ mod tests {
         assert_eq!(status(&s, &ids[0]), TaskStatus::Queued, "a waiting agent picks the reply up");
         assert_eq!(s.task_sessions[&ids[0]], "session", "and keeps its memory");
         assert!(s.tasks.iter().find(|t| t.id == ids[0]).unwrap().events.iter().any(|e| e.role == NOTE_ROLE && e.message == "Use the staging config"));
-        assert_eq!(status(&reply(&ids[1]), &ids[1]), TaskStatus::Building, "review feedback goes back to building");
-        assert_eq!(status(&reply(&ids[2]), &ids[2]), TaskStatus::Building, "running work reads it next step");
+        assert_eq!(status(&reply(&ids[1]), &ids[1]), TaskStatus::Queued, "review feedback is interpreted before granting further changes");
+        assert_eq!(status(&reply(&ids[2]), &ids[2]), TaskStatus::Queued, "running work is superseded before the next writable phase");
         assert_eq!(status(&reply(&ids[3]), &ids[3]), TaskStatus::Queued);
         assert!(apply(&db, Command::ReplyToTask { task_id: ids[0].clone(), text: "  ".into() }).is_err());
     }

@@ -301,6 +301,25 @@ try {
     }
     assert.equal(fs.existsSync(path.join(repo, 'neko-smoke.txt')), false);
     assert.equal(fs.existsSync(path.join(otherRepo, 'neko-smoke.txt')), false);
+    // A question remains read-only even with global autostart enabled. An
+    // explicit work request then continues this watched ticket without an
+    // extra approval click or reapplying unattended low-risk triage.
+    await command({SetStartWithoutApproval:{enabled:true}});
+    await command({ReplyToTask:{task_id:sensitiveId,text:'Explain the cause only. Do not change anything.'}});
+    const explained = await waitFor(sensitiveId,'AwaitingApproval');
+    assert.equal(fs.existsSync(path.join(explained.worktree,'neko-smoke.txt')),false);
+    assert.ok(!(await command('Snapshot')).start_when_planned.includes(sensitiveId));
+    await command({ReplyToTask:{task_id:sensitiveId,text:'It happens on staging.'}});
+    await waitFor(sensitiveId,'AwaitingApproval');
+    assert.ok((await command('Snapshot')).task_read_only.includes(sensitiveId));
+    assert.equal(fs.existsSync(path.join(explained.worktree,'neko-smoke.txt')),false);
+    await command({SetStartWithoutApproval:{enabled:false}});
+    await command({ReplyToTask:{task_id:sensitiveId,text:'Investigate the cause and fix it locally.'}});
+    const directed = await waitFor(sensitiveId,'ReadyForReview');
+    assert.equal(directed.supervision,null,'Direct work must not inherit a stale unattended decision');
+    assert.ok(directed.events.some(e=>e.message.startsWith('Your reply requests local work.')));
+    assert.equal(fs.readFileSync(path.join(directed.worktree,'neko-smoke.txt'),'utf8'),'Isolated task output\n');
+    console.log('Question stayed read-only with global autostart; direct fix reply completed without another approval.');
     const beforeWake = await command('Snapshot');
     const receiptCount = beforeWake.mcp.receipts.length;
     await mcp({ Wake: { responsibility_id: responsibilityId } });
@@ -322,7 +341,7 @@ try {
     await stop(); launch(); await connect();
     const durable = await command('Snapshot');
     assert.equal(durable.tasks.find(t => t.id === lowId).supervision.risk, 'low');
-    assert.equal(durable.tasks.find(t => t.id === sensitiveId).status, 'AwaitingApproval');
+    assert.equal(durable.tasks.find(t => t.id === sensitiveId).status, 'ReadyForReview');
     assert.equal(durable.mcp.responsibilities.find(r => r.id === responsibilityId).enabled, false);
     assert.equal(durable.mcp.connections.find(c => c.id === own.id).enabled, false);
     assert.ok(!durable.mcp.grants.some(g => g.connection_id === own.id));

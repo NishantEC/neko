@@ -155,7 +155,7 @@ pub fn apply_result(
     Ok(())
 }
 pub fn may_prepare(state: &Snapshot, task: &Task, now: i64) -> bool {
-    if !crate::supervision::decision_allows(task) {
+    if state.task_read_only.contains(&task.id) || !crate::supervision::decision_allows(task) {
         return false;
     }
     let Some(source) = state

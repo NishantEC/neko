@@ -59,6 +59,24 @@ also scoped. A reply may propose up to three
 tickets, which become ordinary queued tasks, so planning and approval gates are
 unchanged. Ticket notes (event role `note`) reach planner and builder prompts
 as direction inside the approved scope and never grant tools or publication.
+`ReplyToTask` also interprets unread human messages in order in an empty scratch
+directory with tool-free `native_runner::extract`. Only one human message reaches each
+strict Work/ReadOnly/Context classifier, never issue text or repository content.
+Work sets the existing local start permission; ReadOnly (also the failure default)
+persists a restriction overriding global autostart and standing preparation.
+Context preserves that restriction until a new work request or explicit Start/
+Approve supersedes it. Durable reply revisions and handled markers order these
+actions, survive restart and prevent reinterpreting old replies. A new reply queues
+the ticket and cancels the previous worker; run leases and result commits reject
+its stale revision. An ordered, bounded unread queue prevents a rapid clarification
+from erasing an uninterpreted no-change instruction. Only human work requests or
+explicit Start/Approve set local start authority; a running status alone never does.
+That authority lasts through building and is removed when the result is ready.
+Approved split identities and child scopes survive follow-up replies.
+Previously written changes remain in the task worktree.
+Direct work uses the scout to plan investigation and fixes, including reproduction
+and regression tests, instead of the unattended supervisor's missing-evidence
+hold. Only genuine unavailable access or user-owned decisions need a question.
 
 Chat tool cards persist the exact arguments and workspace. A tool whose server
 declares `readOnlyHint=true` can run without another prompt; the declaration participates
@@ -127,7 +145,8 @@ fresh source evidence with `supervision`'s bounded model assessment before
 automatic local preparation. Sensitive or uncertain work holds for approval.
 An instruction/connection change invalidates prior source eligibility.
 
-Explicit approval or qualifying standing authority allows a builder. A separate
+Explicit approval, a direct human work request, or qualifying standing authority
+allows a builder. A separate
 read-only reviewer must return a structured passing verdict, no findings,
 complete host-observed changed-file coverage, and successful command receipts
 for its checks before the result becomes ready for human review.

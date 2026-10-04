@@ -2,6 +2,17 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Orders human replies against explicit Start/Approve actions across restarts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskReplyState {
+    pub revision: String,
+    pub handled: bool,
+    /// Bounded unread human messages, in order. A clarification cannot erase
+    /// an earlier restriction that has not reached the interpreter yet.
+    #[serde(default)]
+    pub pending: Vec<String>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Secret(pub String);
 impl std::fmt::Debug for Secret {
@@ -178,6 +189,12 @@ pub struct Snapshot {
     /// Once planned they build without asking again.
     #[serde(default)]
     pub start_when_planned: BTreeSet<String>,
+    /// A human asked for an answer or plan without changes. Clarifications do
+    /// not lift this restriction; a new work request or explicit approval does.
+    #[serde(default)]
+    pub task_read_only: BTreeSet<String>,
+    #[serde(default)]
+    pub task_replies: BTreeMap<String, TaskReplyState>,
     /// Each ticket's saved agent session (Codex thread id). Planning and
     /// building continue it so the agent keeps what it learned; reviews
     /// never use it.
