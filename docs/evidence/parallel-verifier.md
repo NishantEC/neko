@@ -1,5 +1,10 @@
 # Parallel tickets and independent verification
 
+Current scheduling (2026-10-04): the fixed global-three/workspace-two cap
+described in the historical proof below has been removed. Every eligible
+ticket now gets its own worker on the next tick, with duplicate, dependency
+and authority gates retained. Provider quota routing is still separate.
+
 Implemented 2026-09-25 in the personal-agent worktree; no app installation,
 publication, push, or original-checkout modification is part of this workflow.
 
@@ -8,8 +13,8 @@ publication, push, or original-checkout modification is part of this workflow.
 Open a ticket whose plan is awaiting approval, choose **Propose parallel
 subtasks**, inspect the two/three proposed goals, exact file scopes, tests and
 dependencies, then **Approve and build**. Proposal generation is read-only.
-Children are ordinary visible tickets with isolated worktrees and the existing
-global-three/workspace-two limits. They do not create an unbounded nested pool.
+Children are ordinary visible tickets with isolated worktrees and the same
+per-ticket admission checks. Each eligible child gets its own worker.
 The parent displays child status and receives their verified patches only in
 its own isolated worktree. It then receives a fresh independent review.
 
@@ -21,8 +26,9 @@ including any earlier successfully applied parent patches. No automatic
 conflict resolution, reset, source merge or publication occurs.
 
 Cancellation propagates to children; a dependency failure blocks the parent
-and cancels unfinished siblings. Daemon restart fails interrupted parent and
-child work. Retrying the parent explicitly requests a new read-only split
+and cancels unfinished siblings. Daemon restart resumes interrupted parent and
+child work up to twice, preserving their worktrees; another interruption fails
+them for inspection. Retrying the parent explicitly requests a new read-only split
 proposal and leaves prior worktree/results intact. A partially integrated
 parent may need an inspected resolution before its retry can integrate cleanly.
 

@@ -1,4 +1,4 @@
-//! Child tickets share the supervisor's existing three/two capacity limits.
+//! Child tickets use the same per-ticket worker admission and authority checks.
 use super::*;
 use std::path::Path;
 
@@ -354,6 +354,47 @@ mod tests {
         let record = result.decision_records.iter().find(|r| r.task_id.as_deref() == Some("t")).unwrap();
         assert_eq!(record.action, neko_protocol::decision_context::DecisionAction::ReportFailure);
         assert_eq!(record.runtime.provider, "host");
+    }
+
+    #[test]
+    fn restarted_parent_waits_for_verified_children_before_integration() {
+        let controller = super::super::tests::controller_with_task(TaskStatus::Reviewing);
+        let mut state = controller.command(Command::Snapshot).unwrap();
+        let mut child = state.tasks[0].clone();
+        child.id = "child".into();
+        child.status = TaskStatus::Building;
+        state.tasks.push(child);
+        state.splits.push(TaskSplit {
+            parent_id: "t".into(), approved: true, integrated: false, base: None,
+            subtasks: vec![SubtaskPlan {
+                title: "Child".into(), goal: "G".into(), files: vec!["a".into()],
+                tests: vec!["check".into()], depends_on: vec![],
+                task_id: Some("child".into()), base: None,
+            }],
+        });
+        let mut sibling = state.tasks[1].clone();
+        sibling.id = "sibling".into();
+        sibling.status = TaskStatus::Completed;
+        state.tasks.push(sibling);
+        let mut sibling_plan = state.splits[0].subtasks[0].clone();
+        sibling_plan.task_id = Some("sibling".into());
+        sibling_plan.files = vec!["b".into()];
+        state.splits[0].subtasks.push(sibling_plan);
+        let db = controller.db.lock().unwrap();
+        store::save(&db, &state).unwrap();
+        let mut state = store::recover_interrupted(&db).unwrap();
+        assert_eq!(state.tasks[0].status, TaskStatus::Building);
+        assert!(!neko_core::decomposition::ready(&state, &state.tasks[0]));
+        for status in [TaskStatus::Reviewing, TaskStatus::Failed, TaskStatus::Cancelled] {
+            state.tasks[1].status = status;
+            assert!(!neko_core::decomposition::ready(&state, &state.tasks[0]));
+        }
+        for status in [TaskStatus::ReadyForReview, TaskStatus::Completed] {
+            state.tasks[1].status = status;
+            assert!(neko_core::decomposition::ready(&state, &state.tasks[0]));
+        }
+        state.tasks.pop();
+        assert!(!neko_core::decomposition::ready(&state, &state.tasks[0]));
     }
 
     #[test]

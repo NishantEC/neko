@@ -69,6 +69,15 @@ pub fn parse(answer: &str) -> Result<Vec<SubtaskPlan>, String> {
 
 pub fn ready(state: &Snapshot, task: &Task) -> bool {
     for split in &state.splits {
+        // Recovery puts interrupted parents back in Building. They still
+        // depend on every child's verified result before integration can run.
+        if split.parent_id == task.id && split.approved && !split.integrated {
+            return !split.subtasks.is_empty() && split.subtasks.iter().all(|plan| {
+                plan.task_id.as_ref().is_some_and(|id| state.tasks.iter().any(|child| {
+                    &child.id == id && matches!(child.status, TaskStatus::ReadyForReview | TaskStatus::Completed)
+                }))
+            });
+        }
         if let Some(plan) = split
             .subtasks
             .iter()

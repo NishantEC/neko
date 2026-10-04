@@ -109,9 +109,12 @@ try {
   assert.ok(plan.plan.length > 0);
   assert.equal(fs.existsSync(path.join(repo, 'neko-smoke.txt')), false);
   assert.equal(fs.existsSync(path.join(plan.worktree, 'neko-smoke.txt')), false);
+  const plannedSession = (await command('Snapshot')).task_sessions[taskId];
+  if (!live) assert.ok(plannedSession, 'Planning must save a session');
   await command({ ApproveTask: { task_id: taskId } });
   const ready = await waitFor(taskId, 'ReadyForReview');
   assert.match(ready.result, /Independent review/);
+  if (!live) assert.equal((await command('Snapshot')).task_sessions[taskId], plannedSession, 'Building must resume the planned session; review must not replace it');
   assert.equal(fs.readFileSync(path.join(ready.worktree, 'neko-smoke.txt'), 'utf8'), 'Isolated task output\n');
   assert.equal(fs.existsSync(path.join(repo, 'neko-smoke.txt')), false);
   const search = await request({ Search: { query: 'Isolated smoke', limit: 10, provider: 'neko-task' } });
@@ -137,15 +140,15 @@ try {
     const parallelWorkspace = await command({SaveWorkspace:{workspace:{id:'',name:'Parallel capacity',repository:parallelRepo,instructions:'Disposable fixture',away_enabled:false}}});
     const parallelWorkspaceId = parallelWorkspace.workspaces.find(w=>w.name==='Parallel capacity').id;
     const parallelIds = [];
-    for (const workspace of [workspaceId,workspaceId,parallelWorkspaceId]) {
+    for (const workspace of [workspaceId,workspaceId,workspaceId,parallelWorkspaceId,parallelWorkspaceId]) {
       const queued = await command({CreateTask:{workspace_id:workspace,title:'Concurrent ticket',goal:'PARALLEL_HOLD: create and verify the isolated smoke output'}});
       parallelIds.push(queued.tasks.at(-1).id);
     }
     for (const id of parallelIds) await waitFor(id,'AwaitingApproval');
     for (const id of parallelIds) await command({ApproveTask:{task_id:id}});
-    await waitSnapshot(s=>parallelIds.every(id=>s.tasks.find(t=>t.id===id).events.some(e=>e.role==='builder' && e.message.includes('Agent started'))) && parallelIds.every(id=>s.tasks.find(t=>t.id===id).status==='Building'),'Three builders did not overlap');
+    await waitSnapshot(s=>parallelIds.every(id=>s.tasks.find(t=>t.id===id).events.some(e=>e.role==='builder' && e.message.includes('Agent started'))) && parallelIds.every(id=>s.tasks.find(t=>t.id===id).status==='Building'),'Five builders did not overlap');
     for (const id of parallelIds) await waitFor(id,'ReadyForReview');
-    console.log('Three real fixture child processes overlapped across two workspaces.');
+    console.log('Five real fixture child processes overlapped, including three in one workspace.');
     const broken = await command({ CreateTask: {workspace_id:workspaceId,title:'Broken builder gate',goal:'BROKEN_BUILDER: create the requested file and verify it'} });
     const id = broken.tasks.at(-1).id;
     await waitFor(id,'AwaitingApproval');
@@ -204,15 +207,23 @@ try {
       const id = created.tasks.at(-1).id;
       await waitFor(id,'AwaitingApproval'); await command({ProposeSplit:{task_id:id}}); await waitFor(id,'AwaitingApproval');
       await command({ApproveTask:{task_id:id}});
-      await waitSnapshot(s=>s.splits.find(p=>p.parent_id===id).subtasks.some(p=>s.tasks.find(t=>t.id===p.task_id).events.some(e=>e.role==='builder' && e.message.includes('Agent started'))),'Child did not start');
+      const before = await waitSnapshot(s=>s.splits.find(p=>p.parent_id===id).subtasks.every(p=>s.tasks.find(t=>t.id===p.task_id).events.some(e=>e.role==='builder' && e.message.includes('Agent started'))),'Children did not start');
       if(restart) { await stop(); launch(); await connect(); }
       else await command({CancelTask:{task_id:id}});
       const state=await command('Snapshot'); const split=state.splits.find(s=>s.parent_id===id);
-      assert.equal(state.tasks.find(t=>t.id===id).status,restart?'Failed':'Cancelled');
-      assert.ok(split.subtasks.every(p=>state.tasks.find(t=>t.id===p.task_id).status===(restart?'Failed':'Cancelled')));
+      assert.equal(state.tasks.find(t=>t.id===id).status,restart?'Building':'Cancelled');
+      assert.ok(split.subtasks.every(p=>state.tasks.find(t=>t.id===p.task_id).status===(restart?'Building':'Cancelled')));
       assert.ok(split.subtasks.some(p=>state.tasks.find(t=>t.id===p.task_id).worktree));
+      if (restart) {
+        for (const taskId of [id, ...split.subtasks.map(p=>p.task_id)]) {
+          const task = state.tasks.find(t=>t.id===taskId);
+          assert.ok(task.events.some(e=>e.message.startsWith('Resumed after a daemon restart')));
+          assert.equal(task.worktree, before.tasks.find(t=>t.id===taskId).worktree);
+        }
+        await waitFor(id, 'ReadyForReview');
+      }
     }
-    console.log('Parent cancellation and restart fail closed while preserving child worktrees.');
+    console.log('Parent cancellation stops children; restart resumes them in the same preserved worktrees.');
   }
   if (live) {
     // Real model, real bridge and a disposable MCP server. No upstream account

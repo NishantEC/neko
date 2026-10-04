@@ -55,9 +55,12 @@ Reply drafts and the return filter survive switching agents. Open a chat to
 approve, stop, retry or reply. Questions and no-work decisions wait for a reply;
 Accept locally marks a reviewed result accepted without applying or publishing it. **Propose parallel subtasks**
 on an awaiting plan generates two or three scoped proposals for your approval.
-Approved children run in isolated worktrees (three workers globally, two per
-workspace), then integrate into the parent task worktree for a final independent
+Approved children run in isolated worktrees, then integrate into the parent task worktree for a final independent
 review. Conflicts, cancellation and restart preserve their evidence.
+Every eligible ticket starts its own worker on the next supervisor tick (within
+two seconds), without a fixed global or workspace agent cap. Dependencies and
+approvals still gate execution. The selected runtime handles each run; automatic
+switching between providers based on remaining usage is not implemented.
 Closing this window does not
 stop the daemon. Dismissing the palette hides only the palette.
 

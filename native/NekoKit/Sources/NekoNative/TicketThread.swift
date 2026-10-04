@@ -90,7 +90,7 @@ struct TicketThreadView: View {
 
     private var workingLine: String? {
         switch ticket["status"].string {
-        case "Queued": "Waiting for a free agent…"
+        case "Queued": "Preparing this agent…"
         case "Planning": "Planner is reading the code…"
         case "Building": "Builder is making the change in its own copy…"
         case "Reviewing": "Reviewer is checking the change…"

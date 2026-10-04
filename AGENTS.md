@@ -24,9 +24,15 @@ snapshots in `neko-core::workbench`, the daemon's `workbench` supervisor, and
 `native_runner` ephemeral Codex CLI processes. A scout plans read-only,
 explicit approval allows an isolated-worktree build, and a
 read-only reviewer returns a result for human review. No publication occurs.
-At most three task workers execute globally and two per workspace. An awaiting
+Every eligible ticket starts its own worker on the next two-second supervisor
+tick, without a fixed global or workspace cap. Active claims prevent duplicate
+workers for one ticket; dependencies, approvals and scope checks still apply.
+Git checkout creation serializes per shared repository with cancellable waiting;
+model work stays concurrent. Restarted split parents wait for verified children.
+The selected runtime runs each phase; quota-aware provider switching is not
+implemented. An awaiting
 plan can request a read-only two/three-subtask proposal; explicit approval
-creates isolated child tickets using those same limits. Verified child patches
+creates isolated child tickets using those same admission checks. Verified child patches
 integrate only into the parent task worktree, followed by independent review.
 Structured reviewer verdicts require successful command receipts and complete
 host-observed diff coverage; findings, missing evidence and conflicts fail

@@ -26,8 +26,6 @@ struct Active {
     task_id: String,
     cancelled: Arc<AtomicBool>,
 }
-const MAX_ACTIVE_TASKS: usize = 3;
-const MAX_ACTIVE_PER_WORKSPACE: usize = 2;
 pub struct Controller {
     importer: Mutex<import::Importer>,
     pub mcp: Arc<crate::mcp_host::Host>,
@@ -497,15 +495,16 @@ impl Controller {
 
     fn tick_with(
         self: &Arc<Self>,
-        execute: impl FnOnce(&Controller, &TaskClaim, &AtomicBool) -> Result<(), String>
+        execute: impl Fn(&Controller, &TaskClaim, &AtomicBool) -> Result<(), String>
         + Send
+        + Sync
         + 'static,
     ) -> Result<(), String> {
         let mut active = self
             .active
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let next = {
+        let claims = {
             let db = self
                 .db
                 .lock()
@@ -523,18 +522,21 @@ impl Controller {
                     worker.cancelled.store(true, Ordering::Release);
                 }
             }
-            let next = if active.len() < MAX_ACTIVE_TASKS {
-                let position = snapshot.tasks.iter().position(|t| {
-                    task_has_capacity(&snapshot, &active, t)
+            let positions: Vec<_> = snapshot.tasks.iter().enumerate()
+                .filter_map(|(index, t)| {
+                    (!active.iter().any(|a| a.task_id == t.id)
                         && neko_core::decomposition::ready(&snapshot, t)
                         && (matches!(t.status, TaskStatus::Queued | TaskStatus::Building)
                             || neko_core::mcp_host::responsibility::may_prepare(
                                 &snapshot,
                                 t,
                                 store::now_ms(),
-                            ))
-                });
-                position.and_then(|index| {
+                            )))
+                        .then_some(index)
+                })
+                .collect();
+            let claims: Vec<_> = positions.into_iter()
+                .filter_map(|index| {
                     // Capture the authority while AwaitingApproval still
                     // identifies an automatic claim; never reconstruct it from
                     // a later Building snapshot.
@@ -554,13 +556,15 @@ impl Controller {
                     }
                     Some(TaskClaim { task: task.clone(), authority })
                 })
-            } else {
-                None
-            };
+                .collect();
             save_with_failure_records(&db, &snapshot, &already_failed)?;
-            next
+            claims
         };
-        if let Some(claim) = next {
+        // Every eligible ticket owns its worker; there is no fixed agent pool.
+        // Hold the active lock through admission so overlapping ticks cannot
+        // launch duplicate workers, even while a ticket is preparing its repo.
+        let execute = Arc::new(execute);
+        for claim in claims {
             let task = &claim.task;
             let cancel = Arc::new(AtomicBool::new(false));
             active.push(Active {
@@ -569,12 +573,13 @@ impl Controller {
             });
             let controller = self.clone();
             let task_id = task.id.clone();
+            let execute = execute.clone();
             let spawn = std::thread::Builder::new()
                 .name(format!("neko-task-{task_id}"))
                 .spawn(move || {
                     let task = &claim.task;
-                    // A panicking worker still fails its task and frees the slot,
-                    // so one crash can't block every later ticket.
+                    // A panicking worker still fails its task and releases its
+                    // claim, so retry can start a new worker.
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         execute(&controller, &claim, &cancel)
                     }))
@@ -1066,21 +1071,6 @@ impl Controller {
         })?;
         Ok(root)
     }
-}
-
-fn task_has_capacity(snapshot: &Snapshot, active: &[Active], task: &Task) -> bool {
-    active.len() < MAX_ACTIVE_TASKS
-        && !active.iter().any(|a| a.task_id == task.id)
-        && active
-            .iter()
-            .filter(|a| {
-                snapshot
-                    .tasks
-                    .iter()
-                    .any(|t| t.id == a.task_id && t.workspace_id == task.workspace_id)
-            })
-            .count()
-            < MAX_ACTIVE_PER_WORKSPACE
 }
 
 /// One Neko reply. Runs filesystem-read-only with scoped tools, outside any lock, and may open tickets as
@@ -2272,7 +2262,7 @@ mod tests {
     }
 
     #[test]
-    fn scheduler_runs_three_workers_but_never_more_than_two_in_one_workspace() {
+    fn scheduler_starts_all_ready_tickets_in_one_tick_without_duplicate_workers() {
         let controller = Arc::new(controller_with_task(TaskStatus::Queued));
         {
             let db = controller.db.lock().unwrap();
@@ -2297,7 +2287,7 @@ mod tests {
         }
         let released = Arc::new(AtomicBool::new(false));
         let (started, receiver) = std::sync::mpsc::channel();
-        for _ in 0..3 {
+        {
             let started = started.clone();
             let released = released.clone();
             controller
@@ -2313,12 +2303,12 @@ mod tests {
                 })
                 .unwrap();
         }
-        let mut ids: Vec<_> = (0..3)
+        let mut ids: Vec<_> = (0..5)
             .map(|_| receiver.recv_timeout(Duration::from_secs(2)).unwrap())
             .collect();
         ids.sort();
-        assert_eq!(ids, ["other-task", "second", "t"]);
-        assert_eq!(controller.active.lock().unwrap().len(), 3);
+        assert_eq!(ids, ["eligible-fourth", "other-task", "second", "t", "third-same"]);
+        assert_eq!(controller.active.lock().unwrap().len(), 5);
         let (unexpected, unexpected_rx) = std::sync::mpsc::channel();
         controller
             .tick_with(move |_, claim, _| {
@@ -2330,7 +2320,7 @@ mod tests {
             unexpected_rx
                 .recv_timeout(Duration::from_millis(100))
                 .is_err(),
-            "global capacity exceeded"
+            "an active ticket must not start a second worker"
         );
         released.store(true, Ordering::Release);
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
