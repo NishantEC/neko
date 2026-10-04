@@ -794,18 +794,20 @@ fn record(
             return Err("Decision source needs successful scoped receipts".into());
         }
         let mut receipt_ids = Vec::new();
+        let mut pruned_receipts = false;
         for id in &source.receipt_ids {
-            let receipt = snapshot
+            let Some(receipt) = snapshot
                 .mcp
                 .receipts
                 .iter()
-                .find(|r| {
-                    r.id == *id
-                        && r.workspace_id == ws.id
-                        && r.connection_id == connection.id
-                        && r.success
-                })
-                .ok_or("Decision source needs successful scoped receipts")?;
+                .find(|r| r.id == *id)
+            else {
+                pruned_receipts = true;
+                continue;
+            };
+            if receipt.workspace_id != ws.id || receipt.connection_id != connection.id || !receipt.success {
+                return Err("Decision source needs successful scoped receipts".into());
+            }
             if needs_current_grant
                 && (!connection
                     .tools
@@ -825,6 +827,13 @@ fn record(
             if !receipt_ids.contains(id) {
                 receipt_ids.push(id.clone());
             }
+        }
+        if pruned_receipts {
+            // Tickets outlive bounded tool history. Record the local action,
+            // but attach no source proof whose receipts cannot be checked.
+            // Execution/standing-authority checks still require live receipts.
+            unavailable_sources.push(format!("Source evidence unavailable for {}: historical tool receipts are no longer retained.", source.id));
+            continue;
         }
         if !responsibility_ids.contains(&responsibility.id) {
             responsibility_ids.push(responsibility.id.clone());

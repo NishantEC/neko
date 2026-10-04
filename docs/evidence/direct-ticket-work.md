@@ -62,3 +62,19 @@ Final source checks (2026-10-04):
 An initial full core run hit the existing process-death fixture deadline;
 the isolated rerun and subsequent full runs passed without changing that test
 or the guardian implementation.
+
+## Live installation follow-up
+
+The signed `0af678a` build installed successfully after unlocking the login
+keychain. Retrying NEK-7E33 exposed a separate pre-existing failure in decision
+history: the ticket's source still referenced tool receipts already evicted from
+the bounded receipt history. Recording the human reply rolled the command back
+with `Decision source needs successful scoped receipts`.
+
+Decision history now records the local action with an explicit unavailable-source
+marker and no source evidence when referenced receipts are no longer retained.
+Present receipts still require the correct workspace, connection, successful
+result and current grant where applicable, including when a missing receipt is
+mixed with an invalid one. Runtime tool and standing-work authorization are
+unchanged. A regression test reproduces the actual reply rollback and verifies
+that a later plan can be recorded without fabricating receipts.
