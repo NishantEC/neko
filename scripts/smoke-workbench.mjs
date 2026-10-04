@@ -15,6 +15,8 @@ const data = path.join(scratch, 'data');
 fs.mkdirSync(repo); fs.mkdirSync(data);
 const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
 git('init', '--quiet');
+fs.writeFileSync(path.join(repo, '.gitignore'), '.fixture-cache/\n');
+git('add', '.gitignore');
 git('-c', 'user.name=Neko Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture');
 const fixture = path.join(root, 'scripts/fixtures/codex-workbench.mjs');
 // Explicit opt-in only: this invokes an authenticated model and may use quota.
@@ -136,6 +138,8 @@ try {
   if (!live) {
     const parallelRepo = path.join(scratch,'parallel-repo'); fs.mkdirSync(parallelRepo);
     execFileSync('git',['-C',parallelRepo,'init','--quiet']);
+    fs.writeFileSync(path.join(parallelRepo,'.gitignore'),'.fixture-cache/\n');
+    execFileSync('git',['-C',parallelRepo,'add','.gitignore']);
     execFileSync('git',['-C',parallelRepo,'-c','user.name=Neko Test','-c','user.email=test@example.invalid','commit','--allow-empty','-qm','parallel']);
     const parallelWorkspace = await command({SaveWorkspace:{workspace:{id:'',name:'Parallel capacity',repository:parallelRepo,instructions:'Disposable fixture',away_enabled:false}}});
     const parallelWorkspaceId = parallelWorkspace.workspaces.find(w=>w.name==='Parallel capacity').id;
@@ -156,14 +160,14 @@ try {
     const rejected = await waitFor(id,'Failed');
     assert.ok(rejected.events.some(e => e.message.includes('Independent verification failed')));
     assert.match(rejected.result,/Broken builder output/);
-    assert.equal(rejected.events.filter(e => e.message.includes('Repair pass')).length, 1, 'Unchanged rejected output must stop after one repair');
+    assert.equal(rejected.events.filter(e => e.message.includes('Recovery pass')).length, 3, 'Unresolved recovery must stop after three supervised attempts');
     const repair = await command({CreateTask:{workspace_id:workspaceId,title:'Repair review feedback',goal:'REPAIR_REQUIRED COMMITTED_REPAIR: create and independently verify the requested file'}});
     const repairId = repair.tasks.at(-1).id;
     await waitFor(repairId,'AwaitingApproval');
     const repairSession = (await command('Snapshot')).task_sessions[repairId];
     await command({ApproveTask:{task_id:repairId}});
     const repaired = await waitFor(repairId,'ReadyForReview');
-    assert.equal(repaired.events.filter(e => e.message.includes('Repair pass')).length, 1);
+    assert.equal(repaired.events.filter(e => e.message.includes('Recovery pass')).length, 1);
     assert.equal((await command('Snapshot')).task_sessions[repairId], repairSession, 'Repair must resume the ticket session');
     assert.equal(fs.readFileSync(path.join(repaired.worktree,'neko-smoke.txt'),'utf8'),'Isolated task output\n');
     assert.match(repaired.result,/committed.txt/);
@@ -171,10 +175,42 @@ try {
     const stopRepairId = stopRepair.tasks.at(-1).id;
     await waitFor(stopRepairId,'AwaitingApproval');
     await command({ApproveTask:{task_id:stopRepairId}});
-    await waitSnapshot(s=>s.tasks.some(t=>t.id===stopRepairId && t.status==='Building' && t.events.some(e=>e.message.includes('Repair pass'))),'Repair did not start');
+    await waitSnapshot(s=>s.tasks.some(t=>t.id===stopRepairId && t.status==='Building' && t.events.some(e=>e.message.includes('Recovery pass'))),'Repair did not start');
     await command({CancelTask:{task_id:stopRepairId}});
     await waitFor(stopRepairId,'Cancelled');
-    console.log('Review repair reused the session and original diff base; unchanged failures stop and repair remains cancellable.');
+    console.log('Recovery reused the session and original diff base; repeated failures are bounded and recovery remains cancellable.');
+    for (const marker of ['ENVIRONMENT_RECOVERY','WORKER_ERROR','SCOUT_QUESTION']) {
+      const created = await command({CreateTask:{workspace_id:workspaceId,title:marker,goal:marker+': produce and verify the fixture output'}});
+      const recoveryId = created.tasks.at(-1).id;
+      await waitFor(recoveryId,'AwaitingApproval');
+      const savedRecoverySession = (await command('Snapshot')).task_sessions[recoveryId];
+      await command({ReplyToTask:{task_id:recoveryId,text:'Investigate the cause and fix it locally.'}});
+      const done = await waitFor(recoveryId,'ReadyForReview');
+      assert.equal((await command('Snapshot')).task_sessions[recoveryId], savedRecoverySession, marker+' discarded the saved agent session');
+      assert.ok(done.events.some(e=>e.role==='coordinator' && e.message.includes('Recovery pass')), marker+' bypassed supervision');
+    }
+    for (const marker of ['REVIEWER_MUTATES','REPAIR_REQUIRED COORDINATOR_MUTATES']) {
+      const created = await command({CreateTask:{workspace_id:workspaceId,title:marker,goal:marker+': produce and verify the fixture output'}});
+      const mutationId = created.tasks.at(-1).id;
+      await waitFor(mutationId,'AwaitingApproval');
+      await command({ReplyToTask:{task_id:mutationId,text:'Investigate the cause and fix it locally.'}});
+      const failed = await waitFor(mutationId,'Failed');
+      assert.ok(failed.events.some(e=>e.message.includes('changed repository source or Git state')), 'Mutation was accepted');
+    }
+    const decision = await command({CreateTask:{workspace_id:workspaceId,title:'User decision',goal:'REPAIR_REQUIRED REAL_DECISION'}});
+    const decisionId = decision.tasks.at(-1).id;
+    await waitFor(decisionId,'AwaitingApproval');
+      await command({ReplyToTask:{task_id:decisionId,text:'Investigate the cause and fix it locally.'}});
+    await waitSnapshot(s=>s.tasks.some(t=>t.id===decisionId && t.status==='AwaitingApproval' && t.events.some(e=>e.message.includes('Which deployment is in scope?'))),'Precise user question missing');
+    assert.ok((await request({Workbench:{ApproveTask:{task_id:decisionId}}})).Error, 'A pending question cannot be bypassed with approval');
+    const cancelRecovery = await command({CreateTask:{workspace_id:workspaceId,title:'Cancel supervisor',goal:'REPAIR_REQUIRED COORDINATOR_HOLD'}});
+    const cancelRecoveryId = cancelRecovery.tasks.at(-1).id;
+    await waitFor(cancelRecoveryId,'AwaitingApproval');
+      await command({ReplyToTask:{task_id:cancelRecoveryId,text:'Investigate the cause and fix it locally.'}});
+    await waitSnapshot(s=>s.tasks.some(t=>t.id===cancelRecoveryId && t.events.some(e=>e.role==='coordinator')),'Supervisor did not start');
+    await command({CancelTask:{task_id:cancelRecoveryId}});
+    await waitFor(cancelRecoveryId,'Cancelled');
+    console.log('Supervisor repaired setup without source changes, recovered worker/scout blockers, surfaced a real decision, rejected source mutations and remained cancellable.');
     for (const conflict of [false,true]) {
       const created = await command({CreateTask:{workspace_id:workspaceId,title:conflict?'Conflicting split':'Parallel split',goal:conflict?'SPLIT_CONFLICT':'Split into independent left and right files'}});
       const parentId = created.tasks.at(-1).id;

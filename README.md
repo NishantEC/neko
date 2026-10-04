@@ -39,10 +39,12 @@ a workspace.
    stay available on demand rather than becoming empty recurring checks.
 5. Keep **Plan only**, or explicitly allow low-risk local fixes. A read-only
    supervisor investigates, a builder uses an isolated Git worktree, and an
-   independent read-only reviewer checks the actual diff and executes checks.
-   Findings or missing evidence block the result from becoming ready for review.
-   Rejected findings get up to two local repair passes with fresh reviews;
-   unchanged rejected patches stop early with the worktree preserved.
+   independent reviewer checks the actual diff and executes checks. Authorized
+   builders and reviewers have full local filesystem access for dependencies,
+   caches and tests. The host rejects reviews that change source or Git state.
+   A fresh supervisor investigates worker errors and rejected checks, then
+   directs the same ticket agent through up to three recovery attempts or asks
+   one necessary question. Every repaired result needs a fresh passing review.
 
 Open the full app from the Dock, menu bar **Open Neko Workspace**, or the
 palette's **Open Neko Workspace** command. **Home** is a conversation with
@@ -130,11 +132,13 @@ models independently. Without it, the Codex default and local-provider choices
 remain available. Model selection changes future runs, not work in progress.
 Runs ignore global user config/rules
 and receive only a temporary Neko bridge, not upstream server credentials.
-Shell network access stays disabled; only the two capability-checked bridge
-tools are preapproved. Your global Codex configuration is not modified.
-**Filesystem read confidentiality between workspaces is not guaranteed** by
-the installed Codex sandbox. Local MCP executables run outside that sandbox
-and must be trusted as software.
+Read-only planning, chat and background checks keep their restricted profile.
+Authorized local execution uses full access, including shell networking for
+normal dependency setup. The two bridge tools still check scoped MCP grants.
+Your global Codex configuration is not modified. **Full-access agents are
+trusted local processes, without filesystem isolation.** Worktrees separate
+changes; before/after review snapshots detect source changes rather than
+preventing them. Local MCP executables must also be trusted as software.
 
 Historical Linear records, tasks and worktrees are preserved. Old polling and
 standing grants are disabled; reconnect with a user-added MCP server.

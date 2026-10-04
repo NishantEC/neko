@@ -1,16 +1,19 @@
 //! Isolated, ephemeral Codex executions owned by Neko.
 //!
-//! Isolation here means independent execution state and constrained writes,
-//! not confidentiality between workspaces: the legacy Codex sandbox modes
-//! permit reads outside the selected directory. Do not describe this runner
-//! as enforcing a filesystem read allowlist. Named permission profiles exist,
-//! but must pass an OS-level denied-read probe before replacing this policy.
+//! Isolation here means independent execution state. Writable runs have full
+//! local filesystem and shell network access, matching the underlying agent.
+//! This does not grant MCP tools or publication authority. Nonwritable runs
+//! retain their read-only permission profile and protected-folder denials,
+//! but may read outside the selected directory. This runner does not enforce
+//! a filesystem read allowlist or confidentiality between workspaces.
 //! `--ignore-user-config` and `--ignore-rules` also do not disable skill
 //! discovery. `skills.include_instructions=false` suppresses automatic skill
 //! instructions; Neko injects only explicit workspace activations. This is not
 //! a filesystem read privacy boundary.
-//! Read-only runs cannot create temporary files, including tool caches. A
-//! writable TMPDIR exception must not silently widen the review's policy.
+//! Read-only runs cannot create temporary files, including tool caches.
+//! Independent reviewers can use writable execution for tests/dependencies;
+//! their caller must compare host `capture_review_state` snapshots before
+//! accepting a review. That detects source changes; it is not a sandbox.
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -27,6 +30,8 @@ use std::time::{Duration, Instant};
 const MAX_PROMPT: usize = 256 * 1024;
 
 pub(crate) mod cli_workers;
+mod review_state;
+pub use review_state::{ReviewState, capture_review_state};
 const MAX_LINE: usize = 256 * 1024;
 const MAX_STDOUT: usize = 4 * 1024 * 1024;
 const MAX_STDERR: usize = 64 * 1024;
@@ -80,6 +85,8 @@ const EXTRACTION_DISABLED_FEATURES: &[&str] = &[
 pub struct RunSpec {
     pub directory: PathBuf,
     pub prompt: String,
+    /// Full local filesystem and shell network access; no extra MCP grants
+    /// or publication authority. False preserves the read-only sandbox.
     pub writable: bool,
     pub timeout: Duration,
     pub runtime: neko_protocol::workbench::AgentRuntime,
@@ -237,10 +244,16 @@ fn run_configured_session(
         command.arg("--ephemeral");
     }
     command.args(["--ignore-user-config", "--ignore-rules", "--skip-git-repo-check"]);
-    // Saved sessions and fresh runs use the same permission profile.
+    // This supported flag applies to both exec and exec resume (which has no
+    // --sandbox option). Do not also supply a named restricted profile: it
+    // would contradict full access or win during permission resolution.
     // Resume uses the process working directory rather than unsupported -C.
-    command.args(["-c", "default_permissions=\"neko\""]);
-    command.args(["-c", &permission_profile(spec.writable)]);
+    if spec.writable {
+        command.arg("--dangerously-bypass-approvals-and-sandbox");
+    } else {
+        command.args(["-c", "default_permissions=\"neko\""]);
+        command.args(["-c", &permission_profile()]);
+    }
     command
         .args([
             "-c",
@@ -297,7 +310,7 @@ fn run_configured_session(
     ] {
         command.env_remove(name);
     }
-    let home_scoped = privacy_guard(&mut command, &directory);
+    let home_scoped = !spec.writable && privacy_guard(&mut command, &directory);
 
     let mut pending = Vec::new();
     let mut answer = None;
@@ -649,15 +662,10 @@ const SANDBOX_DENIED_HOME_PATHS: &[&str] = &[
 ];
 const HOME_PRIVACY_NOTE: &str = "Your working folder is the user's whole home folder. Personal folders such as ~/Pictures, ~/Music, ~/Movies and app data in ~/Library are blocked; do not try to read them. Search inside the specific project folders instead of the whole home folder.";
 
-/// Inline TOML for `permissions.neko`: the built-in read-only or workspace
+/// Inline TOML for `permissions.neko`: the built-in read-only
 /// profile plus read denials for privacy-guarded folders.
-fn permission_profile(writable: bool) -> String {
-    let base = if writable { ":workspace" } else { ":read-only" };
+fn permission_profile() -> String {
     let mut entries = Vec::new();
-    if writable {
-        entries.push("\":tmpdir\"=\"read\"".to_owned());
-        entries.push("\":slash_tmp\"=\"read\"".to_owned());
-    }
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from).filter(|h| h.is_absolute()) {
         for relative in SANDBOX_DENIED_HOME_PATHS {
             let path = home.join(relative);
@@ -666,7 +674,7 @@ fn permission_profile(writable: bool) -> String {
             }
         }
     }
-    format!("permissions.neko={{extends=\"{base}\",filesystem={{{}}}}}", entries.join(","))
+    format!("permissions.neko={{extends=\":read-only\",filesystem={{{}}}}}", entries.join(","))
 }
 
 fn ripgrep_privacy_config() -> String {
@@ -730,6 +738,10 @@ fn git_command(directory: &Path) -> Command {
         command.env_remove(name);
     }
     command.env("GIT_TERMINAL_PROMPT", "0");
+    // Host observations must not refresh the index or fetch missing objects.
+    command.env("GIT_OPTIONAL_LOCKS", "0");
+    command.env("GIT_NO_LAZY_FETCH", "1");
+    command.env("GIT_NO_REPLACE_OBJECTS", "1");
     command
 }
 
@@ -1694,6 +1706,8 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{
             assert!(args.contains(&format!("features.{feature}=false")));
         }
         assert!(!args.contains("mcp_servers"));
+        assert!(args.contains("extends=\":read-only\""));
+        assert!(!args.contains("--dangerously-bypass-approvals-and-sandbox"));
         let (_temp, executable, spec) = fixture(
             r#"
 cat >/dev/null
@@ -1736,6 +1750,122 @@ sleep 10
         assert!(memories[0]["text"].as_str().unwrap().len() <= 500);
         assert!(fs::read_dir(scratch.path()).unwrap().next().is_none());
         eprintln!("LIVE_MEMORY_EXTRACTION_PASS {answer}");
+    }
+
+    /// Exercises the real resolved CLI, including changes of authority on one
+    /// saved session. Every requested write is inside disposable fixture dirs.
+    #[test]
+    #[ignore = "Opt-in authenticated Codex permission probe; consumes quota"]
+    fn live_codex_permissions_ephemeral_and_resume() {
+        let executable = resolve_codex().unwrap();
+        eprintln!("LIVE_PERMISSION_CLI {} {:?}", executable.display(), codex_version_label(&executable));
+        for args in [vec!["exec", "--dangerously-bypass-approvals-and-sandbox", "--help"], vec!["exec", "resume", "--dangerously-bypass-approvals-and-sandbox", "--help"]] {
+            assert!(Command::new(&executable).args(args).output().unwrap().status.success());
+        }
+        let task = TempDir::new().unwrap();
+        let external = TempDir::new().unwrap();
+        let directory = task.path().canonicalize().unwrap();
+        let cache = external.path().canonicalize().unwrap();
+        let source = directory.join("source.rs");
+        fs::write(&source, "original\n").unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut spec = RunSpec {
+            directory: directory.clone(), prompt: String::new(), writable: true,
+            timeout: Duration::from_secs(180),
+            runtime: neko_protocol::workbench::AgentRuntime {
+                provider: "codex".into(),
+                model: std::env::var("NEKO_LIVE_CODEX_MODEL").unwrap_or_default(),
+            },
+        };
+        let mut saved = None;
+        for (label, writable, session) in [
+            ("ephemeral-write", true, Session::Ephemeral),
+            ("fresh-readonly", false, Session::Start),
+            ("resume-write", true, Session::Resume(String::new())),
+            ("resume-readonly", false, Session::Resume(String::new())),
+        ] {
+            let session = if matches!(session, Session::Resume(_)) {
+                Session::Resume(saved.clone().expect("fresh run reports its session id"))
+            } else { session };
+            spec.writable = writable;
+            let command = if writable {
+                format!("printf writable > {}; printf cache > {}; /usr/bin/mktemp {}", shell_quote(&directory.join(label)), shell_quote(&cache.join(label)), shell_quote(&cache.join("temp.XXXXXX")))
+            } else {
+                format!("printf forbidden > {}", shell_quote(&source))
+            };
+            spec.prompt = format!("Permission regression probe in disposable fixture directories owned by this test. Run exactly this command ONCE using your shell tool: {command}\nThe write attempt is authorized solely to test the active OS sandbox; a permission denial is an expected successful test observation in read-only mode. Attempt the command even if you expect denial. Do not edit through another tool, request escalation, read other directories, or perform additional work. Finish with DONE after reporting the exit status.");
+            let transcript_offset = saved.as_deref().and_then(probe_session_file)
+                .and_then(|p| fs::metadata(p).ok()).map(|m| m.len() as usize).unwrap_or(0);
+            let mut events = Vec::new();
+            let answer = run_configured_session(&executable, &spec, None, &session, &cancel, |event| {
+                if let Some(id) = event.strip_prefix(SESSION_EVENT) { saved = Some(id.to_owned()); }
+                events.push(event);
+            }, false).unwrap_or_else(|e| panic!("{label}: {e}"));
+            let receipts: Vec<serde_json::Value> = events.iter().filter_map(|e| e.strip_prefix("VERIFICATION_COMMAND "))
+                .map(|json| serde_json::from_str(json).unwrap()).collect();
+            if writable {
+                assert_eq!(fs::read_to_string(directory.join(label)).unwrap(), "writable");
+                assert_eq!(fs::read_to_string(cache.join(label)).unwrap(), "cache");
+                assert!(fs::read_dir(&cache).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with("temp.")));
+                assert!(receipts.iter().any(|r| r["exit_code"] == 0), "{label}: no successful shell receipt: {events:?}");
+            } else {
+                assert_eq!(fs::read_to_string(&source).unwrap(), "original\n");
+                let receipt = receipts.iter().any(|r| r["exit_code"].as_i64().is_some_and(|c| c != 0) && r["command"].as_str().is_some_and(|c| c.contains("source.rs")));
+                // Codex 0.160 omits code-mode-host calls from exec JSONL. For
+                // this opt-in probe only, verify its persisted tool output,
+                // never the model's prose. Production receipts stay unchanged.
+                let persisted_denial = saved.as_deref().is_some_and(|id| probe_recorded_denial(id, &source, transcript_offset));
+                assert!(receipt || persisted_denial, "{label}: no host-observed denied shell attempt: {events:?}");
+            }
+            eprintln!("LIVE_PERMISSION_PASS {label}: {answer}");
+        }
+    }
+
+    fn probe_session_file(id: &str) -> Option<PathBuf> {
+        let home = std::env::var_os("CODEX_HOME").map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".codex")))?;
+        let suffix = format!("-{id}.jsonl");
+        let mut directories = vec![home.join("sessions")];
+        // Only locate this probe's exact session filename; never read others.
+        for _ in 0..4 {
+            let mut next = Vec::new();
+            for directory in directories {
+                for entry in fs::read_dir(directory).ok()?.flatten() {
+                    if entry.file_type().ok()?.is_dir() { next.push(entry.path()); }
+                    else if entry.file_name().to_string_lossy().ends_with(&suffix) { return Some(entry.path()); }
+                }
+            }
+            directories = next;
+        }
+        None
+    }
+
+    fn probe_recorded_denial(id: &str, source: &Path, offset: usize) -> bool {
+        let Some(path) = probe_session_file(id) else { return false };
+        let Ok(bytes) = fs::read(path) else { return false };
+        let Some(bytes) = bytes.get(offset..) else { return false };
+        let mut calls = std::collections::HashSet::new();
+        for line in bytes.split(|b| *b == b'\n') {
+            let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else { continue };
+            if value["type"] != "response_item" { continue; }
+            let payload = &value["payload"];
+            let Some(call_id) = payload["call_id"].as_str() else { continue };
+            if payload["type"] == "custom_tool_call" && payload["name"] == "exec"
+                && payload["input"].as_str().is_some_and(|input| input.contains(source.to_string_lossy().as_ref())) {
+                calls.insert(call_id.to_owned());
+            }
+            if payload["type"] == "custom_tool_call_output" && calls.contains(call_id) {
+                for item in payload["output"].as_array().into_iter().flatten() {
+                    let Some(text) = item["text"].as_str() else { continue };
+                    let Ok(result) = serde_json::from_str::<serde_json::Value>(text) else { continue };
+                    if result["exit_code"].as_i64().is_some_and(|c| c != 0)
+                        && result["output"].as_str().is_some_and(|s| s.contains("operation not permitted") || s.contains("Permission denied")) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     #[test]
@@ -1929,6 +2059,7 @@ printf '%s\n' '{"type":"turn.completed"}'
         }
         assert!(args.contains("extends=\":read-only\""), "{args}");
         assert!(args.contains("/Pictures\"=\"none\""), "privacy folders must be denied: {args}");
+        assert!(!args.contains("--dangerously-bypass-approvals-and-sandbox"));
         assert!(!events.is_empty());
     }
 
@@ -2311,8 +2442,8 @@ printf '%s\n' '{"type":"turn.completed"}'
         run_configured_session(&executable, &spec, None, &Session::Resume("0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000".into()), &AtomicBool::new(false), |_| {}, false).unwrap();
         let args: Vec<String> = fs::read_to_string(temp.path().join("args")).unwrap().lines().map(str::to_owned).collect();
         assert_eq!(&args[..2], ["exec", "resume"]);
-        assert!(args.contains(&"default_permissions=\"neko\"".to_owned()), "resume takes its permission profile from config");
-        assert!(args.iter().any(|arg| arg.contains("extends=\":workspace\"")), "resume retains write authority");
+        assert!(args.contains(&"--dangerously-bypass-approvals-and-sandbox".to_owned()), "resume has full local access");
+        assert!(!args.iter().any(|arg| arg.contains("permissions.neko") || arg.contains("default_permissions")));
         assert!(!args.iter().any(|a| a == "-s" || a == "-C"));
         assert!(args.contains(&"0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000".to_owned()));
 
@@ -2320,6 +2451,11 @@ printf '%s\n' '{"type":"turn.completed"}'
         run_configured_session(&executable, &spec, None, &Session::Ephemeral, &AtomicBool::new(false), |e| events.push(e), false).unwrap();
         assert!(fs::read_to_string(temp.path().join("args")).unwrap().lines().any(|a| a == "--ephemeral"));
         assert!(!events.iter().any(|e| e.starts_with(SESSION_EVENT)), "reviews never report a session");
+        spec.writable = false;
+        run_configured_session(&executable, &spec, None, &Session::Resume("0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000".into()), &AtomicBool::new(false), |_| {}, false).unwrap();
+        let args = fs::read_to_string(temp.path().join("args")).unwrap();
+        assert!(args.contains("extends=\":read-only\""));
+        assert!(!args.contains("--dangerously-bypass-approvals-and-sandbox"));
         assert!(run_configured_session(&executable, &spec, None, &Session::Resume("bad id;rm".into()), &AtomicBool::new(false), |_| {}, false).is_err());
     }
 
@@ -2339,9 +2475,25 @@ printf '%s' '{"type":"turn.completed"}'
             "Done"
         );
         let args = fs::read_to_string(temp.path().join("args")).unwrap();
-        assert!(args.contains("extends=\":workspace\""), "{args}");
-        assert!(args.contains("\":slash_tmp\"=\"read\""));
-        assert!(args.contains("\":tmpdir\"=\"read\""));
+        assert!(args.contains("--dangerously-bypass-approvals-and-sandbox"), "{args}");
+        assert!(!args.contains("permissions.neko") && !args.contains("default_permissions"));
+        assert!(!args.contains("workspace-write") && !args.contains("sandbox_workspace_write"));
+        for feature in AMBIENT_DISABLED_FEATURES {
+            assert!(args.contains(&format!("features.{feature}=false")));
+        }
+        assert!(args.contains("web_search=\"disabled\""));
+    }
+
+    #[test]
+    fn writable_extraction_is_rejected_before_launch_for_all_providers() {
+        let (temp, executable, mut spec) = fixture("touch spawned");
+        spec.writable = true;
+        for provider in ["codex", "claude", "opencode"] {
+            spec.runtime.provider = provider.into();
+            let err = run_configured_mode(&executable, &spec, None, &AtomicBool::new(false), |_| {}, true).unwrap_err();
+            assert!(err.contains("Extraction cannot receive write or tool authority"), "{err}");
+            assert!(!temp.path().join("spawned").exists());
+        }
     }
 
     #[test]

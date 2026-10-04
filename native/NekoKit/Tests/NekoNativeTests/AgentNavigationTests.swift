@@ -59,6 +59,13 @@ import NekoKit
         ])])
         XCTAssertNil(TicketPresentation.waitingReason(ticket))
     }
+    func testRecoverySupervisorQuestionIsVisibleAndNewPlanSupersedesIt() {
+        let question: JSONValue = .object(["role": .string("coordinator"), "message": .string("Needs your input before building: Which deployment?\nTried: inspected local configuration")])
+        let ticket: JSONValue = .object(["status": .string("AwaitingApproval"), "events": .array([question])])
+        XCTAssertEqual(TicketPresentation.waitingReason(ticket), "Needs your input: Which deployment?\nTried: inspected local configuration")
+        let planned: JSONValue = .object(["status": .string("AwaitingApproval"), "events": .array([question, .object(["role": .string("supervisor"), "message": .string("Plan ready.")])])])
+        XCTAssertNil(TicketPresentation.waitingReason(planned))
+    }
     func testQuestionAndNoWorkDoNotReadAsBuildablePlan() {
         for message in ["Needs your input before building: Which tenant?", "Nothing to build: Already fixed"] {
             let ticket: JSONValue = .object(["status": .string("AwaitingApproval"), "events": .array([.object(["role": .string("supervisor"), "message": .string(message)])])])

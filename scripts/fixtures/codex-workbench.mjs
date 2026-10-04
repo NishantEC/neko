@@ -8,7 +8,8 @@ import { randomUUID } from 'node:crypto';
 const args = process.argv.slice(2);
 assert.equal(args[0], 'exec');
 assert.ok(args.includes('--ignore-user-config'));
-assert.ok(args.includes('default_permissions="neko"'));
+const fullAccess = args.includes('--dangerously-bypass-approvals-and-sandbox');
+assert.equal(args.includes('default_permissions="neko"'), !fullAccess, 'Full access must not be overridden by a restricted profile');
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 assert.ok(args.includes('skills.include_instructions=false'), 'Neko must control injected skill instructions');
@@ -143,7 +144,20 @@ async function observeThroughBridge() {
 const scout = prompt.includes("Neko's scout");
 const supervisor = prompt.includes("Neko's supervisor");
 const review = prompt.includes("Neko's reviewer");
+const coordinator = prompt.includes("Neko's coordinator");
+if (coordinator) {
+  assert.ok(args.includes('--ephemeral'), 'Recovery supervisor is independent');
+  assert.equal(fullAccess, !prompt.includes('Phase: read-only planning'));
+  if (prompt.includes('COORDINATOR_HOLD')) await new Promise(resolve=>setTimeout(resolve,9000));
+  if (prompt.includes('COORDINATOR_MUTATES')) fs.writeFileSync('unexpected.txt', 'Supervisor changed source');
+  const decision = prompt.includes('REAL_DECISION')
+    ? {action:'ask_user',reason:'Inspected the available configuration; two deployments match.',question:'Which deployment is in scope?'}
+    : {action:'retry',reason:'The available repository conventions give a concrete recovery step.',instructions:'SUPERVISOR_RECOVERY: resolve the local test prerequisites and Broken builder output, preserve scope, run the regression check.'};
+  process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'agent_message',text:JSON.stringify(decision)}}) }\n${JSON.stringify({type:'turn.completed'})}\n`);
+  process.exit(0);
+}
 const splitter = prompt.includes("Neko's splitter");
+if (scout || supervisor || splitter || responsibility) assert.equal(fullAccess, false);
 if (responsibility || review) assert.ok(args.includes('--ephemeral'), 'Background checks and reviews must stay fresh');
 if (!args.includes('--ephemeral')) {
   // Session persistence is simulated; the real daemon must retain and resume
@@ -164,8 +178,14 @@ if (scout && fs.existsSync('neko-smoke.txt')) throw new Error('Scout changed sou
 const outputFile = prompt.match(/SUBTASK_FILE=([a-z]+\.txt)/)?.[1] || 'neko-smoke.txt';
 if (!responsibility && !scout && !supervisor && !review && prompt.includes('PARALLEL_HOLD')) await new Promise(resolve=>setTimeout(resolve,9000));
 if (!responsibility && !scout && !supervisor && !review) {
+  assert.equal(fullAccess, true, 'Authorized builder has full local access, including resume');
+  if (prompt.includes('WORKER_ERROR') && !prompt.includes('SUPERVISOR_RECOVERY')) throw new Error('Transient worker startup failure');
   const repair = prompt.includes('REPAIR_REQUIRED');
-  const receivedFinding = prompt.includes('The independent reviewer rejected the previous result.') && prompt.includes('Broken builder output');
+  if (prompt.includes('ENVIRONMENT_RECOVERY') && prompt.includes('SUPERVISOR_RECOVERY')) {
+    fs.mkdirSync('.fixture-cache', {recursive:true});
+    fs.writeFileSync('.fixture-cache/ready', 'setup complete');
+  }
+  const receivedFinding = prompt.includes('SUPERVISOR_RECOVERY') && prompt.includes('Broken builder output');
   if (prompt.includes('REPAIR_HOLD') && receivedFinding) await new Promise(resolve=>setTimeout(resolve,9000));
   fs.writeFileSync(outputFile, prompt.includes('BROKEN_BUILDER') || (repair && !receivedFinding) ? 'broken\n' : 'Isolated task output\n');
   if (prompt.includes('COMMITTED_REPAIR') && !fs.existsSync('committed.txt')) {
@@ -176,7 +196,10 @@ if (!responsibility && !scout && !supervisor && !review) {
 }
 let verdict;
 if (review) {
-  assert.ok(args.some(arg => arg.startsWith('permissions.neko={extends=":read-only"')), 'Repair reviews must retain the read-only sandbox');
+  assert.equal(fullAccess, true, 'Reviewer can write dependencies, caches and temp files');
+  if (prompt.includes('REVIEWER_MUTATES')) fs.writeFileSync(outputFile, 'reviewer replaced builder output\n');
+  fs.mkdirSync('.fixture-cache', {recursive:true});
+  fs.writeFileSync('.fixture-cache/test-output', 'ignored test output');
   const base = prompt.match(/Host-observed diff base: ([a-f0-9]+)/)?.[1] || 'HEAD';
   const files = [...new Set((execFileSync('git',['diff','--name-only',base],{encoding:'utf8'}) + execFileSync('git',['ls-files','--others','--exclude-standard'],{encoding:'utf8'})).trim().split('\n').filter(Boolean))];
   if (prompt.includes('COMMITTED_REPAIR')) assert.ok(files.includes('committed.txt'), 'Every review must include unchanged committed builder edits');
@@ -184,6 +207,10 @@ if (review) {
   const command = prompt.includes('PARENT_MISSING_CHECK') ? 'node unrelated-check' : 'node fixture-check';
   process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'command_execution',command,status:check.status===0?'completed':'failed',exit_code:check.status,aggregated_output:check.stdout+check.stderr}})}\n`);
   verdict = {passed:check.status===0,findings:check.status===0?[]:['Broken builder output'],files,tests:[command],summary:check.status===0?'Actual isolated files checked by independent child process':'Independent check failed'};
+  if (prompt.includes('ENVIRONMENT_RECOVERY') && !fs.existsSync('.fixture-cache/ready')) {
+    verdict.passed = false; verdict.findings = ['Missing test dependency'];
+  }
+  if (prompt.includes('REVIEWER_MUTATES')) { verdict.passed = true; verdict.findings = []; }
 }
 const text = responsibility ? JSON.stringify(await observeThroughBridge()) : supervisor ? JSON.stringify({
   action: prompt.includes('Sensitive fixture') ? 'ask_user' : 'prepare_fix',
@@ -193,7 +220,9 @@ const text = responsibility ? JSON.stringify(await observeThroughBridge()) : sup
   tests: ['node fixture-check'],
   sensitive_areas: prompt.includes('Sensitive fixture') ? ['authentication'] : [], uncertainties: [],
   plan: 'Add neko-smoke.txt with the exact requested text and verify its bytes.'
-}) : scout ? 'Plan: add the isolated smoke file, then verify its contents.'
+}) : scout ? (prompt.includes('SCOUT_QUESTION') && !prompt.includes('SUPERVISOR_RECOVERY')
+    ? 'QUESTION: Please investigate the local test setup for me.'
+    : 'Plan: add the isolated smoke file, then verify its contents.')
   : review ? JSON.stringify(verdict)
   : 'Created neko-smoke.txt in the task worktree.';
 process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text } })}\n`);

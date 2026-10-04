@@ -8,7 +8,7 @@ enum TicketPresentation {
         let decision = task["supervision"]
         if decision["action"].string == "AskUser" { return "Needs your input: " + decision["reason"].string }
         if decision["action"].string == "Skip" { return "Nothing to build: " + decision["reason"].string }
-        if let event = task["events"].array.last(where: { $0["role"].string == "supervisor" }) {
+        if let event = task["events"].array.last(where: { ["supervisor", "coordinator"].contains($0["role"].string) }) {
             let message = event["message"].string
             for prefix in ["Needs your input before building: ", "Nothing to build: "] where message.hasPrefix(prefix) {
                 return (prefix.hasPrefix("Needs") ? "Needs your input: " : "Nothing to build: ") + message.dropFirst(prefix.count)
