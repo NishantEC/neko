@@ -32,9 +32,13 @@ matching clones with an identical origin may reuse the single checkout already
 recorded for other tasks in this workspace. Different origins or multiple known
 copies remain ambiguous. The host saves the root and file evidence on the ticket;
 this discovery does not run repository code or change approval/sandbox policy.
-`neko-daemon::workbench` supervises up to three tasks globally and two per
-workspace without holding the
-database mutex during model/network calls. A two-second supervisor heartbeat
+`neko-daemon::workbench` claims every eligible ticket on each tick, without a
+fixed global or per-workspace worker cap. An active claim prevents duplicate
+workers for one ticket; dependency, approval and scope checks still apply.
+Checkout creation serializes only Git metadata setup per shared repository
+(including linked worktrees), with cancellable waiting. Model execution remains
+concurrent. Restarted split parents wait until every child has passed review.
+Model/network calls run outside the database mutex. A two-second supervisor heartbeat
 is separate from task progress; it does not claim the model made progress.
 
 The native main window (`native/NekoKit/Sources/NekoNative/NekoApp.swift`) uses a
@@ -97,6 +101,9 @@ entries, and displays real provider names; Neko does not independently fetch
 those providers' catalogs or import their credentials. Runs still use the Codex
 CLI with ephemeral configuration. Selection does not alter already-running
 work. The Home composer and main-window Settings → AI page both update it.
+The saved provider remains an explicit choice: Neko does not yet select or switch
+providers based on remaining quota. Worker concurrency is independent of account
+usage limits; starting another session does not reset those limits.
 A scoped, expiring capability in environment variables connects a temporary
 stdio bridge back to the daemon. Only `neko_list_tools` and `neko_call_tool`
 are enabled and preapproved. Upstream configurations and credentials are not

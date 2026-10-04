@@ -4,8 +4,11 @@ import fs from 'node:fs';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import readline from 'node:readline';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 const args = process.argv.slice(2);
-if (!args.includes('--ephemeral') || !args.includes('--ignore-user-config')) process.exit(2);
+assert.equal(args[0], 'exec');
+assert.ok(args.includes('--ignore-user-config'));
+assert.ok(args.includes('default_permissions="neko"'));
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 assert.ok(args.includes('skills.include_instructions=false'), 'Neko must control injected skill instructions');
@@ -13,7 +16,8 @@ for (const feature of ['apps','browser_use','computer_use','plugins','remote_plu
 if (prompt.startsWith('Extract bounded memory proposals')) {
   for (const feature of ['shell_tool', 'unified_exec', 'view_image', 'image_generation', 'skill_search', 'tool_suggest', 'sleep_tool', 'apps', 'browser_use', 'computer_use', 'remote_plugin', 'plugins', 'goals', 'hooks', 'workspace_dependencies', 'code_mode_host', 'multi_agent', 'memories', 'skill_mcp_dependency_install']) assert.ok(args.includes(`features.${feature}=false`), `Extraction must disable ${feature}`);
   assert.ok(args.includes('features.skip_host_skill_discovery=true'));
-  assert.ok(args.includes('read-only'));
+  assert.ok(args.some(arg => arg.startsWith('permissions.neko={extends=":read-only"')));
+  assert.ok(args.includes('--ephemeral'));
   assert.ok(!args.some(arg => arg.startsWith('mcp_servers.')), 'Learning must never get an MCP bridge');
   assert.deepEqual(fs.readdirSync(process.cwd()), [], 'Learning requires an independent empty scratch directory');
   const probe = prompt.includes('MEMORY_LEARNING_PROBE');
@@ -129,6 +133,15 @@ const scout = prompt.includes("Neko's scout");
 const supervisor = prompt.includes("Neko's supervisor");
 const review = prompt.includes("Neko's reviewer");
 const splitter = prompt.includes("Neko's splitter");
+if (responsibility || review) assert.ok(args.includes('--ephemeral'), 'Background checks and reviews must stay fresh');
+if (!args.includes('--ephemeral')) {
+  // Session persistence is simulated; the real daemon must retain and resume
+  // this id between planning and building. The fixture never contacts a model.
+  const resumed = args[1] === 'resume';
+  const ids = args.filter(arg => /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(arg));
+  assert.equal(ids.length, resumed ? 1 : 0);
+  process.stdout.write(`${JSON.stringify({type:'thread.started',thread_id:resumed ? ids[0] : randomUUID()})}\n`);
+}
 if (prompt.includes('SKILL_ROLE_CHECK')) assert.ok(prompt.includes('SKILL_PROBE_SENTINEL'), 'Enabled skill never reached ticket role');
 if (splitter) {
   const conflict = prompt.includes('SPLIT_CONFLICT');

@@ -21,6 +21,7 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 const MAX_PROMPT: usize = 256 * 1024;
@@ -457,6 +458,39 @@ fn create_worktree_in(repository: &Path, task_id: &str, root: &Path) -> Result<P
     create_worktree_in_cancellable(repository, task_id, root, &AtomicBool::new(false))
 }
 
+/// Git enumerates sibling worktree metadata while adding a checkout. Concurrent
+/// adds can observe an unfinished sibling before its `commondir` exists. Share
+/// a lock across all linked checkouts, but not across unrelated repositories.
+fn checkout_lock(repository: &Path, cancel: &AtomicBool) -> Result<Arc<Mutex<()>>, String> {
+    let common = git_output(repository, &["rev-parse", "--path-format=absolute", "--git-common-dir"], cancel)?;
+    let common = Path::new(common.trim()).canonicalize()
+        .map_err(|e| format!("Cannot resolve shared Git directory: {e}"))?;
+    type Locks = std::collections::BTreeMap<PathBuf, Weak<Mutex<()>>>;
+    static LOCKS: OnceLock<Mutex<Locks>> = OnceLock::new();
+    let mut locks = LOCKS.get_or_init(Mutex::default).lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(&common).and_then(Weak::upgrade) {
+        return Ok(lock);
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(common, Arc::downgrade(&lock));
+    Ok(lock)
+}
+
+fn wait_for_checkout<'a>(lock: &'a Mutex<()>, cancel: &AtomicBool) -> Result<std::sync::MutexGuard<'a, ()>, String> {
+    loop {
+        if cancel.load(Ordering::Acquire) {
+            return Err("Task cancelled".into());
+        }
+        match lock.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+}
+
 fn create_worktree_in_cancellable(
     repository: &Path,
     task_id: &str,
@@ -478,6 +512,8 @@ fn create_worktree_in_cancellable(
     let repository = repository
         .canonicalize()
         .map_err(|e| format!("Repository unavailable: {e}"))?;
+    let checkout = checkout_lock(&repository, cancel)?;
+    let _checkout = wait_for_checkout(&checkout, cancel)?;
     if git_output(&repository, &["rev-parse", "--is-inside-work-tree"], cancel)?.trim() != "true" {
         return Err("Choose a non-bare Git repository".into());
     }
@@ -2113,6 +2149,57 @@ printf '%s\n' '{"type":"turn.completed"}'
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8(output.stdout).unwrap()
+    }
+
+    #[test]
+    fn concurrent_tickets_can_create_worktrees_from_the_same_repository() {
+        let temp = TempDir::new().unwrap();
+        let repo = temp.path().join("repository");
+        fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["-c", "user.name=Neko Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture"]);
+        let root = temp.path().join("worktrees");
+        let linked = create_worktree_in(&repo, "linked", &root).unwrap();
+        let cancel = AtomicBool::new(false);
+        let primary_lock = checkout_lock(&repo, &cancel).unwrap();
+        let linked_lock = checkout_lock(&linked, &cancel).unwrap();
+        assert!(Arc::ptr_eq(&primary_lock, &linked_lock));
+        let barrier = std::sync::Barrier::new(12);
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..12).map(|i| {
+                let (repo, root, barrier) = (if i % 2 == 0 { &repo } else { &linked }, &root, &barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    create_worktree_in(repo, &format!("parallel-{i}"), root)
+                })
+            }).collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect::<Vec<_>>()
+        });
+        let errors: Vec<_> = results.iter().filter_map(|r| r.as_ref().err()).collect();
+        assert!(errors.is_empty(), "Concurrent checkout errors: {errors:?}");
+        for path in results.into_iter().map(Result::unwrap) {
+            assert_eq!(git(&path, &["status", "--porcelain"]), "");
+        }
+    }
+
+    #[test]
+    fn cancellation_interrupts_waiting_for_checkout_metadata() {
+        let lock = Mutex::new(());
+        let held = lock.lock().unwrap();
+        let cancel = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            let (done, result) = std::sync::mpsc::channel();
+            let (lock, cancel) = (&lock, &cancel);
+            scope.spawn(move || {
+                let result = wait_for_checkout(lock, cancel).map(|_| ());
+                done.send(result).unwrap();
+            });
+            assert!(result.recv_timeout(Duration::from_millis(40)).is_err(), "checkout must wait while another setup owns the metadata");
+            cancel.store(true, Ordering::Release);
+            let outcome = result.recv_timeout(Duration::from_secs(1));
+            drop(held);
+            assert_eq!(outcome.unwrap(), Err("Task cancelled".into()));
+        });
     }
 
     #[test]
