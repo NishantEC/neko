@@ -18,7 +18,9 @@ pub(super) fn reconcile(state: &mut Snapshot) {
         if matches!(
             parent.status,
             TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Completed
-        ) {
+        ) || state.task_read_only.contains(&parent.id)
+            || state.task_replies.get(&parent.id).is_some_and(|r| !r.handled)
+        {
             continue;
         }
         let ids: Vec<_> = split
@@ -88,6 +90,9 @@ impl Controller {
                 .iter_mut()
                 .find(|s| s.parent_id == task.id)
                 .ok_or("Split missing")?;
+            if split.approved {
+                return Err("Approved subtasks must retain their identities and evidence".into());
+            }
             split.subtasks = plans;
             split.base = Some(base.into());
             let t = state

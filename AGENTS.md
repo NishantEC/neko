@@ -22,7 +22,7 @@ window; the hotkey remains a separate palette, dismissed with native
 Native work uses `neko-protocol::workbench`, daemon-owned bounded SQLite
 snapshots in `neko-core::workbench`, the daemon's `workbench` supervisor, and
 `native_runner` ephemeral Codex CLI processes. A scout plans read-only,
-explicit approval allows an isolated-worktree build, and a
+explicit approval or a direct human work request allows an isolated-worktree build, and a
 read-only reviewer returns a result for human review. No publication occurs.
 Every eligible ticket starts its own worker on the next two-second supervisor
 tick, without a fixed global or workspace cap. Active claims prevent duplicate
@@ -43,15 +43,27 @@ security boundary. Task worktrees are preserved, including failed work.
 
 Tickets are agents (2026-10-03). Each ticket opens as a conversation
 (`TicketThread.swift`) and `ReplyToTask` hands your reply to its agent:
-waiting/stopped/done tickets re-plan, ready-for-review goes back to
-building, running work reads it next step. Planning and building continue
+replies re-plan in the preserved worktree, including review feedback. A new reply
+invalidates the old claim and cancels any active worker before admitting another
+phase. A tool-free intent call in an empty scratch directory receives only the
+unread human messages, one at a time in order: a direct work request authorizes local continuation,
+questions or no-change instructions persist a read-only restriction, and factual
+context preserves the existing authority. Malformed/unavailable interpretation
+fails read-only. Durable reply revisions prevent stale results, duplicate
+interpretation, rapid clarifications swallowing unread restrictions, and old notes
+overriding a newer Start/Approve action. Source
+text never enters this interpreter. Planning and building continue
 one saved Codex session per ticket (`task_sessions`, `exec resume`, sandbox
 via `-c sandbox_mode`); reviewers are always fresh and ephemeral; a session
 that can't resume falls back to a fresh start from the ticket history.
 Codex exec sessions did not appear in the Codex app's thread list when
 checked. The agent decides the next move: a supervisor `ask_user`/`skip` or a
 scout's closing `QUESTION:` line waits for you; a fix builds only when you
-started the ticket (`StartTask`, drag to Working) or allow starting.
+started the ticket (`StartTask`, drag to Working), directly requested local work
+in its chat, or allow starting. Directly requested work uses the scout instead of
+unattended source triage; missing reproduction or tests become investigation
+steps, not automatic questions. Unattended watch policy, tool grants, reviewer
+sandbox and publication boundaries are unchanged.
 Daemon restarts resume interrupted work up to twice. Repository discovery
 matches whole words and ignores generic names (`init`, `web`, ...).
 

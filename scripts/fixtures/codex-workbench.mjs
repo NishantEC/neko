@@ -13,6 +13,17 @@ let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 assert.ok(args.includes('skills.include_instructions=false'), 'Neko must control injected skill instructions');
 for (const feature of ['apps','browser_use','computer_use','plugins','remote_plugin','multi_agent','hooks','workspace_dependencies','skill_mcp_dependency_install']) assert.ok(args.includes(`features.${feature}=false`), `Ambient ${feature} bypasses Neko authority`);
+if (prompt.startsWith("Classify the user's latest ticket message.")) {
+  for (const feature of ['shell_tool','unified_exec','view_image','code_mode_host']) assert.ok(args.includes(`features.${feature}=false`));
+  assert.ok(args.includes('--ephemeral'));
+  assert.ok(!args.some(arg => arg.startsWith('mcp_servers.')), 'Reply interpretation has no tools');
+  assert.deepEqual(fs.readdirSync(process.cwd()), [], 'Reply interpretation uses an empty scratch folder');
+  const message = JSON.parse(prompt.split('User message (JSON string): ')[1]);
+  const intent = message === 'Investigate the cause and fix it locally.' ? 'work'
+    : message === 'Explain the cause only. Do not change anything.' ? 'read_only' : 'context';
+  process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'agent_message',text:JSON.stringify({intent})}})}\n${JSON.stringify({type:'turn.completed'})}\n`);
+  process.exit(0);
+}
 if (prompt.startsWith('Extract bounded memory proposals')) {
   for (const feature of ['shell_tool', 'unified_exec', 'view_image', 'image_generation', 'skill_search', 'tool_suggest', 'sleep_tool', 'apps', 'browser_use', 'computer_use', 'remote_plugin', 'plugins', 'goals', 'hooks', 'workspace_dependencies', 'code_mode_host', 'multi_agent', 'memories', 'skill_mcp_dependency_install']) assert.ok(args.includes(`features.${feature}=false`), `Extraction must disable ${feature}`);
   assert.ok(args.includes('features.skip_host_skill_discovery=true'));

@@ -751,10 +751,10 @@ pub fn diagnostics(data_dir: &Path) -> neko_protocol::agent_models::DiagnosticsR
 
 /// A private, empty working folder removed on drop, so no project's
 /// instructions or settings join a discovery or check.
-struct Scratch(PathBuf);
+pub(crate) struct Scratch(pub(crate) PathBuf);
 
 impl Scratch {
-    fn new(prefix: &str) -> Result<Self, String> {
+    pub(crate) fn new(prefix: &str) -> Result<Self, String> {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let path = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()));
         std::fs::create_dir(&path).map_err(|e| format!("Couldn’t create a scratch folder: {e}"))?;

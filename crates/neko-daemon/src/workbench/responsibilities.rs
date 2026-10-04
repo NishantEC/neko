@@ -20,6 +20,7 @@ pub(super) struct RunAuthority {
     source: Option<SourceEvidence>,
     task: Option<String>,
     automatic_task: Option<Task>,
+    reply_revision: Option<String>,
 }
 fn same_responsibility(a: &Responsibility, b: &Responsibility) -> bool {
     a.id == b.id
@@ -57,6 +58,7 @@ impl RunAuthority {
             source: None,
             task: None,
             automatic_task: None,
+            reply_revision: None,
         };
         if !authority.valid(state) {
             return Err("Run tool scope is paused, unavailable, or changed".into());
@@ -108,6 +110,7 @@ impl RunAuthority {
             };
         let mut authority = Self::new(state, &task.workspace_id, connections, responsibility)?;
         authority.task = Some(task.id.clone());
+        authority.reply_revision = state.task_replies.get(&task.id).map(|r| r.revision.clone());
         authority.source = source.cloned();
         // AwaitingApproval can enter a run only through standing permission.
         // An already-Building task was explicitly approved by the user.
@@ -124,6 +127,7 @@ impl RunAuthority {
     }
     pub(super) fn valid(&self, state: &Snapshot) -> bool {
         state.agent_profiles.revision == self.profile_revision
+            && self.reply_is_current(state)
             && state.workspaces.iter().any(|w| w.id == self.workspace)
             && self.connections.iter().all(|id| {
                 state.mcp.connections.iter().any(|c| {
@@ -196,6 +200,12 @@ impl RunAuthority {
                         && current.eligible == source.eligible
                 })
             })
+    }
+
+    pub(super) fn reply_is_current(&self, state: &Snapshot) -> bool {
+        self.task.as_ref().is_none_or(|id| {
+            state.task_replies.get(id).map(|r| &r.revision) == self.reply_revision.as_ref()
+        })
     }
 }
 impl Controller {
@@ -818,6 +828,7 @@ mod tests {
             let task_claim = TaskClaim {
                 task: state.tasks[1].clone(),
                 authority: authority.clone(),
+                read_only_reply: false,
             };
             match revoke {
                 0 => state.mcp.responsibilities[0].prepare_low_risk = false,

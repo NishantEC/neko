@@ -52,7 +52,14 @@ the current reply and sends. **All agents**
 keeps List and Board views. Each ticket opens its own full-page conversation;
 the native sidebar shows the five newest agents in Needs you, Working and Recent.
 Reply drafts and the return filter survive switching agents. Open a chat to
-approve, stop, retry or reply. Questions and no-work decisions wait for a reply;
+approve, stop, retry or reply. A ticket reply such as “investigate and fix it”
+authorizes scoped local work without another approval click. An explanation-only
+request stays read-only, including later factual clarifications, until you ask
+for changes or explicitly start the ticket. A new reply stops the current run
+and re-plans in its preserved worktree. Agents investigate missing reproduction
+steps and tests themselves; they ask for decisions or access they cannot obtain.
+Unattended watches keep their existing low-risk approval rules.
+Questions and no-work decisions wait for a reply;
 Accept locally marks a reviewed result accepted without applying or publishing it. **Propose parallel subtasks**
 on an awaiting plan generates two or three scoped proposals for your approval.
 Approved children run in isolated worktrees, then integrate into the parent task worktree for a final independent
