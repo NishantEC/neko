@@ -150,6 +150,14 @@ allows a builder. A separate
 read-only reviewer must return a structured passing verdict, no findings,
 complete host-observed changed-file coverage, and successful command receipts
 for its checks before the result becomes ready for human review.
+Rejected structured findings return to the same saved builder session for up to
+two repair passes per worker. Each pass gets a fresh read-only reviewer and the
+original diff base. An unchanged rejected patch stops early; malformed verdicts,
+unproven success and scope escapes remain failures. The original captured
+authority guards every run and commit, including cancellation, newer replies,
+standing grants and budgets. Split parents never use this builder repair loop.
+Builders receive their original checkout as a read-only reference for local
+dependency setup; preparing tests must stay within their existing sandbox.
 `decomposition` validates bounded two/three-subtask proposals. Explicit approval
 creates ordinary child tickets, sharing the same scheduler limits. Dependencies
 receive earlier verified patches in separate scopes. The daemon integrates

@@ -18,6 +18,8 @@ mod scheduled_plans;
 mod splits;
 #[path = "workbench/replies.rs"]
 mod replies;
+#[path = "workbench/review_repair.rs"]
+mod review_repair;
 
 struct TaskClaim {
     task: Task,
@@ -787,234 +789,256 @@ impl Controller {
         } else {
             native_runner::task_patch_scoped(&directory, &base, &inherited, cancel)?
         };
-        let result = if !planning && split.is_some_and(|s| s.approved && !s.integrated) {
-            self.integrate_split(split.unwrap(), &directory, cancel, authority)?
-        } else {
-            self.check_budget(&task.id)?;
-            let direction = if direct_work {
-                "The host recognized the user's direct request to investigate and carry out local work on this ticket. Unattended-watch triage rules do not apply to this request. A missing reproduction or regression test is work for you to plan and implement, not something to hand back to the user. During read-only planning, plan a bounded investigation and fix; during building, carry it out in the isolated worktree. Choose routine technical details from repository conventions. Ask only for an actual user-owned decision or inaccessible information after trying the available repository and scoped tools."
-            } else if claim.read_only_reply {
-                "The user's latest request is read-only. Answer their question or give the requested plan. No local changes are authorized by this message."
-            } else { "" };
-            let spec = native_runner::RunSpec {
-                directory: directory.clone(),
-                prompt: format!("{}\n{direction}", prompt(
-                    workspace,
-                    task,
-                    if planning && split.is_some_and(|s| !s.approved) {
-                        "splitter"
-                    } else {
-                        role
-                    },
-                    &memory,
-                )),
-                writable: !planning,
-                timeout: Duration::from_secs(if planning { 600 } else { 1800 }),
-                runtime: snapshot.agent_runtime.clone(),
-            };
-            // Planning and building continue the ticket's own agent session,
-            // so it remembers what it already investigated and your replies.
-            let session = if native_runner::supports_sessions(&snapshot.agent_runtime) {
-                match snapshot.task_sessions.get(&task.id) {
-                    Some(id) => native_runner::Session::Resume(id.clone()),
-                    None => native_runner::Session::Start,
-                }
+        // Keep the original diff base and captured authority for every repair.
+        // A repair is part of this worker, never a newly authorized scheduler claim.
+        let mut attempt_task = task.clone();
+        let mut repairs = review_repair::RepairBudget::default();
+        loop {
+            let task = &attempt_task;
+            let result = if !planning && split.is_some_and(|s| s.approved && !s.integrated) {
+                self.integrate_split(split.unwrap(), &directory, cancel, authority)?
             } else {
-                native_runner::Session::Ephemeral
-            };
-            let on_event = |event: String| {
-                if let Some(id) = event.strip_prefix(native_runner::SESSION_EVENT) {
-                    let id = id.to_owned();
-                    let _ = self.commit_authorized(authority, |s| {
-                        s.task_sessions.insert(task.id.clone(), id);
-                        Ok(())
-                    });
-                    return;
-                }
-                let usage = event.starts_with("USAGE ");
-                let _ = self.update_task_authorized(&task.id, authority, |t| {
-                    store::append_event(t, role, &event)
-                });
-                if usage { self.stop_if_over_budget(&task.id, cancel); }
-            };
-            let started = std::time::Instant::now();
-            match self.run_native_session(&spec, &session, &store::new_id(), authority, cancel, &on_event) {
-                // A saved session that can't be continued (expired, removed,
-                // or from another Codex) falls back to a fresh agent that
-                // reads the ticket's history from its prompt.
-                Err(error)
-                    if matches!(session, native_runner::Session::Resume(_))
-                        && !cancel.load(Ordering::SeqCst)
-                        && started.elapsed() < Duration::from_secs(45) =>
-                {
-                    self.commit_authorized(authority, |s| {
-                        s.task_sessions.remove(&task.id);
-                        if let Some(t) = s.tasks.iter_mut().find(|t| t.id == task.id) {
-                            store::append_event(t, "system", &format!("Couldn’t continue the saved session ({}); starting fresh from the ticket’s history.", error.chars().take(200).collect::<String>()));
-                        }
-                        Ok(())
-                    })?;
-                    self.run_native_session(&spec, &native_runner::Session::Start, &store::new_id(), authority, cancel, &on_event)?
-                }
-                other => other?,
-            }
-        };
-        if planning {
-            if split.is_some_and(|s| !s.approved) {
-                return self.save_split_proposal(task, &result, &base, authority, &snapshot);
-            }
-            // The next scheduler claim checks the latest grant in the same
-            // transaction that authorizes the build, never a stale read here.
-            self.commit_phase_authorized(authority, Some(&snapshot), |snapshot| {
-                let current = snapshot.tasks.iter_mut().find(|t| t.id == task.id).ok_or("Task no longer exists")?;
-                if replies::latest(current) != replies::latest(task) {
-                    current.status = TaskStatus::Queued;
-                    store::append_event(current, "system", "A newer reply arrived. Reading it before deciding whether to build.");
-                    return Ok(());
-                }
-                let started_by_you = snapshot.start_when_planned.contains(&task.id);
-                let t = snapshot
-                    .tasks
-                    .iter_mut()
-                    .find(|t| t.id == task.id)
-                    .ok_or("Task no longer exists")?;
-                t.updated_at_ms = store::now_ms();
-                if supervised {
-                    match supervision::parse_decision(&result) {
-                        Ok(decision) => {
-                            t.plan = decision.plan.clone();
-                            store::append_event(t, "supervisor", &format!("Decision: {:?}; risk: {:?}. {}", decision.action, decision.risk, decision.reason));
-                            t.supervision = Some(decision);
-                        }
-                        Err(error) => {
-                            t.plan = result;
-                            t.supervision = None;
-                            store::append_event(t, "supervisor", &error);
-                        }
-                    }
-                } else { t.plan = result; }
-                t.status = TaskStatus::AwaitingApproval;
-                store::append_event(
-                    t,
-                    "supervisor",
-                    if supervised {
-                        "Investigation complete. Only eligible low-risk assigned bugs can proceed under the standing responsibility; other work requires your decision."
-                    } else {
-                        "Plan ready."
-                    },
-                );
-                // The agent decides: a question or "nothing to fix" waits for
-                // you; a fix builds when you started it or allow starting.
-                let waiting = match t.supervision.as_ref().map(|d| (d.action.clone(), d.reason.clone())) {
-                    Some((neko_protocol::workbench::SupervisorAction::AskUser, reason)) => Some(format!("Needs your input before building: {reason}")),
-                    Some((neko_protocol::workbench::SupervisorAction::Skip, reason)) => Some(format!("Nothing to build: {reason}")),
-                    _ => plan_question(&t.plan).map(|q| format!("Needs your input before building: {q}")),
-                };
-                if let Some(message) = waiting {
-                    store::append_event(t, "supervisor", &message);
-                    if started_by_you {
-                        // Keep your go-ahead: once you answer and the plan is a fix, it builds.
-                        snapshot.start_when_planned.insert(task.id.clone());
-                    }
-                } else if start_without_approval {
-                    t.status = TaskStatus::Building;
-                    store::append_event(t, "supervisor", "Started without asking, as your settings allow. It works in its own copy; nothing is pushed or published.");
-                } else if started_by_you {
-                    t.status = TaskStatus::Building;
-                    store::append_event(t, "user", "You started this ticket, so the plan goes straight to building. It works in its own copy; nothing is pushed or published.");
-                }
-                Ok(())
-            })?;
-        } else {
-            self.update_task_authorized(&task.id, authority, |t| {
-                t.result = result.clone();
-                t.status = TaskStatus::Reviewing;
-            })?;
-            if !inherited.is_empty()
-                && native_runner::task_patch_scoped(&directory, &base, &inherited, cancel)?
-                    != inherited_evidence
-            {
-                return Err("Builder changed a dependency's files outside its approved subtask scope; worktree preserved".into());
-            }
-            let mut review_task = task.clone();
-            review_task.result = result;
-            // Re-read activation and hashes after the writable run.
-            let mut memory = neko_core::agent_profiles::context_about(&snapshot, Some(&workspace.id), Some(&format!("{} {}", task.title, task.goal)));
-        memory.push_str(&decision_context::context_about(&snapshot, &workspace.id, Some(&task.id), &format!("{} {}", task.title, task.goal)));
-            memory.push_str(&neko_core::skills::instructions(
-                &*self.db.lock().map_err(|_| "Skill storage unavailable")?,
-                &skill_workspaces,
-                Some(&workspace.id),
-            )?);
-            let changed = native_runner::changed_files(
-                &directory,
-                split.and_then(|s| s.base.as_deref()).unwrap_or(&base),
-                cancel,
-            )?;
-            let mut required_checks = task
-                .supervision
-                .as_ref()
-                .map(|s| s.tests.clone())
-                .unwrap_or_default();
-            if let Some(split) = split {
-                required_checks.extend(split.subtasks.iter().flat_map(|p| p.tests.clone()));
-            }
-            required_checks.sort();
-            required_checks.dedup();
-            let mut receipts = Vec::new();
-            self.check_budget(&task.id)?;
-            let review = self.run_native(
-                &native_runner::RunSpec {
-                    directory,
-                    prompt: format!("{}\nHost-observed diff base: {}\nHost-observed changed files (verify every file, including committed edits and untracked additions): {}\nInherited dependency files: {:?}\nRequired approved checks (execute every command exactly and report it in tests; if blocked, fail): {:?}", prompt(workspace, &review_task, "reviewer", &memory), split.and_then(|s| s.base.as_deref()).unwrap_or(&base), changed.join(", "), inherited, required_checks),
-                    writable: false,
-                    timeout: Duration::from_secs(600),
+                self.check_budget(&task.id)?;
+                let direction = if direct_work {
+                    "The host recognized the user's direct request to investigate and carry out local work on this ticket. Unattended-watch triage rules do not apply to this request. A missing reproduction or regression test is work for you to plan and implement, not something to hand back to the user. During read-only planning, plan a bounded investigation and fix; during building, carry it out in the isolated worktree. Choose routine technical details from repository conventions. Ask only for an actual user-owned decision or inaccessible information after trying the available repository and scoped tools."
+                } else if claim.read_only_reply {
+                    "The user's latest request is read-only. Answer their question or give the requested plan. No local changes are authorized by this message."
+                } else { "" };
+                let spec = native_runner::RunSpec {
+                    directory: directory.clone(),
+                    prompt: format!("{}\n{direction}\nOriginal checkout (read-only reference for local toolchain and dependency setup): {task_root}. This isolated worktree may lack ignored dependencies. Prepare test prerequisites from repository conventions and available offline caches within the existing sandbox. Keep all writes in this task worktree; never mutate shared dependencies or expand permissions.\n{}", prompt(
+                        workspace,
+                        task,
+                        if planning && split.is_some_and(|s| !s.approved) {
+                            "splitter"
+                        } else {
+                            role
+                        },
+                        &memory,
+                    ), repairs.instruction()),
+                    writable: !planning,
+                    timeout: Duration::from_secs(if planning { 600 } else { 1800 }),
                     runtime: snapshot.agent_runtime.clone(),
-                },
-                &store::new_id(),
-                &authority,
-                cancel,
-                |event| {
-                    if event.starts_with("VERIFICATION_COMMAND ") { receipts.push(event.clone()); }
+                };
+                // Planning and building continue the ticket's own agent session,
+                // so it remembers what it already investigated and your replies.
+                let session_state = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
+                let session = if native_runner::supports_sessions(&snapshot.agent_runtime) {
+                    match session_state.task_sessions.get(&task.id) {
+                        Some(id) => native_runner::Session::Resume(id.clone()),
+                        None => native_runner::Session::Start,
+                    }
+                } else {
+                    native_runner::Session::Ephemeral
+                };
+                let on_event = |event: String| {
+                    if let Some(id) = event.strip_prefix(native_runner::SESSION_EVENT) {
+                        let id = id.to_owned();
+                        let _ = self.commit_authorized(authority, |s| {
+                            s.task_sessions.insert(task.id.clone(), id);
+                            Ok(())
+                        });
+                        return;
+                    }
                     let usage = event.starts_with("USAGE ");
-                    let _ =
-                        self.update_task_authorized(&task.id, authority, |t| store::append_event(t, "reviewer", &event));
+                    let _ = self.update_task_authorized(&task.id, authority, |t| {
+                        store::append_event(t, role, &event)
+                    });
                     if usage { self.stop_if_over_budget(&task.id, cancel); }
-                },
-            )?;
-            self.update_task_authorized(&task.id, authority, |t| {
-                t.result.push_str("\n\nIndependent review:\n");
-                t.result.push_str(&review);
-            })?;
-            let mut allowed = task
-                .supervision
-                .as_ref()
-                .map(|s| s.files.clone())
-                .unwrap_or_default();
-            allowed.extend(inherited);
-            if let Some(split) = split {
-                allowed.extend(split.subtasks.iter().flat_map(|p| p.files.clone()));
+                };
+                let started = std::time::Instant::now();
+                match self.run_native_session(&spec, &session, &store::new_id(), authority, cancel, &on_event) {
+                    // A saved session that can't be continued (expired, removed,
+                    // or from another Codex) falls back to a fresh agent that
+                    // reads the ticket's history from its prompt.
+                    Err(error)
+                        if matches!(session, native_runner::Session::Resume(_))
+                            && !cancel.load(Ordering::SeqCst)
+                            && started.elapsed() < Duration::from_secs(45) =>
+                    {
+                        self.commit_authorized(authority, |s| {
+                            s.task_sessions.remove(&task.id);
+                            if let Some(t) = s.tasks.iter_mut().find(|t| t.id == task.id) {
+                                store::append_event(t, "system", &format!("Couldn’t continue the saved session ({}); starting fresh from the ticket’s history.", error.chars().take(200).collect::<String>()));
+                            }
+                            Ok(())
+                        })?;
+                        self.run_native_session(&spec, &native_runner::Session::Start, &store::new_id(), authority, cancel, &on_event)?
+                    }
+                    other => other?,
+                }
+            };
+            if planning {
+                if split.is_some_and(|s| !s.approved) {
+                    return self.save_split_proposal(task, &result, &base, authority, &snapshot);
+                }
+                // The next scheduler claim checks the latest grant in the same
+                // transaction that authorizes the build, never a stale read here.
+                self.commit_phase_authorized(authority, Some(&snapshot), |snapshot| {
+                    let current = snapshot.tasks.iter_mut().find(|t| t.id == task.id).ok_or("Task no longer exists")?;
+                    if replies::latest(current) != replies::latest(task) {
+                        current.status = TaskStatus::Queued;
+                        store::append_event(current, "system", "A newer reply arrived. Reading it before deciding whether to build.");
+                        return Ok(());
+                    }
+                    let started_by_you = snapshot.start_when_planned.contains(&task.id);
+                    let t = snapshot
+                        .tasks
+                        .iter_mut()
+                        .find(|t| t.id == task.id)
+                        .ok_or("Task no longer exists")?;
+                    t.updated_at_ms = store::now_ms();
+                    if supervised {
+                        match supervision::parse_decision(&result) {
+                            Ok(decision) => {
+                                t.plan = decision.plan.clone();
+                                store::append_event(t, "supervisor", &format!("Decision: {:?}; risk: {:?}. {}", decision.action, decision.risk, decision.reason));
+                                t.supervision = Some(decision);
+                            }
+                            Err(error) => {
+                                t.plan = result;
+                                t.supervision = None;
+                                store::append_event(t, "supervisor", &error);
+                            }
+                        }
+                    } else { t.plan = result; }
+                    t.status = TaskStatus::AwaitingApproval;
+                    store::append_event(
+                        t,
+                        "supervisor",
+                        if supervised {
+                            "Investigation complete. Only eligible low-risk assigned bugs can proceed under the standing responsibility; other work requires your decision."
+                        } else {
+                            "Plan ready."
+                        },
+                    );
+                    // The agent decides: a question or "nothing to fix" waits for
+                    // you; a fix builds when you started it or allow starting.
+                    let waiting = match t.supervision.as_ref().map(|d| (d.action.clone(), d.reason.clone())) {
+                        Some((neko_protocol::workbench::SupervisorAction::AskUser, reason)) => Some(format!("Needs your input before building: {reason}")),
+                        Some((neko_protocol::workbench::SupervisorAction::Skip, reason)) => Some(format!("Nothing to build: {reason}")),
+                        _ => plan_question(&t.plan).map(|q| format!("Needs your input before building: {q}")),
+                    };
+                    if let Some(message) = waiting {
+                        store::append_event(t, "supervisor", &message);
+                        if started_by_you {
+                            // Keep your go-ahead: once you answer and the plan is a fix, it builds.
+                            snapshot.start_when_planned.insert(task.id.clone());
+                        }
+                    } else if start_without_approval {
+                        t.status = TaskStatus::Building;
+                        store::append_event(t, "supervisor", "Started without asking, as your settings allow. It works in its own copy; nothing is pushed or published.");
+                    } else if started_by_you {
+                        t.status = TaskStatus::Building;
+                        store::append_event(t, "user", "You started this ticket, so the plan goes straight to building. It works in its own copy; nothing is pushed or published.");
+                    }
+                    Ok(())
+                })?;
+            } else {
+                self.update_task_authorized(&task.id, authority, |t| {
+                    t.result = result.clone();
+                    t.status = TaskStatus::Reviewing;
+                })?;
+                if !inherited.is_empty()
+                    && native_runner::task_patch_scoped(&directory, &base, &inherited, cancel)?
+                        != inherited_evidence
+                {
+                    return Err("Builder changed a dependency's files outside its approved subtask scope; worktree preserved".into());
+                }
+                let mut review_task = task.clone();
+                review_task.result = result;
+                // Re-read activation and hashes after the writable run.
+                let mut memory = neko_core::agent_profiles::context_about(&snapshot, Some(&workspace.id), Some(&format!("{} {}", task.title, task.goal)));
+            memory.push_str(&decision_context::context_about(&snapshot, &workspace.id, Some(&task.id), &format!("{} {}", task.title, task.goal)));
+                memory.push_str(&neko_core::skills::instructions(
+                    &*self.db.lock().map_err(|_| "Skill storage unavailable")?,
+                    &skill_workspaces,
+                    Some(&workspace.id),
+                )?);
+                let changed = native_runner::changed_files(
+                    &directory,
+                    split.and_then(|s| s.base.as_deref()).unwrap_or(&base),
+                    cancel,
+                )?;
+                let mut required_checks = task
+                    .supervision
+                    .as_ref()
+                    .map(|s| s.tests.clone())
+                    .unwrap_or_default();
+                if let Some(split) = split {
+                    required_checks.extend(split.subtasks.iter().flat_map(|p| p.tests.clone()));
+                }
+                required_checks.sort();
+                required_checks.dedup();
+                let mut receipts = Vec::new();
+                self.check_budget(&task.id)?;
+                let review = self.run_native(
+                    &native_runner::RunSpec {
+                        directory: directory.clone(),
+                        prompt: format!("{}\nHost-observed diff base: {}\nHost-observed changed files (verify every file, including committed edits and untracked additions): {}\nInherited dependency files: {:?}\nRequired approved checks (execute every command exactly and report it in tests; if blocked, fail): {:?}", prompt(workspace, &review_task, "reviewer", &memory), split.and_then(|s| s.base.as_deref()).unwrap_or(&base), changed.join(", "), inherited, required_checks),
+                        writable: false,
+                        timeout: Duration::from_secs(600),
+                        runtime: snapshot.agent_runtime.clone(),
+                    },
+                    &store::new_id(),
+                    &authority,
+                    cancel,
+                    |event| {
+                        if event.starts_with("VERIFICATION_COMMAND ") { receipts.push(event.clone()); }
+                        let usage = event.starts_with("USAGE ");
+                        let _ =
+                            self.update_task_authorized(&task.id, authority, |t| store::append_event(t, "reviewer", &event));
+                        if usage { self.stop_if_over_budget(&task.id, cancel); }
+                    },
+                )?;
+                self.update_task_authorized(&task.id, authority, |t| {
+                    t.result.push_str("\n\nIndependent review:\n");
+                    t.result.push_str(&review);
+                })?;
+                let mut allowed = task
+                    .supervision
+                    .as_ref()
+                    .map(|s| s.files.clone())
+                    .unwrap_or_default();
+                allowed.extend(inherited.iter().cloned());
+                if let Some(split) = split {
+                    allowed.extend(split.subtasks.iter().flat_map(|p| p.files.clone()));
+                }
+                if let Err(error) = neko_core::verification::accept(
+                    &review,
+                    &changed,
+                    &allowed,
+                    &receipts,
+                    &required_checks,
+                ) {
+                    // Split parents only integrate independently verified children;
+                    // letting a parent builder repair them would bypass that boundary.
+                    if split.is_some() { return Err(error); }
+                    let patch = native_runner::task_patch(&directory, &base, cancel)?;
+                    repairs.next(&review, &changed, &allowed, patch)
+                        .map_err(|reason| format!("{error}\nAutomatic repair stopped: {reason}. Worktree preserved."))?;
+                    self.update_task_authorized(&task.id, authority, |t| {
+                        t.status = TaskStatus::Building;
+                        store::append_event(t, "supervisor", &format!("Repair pass {}/2: returning the independent findings to the ticket’s agent, then reviewing again.", repairs.attempts()));
+                    })?;
+                    // Keep the complete verdict in the bounded repair prompt.
+                    attempt_task = review_repair::feedback(task, &review);
+                    continue;
+                }
+                self.commit_phase_authorized(authority, Some(&snapshot), |state| {
+                    let t = state.tasks.iter_mut().find(|t| t.id == task.id).ok_or("Task no longer exists")?;
+                    t.status = TaskStatus::ReadyForReview;
+                    state.start_when_planned.remove(&task.id);
+                    store::append_event(
+                        t,
+                        "supervisor",
+                        "Local result ready for your review. Nothing pushed or published.",
+                    );
+                    Ok(())
+                })?;
             }
-            neko_core::verification::accept(
-                &review,
-                &changed,
-                &allowed,
-                &receipts,
-                &required_checks,
-            )?;
-            self.commit_phase_authorized(authority, Some(&snapshot), |state| {
-                let t = state.tasks.iter_mut().find(|t| t.id == task.id).ok_or("Task no longer exists")?;
-                t.status = TaskStatus::ReadyForReview;
-                state.start_when_planned.remove(&task.id);
-                store::append_event(
-                    t,
-                    "supervisor",
-                    "Local result ready for your review. Nothing pushed or published.",
-                );
-                Ok(())
-            })?;
+            return Ok(());
         }
-        Ok(())
     }
 
     fn record_worktree(&self, task_id: &str, path: &std::path::Path) -> Result<(), String> {
@@ -2552,6 +2576,21 @@ mod tests {
         assert!(
             prompt(&snapshot.workspaces[0], &snapshot.tasks[0], "scout", "").len() < 256 * 1024
         );
+    }
+
+    #[test]
+    fn repair_prompt_preserves_a_maximum_verdict_with_findings_last() {
+        let controller = controller_with_task(TaskStatus::Building);
+        let mut snapshot = controller.command(Command::Snapshot).unwrap();
+        snapshot.tasks[0].result = "long builder report".repeat(4096);
+        let template = r#"{"passed":false,"files":[],"tests":[],"summary":"","findings":["fix last"]}"#;
+        let review = template.replace("\"summary\":\"\"", &format!("\"summary\":\"{}\"", "x".repeat(65_536 - template.len())));
+        assert_eq!(review.len(), 65_536);
+        assert!(serde_json::from_str::<neko_core::verification::Verdict>(&review).is_ok());
+        let task = review_repair::feedback(&snapshot.tasks[0], &review);
+        assert!(prompt(&snapshot.workspaces[0], &task, "builder", "").contains(&review));
+        assert_eq!(task.plan, snapshot.tasks[0].plan);
+        assert_eq!(task.supervision, snapshot.tasks[0].supervision);
     }
     #[test]
     fn notes_reach_the_builder_without_granting_authority() {

@@ -163,10 +163,23 @@ if (splitter) {
 if (scout && fs.existsSync('neko-smoke.txt')) throw new Error('Scout changed source');
 const outputFile = prompt.match(/SUBTASK_FILE=([a-z]+\.txt)/)?.[1] || 'neko-smoke.txt';
 if (!responsibility && !scout && !supervisor && !review && prompt.includes('PARALLEL_HOLD')) await new Promise(resolve=>setTimeout(resolve,9000));
-if (!responsibility && !scout && !supervisor && !review) fs.writeFileSync(outputFile, prompt.includes('BROKEN_BUILDER') ? 'broken\n' : 'Isolated task output\n');
+if (!responsibility && !scout && !supervisor && !review) {
+  const repair = prompt.includes('REPAIR_REQUIRED');
+  const receivedFinding = prompt.includes('The independent reviewer rejected the previous result.') && prompt.includes('Broken builder output');
+  if (prompt.includes('REPAIR_HOLD') && receivedFinding) await new Promise(resolve=>setTimeout(resolve,9000));
+  fs.writeFileSync(outputFile, prompt.includes('BROKEN_BUILDER') || (repair && !receivedFinding) ? 'broken\n' : 'Isolated task output\n');
+  if (prompt.includes('COMMITTED_REPAIR') && !fs.existsSync('committed.txt')) {
+    fs.writeFileSync('committed.txt', 'Isolated task output\n');
+    execFileSync('git', ['add', outputFile, 'committed.txt']);
+    execFileSync('git', ['-c','core.hooksPath=/dev/null','-c','user.name=Neko Test','-c','user.email=test@example.invalid','commit','-qm','Builder fixture commit']);
+  }
+}
 let verdict;
 if (review) {
-  const files = [...new Set((execFileSync('git',['diff','--name-only','HEAD'],{encoding:'utf8'}) + execFileSync('git',['ls-files','--others','--exclude-standard'],{encoding:'utf8'})).trim().split('\n').filter(Boolean))];
+  assert.ok(args.some(arg => arg.startsWith('permissions.neko={extends=":read-only"')), 'Repair reviews must retain the read-only sandbox');
+  const base = prompt.match(/Host-observed diff base: ([a-f0-9]+)/)?.[1] || 'HEAD';
+  const files = [...new Set((execFileSync('git',['diff','--name-only',base],{encoding:'utf8'}) + execFileSync('git',['ls-files','--others','--exclude-standard'],{encoding:'utf8'})).trim().split('\n').filter(Boolean))];
+  if (prompt.includes('COMMITTED_REPAIR')) assert.ok(files.includes('committed.txt'), 'Every review must include unchanged committed builder edits');
   const check = spawnSync(process.execPath, ['-e', 'const fs=require("fs");for(const f of process.argv.slice(1)){if(fs.readFileSync(f,"utf8")!=="Isolated task output\\n")throw Error("broken builder output: "+f)}console.log("Verified "+process.argv.slice(1).join(", "))', ...files], {encoding:'utf8'});
   const command = prompt.includes('PARENT_MISSING_CHECK') ? 'node unrelated-check' : 'node fixture-check';
   process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'command_execution',command,status:check.status===0?'completed':'failed',exit_code:check.status,aggregated_output:check.stdout+check.stderr}})}\n`);
