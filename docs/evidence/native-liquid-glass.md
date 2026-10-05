@@ -113,3 +113,25 @@ composer APIs remain in place.
   This correction was checked live in the current System/dark appearance;
   light appearance, older macOS fallbacks and accessibility display settings
   were not rechecked. The earlier verification limits still apply.
+
+## Compact composer hint — 2026-10-05
+
+Source `931bcf2` moves the keyboard hint into the shared composer's existing
+controls row, beside Send, using native caption2 text. The separate footer is
+removed. Horizontal alternatives shorten or hide the hint when space is tight;
+full shortcut descriptions remain in the editor's accessibility help. Editor
+measurement, draft handling and keyboard commands are unchanged.
+
+- 105 XCTest cases and 11 Swift Testing tests passed; the optional real-daemon
+  test remained skipped. `git diff --check` passed. Logs are local temporary
+  files: `/tmp/neko-composer-hint-tests.log`, `/tmp/neko-composer-hint-build.log`
+  and `/tmp/neko-composer-hint-install.log`.
+- The signed release was installed after verifying zero active/queued tickets
+  and zero pending/queued Home messages. Installed source is `931bcf2`; strict
+  deep signature verification passed, both executables match build output,
+  and one canonical client and daemon are running.
+- Active-window screenshots of Home and NEK-9523 confirm the smaller hint fits
+  inside the existing bottom controls row and the external footer is gone.
+  Both editors remained empty; no messages were sent. Screenshots were reviewed
+  in chat. Narrow-window fallback, light appearance and active queue states
+  were not exercised on screen in this correction.
