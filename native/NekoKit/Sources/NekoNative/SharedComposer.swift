@@ -141,9 +141,7 @@ struct SharedComposer<Controls: View>: View {
                 }.layoutPriority(1)
                 Spacer(minLength: 4)
                 ViewThatFits(in: .horizontal) {
-                    Text(state.primary == .queue ? "↵ Queue · ⇧↵ New line" : "↵ Send · ⇧↵ New line")
-                        .fixedSize()
-                    Text("⇧↵ New line").fixedSize()
+                    Text("Shift-Return for a new line").fixedSize()
                     Color.clear.frame(width: 0, height: 0)
                 }
                 .font(.caption2).foregroundStyle(.secondary)
