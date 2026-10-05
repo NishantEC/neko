@@ -19,6 +19,161 @@ pub const NOTE_ROLE: &str = "note";
 const MAX_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
 const STATE_RESERVE_BYTES: usize = 64 * 1024;
 
+pub(crate) const VERIFICATION_COMMAND_PREFIX: &str = "VERIFICATION_COMMAND ";
+
+/// Evidence fields remain nullable: a missing output is not a silent success.
+/// Flags are additive for legacy receipts; incorrectly typed flags are malformed.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct VerificationReceipt {
+    pub command: Option<String>,
+    pub exit_code: Option<i64>,
+    pub output: Option<String>,
+    #[serde(default)]
+    command_truncated: bool,
+    #[serde(default)]
+    output_truncated: bool,
+    #[serde(default)]
+    receipt_incomplete: bool,
+    #[serde(default)]
+    receipt_malformed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    raw: Option<String>,
+    #[serde(default)]
+    raw_truncated: bool,
+}
+
+impl VerificationReceipt {
+    pub(crate) fn decode(payload: &str) -> Self {
+        let mut receipt = if payload.trim_start().starts_with('{') {
+            serde_json::from_str::<Self>(payload).ok()
+        } else {
+            None
+        }
+        .unwrap_or_else(|| Self {
+            receipt_malformed: true,
+            // A valid JSON object can have malformed evidence fields while
+            // still recording a known failure code. Never scrape broken JSON.
+            exit_code: serde_json::from_str::<serde_json::Value>(payload)
+                .ok()
+                .filter(serde_json::Value::is_object)
+                .and_then(|value| value["exit_code"].as_i64()),
+            raw: Some(payload.to_owned()),
+            ..Self::default()
+        });
+        if receipt.receipt_malformed || receipt.raw.is_some() {
+            receipt.receipt_malformed = true;
+            receipt.raw.get_or_insert_with(|| payload.to_owned());
+            receipt.command = None;
+            receipt.output = None;
+        }
+        receipt.receipt_incomplete |= !receipt.is_complete();
+        receipt
+    }
+
+    pub(crate) fn has_complete_command(&self) -> bool {
+        !self.receipt_malformed
+            && !self.command_truncated
+            && self.command.as_ref().is_some_and(|c| !c.trim().is_empty())
+    }
+
+    pub(crate) fn is_complete(&self) -> bool {
+        !self.receipt_incomplete
+            && self.has_complete_command()
+            && self.exit_code.is_some()
+            && self.output.is_some()
+    }
+
+    fn event(&self) -> String {
+        format!("{VERIFICATION_COMMAND_PREFIX}{}", serde_json::to_string(self).expect("receipt fields serialize"))
+    }
+
+    fn bounded_event(mut self) -> String {
+        if self.event().len() <= MAX_EVENT_BYTES {
+            return self.event();
+        }
+        // Reserve the complete envelope first, including nulls, quotes and flags.
+        // Changing a false flag to true only makes that envelope smaller.
+        let command = self.command.take();
+        let output = self.output.take();
+        let raw = self.raw.take();
+        self.command = command.as_ref().map(|_| String::new());
+        self.output = output.as_ref().map(|_| String::new());
+        self.raw = raw.as_ref().map(|_| String::new());
+        let mut budget = MAX_EVENT_BYTES.saturating_sub(self.event().len());
+        // Keep both previews when both are long, but spend spare output space
+        // on a complete command (and spare command space on output).
+        let output_reserve = output.as_deref().map_or(0, |s| json_string_bytes(s).min(budget / 2));
+        if let Some(command) = command {
+            let (preview, shortened) = bounded_json_string(&command, budget - output_reserve);
+            budget -= json_string_bytes(&preview);
+            self.command = Some(preview);
+            self.command_truncated |= shortened;
+        }
+        if let Some(output) = output {
+            let (preview, shortened) = bounded_json_string(&output, budget);
+            budget -= json_string_bytes(&preview);
+            self.output = Some(preview);
+            self.output_truncated |= shortened;
+        }
+        if let Some(raw) = raw {
+            let (preview, shortened) = bounded_json_string(&raw, budget);
+            self.raw = Some(preview);
+            self.raw_truncated |= shortened;
+        }
+        self.receipt_incomplete |= !self.is_complete();
+        self.event()
+    }
+}
+
+fn json_char_bytes(ch: char) -> usize {
+    match ch {
+        '"' | '\\' | '\n' | '\r' | '\t' | '\u{0008}' | '\u{000c}' => 2,
+        '\u{0000}'..='\u{001f}' => 6,
+        _ => ch.len_utf8(),
+    }
+}
+
+fn json_string_bytes(text: &str) -> usize {
+    text.chars().map(json_char_bytes).sum()
+}
+
+/// Budget counts JSON string contents, not raw bytes; never split UTF-8/escapes.
+fn bounded_json_string(text: &str, budget: usize) -> (String, bool) {
+    let mut bytes = 0;
+    for (offset, ch) in text.char_indices() {
+        bytes += json_char_bytes(ch);
+        if bytes > budget {
+            return (text[..offset].to_owned(), true);
+        }
+    }
+    (text.to_owned(), false)
+}
+
+/// Live reviewer evidence keeps the full command. Only output is a preview;
+/// append_event/save separately bound the persisted copy of this same schema.
+pub(crate) fn verification_command_event(command: Option<&str>, exit_code: Option<i64>, output: Option<&str>) -> String {
+    let (output, output_truncated) = output.map(|s| bounded_json_string(s, MAX_EVENT_BYTES))
+        .map_or((None, false), |(text, shortened)| (Some(text), shortened));
+    let mut receipt = VerificationReceipt {
+        command: command.map(str::to_owned), exit_code, output, output_truncated,
+        ..VerificationReceipt::default()
+    };
+    receipt.receipt_incomplete = !receipt.is_complete();
+    receipt.event()
+}
+
+fn bounded_event_message(role: &str, message: &str) -> String {
+    // Only these roles receive runner tool events. Notes/system messages that
+    // quote the wire prefix are text, never evidence to decode or rewrite.
+    if !matches!(role, "supervisor" | "scout" | "builder" | "reviewer" | "coordinator") {
+        return truncate(message, MAX_EVENT_BYTES);
+    }
+    match message.strip_prefix(VERIFICATION_COMMAND_PREFIX) {
+        Some(payload) => VerificationReceipt::decode(payload).bounded_event(),
+        None => truncate(message, MAX_EVENT_BYTES),
+    }
+}
+
 /// Bumped after every successful write of the task store. Readers that poll
 /// (authority watchdogs, the quick panel's ticket list) re-parse the store
 /// only when this moves, instead of on every tick or keystroke.
@@ -93,7 +248,7 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     compacted.import_preview = Default::default();
     for task in &mut compacted.tasks {
         for event in &mut task.events {
-            event.message = truncate(&event.message, MAX_EVENT_BYTES);
+            event.message = bounded_event_message(&event.role, &event.message);
         }
     }
     let mut json = serde_json::to_string(&compacted).map_err(|e| e.to_string())?;
@@ -824,7 +979,7 @@ pub fn append_event(task: &mut Task, role: &str, message: &str) {
     task.events.push(TaskEvent {
         at_ms,
         role: truncate(role, 64),
-        message: truncate(message, MAX_EVENT_BYTES),
+        message: bounded_event_message(role, message),
     });
     // Evict the oldest progress events first. The user's notes are direction
     // for future runs and go only when nothing else is left to evict.
@@ -2808,6 +2963,156 @@ mod tests {
                 .message
                 .contains("restart")
         );
+    }
+
+    #[test]
+    fn verification_receipt_prefix_in_user_or_system_text_is_not_normalized() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        task(&db, &ws);
+        let mut snapshot = load(&db).unwrap();
+        snapshot.tasks[0].events.clear();
+        let message = r#"VERIFICATION_COMMAND {"command":"cargo test","exit_code":0,"output":"user text"}"#;
+        for role in [NOTE_ROLE, "user", "system", "assistant", "splitter"] {
+            append_event(&mut snapshot.tasks[0], role, message);
+            assert_eq!(snapshot.tasks[0].events.last().unwrap().message, message);
+        }
+        // Exercise save directly, too: imported events may bypass append_event.
+        snapshot.tasks[0].events.push(TaskEvent { at_ms: 0, role: NOTE_ROLE.into(), message: message.into() });
+        save(&db, &snapshot).unwrap();
+        assert!(load(&db).unwrap().tasks[0].events.iter().all(|e| e.message == message));
+    }
+
+    #[test]
+    fn verification_receipt_bounds_escaped_fields_before_serialization() {
+        let command = "printf \"\\猫🦊\u{0001}\n".repeat(500);
+        let output = "\"\\猫🦊\u{0000}\t".repeat(1000);
+        for code in [serde_json::json!(0), serde_json::json!(101), serde_json::Value::Null] {
+            let message = format!("VERIFICATION_COMMAND {}", serde_json::json!({
+                "command": command, "exit_code": code, "output": output
+            }));
+            let mut task = create_task("w".into(), None, "t".into(), "g".into()).unwrap();
+            append_event(&mut task, "reviewer", &message);
+            let saved = &task.events.last().unwrap().message;
+            assert!(saved.len() <= MAX_EVENT_BYTES);
+            let receipt: serde_json::Value = serde_json::from_str(saved.strip_prefix("VERIFICATION_COMMAND ").unwrap()).unwrap();
+            assert_eq!(receipt["exit_code"], code);
+            assert_eq!(receipt["command_truncated"], true);
+            assert_eq!(receipt["output_truncated"], true);
+            assert_eq!(receipt["receipt_incomplete"], true);
+            assert_eq!(receipt["receipt_malformed"], false);
+            for (field, original) in [("command", &command), ("output", &output)] {
+                let preview = receipt[field].as_str().unwrap();
+                assert!(!preview.is_empty());
+                assert!(original.starts_with(preview));
+            }
+            let saved = saved.clone();
+            append_event(&mut task, "reviewer", &saved);
+            assert_eq!(task.events.last().unwrap().message, saved);
+        }
+    }
+
+    #[test]
+    fn verification_receipt_missing_and_malformed_evidence_is_explicit() {
+        let mut task = create_task("w".into(), None, "t".into(), "g".into()).unwrap();
+        for payload in ["{}", r#"{"command":"cargo test","exit_code":0}"#] {
+            append_event(&mut task, "reviewer", &format!("VERIFICATION_COMMAND {payload}"));
+            let value: serde_json::Value = serde_json::from_str(task.events.last().unwrap().message.strip_prefix("VERIFICATION_COMMAND ").unwrap()).unwrap();
+            assert_eq!(value["receipt_incomplete"], true);
+            assert!(value["output"].is_null());
+            assert_eq!(value["receipt_malformed"], false);
+        }
+        for raw in ["not json".into(), r#"{"command":42,"exit_code":101,"output":""}"#.into(), format!("{{\"output\":\"{}", "\"\\猫🦊".repeat(1000))] {
+            append_event(&mut task, "reviewer", &format!("VERIFICATION_COMMAND {raw}"));
+            let saved = task.events.last().unwrap().message.clone();
+            assert!(saved.len() <= MAX_EVENT_BYTES);
+            let value: serde_json::Value = serde_json::from_str(saved.strip_prefix("VERIFICATION_COMMAND ").unwrap()).unwrap();
+            assert_eq!(value["receipt_incomplete"], true);
+            assert_eq!(value["receipt_malformed"], true);
+            assert!(value["command"].is_null() && value["output"].is_null());
+            let known_exit = serde_json::from_str::<serde_json::Value>(&raw).ok().and_then(|v| v["exit_code"].as_i64());
+            assert_eq!(value["exit_code"].as_i64(), known_exit);
+            let preview = value["raw"].as_str().unwrap();
+            assert!(raw.starts_with(preview));
+            assert_eq!(value["raw_truncated"], preview.len() < raw.len());
+            append_event(&mut task, "reviewer", &saved);
+            assert_eq!(task.events.last().unwrap().message, saved);
+        }
+    }
+
+    #[test]
+    fn verification_receipt_save_roundtrip_preserves_failure_and_existing_flags() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        task(&db, &ws);
+        let mut snapshot = load(&db).unwrap();
+        snapshot.tasks[0].events[0].role = "reviewer".into();
+        snapshot.tasks[0].events[0].message = format!("VERIFICATION_COMMAND {}", serde_json::json!({
+            "command": "cargo test", "exit_code": 101, "output": "\"\\猫🦊".repeat(1000),
+            "command_truncated": true, "output_truncated": true
+        }));
+        save(&db, &snapshot).unwrap();
+        let loaded = load(&db).unwrap();
+        let message = &loaded.tasks[0].events[0].message;
+        assert!(message.len() <= MAX_EVENT_BYTES);
+        let value: serde_json::Value = serde_json::from_str(message.strip_prefix("VERIFICATION_COMMAND ").unwrap()).unwrap();
+        assert_eq!(value["command"], "cargo test");
+        assert_eq!(value["exit_code"], 101);
+        assert_eq!(value["command_truncated"], true);
+        assert_eq!(value["output_truncated"], true);
+        assert_eq!(value["receipt_incomplete"], true);
+        save(&db, &loaded).unwrap();
+        assert_eq!(load(&db).unwrap(), loaded);
+    }
+
+    #[test]
+    fn verification_receipt_budget_covers_each_json_escape_and_worker_role() {
+        let escaped: String = (0..=31).map(char::from).chain(['"', '\\', '/', '猫', '🦊']).collect();
+        for repeat in [0, 1, 8, 11, 12, 13, 14, 15, 16, 100] {
+            let text = escaped.repeat(repeat);
+            for (command, output) in [(text.as_str(), ""), ("cargo test", text.as_str()), (text.as_str(), text.as_str())] {
+                for role in ["supervisor", "scout", "builder", "reviewer", "coordinator"] {
+                    let message = format!("VERIFICATION_COMMAND {}", serde_json::json!({"command":command,"exit_code":i64::MIN,"output":output}));
+                    let saved = bounded_event_message(role, &message);
+                    assert!(saved.len() <= MAX_EVENT_BYTES);
+                    let value: serde_json::Value = serde_json::from_str(saved.strip_prefix(VERIFICATION_COMMAND_PREFIX).unwrap()).unwrap();
+                    assert_eq!(value["exit_code"], i64::MIN);
+                    for (field, original, flag) in [("command", command, "command_truncated"), ("output", output, "output_truncated")] {
+                        let preview = value[field].as_str().unwrap();
+                        assert!(original.starts_with(preview));
+                        assert_eq!(value[flag], preview != original);
+                    }
+                    assert_eq!(bounded_event_message(role, &saved), saved);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn verification_receipt_legacy_load_is_unchanged_until_normal_save() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        task(&db, &ws);
+        let mut snapshot = load(&db).unwrap();
+        let raw = r#"{"command":"cargo test","exit_code":0,"output":"unfinished"#;
+        snapshot.tasks[0].events[0].role = "reviewer".into();
+        snapshot.tasks[0].events[0].message = format!("VERIFICATION_COMMAND {raw}");
+        let original = serde_json::to_string(&snapshot).unwrap();
+        db.set_setting(SETTING, &original).unwrap();
+        let loaded = load(&db).unwrap();
+        assert_eq!(loaded.tasks[0].events, snapshot.tasks[0].events);
+        assert_eq!(db.get_setting(SETTING).unwrap().unwrap(), original);
+        save(&db, &loaded).unwrap();
+        let saved = load(&db).unwrap();
+        let message = &saved.tasks[0].events[0].message;
+        let value: serde_json::Value = serde_json::from_str(message.strip_prefix(VERIFICATION_COMMAND_PREFIX).unwrap()).unwrap();
+        assert_eq!(value["raw"], raw);
+        assert_eq!(value["receipt_malformed"], true);
+        assert_eq!(value["receipt_incomplete"], true);
+        assert!(value["exit_code"].is_null());
     }
 
     #[test]

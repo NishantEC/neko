@@ -173,15 +173,17 @@ pub fn accept(
         }
         let proven = receipts
             .iter()
-            .filter_map(|r| r.strip_prefix("VERIFICATION_COMMAND "))
-            .filter_map(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+            .filter_map(|r| r.strip_prefix(crate::workbench::VERIFICATION_COMMAND_PREFIX))
+            .map(crate::workbench::VerificationReceipt::decode)
             .filter(|r| {
-                r["command"]
-                    .as_str()
-                    .is_some_and(|command| normalized_command(command) == normalized_command(test))
+                // Unidentifiable/shortened receipts cannot be skipped in favor
+                // of an earlier success: they may describe a later failed run.
+                !r.has_complete_command() || r.command.as_ref().is_some_and(|command| {
+                    normalized_command(command) == normalized_command(test)
+                })
             })
             .last()
-            .is_some_and(|r| r["exit_code"].as_i64() == Some(0) && r["output"].is_string());
+            .is_some_and(|r| r.is_complete() && r.exit_code == Some(0));
         if !proven {
             return Err(format!(
                 "No successful independent execution evidence for: {test}"
@@ -244,6 +246,33 @@ mod tests {
             "VERIFICATION_COMMAND {}",
             serde_json::json!({"command":command,"exit_code":code,"output":output})
         )
+    }
+
+    #[test]
+    fn verification_receipt_flags_cannot_promote_partial_or_malformed_evidence() {
+        let files = vec!["src/a.rs".into()];
+        for (flag, value) in [
+            ("command_truncated", serde_json::json!(true)),
+            ("receipt_incomplete", serde_json::json!(true)),
+            ("receipt_malformed", serde_json::json!(true)),
+            ("command_truncated", serde_json::json!("false")),
+            ("output_truncated", serde_json::Value::Null),
+        ] {
+            let mut partial = serde_json::json!({"command":"cargo test","exit_code":0,"output":""});
+            partial[flag] = value;
+            let partial = format!("VERIFICATION_COMMAND {partial}");
+            assert!(accept(&answer(), &files, &files, &[receipt("cargo test", 0, ""), partial], &[]).is_err(), "{flag}");
+        }
+        for broken in [r#"{"command":"cargo test","exit_code":0}"#, r#"{"exit_code":0,"output":""}"#, r#"{"command":"cargo test""#] {
+            assert!(accept(&answer(), &files, &files, &[receipt("cargo test", 0, ""), format!("VERIFICATION_COMMAND {broken}")], &[]).is_err());
+        }
+        let preview = r#"VERIFICATION_COMMAND {"command":"cargo test","exit_code":0,"output":"preview","output_truncated":true}"#.into();
+        assert!(accept(&answer(), &files, &files, &[preview], &[]).is_ok());
+        // Missing output for an identifiable, unrelated command does not
+        // invalidate a complete required check; a matching later failure does.
+        let unrelated = r#"VERIFICATION_COMMAND {"command":"ls","exit_code":0}"#.into();
+        assert!(accept(&answer(), &files, &files, &[receipt("cargo test", 0, ""), unrelated], &[]).is_ok());
+        assert!(accept(&answer(), &files, &files, &["VERIFICATION_COMMAND broken".into(), receipt("cargo test", 0, "")], &[]).is_ok());
     }
 
     #[test]

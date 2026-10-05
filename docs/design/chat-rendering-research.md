@@ -120,8 +120,11 @@ and [cross-provider contract](https://github.com/zeronsh/zeron/blob/9b3773082a81
 
 These describe the inspected `a22a41f` baseline. The follow-up fixes visible
 results, shared composing, explicit Home scroll intent and local rich-output
-previews. The underlying continuity, streaming, transcript identity and event
-retention work below remains open; see the evidence report for the exact boundary.
+previews. The next correctness slice fixes scoped history selection and valid
+bounded command receipts, with native evidence disclosures; see
+[chat continuity and evidence](../evidence/chat-continuity-evidence.md).
+Streaming, transcript identity, full event retention and provider context
+compaction remain open. The numbered findings below preserve the original audit.
 
 1. **Home continuity:** `crates/neko-core/src/neko_chat.rs:575` selects the last
    12 messages before workspace/profile filtering and truncates each included

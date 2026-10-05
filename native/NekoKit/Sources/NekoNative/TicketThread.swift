@@ -8,7 +8,7 @@ enum TicketThread {
         case brief(String)
         case you(String)
         case agent(role: String, text: String)
-        case steps(role: String, commands: [String])
+        case steps(role: String, commands: [TicketCommandReceipt])
         case status(String)
     }
 
@@ -40,14 +40,12 @@ enum TicketThread {
             let role = event["role"].string
             let message = event["message"].string.trimmingCharacters(in: .whitespacesAndNewlines)
             if message.isEmpty { continue }
-            if message.hasPrefix("VERIFICATION_COMMAND ") {
-                let receipt = try? JSONDecoder().decode(JSONValue.self, from: Data(message.dropFirst("VERIFICATION_COMMAND ".count).utf8))
-                let command = shortCommand(receipt?["command"].string ?? "")
+            if let receipt = TicketCommandReceipt.from(event: event) {
                 if case .steps(let r, var commands)? = items.last, r == role {
-                    commands.append(command)
+                    commands.append(receipt)
                     items[items.count - 1] = .steps(role: role, commands: commands)
                 } else {
-                    items.append(.steps(role: role, commands: [command]))
+                    items.append(.steps(role: role, commands: [receipt]))
                 }
                 continue
             }
@@ -125,12 +123,12 @@ struct TicketThreadView: View {
         case .steps(let role, let commands):
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(commands.enumerated()), id: \.offset) { _, command in
-                        Label(command, systemImage: "terminal").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).textSelection(.enabled)
+                    ForEach(Array(commands.enumerated()), id: \.offset) { _, receipt in
+                        TicketCommandReceiptView(receipt: receipt)
                     }
                 }.padding(.top, 4)
             } label: {
-                Text("\(TicketThread.agentName(role)) ran \(commands.count) \(commands.count == 1 ? "step" : "steps")").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("\(TicketThread.agentName(role)) · \(commands.count) saved \(commands.count == 1 ? "command" : "commands")").font(.system(size: 12)).foregroundStyle(.secondary)
             }
         case .status(let text):
             HStack(spacing: 6) {
