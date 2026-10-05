@@ -343,9 +343,9 @@ func friendlyTaskStatus(_ status: String) -> String {
 /// One neutral surface ramp for the native app, shared by legacy Ink consumers.
 /// Small secondary text remains readable on the brightest content surface.
 enum N {
-    static let canvas = Color.adaptive(light: 0xF7F8FA, dark: 0x202329)
-    static let panel = Color.adaptive(light: 0xFFFFFF, dark: 0x272B32)
-    static let card = Color.adaptive(light: 0xFFFFFF, dark: 0x2C3038)
+    static let canvas = Color.adaptive(light: 0xF7F8FA, dark: 0x1C1C1E)
+    static let panel = Color.adaptive(light: 0xFFFFFF, dark: 0x242426)
+    static let card = Color.adaptive(light: 0xFFFFFF, dark: 0x2C2C2E)
     static let selected = Color.primary.opacity(0.065)
     static let line = Color.primary.opacity(0.08)
     static let lineStrong = Color.primary.opacity(0.16)
@@ -495,37 +495,7 @@ extension EnvironmentValues {
     }
 }
 
-/// Content-layer backdrop. Glass needs something to refract, so the ambient and
-/// mascot looks paint a soft field that extends under the sidebar glass.
-struct LookBackground: View {
-    let look: String
-    @Environment(\.accessibilityReduceTransparency) private var opaque
-    @Environment(\.colorScheme) private var scheme
-    var body: some View {
-        switch NekoLook(rawValue: look) ?? .ambient {
-        case .system, .dense:
-            N.canvas
-        case .ambient, .mascot:
-            if opaque { Color(nsColor: .windowBackgroundColor) } else { field.extendsUnderSidebar() }
-        }
-    }
-    /// A static, quiet field gives floating controls material to sample without
-    /// competing with the conversation or making content itself translucent.
-    private var field: some View {
-        ZStack {
-            N.canvas
-            RadialGradient(colors: [NekoStyle.accent.opacity(scheme == .dark ? 0.10 : 0.045), .clear],
-                           center: .topLeading, startRadius: 0, endRadius: 680)
-            RadialGradient(colors: [NekoStyle.mint.opacity(0.035), .clear],
-                           center: .bottomTrailing, startRadius: 0, endRadius: 460)
-        }.allowsHitTesting(false).accessibilityHidden(true)
-    }
-}
-
 extension View {
-    @ViewBuilder func extendsUnderSidebar() -> some View {
-        if #available(macOS 26, *) { self.backgroundExtensionEffect() } else { self }
-    }
     @ViewBuilder func softScrollEdges() -> some View {
         if #available(macOS 26, *) { self.scrollEdgeEffectStyle(.soft, for: .all) } else { self }
     }

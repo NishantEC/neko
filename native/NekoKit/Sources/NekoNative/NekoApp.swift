@@ -94,7 +94,7 @@ struct WorkspaceView: View {
                     }
                     .stableSplitPane()
                     .clipped()
-                    .background { LookBackground(look: look) }
+                    .background(N.canvas)
                     .softScrollEdges()
                     // Pages supply real native toolbar items, so the top row is both
                     // useful and clickable. Only backgrounds extend behind the toolbar.

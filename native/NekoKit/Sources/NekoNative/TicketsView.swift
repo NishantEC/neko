@@ -702,9 +702,9 @@ private struct TicketOutcomeReadback: View {
                     .help("Copy the full saved result, including the reviewer response")
                 }
             }
-            Text(outcome.note).font(NekoFont.meta).foregroundStyle(.secondary)
+            Text(outcome.note).font(NekoFont.meta).foregroundStyle(N.text2)
             if review.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("No result text was saved for this ticket.").foregroundStyle(.secondary)
+                Text("No result text was saved for this ticket.").foregroundStyle(N.text2)
             } else {
                 ReadableText(text: review.body).font(NekoFont.chat).lineSpacing(4)
             }
@@ -721,7 +721,7 @@ private struct TicketOutcomeReadback: View {
                     Text("This is the recorded reviewer response; the ticket status reflects the current verification gate.").font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text(outcome == .reviewing ? "No structured reviewer verdict yet." : "No structured reviewer verdict is available. Any saved review text remains in the result.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(N.text2)
                 }
             }.font(NekoFont.body)
             TicketCommandEvidenceView(events: events)
