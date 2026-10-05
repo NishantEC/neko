@@ -114,53 +114,57 @@ struct SharedComposer<Controls: View>: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 12) {
-                if !attachments.isEmpty { ComposerAttachmentStrip(attachments: attachments, remove: onRemove) }
-                ComposerView(
-                    text: $text,
-                    onSubmit: { if state.canSubmit { onSend() } },
-                    onInterruptAndSubmit: { if state.canSubmit { (onInterrupt ?? onSend)() } },
-                    onAttach: onAttach, onError: onError,
-                    onSubmitWithContext: onContext.map { action in { if state.canSubmit { action() } } },
-                    onMenuKey: onMenuKey,
-                    placeholder: placeholder, accessibilityLabel: accessibilityLabel, accessibilityHelp: accessibilityHelp
-                )
-                if let validationError {
-                    Text(validationError).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(alignment: .bottom, spacing: 12) {
-                    Button("Attach files", systemImage: "plus", action: onChooseAttachments)
-                        .labelStyle(.iconOnly).font(NekoFont.body)
-                        .frame(width: 32, height: 32).contentShape(Rectangle())
-                        .buttonStyle(.borderless).foregroundStyle(.secondary)
-                        .help("Attach images or files; you can also paste or drop them")
-                        .accessibilityLabel("Attach images or files")
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 10) { controls() }
-                        VStack(alignment: .leading, spacing: 6) { controls() }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    Spacer(minLength: 4)
-                    Button {
-                        if state.primary == .stop { onStop() } else { onSend() }
-                    } label: {
-                        HStack(spacing: 5) {
-                            if state.primary == .submitting { ProgressView().controlSize(.mini) }
-                            else { Image(systemName: state.primary == .stop ? "stop.fill" : state.primary == .queue ? "text.badge.plus" : "arrow.up") }
-                            Text(actionLabel)
-                        }.font(NekoFont.meta.weight(.medium)).padding(.horizontal, 14).frame(height: 34)
-                            .foregroundStyle(state.buttonEnabled ? Color.white : Color.secondary)
-                            .background(state.buttonEnabled ? NekoStyle.accent : Color.primary.opacity(0.06), in: Capsule())
-                    }.buttonStyle(.plain).disabled(!state.buttonEnabled).accessibilityLabel(actionLabel)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            if !attachments.isEmpty { ComposerAttachmentStrip(attachments: attachments, remove: onRemove) }
+            ComposerView(
+                text: $text,
+                onSubmit: { if state.canSubmit { onSend() } },
+                onInterruptAndSubmit: { if state.canSubmit { (onInterrupt ?? onSend)() } },
+                onAttach: onAttach, onError: onError,
+                onSubmitWithContext: onContext.map { action in { if state.canSubmit { action() } } },
+                onMenuKey: onMenuKey,
+                placeholder: placeholder, accessibilityLabel: accessibilityLabel, accessibilityHelp: accessibilityHelp
+            )
+            if let validationError {
+                Text(validationError).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 20).padding(.vertical, 14)
-            .liquidGlass(radius: 24)
-            Text(state.primary == .queue ? "Return to queue · Shift-Return for a new line" : "Return to send · Shift-Return for a new line")
-                .font(NekoFont.meta).foregroundStyle(.secondary)
-                .padding(.horizontal, NekoLayout.rowInset)
+            HStack(alignment: .bottom, spacing: 12) {
+                Button("Attach files", systemImage: "plus", action: onChooseAttachments)
+                    .labelStyle(.iconOnly).font(NekoFont.body)
+                    .frame(width: 32, height: 32).contentShape(Rectangle())
+                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .help("Attach images or files; you can also paste or drop them")
+                    .accessibilityLabel("Attach images or files")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { controls() }
+                    VStack(alignment: .leading, spacing: 6) { controls() }
+                }.layoutPriority(1)
+                Spacer(minLength: 4)
+                ViewThatFits(in: .horizontal) {
+                    Text(state.primary == .queue ? "↵ Queue · ⇧↵ New line" : "↵ Send · ⇧↵ New line")
+                        .fixedSize()
+                    Text("⇧↵ New line").fixedSize()
+                    Color.clear.frame(width: 0, height: 0)
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(height: 34)
+                .accessibilityHidden(true) // The editor's help already describes these shortcuts.
+                Button {
+                    if state.primary == .stop { onStop() } else { onSend() }
+                } label: {
+                    HStack(spacing: 5) {
+                        if state.primary == .submitting { ProgressView().controlSize(.mini) }
+                        else { Image(systemName: state.primary == .stop ? "stop.fill" : state.primary == .queue ? "text.badge.plus" : "arrow.up") }
+                        Text(actionLabel)
+                    }.font(NekoFont.meta.weight(.medium)).padding(.horizontal, 14).frame(height: 34)
+                        .foregroundStyle(state.buttonEnabled ? Color.white : Color.secondary)
+                        .background(state.buttonEnabled ? NekoStyle.accent : Color.primary.opacity(0.06), in: Capsule())
+                }.buttonStyle(.plain).disabled(!state.buttonEnabled).accessibilityLabel(actionLabel)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
         }
+        .padding(.horizontal, 20).padding(.vertical, 14)
+        .liquidGlass(radius: 24)
     }
 }
 
