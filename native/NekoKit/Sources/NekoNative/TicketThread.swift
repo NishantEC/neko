@@ -103,21 +103,24 @@ struct TicketThreadView: View {
         case .brief(let text):
             VStack(alignment: .leading, spacing: 6) {
                 Label("Ticket", systemImage: "ticket").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                ReadableText(text: text).font(.system(size: 13))
+                ReadableText(text: text).font(.system(size: 13)).lineSpacing(3)
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         case .you(let text):
             HStack {
                 Spacer(minLength: 60)
-                Text(text).font(.system(size: 13)).textSelection(.enabled)
+                Group {
+                    if text.contains("![") { ReadableText(text: text) }
+                    else { Text(text).textSelection(.enabled) }
+                }.font(.system(size: 13)).lineSpacing(3)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(NekoStyle.accent.opacity(0.22), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         case .agent(let role, let text):
             VStack(alignment: .leading, spacing: 4) {
                 Text(TicketThread.agentName(role)).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                ReadableText(text: text).font(.system(size: 13))
+                ReadableText(text: text).font(.system(size: 13)).lineSpacing(3)
             }
         case .steps(let role, let commands):
             DisclosureGroup {
@@ -132,7 +135,7 @@ struct TicketThreadView: View {
         case .status(let text):
             HStack(spacing: 6) {
                 Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1).frame(maxWidth: 24)
-                Text(text).font(.system(size: 11)).foregroundStyle(.tertiary).lineLimit(2)
+                Text(text).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -140,7 +143,7 @@ struct TicketThreadView: View {
     private func workingRow(_ text: String) -> some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
-            Text(text).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(text).font(.system(size: 13)).foregroundStyle(.secondary)
         }
     }
 }
@@ -150,11 +153,14 @@ struct TicketComposer: View {
     @ObservedObject var model: AppModel
     let id: String
     let status: String
-    private var draft: Binding<String> {
-        Binding(get: { model.ticketDrafts[id] ?? "" }, set: { model.ticketDrafts[id] = $0 })
+    private var sending: Bool { model.sendingTicketIDs.contains(id) }
+    private var running: Bool { ["Queued", "Planning", "Building", "Reviewing"].contains(status) }
+    private var submission: ComposerDraftStore<String>.Submission { model.ticketDrafts.submission(for: id) }
+    private var payloadError: String? { ComposerPayload.validationError(submission.text, limit: 2048) }
+    private var composerState: ComposerActionState {
+        ComposerActionState(running: running, hasContent: !submission.text.isEmpty, submitting: sending,
+                            blocked: model.busy || payloadError != nil, queues: false)
     }
-    private var text: String { model.ticketDrafts[id] ?? "" }
-    private var sendLabel: String { "Send to agent" }
     private var placeholder: String {
         switch status {
         case "AwaitingApproval": "Answer the agent, or tell it what to change…"
@@ -165,24 +171,36 @@ struct TicketComposer: View {
         }
     }
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(placeholder, text: draft, axis: .vertical)
-                .textFieldStyle(.plain).font(.system(size: 13)).lineLimit(1...6)
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.1)))
-                .onSubmit(send)
-            Button(sendLabel, systemImage: "arrow.up", action: send)
-                .buttonStyle(.borderedProminent)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
-                .help(sendLabel + " (Return)")
-        }
-        .padding(12)
+        let targetID = id
+        SharedComposer(
+            text: Binding(get: { model.ticketDrafts.text(for: targetID) }, set: { model.ticketDrafts.set($0, for: targetID) }),
+            attachments: model.ticketDrafts.attachments(for: targetID),
+            placeholder: placeholder,
+            accessibilityLabel: "Message to ticket agent",
+            accessibilityHelp: "Return sends a reply to this agent. Shift Return adds a line. Command Return also sends a reply. New direction pauses active work and the agent reassesses it. Paste or drop images and files to attach them.",
+            state: composerState, validationError: payloadError,
+            onSend: send,
+            onStop: { Task { await model.workbench(.command("CancelTask", ["task_id": .string(targetID)])) } },
+            onAttach: { model.ticketDrafts.add($0, for: targetID) },
+            onRemove: { model.ticketDrafts.remove($0, for: targetID) },
+            onChooseAttachments: {
+                ComposerAttachmentPicker.choose(attach: { model.ticketDrafts.add($0, for: targetID) }, onError: { model.error = $0 })
+            },
+            onError: { model.error = $0 }
+        ) {
+            ComposerRuntimeMenu(model: model)
+        }.id(targetID).padding(12)
     }
     private func send() {
-        let submittedDraft = text
-        let reply = submittedDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !reply.isEmpty else { return }
-        Task { if await model.workbench(.command("ReplyToTask", ["task_id": .string(id), "text": .string(reply)])) { if model.ticketDrafts[id] == submittedDraft { model.ticketDrafts[id] = "" } } }
+        guard !sending, !model.busy else { return }
+        let submitted = submission
+        guard !submitted.text.isEmpty else { return }
+        if let error = ComposerPayload.validationError(submitted.text, limit: 2048) { model.error = error; return }
+        model.sendingTicketIDs.insert(submitted.scope)
+        Task {
+            let saved = await model.workbench(.command("ReplyToTask", ["task_id": .string(submitted.scope), "text": .string(submitted.text)]))
+            model.ticketDrafts.complete(submitted, succeeded: saved)
+            model.sendingTicketIDs.remove(submitted.scope)
+        }
     }
 }

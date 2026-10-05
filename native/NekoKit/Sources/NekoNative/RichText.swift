@@ -9,10 +9,32 @@ enum NativeMarkdownBlock: Equatable {
 enum NativeMarkdown {
     /// "| a | b |" → ["a", "b"].
     static func tableCells(_ line: String) -> [String] {
-        var text = line.trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("|") { text.removeFirst() }
-        if text.hasSuffix("|") { text.removeLast() }
-        return text.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+        let text = Array(line.trimmingCharacters(in: .whitespaces))
+        var cells = [String]()
+        var cell = ""
+        var index = 0
+        var trailingSeparator = false
+        while index < text.count {
+            let character = text[index]
+            trailingSeparator = false
+            if character == "\\", index + 1 < text.count {
+                let next = text[index + 1]
+                if next == "|" {
+                    cell.append("|"); index += 2; continue
+                }
+                if next == "\\" {
+                    cell.append(contentsOf: "\\\\"); index += 2; continue
+                }
+            }
+            if character == "|" {
+                cells.append(cell); cell = ""; trailingSeparator = true
+            } else { cell.append(character) }
+            index += 1
+        }
+        cells.append(cell)
+        if text.first == "|" { cells.removeFirst() }
+        if trailingSeparator { cells.removeLast() }
+        return cells.map { $0.trimmingCharacters(in: .whitespaces) }
     }
     static func isTableSeparator(_ line: String) -> Bool {
         let cells = tableCells(line)

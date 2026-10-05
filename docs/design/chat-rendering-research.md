@@ -1,11 +1,78 @@
-# Chat rendering and compaction references
+# Complete chat, composer and rendering direction
 
 Source review: 2026-10-05. Neko baseline: `a22a41f`.
 
-**Direction:** keep Neko's SwiftUI/AppKit shell and rich reply blocks. Give Home
+**Direction:** treat the composer, conversation and result as one experience.
+Keep Neko's SwiftUI/AppKit shell and rich reply blocks. Give Home
 and agent chats a shared, stable transcript model. Show the useful response first,
 with intermediate work in an expandable row. Add real context lifecycle support
 at the runtime boundary independently of that presentation work.
+
+## Whole-chat follow-up, 2026-10-05
+
+The original research below concentrated too heavily on compaction. The live
+audit of the installed app at `a22a41f` confirmed a broader split: Home already
+used a growing AppKit editor with attachments and commands, while each agent
+had a basic SwiftUI text field. Agent results were hidden in Details underneath
+large decision cards; old plans occupied the latest end of the conversation.
+
+Two complete, buildable variants are in the existing
+[Paper file](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-1-0):
+**20A · Complete chat — conversation first** and **20B · Complete chat — work log**.
+Both preserve the native source-list sidebar and toolbar. A is the implementation
+direction: user message, folded historical work, visible current result, shared
+growing composer. B uses denser role-labelled work rows and a compact composer.
+Illustrative review/check counts on these boards are sample content.
+
+### Complete interaction contract
+
+| Area | Direction and existing implementation seam |
+| --- | --- |
+| Drafting | Reuse `ComposerView` / `NSTextView` for both surfaces: undo, selection, bounded growth, Return to send, Shift Return for a line, IME composition preserved. |
+| Draft lifetime | Keep drafts scoped to Home workspace/profile or ticket ID. Clear only the exact successful revision, including attachments; failed sends retain the draft. These stores are currently in-memory, not restart persistence. |
+| Attachments | Reuse `ComposerAttachmentStore`, file picker, paste/drop, durable local references, removable chips. Validate serialized text including references against actual backend limits. |
+| Sending | Home sends or queues; empty busy Home offers Stop. Return never means Stop. A ticket reply redirects the same agent through `ReplyToTask`; it is not a queued Home message. |
+| Runtime | Home's catalog changes the app runtime. Agent chat can display that default; no UI should imply a per-ticket override or quota-based routing that the daemon does not support. |
+| Reading | Keep the current result and review readable. Fold older plans, intermediate work and decision history when settled; keep needed questions and current approval plans visible. |
+| Rich output | Wrap table cells, preserve escaped pipes, expose preview line counts and incremental expansion, copy complete available output. A UI cannot recover bytes already discarded by the daemon. |
+| Following | Preserve explicit scroll-away and selection, with a clear route back to latest. A unified stable transcript/anchor model still needs dedicated work and long-conversation measurement. |
+| Context | Only show measured occupancy and confirmed compaction events. No decorative context gauge or no-op `/compact` command. |
+
+```mermaid
+flowchart LR
+    Draft[Scoped draft and attachments] --> Validate[Validate complete submission]
+    Validate --> Home{Home turn running?}
+    Home -->|No| Send[Send message]
+    Home -->|Yes, has text| Queue[Queue message]
+    Validate --> Ticket[Reply to same ticket agent]
+    Ticket --> Reassess[Cancel old claim and reassess reply authority]
+    Send --> Read[Conversation and current result]
+    Queue --> Read
+    Reassess --> Read
+    Read --> Details[Expand work, checks and changes]
+```
+
+### Composer reference findings
+
+- Zeron's composer has measured growth and explicit idle/send, busy/queue and
+  busy-empty/stop states. Enter accepts a completion before sending, and never
+  stops an empty running turn. Failed sends restore the draft without replacing
+  newly added attachments. See
+  [composer](https://github.com/zeronsh/zeron/blob/9b3773082a8171cd29387b07f2a2b92a48c6ad0b/crates/ui/src/composer.rs#L564)
+  and [queue capabilities](https://github.com/zeronsh/zeron/blob/9b3773082a8171cd29387b07f2a2b92a48c6ad0b/crates/ui/src/queue.rs#L97).
+- Macai's AppKit editor and attachment lifecycle are the closer native reference:
+  loading, preview, removal and failure belong in the composer, with a readiness
+  gate before send. See
+  [MacaiTextField](https://github.com/Renset/macai/blob/99300f753172e82bae0d70919c16897b2fea9a5b/macai/UI/Components/MacaiTextField.swift#L177)
+  and [MessageInputView](https://github.com/Renset/macai/blob/99300f753172e82bae0d70919c16897b2fea9a5b/macai/UI/Chat/BottomContainer/MessageInputView.swift#L640).
+- Zeron clamps effort to the selected model's supported options. Neko should
+  derive options from its own catalog before adding effort UI. A local/new-worktree
+  mode is verified in Zeron; a separate Ask/Plan mode was not established by this audit.
+
+The reference findings are source inspections, not proof of their current installed
+apps. Implementation here reuses Neko's own components; no renderer or new package
+was imported. The original staged roadmap below remains the deeper backend and
+performance work, not a claim that this first UI pass completes it.
 
 ## What the references actually do
 
@@ -49,7 +116,12 @@ from cumulative billing. Missing measurements appear unavailable, not 0%.
 [Normalization](https://github.com/zeronsh/zeron/blob/9b3773082a8171cd29387b07f2a2b92a48c6ad0b/crates/harness/src/codex/normalize.rs#L140)
 and [cross-provider contract](https://github.com/zeronsh/zeron/blob/9b3773082a8171cd29387b07f2a2b92a48c6ad0b/docs/context-usage.md).
 
-## Neko gaps, in priority order
+## Baseline gaps, in priority order
+
+These describe the inspected `a22a41f` baseline. The follow-up fixes visible
+results, shared composing, explicit Home scroll intent and local rich-output
+previews. The underlying continuity, streaming, transcript identity and event
+retention work below remains open; see the evidence report for the exact boundary.
 
 1. **Home continuity:** `crates/neko-core/src/neko_chat.rs:575` selects the last
    12 messages before workspace/profile filtering and truncates each included
@@ -143,6 +215,7 @@ This is the heavier alternative, with more accessibility/layout integration work
    unsupported ones should state that capability honestly. Verify one actual
    resumed conversation across compaction, cancellation and restart.
 
-These are implementation estimates, not completed work. This commit contains
-research only: no renderer/runtime code, package, model configuration or installed
-app changed. Compaction and performance were not exercised against live providers.
+These are estimates for the deeper work, not completed capabilities. The original
+`6a467cd` commit contained research only. The follow-up UI implementation is recorded
+in `docs/evidence/chat-composer-upgrade.md`. Compaction and long-conversation
+performance have not been exercised against live providers.

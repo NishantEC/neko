@@ -22,6 +22,14 @@ final class RichTextTests: XCTestCase {
         XCTAssertEqual(NativeMarkdown.parse("Look ![Image](file:///tmp/a path.png) now"), [.paragraph("Look"), .image("Image", "file:///tmp/a path.png"), .paragraph("now")])
         XCTAssertEqual(NativeMarkdown.parse("![Remote](https://example.com/image.png)"), [.image("Remote", "https://example.com/image.png")])
     }
+    func testTablesPreserveEscapedPipesAndEmptyColumns() {
+        XCTAssertEqual(NativeMarkdown.tableCells(#"| Name | a\|b | |"#), ["Name", "a|b", ""])
+        XCTAssertEqual(NativeMarkdown.tableCells(#"a | ends\|"#), ["a", "ends|"])
+        XCTAssertEqual(NativeMarkdown.tableCells(#"| path\\| next |"#), [#"path\\"#, "next"])
+        XCTAssertEqual(NativeMarkdown.parse("| Test | Value |\n|---|---|\n| Pipe | a\\|b |"), [
+            .table(["Test", "Value"], [["Pipe", "a|b"]])
+        ])
+    }
     func testAttachmentPathRejectsRemoteTraversalSiblingsAndSymlinks() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("neko-richtext-" + UUID().uuidString)
         let directory = root.appendingPathComponent("attachments")
