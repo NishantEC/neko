@@ -1,4 +1,6 @@
 import XCTest
+import Combine
+import Observation
 import NekoKit
 @testable import NekoNative
 
@@ -17,6 +19,72 @@ private actor ControlledTransport {
 }
 
 @MainActor final class AppModelTests: XCTestCase {
+    func testTypingDoesNotInvalidateTheWholeApp() {
+        let model = AppModel()
+        var updates = 0
+        let subscription = model.objectWillChange.sink { updates += 1 }
+        let scope = ChatDraftScope(workspaceID: nil, profileID: "default")
+        for length in 1...80 {
+            model.chatDrafts.set(String(repeating: "a", count: length), for: scope)
+            model.ticketDrafts.set(String(repeating: "b", count: length), for: "ticket")
+        }
+        XCTAssertEqual(updates, 0, "Draft editing must only invalidate its composer, not the sidebar and ticket history")
+        XCTAssertEqual(model.chatDrafts.text(for: scope).count, 80)
+        XCTAssertEqual(model.ticketDrafts.text(for: "ticket").count, 80)
+        withExtendedLifetime(subscription) {}
+    }
+
+    func testUnchangedPollDoesNotInvalidateTheApp() async {
+        let model = AppModel { _ in .object(["Workbench": .object(["tasks": .array([])])]) }
+        await model.refresh()
+        var updates = 0
+        let subscription = model.objectWillChange.sink { updates += 1 }
+        await model.refresh()
+        XCTAssertEqual(updates, 0, "Idle two-second polls must not rebuild every page")
+        withExtendedLifetime(subscription) {}
+    }
+
+    func testComposerStillObservesDraftEdits() {
+        let model = AppModel()
+        let changed = expectation(description: "composer observes its text")
+        withObservationTracking {
+            _ = model.ticketDrafts.text(for: "ticket")
+        } onChange: {
+            changed.fulfill()
+        }
+        model.ticketDrafts.set("Keep the composer responsive", for: "ticket")
+        wait(for: [changed], timeout: 0.1)
+    }
+
+    func testHeartbeatOnlyPollIsQuietButChangedContentIsPublished() async {
+        let transport = ControlledTransport()
+        let model = AppModel { try await transport.request($0) }
+        func snapshot(_ heartbeat: Int, title: String) -> JSONValue {
+            .object(["Workbench": .object([
+                "heartbeat_ms": .number(Double(heartbeat)),
+                "tasks": .array([.object(["title": .string(title)])])
+            ])])
+        }
+        let first = Task { await model.refresh() }
+        await transport.waitFor(1)
+        await transport.respond(0, snapshot(1, title: "First"))
+        await first.value
+        var updates = 0
+        let subscription = model.objectWillChange.sink { updates += 1 }
+        let unchanged = Task { await model.refresh() }
+        await transport.waitFor(2)
+        await transport.respond(1, snapshot(2, title: "First"))
+        await unchanged.value
+        XCTAssertEqual(updates, 0)
+        let changed = Task { await model.refresh() }
+        await transport.waitFor(3)
+        await transport.respond(2, snapshot(3, title: "Updated"))
+        await changed.value
+        XCTAssertEqual(updates, 1)
+        XCTAssertEqual(model.tasks.first?["title"].string, "Updated")
+        withExtendedLifetime(subscription) {}
+    }
+
     func testWatchingStatusRequiresAnEnabledResponsibility() {
         XCTAssertEqual(WatchingPresentation(connected: true, snapshot: .null).title, "Ready")
         let paused: JSONValue = .object(["mcp": .object(["responsibilities": .array([

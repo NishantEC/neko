@@ -10,7 +10,8 @@ import NekoKit
     @Published var agentFilter = "all"
     @Published var agentSearch = ""
     @Published var includeStoppedAgents = true
-    @Published var ticketDrafts = ComposerDraftStore<String>()
+    // Drafts notify only views that read them, not every observer of AppModel.
+    let ticketDrafts = ComposerDraftStore<String>()
     @Published var sendingTicketIDs: Set<String> = []
 
     func openAgent(_ id: String, from page: String? = nil) {
@@ -45,7 +46,7 @@ import NekoKit
             if newValue == nil { connectionError = nil }
         }
     }
-    @Published var chatDrafts = ScopedChatDrafts()
+    let chatDrafts = ScopedChatDrafts()
     @Published var sendingChatScopes: Set<ChatDraftScope> = []
     @Published var connected = false
     @Published var busy = false
@@ -102,14 +103,15 @@ import NekoKit
             let result = try await request(.object(["Workbench": .string("Snapshot")]))
             guard started == generation, sequence == refreshSequence else { return }
             guard case .object = result["Workbench"] else { throw invalidResponse() }
-            snapshot = result["Workbench"]
-            connected = true
-            connectionError = nil
+            acceptSnapshot(result["Workbench"])
+            if !connected { connected = true }
+            if connectionError != nil { connectionError = nil }
             // A connection failure from before the daemon was up is no longer true.
             if let error, AppModel.isConnectionError(error) { self.error = nil }
         } catch {
             guard started == generation, sequence == refreshSequence else { return }
-            connected = false; connectionError = error.localizedDescription
+            if connected { connected = false }
+            if connectionError != error.localizedDescription { connectionError = error.localizedDescription }
         }
     }
     @discardableResult func workbench(_ command: JSONValue) async -> Bool {
@@ -120,7 +122,7 @@ import NekoKit
         do {
             let result = try await request(.object(["Workbench": command]))
             guard case .object = result["Workbench"] else { throw invalidResponse() }
-            snapshot = result["Workbench"]
+            acceptSnapshot(result["Workbench"])
             connected = true
             error = nil
             return true
@@ -158,6 +160,16 @@ import NekoKit
     }
     private func invalidResponse() -> NSError {
         NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: "The daemon returned an unexpected response. Please try again."])
+    }
+
+    private func acceptSnapshot(_ value: JSONValue) {
+        // The native UI uses successful IPC for connection health. A daemon
+        // heartbeat alone does not change any displayed content.
+        var previous = snapshot.object
+        var incoming = value.object
+        previous.removeValue(forKey: "heartbeat_ms")
+        incoming.removeValue(forKey: "heartbeat_ms")
+        if previous != incoming { snapshot = value }
     }
 }
 

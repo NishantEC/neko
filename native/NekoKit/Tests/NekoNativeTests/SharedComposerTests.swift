@@ -1,7 +1,7 @@
 import XCTest
 @testable import NekoNative
 
-final class SharedComposerTests: XCTestCase {
+@MainActor final class SharedComposerTests: XCTestCase {
     func testAnotherWorkspaceQueuesWithoutOfferingAnUnrelatedStop() {
         let empty = ComposerActionState(running: true, hasContent: false, submitting: false, blocked: false, queues: true, canStop: false)
         XCTAssertEqual(empty.primary, .send)
@@ -37,7 +37,7 @@ final class SharedComposerTests: XCTestCase {
     }
 
     func testTicketSubmissionDoesNotClearNewerTextOrAttachments() {
-        var drafts = ComposerDraftStore<String>()
+        let drafts = ComposerDraftStore<String>()
         drafts.set("Original", for: "a")
         let sent = drafts.submission(for: "a")
         drafts.set("Changed", for: "a")
@@ -52,7 +52,7 @@ final class SharedComposerTests: XCTestCase {
     }
 
     func testSubmissionAndPickerCompletionRemainInOriginatingTicket() {
-        var drafts = ComposerDraftStore<String>()
+        let drafts = ComposerDraftStore<String>()
         drafts.set("First", for: "a")
         drafts.set("Second", for: "b")
         let sent = drafts.submission(for: "a")
@@ -94,7 +94,7 @@ final class SharedComposerTests: XCTestCase {
         XCTAssertNotNil(ComposerPayload.validationError(exact + "é", limit: 2048))
         XCTAssertNil(ComposerPayload.validationError(String(repeating: "🙂", count: 1024), limit: 4096))
         XCTAssertNotNil(ComposerPayload.validationError(String(repeating: "🙂", count: 1025), limit: 4096))
-        var drafts = ComposerDraftStore<String>()
+        let drafts = ComposerDraftStore<String>()
         drafts.add(attachment, for: "a")
         let references = drafts.submission(for: "a").text
         XCTAssertEqual(references, attachment.reference)
@@ -121,7 +121,7 @@ final class SharedComposerTests: XCTestCase {
     }
 
     func testAttachmentRemovalChangesRevisionAndWorkspaceMentionDoesNotSwitchDraft() {
-        var drafts = ScopedChatDrafts()
+        let drafts = ScopedChatDrafts()
         let first = ChatDraftScope(workspaceID: "a", profileID: "default")
         let second = ChatDraftScope(workspaceID: "b", profileID: "default")
         drafts.set("Check @b", for: first)

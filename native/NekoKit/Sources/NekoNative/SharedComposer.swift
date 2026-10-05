@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 import NekoKit
 
@@ -10,7 +11,7 @@ struct ChatDraftScope: Hashable {
 typealias ScopedChatDrafts = ComposerDraftStore<ChatDraftScope>
 
 /// Navigation-owned draft state; acknowledgements clear only the submitted revision.
-struct ComposerDraftStore<Key: Hashable> {
+@MainActor @Observable final class ComposerDraftStore<Key: Hashable> {
     struct Submission { let scope: Key; let text: String; let revision: Int }
     private var values: [Key: String] = [:]
     private var attached: [Key: [ComposerAttachment]] = [:]
@@ -21,17 +22,17 @@ struct ComposerDraftStore<Key: Hashable> {
     }
     func text(for key: Key) -> String { values[key] ?? "" }
     func attachments(for key: Key) -> [ComposerAttachment] { attached[key] ?? [] }
-    mutating func set(_ text: String, for key: Key) {
+    func set(_ text: String, for key: Key) {
         guard values[key] != text else { return }
         values[key] = text
         revisions[key, default: 0] += 1
     }
-    mutating func add(_ attachment: ComposerAttachment, for key: Key) {
+    func add(_ attachment: ComposerAttachment, for key: Key) {
         guard !attachments(for: key).contains(attachment) else { return }
         attached[key, default: []].append(attachment)
         revisions[key, default: 0] += 1
     }
-    mutating func remove(_ attachment: ComposerAttachment, for key: Key) {
+    func remove(_ attachment: ComposerAttachment, for key: Key) {
         attached[key]?.removeAll { $0 == attachment }
         revisions[key, default: 0] += 1
     }
@@ -39,7 +40,7 @@ struct ComposerDraftStore<Key: Hashable> {
         let parts = [text(for: key).trimmingCharacters(in: .whitespacesAndNewlines)] + attachments(for: key).map(\.reference)
         return Submission(scope: key, text: parts.filter { !$0.isEmpty }.joined(separator: "\n"), revision: revisions[key, default: 0])
     }
-    mutating func complete(_ submission: Submission, succeeded: Bool) {
+    func complete(_ submission: Submission, succeeded: Bool) {
         guard succeeded, revisions[submission.scope, default: 0] == submission.revision else { return }
         set("", for: submission.scope)
         attached[submission.scope] = []
