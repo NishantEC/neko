@@ -1,7 +1,37 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Neko gem shaders. Compiled into Neko.metallib by scripts/build-native.sh.
+// Neko decorative surface shaders. Compiled into Neko.metallib by scripts/build-native.sh.
+
+/// Opaque nacre: broad softbox lighting, a translucent-looking coloured body and
+/// restrained interference bands. This shades the bead only, not system glass.
+/// Pointer uniforms move the light; no clock or continuously running animation.
+[[stitchable]] half4 pearlOrb(float2 pos, half4 source, float2 size, float2 pointer,
+                            float hover, half4 tint, half4 sheen, half4 illuminant) {
+    if (source.a <= 0.0h) return source;
+    float2 p = (pos - size * 0.5) / max(1.0, min(size.x, size.y) * 0.5);
+    float r2 = min(dot(p, p), 1.0);
+    float3 n = float3(p, sqrt(max(0.0, 1.0 - r2)));
+    float3 light = normalize(float3(-0.45 + pointer.x * 0.48, -0.6 + pointer.y * 0.42, 1.25));
+    float diffuse = max(0.0, dot(n, light));
+    float grazing = pow(1.0 - n.z, 2.2);
+    float3 white = float3(illuminant.rgb);
+    float3 base = float3(tint.rgb);
+    // Soft body transmission prevents the near-black rim of a metal ball.
+    float3 col = mix(base, white, 0.36) * (0.70 + diffuse * 0.22);
+    float layers = sin(n.x * 5.2 + n.y * 3.5 + n.z * 6.0 + pointer.x * 0.45);
+    float veil = smoothstep(-0.8, 0.9, layers) * (0.11 + grazing * 0.13);
+    col = mix(col, float3(sheen.rgb), veil);
+    // Curved nacre bands live inside the sphere; broad highlights avoid chrome pinpoints.
+    float band = exp(-pow((n.y + n.x * 0.35 - 0.32 + pointer.y * 0.12) * 5.0, 2.0));
+    col += float3(sheen.rgb) * band * 0.08 * (0.3 + n.z);
+    float3 halfway = normalize(light + float3(0, 0, 1));
+    float softbox = pow(max(0.0, dot(n, halfway)), 12.0);
+    float rim = grazing * (0.065 + 0.045 * max(0.0, -n.x));
+    col = mix(col, white, softbox * (0.48 + hover * 0.10));
+    col += white * rim;
+    return half4(half3(clamp(col, 0.0, 1.0)) * source.a, source.a);
+}
 
 static float hash21(float2 p) { return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
 static float vnoise(float2 p) {

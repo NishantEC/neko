@@ -9,8 +9,8 @@ struct DesignLabAgentSheet: View {
             HStack(spacing: 14) {
                 DesignLabOrb(color: agent.color, size: 40)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(agent.rawValue).font(.title2.weight(.semibold))
-                    Text("Sample agent · \(agent.status)").font(.caption).foregroundStyle(.secondary)
+                    Text(agent.title).font(.title2.weight(.semibold))
+                    Text("\(agent.role) · \(agent.status) · Sample").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)

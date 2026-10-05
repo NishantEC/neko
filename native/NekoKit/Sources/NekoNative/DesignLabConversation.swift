@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DesignLabConversation: View {
     let messages: [String]
+    let taskActivity: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
@@ -27,13 +28,13 @@ struct DesignLabConversation: View {
                 }
                 Text("A quieter canvas. A little more depth.")
                     .font(.system(size: 28, weight: .semibold)).tracking(-0.6)
-                Text("The team is tracing colours back to shared tokens. Your tools and agents stay within reach while the conversation gets the space.")
+                Text("Neko is tracing colours back to shared tokens. Task details and plugins stay within reach while the conversation gets the space.")
                     .font(.system(size: 16)).lineSpacing(6).foregroundStyle(.secondary)
             }
             DesignLabArtifact()
             HStack(spacing: 10) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint)
-                Text("Three focused agents. One place to follow the work.").font(.system(size: 14))
+                Text(taskActivity).font(.system(size: 14))
                 Spacer()
             }.padding(.vertical, 8)
             ForEach(Array(messages.enumerated()), id: \.offset) { _, message in
