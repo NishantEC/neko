@@ -17,6 +17,12 @@ daemon health and relaunches its bundled daemon after a connection failure;
 the daemon owns socket singleton detection.
 `neko-core::workbench` stores bounded,
 validated snapshots atomically in the daemon-owned SQLite settings table.
+Storage accounting uses actual persisted bytes. Waiting tickets do not reserve
+hypothetical maximum-size future output or impose an indirect worker cap.
+The current snapshot still has an 8 MiB actual-content limit and 1,000-task
+record limit; this is bounded storage, not unlimited archival history. Old events
+compact under pressure, while plans/results are retained and an oversized write
+fails atomically without replacing saved data.
 Workspace identity is a canonical existing folder, including a non-Git folder.
 Creating or planning a code task separately validates that the folder belongs
 to a Git repository, because execution requires an isolated worktree. Import
@@ -92,7 +98,7 @@ explicit warnings for shortened output or incomplete legacy receipts. Copy saved
 record copies exactly the retained event, not an unavailable full execution log.
 These records can span multiple attempts; they are not the current review verdict.
 `neko-core::neko_chat` stores the conversation in its own bounded setting,
-outside the task store's reserved capacity. Each message is one Codex turn with
+outside the task store's content limit. Each message is one Codex turn with
 read-only filesystem access (`neko-daemon::workbench::converse`). A selected
 workspace receives its connected MCP tools through a temporary lease;
 an unscoped chat receives no bridge. Chat history injected into the prompt is
