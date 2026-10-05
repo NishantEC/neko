@@ -37,7 +37,7 @@ struct DecisionCard: View {
     @State private var correcting = false
     @State private var correction = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
             Text(DecisionPresentation.title(record["action"].string))
                 .font(NekoFont.heading).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
             if let observed = record["observed_outcome"].string.nonEmpty {
@@ -94,26 +94,25 @@ struct DecisionCard: View {
                 if let taskID = record["task_id"].string.nonEmpty, model.agentID != taskID {
                     Button("Open agent") { model.openAgent(taskID, from: originPage) }
                 }
-            }.controlSize(.small)
+            }.controlSize(.regular)
         }
         .padding(NekoLayout.rowInset).frame(maxWidth: .infinity, alignment: .leading)
-        .background(N.card, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(N.line))
+        .background(N.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .contain)
         .sheet(isPresented: $correcting) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Correct this decision").font(NekoFont.title)
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Correct this decision").font(NekoFont.title).accessibilityAddTraits(.isHeader)
                 Form {
                     Section {
                         TextEditor(text: $correction).font(NekoFont.body)
-                            .scrollContentBackground(.hidden).padding(8).frame(height: 120)
-                            .background(N.panel, in: RoundedRectangle(cornerRadius: 6))
-                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(N.line))
+                            .scrollContentBackground(.hidden).padding(12).frame(height: 160)
+                            .background(N.panel, in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(N.line))
                             .accessibilityLabel("What should Neko do differently?")
                     } header: { Text("What should Neko do differently?") } footer: {
                         Text("The original observation stays in history. This correction applies to this decision; broader guidance needs your confirmation in Working style.")
                     }
-                }.formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 245)
+                }.formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 310)
                 if let error = model.error { Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.coral).textSelection(.enabled) }
                 HStack {
                     Button("Cancel") { correcting = false }.keyboardShortcut(.cancelAction)
@@ -122,9 +121,9 @@ struct DecisionCard: View {
                         Task {
                             if await model.workbench(nested("DecisionContext", "CorrectDecision", ["workspace_id": record["workspace_id"], "record_id": record["id"], "expected_version": record["version"], "correction": .string(correction)])) { correcting = false; correction = "" }
                         }
-                    }.keyboardShortcut(.defaultAction).disabled(correction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
+                    }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(correction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
                 }
-            }.font(NekoFont.body).padding(NekoLayout.pageInset).frame(width: 560)
+            }.font(NekoFont.body).controlSize(.regular).padding(NekoLayout.pageInset).frame(width: 620).background(N.canvas)
         }
     }
 }
@@ -167,7 +166,7 @@ struct WorkingStyleView: View {
             let dismissed = preferences.filter { $0["state"].string == "dismissed" }
             if !dismissed.isEmpty {
                 DisclosureGroup("Dismissed guidance · \(dismissed.count)") {
-                    VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 18) {
                         ForEach(dismissed, id: \.recordID) { item in
                             preferenceRow(item)
                             if item != dismissed.last { Divider() }
@@ -178,7 +177,7 @@ struct WorkingStyleView: View {
             let records = DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace })
             if !records.isEmpty {
                 DisclosureGroup("Recent decisions · \(min(records.count, 12))") {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 18) {
                         ForEach(records.prefix(12), id: \.recordID) { DecisionCard(model: model, record: $0, originPage: "Memory") }
                     }.padding(.top, 10)
                 }.font(NekoFont.heading)
@@ -187,7 +186,7 @@ struct WorkingStyleView: View {
         .sheet(item: $editor) { WorkingPreferenceEditor(model: model, original: $0.value) }
     }
     private func preferenceRow(_ item: JSONValue) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             ManagementDetailText(text: item["instruction"].string, disclosure: "Full guidance")
             Text("Applies to: " + (item["applicability"]["terms"].array.map(\.string) + item["applicability"]["task_ids"].array.map { "NEK-" + String($0.string.prefix(4)).uppercased() }).joined(separator: ", "))
                 .font(NekoFont.meta).foregroundStyle(N.text3)
@@ -218,8 +217,8 @@ struct WorkingStyleView: View {
                 Menu("Guidance actions", systemImage: "ellipsis") {
                     Button("Forget guidance", role: .destructive) { submit(model, DecisionPresentation.preferenceCommand("ForgetPreference", item)) }
                 }.labelStyle(.iconOnly).fixedSize()
-            }.controlSize(.small).disabled(model.busy)
-        }.font(NekoFont.body).padding(.vertical, 4)
+            }.controlSize(.regular).disabled(model.busy)
+        }.font(NekoFont.body).padding(.vertical, 12)
     }
 }
 
@@ -238,11 +237,16 @@ struct WorkingPreferenceEditor: View {
     }
     private func phrases(_ text: String) -> JSONValue { .array(text.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespacesAndNewlines)) }.filter { !$0.string.isEmpty }) }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(original.recordID.isEmpty ? "Add working guidance" : "Edit working guidance").font(NekoFont.title)
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(original.recordID.isEmpty ? "Add working guidance" : "Edit working guidance")
+                    .font(NekoFont.title).accessibilityAddTraits(.isHeader)
+                Text("Describe a recurring situation and how you want Neko to approach it.")
+                    .font(NekoFont.body).foregroundStyle(N.text3)
+            }
             Form {
                 Section("Guidance") {
-                    TextField("Instruction", text: $instruction, axis: .vertical).lineLimit(2...5)
+                    TextField("Instruction", text: $instruction, axis: .vertical).lineLimit(3...6)
                 }
                 Section {
                     TextField("Words or phrases", text: $terms, axis: .vertical).lineLimit(1...3)
@@ -250,7 +254,7 @@ struct WorkingPreferenceEditor: View {
                 } header: { Text("When it applies") } footer: {
                     Text("Separate phrases with commas. Context matches complete words in a task; exceptions narrow when guidance applies.")
                 }
-            }.formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 290)
+            }.formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 330)
             Text("Saved guidance returns to Suggested until you keep it. It does not grant new permissions.")
                 .font(NekoFont.meta).foregroundStyle(N.text3)
             if let error = model.error { Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.coral).textSelection(.enabled) }
@@ -261,9 +265,9 @@ struct WorkingPreferenceEditor: View {
                         let workspace = original["workspace_id"].string.nonEmpty ?? model.selectedWorkspace ?? ""
                         if await model.workbench(nested("DecisionContext", "SavePreference", ["workspace_id": .string(workspace), "id": .string(original.recordID), "expected_version": original["version"], "applicability": .object(["terms": phrases(terms), "task_ids": original["applicability"]["task_ids"] == .null ? .array([]) : original["applicability"]["task_ids"]]), "instruction": .string(instruction), "supporting_record_ids": original["supporting_record_ids"] == .null ? .array([]) : original["supporting_record_ids"], "exceptions": phrases(exceptions)])) { dismiss() }
                     }
-                }.keyboardShortcut(.defaultAction).disabled(instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (phrases(terms).array.isEmpty && original["applicability"]["task_ids"].array.isEmpty) || model.busy)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (phrases(terms).array.isEmpty && original["applicability"]["task_ids"].array.isEmpty) || model.busy)
             }
-        }.font(NekoFont.body).textFieldStyle(.roundedBorder).padding(NekoLayout.pageInset).frame(width: 560)
+        }.font(NekoFont.body).controlSize(.regular).textFieldStyle(.roundedBorder).padding(NekoLayout.pageInset).frame(width: 620).background(N.canvas)
     }
 }
 

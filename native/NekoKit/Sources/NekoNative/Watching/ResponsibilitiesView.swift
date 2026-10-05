@@ -29,7 +29,7 @@ struct ResponsibilitiesView: View {
 
     var body: some View {
         ManagementScroll {
-            PageIntro(title: "Watching", message: "Checks connected sources every 10 minutes and brings relevant work to Home.") {
+            PageIntro(title: "Watching", message: "Keep up with the sources that matter. Neko checks every 10 minutes while it’s running and brings relevant work to Home.") {
                 Button("New watch", systemImage: "plus") {
                     draft = ManagementDraft(value: .object([:]), workspace: workspaceID)
                 }.disabled(model.workspaces.isEmpty || model.busy)
@@ -58,7 +58,7 @@ struct ResponsibilitiesView: View {
                                     draft = ManagementDraft(value: item, workspace: item["workspace_id"].string)
                                 }
                             }
-                        }.padding(.top, 8)
+                        }.padding(.top, 16)
                     } label: {
                         sectionTitle("Suggestions", detail: "\(suggested.count) to review")
                     }
@@ -75,13 +75,13 @@ struct ResponsibilitiesView: View {
     }
 
     private var watchingSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 16) {
             sectionTitle("Active watches", detail: "\(active.count)")
             if active.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("No active watches").font(NekoFont.body).foregroundStyle(N.text2)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("No active watches").font(NekoFont.heading).foregroundStyle(N.text2)
                     Text(paused.isEmpty ? "Describe a watch below, or review a suggestion." : "Resume a paused watch or describe a new one below.")
-                        .font(NekoFont.meta).foregroundStyle(N.text3)
+                        .font(NekoFont.body).foregroundStyle(N.text3)
                 }.padding(.vertical, NekoLayout.rowInset)
             } else { watchRows(active) }
         }
@@ -101,12 +101,12 @@ struct ResponsibilitiesView: View {
         HStack(spacing: 8) {
             Text(title).font(NekoFont.heading).foregroundStyle(N.text)
             Text(detail).font(NekoFont.meta).foregroundStyle(N.text3).monospacedDigit()
-        }.accessibilityAddTraits(.isHeader)
+        }.accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
     }
 
     private var askBox: some View {
         let tools = Watching.connections(model, workspace: workspaceID)
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Text("Describe a watch").font(NekoFont.heading).foregroundStyle(N.text)
                 Spacer()
@@ -115,12 +115,15 @@ struct ResponsibilitiesView: View {
                         ForEach(tools, id: \.recordID) { tool in
                             Button(Watching.idea(for: tool["label"].string)) { ask = Watching.idea(for: tool["label"].string) }
                         }
-                    }.fixedSize().controlSize(.small)
+                    }.fixedSize().controlSize(.regular)
                 }
             }
             TextField("What should Neko keep an eye on?", text: $ask, axis: .vertical)
-                .textFieldStyle(.plain).font(NekoFont.body).lineLimit(2...4).onSubmit { send(ask) }
-            Divider()
+                .textFieldStyle(.plain).font(NekoFont.body).lineLimit(3...6).onSubmit { send(ask) }
+                .padding(NekoLayout.rowInset)
+                .background(N.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(N.line))
+                .accessibilityLabel("What should Neko keep an eye on?")
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) { workspacePicker; Spacer(minLength: 8); askActions(tools) }
                 VStack(alignment: .leading, spacing: 10) { workspacePicker; askActions(tools) }
@@ -128,16 +131,15 @@ struct ResponsibilitiesView: View {
             Text(tools.isEmpty ? "Connect a source in Tools & skills to start." : "\(tools.count) connected \(tools.count == 1 ? "source" : "sources") available. Review access before turning on a suggestion.")
                 .font(NekoFont.meta).foregroundStyle(N.text3)
         }
-        .padding(NekoLayout.rowInset)
-        .background(N.card, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(N.line))
+        .padding(.top, 8)
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder private var workspacePicker: some View {
         if model.selectedWorkspace == nil, model.workspaces.count > 1 {
             Picker("Workspace", selection: Binding(get: { workspaceID ?? "" }, set: { target = $0 })) {
                 ForEach(model.workspaces, id: \.recordID) { Text($0["name"].string).tag($0.recordID) }
-            }.labelsHidden().frame(maxWidth: 220).controlSize(.small)
+            }.labelsHidden().frame(maxWidth: 240).controlSize(.regular)
         } else {
             Text(model.workspaces.first { $0.recordID == workspaceID }?["name"].string ?? "Workspace")
                 .font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1)
@@ -149,14 +151,14 @@ struct ResponsibilitiesView: View {
             if sending { ProgressView().controlSize(.small).accessibilityLabel("Asking Neko") }
             Button("Suggest from tools", systemImage: "sparkles") { send(Watching.suggestPrompt) }
                 .disabled(sending || model.busy || tools.isEmpty)
-            Button("Ask Neko") { send(ask) }.nekoPrimaryButton()
+            Button("Ask Neko") { send(ask) }.buttonStyle(.borderedProminent)
                 .disabled(sending || model.busy || ask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .keyboardShortcut(.return, modifiers: .command)
-        }.controlSize(.small).fixedSize()
+        }.controlSize(.regular).fixedSize()
     }
 
     private func replyView(_ message: JSONValue) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text(message["pending"].bool ? "Looking through your tools…" : "Neko’s reply").font(NekoFont.heading)
                 Spacer()

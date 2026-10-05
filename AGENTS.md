@@ -2,6 +2,15 @@
 
 ## Current standalone workspace (2026-09-24)
 
+The native workspace now follows system appearance, with Light / Dark overrides
+in Settings and the sidebar. Shared typography uses 28pt page introductions and
+15pt body text, with 32pt page insets and bounded 880pt management / 760pt chat
+content. Native sidebar and toolbar keep platform materials; the floating chat
+composer uses Liquid Glass on macOS 26 and a material fallback below 26. Content
+and evidence stay opaque. Preserve `stableSplitPane`, the native top safe area,
+and navigation-owned drafts when changing these surfaces. See
+`docs/design/native-polish.md` and `docs/evidence/native-liquid-glass.md`.
+
 As of 2026-10-03, the native client has Home, All agents (List/Board), full-page
 agent chats and a system source-list sidebar with bounded live agent groups.
 Ticket drafts and return filters survive navigation. Memory / Working style

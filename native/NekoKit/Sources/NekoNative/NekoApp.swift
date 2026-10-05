@@ -50,6 +50,7 @@ struct WorkspaceView: View {
     @State private var page = ProcessInfo.processInfo.environment["NEKO_START_PAGE"] ?? "Home"
     @State private var columns: NavigationSplitViewVisibility = ProcessInfo.processInfo.environment["NEKO_SIDEBAR"] == "hidden" ? .detailOnly : .all
     @AppStorage("neko.look") private var look = ProcessInfo.processInfo.environment["NEKO_LOOK"] ?? NekoLook.ambient.rawValue
+    @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     @State private var addingWorkspace = false
     private let pages = [("Home", "house"), ("Tickets", "tray"), ("Responsibilities", "waveform.path"), ("Tools & skills", "shippingbox"), ("Schedules", "calendar"), ("Memory", "text.alignleft"), ("Profiles", "person.2"), ("Settings", "gearshape")]
     var body: some View {
@@ -61,7 +62,7 @@ struct WorkspaceView: View {
                 NavigationSplitView(columnVisibility: $columns) {
                     NativeSidebar(model: model, page: $page, pages: pages, addingWorkspace: $addingWorkspace, look: $look)
                         .stableSplitPane()
-                        .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 300)
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 252, max: 320)
                 } detail: {
                     // Home and agent chats place their permission banners within their content.
                     let ownsToolbarRow = !["Workspaces", "Responsibilities", "Tools & skills", "Memory", "Profiles", "Schedules", "Settings", "Activity", "Reply views"].contains(page)
@@ -103,21 +104,21 @@ struct WorkspaceView: View {
                 }
             }
         }
-        .frame(minWidth: model.onboarding ? 760 : 960, maxWidth: model.onboarding ? 760 : .infinity, minHeight: model.onboarding ? 580 : 620, maxHeight: model.onboarding ? 580 : .infinity)
+        .frame(minWidth: model.onboarding ? 840 : 960, maxWidth: model.onboarding ? 840 : .infinity, minHeight: model.onboarding ? 660 : 620, maxHeight: model.onboarding ? 660 : .infinity)
         .onChange(of: model.onboarding) { _, onboarding in
             // Let SwiftUI lift the fixed setup frame first, then grow the window.
             if !onboarding { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { WindowSizer.expandForWorkspace() } }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme((NekoAppearance(rawValue: appearance) ?? .system).colorScheme)
         .environment(\.nekoLook, NekoLook(rawValue: look) ?? .ambient)
         .safeAreaInset(edge: .top) {
             if let notice = model.notice, model.error == nil {
                 HStack(spacing: 10) { Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint); Text(notice).font(NekoFont.body); Spacer(); Button { model.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
-                    .nekoToast().transition(.move(edge: .top).combined(with: .opacity))
+                    .nekoToast().transition(.move(edge: .top))
             }
             if let error = model.error {
                 HStack(spacing: 10) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(NekoStyle.amber); Text(error).font(NekoFont.body).textSelection(.enabled).lineLimit(2); Spacer(); Button("Retry") { Task { await model.refresh() } }.nekoGlassButton(); Button { model.error = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
-                    .nekoToast().transition(.move(edge: .top).combined(with: .opacity))
+                    .nekoToast().transition(.move(edge: .top))
             }
         }
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
@@ -225,6 +226,7 @@ struct NativeSidebar: View {
     let pages: [(String, String)]
     @Binding var addingWorkspace: Bool
     @Binding var look: String
+    @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     var body: some View {
         List(selection: $selection) {
             Section {
@@ -239,12 +241,14 @@ struct NativeSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .font(.system(size: 14))
+        .environment(\.defaultMinListRowHeight, 32)
         // Where Neko works sits at the top, like a Codex or Xcode project picker.
         .safeAreaInset(edge: .top, spacing: 0) {
             WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace)
                 .menuStyle(.button).buttonStyle(.borderless)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.vertical, 8)
+                .padding(.horizontal, 16).padding(.vertical, 12)
         }
         // Status and app controls live in the sidebar footer.
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -252,16 +256,15 @@ struct NativeSidebar: View {
                 WatchingStatus(connected: model.connected, snapshot: model.snapshot)
                 Spacer()
                 Menu {
-                    Picker("Look", selection: $look) { ForEach(NekoLook.allCases) { Text($0.title).tag($0.rawValue) } }.pickerStyle(.inline)
+                    Picker("Appearance", selection: $appearance) { ForEach(NekoAppearance.allCases) { Text($0.title).tag($0.rawValue) } }.pickerStyle(.inline)
                 } label: { Image(systemName: "paintpalette") }
                 .menuStyle(.button).buttonStyle(.borderless).menuIndicator(.hidden).fixedSize()
-                .help("Switch Neko's look").accessibilityLabel("Look")
+                .help("Choose light, dark, or system appearance").accessibilityLabel("Appearance")
                 Button { PaletteController.shared.toggle(model: model) } label: { Image(systemName: "command") }
                     .buttonStyle(.borderless).help("Quick panel (⌘K)").accessibilityLabel("Quick panel")
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .overlay(alignment: .top) { N.line.frame(height: 1) }
+            .padding(.horizontal, 16).padding(.vertical, 14)
         }
         .onAppear { selection = page }
         .onChange(of: selection) { _, value in

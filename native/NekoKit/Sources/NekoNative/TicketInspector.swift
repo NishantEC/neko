@@ -17,14 +17,14 @@ struct TicketInspector: View {
             if ticket == .null {
                 VStack(spacing: 8) {
                     Image(systemName: "tray").font(.system(size: 26)).foregroundStyle(.tertiary)
-                    Text("No ticket yet").font(.system(size: 13, weight: .semibold))
-                    Text("When Neko proposes work in this chat, its ticket shows here.").font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Text("No ticket yet").font(NekoFont.heading)
+                    Text("When Neko proposes work in this chat, its ticket shows here.").font(NekoFont.meta).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         header("Ticket")
-                        Text(ticket["title"].string).font(.system(size: 13, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.bottom, 6)
+                        Text(ticket["title"].string).font(NekoFont.heading).fixedSize(horizontal: false, vertical: true).padding(.bottom, 12)
                         row("Status") { Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(ticketStatusColor(ticket["status"].string)) }
                         row("Workspace") { Text(workspaceName) }
                         if !folder.isEmpty { row("Folder") { Text((folder as NSString).lastPathComponent).help(folder) } }
@@ -32,7 +32,7 @@ struct TicketInspector: View {
                         if let cents = budgetCents { row("Budget") { Text(String(format: "$%.2f per ticket", Double(cents) / 100)) } }
                         if !ticket["plan"].string.isEmpty {
                             header("Plan")
-                            Text(planSummary).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text(planSummary).font(NekoFont.meta).foregroundStyle(.secondary).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
                         }
                         if !ticket["worktree"].string.isEmpty {
                             header("Changes")
@@ -57,7 +57,7 @@ struct TicketInspector: View {
                         }
                         row("Publish") { Text("Not pushed") }.padding(.top, 10)
                         actions.padding(.top, 16)
-                    }.padding(.horizontal, 16).padding(.bottom, 16)
+                    }.padding(.horizontal, 20).padding(.bottom, 24)
                 }
             }
         }
@@ -100,7 +100,7 @@ struct TicketInspector: View {
         Task { await model.workbench(.command(command, ["task_id": .string(id)])) }
     }
     private func header(_ title: String) -> some View {
-        Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.top, 14).padding(.bottom, 4)
+        Text(title).font(NekoFont.meta.weight(.medium)).foregroundStyle(.secondary).padding(.top, 24).padding(.bottom, 10)
     }
     private func row<Value: View>(_ label: String, wide: Bool = false, @ViewBuilder value: () -> Value) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -108,7 +108,7 @@ struct TicketInspector: View {
             if wide { Spacer(minLength: 4) }
             value().lineLimit(1)
             if !wide { Spacer(minLength: 0) }
-        }.font(.system(size: 12)).frame(minHeight: 22)
+        }.font(NekoFont.meta).frame(minHeight: 28)
     }
     private func loadChanges() async {
         guard let id, !ticket["worktree"].string.isEmpty else { changes = []; loadedFor = id; return }

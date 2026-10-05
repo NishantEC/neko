@@ -10,8 +10,13 @@ struct WorkspaceEditor: View {
     @State private var original: JSONValue = .null
     @State private var saving = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(original == .null ? "Create workspace" : "Workspace settings").font(NekoFont.title)
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(original == .null ? "Create workspace" : "Workspace settings")
+                    .font(NekoFont.title).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
+                Text("Give this work a name, a home, and its own instructions.")
+                    .font(NekoFont.body).foregroundStyle(N.text3)
+            }
             Form {
                 Section("Workspace") {
                     TextField("Name", text: $name).textFieldStyle(.roundedBorder)
@@ -23,13 +28,14 @@ struct WorkspaceEditor: View {
                     ForEach(folders, id: \.self) { path in
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: "folder").foregroundStyle(N.text3).accessibilityHidden(true)
-                            Text((path as NSString).abbreviatingWithTildeInPath)
+                            Text(verbatim: (path as NSString).abbreviatingWithTildeInPath)
                                 .font(NekoFont.body).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button("Remove folder", systemImage: "minus.circle") { folders.removeAll { $0 == path } }
                                 .labelStyle(.iconOnly).buttonStyle(.borderless)
                                 .accessibilityLabel("Remove \(path)").help("Remove \(path)")
-                        }
+                        }.padding(.vertical, 6)
                     }
                     Button("Add folders…", systemImage: "folder.badge.plus") { chooseFolders() }
                 } header: { Text("Source folders") } footer: {
@@ -37,17 +43,23 @@ struct WorkspaceEditor: View {
                 }
                 Section {
                     TextField("How should Neko work here?", text: $instructions, axis: .vertical)
-                        .lineLimit(3...6).textFieldStyle(.roundedBorder)
+                        .lineLimit(4...8).textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.leading)
                         .accessibilityLabel("Workspace instructions, optional")
                 } header: { Text("Instructions · optional") }
             }
-            .formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 400)
+            .formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 420)
             if let error = model.error {
                 Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.coral).textSelection(.enabled)
             }
-            HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); Button(saving ? "Saving…" : "Save workspace") { Task { await save() } }.keyboardShortcut(.defaultAction).disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || folders.isEmpty) }
-        }.font(NekoFont.body).padding(NekoLayout.pageInset).frame(width: 560)
+            HStack {
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(saving ? "Saving…" : "Save workspace") { Task { await save() } }
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || folders.isEmpty)
+            }
+        }.font(NekoFont.body).controlSize(.regular).padding(NekoLayout.pageInset).frame(width: 620).background(N.canvas)
             .onAppear {
                 if let selected = model.selectedWorkspace, let workspace = model.workspaces.first(where: { $0.recordID == selected }) {
                     original = workspace; name = workspace["name"].string; instructions = workspace["instructions"].string

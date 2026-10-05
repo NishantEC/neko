@@ -55,8 +55,12 @@ its top row useful and mouse-accessible with the sidebar expanded or collapsed.
 Page bodies and side panels respect the native top safe area. Hiding the toolbar
 background does not remove its mouse-hit region; content must not draw controls
 underneath it.
-The native craft pass uses one shared graphite surface ramp and bounded page
-widths: 820pt for management and 720pt for conversations. Native segmented
+The native workspace uses a shared light/dark surface ramp and bounded page
+widths: 880pt for management and 760pt for conversations, with 32pt outer insets.
+Appearance follows macOS by default and can be set to Light or Dark in Settings
+or the sidebar. The floating composer uses Liquid Glass on macOS 26, with a
+material fallback on older supported systems; content cards remain opaque.
+Native segmented
 pickers own focus and keyboard selection. Management headers expose their
 actions separately to accessibility; long source/check details use explicit
 disclosures. Active watches appear before suggestions. Settings and editors

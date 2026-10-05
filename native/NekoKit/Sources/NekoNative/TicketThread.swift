@@ -81,7 +81,7 @@ struct TicketThreadView: View {
     let ticket: JSONValue
     @Environment(\.ink) private var ink
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
+        VStack(alignment: .leading, spacing: NekoLayout.sectionGap + 8) {
             ForEach(Array(TicketThread.items(ticket).enumerated()), id: \.offset) { _, item in row(item) }
             if let working = workingLine { workingRow(working) }
         }
@@ -100,36 +100,25 @@ struct TicketThreadView: View {
     @ViewBuilder private func row(_ item: TicketThread.Item) -> some View {
         switch item {
         case .brief(let text):
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 ChatAuthorLine(author: "Task brief", timestamp: ticket["created_at_ms"].int)
                 ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         case .you(let text):
-            HStack {
-                Spacer(minLength: 32)
-                VStack(alignment: .trailing, spacing: 8) {
-                ChatAuthorLine(author: "You")
-                Group {
-                    if text.contains("![") { ReadableText(text: text) }
-                    else { Text(text).textSelection(.enabled) }
-                }.font(NekoFont.chat).lineSpacing(3)
-                    .padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 10)
-                    .background(ink.raised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }.frame(maxWidth: 560, alignment: .trailing)
-            }
+            ChatUserMessage(text: text)
         case .agent(let role, let text):
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 ChatAuthorLine(author: TicketThread.agentName(role))
                 ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
             }
         case .steps(let role, let commands):
             DisclosureGroup {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(commands.enumerated()), id: \.offset) { _, receipt in
                         TicketCommandReceiptView(receipt: receipt)
                     }
-                }.padding(.top, 10)
+                }.padding(.top, 14)
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     Label("\(TicketThread.agentName(role)) · \(commands.count) saved \(commands.count == 1 ? "command" : "commands")", systemImage: "terminal")
@@ -143,7 +132,7 @@ struct TicketThreadView: View {
                 }
             }
         case .status(let text):
-            HStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Rectangle().fill(ink.lineStrong).frame(height: 1).frame(maxWidth: 16)
                 Text(text).font(NekoFont.meta).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
@@ -151,10 +140,10 @@ struct TicketThreadView: View {
     }
 
     private func workingRow(_ text: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             ProgressView().controlSize(.small)
             Text(text).font(NekoFont.meta).foregroundStyle(.secondary)
-        }
+        }.padding(.vertical, 4)
     }
 }
 

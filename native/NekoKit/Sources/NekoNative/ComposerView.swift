@@ -53,7 +53,7 @@ struct ComposerView: NSViewRepresentable {
         editor.isEditable = true
         editor.isSelectable = true
         editor.drawsBackground = false
-        editor.font = .systemFont(ofSize: 14)
+        editor.font = .systemFont(ofSize: 15)
         editor.textColor = .labelColor
         editor.insertionPointColor = .labelColor
         editor.textContainerInset = NSSize(width: 0, height: 6)

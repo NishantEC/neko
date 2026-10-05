@@ -146,10 +146,13 @@ struct TicketsView: View {
     }
     private var workspaceLabel: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
     private var startsWithoutAsking: Bool { model.snapshot["start_without_approval"].bool }
+    private var hasVisibleTasks: Bool { Self.columns.contains { !tasks(in: $0).isEmpty } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if layout == "list" { list } else { board }
+            if layout == "list" { list }
+            else if hasVisibleTasks { board }
+            else { emptyState.frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .navigationTitle(model.agentFilter == "all" ? "All agents" : (AgentSidebarGroup(rawValue: model.agentFilter)?.title ?? "All agents"))
         .navigationSubtitle("\(workspaceLabel) · \(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")\(startsWithoutAsking ? " · starts without asking" : "")")
@@ -205,30 +208,65 @@ struct TicketsView: View {
             ForEach(Self.columns, id: \.id) { column in
                 let items = tasks(in: column)
                 if !items.isEmpty {
-                    Section("\(column.title) · \(items.count)") {
-                        ForEach(items, id: \.recordID) { task in listRow(task, color: column.color).tag(task.recordID) }
+                    Section {
+                        ForEach(items, id: \.recordID) { task in
+                            listRow(task).tag(task.recordID)
+                                .listRowInsets(EdgeInsets(top: 14, leading: NekoLayout.rowInset, bottom: 14, trailing: NekoLayout.rowInset))
+                                .listRowSeparator(.hidden)
+                        }
+                    } header: {
+                        HStack(spacing: 8) {
+                            Text(column.title).font(NekoFont.heading)
+                            Text(String(items.count)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 16).padding(.bottom, 8)
+                        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
                     }
                 }
             }
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
+        .contentMargins(.horizontal, NekoLayout.pageInset, for: .scrollContent)
+        .contentMargins(.vertical, 12, for: .scrollContent)
         .frame(maxWidth: NekoLayout.pageWidth)
         .frame(maxWidth: .infinity)
-        .overlay { if Self.columns.allSatisfy({ tasks(in: $0).isEmpty }) { ContentUnavailableView("No tickets", systemImage: "tray", description: Text(search.isEmpty ? "Ask Neko for work in Home, and its tickets appear here." : "No ticket matches “\(search)”.")) } }
+        .overlay { if !hasVisibleTasks { emptyState } }
     }
-    private func listRow(_ task: JSONValue, color: Color) -> some View {
-        let status = task["status"].string
-        return HStack(spacing: 10) {
-            StatusGlyph(status: status, size: 14).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(task["title"].string).font(NekoFont.heading).lineLimit(2)
-                Text("\(workspaceName(task)) · \(friendlyTaskStatus(status))").font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1)
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label(search.isEmpty ? "No agents here yet" : "No matching agents", systemImage: "bubble.left.and.bubble.right")
+        } description: {
+            Text(search.isEmpty ? "Ask Neko for work in Home. Agents matching this view will appear here." : "No ticket matches “\(search)”.")
+        } actions: {
+            if search.isEmpty {
+                Button("Open Home") { NotificationCenter.default.post(name: .nekoNavigate, object: "Home") }
+            } else {
+                Button("Clear search") { model.agentSearch = "" }
             }
-            Spacer(minLength: 8)
-            Text(relative(task["updated_at_ms"].int)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
         }
-        .padding(.vertical, 7)
+        .padding(NekoLayout.pageInset)
+    }
+    private func listRow(_ task: JSONValue) -> some View {
+        let status = task["status"].string
+        let note = status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task)
+        return HStack(alignment: .top, spacing: 14) {
+            StatusGlyph(status: status, size: 16).padding(.top, 2).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 7) {
+                Text(task["title"].string).font(NekoFont.heading).lineSpacing(3).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(workspaceName(task)) · \(friendlyTaskStatus(status))").font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1)
+                if let note {
+                    Text(note).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 16)
+            Text(relative(task["updated_at_ms"].int)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
+                .fixedSize().padding(.top, 2)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
         .contextMenu { moveMenu(task) }
     }
 
@@ -236,34 +274,34 @@ struct TicketsView: View {
 
     private var board: some View {
         ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: NekoLayout.rowInset) {
+            HStack(alignment: .top, spacing: NekoLayout.sectionGap) {
                 ForEach(Self.columns, id: \.id) { column in
                     let items = tasks(in: column)
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 18) {
                         HStack(spacing: 8) {
+                            Circle().fill(column.color).frame(width: 6, height: 6).accessibilityHidden(true)
                             Text(column.title).font(NekoFont.heading)
                             Text(String(items.count)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
                             Spacer(minLength: 0)
-                        }.padding(.horizontal, NekoLayout.rowInset).frame(height: 32)
-                        .overlay(alignment: .bottom) { N.line.frame(height: 1) }
+                        }.padding(.horizontal, 6).frame(minHeight: 32)
                         .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
                         ScrollView(.vertical) {
-                            LazyVStack(spacing: 10) {
+                            LazyVStack(spacing: 14) {
                                 ForEach(items, id: \.recordID) { task in
                                     card(task)
-                                        .draggable(task.recordID) { card(task).frame(width: 260).opacity(0.9) }
+                                        .draggable(task.recordID) { card(task).frame(width: 300).opacity(0.9) }
                                 }
                                 if items.isEmpty {
                                     Text(dropTarget == column.id ? "Drop to move here" : "Nothing here")
-                                        .font(NekoFont.meta).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 72)
+                                        .font(NekoFont.meta).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 112)
                                 }
                             }.padding(.horizontal, 2).padding(.bottom, 12)
                         }.scrollIndicators(.never)
                     }
-                    .frame(width: 280).frame(maxHeight: .infinity, alignment: .top)
+                    .frame(width: 300).frame(maxHeight: .infinity, alignment: .top)
                     // Columns are plain; only the one under a dragged card lights up.
-                    .background(dropTarget == column.id ? column.color.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(dropTarget == column.id ? column.color.opacity(0.5) : .clear))
+                    .background(dropTarget == column.id ? column.color.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(dropTarget == column.id ? column.color.opacity(0.5) : .clear))
                     .dropDestination(for: String.self) { ids, _ in
                         guard let id = ids.first else { return false }
                         return move(id, to: column)
@@ -374,9 +412,9 @@ struct TicketDetail: View {
     @State private var changesError: String?
     @State private var loadingChanges = false
     private var changesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Changes").font(.headline)
+                Text("Changes").font(NekoFont.heading)
                 Spacer()
                 Button(loadingChanges ? "Loading…" : (changes == nil ? "Show changes" : "Refresh")) { loadChanges() }.disabled(loadingChanges).controlSize(.small)
             }
@@ -389,7 +427,8 @@ struct TicketDetail: View {
                     Text("\(changes.files.count) \(changes.files.count == 1 ? "file" : "files"): \(changes.files.prefix(12).joined(separator: ", "))\(changes.files.count > 12 ? "…" : "")").font(.caption)
                     ScrollView([.vertical, .horizontal]) {
                         Text(changes.patch).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    }.frame(maxHeight: 320).padding(8).nekoCard(padding: 0, radius: 8)
+                    }.frame(maxHeight: 320).padding(NekoLayout.rowInset)
+                        .background(N.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
             }
         }
@@ -421,7 +460,7 @@ struct TicketDetail: View {
         VStack(spacing: 0) {
         if fullPage { FullDiskAccessBanner() }
         ScrollView {
-            VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
+            VStack(alignment: .leading, spacing: NekoLayout.sectionGap + 8) {
                 if !fullPage { HStack(alignment: .top) {
                     Text(ticket["title"].string).font(NekoFont.title).textSelection(.enabled)
                     Spacer()
@@ -436,19 +475,18 @@ struct TicketDetail: View {
                 }
                 if ticket["status"].string == "Failed" { stoppedCallout }
                 if let question = TicketPresentation.waitingReason(ticket) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Neko is waiting on you", systemImage: "questionmark.bubble.fill").font(.headline).foregroundStyle(NekoStyle.amber)
-                        Text(question).textSelection(.enabled)
-                        Text("Reply below so the agent can reassess its plan.").font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Neko is waiting on you", systemImage: "questionmark.bubble").font(NekoFont.heading).foregroundStyle(NekoStyle.amber)
+                        Text(question).lineSpacing(4).textSelection(.enabled)
+                        Text("Reply below so the agent can reassess its plan.").font(NekoFont.meta).foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                    .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(NekoStyle.amber.opacity(0.25)))
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(NekoLayout.rowInset)
+                    .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 22) { detailsBody }.padding(.top, 10)
+                    VStack(alignment: .leading, spacing: NekoLayout.sectionGap) { detailsBody }.padding(.top, 16)
                 } label: {
-                    Text("Changes, evidence, risk & activity").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text("Changes, evidence, risk & activity").font(NekoFont.meta).foregroundStyle(.secondary)
                 }
                 if !fullPage { HStack {
                     switch ticket["status"].string {
@@ -471,7 +509,7 @@ struct TicketDetail: View {
         }.frame(maxWidth: .infinity).defaultScrollAnchor(.bottom)
         TicketComposer(model: model, id: id, status: ticket["status"].string)
             .frame(maxWidth: NekoLayout.readingWidth)
-            .padding(.horizontal, NekoLayout.pageInset).padding(.top, 8).padding(.bottom, 14)
+            .padding(.horizontal, NekoLayout.pageInset).padding(.top, 12).padding(.bottom, 20)
         }.frame(maxWidth: .infinity)
                 .toolbar { if fullPage { agentToolbar } }
                 .confirmationDialog("Delete this ticket?", isPresented: $confirmDelete) {
@@ -484,7 +522,7 @@ struct TicketDetail: View {
     }
     private var previousWork: some View {
         DisclosureGroup {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
                 if conversation.foldsHistory { TicketThreadView(ticket: ticket) }
                 if !conversation.showsPlan { section("Saved plan", ticket["plan"].string) }
                 if conversation.outcome.belongsInHistory && !ticket["result"].string.isEmpty {
@@ -497,7 +535,7 @@ struct TicketDetail: View {
                         }.padding(.top, 8)
                     }
                 }
-            }.padding(.top, 10)
+            }.padding(.top, 16)
         } label: {
             Label("Previous work & history", systemImage: "clock.arrow.circlepath").font(NekoFont.meta).foregroundStyle(.secondary)
         }
@@ -570,7 +608,8 @@ struct TicketDetail: View {
                             Text(friendlyTaskStatus(task["status"].string)).foregroundStyle(.secondary)
                             Button("Open subtask") { model.openAgent(task.recordID) }
                         } else { Text(split["approved"].bool ? "Subtask not available in this snapshot" : "Awaiting approval").foregroundStyle(.secondary) }
-                    }.padding(12).nekoCard(padding: 0, radius: 12)
+                    }.padding(NekoLayout.rowInset)
+                        .background(N.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
             }
             if !ticket["worktree"].string.isEmpty { Button("Reveal working folder", systemImage: "folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
@@ -583,9 +622,9 @@ struct TicketDetail: View {
     }
     private func action(_ label: String, _ command: String) -> some View { Button(label) { Task { await model.workbench(.command(command, ["task_id": .string(id)])) } } }
     private var stoppedCallout: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Why it stopped", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(NekoStyle.amber)
-            Text(TicketPresentation.stopReason(ticket)).textSelection(.enabled)
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Why it stopped", systemImage: "exclamationmark.triangle").font(NekoFont.heading).foregroundStyle(NekoStyle.amber)
+            Text(TicketPresentation.stopReason(ticket)).lineSpacing(4).textSelection(.enabled)
             HStack {
                 Button("Choose folder…") { chooseFolder() }
                 Text(model.snapshot["task_roots"][id].string.isEmpty ? "Pick the repository this ticket is about, then Neko starts it." : "Working in \(URL(fileURLWithPath: model.snapshot["task_roots"][id].string).lastPathComponent). Pick another repository to start over there.")
@@ -593,9 +632,8 @@ struct TicketDetail: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(NekoStyle.amber.opacity(0.25)))
+        .padding(NekoLayout.rowInset)
+        .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
     private func chooseFolder() {
         let panel = NSOpenPanel()
@@ -648,7 +686,7 @@ private struct TicketOutcomeReadback: View {
 
     var body: some View {
         let review = TicketPresentation.review(result)
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(outcome.title).font(NekoFont.title).accessibilityAddTraits(.isHeader)
@@ -671,7 +709,7 @@ private struct TicketOutcomeReadback: View {
                 ReadableText(text: review.body).font(NekoFont.chat).lineSpacing(4)
             }
             Divider().padding(.top, 8)
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 14) {
                 Text(outcome.reviewIsCurrent ? "Independent review" : "Recorded independent review").font(NekoFont.heading)
                 if let verdict = review.verdict {
                     Label(verdict.passed ? "Reviewer reported passed" : "Reviewer found issues", systemImage: verdict.passed ? "checkmark.shield" : "exclamationmark.shield")
@@ -705,16 +743,16 @@ struct TicketCard: View {
     @State private var hover = false
     @Environment(\.ink) private var ink
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
                 StatusGlyph(status: status, size: 14).padding(.top, 2).accessibilityHidden(true)
-                Text(title).font(NekoFont.heading).foregroundStyle(.primary).lineSpacing(2).lineLimit(3)
+                Text(title).font(NekoFont.heading).foregroundStyle(.primary).lineSpacing(3).lineLimit(3)
                     .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
             if let note {
                 Text(note).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(friendlyTaskStatus(status)).font(NekoFont.meta).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Text(workspace).lineLimit(1)
@@ -725,9 +763,9 @@ struct TicketCard: View {
         }
         .padding(NekoLayout.rowInset)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(hover ? ink.raisedHover : ink.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(highlighted ? NekoStyle.accent : hover ? ink.lineStrong : ink.line))
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(hover ? ink.raisedHover : ink.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(highlighted ? NekoStyle.accent : .clear))
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .help(id)
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
     }
