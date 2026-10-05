@@ -78,17 +78,6 @@ struct ToolsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Tools & skills").font(.system(size: 25, weight: .semibold)).foregroundStyle(N.text)
-                    Text("Connections provide access. Skills provide instructions.")
-                        .font(.system(size: 13)).foregroundStyle(N.text3)
-                }
-                Spacer(minLength: 12)
-                if busy { ProgressView().controlSize(.small).accessibilityLabel("Updating tools and skills") }
-            }
-            .padding(.bottom, 24)
-
             HStack {
                 GlassSegmented(selection: $tab, options: [
                     .init(value: 0, title: "Connections"),
@@ -129,7 +118,16 @@ struct ToolsView: View {
         }
         .frame(maxWidth: 940, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 32)
-        .padding(.top, 28)
+        .padding(.top, 16)
+        .navigationTitle("Tools & skills")
+        .navigationSubtitle("Connections provide access. Skills provide instructions.")
+        .toolbar {
+            if busy {
+                ToolbarItem(placement: .primaryAction) {
+                    ProgressView().controlSize(.small).accessibilityLabel("Updating tools and skills")
+                }
+            }
+        }
         .frame(maxWidth: .infinity, alignment: .top)
         .sheet(item: $selectedConnection) { selection in
             if let connection = connections.first(where: { $0.recordID == selection.id }) {

@@ -63,17 +63,21 @@ struct WorkspaceView: View {
                         .stableSplitPane()
                         .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 300)
                 } detail: {
-                    // Work and Today (the default page) draw their own toolbar row.
+                    // Home and agent chats place their permission banners within their content.
                     let ownsToolbarRow = !["Workspaces", "Responsibilities", "Tools & skills", "Memory", "Profiles", "Schedules", "Settings", "Activity", "Reply views"].contains(page)
                     let isToday = ownsToolbarRow && page != "Tickets" && model.agentID == nil
                     VStack(spacing: 0) {
-                    // Today places the banner under its own toolbar row.
-                    if !isToday && model.agentID == nil { FullDiskAccessBanner().padding(.top, 40) }
+                    // Other pages share the permission banner here.
+                    if !isToday && model.agentID == nil { FullDiskAccessBanner() }
                     Group {
                         if let agentID = model.agentID {
-                            TicketDetail(model: model, id: agentID, close: { model.closeAgent() }, fullPage: true).id(agentID)
+                            let ticket = model.tasks.first { $0.recordID == agentID } ?? .null
+                            TicketDetail(model: model, id: agentID, close: { model.closeAgent() }, fullPage: true)
+                                .navigationTitle("NEK-" + String(agentID.prefix(4)).uppercased() + "  " + ticket["title"].string)
+                                .navigationSubtitle(friendlyTaskStatus(ticket["status"].string))
+                                .id(agentID)
                         } else { switch page {
-                        case "Tickets": TicketsView(model: model, sidebarHidden: columns == .detailOnly)
+                        case "Tickets": TicketsView(model: model)
                         case "Workspaces": WorkspacesView(model: model)
                         case "Responsibilities": ResponsibilitiesView(model: model)
                         case "Tools & skills": ToolsView(model: model)
@@ -88,18 +92,12 @@ struct WorkspaceView: View {
                     }
                     }
                     .stableSplitPane()
+                    .clipped()
                     .background { LookBackground(look: look) }
                     .softScrollEdges()
-                    // No title strip: the page is named by the sidebar selection, and the
-                    // content runs to the top edge with only the window controls above it.
-                    .environment(\.sidebarCollapsed, columns == .detailOnly)
-                    // Pages other than Work keep clear of the window controls strip.
-                    // Every page starts at the window's top edge; each page's own
-                    // header spacing is enough to clear the window controls.
-                    .safeAreaPadding(.top, 0)
-                    .navigationTitle("")
+                    // Pages supply real native toolbar items, so the top row is both
+                    // useful and clickable. Only backgrounds extend behind the toolbar.
                     .hiddenWindowToolbarBackground()
-                    .ignoresSafeArea(.container, edges: .top)
 
                     .onReceive(NotificationCenter.default.publisher(for: .nekoNavigate)) { note in if let key = note.object as? String { model.agentID = nil; page = key == "Today" ? "Home" : key } }
                 }
@@ -423,15 +421,5 @@ struct ArcCard: ViewModifier {
         let size = NSSize(width: min(1280, screen.width - 80), height: min(820, screen.height - 60))
         let origin = NSPoint(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2)
         window.setFrame(NSRect(origin: origin, size: size), display: true, animate: true)
-    }
-}
-
-/// When the sidebar is hidden, the traffic lights and sidebar toggle float over
-/// the top-left of the detail pane; pages leave room for them.
-private struct SidebarCollapsedKey: EnvironmentKey { static let defaultValue = false }
-extension EnvironmentValues {
-    var sidebarCollapsed: Bool {
-        get { self[SidebarCollapsedKey.self] }
-        set { self[SidebarCollapsedKey.self] = newValue }
     }
 }

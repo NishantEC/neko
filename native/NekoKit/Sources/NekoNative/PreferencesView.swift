@@ -162,8 +162,6 @@ struct PreferencesView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Settings").font(.system(size: 24, weight: .semibold))
-                .padding(.horizontal, 12)
             GlassSegmented(selection: $settingsTab, options: [
                 .init(value: "General", title: "General", symbol: "gearshape"),
                 .init(value: "AI", title: "AI", symbol: "cpu"),
@@ -308,7 +306,8 @@ struct PreferencesView: View {
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled).padding() }
         }
         .frame(maxWidth: 860, maxHeight: .infinity)
-        .padding(.horizontal, 28).padding(.top, 36).padding(.bottom, 20)
+        .padding(.horizontal, 28).padding(.top, 16).padding(.bottom, 20)
+        .navigationTitle("Settings")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await load()

@@ -172,14 +172,11 @@ struct PageIntro<Action: View>: View {
     let message: String
     @ViewBuilder var action: () -> Action
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: 20, weight: .semibold)).foregroundStyle(N.text)
-                Text(message).font(.system(size: 13)).foregroundStyle(N.text3).lineLimit(4)
-            }
-            Spacer(minLength: 16)
-            action()
-        }.padding(.bottom, 4)
+        Text(message).font(.system(size: 13)).foregroundStyle(N.text3).lineLimit(4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, 4)
+            .navigationTitle(title)
+            .toolbar { ToolbarItemGroup(placement: .primaryAction) { action() } }
     }
 }
 
