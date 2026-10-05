@@ -65,7 +65,7 @@ struct WorkspaceView: View {
                         .navigationSplitViewColumnWidth(min: 220, ideal: 252, max: 320)
                 } detail: {
                     // Home and agent chats place their permission banners within their content.
-                    let ownsToolbarRow = !["Workspaces", "Responsibilities", "Tools & skills", "Memory", "Profiles", "Schedules", "Settings", "Activity", "Reply views"].contains(page)
+                    let ownsToolbarRow = !["Workspaces", "Responsibilities", "Tools & skills", "Memory", "Profiles", "Schedules", "Settings", "Activity", "Reply views", "Design lab"].contains(page)
                     let isToday = ownsToolbarRow && page != "Tickets" && model.agentID == nil
                     VStack(spacing: 0) {
                     // Other pages share the permission banner here.
@@ -88,6 +88,7 @@ struct WorkspaceView: View {
                         case "Settings": PreferencesView(model: model)
                         case "Activity": ActivityGallery()
                         case "Reply views": ReplyGallery()
+                        case "Design lab": DesignLabView()
                         default: TodayView(model: model)
                         } }
                     }
@@ -362,7 +363,7 @@ enum PageInfo {
         ("Your day", ["Home", "Tickets"]),
         ("What Neko watches", ["Workspaces", "Responsibilities", "Schedules"]),
         ("Teach Neko", ["Tools & skills", "Memory", "Profiles"]),
-        ("Neko", ["Settings"])
+        ("Neko", ["Design lab", "Settings"])
     ]
     static func title(_ key: String) -> String {
         switch key {
@@ -383,6 +384,7 @@ enum PageInfo {
         case "Memory": "brain"
         case "Profiles": "person.2"
         case "Settings": "gearshape"
+        case "Design lab": "circle.hexagongrid"
         default: "circle"
         }
     }
