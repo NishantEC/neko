@@ -2,6 +2,8 @@
 
 Status: proposed, not implemented. Paper mockups reviewed on 2026-10-05.
 
+Latest feedback: keep plugins and the agent controls; reject the detached dock. The integrated 23A/23B studies below supersede the original composer recommendation. The plugin library and setup direction in 22C/22D remain unchanged.
+
 ## Review the designs
 
 [Paper: Neko — Redesign](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-1-0), page **Approved · Native macOS**. Existing 20A and 21A/B remain intact; these new boards are explicitly proposals despite the page name.
@@ -9,10 +11,13 @@ Status: proposed, not implemented. Paper mockups reviewed on 2026-10-05.
 | Board | Purpose |
 | --- | --- |
 | 22.0 · Plugins — product flow & build boundary | Outcome through discovery, inspection, installation, connection and use; current versus proposed extension boundaries. |
-| 22A · Pearl — tactile composer | Recommended. Reference-inspired attachment chip, shaded beads and spherical send control, within the existing native sidebar. |
-| 22B · Dock — conversation with agent shelf | Alternate. Active child agents have labeled controls above a compact composer. |
+| 22A · Pearl — tactile composer | Earlier reference. Attachment chip, shaded beads and spherical send control, within the existing native sidebar. |
+| 22B · Dock — conversation with agent shelf | Rejected direction: detached agent shelf. Retained for comparison. |
 | 22C · Plugins — discover and connect | Unified discovery and installed states with a selected plugin's capabilities and setup. |
 | 22D · Add a plugin — inspect, connect, ready | Native sheet states, return to the original task, and actionable failure states. |
+| 23A · Inline — agents and plugins in one composer | Recommended revision. Labeled Agents and Plugins controls share Pearl's integrated bottom row. |
+| 23B · Expanded — integrated agent context | Alternative. Agent names/status and Plugins live in a top row inside the same composer surface. |
+| 23C · Controls — agent and plugin menus | Separate open-menu studies showing child chat navigation and chat-level plugin selection. |
 
 Catalog names, versions, counts and task activity are illustrative. No real catalog publisher, plugin installation, account connection or successful agent run is implied.
 
@@ -26,7 +31,17 @@ Catalog names, versions, counts and task activity are illustrative. No real cata
 
 22A's “Propose 3 agents” maps to the existing bounded split proposal, with approval before child creation. It does not claim that arbitrary workers are already running. 22B's shelf depicts an approved three-child split and opens existing child-agent conversations. Do not fabricate context percentages when provider telemetry is absent.
 
-For narrower windows, clamp the text column, wrap attachments, and collapse the shelf into a labeled agent menu. Keep the native sidebar collapsible. Verify keyboard focus, VoiceOver labels, dark appearance, Reduce Motion and Reduce Transparency during implementation.
+For narrower windows, clamp the text column, wrap attachments, and collapse expanded agent context into a labeled menu. Keep the native sidebar collapsible. Verify keyboard focus, VoiceOver labels, dark appearance, Reduce Motion and Reduce Transparency during implementation.
+
+### Integrated composer revision
+
+23A keeps the draft area quiet and puts attachment, Agents and Plugins controls on one bottom row. Agent beads remain decorative companions to the “3 agents” label. 23B instead embeds agent names and current status into the composer's top context row, with Plugins at the trailing edge. Neither has a detached dock. Both preserve the spherical send control, expanded new-line shortcut hint and native sidebar.
+
+The Agents popover lists only the current task's existing child agents. A row opens that child's full chat; “View all agents” opens the existing agents page. When no split exists, use the existing split-proposal flow rather than displaying fictional workers. The Plugins popover lists installed, ready capabilities available to this workspace, with a route to the library.
+
+The illustrated plugin checkboxes propose a new persisted chat-level selection, not an existing feature. Implementation must pass that selection into the daemon's next run as a subset of available workspace capabilities; the UI must not claim deselection if the runtime ignores it. Selection changes apply to the next message/phase and do not silently restart an active worker. Plugin selection never expands existing connection or publication authority. Show a setup action for capabilities that need a connection.
+
+Use one native popover at a time, anchored to its button. Escape or an outside click dismisses it and restores focus. In 23B, agent labels open child chats directly. At narrow widths, collapse the expanded row to the two labeled controls, allowing the shortcut hint to wrap inside the composer. Avoid simultaneous agent/plugin menus and decorative permanent panels.
 
 ## What DeepSeek Harness actually provides
 
@@ -62,4 +77,4 @@ Neko continues to own tasks, workspaces, memory, agent state and publication aut
 
 ## Verification boundary
 
-Paper screenshots were inspected for spacing, hierarchy, contrast, row alignment and clipping. The cloned sidebar footer was corrected to fit the window. The five boards and two exported composer PNGs are design deliverables. Existing source seams were checked for feasibility; no application code or plugin host was changed, no packages/accounts were installed or connected, and no daemon restart was performed. These mockups do not verify native glass rendering, typing performance or actual plugin interoperability. No application tests were rerun for this documentation/design-only change.
+Paper screenshots were inspected for spacing, hierarchy, contrast, row alignment and clipping. The cloned sidebar footer was corrected to fit the window; the later menu study also aligned its footer actions. The eight boards and four exported composer PNGs are design deliverables. Existing source seams were checked for feasibility; no application code or plugin host was changed, no packages/accounts were installed or connected, and no daemon restart was performed. These mockups do not verify native glass rendering, typing performance or actual plugin interoperability. No application tests were rerun for these documentation/design-only changes.
