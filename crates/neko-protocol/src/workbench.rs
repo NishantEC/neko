@@ -224,7 +224,7 @@ pub struct Snapshot {
     pub tasks: Vec<Task>,
     pub heartbeat_ms: i64,
     /// The user's conversation with Neko. Stored separately from the task
-    /// store, so it never competes with capacity reserved for task results.
+    /// store, so it never competes with stored task plans and results.
     #[serde(default)]
     pub conversation: Vec<ChatMessage>,
     /// What Neko has learned about the user and their workspaces. Stored

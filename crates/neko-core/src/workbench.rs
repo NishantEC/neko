@@ -226,17 +226,9 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
 /// Old event messages are shortened and oldest events are evicted under pressure.
 /// Plans, results and task identities are never evicted. Reload after saving when
 /// a caller needs the exact persisted event history.
+/// Capacity is based on actual persisted bytes, never hypothetical future output.
 pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     validate(snapshot)?;
-    let projected = reserved_capacity(snapshot)?;
-    if projected > MAX_SNAPSHOT_BYTES - STATE_RESERVE_BYTES {
-        // Older stores can already exceed the newly introduced reservation.
-        // Let work finish or be cancelled while refusing growth/new intake.
-        let previous = load(db)?;
-        if projected > reserved_capacity(&previous)? {
-            return Err("Workbench capacity is reserved for pending task results; finish or cancel pending work before adding more".into());
-        }
-    }
     let mut compacted = snapshot.clone();
     crate::scheduled_plans::refresh_results(&mut compacted);
     compacted.conversation.clear();
@@ -293,50 +285,6 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
     bump_revision();
     Ok(())
-}
-
-/// Reserve the worst possible JSON size of every pending plan/result/worktree.
-/// A future result can therefore displace logs without competing with new work.
-/// Six is JSON's maximum expansion for a UTF-8 byte (a control character).
-fn reserved_capacity(snapshot: &Snapshot) -> Result<usize, String> {
-    let mut metadata = snapshot.clone();
-    metadata.conversation.clear();
-    metadata.memory.clear();
-    metadata.memory_proposals.clear();
-    metadata.decision_records.clear();
-    metadata.working_preferences.clear();
-    for task in &mut metadata.tasks {
-        task.events.clear();
-    }
-    let mut bytes = serde_json::to_vec(&metadata)
-        .map_err(|e| e.to_string())?
-        .len();
-    for task in snapshot.tasks.iter().filter(|task| !terminal(task.status)) {
-        for (text, limit) in [
-            (&task.plan, MAX_CONTENT_BYTES * 2),
-            (&task.result, MAX_RESULT_BYTES),
-        ] {
-            let occupied = serde_json::to_string(text)
-                .map_err(|e| e.to_string())?
-                .len()
-                - 2;
-            bytes += (limit * 6).saturating_sub(occupied);
-        }
-        let occupied = task
-            .worktree
-            .as_ref()
-            .map(|path| serde_json::to_string(path).map(|s| s.len() - 2))
-            .transpose()
-            .map_err(|e| e.to_string())?
-            .unwrap_or(0);
-        bytes += (4096_usize * 6).saturating_sub(occupied);
-        bytes += 512; // status/timestamps and optional-path representation
-        let occupied = serde_json::to_vec(&task.supervision)
-            .map_err(|e| e.to_string())?
-            .len();
-        bytes += crate::supervision::MAX_DECISION_BYTES.saturating_sub(occupied);
-    }
-    Ok(bytes)
 }
 
 pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
@@ -2606,17 +2554,13 @@ mod tests {
     }
 
     #[test]
-    fn completed_tasks_release_capacity_but_all_task_history_pins_repository_identity() {
+    fn all_task_history_pins_repository_identity() {
         let db = Db::open_in_memory().unwrap();
         let repo = repository();
         let ws = workspace(&db, repo.path());
         task(&db, &ws);
         let mut snapshot = load(&db).unwrap();
-        snapshot.tasks[0].status = TaskStatus::ReadyForReview;
-        let ready_capacity = reserved_capacity(&snapshot).unwrap();
         snapshot.tasks[0].status = TaskStatus::Completed;
-        let complete_capacity = reserved_capacity(&snapshot).unwrap();
-        assert!(complete_capacity <= ready_capacity);
         assert!(terminal(TaskStatus::Completed));
         let other = repository();
         for status in [
@@ -3275,7 +3219,51 @@ mod tests {
     }
 
     #[test]
-    fn intake_reserves_space_for_pending_results_and_emergency_cancellation() {
+    fn waiting_backlog_does_not_block_retry_reply_or_new_work() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let original = task(&db, &ws);
+        let mut snapshot = load(&db).unwrap();
+        snapshot.tasks.clear();
+        snapshot.task_roots.clear();
+        for index in 0..69 {
+            let mut ticket = original.clone();
+            ticket.id = format!("ticket-{index}");
+            ticket.goal = "g".repeat(16 * 1024);
+            ticket.plan = "Saved plan".into();
+            ticket.result = "Saved result".into();
+            ticket.status = match index {
+                0..=62 => TaskStatus::Failed,
+                63..=67 => TaskStatus::AwaitingApproval,
+                _ => TaskStatus::Completed,
+            };
+            snapshot.tasks.push(ticket);
+        }
+        save(&db, &snapshot).unwrap();
+        assert!(db.get_setting(SETTING).unwrap().unwrap().len() < 2 * 1024 * 1024);
+
+        let started = apply(&db, Command::StartTask { task_id: "ticket-0".into() }).unwrap();
+        assert_eq!(started.tasks[0].status, TaskStatus::Queued);
+        assert!(started.start_when_planned.contains("ticket-0"));
+        let replied = apply(&db, Command::ReplyToTask {
+            task_id: "ticket-1".into(), text: "Explain the saved result".into(),
+        }).unwrap();
+        assert_eq!(replied.tasks[1].status, TaskStatus::Queued);
+        let created = apply(&db, Command::CreateTask {
+            workspace_id: ws.id, title: "New work".into(), goal: "Investigate this".into(),
+        }).unwrap();
+        assert_eq!(created.tasks.len(), 70);
+        for (before, after) in snapshot.tasks.iter().zip(&created.tasks) {
+            assert_eq!(before.id, after.id);
+            assert_eq!(before.plan, after.plan);
+            assert_eq!(before.result, after.result);
+        }
+        assert_eq!(created, load(&db).unwrap());
+    }
+
+    #[test]
+    fn actual_content_limits_preserve_results_and_allow_cancellation() {
         let db = Db::open_in_memory().unwrap();
         let repo = repository();
         let ws = workspace(&db, repo.path());
@@ -3289,19 +3277,18 @@ mod tests {
             snapshot.tasks.push(previous);
         }
         save(&db, &snapshot).unwrap();
-        assert!(
-            apply(
-                &db,
-                Command::CreateTask {
-                    workspace_id: ws.id,
-                    title: "Extra task".into(),
-                    goal: "More work".into()
-                }
-            )
-            .is_err()
-        );
+        snapshot = apply(
+            &db,
+            Command::CreateTask {
+                workspace_id: ws.id,
+                title: "Extra task".into(),
+                goal: "More work".into(),
+            },
+        ).unwrap();
+        assert_eq!(snapshot.tasks.len(), 202);
         assert_eq!(load(&db).unwrap(), snapshot);
-        // Worst-case JSON escaping still fits the reserved output allowance.
+        // Actual serialized output, including JSON escaping, fits without a
+        // speculative reservation preventing ordinary intake above.
         snapshot.tasks[0].status = TaskStatus::Reviewing;
         snapshot.tasks[0].plan = "\u{0001}".repeat(65_536);
         snapshot.tasks[0].result = "\u{0001}".repeat(132 * 1024);
@@ -3316,6 +3303,12 @@ mod tests {
         assert_eq!(cancelled.tasks[0].status, TaskStatus::Cancelled);
         assert_eq!(cancelled.tasks[0].result, snapshot.tasks[0].result);
         assert_eq!(cancelled.tasks[0].plan, snapshot.tasks[0].plan);
+        let mut overflowing = cancelled.clone();
+        for task in overflowing.tasks.iter_mut().take(3) {
+            task.result = "\u{0001}".repeat(MAX_RESULT_BYTES);
+        }
+        assert!(save(&db, &overflowing).unwrap_err().contains("durable content is full"));
+        assert_eq!(load(&db).unwrap(), cancelled, "failed writes preserve saved results");
     }
 
     #[test]
