@@ -60,6 +60,8 @@ widths: 880pt for management and 760pt for conversations, with 32pt outer insets
 Appearance follows macOS by default and can be set to Light or Dark in Settings
 or the sidebar. The floating composer uses Liquid Glass on macOS 26, with a
 material fallback on older supported systems; content cards remain opaque.
+The content canvas is solid neutral charcoal in dark mode, with no decorative
+gradient wash. Native sidebar and control materials retain their own appearance.
 Native segmented
 pickers own focus and keyboard selection. Management headers expose their
 actions separately to accessibility; long source/check details use explicit

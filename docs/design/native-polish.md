@@ -11,9 +11,9 @@ The first craft pass became too dense and flat: opaque composer backing and a fo
 ## Shared contract
 
 - System font: 28pt display, 20pt title, 15pt semibold section heading, 15pt interface and conversation body, 13pt secondary text and 12pt code.
-- Dynamic light/dark surfaces shared by `N` and `Ink`: paper `#F7F8FA` or dusk `#202329`, native blue actions and readable semantic status colors. Appearance follows the system by default; Settings and the sidebar offer System / Light / Dark.
+- Dynamic light/dark surfaces shared by `N` and `Ink`: paper `#F7F8FA` or neutral charcoal `#1C1C1E`, native blue actions and readable semantic status colors. Appearance follows the system by default; Settings and the sidebar offer System / Light / Dark.
 - Management content is bounded to 880pt; conversations to 760pt. Both use 32pt outer insets and 28pt section gaps; the board remains horizontally scrollable.
-- The floating composer uses real `glassEffect` on macOS 26, with a material fallback on macOS 14–15. Its editor and inner buttons do not stack another glass surface. Native sidebar and toolbar own their platform materials. Content cards stay opaque. Background color fields are static and quiet; Reduce Transparency removes decorative background fields.
+- The floating composer uses real `glassEffect` on macOS 26, with a material fallback on macOS 14–15. Its editor and inner buttons do not stack another glass surface. Native sidebar and toolbar own their platform materials. Content stays opaque on a flat neutral canvas; decorative blue/green background fields were removed after live feedback about a washed-out appearance. Explanatory result text uses a readable secondary token.
 - Native segmented pickers own focus, keyboard selection and state. Search keeps matching control geometry and exposes a labelled clear action.
 - Long evidence, source text and secondary settings remain available through explicit disclosures. No stored detail is discarded to simplify the view.
 
