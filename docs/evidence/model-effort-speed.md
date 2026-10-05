@@ -78,5 +78,41 @@ listed model, every tier, another provider's adapter, or remaining account quota
 
 ## Native acceptance
 
-Pending installation and on-screen verification. Design lab's sample models and
-third speed tier are illustrative metadata, never provider availability claims.
+Installed signed implementation commit `722bc9d` at `/Applications/Neko.app`.
+The installer ran after confirming no Planning/Building/Reviewing tickets and
+no pending or queued Home turns. Code signing and the embedded commit were
+verified. Final process inspection found one native app and one main daemon;
+native-runner guards and MCP bridges are child helpers, not extra daemon instances.
+
+Verified through the installed app's native accessibility tree and keyboard:
+
+- Inline and Separate designs share the applied sample settings. The pearl,
+  labels, lightning indicator and separate Plugins control were captured in
+  [Inline](model-effort-speed-inline.png) and
+  [Separate](model-effort-speed-separate.png) screenshots. The sidebar was hidden
+  so the committed screenshots contain only sample content.
+- Search text edited by keyboard filters the model list. Effort increment
+  actions expose discrete Low/Medium labels and descriptions. Astra's sample
+  menu offers Auto/Normal/Fast/Express; Quick uses a Fast switch, and switching
+  it off explicitly pins Normal. Simple hides unsupported effort and explains
+  the reset. These sample capabilities are not live provider claims.
+- Real Home selection of Codex `gpt-6-astra`, Low, Normal completed Check & apply.
+  The daemon persisted it under `home:default:*`, revision 1, while the global
+  runtime stayed unchanged. Opening an existing ticket showed Neko decides;
+  returning Home restored Astra / Low / Normal. A temporary composer typing
+  probe worked and was cleared without sending a message.
+- Reset to Neko decides succeeded without inference, removed the saved Home
+  pins and advanced revision to 2. Paid automatic speed remains off. No ticket
+  settings were changed. The app was left on Home with an empty composer.
+- After installation, an existing background responsibility admitted a new
+  ticket. Its actual dispatch recorded `codex / gpt-6-astra / medium / default`.
+  That worker was still Planning at the final check and was left uninterrupted.
+  This confirms installed automatic dispatch and recording, not completed work.
+
+The capture tool excludes the separate native popover from main-window images.
+Its controls and transitions were verified through accessibility, but its visual
+placement was not captured. Physical pointer dragging of the effort slider,
+keyboard-arrow slider adjustment, and an OS Reduce Motion toggle were not
+verified. Resize-state preservation was proved by the hosted native regression
+above, not by a real window drag. Actual served speed and paid Fast inference
+remain unverified; the UI describes the recorded settings as requested.
