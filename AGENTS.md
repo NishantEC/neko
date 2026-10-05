@@ -11,6 +11,14 @@ and evidence stay opaque. Preserve `stableSplitPane`, the native top safe area,
 and navigation-owned drafts when changing these surfaces. See
 `docs/design/native-polish.md` and `docs/evidence/native-liquid-glass.md`.
 
+Design lab (2026-10-05) is an interactive native preview page, with Inline/Context
+composer layouts, real availability-gated Liquid Glass and illustrative agents
+and plugins. Its local observation model has no AppModel, IPC or provider
+dependency. Preview Send appends locally; plugin switches do not install or grant
+anything. It reuses the AppKit editor, including its local attachment store.
+Production Home/agent composers are unchanged. Treat it as a design study, not
+as evidence of a shipped plugin host or live child-agent integration.
+
 As of 2026-10-03, the native client has Home, All agents (List/Board), full-page
 agent chats and a system source-list sidebar with bounded live agent groups.
 Ticket drafts and return filters survive navigation. Memory / Working style
