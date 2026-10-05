@@ -84,3 +84,32 @@ were not checked on screen. Onboarding was compiled but not entered against
 live data. Live model execution and compaction behavior were not changed or
 retested. Reset and worktree cleanup remain separate work; existing tickets and
 worktrees were preserved. Commits are local to main; no remote push was made.
+
+## Contrast correction — 2026-10-05
+
+The reported washed-out agent page used Ambient's blue and green radial
+gradients behind its content, not an overlay over text. Source `85d41be` removes
+that background field and uses a flat neutral canvas, with darker neutral dark
+surfaces. Result notes, missing-result text and missing-review explanations now
+use the shared higher-contrast secondary text token. Native sidebar and glass
+composer APIs remain in place.
+
+- Native verification passed: 105 XCTest cases and 11 Swift Testing tests;
+  the optional real-daemon test remained skipped without `NEKO_TEST_DAEMON`.
+  No Rust source changed. The signed release build and idle-gated installation
+  succeeded; immediately before installation there were zero active or queued
+  tickets and zero pending/queued Home messages.
+- Installed `NekoGitCommit` is `85d41bed79b72b19184b8f2df0db3f714ce2be60`.
+  Strict deep signature verification passed, and both installed executables
+  exactly matched the build output. Process inspection found one canonical
+  client and one daemon under `/Applications/Neko.app`.
+- An active-window screenshot of NEK-9523 showed the neutral charcoal canvas,
+  brighter result/reviewer prose and retained glass composer. Initial inactive
+  captures dimmed native chrome; a harmless Left-arrow key activated the window
+  before the final screenshot. The reply editor remained empty and nothing was
+  submitted. Screenshots were reviewed in chat, not saved as repository files.
+- Logs: `/tmp/neko-contrast-test.log`, `/tmp/neko-contrast-build.log`, and
+  `/tmp/neko-contrast-install.log`. These are local temporary artifacts.
+  This correction was checked live in the current System/dark appearance;
+  light appearance, older macOS fallbacks and accessibility display settings
+  were not rechecked. The earlier verification limits still apply.
