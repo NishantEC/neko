@@ -19,6 +19,16 @@ anything. It reuses the AppKit editor, including its local attachment store.
 Production Home/agent composers are unchanged. Treat it as a design study, not
 as evidence of a shipped plugin host or live child-agent integration.
 
+Design lab refinement (2026-10-06): Inline is the selected direction. The task
+control shows Neko for an unsplit task and counts only distinct existing child
+ticket IDs in an approved split. Planning/building/review are phases, not three
+simultaneous agents. The sample-state menu demonstrates One task, Split task and
+Review without starting work. `TaskTeamSummary` derives membership/status counts
+from the snapshot shape; it is currently used only by the preview. Decorative
+beads use a pointer-driven Metal pearl shader, with no idle animation timer.
+Reduce Motion disables movement; Reduce Transparency/Increased Contrast use a
+solid fallback. System Liquid Glass remains a separate native material.
+
 As of 2026-10-03, the native client has Home, All agents (List/Board), full-page
 agent chats and a system source-list sidebar with bounded live agent groups.
 Ticket drafts and return filters survive navigation. Memory / Working style

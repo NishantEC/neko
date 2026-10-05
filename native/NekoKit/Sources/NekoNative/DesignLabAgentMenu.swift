@@ -6,22 +6,27 @@ struct DesignLabAgentMenu: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Agents on this task").font(.headline)
-            Text("Sample team · Ship dark mode").font(.caption).foregroundStyle(.secondary)
+            Text("Who’s working on this?").font(.headline)
+            Text("Sample task · Ship dark mode").font(.caption).foregroundStyle(.secondary)
             Divider()
-            ForEach(DesignLabModel.Agent.allCases) { agent in
+            ForEach([preview.owner] + preview.agents) { agent in
                 Button { close(); preview.selectedAgent = agent } label: {
                     HStack(spacing: 12) {
                         DesignLabOrb(color: agent.color, size: 28)
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(agent.rawValue).font(.system(size: 14, weight: .semibold))
+                            Text(agent.title).font(.system(size: 14, weight: .semibold))
+                            Text("\(agent.role) · \(agent.status)").font(.caption).foregroundStyle(.secondary)
                             Text(agent.activity).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }.padding(.vertical, 6).contentShape(Rectangle())
-                }.buttonStyle(.plain)
+                }.buttonStyle(DesignLabHoverStyle())
             }
+            Divider()
+            Text(preview.agents.isEmpty ? "One task. Planning, building and review are its phases."
+                 : "\(preview.team.label) · \(preview.team.activity). The owner is shown separately.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }.padding(22).frame(width: 360)
     }
 }

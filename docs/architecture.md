@@ -69,12 +69,19 @@ material fallback on older supported systems; content cards remain opaque.
 The content canvas is solid neutral charcoal in dark mode, with no decorative
 gradient wash. Native sidebar and control materials retain their own appearance.
 Design lab is a separate sidebar page for a local, interactive composer study.
-It offers Inline and Context layouts with real Liquid Glass, static shaded agent
-beads, native popovers, sample plugin toggles and the existing AppKit text editor.
+It offers Inline (selected direction) and Context layouts with real Liquid Glass,
+Metal pearl beads, native popovers, sample plugin toggles and the existing AppKit text editor.
 Its observation model has no AppModel/IPC/provider dependency: sends append only
 to the sample conversation. Pasted/dropped files use the shared local attachment
 store. It does not install plugins or start workers. Preview state resets when
 leaving the page; Home and agent conversations keep their production behavior.
+The task control counts distinct existing child ticket IDs from approved splits,
+never phase sessions or all workspace tickets. A task without children shows
+Neko. Working/waiting/review-needed/completed/stopped counts follow task statuses.
+One task, Split task and Review are selectable sample states, not runtime actions.
+Pearl lighting follows pointer events and has no idle render timer; Reduce Motion
+holds the light/scale still, and transparency/contrast preferences select a solid
+fallback. The shader applies only to beads, not the system glass composer.
 Native segmented
 pickers own focus and keyboard selection. Management headers expose their
 actions separately to accessibility; long source/check details use explicit

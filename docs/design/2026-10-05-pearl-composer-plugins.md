@@ -2,6 +2,43 @@
 
 Status: proposed, not implemented. Paper mockups reviewed on 2026-10-05.
 
+**2026-10-06 update:** the native Design lab implements the visual study. The user
+selected Inline; production adoption and the plugin host remain proposed. The
+following revision supersedes the earlier static bead and “3 agents” examples.
+
+## Selected Inline revision: task ownership and pearl material
+
+The primary chat is Neko. A task has one saved planning/building session; a fresh
+reviewer checks the result. A reviewer, scout or recovery supervisor is a phase
+role, not a new child task to add to the displayed team count. There is no global
+three-agent cap. The existing split proposal is deliberately bounded to two or
+three subtasks and approval creates the corresponding child tickets.
+
+Show **Neko** when the current ticket has no created children. Once a split is
+approved, show **N subtasks**, calculated from distinct `splits[].subtasks[].task_id`
+values belonging to this `parent_id` that resolve in `snapshot.tasks`. Exclude
+unapproved proposals, missing IDs, duplicates and the parent. Show the owner
+separately in the popover. Never derive the number from plugin count, model count,
+saved sessions or the total number of workspace tickets.
+
+The count means membership, not simultaneous execution. Planning/Building/Reviewing
+mean working; Queued means waiting; AwaitingApproval/ReadyForReview need the user;
+Completed is done; Failed/Cancelled are stopped. Dependency-blocked children are
+still subtasks, but are not labelled working. These are durable task statuses,
+not measured live process counts. `TaskTeamSummary` implements this calculation
+against the protocol snapshot shape and is currently consumed by sample data
+only. No production chat integration is claimed.
+
+The native preview offers One task, Split task (one working, one dependency waiting)
+and Review examples. Inline retains its compact integrated control. The earlier
+Context comparison remains available. Decorative orbs now use a Metal nacre
+shader with broad softbox highlights and a softly coloured body instead of a
+near-black metallic rim. Whole-button pointer tracking moves the light; hover
+adds restrained scale/contrast, and press gives immediate feedback. No idle
+TimelineView or timer runs for these beads. Reduce Motion keeps position/scale
+still; Reduce Transparency or Increased Contrast selects an opaque fallback.
+The actual composer continues to use system Liquid Glass.
+
 Latest feedback: keep plugins and the agent controls; reject the detached dock. The integrated 23A/23B studies below supersede the original composer recommendation. The plugin library and setup direction in 22C/22D remain unchanged.
 
 ## Review the designs

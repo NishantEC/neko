@@ -8,7 +8,7 @@ struct DesignLabView: View {
         ScrollViewReader { scroll in
             ScrollView {
                 VStack(spacing: 0) {
-                    DesignLabConversation(messages: preview.messages)
+                    DesignLabConversation(messages: preview.messages, taskActivity: "\(preview.team.label) · \(preview.teamActivity)")
                         .frame(maxWidth: 820)
                         .padding(.horizontal, 44).padding(.top, 32)
                         .frame(maxWidth: .infinity)
@@ -42,6 +42,13 @@ struct DesignLabView: View {
                 .pickerStyle(.segmented).frame(width: 200)
             }
             ToolbarItem(placement: .primaryAction) {
+                Picker("Sample task", selection: $preview.scenario) {
+                    ForEach(DesignLabModel.Scenario.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.menu).frame(width: 120)
+                .help("Switch sample task state. No agents are launched.")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button("Reset preview", systemImage: "arrow.counterclockwise", action: preview.reset)
                     .labelStyle(.iconOnly).help("Reset this local preview")
             }
@@ -49,6 +56,7 @@ struct DesignLabView: View {
         .sheet(item: $preview.selectedAgent) { agent in
             DesignLabAgentSheet(agent: agent)
         }
+        .onChange(of: preview.scenario) { _, _ in preview.selectedAgent = nil }
         .sheet(isPresented: $preview.showingLibrary) {
             DesignLabPluginLibrary(preview: preview)
         }

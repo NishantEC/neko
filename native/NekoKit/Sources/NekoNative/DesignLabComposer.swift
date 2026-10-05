@@ -61,10 +61,10 @@ struct DesignLabComposer: View {
                     Button(action: preview.send) {
                         ZStack {
                             DesignLabOrb(size: 42)
-                            Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
-                        }.contentShape(Circle())
+                            Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).foregroundStyle(.black.opacity(0.78))
+                        }.frame(width: 44, height: 44).contentShape(Circle())
                     }
-                    .buttonStyle(.plain).disabled(!preview.canSend)
+                    .buttonStyle(DesignLabHoverStyle(circular: true)).disabled(!preview.canSend)
                     .accessibilityLabel("Send preview message").help("Send to this local preview")
                 }
                 .padding(.horizontal, 16).padding(.bottom, 14)
