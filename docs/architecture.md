@@ -69,12 +69,24 @@ results during retries are labelled historical; display text does not determine
 approval or verification status. Rich tables wrap, and long terminal/diff previews
 have explicit line counts and incremental expansion of available output. These
 presentation changes are separate from runtime context compaction.
+Saved command evidence is directly expandable beneath the reviewer readback and
+inside work history/activity. It shows recorded exit codes and saved output, with
+explicit warnings for shortened output or incomplete legacy receipts. Copy saved
+record copies exactly the retained event, not an unavailable full execution log.
+These records can span multiple attempts; they are not the current review verdict.
 `neko-core::neko_chat` stores the conversation in its own bounded setting,
 outside the task store's reserved capacity. Each message is one Codex turn with
 read-only filesystem access (`neko-daemon::workbench::converse`). A selected
 workspace receives its connected MCP tools through a temporary lease;
 an unscoped chat receives no bridge. Chat history injected into the prompt is
-also scoped. A reply may propose up to three
+also scoped: exact workspace/profile filtering precedes the newest-12 window.
+A 12 KiB budget includes role labels and omission notices. Whole recent messages
+are preferred; an oversized newest message retains a UTF-8-safe tail with a notice.
+This is bounded history selection, without a generated summary or provider context
+compaction. Task command receipts bound fields before JSON serialization rather
+than cutting serialized JSON. Missing or shortened command identity cannot prove a
+successful check; shortened output is an explicitly labelled preview of the host
+execution receipt. A reply may propose up to three
 tickets, which become ordinary queued tasks, so planning and approval gates are
 unchanged. Ticket notes (event role `note`) reach planner and builder prompts
 as direction inside the approved scope and never grant tools or publication.

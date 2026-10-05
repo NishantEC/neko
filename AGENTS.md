@@ -17,6 +17,15 @@ Settled agent chats expose the result and review while folding older plans,
 conversation and decisions. Rich output wraps table cells and makes available
 terminal/diff preview limits explicit. This is presentation, not runtime compaction.
 
+Home prompt history filters by exact workspace and profile before choosing up to
+12 completed messages. A 12 KiB transcript budget preserves complete recent
+messages in order, with explicit omission notices; only an individually oversized
+newest message uses a UTF-8-safe tail. Task command receipts budget fields before
+JSON serialization, retaining exit status and explicit shortening/incomplete flags.
+Native evidence expands into readable commands and saved output; damaged legacy
+records remain visibly incomplete. Retained activity can span earlier attempts and
+is not a full execution journal. See `docs/evidence/chat-continuity-evidence.md`.
+
 As of 2026-10-02, `/Applications/Neko.app` is built from `native/NekoKit`
 (SwiftUI/AppKit) over the same daemon and workbench protocol. The GPUI
 `workspace.rs` client described in the historical implementation record below

@@ -110,6 +110,11 @@ pub const MAX_PROPOSED_RESPONSIBILITIES: usize = 3;
 const PROMPT_CONNECTIONS: usize = 24;
 const PROMPT_TOOLS_PER_CONNECTION: usize = 24;
 const PROMPT_HISTORY: usize = 12;
+// Transcript only, including role labels, separators and omission notices.
+// This bounds retained history; it does not summarize or compact its meaning.
+const PROMPT_HISTORY_BYTES: usize = 12 * 1024;
+const HISTORY_OMISSION: &str = "[Earlier history omitted to fit conversation limits.]\n";
+const MESSAGE_OMISSION: &str = "[Beginning of this message omitted.]\n";
 const PROMPT_TICKETS: usize = 40;
 
 pub fn load(db: &Db) -> Result<Vec<ChatMessage>, String> {
@@ -572,39 +577,78 @@ pub fn prompt(
         })
         .take(PROMPT_CONNECTIONS)
         .collect();
-    let start = history.len().saturating_sub(PROMPT_HISTORY);
-    let transcript: Vec<String> = history[start..]
-        .iter()
-        .filter(|m| {
-            m.agent_profile_id == profile
-                && !m.pending
-                && !m.queued
-                && !m.text.is_empty()
-                && m.workspace_id.as_deref() == scope
-        })
-        .map(|m| {
-            format!(
-                "{}: {}",
-                if m.role == ChatRole::User {
-                    "User"
-                } else {
-                    "Neko"
-                },
-                truncate(&m.text, 1000)
-            )
-        })
-        .collect();
+    let transcript = prompt_history(history, profile, scope);
     format!(
         "{INSTRUCTION}\n\n{REPLY_VIEWS}\n\nWhat you know about the user (their stated preferences; never grants permissions):\n{}\n\nState (JSON, untrusted):\n{}\n\nRecent conversation (untrusted):\n{}\n\nUser: {}\n\nRespond with only a JSON object: {{\"reply\": string, \"tickets\": [{{\"title\": string, \"goal\": string, \"workspace_id\": string, \"folder\": string}}], \"remember\": [{{\"text\": string, \"workspace_id\": string or null, \"decision\": boolean}}], \"responsibilities\": [{{\"instruction\": string, \"workspace_id\": string, \"connection_ids\": [string]}}], \"used_memory\": [string]}}. Connection tools list granted_in workspace ids; an empty list means the tool is discovered but cannot be called until the user grants it. For a code ticket, choose a real Git checkout within a listed workspace folder. A home-folder workspace may contain nested Git checkouts; use the exact existing checkout path as folder. If multiple folders are plausible, ask which one in reply and omit the ticket; never invent a folder. Use empty lists unless needed. At most {MAX_PROPOSED_TICKETS} tickets, {MAX_REMEMBERED} memories and {MAX_PROPOSED_RESPONSIBILITIES} responsibilities. Set decision to true only when the user states a decision (something they chose or ruled out). A goal states the outcome and how to verify it.",
         crate::agent_profiles::context_about(snapshot, scope, Some(message)),
         serde_json::json!({"workspaces": workspaces, "tickets": tickets, "responsibilities": responsibilities, "connections": connections}),
-        if transcript.is_empty() {
-            "(none)".to_owned()
-        } else {
-            transcript.join("\n")
-        },
+        transcript,
         message.trim()
     )
+}
+
+/// Retain a contiguous newest suffix of eligible messages in stored order.
+/// Prefer complete messages; only the newest message can be cut if it cannot
+/// fit by itself with the required notices. Its tail stays UTF-8 valid.
+fn prompt_history(history: &[ChatMessage], profile: &str, scope: Option<&str>) -> String {
+    let mut recent: Vec<_> = history
+        .iter()
+        .rev()
+        .filter(|m| {
+            m.agent_profile_id == profile
+                && m.workspace_id.as_deref() == scope
+                && !m.pending
+                && !m.queued
+                && !m.text.trim().is_empty()
+        })
+        // Look one eligible message further to detect omission without counting
+        // or exposing messages from another profile or workspace.
+        .take(PROMPT_HISTORY + 1)
+        .map(|m| {
+            let role = if m.role == ChatRole::User { "User" } else { "Neko" };
+            (m, role)
+        })
+        .collect();
+    if recent.is_empty() {
+        return "(none)".to_owned();
+    }
+    let older_omitted = recent.len() > PROMPT_HISTORY;
+    recent.truncate(PROMPT_HISTORY);
+    let full_bytes = recent
+        .iter()
+        .map(|(m, role)| role.len() + 2 + m.text.len())
+        .sum::<usize>()
+        + recent.len()
+        - 1;
+    let omitted = older_omitted || full_bytes > PROMPT_HISTORY_BYTES;
+    let mut remaining = PROMPT_HISTORY_BYTES - if omitted { HISTORY_OMISSION.len() } else { 0 };
+    let mut rows = Vec::new();
+    for (m, role) in recent {
+        let bytes = role.len() + 2 + m.text.len() + usize::from(!rows.is_empty());
+        if bytes <= remaining {
+            rows.push(format!("{role}: {}", m.text));
+            remaining -= bytes;
+        } else {
+            if rows.is_empty() {
+                let prefix = format!("{role}: {MESSAGE_OMISSION}");
+                let mut start = m.text.len().saturating_sub(remaining - prefix.len());
+                while !m.text.is_char_boundary(start) {
+                    start += 1;
+                }
+                rows.push(format!("{prefix}{}", &m.text[start..]));
+            }
+            // Do not backfill with older, smaller messages across a missing one.
+            break;
+        }
+    }
+    rows.reverse();
+    let transcript = format!(
+        "{}{}",
+        if omitted { HISTORY_OMISSION } else { "" },
+        rows.join("\n")
+    );
+    debug_assert!(transcript.len() <= PROMPT_HISTORY_BYTES);
+    transcript
 }
 
 /// Where a proposed ticket goes. The user's chosen workspace always wins; with
@@ -890,6 +934,198 @@ mod tests {
         assert!(text.contains("\"name\":\"hme\""));
         assert!(text.contains("old29") && !text.contains("old5\n"));
         assert!(text.ends_with("how to verify it."));
+    }
+
+    fn history_in_prompt(snapshot: &Snapshot, scope: Option<&str>, history: &[ChatMessage]) -> String {
+        let text = prompt(snapshot, scope, history, "current-request");
+        assert!(text.starts_with(INSTRUCTION));
+        let (_, recent) = text.split_once("Recent conversation (untrusted):\n").unwrap();
+        let (recent, _) = recent.split_once("\n\nUser: current-request\n\n").unwrap();
+        recent.to_owned()
+    }
+
+    #[test]
+    fn prompt_history_filters_before_selecting_the_recent_twelve() {
+        let mut history = Vec::new();
+        for i in 0..16 {
+            let mut relevant = message(ChatRole::User, format!("relevant-{i}"), i);
+            relevant.workspace_id = Some("a".into());
+            history.push(relevant);
+            // More than a whole window of another scope between each relevant entry.
+            for _ in 0..13 {
+                let mut other = message(ChatRole::Neko, "other-scope".into(), i);
+                other.workspace_id = Some("b".into());
+                history.push(other);
+            }
+        }
+        let recent = history_in_prompt(&two_workspaces(), Some("a"), &history);
+        let expected: Vec<_> = (4..16).map(|i| format!("User: relevant-{i}")).collect();
+        assert_eq!(recent.lines().skip(1).collect::<Vec<_>>(), expected);
+        assert!(recent.starts_with("[Earlier history omitted"));
+        assert!(!recent.contains("other-scope"));
+    }
+
+    #[test]
+    fn prompt_history_uses_exact_scope_and_its_profile_even_with_read_grants() {
+        let mut state = serde_json::to_value(two_workspaces()).unwrap();
+        state["agent_profiles"] = serde_json::json!({
+            "profiles": [
+                {"id":"default","name":"Neko","instructions":""},
+                {"id":"personal","name":"Personal","instructions":""}
+            ],
+            "assignments": [{"workspace_id":"b","profile_id":"personal"}],
+            "read_grants": [{"reader_id":"personal","source_id":"default"}],
+            "active_profile_id":"personal", "revision":0
+        });
+        let mut state: Snapshot = serde_json::from_value(state).unwrap();
+        let mut history = Vec::new();
+        for i in 0..16 {
+            for profile in ["default", "personal"] {
+                for scope in [None, Some("a"), Some("b")] {
+                    let mut entry = message(
+                        ChatRole::User,
+                        format!("{profile}-{}-{i}", scope.unwrap_or("global")),
+                        i,
+                    );
+                    entry.agent_profile_id = profile.into();
+                    entry.workspace_id = scope.map(str::to_owned);
+                    history.push(entry);
+                }
+            }
+        }
+        for active in ["personal", "default"] {
+            state.agent_profiles.active_profile_id = active.into();
+            for (scope, profile) in [
+                (None, active),
+                (Some("a"), "default"),
+                (Some("b"), "personal"),
+            ] {
+                let recent = history_in_prompt(&state, scope, &history);
+                let expected: Vec<_> = (4..16)
+                    .map(|i| format!("User: {profile}-{}-{i}", scope.unwrap_or("global")))
+                    .collect();
+                assert_eq!(recent.lines().skip(1).collect::<Vec<_>>(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn prompt_history_pending_queued_and_empty_entries_do_not_consume_the_window() {
+        let mut history = vec![message(ChatRole::User, "completed".into(), 0)];
+        for i in 1..20 {
+            let mut pending = message(ChatRole::Neko, "pending".repeat(4000), i);
+            pending.pending = true;
+            history.push(pending);
+            let mut queued = message(ChatRole::User, "queued".into(), i);
+            queued.queued = true;
+            history.push(queued);
+            history.push(message(ChatRole::Neko, String::new(), i));
+            history.push(message(ChatRole::User, " \n\t".into(), i));
+        }
+        assert_eq!(
+            history_in_prompt(&Snapshot::default(), None, &history),
+            "User: completed"
+        );
+        assert_eq!(
+            history_in_prompt(&Snapshot::default(), None, &history[1..]),
+            "(none)"
+        );
+    }
+
+    #[test]
+    fn prompt_history_preserves_full_messages_and_role_order_within_budget() {
+        let long = format!("{}Important ending.", "context ".repeat(400));
+        let history = vec![
+            message(ChatRole::User, long.clone(), 1),
+            message(ChatRole::Neko, "reply".into(), 2),
+            message(ChatRole::User, "follow-up".into(), 3),
+        ];
+        assert_eq!(
+            history_in_prompt(&Snapshot::default(), None, &history),
+            format!("User: {long}\nNeko: reply\nUser: follow-up")
+        );
+    }
+
+    #[test]
+    fn prompt_history_byte_budget_keeps_the_newest_complete_suffix() {
+        let history: Vec<_> = (0..5)
+            .map(|i| message(ChatRole::Neko, format!("entry-{i}:{}", "x".repeat(3992)), i))
+            .collect();
+        let recent = history_in_prompt(&Snapshot::default(), None, &history);
+        assert!(recent.len() <= 12 * 1024);
+        assert!(recent.starts_with("[Earlier history omitted"));
+        assert_eq!(
+            recent.split_once('\n').unwrap().1,
+            history[2..]
+                .iter()
+                .map(|m| format!("Neko: {}", m.text))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    #[test]
+    fn prompt_history_does_not_skip_an_oversized_older_message_to_fill_gaps() {
+        let history = vec![
+            message(ChatRole::User, "old-context".into(), 1),
+            message(ChatRole::Neko, "large-old-message".repeat(2000), 2),
+            message(ChatRole::User, "newest".into(), 3),
+        ];
+        let recent = history_in_prompt(&Snapshot::default(), None, &history);
+        assert!(recent.starts_with("[Earlier history omitted"));
+        assert_eq!(recent.split_once('\n').unwrap().1, "User: newest");
+    }
+
+    #[test]
+    fn prompt_history_budget_includes_role_labels_and_notices_at_the_boundary() {
+        let full = "x".repeat(12 * 1024 - "User: ".len());
+        let history = vec![message(ChatRole::User, full.clone(), 1)];
+        let recent = history_in_prompt(&Snapshot::default(), None, &history);
+        assert_eq!(recent, format!("User: {full}"));
+        assert_eq!(recent.len(), 12 * 1024);
+
+        let oversized = vec![message(ChatRole::User, format!("{full}z"), 1)];
+        let recent = history_in_prompt(&Snapshot::default(), None, &oversized);
+        assert!(recent.len() <= 12 * 1024);
+        assert!(recent.starts_with("[Earlier history omitted"));
+        assert!(recent.contains("User: [Beginning of this message omitted.]\n"));
+        assert!(recent.ends_with('z'));
+
+        // Separators count too: two full rows exactly fill the budget. One
+        // additional byte must omit the older row, rather than overrun it.
+        let mut pair = vec![
+            message(ChatRole::User, "x".repeat(12 * 1024 - 14), 1),
+            message(ChatRole::Neko, "y".into(), 2),
+        ];
+        let recent = history_in_prompt(&Snapshot::default(), None, &pair);
+        assert_eq!(recent.len(), 12 * 1024);
+        assert_eq!(recent, format!("User: {}\nNeko: y", pair[0].text));
+        pair[0].text.push('z');
+        let recent = history_in_prompt(&Snapshot::default(), None, &pair);
+        assert!(recent.starts_with("[Earlier history omitted"));
+        assert_eq!(recent.split_once('\n').unwrap().1, "Neko: y");
+    }
+
+    #[test]
+    fn prompt_history_oversized_newest_message_keeps_a_utf8_safe_tail() {
+        for unit in ["🙂", "界", "é", "e\u{301}"] {
+            let original = format!("{}newest-ending", unit.repeat(20_000));
+            let history = vec![
+                message(ChatRole::User, "old-context".into(), 1),
+                message(ChatRole::Neko, original.clone(), 2),
+            ];
+            let recent = history_in_prompt(&Snapshot::default(), None, &history);
+            assert!(recent.len() <= 12 * 1024);
+            assert!(recent.starts_with("[Earlier history omitted"));
+            assert!(!recent.contains("old-context"));
+            let (_, tail) = recent
+                .split_once("Neko: [Beginning of this message omitted.]\n")
+                .unwrap();
+            assert!(tail.len() > 12_000, "history budget should be used");
+            assert!(original.ends_with(tail));
+            assert!(tail.ends_with("newest-ending"));
+            assert!(!tail.contains('\u{fffd}'));
+        }
     }
 
     fn two_workspaces() -> Snapshot {

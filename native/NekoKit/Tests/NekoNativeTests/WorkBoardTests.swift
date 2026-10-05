@@ -25,11 +25,14 @@ final class WorkBoardTests: XCTestCase {
           {"role":"note","message":"Use staging tenant 42"}
         ]}
         """.utf8))
-        XCTAssertEqual(TicketThread.items(task), [
+        let items = TicketThread.items(task)
+        guard case .steps(let role, let receipts) = items[3] else { return XCTFail("Missing command group") }
+        XCTAssertEqual(role, "supervisor")
+        XCTAssertEqual(receipts.map(\.title), ["rg -n login", "nl -ba a.ts"])
+        XCTAssertEqual(Array(items.prefix(3)) + Array(items.dropFirst(4)), [
             .brief("Fix the login crash"),
             .status("Queued for planning."),
             .status("Working in /repo/athena: its name appears in the ticket."),
-            .steps(role: "supervisor", commands: ["rg -n login", "nl -ba a.ts"]),
             .agent(role: "supervisor", text: "I traced the crash to an unguarded profile call."),
             .you("Use staging tenant 42")
         ])

@@ -431,7 +431,7 @@ struct TicketDetail: View {
                 if !conversation.foldsHistory { TicketThreadView(ticket: ticket) }
                 if conversation.showsPlan { section(conversation.planTitle, ticket["plan"].string) }
                 if !conversation.outcome.belongsInHistory {
-                    TicketOutcomeReadback(result: ticket["result"].string, outcome: conversation.outcome)
+                    TicketOutcomeReadback(result: ticket["result"].string, outcome: conversation.outcome, events: ticket["events"].array)
                 }
                 if ticket["status"].string == "Failed" { stoppedCallout }
                 if let question = TicketPresentation.waitingReason(ticket) {
@@ -483,7 +483,7 @@ struct TicketDetail: View {
                 if conversation.foldsHistory { TicketThreadView(ticket: ticket) }
                 if !conversation.showsPlan { section("Saved plan", ticket["plan"].string) }
                 if conversation.outcome.belongsInHistory && !ticket["result"].string.isEmpty {
-                    TicketOutcomeReadback(result: ticket["result"].string, outcome: conversation.outcome)
+                    TicketOutcomeReadback(result: ticket["result"].string, outcome: conversation.outcome, events: ticket["events"].array)
                 }
                 if !decisions.isEmpty {
                     DisclosureGroup("Decision history · \(decisions.count)") {
@@ -608,19 +608,18 @@ struct TicketDetail: View {
             }
         }
     }
-    private func eventView(_ event: JSONValue) -> some View {
+    @ViewBuilder private func eventView(_ event: JSONValue) -> some View {
         let message = event["message"].string
-        let prefix = "VERIFICATION_COMMAND "
-        let receipt = message.hasPrefix(prefix) ? (try? JSONDecoder().decode(JSONValue.self, from: Data(message.dropFirst(prefix.count).utf8))) : nil
-        let heading: String
-        if let receipt { heading = "\(receipt["exit_code"] == .number(0) ? "Succeeded" : "Failed or incomplete") · \(receipt["command"].string)" }
-        else { heading = String(message.split(separator: "\n").first.map(String.init)?.prefix(100) ?? "Event".prefix(100)) }
-        return DisclosureGroup {
-            Text(message).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(event["role"].string.capitalized).font(.caption).foregroundStyle(.secondary)
-                Text(heading).font(.callout).lineLimit(2)
+        if let receipt = TicketCommandReceipt.from(event: event) {
+            TicketCommandReceiptView(receipt: receipt, role: event["role"].string)
+        } else {
+            DisclosureGroup {
+                Text(message).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(event["role"].string.capitalized).font(.caption).foregroundStyle(.secondary)
+                    Text(String(message.split(separator: "\n").first.map(String.init)?.prefix(100) ?? "Event".prefix(100))).font(.callout).lineLimit(2)
+                }
             }
         }
     }
@@ -632,6 +631,7 @@ struct TicketDetail: View {
 private struct TicketOutcomeReadback: View {
     let result: String
     let outcome: TicketPresentation.Outcome
+    let events: [JSONValue]
     @State private var copied = false
 
     var body: some View {
@@ -669,6 +669,7 @@ private struct TicketOutcomeReadback: View {
                 Text(outcome == .reviewing ? "No structured reviewer verdict yet." : "No structured reviewer verdict is available. Any saved review text remains in the result.")
                     .font(.callout).foregroundStyle(.secondary)
             }
+            TicketCommandEvidenceView(events: events)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: result) { _, _ in copied = false }
