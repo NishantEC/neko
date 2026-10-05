@@ -38,6 +38,7 @@ struct WorkspaceEditor: View {
                 Section {
                     TextField("How should Neko work here?", text: $instructions, axis: .vertical)
                         .lineLimit(3...6).textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.leading)
                         .accessibilityLabel("Workspace instructions, optional")
                 } header: { Text("Instructions · optional") }
             }

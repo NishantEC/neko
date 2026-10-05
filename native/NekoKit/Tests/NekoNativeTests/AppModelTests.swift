@@ -210,7 +210,7 @@ private actor ControlledTransport {
             .object(["name": .string("read"), "schema_hash": .string("v2")]),
             .object(["name": .string("write"), "schema_hash": .string("v1")]),
         ]
-        let connection: JSONValue = .object(["id": .string("server"), "tools": .array(tools)])
+        let connection: JSONValue = .object(["id": .string("server"), "enabled": .bool(true), "tools": .array(tools)])
         XCTAssertEqual(ToolsPresentation.toolSummary(connection), "2 tools")
         XCTAssertEqual(ToolsPresentation.toolSummary(replacing(connection, ["tools": .array([])])), "Discovering")
         XCTAssertEqual(ToolsPresentation.toolSummary(replacing(connection, ["tools": .array([]), "discovered_ms": .number(1)])), "No tools")

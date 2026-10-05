@@ -40,17 +40,20 @@ struct PermissionsView: View {
                 row("Full Disk Access", "Allows access to protected folders, including Documents, Desktop and iCloud Drive.",
                     status: fullDisk ? "Allowed" : "Not allowed", ok: fullDisk) {
                     Button(fullDisk ? "Open Settings" : "Allow…") { FullDiskAccess.openSettings() }
+                        .accessibilityLabel(fullDisk ? "Open Full Disk Access settings" : "Allow Full Disk Access")
                 }
                 row("Accessibility", "Lets Neko paste for you and read the text you have selected. Nothing else on screen is read.",
                     status: trusted ? "Allowed" : "Not allowed", ok: trusted) {
                     if trusted {
                         Button("Open Settings") { NSWorkspace.shared.open(PermissionCatalog.accessibilitySettings) }
+                            .accessibilityLabel("Open Accessibility settings")
                     } else {
                         Button("Allow…") {
                             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
                             trusted = AXIsProcessTrustedWithOptions(options)
                         }
                         Button("Open Settings") { NSWorkspace.shared.open(PermissionCatalog.accessibilitySettings) }
+                            .accessibilityLabel("Open Accessibility settings")
                     }
                 }
                 row("Clipboard history", "Saves what you copy, only on this Mac. Turning it off stops new capture; existing history stays until you clear it.",
