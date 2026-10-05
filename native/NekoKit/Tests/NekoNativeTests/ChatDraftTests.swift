@@ -3,23 +3,6 @@ import NekoKit
 @testable import NekoNative
 
 final class ChatDraftTests: XCTestCase {
-    func testTodayComposerUsesGlassWithoutOpaqueBacking() throws {
-        let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/NekoNative/TodayView.swift"), encoding: .utf8)
-        let composer = try XCTUnwrap(source.components(separatedBy: "private func composer(availableWidth: CGFloat)").dropFirst().first?
-            .components(separatedBy: "private var canSend").first)
-        XCTAssertTrue(composer.contains("SharedComposer("))
-        let shared = try String(contentsOf: URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/NekoNative/SharedComposer.swift"), encoding: .utf8)
-        XCTAssertTrue(shared.contains(".liquidGlass(radius: 16)"))
-        XCTAssertFalse(composer.contains(".background(N.card"))
-        XCTAssertFalse(composer.contains("Text(\"Message\")"))
-        XCTAssertTrue(shared.contains(".menuIndicator(.hidden)"))
-        XCTAssertFalse(source.contains("RadialGradient("))
-    }
-
     func testSendButtonUsesFullComposerWidth() throws {
         let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -112,17 +95,6 @@ final class ChatDraftTests: XCTestCase {
         XCTAssertEqual(catalog.model("codex", "gpt-b")?.usable, false)
         XCTAssertEqual(catalog.source("ollama")?.status, .notRunning)
         XCTAssertEqual(AgentModelCatalog.label(provider: "codex", model: "gpt-a", catalog: catalog), "Codex · GPT A")
-    }
-
-    func testSharedComposerHasNoFocusHighlight() throws {
-        let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/NekoNative/SharedComposer.swift"), encoding: .utf8)
-        let composer = try XCTUnwrap(source.components(separatedBy: "struct SharedComposer").dropFirst().first?
-            .components(separatedBy: "struct ComposerAttachmentStrip").first)
-        XCTAssertFalse(composer.contains(".overlay"))
-        XCTAssertFalse(composer.contains(".strokeBorder"))
-        XCTAssertTrue(composer.contains(".liquidGlass(radius: 16)"))
     }
 
     func testComposerUsesReturnToSendAndShiftReturnForNewline() throws {

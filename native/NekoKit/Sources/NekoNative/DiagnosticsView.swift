@@ -23,7 +23,7 @@ struct DiagnosticsView: View {
         Form {
             Section {
                 HStack {
-                    Text("Checks the agent runtimes, the Codex install Neko uses, and how long each takes to answer. Nothing is sent to a model.")
+                    Text("Checks installed runtimes and response times. No model request is sent.")
                         .font(.callout).foregroundStyle(.secondary)
                     Spacer()
                     Button(running ? "Running…" : "Run diagnostics") { run() }.disabled(running)
@@ -31,21 +31,26 @@ struct DiagnosticsView: View {
                 if let roundTrip {
                     LabeledContent("App ↔ daemon") { Text("\(roundTrip) ms").monospacedDigit().foregroundStyle(.secondary) }
                 }
+                if checks.isEmpty && !running {
+                    Label("Run a check to see connection and runtime details.", systemImage: "stethoscope")
+                        .font(NekoFont.body).foregroundStyle(.secondary).padding(.vertical, 12)
+                }
                 ForEach(checks) { check in
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: check.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                             .foregroundStyle(check.ok ? Color.green : NekoStyle.amber)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(check.name).font(.headline)
-                            Text(check.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(check.name).font(NekoFont.heading)
+                            Text(check.detail).font(NekoFont.meta).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer()
                         if check.millis > 0 { Text("\(check.millis) ms").font(.caption).monospacedDigit().foregroundStyle(.secondary) }
-                    }
+                    }.padding(.vertical, 6)
                 }
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
     }
     private func run() {
         running = true
@@ -59,4 +64,3 @@ struct DiagnosticsView: View {
         }
     }
 }
-

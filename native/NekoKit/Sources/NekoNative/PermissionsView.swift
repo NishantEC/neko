@@ -37,7 +37,7 @@ struct PermissionsView: View {
     var body: some View {
         Form {
             Section {
-                row("Full Disk Access", "One switch that lets search and agents open any folder (Documents, Desktop, Downloads, iCloud Drive, other drives) without asking folder by folder.",
+                row("Full Disk Access", "Allows access to protected folders, including Documents, Desktop and iCloud Drive.",
                     status: fullDisk ? "Allowed" : "Not allowed", ok: fullDisk) {
                     Button(fullDisk ? "Open Settings" : "Allow…") { FullDiskAccess.openSettings() }
                 }
@@ -77,11 +77,12 @@ struct PermissionsView: View {
                 }
             } header: { Text("Workspace folders") }
             Section {
-                Text("Neko never controls your mouse or keyboard, never records your screen, and never sends mail or messages on its own. Agents work in their own copies of your repositories; nothing is published without you.")
+                Text("Neko does not record your screen or control your mouse. Authorized agents are local processes with full filesystem access; their worktrees are separate copies, not a security boundary. Publishing or changing external systems needs separate authority.")
                     .font(.callout).foregroundStyle(.secondary)
-            } header: { Text("What Neko doesn’t ask for") }
+            } header: { Text("Agent access") }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .task {
             if let reply = try? await model.request(.string("GetClipboardHistoryEnabled")) { try? clipboard.load(reply) }
             while !Task.isCancelled {
@@ -93,17 +94,17 @@ struct PermissionsView: View {
     }
     private func row<Action: View>(_ title: String, _ purpose: String, status: String, ok: Bool, @ViewBuilder action: () -> Action) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Text(title).font(.headline)
+                    Text(title).font(NekoFont.heading)
                     Text(status).font(.caption.weight(.medium))
                         .foregroundStyle(ok ? Color.secondary : NekoStyle.amber)
                 }
-                Text(purpose).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(purpose).font(NekoFont.meta).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
             HStack(spacing: 6) { action() }
-        }.padding(.vertical, 2)
+        }.padding(.vertical, 6)
     }
     private func setClipboard(_ enabled: Bool) {
         guard !pending, clipboard.begin(enabled) else { return }

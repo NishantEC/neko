@@ -12,37 +12,41 @@ struct OnboardingView: View {
     @State private var registrySheet = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 24)
-            Group {
-                switch step {
-                case 0: welcomeStep
-                case 1: permissionsStep
-                default: workspaceStep
+        VStack(spacing: 24) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    Group {
+                        switch step {
+                        case 0: welcomeStep
+                        case 1: permissionsStep
+                        default: workspaceStep
+                        }
+                    }
+                    .transition(.opacity)
+                    .id(step)
+                    if let error = model.error {
+                        Text(error).font(NekoFont.body).foregroundStyle(NekoStyle.coral)
+                            .textSelection(.enabled).padding(.top, 12)
+                    }
                 }
+                .frame(maxWidth: 560).padding(.vertical, 20).frame(maxWidth: .infinity)
             }
-            .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .move(edge: .leading).combined(with: .opacity)))
-            .id(step)
-            if let error = model.error { Text(error).font(.callout).foregroundStyle(Color.oklch(0.75, 0.15, 27)).textSelection(.enabled).padding(.top, 12) }
-            Spacer(minLength: 24)
             HStack {
-                if step > 0 { Button("Back") { step -= 1 }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.7)) }
+                if step > 0 { Button("Back") { step -= 1 }.buttonStyle(.bordered) }
                 Spacer()
-                HStack(spacing: 6) {
-                    ForEach(0..<3) { i in Capsule().fill(.white.opacity(i == step ? 0.9 : 0.25)).frame(width: i == step ? 20 : 6, height: 6) }
-                }.accessibilityLabel("Step \(step + 1) of 3")
+                Text("Step \(step + 1) of 3").font(NekoFont.meta).foregroundStyle(.secondary)
                 Spacer()
                 if step > 0 {
                     if step < 2 { Button("Skip") { finish() }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.7)) }
-                    Button(step == 2 ? "Open Neko" : "Continue") { if step == 2 { finish() } else { step += 1 } }.buttonStyle(PillButtonStyle())
+                    Button(step == 2 ? "Open Neko" : "Continue") { if step == 2 { finish() } else { step += 1 } }.buttonStyle(.borderedProminent)
                 } else { Color.clear.frame(width: 60, height: 1) }
             }
             .disabled(pending)
             .frame(maxWidth: 560)
         }
-        .padding(40)
+        .padding(32)
         .frame(width: 760, height: 580)
-        .background { SpaceGradient() }
+        .background(N.canvas)
         .environment(\.colorScheme, .dark)
         .hiddenWindowToolbarBackground()
         .navigationTitle("")
@@ -60,14 +64,14 @@ struct OnboardingView: View {
     }
     private var welcomeStep: some View {
         VStack(spacing: 22) {
-            BrandMark(size: 96).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .shadow(color: Gem.amethyst.opacity(0.55), radius: 36, y: 16)
+            BrandMark(size: 76).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             VStack(spacing: 10) {
-                Text("While you're away,\nNeko keeps watch.").font(.system(size: 32, weight: .bold)).tracking(-0.7).multilineTextAlignment(.center).foregroundStyle(.white)
-                Text("It watches your projects and tools, plans the next step the way you would, and asks before it changes anything.")
+                Text("A little more off your mind.").font(.system(size: 28, weight: .semibold)).tracking(-0.5).multilineTextAlignment(.center).foregroundStyle(N.text)
+                Text("Connect your projects and tools, hand off work, and see what needs your attention.")
                     .font(.system(size: 15)).foregroundStyle(.white.opacity(0.72)).multilineTextAlignment(.center).frame(maxWidth: 480)
             }
-            OrbButton(title: "Start") { step = 1 }.padding(.top, 8)
+            Button("Get started", systemImage: "arrow.right") { step = 1 }
+                .buttonStyle(.borderedProminent).controlSize(.large).padding(.top, 8)
         }
     }
     private var permissionsStep: some View {
@@ -76,7 +80,7 @@ struct OnboardingView: View {
                 Button(trusted ? "Enabled" : "Allow…") {
                     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
                     trusted = AXIsProcessTrustedWithOptions(options)
-                }.disabled(trusted).buttonStyle(PillButtonStyle())
+                }.disabled(trusted).buttonStyle(.bordered)
             }
             settingRow(symbol: "doc.on.clipboard.fill", tint: Gem.emerald, title: "Clipboard history", detail: "Saved only on this Mac. Off by default.") {
                 Toggle("Clipboard history", isOn: Binding(get: { clipboard ?? false }, set: { value in
@@ -99,11 +103,11 @@ struct OnboardingView: View {
     }
     private var workspaceStep: some View {
         VStack(spacing: 14) {
-        stepCard(title: "Where do you work?", subtitle: "Add a folder you already work in. Each workspace can have its own tools, such as its own Linear.") {
+        stepCard(title: "Where do you work?", subtitle: "Choose your folders. Each workspace keeps its own tools and instructions.") {
             if model.homeWorkspaceID == nil {
                 Button { Task { await model.addHomeWorkspace() } } label: {
                     HStack(spacing: 14) {
-                        DimensionalGlyph(symbol: "house.fill", tint: Gem.amethyst, size: 52)
+                        setupIcon("house", tint: NekoStyle.accent)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Use my home folder").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                             Text("Recommended · one default workspace for everything in ~").font(.system(size: 13)).foregroundStyle(.white.opacity(0.65))
@@ -116,10 +120,10 @@ struct OnboardingView: View {
             if model.workspaces.isEmpty {
                 Button { model.selectedWorkspace = nil; workspaceSheet = true } label: {
                     HStack(spacing: 14) {
-                        DimensionalGlyph(symbol: "folder.fill.badge.plus", tint: Gem.sapphire, size: 52)
+                        setupIcon("folder.badge.plus", tint: NekoStyle.accent)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Choose specific folders").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                            Text("A project, with its own tools such as its own Linear").font(.system(size: 13)).foregroundStyle(.white.opacity(0.65))
+                            Text("A project with its own tools and instructions").font(NekoFont.body).foregroundStyle(N.text3)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.5))
@@ -134,7 +138,7 @@ struct OnboardingView: View {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.oklch(0.78, 0.14, 158))
                     }.padding(.vertical, 6)
                 }
-                Button("Add another workspace…") { model.selectedWorkspace = nil; workspaceSheet = true }.buttonStyle(PillButtonStyle())
+                Button("Add another workspace…") { model.selectedWorkspace = nil; workspaceSheet = true }.buttonStyle(.bordered)
             }
         }
         Button { registrySheet = true } label: {
@@ -154,13 +158,12 @@ struct OnboardingView: View {
             }
             VStack(alignment: .leading, spacing: 4, content: content)
                 .padding(12)
-                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.14)))
+                .background(N.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }.frame(maxWidth: 560)
     }
     private func settingRow<Trailing: View>(symbol: String, tint: Color, title: String, detail: String, @ViewBuilder trailing: () -> Trailing) -> some View {
         HStack(spacing: 14) {
-            DimensionalGlyph(symbol: symbol, tint: tint, size: 40)
+            setupIcon(symbol, tint: NekoStyle.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
                 Text(detail).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.65))
@@ -168,6 +171,12 @@ struct OnboardingView: View {
             Spacer(minLength: 12)
             trailing()
         }.padding(10)
+    }
+    private func setupIcon(_ symbol: String, tint: Color) -> some View {
+        Image(systemName: symbol).font(.system(size: 20, weight: .regular))
+            .foregroundStyle(tint).frame(width: 40, height: 40)
+            .background(N.selected, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .accessibilityHidden(true)
     }
     private func finish() { pending = true; Task { await model.completeSetup(); pending = false } }
 }

@@ -10,20 +10,43 @@ struct WorkspaceEditor: View {
     @State private var original: JSONValue = .null
     @State private var saving = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(original == .null ? "Create workspace" : "Workspace settings").font(.title2.bold())
-            TextField("Workspace name", text: $name).textFieldStyle(.roundedBorder)
-            Text("Source folders").font(.headline)
-            List {
-                ForEach(folders, id: \.self) { path in
-                    HStack { Image(systemName: "folder"); Text(path).lineLimit(2).textSelection(.enabled); Spacer(); Button { folders.removeAll { $0 == path } } label: { Image(systemName: "minus.circle") }.accessibilityLabel("Remove \(path)") }
+        VStack(alignment: .leading, spacing: 16) {
+            Text(original == .null ? "Create workspace" : "Workspace settings").font(NekoFont.title)
+            Form {
+                Section("Workspace") {
+                    TextField("Name", text: $name).textFieldStyle(.roundedBorder)
                 }
-            }.frame(height: 150).overlay { if folders.isEmpty { Text("Add the folders where your work lives.").foregroundStyle(.secondary) } }
-            Button("Add folders…", systemImage: "folder.badge.plus") { chooseFolders() }
-            TextField("Instructions for this workspace (optional)", text: $instructions, axis: .vertical).lineLimit(3...6).textFieldStyle(.roundedBorder)
-            Text("Folders do not need to be Git repositories. Existing tools and skills stay in their original locations.").font(.callout).foregroundStyle(.secondary)
+                Section {
+                    if folders.isEmpty {
+                        EmptyRow(text: "Choose at least one folder where this work lives.")
+                    }
+                    ForEach(folders, id: \.self) { path in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "folder").foregroundStyle(N.text3).accessibilityHidden(true)
+                            Text((path as NSString).abbreviatingWithTildeInPath)
+                                .font(NekoFont.body).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button("Remove folder", systemImage: "minus.circle") { folders.removeAll { $0 == path } }
+                                .labelStyle(.iconOnly).buttonStyle(.borderless)
+                                .accessibilityLabel("Remove \(path)").help("Remove \(path)")
+                        }
+                    }
+                    Button("Add folders…", systemImage: "folder.badge.plus") { chooseFolders() }
+                } header: { Text("Source folders") } footer: {
+                    Text("Folders do not need to be Git repositories. Existing tools and skills stay in their original locations.")
+                }
+                Section {
+                    TextField("How should Neko work here?", text: $instructions, axis: .vertical)
+                        .lineLimit(3...6).textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Workspace instructions, optional")
+                } header: { Text("Instructions · optional") }
+            }
+            .formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 400)
+            if let error = model.error {
+                Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.coral).textSelection(.enabled)
+            }
             HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); Button(saving ? "Saving…" : "Save workspace") { Task { await save() } }.keyboardShortcut(.defaultAction).disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || folders.isEmpty) }
-        }.padding(28).frame(width: 540)
+        }.font(NekoFont.body).padding(NekoLayout.pageInset).frame(width: 560)
             .onAppear {
                 if let selected = model.selectedWorkspace, let workspace = model.workspaces.first(where: { $0.recordID == selected }) {
                     original = workspace; name = workspace["name"].string; instructions = workspace["instructions"].string

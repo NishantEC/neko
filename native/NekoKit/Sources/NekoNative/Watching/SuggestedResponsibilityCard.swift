@@ -1,49 +1,50 @@
 import SwiftUI
 import NekoKit
 
-/// One suggestion Neko made: what it will look at, what it will and won't do.
 struct SuggestedResponsibilityCard: View {
     @ObservedObject var model: AppModel
     let item: JSONValue
     var onEdit: (() -> Void)? = nil
+    @State private var expanded = false
+    @State private var confirmingActivation = false
+
     var body: some View {
         let tools = item["connection_ids"].array.map { Watching.label(model, connection: $0.string) }
-        let workspace = model.workspaces.first { $0.recordID == item["workspace_id"].string }?["name"].string ?? "Workspace"
         let missing = Watching.ungranted(model, item)
         let live = item["enabled"].bool
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                PixelGlyph(activity: live ? .watching : .creating, size: 12, animated: live)
-                Text(item["instruction"].string).font(.system(size: 13.5, weight: .medium)).foregroundStyle(N.text)
-                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                promise("checkmark", "Reads \(tools.joined(separator: ", ")) every 10 minutes in \(workspace) and brings what matters to Home.")
-                promise("hand.raised", item["prepare_low_risk"].bool ? "May prepare low-risk local fixes; never publishes or messages anyone." : "Never changes, posts or replies to anything. Plans wait for your approval.")
-                if !missing.isEmpty {
-                    promise("exclamationmark.circle", "Connect or discover tools for \(missing.joined(separator: ", ")) before this check can run.", color: NekoStyle.amber)
+            DisclosureGroup(isExpanded: $expanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(item["instruction"].string).textSelection(.enabled)
+                    Text("Sources: \(tools.isEmpty ? "None selected" : tools.joined(separator: ", "))")
+                    Text(item["prepare_low_risk"].bool ? "May prepare low-risk local fixes; no publication." : "Local work waits for approval.")
+                    if !missing.isEmpty {
+                        Label("Connect or discover tools for \(missing.joined(separator: ", ")) to start.", systemImage: "exclamationmark.triangle").foregroundStyle(NekoStyle.amber)
+                    }
+                }.font(NekoFont.meta).foregroundStyle(N.text3).padding(.top, 8)
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item["instruction"].string).font(NekoFont.body).foregroundStyle(N.text).lineLimit(2)
+                    Text(missing.isEmpty ? "Ready to review" : "Connection access needed").font(NekoFont.meta).foregroundStyle(missing.isEmpty ? N.text3 : NekoStyle.amber)
                 }
             }
             HStack(spacing: 8) {
                 if live {
-                    Label("Watching", systemImage: "checkmark").font(.system(size: 12, weight: .medium)).foregroundStyle(NekoStyle.mint)
+                    Label("Watching", systemImage: "checkmark").font(NekoFont.meta).foregroundStyle(N.text2)
                 } else {
-                    Button(missing.isEmpty ? "Turn on" : "Review connections") {
-                        if missing.isEmpty { Watching.turnOn(model, item) }
+                    Button(missing.isEmpty ? "Turn on…" : "Review connections") {
+                        if missing.isEmpty { confirmingActivation = true }
                         else { Watching.reviewAccess(model, item) }
-                    }.nekoPrimaryButton().controlSize(.small)
+                    }
                 }
-                if let onEdit { Button("Edit", action: onEdit).controlSize(.small) }
-                if !live { Button("Dismiss") { Watching.remove(model, item) }.controlSize(.small) }
-            }.disabled(model.busy)
+                if let onEdit { Button("Edit", action: onEdit) }
+                Spacer()
+                if !live { Button("Dismiss") { Watching.remove(model, item) } }
+            }.controlSize(.small).disabled(model.busy)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(N.card.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(N.line))
-    }
-    private func promise(_ symbol: String, _ text: String, color: Color = N.text3) -> some View {
-        Label { Text(text).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: symbol).frame(width: 14) }
-            .font(.system(size: 12)).foregroundStyle(color)
+        .padding(.vertical, NekoLayout.rowInset)
+        .overlay(alignment: .top) { N.line.frame(height: 1) }
+        .modifier(WatchActivationConfirmation(model: model, item: item, isPresented: $confirmingActivation))
     }
 }

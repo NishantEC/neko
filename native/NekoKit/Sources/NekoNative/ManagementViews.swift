@@ -32,10 +32,12 @@ struct ManagementScroll<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20, content: content)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(24)
+            VStack(alignment: .leading, spacing: NekoLayout.sectionGap, content: content)
+                .frame(maxWidth: NekoLayout.pageWidth, alignment: .leading)
+                .padding(NekoLayout.pageInset)
+                .frame(maxWidth: .infinity, alignment: .top)
         }
+        .font(NekoFont.body)
         .buttonStyle(.bordered)
         .accessibilityElement(children: .contain)
     }
@@ -47,10 +49,10 @@ struct ProfilesView: View {
     var body: some View {
         let profiles = model.snapshot["agent_profiles"]["profiles"].array
         ManagementScroll {
-            PageIntro(title: "Profiles", message: "A profile is how Neko thinks and writes for a kind of work: its instructions and its memories. Give a workspace its own profile when it needs a different voice or rules.") {
+            PageIntro(title: "Profiles", message: "Instructions and memories for each kind of work.") {
                 Button("New profile", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) }
             }
-            ForEach(profiles, id: \.self) { profile in
+            ForEach(profiles, id: \.recordID) { profile in
                 let active = model.snapshot["agent_profiles"]["active_profile_id"] == profile["id"]
                 let assigned = model.snapshot["agent_profiles"]["assignments"].array.filter { $0["profile_id"] == profile["id"] }.compactMap { a in model.workspaces.first { $0.recordID == a["workspace_id"].string }?["name"].string }
                 WorkspaceSection(name: profile["name"].string, color: active ? NekoStyle.accent : N.text4, detail: active ? "Default" : nil) {
@@ -64,10 +66,9 @@ struct ProfilesView: View {
                         Button("Edit") { draft = ManagementDraft(value: profile) }.controlSize(.small)
                     }
                 } content: {
-                    Text(profile["instructions"].string.isEmpty ? "No special instructions." : profile["instructions"].string)
-                        .font(.system(size: 12.5)).foregroundStyle(N.text3).lineLimit(3).textSelection(.enabled)
+                    ManagementDetailText(text: profile["instructions"].string.isEmpty ? "No special instructions. Edit this profile to add a voice or working rules." : profile["instructions"].string, disclosure: "Full instructions")
                     Text(assigned.isEmpty ? "Not used by a specific workspace." : "Used in " + assigned.joined(separator: ", "))
-                        .font(.system(size: 12)).foregroundStyle(N.text4)
+                        .font(NekoFont.meta).foregroundStyle(N.text3)
                     if profiles.count > 1 {
                         DisclosureGroup("Share memories from other profiles") {
                             ForEach(profiles.filter { $0["id"] != profile["id"] }, id: \.self) { source in
@@ -77,8 +78,8 @@ struct ProfilesView: View {
                                     submit(model, nested("AgentProfiles", "SetReadGrant", ["reader_id": profile["id"], "source_id": source["id"], "allowed": .bool(allowed)]))
                                 }))
                             }
-                            Text("This only shares memories. It never shares tools or workspace access.").font(.caption).foregroundStyle(N.text4)
-                        }.font(.system(size: 12.5))
+                            Text("This only shares memories. It never shares tools or workspace access.").font(NekoFont.meta).foregroundStyle(N.text3)
+                        }.font(NekoFont.body).toggleStyle(.checkbox)
                     }
                 }
             }
@@ -95,11 +96,17 @@ struct MemoryView: View {
     private func memoryToggle(_ title: String, key: String, help: String) -> some View {
         let options = model.snapshot["memory_options"]
         let on = options[key] == .null ? true : options[key].bool
-        return Toggle(title, isOn: Binding(get: { on }, set: { value in
+        return Toggle(isOn: Binding(get: { on }, set: { value in
             var next: [String: JSONValue] = ["learning": options["learning"] == .null ? .bool(true) : options["learning"], "use_memory": options["use_memory"] == .null ? .bool(true) : options["use_memory"]]
             next[key] = .bool(value)
             Task { await model.workbench(.command("SetMemoryOptions", ["options": .object(next)])) }
-        })).toggleStyle(.switch).controlSize(.small).help(help).disabled(model.busy)
+        })) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(NekoFont.body).foregroundStyle(N.text)
+                Text(help).font(NekoFont.meta).foregroundStyle(N.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }.toggleStyle(.switch).controlSize(.small).disabled(model.busy)
     }
     private func inScope(_ item: JSONValue) -> Bool {
         item["agent_profile_id"].string == profileFor(model) && (item["workspace_id"] == .null || model.selectedWorkspace == nil || item["workspace_id"].string == model.selectedWorkspace)
@@ -111,7 +118,7 @@ struct MemoryView: View {
         let memories = model.snapshot["memory"].array.filter(inScope)
         let proposals = model.snapshot["memory_proposals"].array.filter(inScope)
         ManagementScroll {
-            PageIntro(title: "Memory", message: "What Neko has learned about how you work: preferences, decisions and facts about your projects. Neko suggests new memories; nothing is kept until you accept it.") {
+            PageIntro(title: "Memory", message: "Saved context and working guidance. Suggestions wait for your approval.") {
                 if tab == "memories" { Button("Add memory", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) } }
             }
             Picker("Memory view", selection: $tab) {
@@ -119,45 +126,75 @@ struct MemoryView: View {
                 Text("Working style").tag("style")
             }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 300)
             if tab == "style" { WorkingStyleView(model: model) } else {
-            HStack(spacing: 18) {
-                memoryToggle("Suggest new memories", key: "learning", help: "When off, Neko stops proposing memories from chats and tickets. Things you tell it to remember are still saved.")
-                memoryToggle("Use memory in replies and tasks", key: "use_memory", help: "When off, no memory is sent to any model. Saved memories stay here.")
-                Spacer()
-            }.font(.system(size: 13))
+            WorkspaceSection(name: "Memory settings", color: N.text4) { EmptyView() } content: {
+                memoryToggle("Suggest new memories", key: "learning", help: "Propose context from chats and agents. Direct requests to remember something still work when this is off.")
+                Divider()
+                memoryToggle("Use saved memory", key: "use_memory", help: "Include memory in replies and tasks. Turning this off keeps saved memories here.")
+            }
             if !proposals.isEmpty {
                 WorkspaceSection(name: "Suggested", color: NekoStyle.amber, detail: "\(proposals.count) waiting") { EmptyView() } content: {
-                    ForEach(proposals, id: \.self) { proposal in
-                        HStack(alignment: .top, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(proposal["text"].string).font(.system(size: 13)).foregroundStyle(N.text)
-                                Text(proposal["source"].string).font(.system(size: 12)).foregroundStyle(N.text4)
+                    ForEach(proposals, id: \.recordID) { proposal in
+                        VStack(alignment: .leading, spacing: 10) {
+                            ManagementDetailText(text: proposal["text"].string, disclosure: "Full suggestion")
+                            HStack(spacing: 8) {
+                                Text(scopeLabel(proposal)).font(NekoFont.meta).foregroundStyle(N.text3)
+                                Spacer(minLength: 8)
+                                Button("Keep memory") { submit(model, .command("DecideMemoryProposal", ["id": proposal["id"], "accept": .bool(true)])) }
+                                Button("Dismiss") { submit(model, .command("DecideMemoryProposal", ["id": proposal["id"], "accept": .bool(false)])) }
                             }
-                            Spacer()
-                            Button("Keep") { submit(model, .command("DecideMemoryProposal", ["id": proposal["id"], "accept": .bool(true)])) }.controlSize(.small)
-                            Button("Dismiss") { submit(model, .command("DecideMemoryProposal", ["id": proposal["id"], "accept": .bool(false)])) }.controlSize(.small)
-                        }.padding(.vertical, 6).overlay(alignment: .top) { N.line.frame(height: 1) }
+                            MemorySourceDetails(model: model, source: proposal["source"].string)
+                        }.controlSize(.small).padding(.vertical, 4)
+                        if proposal != proposals.last { Divider() }
                     }
                 }
             }
             WorkspaceSection(name: "Remembered", color: N.text4, detail: memories.isEmpty ? nil : "\(memories.count)") { EmptyView() } content: {
                 if memories.isEmpty { EmptyRow(text: "Nothing yet. Tell Neko \"remember that…\" in Home, or add one here.") }
-                ForEach(memories, id: \.self) { entry in
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry["text"].string).font(.system(size: 13)).foregroundStyle(N.text).textSelection(.enabled)
-                            Text("\(entry["kind"].string.capitalized) · \(scopeLabel(entry))").font(.system(size: 12)).foregroundStyle(N.text4)
-                        }
-                        Spacer()
-                        Menu("More") {
+                ForEach(memories, id: \.recordID) { entry in
+                    VStack(alignment: .leading, spacing: 10) {
+                        ManagementDetailText(text: entry["text"].string, disclosure: "Full memory")
+                        HStack(spacing: 8) {
+                            Text("\(entry["kind"].string.capitalized) · \(scopeLabel(entry))").font(NekoFont.meta).foregroundStyle(N.text3)
+                            Spacer(minLength: 8)
                             Button("Edit") { draft = ManagementDraft(value: entry) }
-                            Button("Forget", role: .destructive) { submit(model, .command("DeleteMemory", ["id": entry["id"]])) }
-                        }.controlSize(.small).fixedSize()
-                    }.padding(.vertical, 6).overlay(alignment: .top) { N.line.frame(height: 1) }
+                            Menu("Memory actions", systemImage: "ellipsis") {
+                                Button("Forget memory", role: .destructive) { submit(model, .command("DeleteMemory", ["id": entry["id"]])) }
+                            }.labelStyle(.iconOnly).fixedSize()
+                        }
+                        MemorySourceDetails(model: model, source: entry["source"].string)
+                    }.controlSize(.small).padding(.vertical, 4)
+                    if entry != memories.last { Divider() }
                 }
             }
         }
         }.sheet(item: $draft) { item in
             ManagementEditor(model: model, kind: .memory, original: item.value, workspace: model.selectedWorkspace, profileID: profileFor(model))
+        }
+    }
+}
+
+private struct MemorySourceDetails: View {
+    @ObservedObject var model: AppModel
+    let source: String
+    private var task: JSONValue? {
+        guard source.hasPrefix("ticket:") else { return nil }
+        let id = source.dropFirst("ticket:".count).split(separator: ":").first.map(String.init) ?? ""
+        return model.tasks.first { $0.recordID == id }
+    }
+    private var label: String {
+        if source == "user" { return "Added by you" }
+        if source == "chat" || source.hasPrefix("chat:") { return "From a Home conversation" }
+        if source.hasPrefix("ticket:") { return task.map { "From agent: " + $0["title"].string } ?? "From an agent conversation" }
+        return "Source details"
+    }
+    var body: some View {
+        if !source.isEmpty {
+            DisclosureGroup(label) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(source).font(NekoFont.meta.monospaced()).textSelection(.enabled)
+                    if let task { Button("Open source agent") { model.openAgent(task.recordID, from: "Memory") } }
+                }.padding(.top, 6)
+            }.font(NekoFont.meta).foregroundStyle(N.text3)
         }
     }
 }
@@ -172,9 +209,12 @@ struct PageIntro<Action: View>: View {
     let message: String
     @ViewBuilder var action: () -> Action
     var body: some View {
-        Text(message).font(.system(size: 13)).foregroundStyle(N.text3).lineLimit(4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 4)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(NekoFont.title).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
+            Text(message).font(NekoFont.body).foregroundStyle(N.text3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+            .frame(maxWidth: NekoLayout.readingWidth, alignment: .leading)
             .navigationTitle(title)
             .toolbar { ToolbarItemGroup(placement: .primaryAction) { action() } }
     }
@@ -187,26 +227,79 @@ struct WorkspaceSection<Trailing: View, Content: View>: View {
     @ViewBuilder var trailing: () -> Trailing
     @ViewBuilder var content: () -> Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 3, style: .continuous).fill(color).frame(width: 10, height: 10)
-                Text(name).font(.system(size: 13, weight: .semibold)).foregroundStyle(N.text)
-                if let detail { Text(detail).font(.system(size: 12)).foregroundStyle(N.text4) }
-                Spacer()
-                trailing()
+        VStack(alignment: .leading, spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    heading.fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 12)
+                    trailing().fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    heading
+                    trailing()
+                }
             }
-            .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
-            content()
+            .controlSize(.small)
+            VStack(alignment: .leading, spacing: 12, content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(NekoLayout.rowInset)
+                .background(N.card, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(N.line))
         }
-        .padding(16)
-        .background(N.card.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(N.line))
+        .accessibilityElement(children: .contain)
+    }
+    private var heading: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(name).font(NekoFont.heading).foregroundStyle(N.text)
+            if let detail { Text(detail).font(NekoFont.meta).foregroundStyle(N.text3) }
+        }
+        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
     }
 }
 
 struct EmptyRow: View {
     let text: String
-    var body: some View { Text(text).font(.system(size: 12.5)).foregroundStyle(N.text4).padding(.vertical, 6) }
+    var body: some View {
+        Text(text).font(NekoFont.body).foregroundStyle(N.text3)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+    }
+}
+
+/// Saved instructions and evidence are inert text, never executable chat blocks.
+/// Verbatim rendering also preserves file references whose targets no longer exist.
+struct ManagementSavedText: View {
+    let text: String
+    var body: some View {
+        Text(verbatim: text)
+            .font(NekoFont.body).textSelection(.enabled).lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A brief readback with the complete saved content available on demand.
+struct ManagementDetailText: View {
+    let text: String
+    var disclosure = "Read more"
+    @State private var expanded = false
+    private var needsDisclosure: Bool { text.count > 240 || text.components(separatedBy: .newlines).count > 3 }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if needsDisclosure {
+                if !expanded {
+                    Text(verbatim: String(text.prefix(240)))
+                        .lineLimit(2).foregroundStyle(N.text2)
+                }
+                DisclosureGroup(disclosure, isExpanded: $expanded) {
+                    ManagementSavedText(text: text).padding(.top, 6)
+                }.font(NekoFont.meta)
+            } else {
+                ManagementSavedText(text: text)
+            }
+        }.font(NekoFont.body).textSelection(.enabled)
+    }
 }
 
 func relativeTime(_ ms: Int) -> String {
@@ -218,32 +311,37 @@ struct SchedulesView: View {
     @State private var draft: ManagementDraft?
     var body: some View {
         ManagementScroll {
-            PageIntro(title: "Schedules", message: "Ask Neko to prepare something at a set time, such as a morning brief or a weekly review. Every result waits for you in All agents.") { EmptyView() }
-            if model.workspaces.isEmpty { EmptyRow(text: "Add a workspace first.") }
+            PageIntro(title: "Schedules", message: "Recurring briefs and reviews, delivered to All agents.") { EmptyView() }
+            if model.workspaces.isEmpty { EmptyRow(text: "Add a workspace in Workspaces, then create its first schedule here.") }
             ForEach(scopedWorkspaces(model), id: \.element.recordID) { index, workspace in
                 let items = model.snapshot["schedules"].array.filter { $0["workspace_id"].string == workspace.recordID }
                 WorkspaceSection(name: workspace["name"].string, color: workspaceColor(index), detail: items.isEmpty ? nil : "\(items.count) scheduled") {
                     Button("New schedule", systemImage: "plus") { draft = ManagementDraft(value: .object([:]), workspace: workspace.recordID) }.controlSize(.small)
                 } content: {
-                    if items.isEmpty { EmptyRow(text: "No schedules here yet.") }
-                    ForEach(items, id: \.self) { item in
-                        HStack(alignment: .top, spacing: 12) {
-                            Toggle("", isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
+                    if items.isEmpty { EmptyRow(text: "Create a schedule for a morning brief, a weekly review, or another recurring task.") }
+                    ForEach(items, id: \.recordID) { item in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Toggle(isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
                                 submit(model, nested("Schedules", "SetEnabled", ["id": item["id"], "enabled": .bool(enabled)]))
-                            })).toggleStyle(.switch).controlSize(.mini).labelsHidden().accessibilityLabel("Enabled")
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(item["name"].string).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text)
-                                Text(item["prompt"].string).font(.system(size: 12.5)).foregroundStyle(N.text3).lineLimit(2).textSelection(.enabled)
-                                Text("\(ScheduleRecurrence.summary(item["rule"].string)) · \(item["timezone"].string)" + (item["next_due_ms"] == .null ? "" : " · next \(relativeTime(item["next_due_ms"].int))"))
-                                    .font(.system(size: 12)).foregroundStyle(N.text4)
+                            })) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item["name"].string).font(NekoFont.heading).foregroundStyle(N.text)
+                                    Text(item["enabled"].bool ? "Enabled" : "Paused").font(NekoFont.meta).foregroundStyle(N.text3)
+                                }
+                            }.toggleStyle(.switch).controlSize(.small)
+                            Text("\(ScheduleRecurrence.summary(item["rule"].string)) · \(item["timezone"].string)" + (item["next_due_ms"] == .null ? "" : " · next \(relativeTime(item["next_due_ms"].int))"))
+                                .font(NekoFont.meta).foregroundStyle(N.text3)
+                            ManagementDetailText(text: item["prompt"].string, disclosure: "Full instructions")
+                            HStack(spacing: 8) {
+                                Button("Run now") { submit(model, nested("Schedules", "RunNow", ["id": item["id"]])) }
+                                Button("Edit schedule") { draft = ManagementDraft(value: item, workspace: workspace.recordID) }
+                                Spacer()
+                                Menu("Schedule actions", systemImage: "ellipsis") {
+                                    Button("Delete schedule", role: .destructive) { submit(model, nested("Schedules", "Remove", ["id": item["id"]])) }
+                                }.labelStyle(.iconOnly).fixedSize()
                             }
-                            Spacer()
-                            Button("Run now") { submit(model, nested("Schedules", "RunNow", ["id": item["id"]])) }.controlSize(.small)
-                            Menu("More") {
-                                Button("Edit") { draft = ManagementDraft(value: item, workspace: workspace.recordID) }
-                                Button("Delete", role: .destructive) { submit(model, nested("Schedules", "Remove", ["id": item["id"]])) }
-                            }.controlSize(.small).fixedSize()
-                        }.padding(.vertical, 6).overlay(alignment: .top) { N.line.frame(height: 1) }
+                        }.controlSize(.small).padding(.vertical, 4)
+                        if item != items.last { Divider() }
                     }
                 }
             }
@@ -259,21 +357,22 @@ struct WorkspacesView: View {
     @State private var editing = false
     var body: some View {
         ManagementScroll {
-            PageIntro(title: "Workspaces", message: "Each workspace is a project: its folders, the tools it can use (for example its own Linear team) and what Neko watches for it. Everything comes together under All workspaces.") {
+            PageIntro(title: "Workspaces", message: "Project folders, connected tools, and the work Neko watches.") {
                 Button("Add workspace", systemImage: "plus") { model.selectedWorkspace = nil; editing = true }
             }
             if model.homeWorkspaceID == nil {
                 HStack(spacing: 12) {
                     Image(systemName: "house").font(.system(size: 16)).foregroundStyle(N.text3).frame(width: 24)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Add your home folder as the default workspace").font(.system(size: 13, weight: .medium)).foregroundStyle(N.text)
-                        Text("Covers everything in ~ that isn't part of a specific workspace.").font(.system(size: 12)).foregroundStyle(N.text4)
+                        Text("A workspace for everyday work").font(NekoFont.heading).foregroundStyle(N.text)
+                        Text("Use your home folder for work outside a specific project.").font(NekoFont.meta).foregroundStyle(N.text3)
                     }
                     Spacer()
                     Button("Add home folder") { Task { await model.addHomeWorkspace() } }.nekoGlassButton().controlSize(.small)
                 }
-                .padding(14)
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(N.line, style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
+                .padding(NekoLayout.rowInset)
+                .background(N.card, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(N.line))
             }
             ForEach(Array(model.workspaces.enumerated()), id: \.element.recordID) { index, workspace in
                 row(workspace, color: workspaceColor(index))
@@ -299,17 +398,35 @@ struct WorkspacesView: View {
             }
         } content: {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 6) {
-                fact("Folders", folders.isEmpty ? "None" : folders.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: ", "))
-                fact("Tools", tools.isEmpty ? "None connected" : tools.joined(separator: ", "))
-                fact("Watching", responsibilities.isEmpty ? "Nothing yet" : "\(responsibilities.count) \(responsibilities.count == 1 ? "item" : "items")")
-                fact("Last sync", responsibilities.isEmpty ? "—" : relativeTime(lastChecked) + (failing ? " · needs attention" : ""), warn: failing)
+                fact("Watching", responsibilities.isEmpty ? "Nothing yet. Add a watch in Tools & skills." : "\(responsibilities.count) \(responsibilities.count == 1 ? "item" : "items")")
+                if !responsibilities.isEmpty {
+                    fact("Last sync", relativeTime(lastChecked) + (failing ? " · needs attention" : ""), warn: failing)
+                }
             }
+            DisclosureGroup("Folders · \(folders.count)  /  Tools · \(tools.count)") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Folders").font(NekoFont.heading)
+                    if folders.isEmpty { EmptyRow(text: "No folders saved. Open Settings to add one.") }
+                    ForEach(folders, id: \.self) { path in
+                        Label((path as NSString).abbreviatingWithTildeInPath, systemImage: "folder")
+                            .textSelection(.enabled)
+                    }
+                    Text("Connected tools").font(NekoFont.heading)
+                    Text(tools.isEmpty ? "Connect tools in Tools & skills to make them available here." : tools.joined(separator: ", "))
+                        .textSelection(.enabled)
+                    if !workspace["instructions"].string.isEmpty {
+                        Text("Workspace instructions").font(NekoFont.heading)
+                        ManagementSavedText(text: workspace["instructions"].string)
+                    }
+                }.font(NekoFont.body).padding(.top, 8)
+            }
+            .font(NekoFont.meta)
         }
     }
     private func fact(_ label: String, _ value: String, warn: Bool = false) -> some View {
         GridRow {
-            Text(label).font(.system(size: 12)).foregroundStyle(N.text4).gridColumnAlignment(.trailing)
-            Text(value).font(.system(size: 12.5)).foregroundStyle(warn ? NekoStyle.coral : N.text2).lineLimit(2).textSelection(.enabled)
+            Text(label).font(NekoFont.meta).foregroundStyle(N.text3).gridColumnAlignment(.leading)
+            Text(value).font(NekoFont.body).foregroundStyle(warn ? NekoStyle.coral : N.text2).textSelection(.enabled)
         }
     }
 }
@@ -376,56 +493,75 @@ struct ManagementEditor: View {
     @State private var saving = false
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("\(original["id"].string.isEmpty ? "New" : "Edit") \(kind.rawValue)").font(.title2)
+            Text("\(original["id"].string.isEmpty ? "New" : "Edit") \(kind.rawValue)").font(NekoFont.title)
             Form {
-                if kind == .profile || kind == .schedule { TextField("Name", text: $name) }
-                if kind == .memory {
-                    Picker("Kind", selection: $memoryKind) {
-                        Text("Profile").tag("profile")
-                        Text("Workspace").tag("workspace")
-                        Text("Decision").tag("decision")
-                    }.disabled(!original["id"].string.isEmpty)
-                }
-                TextEditor(text: $text).frame(minHeight: 120).accessibilityLabel(kind == .profile ? "Instructions" : "Content")
+                Section {
+                    if kind == .profile || kind == .schedule { TextField("Name", text: $name) }
+                    if kind == .memory {
+                        Picker("Kind", selection: $memoryKind) {
+                            Text("Profile").tag("profile")
+                            Text("Workspace").tag("workspace")
+                            Text("Decision").tag("decision")
+                        }.disabled(!original["id"].string.isEmpty)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(contentLabel).font(NekoFont.heading)
+                        TextEditor(text: $text).font(NekoFont.body)
+                            .scrollContentBackground(.hidden).padding(8)
+                            .frame(height: 112).background(N.panel, in: RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(N.line))
+                            .accessibilityLabel(contentLabel)
+                    }
+                } header: { Text(kind.rawValue) }
                 if kind == .schedule {
-                    Picker("Repeat", selection: $recurrence) { ForEach(ScheduleRecurrence.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                    if recurrence == .hourly { Stepper("Every \(interval) hours", value: $interval, in: 1...168) }
-                    else if recurrence != .custom {
-                        if recurrence == .weekly { Picker("Day", selection: $weekday) { ForEach(ScheduleRecurrence.days, id: \.0) { Text($0.1).tag($0.0) } } }
-                        DatePicker("At", selection: $time, displayedComponents: .hourAndMinute)
-                    }
-                    Text("Time zone: \(timezone)").font(.caption).foregroundStyle(.secondary)
-                    DisclosureGroup("Advanced") {
-                        TextField("Time zone", text: $timezone)
-                        if recurrence == .custom {
-                            TextField("Custom recurrence rule", text: $rule)
-                            Text("The saved custom rule is preserved unless you edit it or choose a different repeat option.").font(.caption)
+                    Section {
+                        Picker("Repeat", selection: $recurrence) { ForEach(ScheduleRecurrence.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                        if recurrence == .hourly { Stepper("Every \(interval) hours", value: $interval, in: 1...168) }
+                        else if recurrence != .custom {
+                            if recurrence == .weekly { Picker("Day", selection: $weekday) { ForEach(ScheduleRecurrence.days, id: \.0) { Text($0.1).tag($0.0) } } }
+                            DatePicker("At", selection: $time, displayedComponents: .hourAndMinute)
                         }
+                        LabeledContent("Time zone", value: timezone).font(NekoFont.meta)
+                        DisclosureGroup("Advanced timing") {
+                            TextField("Time zone", text: $timezone)
+                            if recurrence == .custom {
+                                TextField("Custom recurrence rule", text: $rule)
+                                Text("Your saved custom rule stays unchanged until you edit it or choose another repeat option.").font(NekoFont.meta).foregroundStyle(N.text3)
+                            }
+                        }
+                    } header: { Text("Timing") } footer: {
+                        Text("Saving pauses this schedule. Enable it after reviewing the saved settings.")
                     }
-                    Text("Saving pauses this schedule. Enable it after reviewing the saved settings.").font(.caption)
                 }
                 if kind == .responsibility {
-                    Toggle("Enabled", isOn: $enabled)
-                    if enabled && !missingToolAccess.isEmpty {
-                        Label("Choose access for \(missingToolAccess.joined(separator: ", ")) in Tools & skills before turning this on.", systemImage: "exclamationmark.circle")
-                            .font(.caption).foregroundStyle(NekoStyle.amber)
+                    Section {
+                        Toggle("Enabled", isOn: $enabled)
+                        if enabled && !missingToolAccess.isEmpty {
+                            Label("Choose access for \(missingToolAccess.joined(separator: ", ")) in Tools & skills before turning this on.", systemImage: "exclamationmark.circle")
+                                .font(NekoFont.meta).foregroundStyle(NekoStyle.amber)
+                        }
+                        Toggle("Allow preparation of low-risk local fixes", isOn: $prepare)
+                    } header: { Text("Authority") } footer: {
+                        Text("Remote tool permission and publication authority are separate.")
                     }
-                    Toggle("Allow preparation of low-risk local fixes", isOn: $prepare)
-                    Text("Remote tool permission and publication authority are separate.").font(.caption)
-                    ForEach(model.snapshot["mcp"]["connections"].array.filter { $0["workspace_id"].string.isEmpty || $0["workspace_id"].string == effectiveWorkspace }, id: \.self) { connection in
-                        Toggle(connection["label"].string, isOn: Binding(get: { connections.contains(connection["id"].string) }, set: { selected in
-                            if selected { connections.insert(connection["id"].string) } else { connections.remove(connection["id"].string) }
-                        }))
+                    Section("Connected tools") {
+                        ForEach(model.snapshot["mcp"]["connections"].array.filter { $0["workspace_id"].string.isEmpty || $0["workspace_id"].string == effectiveWorkspace }, id: \.self) { connection in
+                            Toggle(connection["label"].string, isOn: Binding(get: { connections.contains(connection["id"].string) }, set: { selected in
+                                if selected { connections.insert(connection["id"].string) } else { connections.remove(connection["id"].string) }
+                            }))
+                        }
                     }
                 }
             }
+            .formStyle(.grouped).scrollContentBackground(.hidden)
+            .frame(height: kind == .schedule || kind == .responsibility ? 430 : 270)
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(saving ? "Saving…" : "Save") { save() }.keyboardShortcut(.defaultAction).disabled(saving || !kind.hasRequiredContent(name: name, text: text) || (kind == .memory && memoryKind == "workspace" && effectiveWorkspace == nil) || (kind == .responsibility && (connections.isEmpty || (enabled && !missingToolAccess.isEmpty))))
             }
-        }.padding(24).frame(width: 540).onAppear {
+        }.font(NekoFont.body).padding(NekoLayout.pageInset).frame(width: 560).onAppear {
             name = original["name"].string
             text = original[kind == .profile ? "instructions" : kind == .schedule ? "prompt" : kind == .responsibility ? "instruction" : "text"].string
             if !original["kind"].string.isEmpty { memoryKind = original["kind"].string }
@@ -434,6 +570,14 @@ struct ManagementEditor: View {
             connections = Set(original["connection_ids"].array.map(\.string))
             enabled = original["enabled"].bool
             prepare = original["prepare_low_risk"].bool
+        }
+    }
+    private var contentLabel: String {
+        switch kind {
+        case .profile: "Instructions"
+        case .memory: "What to remember"
+        case .schedule: "What to prepare"
+        case .responsibility: "What to watch"
         }
     }
     private var effectiveWorkspace: String? { original["id"].string.isEmpty ? workspace : (original["workspace_id"] == .null ? nil : original["workspace_id"].string) }

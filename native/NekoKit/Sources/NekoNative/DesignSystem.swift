@@ -1,11 +1,10 @@
 import SwiftUI
 
 // MARK: - Tokens
-/// "Quiet craft": neutral ink, hairline structure, monospaced numerics, one
-/// accent taken from the mascot's green eyes. Color is reserved for state.
+/// Shared native chrome. Colour marks actions and state; content stays neutral.
 enum NekoStyle {
     // One meaning per colour. OKLCH values; see Palette section below.
-    static let accent = Color.oklch(0.57, 0.15, 264)     // indigo · primary fill + selection only; white on it ≥4.5:1
+    static let accent = Color(nsColor: .systemBlue)
     static let amber = Color.oklch(0.80, 0.13, 78)       // needs approval
     static let sky = Color.oklch(0.76, 0.10, 222)        // ready to review
     static let mint = Color.oklch(0.76, 0.12, 158)       // done
@@ -21,28 +20,39 @@ enum NekoStyle {
 
 enum NekoFont {
     static let display = Font.system(size: 24, weight: .semibold)
-    static let title = Font.system(size: 15, weight: .semibold)
-    static let heading = Font.system(size: 13, weight: .medium)
+    static let title = Font.system(size: 17, weight: .semibold)
+    static let heading = Font.system(size: 13, weight: .semibold)
     static let body = Font.system(size: 13)
-    static let meta = Font.system(size: 11.5)
-    static let label = Font.system(size: 10.5, weight: .regular, design: .monospaced)
-    static let mono = Font.system(size: 11, weight: .regular, design: .monospaced)
+    static let chat = Font.system(size: 14)
+    static let meta = Font.system(size: 12)
+    static let label = Font.system(size: 11, weight: .medium)
+    static let mono = Font.system(size: 12, weight: .regular, design: .monospaced)
+}
+
+/// Bounded content keeps paragraphs and controls in the same visual lanes.
+/// Board columns and native window chrome intentionally fill their container.
+enum NekoLayout {
+    static let pageWidth: CGFloat = 820
+    static let readingWidth: CGFloat = 720
+    static let pageInset: CGFloat = 28
+    static let sectionGap: CGFloat = 24
+    static let rowInset: CGFloat = 14
 }
 
 struct Ink {
     let scheme: ColorScheme
     var dark: Bool { scheme == .dark }
-    var base: Color { dark ? Color(red: 0.043, green: 0.043, blue: 0.047) : NekoStyle.pearl }
-    var panel: Color { dark ? Color(red: 0.063, green: 0.063, blue: 0.07) : .white }
-    var raised: Color { dark ? Color.white.opacity(0.035) : Color.black.opacity(0.025) }
-    var raisedHover: Color { dark ? Color.white.opacity(0.06) : Color.black.opacity(0.045) }
-    var line: Color { dark ? Color.white.opacity(0.075) : Color.black.opacity(0.08) }
-    var lineStrong: Color { dark ? Color.white.opacity(0.13) : Color.black.opacity(0.14) }
-    var faint: Color { dark ? Color.white.opacity(0.38) : Color.black.opacity(0.4) }
+    var base: Color { dark ? N.canvas : NekoStyle.pearl }
+    var panel: Color { dark ? N.panel : .white }
+    var raised: Color { dark ? N.card : Color.black.opacity(0.025) }
+    var raisedHover: Color { dark ? N.selected : Color.black.opacity(0.045) }
+    var line: Color { dark ? N.line : Color.black.opacity(0.08) }
+    var lineStrong: Color { dark ? N.lineStrong : Color.black.opacity(0.14) }
+    var faint: Color { dark ? N.text4 : Color.black.opacity(0.55) }
 }
 
 extension EnvironmentValues { var ink: Ink { Ink(scheme: colorScheme) } }
-extension Ink { static var panelColor: Color { Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(red: 0.075, green: 0.075, blue: 0.082, alpha: 1) : .white }) } }
+extension Ink { static var panelColor: Color { Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(red: 0.078, green: 0.082, blue: 0.090, alpha: 1) : .white }) } }
 
 // MARK: - Structure
 struct HairlineShape: Shape {
@@ -96,12 +106,13 @@ struct NoiseOverlay: View { var body: some View { Color.clear } }
     var highlighted = false
     var interactive = false
     @Environment(\.ink) private var ink
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hover = false
     func body(content: Content) -> some View {
         content.padding(padding)
             .background(hover && interactive ? ink.raisedHover : ink.raised, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(highlighted ? NekoStyle.accent.opacity(0.55) : (hover && interactive ? ink.lineStrong : ink.line)))
-            .animation(.easeOut(duration: 0.14), value: hover)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hover)
             .onHover { if interactive { hover = $0 } }
     }
 }
@@ -140,26 +151,30 @@ extension View {
 struct NekoPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 12.5, weight: .medium))
             .foregroundStyle(scheme == .dark ? Color.black : .white)
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(scheme == .dark ? Color.white.opacity(configuration.isPressed ? 0.8 : 0.94) : Color.black.opacity(configuration.isPressed ? 0.75 : 0.9), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .opacity(enabled ? 1 : 0.35)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 
 @MainActor struct NekoGhostButtonStyle: ButtonStyle {
     @Environment(\.ink) private var ink
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hover = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 12.5))
             .padding(.horizontal, 11).padding(.vertical, 6)
             .background(configuration.isPressed ? ink.raisedHover : (hover ? ink.raised : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(hover ? ink.lineStrong : ink.line))
-            .animation(.easeOut(duration: 0.12), value: hover)
+            .opacity(enabled ? 1 : 0.45)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hover)
             .onHover { hover = $0 }
     }
 }
@@ -279,10 +294,11 @@ struct EmptyState<Action: View>: View {
     @ViewBuilder var action: () -> Action
     @Environment(\.ink) private var ink
     var body: some View {
-        VStack(spacing: 10) {
-            BrandMark(size: 44).clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous)).opacity(0.9)
+        VStack(spacing: 12) {
+            Image(systemName: icon).font(.system(size: 28, weight: .light))
+                .foregroundStyle(.secondary).padding(.bottom, 4).accessibilityHidden(true)
             Text(title).font(NekoFont.title)
-            Text(message).font(NekoFont.body).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 340)
+            Text(message).font(NekoFont.body).foregroundStyle(.secondary).multilineTextAlignment(.center).lineSpacing(3).frame(maxWidth: 360)
             action().padding(.top, 4)
         }.padding(36).frame(maxWidth: .infinity)
     }
@@ -362,21 +378,19 @@ func friendlyTaskStatus(_ status: String) -> String {
     }
 }
 
-/// HiFi v2 tokens (Paper "Native · HiFi v2"). Night-shift instrument panel:
-/// neutral instrument surfaces, one amber indicator. 4pt spacing grid.
+/// One neutral surface ramp for the native app, shared by legacy Ink consumers.
+/// Small secondary text remains readable on the brightest content surface.
 enum N {
-    // Graphite neutrals, hue 264 at near-zero chroma so greys stay clean, not muddy.
-    // Measured WCAG on panel (L 0.19): text 16.9, text2 9.9, text3 6.4, text4 5.5; all states ≥5.0 on cards.
-    static let canvas = Color.oklch(0.155, 0.004, 264)
-    static let panel = Color.oklch(0.19, 0.004, 264)
-    static let card = Color.oklch(0.225, 0.005, 264)
-    static let selected = Color.oklch(0.265, 0.006, 264)
-    static let line = Color.white.opacity(0.07)
-    static let lineStrong = Color.white.opacity(0.11)
-    static let text = Color.oklch(0.97, 0.002, 264)
-    static let text2 = Color.oklch(0.80, 0.006, 264)
-    static let text3 = Color.oklch(0.68, 0.008, 264)
-    static let text4 = Color.oklch(0.64, 0.008, 264)
+    static let canvas = Color(red: 0.055, green: 0.059, blue: 0.067)
+    static let panel = Color(red: 0.078, green: 0.082, blue: 0.090)
+    static let card = Color(red: 0.110, green: 0.114, blue: 0.125)
+    static let selected = Color(red: 0.153, green: 0.157, blue: 0.173)
+    static let line = Color.white.opacity(0.065)
+    static let lineStrong = Color.white.opacity(0.15)
+    static let text = Color(red: 0.949, green: 0.949, blue: 0.957)
+    static let text2 = Color(red: 0.792, green: 0.792, blue: 0.808)
+    static let text3 = Color(red: 0.671, green: 0.671, blue: 0.698)
+    static let text4 = Color(red: 0.596, green: 0.596, blue: 0.631)
     static let sidebarWidth: CGFloat = 232
     static let headerHeight: CGFloat = 48
     static let rowHeight: CGFloat = 30

@@ -17,22 +17,32 @@ struct NekoSearchField: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField(title, text: $text)
-            .textFieldStyle(.plain)
-            .font(.system(size: size == .small ? 12 : 13))
-            .controlSize(size)
-            .focused($focused)
-            .padding(.horizontal, 10)
-            .frame(height: NekoControlMetrics.height(for: size))
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8).strokeBorder(
-                    focused ? Color.accentColor : Color.primary.opacity(0.12),
-                    lineWidth: focused ? 2 : 1
-                ).allowsHitTesting(false)
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary).accessibilityHidden(true)
+            TextField(title, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: size == .small ? 12 : 13))
+                .controlSize(size)
+                .focused($focused)
+                .accessibilityLabel(title)
+            if !text.isEmpty {
+                Button { text = ""; focused = true } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain).help("Clear search").accessibilityLabel("Clear search")
             }
-            .contentShape(Rectangle())
-            .simultaneousGesture(TapGesture().onEnded { focused = true })
-            .accessibilityLabel(title)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: NekoControlMetrics.height(for: size))
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8).strokeBorder(
+                focused ? Color.accentColor : Color.primary.opacity(0.12),
+                lineWidth: focused ? 2 : 1
+            ).allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded { focused = true })
     }
 }

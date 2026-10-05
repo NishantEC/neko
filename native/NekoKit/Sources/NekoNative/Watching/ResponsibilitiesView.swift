@@ -7,14 +7,19 @@ struct ResponsibilitiesView: View {
     @State private var ask = ""
     @State private var target: String?
     @State private var askedAt: Int?
+    @State private var showSuggestions = false
+    @State private var showPaused = false
+    @State private var showReply = false
 
     private var workspaceID: String? { model.selectedWorkspace ?? target ?? model.homeWorkspaceID ?? model.workspaces.first?.recordID }
     private var all: [JSONValue] {
         model.snapshot["mcp"]["responsibilities"].array.filter { model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace }
     }
     private var suggestedIDs: Set<String> { Watching.suggestedIDs(model) }
+    private var active: [JSONValue] { all.filter { $0["enabled"].bool } }
+    private var paused: [JSONValue] { all.filter { !$0["enabled"].bool && !suggestedIDs.contains($0.recordID) } }
+    private var suggested: [JSONValue] { all.filter { suggestedIDs.contains($0.recordID) } }
     private var sending: Bool { model.sendingChatScopes.contains { $0.workspaceID == workspaceID } }
-    /// Neko's reply to what was asked from this page, while it is fresh.
     private var reply: JSONValue? {
         guard let askedAt else { return nil }
         return model.snapshot["conversation"].array.last {
@@ -24,149 +29,151 @@ struct ResponsibilitiesView: View {
 
     var body: some View {
         ManagementScroll {
-            PageIntro(title: "What Neko watches", message: "Connected sources that can list changing work start watching automatically. Neko checks every 10 minutes and brings changes to Home. Pause a watch here whenever you want; external changes still need your direction.") { EmptyView() }
+            PageIntro(title: "Watching", message: "Checks connected sources every 10 minutes and brings relevant work to Home.") {
+                Button("New watch", systemImage: "plus") {
+                    draft = ManagementDraft(value: .object([:]), workspace: workspaceID)
+                }.disabled(model.workspaces.isEmpty || model.busy)
+            }
+            if let error = model.error {
+                DisclosureGroup {
+                    Text(error).font(NekoFont.meta).textSelection(.enabled)
+                } label: {
+                    Label("Couldn’t update Watching", systemImage: "exclamationmark.triangle").font(NekoFont.body)
+                }.foregroundStyle(NekoStyle.amber)
+            }
             if model.workspaces.isEmpty {
-                EmptyRow(text: "Add a workspace first, then tell Neko what to watch in it.")
+                EmptyRow(text: model.connected ? "Add a workspace to create a watch." : "Waiting for your workspaces…")
             } else {
+                watchingSection
+                if !paused.isEmpty {
+                    DisclosureGroup(isExpanded: $showPaused) { watchRows(paused) } label: {
+                        sectionTitle("Paused", detail: "\(paused.count)")
+                    }
+                }
+                if !suggested.isEmpty {
+                    DisclosureGroup(isExpanded: $showSuggestions) {
+                        VStack(spacing: 0) {
+                            ForEach(suggested, id: \.recordID) { item in
+                                SuggestedResponsibilityCard(model: model, item: item) {
+                                    draft = ManagementDraft(value: item, workspace: item["workspace_id"].string)
+                                }
+                            }
+                        }.padding(.top, 8)
+                    } label: {
+                        sectionTitle("Suggestions", detail: "\(suggested.count) to review")
+                    }
+                }
                 askBox
                 if let reply { replyView(reply) }
-                suggestedSection
-                watchingSection
             }
-        }.sheet(item: $draft) { item in
+        }
+        .font(NekoFont.body)
+        .controlSize(.regular)
+        .sheet(item: $draft) { item in
             ManagementEditor(model: model, kind: .responsibility, original: item.value, workspace: item.workspace ?? model.selectedWorkspace, profileID: profileFor(model))
         }
     }
 
-    // MARK: Ask
-    private var askBox: some View {
-        let tools = Watching.connections(model, workspace: workspaceID)
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "eye").font(.system(size: 14)).foregroundStyle(N.text3).padding(.top, 3)
-                TextField("Tell Neko what to watch… for example “new Linear issues assigned to me”", text: $ask, axis: .vertical)
-                    .textFieldStyle(.plain).font(.system(size: 14)).lineLimit(1...4)
-                    .onSubmit { send(ask) }
-            }
-            if !tools.isEmpty { ideas(tools) }
-            askFooter(tools)
-        }
-        .padding(16)
-        .background(N.card.opacity(0.6), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(N.lineStrong))
-    }
-
-    private func ideas(_ tools: [JSONValue]) -> some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(tools, id: \.recordID) { tool in
-                    let idea = Watching.idea(for: tool["label"].string)
-                    Button { ask = idea } label: { Label(idea, systemImage: "plus").lineLimit(1) }
-                        .buttonStyle(.bordered).controlSize(.small).help("Use this as a starting point")
-                }
-            }
-        }.scrollIndicators(.hidden)
-    }
-
-    private func askFooter(_ tools: [JSONValue]) -> some View {
-        HStack(spacing: 8) {
-            if model.selectedWorkspace == nil, model.workspaces.count > 1 {
-                Picker("Workspace", selection: Binding(get: { workspaceID ?? "" }, set: { target = $0 })) {
-                    ForEach(model.workspaces, id: \.recordID) { Text($0["name"].string).tag($0.recordID) }
-                }.labelsHidden().fixedSize().controlSize(.small)
-            }
-            Text(tools.isEmpty ? "No tools connected here yet. Add one in Tools & skills." : "Uses \(tools.map { $0["label"].string }.joined(separator: ", "))")
-                .font(.system(size: 12)).foregroundStyle(N.text4).lineLimit(1)
-            Spacer()
-            Button("Suggest from my tools", systemImage: "sparkles") { send(Watching.suggestPrompt) }
-                .controlSize(.small).disabled(sending || model.busy || tools.isEmpty)
-            Button("Ask Neko") { send(ask) }.nekoPrimaryButton().controlSize(.small)
-                .disabled(sending || model.busy || ask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .keyboardShortcut(.return, modifiers: .command)
-        }
-    }
-
-    private func replyView(_ message: JSONValue) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Avatar(role: "neko")
-            VStack(alignment: .leading, spacing: 6) {
-                if message["pending"].bool {
-                    ActivityCapsule(activity: .analyzing, label: "Looking through your tools…", plain: true)
-                } else {
-                    ReadableText(text: message["text"].string)
-                }
-            }
-            Spacer()
-            if !message["pending"].bool {
-                Button { askedAt = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).foregroundStyle(N.text4).accessibilityLabel("Hide reply")
-            }
-        }
-    }
-
-    // MARK: Lists
-    @ViewBuilder private var suggestedSection: some View {
-        let suggested = all.filter { suggestedIDs.contains($0.recordID) }
-        if !suggested.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                sectionTitle("Not started automatically", detail: "Review source access or start a custom check")
-                ForEach(suggested, id: \.recordID) { item in
-                    SuggestedResponsibilityCard(model: model, item: item) { draft = ManagementDraft(value: item, workspace: item["workspace_id"].string) }
-                }
-            }
-        }
-    }
-
     private var watchingSection: some View {
-        let items = all.filter { !suggestedIDs.contains($0.recordID) }
-        let on = items.filter { $0["enabled"].bool }.count
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                sectionTitle("Watching", detail: items.isEmpty ? nil : "\(on) on · \(items.count) total")
-                Spacer()
-                Button("Write one yourself", systemImage: "plus") { draft = ManagementDraft(value: .object([:]), workspace: workspaceID) }.controlSize(.small)
-            }
-            if items.isEmpty {
-                EmptyRow(text: "Nothing watched yet. Ask above, or tap an idea to start.")
-            }
-            ForEach(items, id: \.recordID) { item in row(item) }
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("Active watches", detail: "\(active.count)")
+            if active.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No active watches").font(NekoFont.body).foregroundStyle(N.text2)
+                    Text(paused.isEmpty ? "Describe a watch below, or review a suggestion." : "Resume a paused watch or describe a new one below.")
+                        .font(NekoFont.meta).foregroundStyle(N.text3)
+                }.padding(.vertical, NekoLayout.rowInset)
+            } else { watchRows(active) }
         }
     }
 
-    private func sectionTitle(_ title: String, detail: String?) -> some View {
+    private func watchRows(_ items: [JSONValue]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(items, id: \.recordID) { item in
+                WatchRow(model: model, item: item) {
+                    draft = ManagementDraft(value: item, workspace: item["workspace_id"].string)
+                }
+            }
+        }
+    }
+
+    private func sectionTitle(_ title: String, detail: String) -> some View {
         HStack(spacing: 8) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(N.text)
-            if let detail { Text(detail).font(.system(size: 12)).foregroundStyle(N.text4) }
+            Text(title).font(NekoFont.heading).foregroundStyle(N.text)
+            Text(detail).font(NekoFont.meta).foregroundStyle(N.text3).monospacedDigit()
         }.accessibilityAddTraits(.isHeader)
     }
 
-    private func status(_ item: JSONValue) -> String {
-        let tools = item["connection_ids"].array.map { Watching.label(model, connection: $0.string) }.joined(separator: ", ")
-        let workspace = model.selectedWorkspace == nil ? (model.workspaces.first { $0.recordID == item["workspace_id"].string }?["name"].string ?? "") : ""
-        let state = item["failures"].int > 0 ? "Needs attention" : item["enabled"].bool ? (item["last_attempt_ms"] == .null ? "First check queued" : "Last checked \(relativeTime(item["last_attempt_ms"].int))") : "Paused"
-        return [state, tools, workspace].filter { !$0.isEmpty }.joined(separator: " · ")
-    }
-
-    private func row(_ item: JSONValue) -> some View {
-        let failing = item["failures"].int > 0
-        return HStack(alignment: .top, spacing: 12) {
-            Toggle("", isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
-                if enabled { Watching.turnOn(model, item) }
-                else { submit(model, nested("Mcp", "SaveResponsibility", ["responsibility": replacing(item, ["enabled": .bool(false)])])) }
-            })).toggleStyle(.switch).controlSize(.mini).labelsHidden().accessibilityLabel("Watching on")
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item["instruction"].string).font(.system(size: 13)).foregroundStyle(item["enabled"].bool ? N.text : N.text3).textSelection(.enabled)
-                Text(status(item)).font(.system(size: 12)).foregroundStyle(failing ? NekoStyle.coral : N.text4).lineLimit(1)
-                if !item["last_result"].string.isEmpty {
-                    Text(item["last_result"].string).font(.system(size: 12)).foregroundStyle(N.text4).lineLimit(2)
+    private var askBox: some View {
+        let tools = Watching.connections(model, workspace: workspaceID)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Describe a watch").font(NekoFont.heading).foregroundStyle(N.text)
+                Spacer()
+                if !tools.isEmpty {
+                    Menu("Use an idea", systemImage: "lightbulb") {
+                        ForEach(tools, id: \.recordID) { tool in
+                            Button(Watching.idea(for: tool["label"].string)) { ask = Watching.idea(for: tool["label"].string) }
+                        }
+                    }.fixedSize().controlSize(.small)
                 }
             }
-            Spacer()
-            Menu("More") {
-                Button("Check now") { submit(model, nested("Mcp", "Wake", ["responsibility_id": item["id"]])) }.disabled(!item["enabled"].bool)
-                Button("Edit") { draft = ManagementDraft(value: item, workspace: item["workspace_id"].string) }
-                Button("Delete", role: .destructive) { Watching.remove(model, item) }
-            }.controlSize(.small).fixedSize()
-        }.padding(.vertical, 8).overlay(alignment: .top) { N.line.frame(height: 1) }
+            TextField("What should Neko keep an eye on?", text: $ask, axis: .vertical)
+                .textFieldStyle(.plain).font(NekoFont.body).lineLimit(2...4).onSubmit { send(ask) }
+            Divider()
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { workspacePicker; Spacer(minLength: 8); askActions(tools) }
+                VStack(alignment: .leading, spacing: 10) { workspacePicker; askActions(tools) }
+            }
+            Text(tools.isEmpty ? "Connect a source in Tools & skills to start." : "\(tools.count) connected \(tools.count == 1 ? "source" : "sources") available. Review access before turning on a suggestion.")
+                .font(NekoFont.meta).foregroundStyle(N.text3)
+        }
+        .padding(NekoLayout.rowInset)
+        .background(N.card, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(N.line))
+    }
+
+    @ViewBuilder private var workspacePicker: some View {
+        if model.selectedWorkspace == nil, model.workspaces.count > 1 {
+            Picker("Workspace", selection: Binding(get: { workspaceID ?? "" }, set: { target = $0 })) {
+                ForEach(model.workspaces, id: \.recordID) { Text($0["name"].string).tag($0.recordID) }
+            }.labelsHidden().frame(maxWidth: 220).controlSize(.small)
+        } else {
+            Text(model.workspaces.first { $0.recordID == workspaceID }?["name"].string ?? "Workspace")
+                .font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1)
+        }
+    }
+
+    private func askActions(_ tools: [JSONValue]) -> some View {
+        HStack(spacing: 8) {
+            if sending { ProgressView().controlSize(.small).accessibilityLabel("Asking Neko") }
+            Button("Suggest from tools", systemImage: "sparkles") { send(Watching.suggestPrompt) }
+                .disabled(sending || model.busy || tools.isEmpty)
+            Button("Ask Neko") { send(ask) }.nekoPrimaryButton()
+                .disabled(sending || model.busy || ask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .keyboardShortcut(.return, modifiers: .command)
+        }.controlSize(.small).fixedSize()
+    }
+
+    private func replyView(_ message: JSONValue) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(message["pending"].bool ? "Looking through your tools…" : "Neko’s reply").font(NekoFont.heading)
+                Spacer()
+                if !message["pending"].bool {
+                    Button("Hide reply", systemImage: "xmark") { askedAt = nil }
+                        .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(N.text3)
+                }
+            }
+            if message["pending"].bool {
+                ProgressView().controlSize(.small)
+            } else {
+                if !showReply { Text(message["text"].string).font(NekoFont.body).foregroundStyle(N.text2).lineLimit(3) }
+                DisclosureGroup("Full reply", isExpanded: $showReply) {
+                    ReadableText(text: message["text"].string).padding(.top, 8)
+                }.font(NekoFont.meta)
+            }
+        }
     }
 
     private func send(_ text: String) {
@@ -174,6 +181,7 @@ struct ResponsibilitiesView: View {
         guard !text.isEmpty, !sending, !model.busy, let workspace = workspaceID else { return }
         let message = text == Watching.suggestPrompt ? text : "Keep an eye on this for me: \(text)"
         askedAt = Int(Date().timeIntervalSince1970 * 1000)
+        showReply = false
         let scope = ChatDraftScope(workspaceID: workspace, profileID: profileFor(model))
         model.sendingChatScopes.insert(scope)
         Task {
