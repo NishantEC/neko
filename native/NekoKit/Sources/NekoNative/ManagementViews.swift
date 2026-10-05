@@ -105,8 +105,9 @@ struct MemoryView: View {
                 Text(title).font(NekoFont.body).foregroundStyle(N.text)
                 Text(help).font(NekoFont.meta).foregroundStyle(N.text3)
                     .fixedSize(horizontal: false, vertical: true)
-            }
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }.toggleStyle(.switch).controlSize(.small).disabled(model.busy)
+            .accessibilityLabel(title).accessibilityHint(help)
     }
     private func inScope(_ item: JSONValue) -> Bool {
         item["agent_profile_id"].string == profileFor(model) && (item["workspace_id"] == .null || model.selectedWorkspace == nil || item["workspace_id"].string == model.selectedWorkspace)
