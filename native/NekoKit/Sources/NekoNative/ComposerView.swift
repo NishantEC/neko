@@ -38,7 +38,7 @@ struct ComposerView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = ComposerScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -97,6 +97,7 @@ struct ComposerView: NSViewRepresentable {
             let length = (text as NSString).length
             editor.setSelectedRange(NSRange(location: min(selection.location, length), length: 0))
             editor.needsDisplay = true
+            scroll.needsLayout = true
         }
         editor.setAccessibilityLabel(accessibilityLabel)
         editor.setAccessibilityHelp(accessibilityHelp)
@@ -104,16 +105,7 @@ struct ComposerView: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
-        guard let editor = nsView.documentView as? ComposerTextView,
-              let container = editor.textContainer, let layout = editor.layoutManager else { return nil }
-        let width = ComposerLayout.textWidth(for: proposal.width ?? nsView.contentSize.width)
-        editor.setFrameSize(NSSize(width: width, height: max(40, editor.frame.height)))
-        container.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-        layout.ensureLayout(for: container)
-        let textHeight = layout.usedRect(for: container).height
-        let documentHeight = max(40, textHeight + editor.textContainerInset.height * 2)
-        editor.setFrameSize(NSSize(width: width, height: documentHeight))
-        return CGSize(width: width, height: ComposerLayout.height(forTextHeight: textHeight))
+        (nsView as? ComposerScrollView)?.measuredSize(for: proposal.width)
     }
 
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
@@ -123,7 +115,69 @@ struct ComposerView: NSViewRepresentable {
             guard let editor = notification.object as? NSTextView else { return }
             parent.text = editor.string
             editor.needsDisplay = true
+            editor.enclosingScrollView?.needsLayout = true
         }
+    }
+}
+
+@MainActor final class ComposerScrollView: NSScrollView {
+    private let measurement = ComposerTextMeasurement()
+
+    // SwiftUI may ask about several widths without using any of them. Measuring
+    // must not resize the live NSTextView, its text container, or its caret.
+    func measuredSize(for proposedWidth: CGFloat?) -> CGSize? {
+        guard let editor = documentView as? NSTextView else { return nil }
+        let available = proposedWidth.flatMap { $0.isFinite ? $0 : nil } ?? contentSize.width
+        let width = ComposerLayout.textWidth(for: available)
+        let textHeight = measurement.height(for: editor, width: width)
+        return CGSize(width: width, height: ComposerLayout.height(forTextHeight: textHeight))
+    }
+
+    override func layout() {
+        super.layout()
+        guard let editor = documentView as? NSTextView,
+              let container = editor.textContainer, let layout = editor.layoutManager,
+              contentSize.width > 0 else { return }
+        let width = contentSize.width
+        if editor.frame.width != width {
+            editor.setFrameSize(NSSize(width: width, height: editor.frame.height))
+        }
+        if container.containerSize.width != width {
+            container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        }
+        layout.ensureLayout(for: container)
+        let textHeight = max(layout.usedRect(for: container).maxY, layout.extraLineFragmentRect.maxY)
+        let height = max(contentSize.height, 40, textHeight + editor.textContainerInset.height * 2)
+        if editor.frame.height != height {
+            editor.setFrameSize(NSSize(width: width, height: height))
+        }
+    }
+}
+
+/// A separate, reused TextKit stack keeps sizing probes out of the live editor.
+@MainActor private final class ComposerTextMeasurement {
+    private let storage = NSTextStorage()
+    private let layout = NSLayoutManager()
+    private let container = NSTextContainer(size: .zero)
+    private var font: NSFont?
+
+    init() {
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+    }
+
+    func height(for editor: NSTextView, width: CGFloat) -> CGFloat {
+        let editorFont = editor.font ?? .systemFont(ofSize: 15)
+        if storage.string != editor.string || font != editorFont {
+            font = editorFont
+            storage.setAttributedString(NSAttributedString(string: editor.string, attributes: [.font: editorFont]))
+        }
+        if container.containerSize.width != width {
+            container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        }
+        layout.ensureLayout(for: container)
+        return max(layout.usedRect(for: container).maxY, layout.extraLineFragmentRect.maxY)
     }
 }
 

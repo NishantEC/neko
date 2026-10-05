@@ -73,6 +73,11 @@ retain different commands: Home sends/queues/cancels chat, while ticket replies
 use `ReplyToTask` and can redirect active work. Return sends content and never
 activates Stop; Shift Return inserts a line. Complete serialized payloads are
 checked against the daemon's 4 KiB Home and 2 KiB ticket limits.
+Draft stores use scoped Observation rather than publishing each keystroke through
+the app model. Composer sizing uses a separate TextKit measurement stack; only
+actual scroll-view layout sets the live editor's width. Background snapshots
+publish only when displayed content changes, ignoring the unused heartbeat field;
+IPC success/failure still updates connection health.
 Settled agent chats show their saved result and independent reviewer readback
 openly, with prior conversation, plans and decisions folded into history. Saved
 results during retries are labelled historical; display text does not determine

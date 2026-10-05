@@ -2,7 +2,7 @@ import XCTest
 import NekoKit
 @testable import NekoNative
 
-final class ChatDraftTests: XCTestCase {
+@MainActor final class ChatDraftTests: XCTestCase {
     func testSendButtonUsesFullComposerWidth() throws {
         let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -136,7 +136,7 @@ final class ChatDraftTests: XCTestCase {
     }
 
     func testDraftsAreSeparateByWorkspaceAndProfile() {
-        var drafts = ScopedChatDrafts()
+        let drafts = ScopedChatDrafts()
         let first = ChatDraftScope(workspaceID: "one", profileID: "default")
         let second = ChatDraftScope(workspaceID: "two", profileID: "default")
         let profile = ChatDraftScope(workspaceID: "one", profileID: "other")
@@ -152,7 +152,7 @@ final class ChatDraftTests: XCTestCase {
     }
 
     func testAttachmentsStayWithTheirDraftAndJoinOnlyOnSubmission() {
-        var drafts = ScopedChatDrafts()
+        let drafts = ScopedChatDrafts()
         let first = ChatDraftScope(workspaceID: "one", profileID: "default")
         let second = ChatDraftScope(workspaceID: "two", profileID: "default")
         let attachment = ComposerAttachment(name: "report.pdf", reference: "[report.pdf](file:///tmp/report.pdf)", isImage: false)
@@ -167,7 +167,7 @@ final class ChatDraftTests: XCTestCase {
     }
 
     func testCompletionPreservesNewEditsEvenWhenTextReturnsToOriginal() {
-        var drafts = ScopedChatDrafts()
+        let drafts = ScopedChatDrafts()
         let scope = ChatDraftScope(workspaceID: nil, profileID: "default")
         drafts.set("Original", for: scope)
         let submission = drafts.submission(for: scope)
