@@ -46,3 +46,17 @@ fails before replacing saved data. Authority and worker admission are unchanged.
 
 Native source is unchanged. The correction does not resolve separate agent
 errors such as paused tool scope, and live model execution was not part of QA.
+
+## Installed verification
+
+Installed source is `fa3e0a78989a032565365f451261e156e3b1e611`. The signed release
+build succeeded; strict deep signature verification passed, and installed client
+and daemon binaries match build output. Immediately before installation there
+were zero active/queued tickets and zero pending/queued Home messages. After
+launch, all 69 tickets remain, with one canonical client and one daemon running.
+
+Home and NEK-9523 opened successfully; the active ticket screenshot has no
+capacity error banner. No live Start/Reply command was sent during UI QA; command
+success was verified by the in-memory replay above. Existing paused-tool-scope
+history is still visible. The editor remained empty. Build/install logs are
+`/tmp/neko-capacity-build.log` and `/tmp/neko-capacity-install.log`.
