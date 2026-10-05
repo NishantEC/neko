@@ -243,7 +243,16 @@ struct ToolsView: View {
             }
             .formStyle(.grouped).scrollContentBackground(.hidden)
             .disabled(busy || model.busy)
-            Button("Browse hosted MCP servers") { showManualSheet = false; showRegistrySheet = true }
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Connecting makes discovered tools available here. Neko asks before chat actions that may change data.")
+                    .font(NekoFont.meta).foregroundStyle(.secondary)
+                HStack {
+                    Button("Browse hosted MCP servers") { showManualSheet = false; showRegistrySheet = true }
+                    Spacer()
+                    Button("Add connection", action: addServer).buttonStyle(.borderedProminent)
+                        .disabled(busy || model.busy || label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || target.isEmpty || (local && !trust))
+                }
+            }
         }
         .font(NekoFont.body).controlSize(.regular).padding(NekoLayout.pageInset)
         .frame(width: 700, height: 660).background(N.canvas)
@@ -493,12 +502,6 @@ struct ToolsView: View {
                 LabeledContent("Credentials (optional JSON)") { SecureField("Credentials", text: $credentials).labelsHidden() }
                 Text("Use {\"bearer\":\"…\"} for HTTP or {\"environment\":{\"TOKEN\":\"…\"}} for local servers. Stored in Keychain. Keep secrets out of URLs and arguments.").font(NekoFont.meta).foregroundStyle(.secondary)
             } header: { Text("Credentials · optional") }
-            Section {
-                Button("Add server", action: addServer).buttonStyle(.borderedProminent)
-                    .disabled(label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || target.isEmpty || (local && !trust))
-            } footer: {
-                Text("Connecting makes discovered tools available here. Neko asks before chat actions that may change data.")
-            }
         }
         .textFieldStyle(.roundedBorder)
         .onChange(of: target) { _, _ in trust = false }

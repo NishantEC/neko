@@ -257,7 +257,7 @@ struct TicketsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Text("\(workspaceName(task)) · \(friendlyTaskStatus(status))").font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1)
                 if let note {
-                    Text(note).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).lineLimit(2)
+                    Text(note).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -750,7 +750,7 @@ struct TicketCard: View {
                     .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
             if let note {
-                Text(note).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                Text(note).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text(friendlyTaskStatus(status)).font(NekoFont.meta).foregroundStyle(.secondary)

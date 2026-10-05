@@ -295,7 +295,9 @@ struct ManagementDetailText: View {
         VStack(alignment: .leading, spacing: 8) {
             if needsDisclosure {
                 if !expanded {
-                    Text(verbatim: String(text.prefix(240)))
+                    Text(verbatim: text.count > 240
+                        ? String(text.prefix(240)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+                        : text)
                         .lineLimit(3).lineSpacing(3).foregroundStyle(N.text2)
                 }
                 DisclosureGroup(disclosure, isExpanded: $expanded) {
