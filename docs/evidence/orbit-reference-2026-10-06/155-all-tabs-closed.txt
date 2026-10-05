@@ -1,0 +1,115 @@
+- banner:
+  - button "Toggle sidebar":
+  - generic: Aurora
+  - generic: /
+  - generic: No open tabs
+  - button "Search or run a command":
+    - generic: Search Aurora
+    - generic: ⌘K
+  - button "Opus 5.5":
+    - generic: Opus 5.5
+  - button "Toggle inspector" [pressed]:
+  - button "Account": SD
+- complementary "Navigation":
+  - generic: Workspace
+  - button "Home":
+    - generic: Home
+  - button "Projects":
+    - generic: Projects
+  - button "Agents":
+    - generic: Agents
+  - button "Tasks":
+    - generic: Tasks
+  - button "Workflows":
+    - generic: Workflows
+  - generic: Resources
+  - button "Files":
+    - generic: Files
+  - button "Conversations":
+    - generic: Conversations
+  - button "Runs":
+    - generic: Runs
+  - button "Activity":
+    - generic: Activity
+  - generic: Agents
+  - generic: 6 online
+  - button "Atlas Idle":
+    - generic: Atlas
+    - generic: Idle
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - button "Quill Idle":
+    - generic: Quill
+    - generic: Idle
+  - button "Forge Idle":
+    - generic: Forge
+    - generic: Idle
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - button "Settings ⌘,":
+    - generic: Settings
+    - generic: ⌘,
+  - button "Account":
+    - generic: Account
+- main:
+  - tablist "Open tabs"
+  - heading "No open tabs" [level=2]
+  - paragraph:
+    - text: Press
+    - generic: ⌘
+    - generic: K
+    - text: to open a task, a file or an agent.
+- complementary "Inspector":
+  - tablist:
+    - tab "Agents"
+    - tab "Context" [selected]
+  - button "Close inspector":
+  - generic: Task
+  - generic: TASK-142 · Build landing page
+  - emphasis: queued
+  - generic: Repository
+  - generic: aurora-web
+  - emphasis: main
+  - generic: feat/landing
+  - emphasis: 0 changed
+  - generic: Attached
+  - generic: "4"
+  - button "docs/research.md 2.4k words":
+    - generic: docs/research.md
+    - emphasis: 2.4k words
+  - generic: customer_feedback.pdf
+  - emphasis: 3,842 rows
+  - generic: brand-guidelines.pdf
+  - emphasis: 24 pp
+  - button "app/(marketing)/page.tsx tsx":
+    - generic: app/(marketing)/page.tsx
+    - emphasis: tsx
+  - generic: Secrets
+  - generic: DEPLOY_TOKEN
+  - emphasis: not granted
+  - generic: ANALYTICS_KEY
+  - emphasis: granted
+  - generic: Memory
+  - generic: "Tone: confident, plain, no hype"
+  - emphasis
+  - generic: Pricing is per seat, never per agent
+  - emphasis
+- contentinfo:
+  - generic: feat/landing
+  - generic: "Run #218"
+  - button "Agents working":
+    - generic: All agents idle
+  - button "Scenes":
+    - generic: Scenes
+  - 'button "Motion: Full"':
+    - generic: "Motion: Full"
+  - generic: 13.5k tok
+  - button "Toggle terminal":

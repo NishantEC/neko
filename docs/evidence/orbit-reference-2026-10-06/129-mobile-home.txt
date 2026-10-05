@@ -1,0 +1,215 @@
+- banner:
+  - button "Toggle sidebar":
+  - generic: Home
+  - button "Search or run a command":
+    - generic: ⌘K
+  - button:
+  - button "Toggle inspector":
+  - button "Account": SD
+- complementary "Navigation":
+  - generic: Workspace
+  - button "Home" [active]:
+    - generic: Home
+  - button "Projects":
+    - generic: Projects
+  - button "Agents":
+    - generic: Agents
+  - button "Tasks":
+    - generic: Tasks
+  - button "Workflows":
+    - generic: Workflows
+  - generic: Resources
+  - button "Files":
+    - generic: Files
+  - button "Conversations":
+    - generic: Conversations
+  - button "Runs":
+    - generic: Runs
+  - button "Activity":
+    - generic: Activity
+  - generic: Agents
+  - generic: 6 online
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - button "Scout Researching":
+    - generic: Scout
+    - generic: Researching
+  - button "Sage Analyzing":
+    - generic: Sage
+    - generic: Analyzing
+  - button "Pixel Generating":
+    - generic: Pixel
+    - generic: Generating
+  - button "Quill Writing":
+    - generic: Quill
+    - generic: Writing
+  - button "Forge ⠧ Running":
+    - generic: Forge
+    - generic: ⠧
+    - generic: Running
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - button "Settings ⌘,":
+    - generic: Settings
+    - generic: ⌘,
+  - button "Account":
+    - generic: Account
+- main:
+  - tablist "Open tabs":
+    - tab "Home Close Home" [selected]:
+      - generic: Home
+      - button "Close Home":
+    - tab "Build landing page Close Build landing page":
+      - generic: Build landing page
+      - button "Close Build landing page":
+    - tab "Chat Close Chat":
+      - generic: Chat
+      - button "Close Chat":
+    - tab "page.tsx Close page.tsx":
+      - generic: page.tsx
+      - button "Close page.tsx":
+    - tab "research.md Close research.md":
+      - generic: research.md
+      - button "Close research.md":
+    - tab "Review Orbit demo access… Close Review Orbit demo access…":
+      - generic: Review Orbit demo access…
+      - button "Close Review Orbit demo access…":
+    - tab "Projects Close Projects":
+      - generic: Projects
+      - button "Close Projects":
+    - tab "Agents Close Agents":
+      - generic: Agents
+      - button "Close Agents":
+    - tab "Tasks Close Tasks":
+      - generic: Tasks
+      - button "Close Tasks":
+    - tab "Competitor digest Close Competitor digest":
+      - generic: Competitor digest
+      - button "Close Competitor digest":
+    - tab "Workflows Close Workflows":
+      - generic: Workflows
+      - button "Close Workflows":
+    - tab "Files Close Files":
+      - generic: Files
+      - button "Close Files":
+    - tab "Conversations Close Conversations":
+      - generic: Conversations
+      - button "Close Conversations":
+    - tab "Runs Close Runs":
+      - generic: Runs
+      - button "Close Runs":
+    - tab "Activity Close Activity":
+      - generic: Activity
+      - button "Close Activity":
+    - tab "Settings Close Settings":
+      - generic: Settings
+      - button "Close Settings":
+    - tab "Research competitor pric… Close Research competitor pric…":
+      - generic: Research competitor pric…
+      - button "Close Research competitor pric…":
+    - tab "Design three hero varian… Close Design three hero varian…":
+      - generic: Design three hero varian…
+      - button "Close Design three hero varian…":
+    - tab "Compare the demo states Close Compare the demo states":
+      - generic: Compare the demo states
+      - button "Close Compare the demo states":
+  - region "Atlas":
+    - button "Scout, Research":
+      - generic: Scout
+    - button "Sage, Analysis":
+      - generic: Sage
+    - button "Pixel, Design":
+      - generic: Pixel
+    - button "Quill, Writing":
+      - generic: Quill
+    - button "Forge, Engineering":
+      - generic: Forge
+    - button "Atlas, your orchestrator. Poke to say hi.":
+    - generic: Ask Atlas
+    - textbox "Ask Atlas":
+      - /placeholder: Ask Atlas anything, or describe a task…
+    - generic: Atlas routes it to the right agent
+    - generic: ↵ to start
+    - button "Start task":
+    - button "Research competitor pricing pages":
+      - text: Research competitor pricing pages
+    - button "Design an onboarding empty state":
+      - text: Design an onboarding empty state
+    - button "Fix the flaky checkout test":
+      - text: Fix the flaky checkout test
+    - button "Summarize this week’s customer feedback":
+      - text: Summarize this week’s customer feedback
+  - generic: Tasks
+  - button "View all"
+  - table:
+    - row "Task Status":
+      - generic: Task
+      - generic: Status
+    - row "Compare the demo states Queued":
+      - generic: Compare the demo states
+      - generic: Queued
+    - row "Design three hero variants for the pricing page Completed":
+      - generic: Design three hero variants for the pricing page
+      - generic: Completed
+    - row "Research competitor pricing pages Completed":
+      - generic: Research competitor pricing pages
+      - generic: Completed
+    - row "Review Orbit demo accessibility Completed":
+      - generic: Review Orbit demo accessibility
+      - generic: Completed
+  - generic: Recent activity
+  - button "View all"
+  - generic: 04:48
+  - generic: Queued behind Scout’s current work
+  - generic: 04:48
+  - generic: SD
+  - generic: Created task TASK-146
+  - generic: 04:47
+  - generic: Generating design pricing
+  - generic: 04:47
+  - generic: Running command aurora deploy --preview
+  - generic: 04:47
+  - generic: Handed off findings.md to Sage
+- complementary "Inspector":
+  - tablist:
+    - tab "Agents"
+    - tab "Context" [selected]
+  - button "Close inspector":
+  - generic: Task
+  - generic: TASK-142 · Build landing page
+  - emphasis: queued
+  - generic: Repository
+  - generic: aurora-web
+  - emphasis: main
+  - generic: feat/landing
+  - emphasis: 0 changed
+  - generic: Attached
+  - generic: "4"
+  - button "docs/research.md 2.4k words":
+    - generic: docs/research.md
+    - emphasis: 2.4k words
+  - generic: customer_feedback.pdf
+  - emphasis: 3,842 rows
+  - generic: brand-guidelines.pdf
+  - emphasis: 24 pp
+  - button "app/(marketing)/page.tsx tsx":
+    - generic: app/(marketing)/page.tsx
+    - emphasis: tsx
+  - generic: Secrets
+  - generic: DEPLOY_TOKEN
+  - emphasis: not granted
+  - generic: ANALYTICS_KEY
+  - emphasis: granted
+  - generic: Memory
+  - generic: "Tone: confident, plain, no hype"
+  - emphasis
+  - generic: Pricing is per seat, never per agent
+  - emphasis
+- contentinfo:
+  - generic: feat/landing
+  - button "Agents working":
+    - generic: 6 agents working
+  - button "Scenes":
+    - generic: Scenes

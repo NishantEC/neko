@@ -1,0 +1,228 @@
+- banner:
+  - button "Toggle sidebar":
+  - generic: Aurora
+  - generic: /
+  - generic: Build landing page
+  - button "Search or run a command":
+    - generic: Search Aurora
+    - generic: ⌘K
+  - button "Sonnet 5.5":
+    - generic: Sonnet 5.5
+  - button "Toggle inspector":
+  - button "Account": SD
+- complementary "Navigation":
+  - generic: Workspace
+  - button "Home":
+    - generic: Home
+  - button "Projects":
+    - generic: Projects
+  - button "Agents":
+    - generic: Agents
+  - button "Tasks 1 need you":
+    - generic: Tasks
+    - generic: 1 need you
+  - button "Workflows":
+    - generic: Workflows
+  - generic: Resources
+  - button "Files":
+    - generic: Files
+  - button "Conversations":
+    - generic: Conversations
+  - button "Runs":
+    - generic: Runs
+  - button "Activity":
+    - generic: Activity
+  - generic: Agents
+  - generic: 6 online
+  - button "Atlas Idle":
+    - generic: Atlas
+    - generic: Idle
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - button "Quill Idle":
+    - generic: Quill
+    - generic: Idle
+  - button "Forge Blocked":
+    - generic: Forge
+    - generic: Blocked
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - button "Settings ⌘,":
+    - generic: Settings
+    - generic: ⌘,
+  - button "Account":
+    - generic: Account
+- main:
+  - tablist "Open tabs":
+    - tab "Home Close Home":
+      - generic: Home
+      - button "Close Home":
+    - tab "Build landing page Close Build landing page" [selected]:
+      - generic: Build landing page
+      - button "Close Build landing page":
+    - tab "Chat Close Chat":
+      - generic: Chat
+      - button "Close Chat":
+    - tab "page.tsx Close page.tsx":
+      - generic: page.tsx
+      - button "Close page.tsx":
+    - tab "research.md Close research.md":
+      - generic: research.md
+      - button "Close research.md":
+    - tab "Review Orbit demo access… Close Review Orbit demo access…":
+      - generic: Review Orbit demo access…
+      - button "Close Review Orbit demo access…":
+    - tab "Projects Close Projects":
+      - generic: Projects
+      - button "Close Projects":
+    - tab "Agents Close Agents":
+      - generic: Agents
+      - button "Close Agents":
+    - tab "Tasks Close Tasks":
+      - generic: Tasks
+      - button "Close Tasks":
+    - tab "Competitor digest Close Competitor digest":
+      - generic: Competitor digest
+      - button "Close Competitor digest":
+    - tab "Workflows Close Workflows":
+      - generic: Workflows
+      - button "Close Workflows":
+    - tab "Files Close Files":
+      - generic: Files
+      - button "Close Files":
+    - tab "Conversations Close Conversations":
+      - generic: Conversations
+      - button "Close Conversations":
+    - tab "Runs Close Runs":
+      - generic: Runs
+      - button "Close Runs":
+    - tab "Activity Close Activity":
+      - generic: Activity
+      - button "Close Activity":
+    - tab "Settings Close Settings":
+      - generic: Settings
+      - button "Close Settings":
+    - tab "Research competitor pric… Close Research competitor pric…":
+      - generic: Research competitor pric…
+      - button "Close Research competitor pric…":
+    - tab "Design three hero varian… Close Design three hero varian…":
+      - generic: Design three hero varian…
+      - button "Close Design three hero varian…":
+  - generic: TASK-142
+  - generic: Blocked
+  - button "Pause":
+    - text: Pause
+  - button "More actions":
+  - heading "Build the Aurora landing page" [level=1]
+  - generic: Orchestrated by Atlas
+  - generic: feat/landing
+  - generic: Not started
+  - generic: 5 agents
+  - generic: 0:00
+  - generic: Plan
+  - list:
+    - generic: Waiting for a plan
+  - generic: Execution
+  - button "Expand all"
+  - button "Collapse all"
+  - button "04:47:34 Forge Deploy failed aurora deploy --preview DEPLOY_TOKEN is not set 0.6s" [expanded]:
+    - generic: 04:47:34
+    - generic: Forge
+    - generic: Deploy failed
+    - generic: aurora deploy --preview
+    - generic: DEPLOY_TOKEN is not set
+    - generic: 0.6s
+  - code: aurora deploy --preview
+  - generic: exit 1
+  - paragraph:
+    - code: DEPLOY_TOKEN
+    - text: is not set for the preview environment. Forge can't deploy until it has a token.
+  - button "Resolve":
+    - text: Resolve
+  - region "Terminal":
+    - button "Terminal"
+    - button "Output"
+    - button "Problems 0":
+      - text: Problems
+      - generic: "0"
+    - generic: forge · zsh
+    - button "Close panel":
+    - generic: Forge’s shell · commands run by agents appear here
+    - generic: forge@aurora-web ~/aurora-web (feat/landing) $ aurora deploy --preview
+    - generic: "✗ Error: DEPLOY_TOKEN is not set for the preview environment."
+    - generic: forge@aurora-web ~/aurora-web (feat/landing) $
+- complementary "Inspector":
+  - tablist:
+    - tab "Agents" [selected]
+    - tab "Context"
+  - button "Close inspector":
+  - generic: Active
+  - generic: "1"
+  - button "Forge Blocked":
+    - generic: Forge
+    - generic: Blocked
+  - paragraph: Blocked — DEPLOY_TOKEN is not set
+  - generic: Idle
+  - generic: "5"
+  - button "Atlas Idle":
+    - generic: Atlas
+    - generic: Idle
+  - generic: Ready to plan
+  - paragraph: Ready to plan
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - generic: Ready for research
+  - paragraph: Ready for research
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - generic: Ready to analyze
+  - paragraph: Ready to analyze
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - generic: Ready for design task
+  - paragraph: Ready for design task
+  - button "Quill Idle":
+    - generic: Quill
+    - generic: Idle
+  - generic: Ready to write
+  - paragraph: Ready to write
+  - generic: Offline
+  - generic: "1"
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - generic: Back at 18:00
+  - paragraph: Back at 18:00
+  - generic: Run
+  - generic: "#218"
+  - generic: Elapsed
+  - generic: 2:24
+  - generic: Tokens
+  - generic: "76"
+- contentinfo:
+  - generic: feat/landing
+  - generic: "Run #218"
+  - button "Agents working":
+    - generic: All agents idle
+  - button "Scenes":
+    - generic: Scenes
+  - 'button "Motion: Full"':
+    - generic: "Motion: Full"
+  - generic: 76 tok
+  - button "Toggle terminal":
+- status:
+  - paragraph: Forge is blocked
+  - generic: Missing API key · DEPLOY_TOKEN is not set
+  - button "Resolve"
+  - button "Dismiss":

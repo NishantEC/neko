@@ -1,0 +1,259 @@
+- banner:
+  - button "Toggle sidebar":
+  - generic: Aurora
+  - generic: /
+  - generic: Home
+  - button "Search or run a command":
+    - generic: Search Aurora
+    - generic: ⌘K
+  - button "Sonnet 5.5":
+    - generic: Sonnet 5.5
+  - button "Toggle inspector":
+  - button "Account": SD
+- complementary "Navigation":
+  - generic: Workspace
+  - button "Home" [active]:
+    - generic: Home
+  - button "Projects":
+    - generic: Projects
+  - button "Agents":
+    - generic: Agents
+  - button "Tasks 2 need you":
+    - generic: Tasks
+    - generic: 2 need you
+  - button "Workflows":
+    - generic: Workflows
+  - generic: Resources
+  - button "Files":
+    - generic: Files
+  - button "Conversations":
+    - generic: Conversations
+  - button "Runs":
+    - generic: Runs
+  - button "Activity":
+    - generic: Activity
+  - generic: Agents
+  - generic: 6 online
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - button "Quill Needs you":
+    - generic: Quill
+    - generic: Needs you
+  - button "Forge Blocked":
+    - generic: Forge
+    - generic: Blocked
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - button "Settings ⌘,":
+    - generic: Settings
+    - generic: ⌘,
+  - button "Account":
+    - generic: Account
+- main:
+  - tablist "Open tabs":
+    - tab "Home Close Home" [selected]:
+      - generic: Home
+      - button "Close Home":
+    - tab "Build landing page Close Build landing page":
+      - generic: Build landing page
+      - button "Close Build landing page":
+    - tab "Chat":
+      - generic: Chat
+    - tab "page.tsx":
+      - generic: page.tsx
+    - tab "research.md":
+      - generic: research.md
+    - tab "Review Orbit demo access… Close Review Orbit demo access…":
+      - generic: Review Orbit demo access…
+      - button "Close Review Orbit demo access…":
+    - tab "Projects Close Projects":
+      - generic: Projects
+      - button "Close Projects":
+    - tab "Agents Close Agents":
+      - generic: Agents
+      - button "Close Agents":
+    - tab "Tasks Close Tasks":
+      - generic: Tasks
+      - button "Close Tasks":
+    - tab "Competitor digest Close Competitor digest":
+      - generic: Competitor digest
+      - button "Close Competitor digest":
+    - tab "Workflows Close Workflows":
+      - generic: Workflows
+      - button "Close Workflows":
+    - tab "Files Close Files":
+      - generic: Files
+      - button "Close Files":
+    - tab "Conversations Close Conversations":
+      - generic: Conversations
+      - button "Close Conversations":
+    - tab "Runs Close Runs":
+      - generic: Runs
+      - button "Close Runs":
+    - tab "Activity Close Activity":
+      - generic: Activity
+      - button "Close Activity":
+    - tab "Settings Close Settings":
+      - generic: Settings
+      - button "Close Settings":
+  - region "Atlas":
+    - button "Scout, Research":
+      - generic: Scout
+    - button "Sage, Analysis":
+      - generic: Sage
+    - button "Pixel, Design":
+      - generic: Pixel
+    - button "Quill, Writing":
+      - generic: Quill
+    - button "Forge, Engineering":
+      - generic: Forge
+    - button "Atlas, your orchestrator. Poke to say hi.":
+    - generic: Ask Atlas
+    - textbox "Ask Atlas":
+      - /placeholder: Ask Atlas anything, or describe a task…
+    - generic: Atlas routes it to the right agent
+    - generic: ↵ to start
+    - button "Start task":
+    - button "Research competitor pricing pages":
+      - text: Research competitor pricing pages
+    - button "Design an onboarding empty state":
+      - text: Design an onboarding empty state
+    - button "Fix the flaky checkout test":
+      - text: Fix the flaky checkout test
+    - button "Summarize this week’s customer feedback":
+      - text: Summarize this week’s customer feedback
+  - generic: Needs you
+  - generic: "2"
+  - table:
+    - row "Agent Waiting on":
+      - generic: Agent
+      - generic: Waiting on
+    - row "Quill Waiting for approval · headline Approve":
+      - generic: Quill
+      - generic: Waiting for approval · headline
+      - button "Approve"
+    - row "Forge Blocked — DEPLOY_TOKEN is not set Resolve":
+      - generic: Forge
+      - generic: Blocked — DEPLOY_TOKEN is not set
+      - button "Resolve"
+  - generic: Tasks
+  - button "View all"
+  - table:
+    - row "Task Owner Status Steps":
+      - generic: Task
+      - generic: Owner
+      - generic: Status
+      - generic: Steps
+    - row "Review Orbit demo accessibility Scout Completed 0/3":
+      - generic: Review Orbit demo accessibility
+      - generic: Scout
+      - generic: Completed
+      - generic: 0/3
+    - row "Build the Aurora landing page Atlas Blocked 4/6":
+      - generic: Build the Aurora landing page
+      - generic: Atlas
+      - generic: Blocked
+      - generic: 4/6
+    - row "Weekly competitor digest Scout Completed 3/3":
+      - generic: Weekly competitor digest
+      - generic: Scout
+      - generic: Completed
+      - generic: 3/3
+    - row "Migrate auth to OAuth Forge Completed 7/7":
+      - generic: Migrate auth to OAuth
+      - generic: Forge
+      - generic: Completed
+      - generic: 7/7
+  - generic: Recent activity
+  - button "View all"
+  - generic: 04:44
+  - generic: Running command aurora deploy --preview
+  - generic: 04:44
+  - generic: Running command pnpm test
+  - generic: 04:44
+  - generic: Editing app/(marketing)/page.tsx
+  - generic: 04:44
+  - generic: Running command pnpm install
+  - generic: 04:44
+  - generic: Handed off hero-specs.json to Forge
+- complementary "Inspector":
+  - tablist:
+    - tab "Agents" [selected]
+    - tab "Context"
+  - button "Close inspector":
+  - generic: Active
+  - generic: "3"
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - paragraph: Coordinating 5 agents
+  - button "Quill Needs you":
+    - generic: Quill
+    - generic: Needs you
+  - paragraph: Waiting for approval · headline
+  - button "Forge Blocked":
+    - generic: Forge
+    - generic: Blocked
+  - paragraph: Blocked — DEPLOY_TOKEN is not set
+  - generic: Idle
+  - generic: "3"
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - generic: Ready for research
+  - paragraph: Ready for research
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - generic: Ready to analyze
+  - paragraph: Ready to analyze
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - generic: Ready for design task
+  - paragraph: Ready for design task
+  - generic: Offline
+  - generic: "1"
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - generic: Back at 18:00
+  - paragraph: Back at 18:00
+  - generic: Run
+  - generic: "#218"
+  - generic: Elapsed
+  - generic: 1:17
+  - generic: Tokens
+  - generic: 34.7k
+- contentinfo:
+  - generic: feat/landing
+  - generic: "Run #218"
+  - button "Agents working":
+    - generic: Atlas working
+  - button "Scenes":
+    - generic: Scenes
+  - 'button "Motion: Full"':
+    - generic: "Motion: Full"
+  - generic: 34.7k tok
+  - button "Toggle terminal, new error":
+- status:
+  - paragraph: Quill needs your approval
+  - generic: “Your team, plus a few tireless agents.”
+  - button "Approve"
+  - button "Dismiss":
+- status:
+  - paragraph: Forge is blocked
+  - generic: Missing API key · DEPLOY_TOKEN is not set
+  - button "Resolve"
+  - button "Dismiss":

@@ -1,0 +1,193 @@
+- banner:
+  - button "Toggle sidebar":
+  - generic: Aurora
+  - generic: /
+  - generic: Build landing page
+  - button "Search or run a command":
+    - generic: Search Aurora
+    - generic: ⌘K
+  - button "Sonnet 5.5":
+    - generic: Sonnet 5.5
+  - button "Toggle inspector":
+  - button "Account": SD
+- complementary "Navigation":
+  - generic: Workspace
+  - button "Home":
+    - generic: Home
+  - button "Projects":
+    - generic: Projects
+  - button "Agents":
+    - generic: Agents
+  - button "Tasks":
+    - generic: Tasks
+  - button "Workflows":
+    - generic: Workflows
+  - generic: Resources
+  - button "Files":
+    - generic: Files
+  - button "Conversations":
+    - generic: Conversations
+  - button "Runs":
+    - generic: Runs
+  - button "Activity":
+    - generic: Activity
+  - generic: Agents
+  - generic: 6 online
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - button "Scout Researching":
+    - generic: Scout
+    - generic: Researching
+  - button "Sage Analyzing":
+    - generic: Sage
+    - generic: Analyzing
+  - button "Pixel Generating":
+    - generic: Pixel
+    - generic: Generating
+  - button "Quill Writing":
+    - generic: Quill
+    - generic: Writing
+  - button "Forge ⠧ Running":
+    - generic: Forge
+    - generic: ⠧
+    - generic: Running
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - button "Settings ⌘,":
+    - generic: Settings
+    - generic: ⌘,
+  - button "Account":
+    - generic: Account
+- main:
+  - tablist "Open tabs":
+    - tab "Home Close Home":
+      - generic: Home
+      - button "Close Home":
+    - tab "Build landing page Close Build landing page" [selected]:
+      - generic: Build landing page
+      - button "Close Build landing page":
+    - tab "Chat Close Chat":
+      - generic: Chat
+      - button "Close Chat":
+    - tab "page.tsx Close page.tsx":
+      - generic: page.tsx
+      - button "Close page.tsx":
+    - tab "research.md Close research.md":
+      - generic: research.md
+      - button "Close research.md":
+    - tab "Review Orbit demo access… Close Review Orbit demo access…":
+      - generic: Review Orbit demo access…
+      - button "Close Review Orbit demo access…":
+    - tab "Projects Close Projects":
+      - generic: Projects
+      - button "Close Projects":
+    - tab "Agents Close Agents":
+      - generic: Agents
+      - button "Close Agents":
+    - tab "Tasks Close Tasks":
+      - generic: Tasks
+      - button "Close Tasks":
+    - tab "Competitor digest Close Competitor digest":
+      - generic: Competitor digest
+      - button "Close Competitor digest":
+    - tab "Workflows Close Workflows":
+      - generic: Workflows
+      - button "Close Workflows":
+    - tab "Files Close Files":
+      - generic: Files
+      - button "Close Files":
+    - tab "Conversations Close Conversations":
+      - generic: Conversations
+      - button "Close Conversations":
+    - tab "Runs Close Runs":
+      - generic: Runs
+      - button "Close Runs":
+    - tab "Activity Close Activity":
+      - generic: Activity
+      - button "Close Activity":
+    - tab "Settings Close Settings":
+      - generic: Settings
+      - button "Close Settings":
+    - tab "Research competitor pric… Close Research competitor pric…":
+      - generic: Research competitor pric…
+      - button "Close Research competitor pric…":
+    - tab "Design three hero varian… Close Design three hero varian…":
+      - generic: Design three hero varian…
+      - button "Close Design three hero varian…":
+    - tab "Compare the demo states Close Compare the demo states":
+      - generic: Compare the demo states
+      - button "Close Compare the demo states":
+    - tab "OAuth migration Close OAuth migration":
+      - generic: OAuth migration
+      - button "Close OAuth migration":
+    - tab "Onboarding art Close Onboarding art":
+      - generic: Onboarding art
+      - button "Close Onboarding art":
+    - tab "Security review Close Security review":
+      - generic: Security review
+      - button "Close Security review":
+  - generic: TASK-142
+  - generic: Queued
+  - button "Pause":
+    - text: Pause
+  - button "More actions":
+  - heading "Build the Aurora landing page" [level=1]
+  - generic: Orchestrated by Atlas
+  - generic: feat/landing
+  - generic: Not started
+  - generic: 5 agents
+  - generic: 0:00
+  - generic: Plan
+  - list:
+    - generic: Waiting for a plan
+  - generic: Execution
+  - button "Expand all"
+  - button "Collapse all"
+- complementary "Inspector":
+  - tablist:
+    - tab "Agents"
+    - tab "Context" [selected]
+  - button "Close inspector":
+  - generic: Task
+  - generic: TASK-142 · Build landing page
+  - emphasis: queued
+  - generic: Repository
+  - generic: aurora-web
+  - emphasis: main
+  - generic: feat/landing
+  - emphasis: 0 changed
+  - generic: Attached
+  - generic: "4"
+  - button "docs/research.md 2.4k words":
+    - generic: docs/research.md
+    - emphasis: 2.4k words
+  - generic: customer_feedback.pdf
+  - emphasis: 3,842 rows
+  - generic: brand-guidelines.pdf
+  - emphasis: 24 pp
+  - button "app/(marketing)/page.tsx tsx":
+    - generic: app/(marketing)/page.tsx
+    - emphasis: tsx
+  - generic: Secrets
+  - generic: DEPLOY_TOKEN
+  - emphasis: not granted
+  - generic: ANALYTICS_KEY
+  - emphasis: granted
+  - generic: Memory
+  - generic: "Tone: confident, plain, no hype"
+  - emphasis
+  - generic: Pricing is per seat, never per agent
+  - emphasis
+- contentinfo:
+  - generic: feat/landing
+  - generic: "Run #218"
+  - button "Agents working":
+    - generic: 6 agents working
+  - button "Scenes":
+    - generic: Scenes
+  - 'button "Motion: Full"':
+    - generic: "Motion: Full"
+  - generic: 479.1k tok
+  - button "Toggle terminal":

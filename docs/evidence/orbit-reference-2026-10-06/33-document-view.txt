@@ -1,0 +1,187 @@
+- banner:
+  - button "Toggle sidebar":
+  - generic: Aurora
+  - generic: /
+  - generic: research.md
+  - button "Search or run a command":
+    - generic: Search Aurora
+    - generic: ⌘K
+  - button "Sonnet 5.5":
+    - generic: Sonnet 5.5
+  - button "Toggle inspector":
+  - button "Account": SD
+- complementary "Navigation":
+  - generic: Workspace
+  - button "Home":
+    - generic: Home
+  - button "Projects":
+    - generic: Projects
+  - button "Agents":
+    - generic: Agents
+  - button "Tasks":
+    - generic: Tasks
+  - button "Workflows":
+    - generic: Workflows
+  - generic: Resources
+  - button "Files":
+    - generic: Files
+  - button "Conversations":
+    - generic: Conversations
+  - button "Runs":
+    - generic: Runs
+  - button "Activity":
+    - generic: Activity
+  - generic: Agents
+  - generic: 6 online
+  - button "Atlas Idle":
+    - generic: Atlas
+    - generic: Idle
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - button "Quill Idle":
+    - generic: Quill
+    - generic: Idle
+  - button "Forge Idle":
+    - generic: Forge
+    - generic: Idle
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - button "Settings ⌘,":
+    - generic: Settings
+    - generic: ⌘,
+  - button "Account":
+    - generic: Account
+- main:
+  - tablist "Open tabs":
+    - tab "Home Close Home":
+      - generic: Home
+      - button "Close Home":
+    - tab "Build landing page Close Build landing page":
+      - generic: Build landing page
+      - button "Close Build landing page":
+    - tab "Chat Close Chat":
+      - generic: Chat
+      - button "Close Chat":
+    - tab "page.tsx Close page.tsx":
+      - generic: page.tsx
+      - button "Close page.tsx":
+    - tab "research.md Close research.md" [selected]:
+      - generic: research.md
+      - button "Close research.md":
+    - tab "Review Orbit demo access… Close Review Orbit demo access…":
+      - generic: Review Orbit demo access…
+      - button "Close Review Orbit demo access…":
+    - tab "Projects Close Projects":
+      - generic: Projects
+      - button "Close Projects":
+    - tab "Agents Close Agents":
+      - generic: Agents
+      - button "Close Agents":
+    - tab "Tasks Close Tasks":
+      - generic: Tasks
+      - button "Close Tasks":
+    - tab "Competitor digest Close Competitor digest":
+      - generic: Competitor digest
+      - button "Close Competitor digest":
+    - tab "Workflows Close Workflows":
+      - generic: Workflows
+      - button "Close Workflows":
+    - tab "Files Close Files":
+      - generic: Files
+      - button "Close Files":
+  - article:
+    - heading "Landing page research" [level=1]
+    - generic: Written by Scout
+    - generic: ·
+    - generic: docs/research.md
+    - generic: ·
+    - generic: 12 sources
+    - heading "Summary" [level=2]
+    - paragraph: Across twelve recent launches of AI workspace products, the pages that performed best showed the product working instead of describing it. Three patterns repeat.
+    - list:
+      - strong: Show agents working.
+      - text: 9 of 12 pages lead with a live product view above the fold.
+      - strong: Name each job.
+      - text: Pages that say which agent does research, design or code keep visitors reading longer.
+      - strong: Price per seat.
+      - text: 8 of 12 price per seat; none charge per agent.
+    - heading "What to avoid" [level=2]
+    - paragraph: Abstract illustrations of “AI”, feature grids without a working example, and pricing that makes buyers count agents.
+    - heading "Sources" [level=2]
+    - list:
+      - listitem: How we rebuilt our homepage around the live product · lumen-labs.example
+      - listitem: "Pricing pages that convert: 2026 benchmark · northwind.example"
+      - listitem: "Agents in the product tour: what worked · fabrikam.example"
+      - listitem: "Design teardown: 30 AI tool landing pages · contoso.example"
+      - listitem: Why we stopped charging per agent · tailspin.example
+- complementary "Inspector":
+  - tablist:
+    - tab "Agents" [selected]
+    - tab "Context"
+  - button "Close inspector":
+  - generic: Active
+  - generic: "0"
+  - generic: Idle
+  - generic: "6"
+  - button "Atlas Idle":
+    - generic: Atlas
+    - generic: Idle
+  - generic: Ready to plan
+  - paragraph: Ready to plan
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - generic: Ready for research
+  - paragraph: Ready for research
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - generic: Ready to analyze
+  - paragraph: Ready to analyze
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - generic: Ready for design task
+  - paragraph: Ready for design task
+  - button "Quill Idle":
+    - generic: Quill
+    - generic: Idle
+  - generic: Ready to write
+  - paragraph: Ready to write
+  - button "Forge Idle":
+    - generic: Forge
+    - generic: Idle
+  - generic: Ready to build
+  - paragraph: Ready to build
+  - generic: Offline
+  - generic: "1"
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - generic: Back at 18:00
+  - paragraph: Back at 18:00
+  - generic: Run
+  - generic: "#218"
+  - generic: Elapsed
+  - generic: 1:38
+  - generic: Tokens
+  - generic: 3.4k
+- contentinfo:
+  - generic: feat/landing
+  - generic: "Run #218"
+  - button "Agents working":
+    - generic: All agents idle
+  - button "Scenes":
+    - generic: Scenes
+  - 'button "Motion: Full"':
+    - generic: "Motion: Full"
+  - generic: 3.4k tok
+  - button "Toggle terminal":

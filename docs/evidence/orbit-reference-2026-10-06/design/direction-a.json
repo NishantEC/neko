@@ -1,0 +1,385 @@
+{
+  "fileId": "01M3YBQPKND2A0GY02E3Z13H1G",
+  "pageId": "p-3-0",
+  "pageUrl": "https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-3-0",
+  "direction": "A · Focused conversation",
+  "status": "Reviewed revision complete: keyboard footers removed; eight shared states and light Home added; static designs only",
+  "artboards": [
+    {
+      "role": "home",
+      "id": "9J0-0",
+      "name": "A · Focused conversation · Home",
+      "width": 1440,
+      "height": 900,
+      "annotationId": "AZR-0",
+      "png": "a-home.png",
+      "paperExport": "/Users/nish/Downloads/A · Focused conversation · Home (1).png"
+    },
+    {
+      "role": "task-review",
+      "id": "9YH-0",
+      "name": "A · Focused conversation · Task review",
+      "width": 1440,
+      "height": 900,
+      "annotationId": "AZS-0",
+      "png": "a-task-review.png",
+      "paperExport": "/Users/nish/Downloads/A · Focused conversation · Task review (1).png"
+    },
+    {
+      "role": "home-light",
+      "id": "BES-0",
+      "name": "A · Focused conversation · Home · Light",
+      "width": 1440,
+      "height": 900,
+      "annotationId": "CI4-0",
+      "png": "a-home-light.png",
+      "paperExport": "/Users/nish/Downloads/A · Focused conversation · Home · Light.png",
+      "x": 1520,
+      "y": 1240
+    },
+    {
+      "role": "shared-states",
+      "id": "BL3-0",
+      "name": "A · Focused conversation · Shared states",
+      "width": 1440,
+      "height": 1821,
+      "heightMode": "fit-content",
+      "png": "a-states.png",
+      "paperExport": "/Users/nish/Downloads/A · Focused conversation · Shared states (1).png",
+      "x": 4560,
+      "y": 1240
+    }
+  ],
+  "nodes": {
+    "home": {
+      "titlebar": "9KZ-0",
+      "sidebar": "9LQ-0",
+      "tabs": "9TC-0",
+      "conversation": "9YI-0",
+      "needsYou": "9Z3-0",
+      "composer": "A7D-0"
+    },
+    "task": {
+      "titlebar": "A82-0",
+      "sidebar": "A8T-0",
+      "tabs": "AB2-0",
+      "readingLane": "ABG-0",
+      "needsYou": "AHA-0",
+      "result": "AHH-0",
+      "review": "AHR-0",
+      "savedEvidence": "AI0-0",
+      "history": "AID-0",
+      "composer": "AYY-0",
+      "inspector": "ABH-0"
+    },
+    "annotations": {
+      "home": "B0Q-0",
+      "task": "B0V-0"
+    },
+    "lightHome": {
+      "id": "BES-0",
+      "annotation": "CI4-0",
+      "titlebar": "BIV-0",
+      "sidebar": "BGO-0",
+      "tabs": "BGC-0",
+      "conversation": "BEV-0",
+      "needsYou": "BFG-0",
+      "composer": "BEW-0"
+    },
+    "sharedStates": [
+      {
+        "n": "01",
+        "name": "Empty / start",
+        "scope": "Home",
+        "card": "BLX-0",
+        "ui": "BM2-0",
+        "composer": "BMV-0",
+        "composerMap": {
+          "A7F-0": "BND-0",
+          "A7H-0": "BMW-0",
+          "A7I-0": "BNA-0",
+          "A7L-0": "BN5-0",
+          "A7Q-0": "BN1-0",
+          "A7U-0": "BN0-0",
+          "A7V-0": "BMX-0",
+          "A7W-0": "BMY-0",
+          "A7X-0": "BMZ-0",
+          "A7R-0": "BN4-0",
+          "A7S-0": "BN2-0",
+          "A7T-0": "BN3-0",
+          "A7M-0": "BN8-0",
+          "A7O-0": "BN6-0",
+          "A7P-0": "BN7-0",
+          "A7N-0": "BN9-0",
+          "A7J-0": "BNB-0",
+          "A7K-0": "BNC-0"
+        }
+      },
+      {
+        "n": "02",
+        "name": "Active / stop",
+        "scope": "Home",
+        "card": "BM4-0",
+        "ui": "BM9-0",
+        "composer": "BNI-0",
+        "composerMap": {
+          "A7F-0": "BO0-0",
+          "A7H-0": "BNJ-0",
+          "A7I-0": "BNX-0",
+          "A7L-0": "BNS-0",
+          "A7Q-0": "BNO-0",
+          "A7U-0": "BNN-0",
+          "A7V-0": "BNK-0",
+          "A7W-0": "BNL-0",
+          "A7X-0": "BNM-0",
+          "A7R-0": "BNR-0",
+          "A7S-0": "BNP-0",
+          "A7T-0": "BNQ-0",
+          "A7M-0": "BNV-0",
+          "A7O-0": "BNT-0",
+          "A7P-0": "BNU-0",
+          "A7N-0": "BNW-0",
+          "A7J-0": "BNY-0",
+          "A7K-0": "BNZ-0"
+        }
+      },
+      {
+        "n": "03",
+        "name": "Needs a question answered",
+        "scope": "Task",
+        "card": "BUY-0",
+        "ui": "BV3-0",
+        "composer": "BXB-0",
+        "composerMap": {
+          "AZ0-0": "BXO-0",
+          "AZ6-0": "BXC-0",
+          "AZ7-0": "BXL-0",
+          "AZA-0": "BXH-0",
+          "AZE-0": "BXG-0",
+          "AZF-0": "BXD-0",
+          "AZG-0": "BXE-0",
+          "AZH-0": "BXF-0",
+          "AZB-0": "BXK-0",
+          "AZC-0": "BXI-0",
+          "AZD-0": "BXJ-0",
+          "AZ8-0": "BXM-0",
+          "AZ9-0": "BXN-0"
+        },
+        "sampleQuestion": "Apply this shortcut in every workspace or just neko?",
+        "sampleAnswer": "Only neko. Keep my other workspaces unchanged.",
+        "questionNode": "BVH-0",
+        "answerNode": "BXO-0",
+        "questionBoundary": "A user-owned scope decision; investigate locally discoverable facts autonomously. No permission escalation added."
+      },
+      {
+        "n": "04",
+        "name": "Ready for review",
+        "scope": "Task",
+        "card": "BV5-0",
+        "ui": "BVA-0",
+        "composer": "BXT-0",
+        "composerMap": {
+          "AZ0-0": "BY6-0",
+          "AZ6-0": "BXU-0",
+          "AZ7-0": "BY3-0",
+          "AZA-0": "BXZ-0",
+          "AZE-0": "BXY-0",
+          "AZF-0": "BXV-0",
+          "AZG-0": "BXW-0",
+          "AZH-0": "BXX-0",
+          "AZB-0": "BY2-0",
+          "AZC-0": "BY0-0",
+          "AZD-0": "BY1-0",
+          "AZ8-0": "BY4-0",
+          "AZ9-0": "BY5-0"
+        }
+      },
+      {
+        "n": "05",
+        "name": "Interrupted / error",
+        "scope": "Task",
+        "card": "C3T-0",
+        "ui": "C3Y-0",
+        "composer": "C7C-0",
+        "composerMap": {
+          "AZ0-0": "C7P-0",
+          "AZ6-0": "C7D-0",
+          "AZ7-0": "C7M-0",
+          "AZA-0": "C7I-0",
+          "AZE-0": "C7H-0",
+          "AZF-0": "C7E-0",
+          "AZG-0": "C7F-0",
+          "AZH-0": "C7G-0",
+          "AZB-0": "C7L-0",
+          "AZC-0": "C7J-0",
+          "AZD-0": "C7K-0",
+          "AZ8-0": "C7N-0",
+          "AZ9-0": "C7O-0"
+        }
+      },
+      {
+        "n": "06",
+        "name": "Unavailable model",
+        "scope": "Runtime picker",
+        "card": "C40-0",
+        "ui": "C45-0"
+      },
+      {
+        "n": "07",
+        "name": "Shortened evidence",
+        "scope": "Task",
+        "card": "CCO-0",
+        "ui": "CCT-0"
+      },
+      {
+        "n": "08",
+        "name": "Draft preserved",
+        "scope": "After navigation",
+        "card": "CCV-0",
+        "ui": "CD0-0",
+        "composer": "CDO-0",
+        "composerMap": {
+          "AZ6-0": "CDP-0",
+          "AZ7-0": "CDY-0",
+          "AZA-0": "CDU-0",
+          "AZE-0": "CDT-0",
+          "AZF-0": "CDQ-0",
+          "AZG-0": "CDR-0",
+          "AZH-0": "CDS-0",
+          "AZB-0": "CDX-0",
+          "AZC-0": "CDV-0",
+          "AZD-0": "CDW-0",
+          "AZ8-0": "CDZ-0",
+          "AZ9-0": "CE0-0"
+        },
+        "preservedText": "CGT-0",
+        "attachment": "CGK-0"
+      }
+    ]
+  },
+  "sampleData": {
+    "taskId": "NEK-A041",
+    "allTaskConversationReviewReceiptAndConnectionDataAreIllustrative": true,
+    "annotationPlacement": "Outside each main UI; separate annotation frames below main artboards"
+  },
+  "layout": {
+    "sidebar": 236,
+    "titlebar": 52,
+    "tabs": 40,
+    "readingWidth": 760,
+    "optionalInspector": 288,
+    "composer": "Normal layout directly after transcript/history. No fixed/sticky dock."
+  },
+  "capabilityMapping": [
+    {
+      "surface": "Home Review result",
+      "backing": "AppModel.openAgent; existing TicketDetail destination"
+    },
+    {
+      "surface": "Home Ask/Plan and send",
+      "backing": "SharedComposer; SendMessage / InterruptAndSendMessage / CancelChat; Plan is prompt formatting"
+    },
+    {
+      "surface": "Task Accept locally",
+      "backing": "CompleteTask; records human acceptance only, no apply/merge/publication"
+    },
+    {
+      "surface": "Task reply",
+      "backing": "ReplyToTask; redirects existing ticket; distinct adapter from Home"
+    },
+    {
+      "surface": "Automatic",
+      "backing": "ComposerRuntimeScope/Picker; daemon catalog and validated SetConversationRuntime; no invented provider model"
+    },
+    {
+      "surface": "Saved evidence",
+      "backing": "TicketCommandEvidence/TaskChanges and saved review data; shown receipt is illustrative, not a run performed here"
+    },
+    {
+      "surface": "Persistent tabs",
+      "backing": "Proposed native navigation collection/selection state; not presently implemented in AppModel; existing destinations/commands reused"
+    },
+    {
+      "surface": "Optional inspector",
+      "backing": "Proposed layout using task snapshot, TaskChanges, profile and runtime state; existing native TicketInspector is not currently mounted"
+    },
+    {
+      "surface": "Sidebar",
+      "backing": "NativeSidebar routes/status grouping; single sample task, no invented agent roles or counts"
+    }
+  ],
+  "review": {
+    "screenshotsReviewed": true,
+    "fixes": [
+      "Corrected inherited dark text",
+      "Corrected tab close glyph",
+      "Kept task reading lane at 760pt",
+      "Moved Home composer directly after transcript",
+      "Removed repetitive result copy",
+      "Made external sample annotations readable on opaque background"
+    ],
+    "primaryArtboardsFit1440x900": true,
+    "followup": {
+      "fourArtboardsScreenshotReviewed": true,
+      "exportDimensionsVerified": true,
+      "noVisibleReturnHintsOnMainArtboards": true,
+      "lightIconsAndComposerOutlineCorrected": true,
+      "enabledReplyDistinctFromEmptyDisabledSend": true,
+      "stateSheetAllEightStatesFit": true,
+      "noBrowserOrDaemonUse": true,
+      "directionBUntouchedByThisTask": true,
+      "workingIndicatorsReleasedForOwnNodes": true,
+      "scopeDecisionCopyScreenshotReviewed": true
+    }
+  },
+  "ownedRootNodeIds": [
+    "9J0-0",
+    "9YH-0",
+    "AZR-0",
+    "AZS-0",
+    "BES-0",
+    "BL3-0",
+    "CI4-0"
+  ],
+  "referenceFollowup": {
+    "inspectedImage": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/121-desktop-home.jpg",
+    "inspectedAccessibilityCapture": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/121-desktop-home.txt",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "parentReportedCoverage": {
+      "scenesChecked": 12,
+      "captures": 121
+    },
+    "structure": "Persistent tabs, left navigation, center work area, right inspector, output region below center",
+    "terminalBoundary": "Display-only prompt; parent verified no command entry; accessibility capture exposes generic text, no terminal textbox",
+    "directionAAction": "Retain saved read-only evidence. No shell input, caret or Run action. No Paper or export changes required."
+  },
+  "keyboardHints": {
+    "visibleReturnHints": false,
+    "composerFootersRemoved": true,
+    "optionalShiftReturnHelp": "Accessibility metadata only; not painted in the UI. Design constraint, no implementation edits.",
+    "removedNodes": [
+      "A7Z-0",
+      "A80-0",
+      "AZJ-0",
+      "AZK-0",
+      "AZL-0"
+    ]
+  },
+  "lightPalette": {
+    "source": "native/NekoKit/Sources/NekoNative/DesignSystem.swift:346",
+    "canvas": "#F7F8FA",
+    "panel": "#FFFFFF",
+    "labelApproximation": "#1D1D1F",
+    "secondaryText": "#606875",
+    "tertiaryText": "#666E7A",
+    "attention": "#895600",
+    "separator": "#00000014",
+    "selected": "#00000011",
+    "controlFillApproximation": "#F0F1F3",
+    "sharedDarkTokensUnchanged": true,
+    "nativeMaterialIsStaticApproximation": true
+  }
+}

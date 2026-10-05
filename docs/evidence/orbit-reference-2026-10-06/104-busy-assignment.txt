@@ -1,0 +1,275 @@
+- banner:
+  - button "Toggle sidebar":
+  - generic: Aurora
+  - generic: /
+  - generic: Build landing page
+  - button "Search or run a command":
+    - generic: Search Aurora
+    - generic: ⌘K
+  - button "Sonnet 5.5":
+    - generic: Sonnet 5.5
+  - button "Toggle inspector" [pressed]:
+  - button "Account": SD
+- complementary "Navigation":
+  - generic: Workspace
+  - button "Home":
+    - generic: Home
+  - button "Projects":
+    - generic: Projects
+  - button "Agents":
+    - generic: Agents
+  - button "Tasks":
+    - generic: Tasks
+  - button "Workflows":
+    - generic: Workflows
+  - generic: Resources
+  - button "Files":
+    - generic: Files
+  - button "Conversations":
+    - generic: Conversations
+  - button "Runs":
+    - generic: Runs
+  - button "Activity":
+    - generic: Activity
+  - generic: Agents
+  - generic: 6 online
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - button "Scout Researching":
+    - generic: Scout
+    - generic: Researching
+  - button "Sage Analyzing":
+    - generic: Sage
+    - generic: Analyzing
+  - button "Pixel Generating":
+    - generic: Pixel
+    - generic: Generating
+  - button "Quill Writing":
+    - generic: Quill
+    - generic: Writing
+  - button "Forge ⠦ Running":
+    - generic: Forge
+    - generic: ⠦
+    - generic: Running
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - button "Settings ⌘,":
+    - generic: Settings
+    - generic: ⌘,
+  - button "Account":
+    - generic: Account
+- main:
+  - tablist "Open tabs":
+    - tab "Home Close Home":
+      - generic: Home
+      - button "Close Home":
+    - tab "Build landing page Close Build landing page" [selected]:
+      - generic: Build landing page
+      - button "Close Build landing page":
+    - tab "Chat Close Chat":
+      - generic: Chat
+      - button "Close Chat":
+    - tab "page.tsx Close page.tsx":
+      - generic: page.tsx
+      - button "Close page.tsx":
+    - tab "research.md Close research.md":
+      - generic: research.md
+      - button "Close research.md":
+    - tab "Review Orbit demo access… Close Review Orbit demo access…":
+      - generic: Review Orbit demo access…
+      - button "Close Review Orbit demo access…":
+    - tab "Projects Close Projects":
+      - generic: Projects
+      - button "Close Projects":
+    - tab "Agents Close Agents":
+      - generic: Agents
+      - button "Close Agents":
+    - tab "Tasks Close Tasks":
+      - generic: Tasks
+      - button "Close Tasks":
+    - tab "Competitor digest Close Competitor digest":
+      - generic: Competitor digest
+      - button "Close Competitor digest":
+    - tab "Workflows Close Workflows":
+      - generic: Workflows
+      - button "Close Workflows":
+    - tab "Files Close Files":
+      - generic: Files
+      - button "Close Files":
+    - tab "Conversations Close Conversations":
+      - generic: Conversations
+      - button "Close Conversations":
+    - tab "Runs Close Runs":
+      - generic: Runs
+      - button "Close Runs":
+    - tab "Activity Close Activity":
+      - generic: Activity
+      - button "Close Activity":
+    - tab "Settings Close Settings":
+      - generic: Settings
+      - button "Close Settings":
+    - tab "Research competitor pric… Close Research competitor pric…":
+      - generic: Research competitor pric…
+      - button "Close Research competitor pric…":
+    - tab "Design three hero varian… Close Design three hero varian…":
+      - generic: Design three hero varian…
+      - button "Close Design three hero varian…":
+  - generic: TASK-142
+  - generic: Queued
+  - button "Pause":
+    - text: Pause
+  - button "More actions":
+  - heading "Build the Aurora landing page" [level=1]
+  - generic: Orchestrated by Atlas
+  - generic: feat/landing
+  - generic: Not started
+  - generic: 5 agents
+  - generic: 0:00
+  - generic: Plan
+  - list:
+    - generic: Waiting for a plan
+  - generic: Execution
+  - button "Expand all"
+  - button "Collapse all"
+  - region "Terminal":
+    - button "Terminal"
+    - button "Output"
+    - button "Problems 0":
+      - text: Problems
+      - generic: "0"
+    - generic: zsh
+    - button "Close panel":
+    - generic: Forge’s shell · commands run by agents appear here
+    - generic: forge@aurora-web ~/aurora-web (feat/landing) $
+- complementary "Inspector":
+  - tablist:
+    - tab "Agents" [selected]
+    - tab "Context"
+  - button "Close inspector":
+  - generic: Active
+  - generic: "6"
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - paragraph: Coordinating 5 agents
+  - button "Scout Researching":
+    - generic: Scout
+    - generic: Researching
+  - paragraph: Researching pricing pages
+  - button "Sage Analyzing":
+    - generic: Sage
+    - generic: Analyzing
+  - paragraph: Analyzing 14 documents
+  - button "Pixel Generating":
+    - generic: Pixel
+    - generic: Generating
+  - paragraph: Generating hero variants
+  - button "Quill Writing":
+    - generic: Quill
+    - generic: Writing
+  - paragraph: Drafting subhead options
+  - button "Forge ⠦ Running":
+    - generic: Forge
+    - generic: ⠦
+    - generic: Running
+  - paragraph: Running the test suite
+  - generic: Idle
+  - generic: "0"
+  - generic: Offline
+  - generic: "1"
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - generic: Back at 18:00
+  - paragraph: Back at 18:00
+  - generic: Run
+  - generic: "#218"
+  - generic: Elapsed
+  - generic: 2:24
+  - generic: Tokens
+  - generic: 32.8k
+- contentinfo:
+  - generic: feat/landing
+  - generic: "Run #218"
+  - button "Agents working":
+    - generic: 6 agents working
+  - button "Scenes":
+    - generic: Scenes
+  - 'button "Motion: Full"':
+    - generic: "Motion: Full"
+  - generic: 32.8k tok
+  - button "Toggle terminal":
+- dialog "Agent":
+  - button "Close":
+  - heading "Scout" [level=2]
+  - paragraph: Research agent
+  - generic: Researching
+  - generic: Now
+  - paragraph: Researching pricing pages
+  - term: Model
+  - definition: Sonnet 5.5
+  - term: Tools
+  - definition: Web · Files
+  - term: Permissions
+  - definition: Read-only web and files
+  - term: This week
+  - definition: 17 tasks
+  - generic: Recent
+  - list:
+    - generic: 04:47
+    - generic: Handed off findings.md to Sage
+    - generic: 04:46
+    - generic: Completed task
+    - generic: 04:46
+    - generic: Write summary
+    - generic: 04:46
+    - generic: Read and compare
+  - generic: Preview a state
+  - button "Idle": Idle
+  - button "Thinking": Thinking
+  - button "Working": Working
+  - button "Using tool" [pressed]: Using tool
+  - button "Waiting":
+    - text: Waiting
+  - button "Needs you": Needs you
+  - button "Done":
+    - text: Done
+  - button "Blocked":
+    - text: Blocked
+  - button "Offline": Offline
+  - button "Message":
+    - text: Message
+  - button "Assign task":
+    - text: Assign task
+- dialog:
+  - heading "New task" [level=2]
+  - paragraph: Describe the outcome. The agent plans the steps and asks before anything irreversible.
+  - generic: Task
+  - textbox "Task" [active]: Audit the pricing page for accessibility issues
+  - generic: Assign to
+  - radiogroup "Agent":
+    - radio "Atlas Busy":
+      - generic: Atlas
+      - generic: Busy
+    - radio "Scout Busy" [checked]:
+      - generic: Scout
+      - generic: Busy
+    - radio "Sage Busy":
+      - generic: Sage
+      - generic: Busy
+    - radio "Pixel Busy":
+      - generic: Pixel
+      - generic: Busy
+    - radio "Quill Busy":
+      - generic: Quill
+      - generic: Busy
+    - radio "Forge Busy":
+      - generic: Forge
+      - generic: Busy
+    - radio "Ward Offline" [disabled]:
+      - generic: Ward
+      - generic: Offline
+  - button "Cancel"
+  - button "Assign to Scout"

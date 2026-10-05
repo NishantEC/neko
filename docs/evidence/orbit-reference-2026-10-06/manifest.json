@@ -1,0 +1,1316 @@
+[
+  {
+    "id": "01-home-idle",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/01-home-idle.jpg",
+    "action": "Open demo",
+    "observed": "Home automatically advances into the seeded landing-page run; agent roles, approval state and inspector are visible.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:03:26.700Z"
+  },
+  {
+    "id": "02-scenes-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/02-scenes-menu.jpg",
+    "action": "Click Scenes",
+    "observed": "Scene shortcuts reveal deterministic demo states.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:04:14.406Z"
+  },
+  {
+    "id": "03-home-idle-scene",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/03-home-idle-scene.jpg",
+    "action": "Scenes → Idle and blinking",
+    "observed": "Idle scene resets agents and opens the queued landing-page task with an empty plan.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:04:24.417Z"
+  },
+  {
+    "id": "04-model-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/04-model-menu.jpg",
+    "action": "Click model in toolbar",
+    "observed": "Available model choices and shortcut display.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:04:25.031Z"
+  },
+  {
+    "id": "05-model-switched",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/05-model-switched.jpg",
+    "action": "Select Sonnet 5.5",
+    "observed": "Toolbar model label changes locally.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:04:38.984Z"
+  },
+  {
+    "id": "06-account-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/06-account-menu.jpg",
+    "action": "Click account avatar",
+    "observed": "Account actions, workspace identity and shortcuts.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:04:39.890Z"
+  },
+  {
+    "id": "07-keyboard-shortcuts",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/07-keyboard-shortcuts.jpg",
+    "action": "Account → Keyboard shortcuts",
+    "observed": "Keyboard shortcuts opens the command palette, not a separate help screen; the account menu remains visible behind it.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:04:48.153Z"
+  },
+  {
+    "id": "08-command-filtered",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/08-command-filtered.jpg",
+    "action": "Type forge in command palette",
+    "observed": "Root command search for forge returns zero results; agent choices are available under Open Agent.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:04:58.799Z",
+    "title": "Search · No root agent results"
+  },
+  {
+    "id": "09-command-task-result",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/09-command-task-result.jpg",
+    "action": "Search new task",
+    "observed": "One New Task command is selected and keyboard-actionable.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:05:12.857Z"
+  },
+  {
+    "id": "10-new-task-dialog",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/10-new-task-dialog.jpg",
+    "action": "Press Enter on New Task and wait for dialog",
+    "observed": "New task dialog prefilled with accessibility audit; seven assignees, offline Ward disabled, Forge initially checked.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:05:56.556Z"
+  },
+  {
+    "id": "11-new-task-assignee",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/11-new-task-assignee.jpg",
+    "action": "Edit task and select Scout",
+    "observed": "Task draft and selected agent determine Assign to Scout action.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:05:57.226Z"
+  },
+  {
+    "id": "12-task-assigned",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/12-task-assigned.jpg",
+    "action": "Click Assign to Scout",
+    "observed": "Task assignment closes dialog and starts a simulated agent execution.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:06:08.426Z"
+  },
+  {
+    "id": "13-task-planning",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/13-task-planning.jpg",
+    "action": "Observe assigned Scout task after completion.",
+    "observed": "The assigned Scout task completes three scripted steps, each with time and execution evidence; Pause is disabled once complete.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:06:24.539Z"
+  },
+  {
+    "id": "14-task-actions-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/14-task-actions-menu.jpg",
+    "action": "Task → More actions",
+    "observed": "Copy link, Open in chat, View run, Replay run and Cancel task.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:06:58.049Z"
+  },
+  {
+    "id": "15-chat-initial",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/15-chat-initial.jpg",
+    "action": "Task actions → Open in chat",
+    "observed": "Shared landing-page conversation with thought disclosure, task link, document attachment and agent/model/context composer.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:06:58.793Z"
+  },
+  {
+    "id": "16-chat-thought-toggle",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/16-chat-thought-toggle.jpg",
+    "action": "Toggle Thought for 3s",
+    "observed": "Thought for 3s expands the saved reasoning paragraph above the final response.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:07:12.753Z"
+  },
+  {
+    "id": "17-chat-context-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/17-chat-context-menu.jpg",
+    "action": "Open composer Context",
+    "observed": "Context references menu for research.md, page.tsx and TASK-142.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:07:13.341Z"
+  },
+  {
+    "id": "18-chat-context-click",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/18-chat-context-click.jpg",
+    "action": "Choose docs/research.md from Context",
+    "observed": "Menu closes; no attachment chip or composer change is shown.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:07:32.140Z"
+  },
+  {
+    "id": "19-chat-recipient-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/19-chat-recipient-menu.jpg",
+    "action": "Open composer agent selector",
+    "observed": "All seven roles can be selected, including offline Ward.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:07:32.635Z"
+  },
+  {
+    "id": "20-chat-forge-thinking",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/20-chat-forge-thinking.jpg",
+    "action": "Chat → Forge → send a demo prompt",
+    "observed": "Forge thinking state appears in the shared transcript.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:10:04.957Z"
+  },
+  {
+    "id": "21-chat-forge-code",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/21-chat-forge-code.jpg",
+    "action": "Wait for Forge reply",
+    "observed": "Shared chat displays a scripted Forge response with a collapsed command disclosure and code block.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:10:33.156Z"
+  },
+  {
+    "id": "22-projects",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/22-projects.jpg",
+    "action": "Navigation → Projects",
+    "observed": "Three project rows, branches and agent avatars.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:10:41.735Z"
+  },
+  {
+    "id": "23-project-row-noop",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/23-project-row-noop.jpg",
+    "action": "Click aurora-web project",
+    "observed": "No destination opens; Projects remains selected.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:10:42.441Z"
+  },
+  {
+    "id": "24-agents",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/24-agents.jpg",
+    "action": "Navigation → Agents",
+    "observed": "Seven fixed role rows with state, model and tools.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:10:49.185Z"
+  },
+  {
+    "id": "25-create-agent-notice",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/25-create-agent-notice.jpg",
+    "action": "Agents → Create agent",
+    "observed": "Prototype-only notice appears; no agent editor.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:10:49.636Z"
+  },
+  {
+    "id": "26-tasks",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/26-tasks.jpg",
+    "action": "Navigation → Tasks",
+    "observed": "Task table combines the created task and five seeded tasks.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:10:56.576Z"
+  },
+  {
+    "id": "27-historical-task-blank",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/27-historical-task-blank.jpg",
+    "action": "Tasks → Weekly competitor digest",
+    "observed": "A named detail tab opens with a blank content region.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:10:57.155Z"
+  },
+  {
+    "id": "28-workflows",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/28-workflows.jpg",
+    "action": "Navigation → Workflows",
+    "observed": "Four pipeline rows, each with Run.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:04.758Z"
+  },
+  {
+    "id": "29-workflow-generic-dialog",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/29-workflow-generic-dialog.jpg",
+    "action": "Workflows → Weekly research digest → Run",
+    "observed": "Opens generic New task assignment, not a workflow editor or configured run.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:05.258Z"
+  },
+  {
+    "id": "30-files",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/30-files.jpg",
+    "action": "Navigation → Files",
+    "observed": "Six file rows with owner and size.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:15.665Z"
+  },
+  {
+    "id": "31-file-placeholder",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/31-file-placeholder.jpg",
+    "action": "Files → recommendations.md",
+    "observed": "Click leaves Files unchanged. Only the code and research documents have viewers.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:16.373Z"
+  },
+  {
+    "id": "32-code-view",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/32-code-view.jpg",
+    "action": "Files → page.tsx",
+    "observed": "Read-only syntax-colored code with line numbers; no editor controls.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:16.979Z"
+  },
+  {
+    "id": "33-document-view",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/33-document-view.jpg",
+    "action": "Open research.md tab",
+    "observed": "Formatted research document with headings, numbered findings and source references.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:17.686Z"
+  },
+  {
+    "id": "34-conversations",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/34-conversations.jpg",
+    "action": "Navigation → Conversations",
+    "observed": "Three conversation rows; only Landing page has a destination.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:30.782Z"
+  },
+  {
+    "id": "35-conversation-placeholder",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/35-conversation-placeholder.jpg",
+    "action": "Click Q3 signup numbers",
+    "observed": "No destination opens; Conversations remains selected.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:31.384Z"
+  },
+  {
+    "id": "36-runs",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/36-runs.jpg",
+    "action": "Navigation → Runs",
+    "observed": "Runs lists current demo run #218 and three seeded historical runs. Displayed statuses and metrics are simulated; #218 is not a fixed historical literal.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:31.890Z",
+    "title": "Runs · Current and seeded history"
+  },
+  {
+    "id": "37-activity",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/37-activity.jpg",
+    "action": "Navigation → Activity",
+    "observed": "Timestamped agent activity accumulated by the scripted scenarios.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:32.398Z"
+  },
+  {
+    "id": "38-settings",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/38-settings.jpg",
+    "action": "Navigation → Settings",
+    "observed": "Motion, default model, autonomy choices and Secrets Manage.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:11:55.415Z"
+  },
+  {
+    "id": "39-settings-options",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/39-settings-options.jpg",
+    "action": "Settings → Reduce motion on → Safe actions",
+    "observed": "Reduce motion checked; Safe actions pressed. Demo choices do not grant real authority.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:22.851Z"
+  },
+  {
+    "id": "40-secrets-noop",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/40-secrets-noop.jpg",
+    "action": "Settings → Secrets → Manage",
+    "observed": "No secret editor opens.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:23.971Z"
+  },
+  {
+    "id": "41-atlas-agent-card",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/41-atlas-agent-card.jpg",
+    "action": "Sidebar → Atlas",
+    "observed": "Floating agent card: role, status, current activity, fixed model, tools, permissions and preview states.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:32.088Z"
+  },
+  {
+    "id": "42-agent-thinking",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/42-agent-thinking.jpg",
+    "action": "Atlas → Preview a state → Thinking",
+    "observed": "Preview chip changes avatar, status and current activity to Thinking. This modifies the demo role state.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:40.901Z"
+  },
+  {
+    "id": "43-agent-working",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/43-agent-working.jpg",
+    "action": "Atlas → Preview a state → Working",
+    "observed": "Preview chip changes avatar, status and current activity to Working. This modifies the demo role state.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:41.813Z"
+  },
+  {
+    "id": "44-agent-using-tool",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/44-agent-using-tool.jpg",
+    "action": "Atlas → Preview a state → Using tool",
+    "observed": "Using tool preview sets Atlas to Analyzing with an Analyzing… activity label.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:42.588Z"
+  },
+  {
+    "id": "45-agent-waiting",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/45-agent-waiting.jpg",
+    "action": "Atlas → Preview a state → Waiting",
+    "observed": "Preview chip changes avatar, status and current activity to Waiting. This modifies the demo role state.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:43.410Z"
+  },
+  {
+    "id": "46-agent-needs-you",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/46-agent-needs-you.jpg",
+    "action": "Atlas → Preview a state → Needs you",
+    "observed": "Preview chip changes avatar, status and current activity to Needs you. This modifies the demo role state.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:44.197Z"
+  },
+  {
+    "id": "47-agent-done",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/47-agent-done.jpg",
+    "action": "Atlas → Preview a state → Done",
+    "observed": "Preview chip changes avatar, status and current activity to Done. This modifies the demo role state.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:44.651Z"
+  },
+  {
+    "id": "48-agent-blocked",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/48-agent-blocked.jpg",
+    "action": "Atlas → Preview a state → Blocked",
+    "observed": "Preview chip changes avatar, status and current activity to Blocked. This modifies the demo role state.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:45.592Z"
+  },
+  {
+    "id": "49-agent-offline",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/49-agent-offline.jpg",
+    "action": "Atlas → Preview a state → Offline",
+    "observed": "Preview chip changes avatar, status and current activity to Offline. This modifies the demo role state.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:46.815Z"
+  },
+  {
+    "id": "50-scout-card",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/50-scout-card.jpg",
+    "action": "Sidebar → Scout",
+    "observed": "Agent card shows Scout role, fixed model, tools and stated permissions; seeded demo data.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:12:58.188Z"
+  },
+  {
+    "id": "51-sage-card",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/51-sage-card.jpg",
+    "action": "Sidebar → Sage",
+    "observed": "Agent card shows Sage role, fixed model, tools and stated permissions; seeded demo data.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:00.284Z"
+  },
+  {
+    "id": "52-pixel-card",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/52-pixel-card.jpg",
+    "action": "Sidebar → Pixel",
+    "observed": "Agent card shows Pixel role, fixed model, tools and stated permissions; seeded demo data.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:02.525Z"
+  },
+  {
+    "id": "53-quill-card",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/53-quill-card.jpg",
+    "action": "Sidebar → Quill",
+    "observed": "Agent card shows Quill role, fixed model, tools and stated permissions; seeded demo data.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:04.199Z"
+  },
+  {
+    "id": "54-forge-card",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/54-forge-card.jpg",
+    "action": "Sidebar → Forge",
+    "observed": "Agent card shows Forge role, fixed model, tools and stated permissions; seeded demo data.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:05.990Z"
+  },
+  {
+    "id": "55-ward-card",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/55-ward-card.jpg",
+    "action": "Sidebar → Ward",
+    "observed": "Agent card shows Ward role, fixed model, tools and stated permissions; seeded demo data.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:07.335Z"
+  },
+  {
+    "id": "56-agent-context-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/56-agent-context-menu.jpg",
+    "action": "Right-click Forge",
+    "observed": "Agent menu offers inspector, message, assign, pause and view runs.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:22.573Z"
+  },
+  {
+    "id": "57-agent-paused",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/57-agent-paused.jpg",
+    "action": "Forge context menu → Pause",
+    "observed": "Forge changes to Waiting / Paused by you.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:37.974Z"
+  },
+  {
+    "id": "58-offline-context-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/58-offline-context-menu.jpg",
+    "action": "Right-click Ward",
+    "observed": "Offline agent menu disables assignment and pause.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:38.637Z"
+  },
+  {
+    "id": "59-offline-chat",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/59-offline-chat.jpg",
+    "action": "Ward → Message → Send",
+    "observed": "The demo accepts a message to the offline agent; source has no delivery queue.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:42.731Z"
+  },
+  {
+    "id": "60-chat-tool-output",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/60-chat-tool-output.jpg",
+    "action": "Chat → expand Ran pnpm test",
+    "observed": "Command disclosure reveals a short result receipt in the chat transcript.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:51.236Z"
+  },
+  {
+    "id": "61-code-copy",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/61-code-copy.jpg",
+    "action": "Chat → Copy code",
+    "observed": "Copy code displays a Copied to clipboard success toast; clipboard contents were not independently verified.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:53.318Z",
+    "title": "Copy code · Success notice"
+  },
+  {
+    "id": "62-run-start",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/62-run-start.jpg",
+    "action": "Scenes → Replay the full run → Build landing page",
+    "observed": "Replay begins at queued TASK-142 with an empty plan and Created task event; planning follows.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:13:56.998Z"
+  },
+  {
+    "id": "63-run-plan",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/63-run-plan.jpg",
+    "action": "Observe the main run after start",
+    "observed": "Pipeline plan and current execution events; simulated timing.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:14:06.576Z"
+  },
+  {
+    "id": "64-run-evidence-expanded",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/64-run-evidence-expanded.jpg",
+    "action": "Task → Expand all",
+    "observed": "Expand all is active and disclosure arrows point down; receipt bodies are not visible in this frame. Settled evidence is captured in 69–72 and 160–161.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:14:07.202Z",
+    "title": "Expand all · Disclosure state"
+  },
+  {
+    "id": "65-context-inspector",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/65-context-inspector.jpg",
+    "action": "Open inspector → Context",
+    "observed": "Task, workspace, branch, attached files, secret grant labels and memory context.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:14:32.471Z"
+  },
+  {
+    "id": "66-parallel-design-copy",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/66-parallel-design-copy.jpg",
+    "action": "Main run → Agents inspector",
+    "observed": "Inspector drawer shows Atlas coordinating, Quill awaiting headline approval, Forge implementing, three idle agents and offline Ward.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:14:33.243Z",
+    "title": "Inspector · Parallel work and approval"
+  },
+  {
+    "id": "67-code-diff",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/67-code-diff.jpg",
+    "action": "Main run → page.tsx during implementation",
+    "observed": "Code tab shows scripted inserted/deleted lines and modification status.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:14:53.782Z"
+  },
+  {
+    "id": "68-execution-collapsed",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/68-execution-collapsed.jpg",
+    "action": "Task → Collapse all",
+    "observed": "Compact chronological execution rows retain agent, action, duration and status.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:14:56.264Z"
+  },
+  {
+    "id": "69-analysis-inputs",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/69-analysis-inputs.jpg",
+    "action": "Task execution → expand analysis-inputs",
+    "observed": "Expanded analysis-inputs detail in chronological execution; values are demo fixtures.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:08.852Z"
+  },
+  {
+    "id": "70-design-variants",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/70-design-variants.jpg",
+    "action": "Task execution → expand design-variants",
+    "observed": "Expanded design-variants detail in chronological execution; values are demo fixtures.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:09.864Z"
+  },
+  {
+    "id": "71-copy-options",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/71-copy-options.jpg",
+    "action": "Task execution → expand copy-options",
+    "observed": "Expanded copy-options detail in chronological execution; values are demo fixtures.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:10.799Z"
+  },
+  {
+    "id": "72-file-diff",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/72-file-diff.jpg",
+    "action": "Task execution → expand file-diff",
+    "observed": "Expanded file-diff detail in chronological execution; values are demo fixtures.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:12.480Z"
+  },
+  {
+    "id": "73-test-receipt",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/73-test-receipt.jpg",
+    "action": "Task execution → expand test-receipt",
+    "observed": "The pnpm test row remains collapsed and partly obscured by toasts; this frame does not show an expanded test receipt. See 160 for settled evidence.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:13.489Z",
+    "title": "Tests · Collapsed receipt row"
+  },
+  {
+    "id": "74-deploy-failure",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/74-deploy-failure.jpg",
+    "action": "Task execution → expand deploy-failure",
+    "observed": "Deploy-failure detail is expanded but partially clipped and covered by toasts. This frame is not a complete unobstructed error-card reference; see 161.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:14.345Z",
+    "title": "Deploy failure · Clipped detail"
+  },
+  {
+    "id": "75-home-needs-you",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/75-home-needs-you.jpg",
+    "action": "Home during blocked run",
+    "observed": "Home shows headline approval and deploy-token failure as separate Needs you rows.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:15.468Z"
+  },
+  {
+    "id": "76-resolve-dialog",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/76-resolve-dialog.jpg",
+    "action": "Home Needs you → Resolve",
+    "observed": "Mock deploy-token grant dialog, with Not now and Grant access and retry.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:30.996Z"
+  },
+  {
+    "id": "77-resolve-deferred",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/77-resolve-deferred.jpg",
+    "action": "Resolve → Not now",
+    "observed": "Dialog closes; failure remains actionable in Needs you.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:32.008Z"
+  },
+  {
+    "id": "78-deploy-retry",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/78-deploy-retry.jpg",
+    "action": "Resolve → Grant access and retry",
+    "observed": "Demo grant resumes the scripted deploy; no credential is entered or external permission granted.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:33.869Z"
+  },
+  {
+    "id": "79-task-needs-input",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/79-task-needs-input.jpg",
+    "action": "Task after successful retry, headline not approved",
+    "observed": "Task waits for remaining headline approval after simulated deploy recovery.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:46.635Z"
+  },
+  {
+    "id": "80-terminal",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/80-terminal.jpg",
+    "action": "Open bottom terminal",
+    "observed": "Read-only scripted commands/output displayed under the task.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:47.495Z"
+  },
+  {
+    "id": "81-terminal-output-notice",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/81-terminal-output-notice.jpg",
+    "action": "Terminal → Output",
+    "observed": "Notice appears; Terminal content remains selected.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:15:58.918Z"
+  },
+  {
+    "id": "82-terminal-problems-notice",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/82-terminal-problems-notice.jpg",
+    "action": "Terminal → Problems",
+    "observed": "Toast says Terminal is the only live panel in this preview. Terminal remains shown; no separate Problems panel opens.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:00.026Z",
+    "title": "Problems · Preview-only panel notice"
+  },
+  {
+    "id": "83-approval-discuss",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/83-approval-discuss.jpg",
+    "action": "Pending headline approval → Discuss",
+    "observed": "Opens the same shared Chat instead of a separate approval thread.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:01.316Z"
+  },
+  {
+    "id": "84-task-completed",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/84-task-completed.jpg",
+    "action": "Headline approval → Approve",
+    "observed": "Headline approval clears and Quill becomes Done. The DOM has 6/6 steps but task status is still Running; final Completed state is captured in 85.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:21.760Z",
+    "title": "Approval · Cleared before completion"
+  },
+  {
+    "id": "85-task-pause-notice",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/85-task-pause-notice.jpg",
+    "action": "Observe final completion after approval; Pause is disabled.",
+    "observed": "Task reaches Completed with all six steps finished; Pause is disabled and the completion toast is visible.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:22.542Z",
+    "title": "Task · Completed"
+  },
+  {
+    "id": "86-task-cancel-notice",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/86-task-cancel-notice.jpg",
+    "action": "Task More → Cancel task",
+    "observed": "Cancel produces a disabled-in-preview notice.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:24.552Z"
+  },
+  {
+    "id": "87-home-idle-clean",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/87-home-idle-clean.jpg",
+    "action": "Scenes → Idle and blinking → Home",
+    "observed": "Idle Home hero, suggestions, task list and recent activity.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:40.922Z"
+  },
+  {
+    "id": "88-home-hero-poke",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/88-home-hero-poke.jpg",
+    "action": "Home → click Atlas hero",
+    "observed": "Hero reacts to a poke; static capture records its current expression.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:41.991Z"
+  },
+  {
+    "id": "89-home-suggestion",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/89-home-suggestion.jpg",
+    "action": "Home → Research competitor pricing pages",
+    "observed": "Suggestion fills the task composer without starting work.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:43.857Z"
+  },
+  {
+    "id": "90-home-multiline",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/90-home-multiline.jpg",
+    "action": "Home composer → Shift+Enter",
+    "observed": "Composer accepts a newline without submitting.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:44.161Z"
+  },
+  {
+    "id": "91-home-routing",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/91-home-routing.jpg",
+    "action": "Home composer → Enter",
+    "observed": "Demo routes the research task to Scout, with assignment feedback.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:44.566Z"
+  },
+  {
+    "id": "92-scene-assign",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/92-scene-assign.jpg",
+    "action": "Scenes → Assign a task",
+    "observed": "Scene opens Pixel task assignment before automatic submission.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:16:57.099Z"
+  },
+  {
+    "id": "93-scene-assign-running",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/93-scene-assign-running.jpg",
+    "action": "Assign scene after auto-submit",
+    "observed": "Pixel task is created and runs its three scripted steps.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:04.679Z"
+  },
+  {
+    "id": "94-scene-stream",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/94-scene-stream.jpg",
+    "action": "Scenes → Thinking → streaming reply",
+    "observed": "Streaming scene opens Chat and appends the research question; the new Sage reply is not visible yet.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:05.788Z",
+    "title": "Streaming scene · Question appended"
+  },
+  {
+    "id": "95-scene-stream-progress",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/95-scene-stream-progress.jpg",
+    "action": "Thinking → streaming scene, subsequent frame",
+    "observed": "Sage’s scripted reply is rendered with three research findings and a collapsed analysis disclosure. This frame does not show word-by-word streaming.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:13.225Z",
+    "title": "Sage · Settled research reply"
+  },
+  {
+    "id": "96-scene-tool",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/96-scene-tool.jpg",
+    "action": "Scenes → Tool execution",
+    "observed": "Forge tool-execution scene opens the task and command activity.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:14.130Z"
+  },
+  {
+    "id": "97-scene-tool-complete",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/97-scene-tool-complete.jpg",
+    "action": "Tool execution scene completes",
+    "observed": "Command row becomes a completed receipt.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:24.082Z"
+  },
+  {
+    "id": "98-scene-handoff",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/98-scene-handoff.jpg",
+    "action": "Scenes → Agent handoff after event",
+    "observed": "Scout → Sage findings.md handoff is visible. Sage is idle in this captured frame; no analysis row is shown.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:33.987Z",
+    "title": "Handoff · Scout to Sage"
+  },
+  {
+    "id": "99-scene-blocked",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/99-scene-blocked.jpg",
+    "action": "Scenes → Blocked state",
+    "observed": "Failed deploy with expanded error and Resolve.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:35.430Z"
+  },
+  {
+    "id": "100-scene-completion-start",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/100-scene-completion-start.jpg",
+    "action": "Scenes → Task completion",
+    "observed": "Pixel completion scene starts; task itself is not a completed full pipeline.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:36.503Z"
+  },
+  {
+    "id": "101-scene-completion-result",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/101-scene-completion-result.jpg",
+    "action": "Task completion scene after Pixel finishes",
+    "observed": "Pixel’s generated-variants row is complete and collapsed; TASK-142 remains Queued. No completion toast is visible in this frame.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:50.959Z",
+    "title": "Pixel · Generated row complete"
+  },
+  {
+    "id": "102-scene-multi",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/102-scene-multi.jpg",
+    "action": "Scenes → Several agents working",
+    "observed": "Initial reset frame of the Several agents working scene: agents are still idle and execution is empty.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:52.219Z",
+    "title": "Multi-agent scene · Reset frame"
+  },
+  {
+    "id": "103-multi-inspector",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/103-multi-inspector.jpg",
+    "action": "Several agents working → inspector",
+    "observed": "Inspector opens during scene startup with only Scout Thinking. The settled six-active-agent roster is visible in 120.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:17:52.775Z",
+    "title": "Inspector · Scout starting"
+  },
+  {
+    "id": "104-busy-assignment",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/104-busy-assignment.jpg",
+    "action": "Busy Scout → Assign task",
+    "observed": "Assignment dialog labels active agents Busy and Ward Offline.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:18:10.615Z"
+  },
+  {
+    "id": "105-busy-queued",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/105-busy-queued.jpg",
+    "action": "Assign to busy Scout",
+    "observed": "New task queues behind Scout’s current work.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:18:18.825Z"
+  },
+  {
+    "id": "106-scene-palette-start",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/106-scene-palette-start.jpg",
+    "action": "Scenes → Command palette",
+    "observed": "Command-palette scene opens the unfiltered root with 26 results; the Agents subpage is captured in 107.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:18:31.438Z",
+    "title": "Palette scene · Unfiltered root"
+  },
+  {
+    "id": "107-palette-agents",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/107-palette-agents.jpg",
+    "action": "Command-palette scene → agent subpage",
+    "observed": "Seven agent choices with roles/status and breadcrumb.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:18:43.874Z"
+  },
+  {
+    "id": "108-palette-models",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/108-palette-models.jpg",
+    "action": "Palette → Switch Model",
+    "observed": "Model subpage offers three choices and selected model.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:18:52.771Z"
+  },
+  {
+    "id": "109-palette-files",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/109-palette-files.jpg",
+    "action": "Palette → Search Files",
+    "observed": "Files subpage offers five entries.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:18:54.086Z"
+  },
+  {
+    "id": "110-palette-file-notice",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/110-palette-file-notice.jpg",
+    "action": "Palette Files → recommendations.md",
+    "observed": "Missing file viewer produces a preview-only notice.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:03.580Z"
+  },
+  {
+    "id": "111-palette-workflows",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/111-palette-workflows.jpg",
+    "action": "Palette → Run Workflow",
+    "observed": "Workflow subpage lists landing, digest and release notes; security workflow is absent.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:04.927Z"
+  },
+  {
+    "id": "112-scene-inspector-scout",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/112-scene-inspector-scout.jpg",
+    "action": "Scenes → Agent inspector",
+    "observed": "Inspector scene begins with Scout’s agent card.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:06.479Z"
+  },
+  {
+    "id": "113-scene-inspector-forge",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/113-scene-inspector-forge.jpg",
+    "action": "Agent inspector scene → Forge",
+    "observed": "Scene switches from Scout to Forge automatically.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:22.158Z"
+  },
+  {
+    "id": "114-scene-reduced-motion",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/114-scene-reduced-motion.jpg",
+    "action": "Scenes → Toggle reduced motion",
+    "observed": "Reduced motion state toggles; footer and notice confirm it.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:24.310Z"
+  },
+  {
+    "id": "115-home-reduced-motion",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/115-home-reduced-motion.jpg",
+    "action": "Home with reduced motion enabled",
+    "observed": "Same information hierarchy remains with motion reduced.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:25.019Z"
+  },
+  {
+    "id": "116-sidebar-hidden",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/116-sidebar-hidden.jpg",
+    "action": "Toggle sidebar",
+    "observed": "Content expands while sidebar is hidden.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:26.329Z"
+  },
+  {
+    "id": "117-sidebar-keyboard",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/117-sidebar-keyboard.jpg",
+    "action": "Press Command-B",
+    "observed": "Keyboard shortcut toggles the sidebar back.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:39.846Z"
+  },
+  {
+    "id": "118-keyboard-command-execute",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/118-keyboard-command-execute.jpg",
+    "action": "Command-K → type settings → Return",
+    "observed": "Keyboard selection opens Settings.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:40.577Z"
+  },
+  {
+    "id": "119-keyboard-terminal",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/119-keyboard-terminal.jpg",
+    "action": "Command-J",
+    "observed": "Frame immediately after recorded Command-J input: Settings is visible without the terminal yet. The terminal is visible in 120.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:41.179Z",
+    "title": "Command-J · Before terminal appears"
+  },
+  {
+    "id": "120-keyboard-inspector",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/120-keyboard-inspector.jpg",
+    "action": "Command-I",
+    "observed": "After recorded Command-I input, the inspector drawer is open with six active agents; Terminal is also visible.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:42.092Z",
+    "title": "Inspector · Six active agents and terminal"
+  },
+  {
+    "id": "121-desktop-home",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/121-desktop-home.jpg",
+    "action": "Responsive check at 1440 × 900 → Home",
+    "observed": "Wide desktop shell shows sidebar, central Home and inspector.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:19:54.379Z"
+  },
+  {
+    "id": "122-desktop-context",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/122-desktop-context.jpg",
+    "action": "1440 × 900 → Context inspector",
+    "observed": "Wide Context inspector beside Home.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:20:19.429Z"
+  },
+  {
+    "id": "123-context-resource",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/123-context-resource.jpg",
+    "action": "Context → page.tsx",
+    "observed": "Context resource opens code tab while inspector remains scoped to landing task.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:20:19.927Z"
+  },
+  {
+    "id": "124-tablet-layout",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/124-tablet-layout.jpg",
+    "action": "Responsive check at 768 × 1024",
+    "observed": "768 px layout uses compact navigation and hides the wide inspector.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:20:20.155Z"
+  },
+  {
+    "id": "125-tablet-sidebar",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/125-tablet-sidebar.jpg",
+    "action": "768 × 1024 → sidebar",
+    "observed": "At 768 px the sidebar is hidden and code spans the content width; toggling again exposes the compact icon rail in 126.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:20:20.786Z",
+    "title": "Tablet · Sidebar hidden"
+  },
+  {
+    "id": "126-tablet-sidebar-open",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/126-tablet-sidebar-open.jpg",
+    "action": "768 × 1024 → open sidebar",
+    "observed": "At 768 px the sidebar becomes a narrow icon rail, not a full text drawer.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:20:31.910Z"
+  },
+  {
+    "id": "127-mobile-layout",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/127-mobile-layout.jpg",
+    "action": "Responsive check at 390 × 844",
+    "observed": "Compact header and horizontal resource tabs at phone width.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:20:41.193Z"
+  },
+  {
+    "id": "128-mobile-navigation",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/128-mobile-navigation.jpg",
+    "action": "390 × 844 → Toggle sidebar",
+    "observed": "Phone navigation appears as a full text drawer.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:20:47.956Z"
+  },
+  {
+    "id": "129-mobile-home",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/129-mobile-home.jpg",
+    "action": "Phone navigation → Home",
+    "observed": "Home composer, hero and task list adapt to phone width.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:20:55.334Z"
+  },
+  {
+    "id": "130-mobile-inspector",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/130-mobile-inspector.jpg",
+    "action": "390 × 844 → Inspector",
+    "observed": "Inspector opens above the page as a drawer.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:20:55.999Z"
+  },
+  {
+    "id": "131-historical-detail",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/131-historical-detail.jpg",
+    "action": "Tasks → TASK-140 Migrate auth",
+    "observed": "Historical task opens a titled but blank detail tab.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:21:59.787Z"
+  },
+  {
+    "id": "132-historical-detail",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/132-historical-detail.jpg",
+    "action": "Tasks → TASK-139 Onboarding",
+    "observed": "Historical task opens a titled but blank detail tab.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:22:00.897Z"
+  },
+  {
+    "id": "133-historical-detail",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/133-historical-detail.jpg",
+    "action": "Tasks → TASK-138 Security",
+    "observed": "Historical task opens a titled but blank detail tab.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:22:01.830Z"
+  },
+  {
+    "id": "134-copy-task-link-noop",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/134-copy-task-link-noop.jpg",
+    "action": "Task More → Copy task link",
+    "observed": "Menu closes without feedback; public source handler is empty.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:22:15.334Z"
+  },
+  {
+    "id": "135-signout-notice",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/135-signout-notice.jpg",
+    "action": "Account → Sign out",
+    "observed": "Preview notice confirms sign-out is disabled.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:22:16.342Z"
+  },
+  {
+    "id": "136-chat-atlas",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/136-chat-atlas.jpg",
+    "action": "Chat → Atlas → send sample prompt",
+    "observed": "Scripted Atlas reply rendered in the shared transcript.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:22:48.996Z"
+  },
+  {
+    "id": "137-chat-scout",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/137-chat-scout.jpg",
+    "action": "Chat → Scout → send sample prompt",
+    "observed": "Scripted Scout reply rendered in the shared transcript.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:22:54.444Z"
+  },
+  {
+    "id": "138-chat-pixel",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/138-chat-pixel.jpg",
+    "action": "Chat → Pixel → send sample prompt",
+    "observed": "Scripted Pixel reply rendered in the shared transcript.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:23:30.816Z"
+  },
+  {
+    "id": "139-chat-quill",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/139-chat-quill.jpg",
+    "action": "Chat → Quill → send sample prompt",
+    "observed": "Scripted Quill reply rendered in the shared transcript.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:23:36.063Z"
+  },
+  {
+    "id": "140-chat-at-no-picker",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/140-chat-at-no-picker.jpg",
+    "action": "Chat composer → type @",
+    "observed": "Typing @ does not open a context picker in this demo.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:24:09.553Z"
+  },
+  {
+    "id": "141-chat-draft-reopened",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/141-chat-draft-reopened.jpg",
+    "action": "Close Chat tab → reopen via command palette",
+    "observed": "In-document draft and shared transcript survive closing/reopening the tab.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:24:10.909Z"
+  },
+  {
+    "id": "142-chat-model-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/142-chat-model-menu.jpg",
+    "action": "Chat composer → model",
+    "observed": "Chat model menu shares the workspace selection; agent fixed models are separate.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:24:11.514Z"
+  },
+  {
+    "id": "143-chat-model-changed",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/143-chat-model-changed.jpg",
+    "action": "Chat model → Haiku",
+    "observed": "Composer and header show the selected model; role card models remain fixed.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:24:23.912Z"
+  },
+  {
+    "id": "144-autonomy-full",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/144-autonomy-full.jpg",
+    "action": "Settings → Full",
+    "observed": "Full is visually selected; source has no policy engine behind it.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:24:24.703Z"
+  },
+  {
+    "id": "145-settings-model-menu",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/145-settings-model-menu.jpg",
+    "action": "Settings → Default model",
+    "observed": "Third model-menu entry point uses the same choices.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:24:25.196Z"
+  },
+  {
+    "id": "146-reset-world",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/146-reset-world.jpg",
+    "action": "Scenes → Idle and blinking",
+    "observed": "Idle scene resets the main task and agents while earlier tabs remain. Opus is selected with a model-change toast; conversation and preference retention is source-derived.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:24:26.615Z",
+    "title": "Idle reset · Task and agents"
+  },
+  {
+    "id": "147-home-route-pixel",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/147-home-route-pixel.jpg",
+    "action": "Home → Design an onboarding empty state",
+    "observed": "Keyword-based demo routing assigns this task to Pixel.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:26:45.697Z"
+  },
+  {
+    "id": "148-home-route-sage",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/148-home-route-sage.jpg",
+    "action": "Home → Summarize this week’s customer feedback",
+    "observed": "Keyword-based demo routing assigns this task to Sage.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:26:48.019Z"
+  },
+  {
+    "id": "149-home-route-quill",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/149-home-route-quill.jpg",
+    "action": "Home → Write release notes for the demo",
+    "observed": "Keyword-based demo routing assigns this task to Quill.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:26:50.146Z"
+  },
+  {
+    "id": "150-home-route-forge",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/150-home-route-forge.jpg",
+    "action": "Home → Fix the flaky checkout test",
+    "observed": "Keyword-based demo routing assigns this task to Forge.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:26:52.535Z"
+  },
+  {
+    "id": "151-empty-task-dialog",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/151-empty-task-dialog.jpg",
+    "action": "New task → clear title",
+    "observed": "Empty title leaves the assignment button enabled.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:27:03.364Z"
+  },
+  {
+    "id": "152-untitled-task",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/152-untitled-task.jpg",
+    "action": "Submit empty New task",
+    "observed": "An Untitled task is created rather than validation blocking it.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:27:13.663Z"
+  },
+  {
+    "id": "153-middle-close-tab",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/153-middle-close-tab.jpg",
+    "action": "Middle-click Projects tab",
+    "observed": "Projects tab is absent after the recorded middle-click. Source retains its content; this frame does not demonstrate reopening it.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:27:14.563Z",
+    "title": "Tab · Projects closed"
+  },
+  {
+    "id": "154-n-shortcut-noop",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/154-n-shortcut-noop.jpg",
+    "action": "Press advertised N outside input",
+    "observed": "No New task dialog opens; advertised shortcut is unwired in source.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:27:14.959Z"
+  },
+  {
+    "id": "155-all-tabs-closed",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/155-all-tabs-closed.jpg",
+    "action": "Close every resource tab with middle-click",
+    "observed": "Empty workspace displays the no-open-tabs state and command hint.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:27:53.311Z"
+  },
+  {
+    "id": "156-reload-reset",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/156-reload-reset.jpg",
+    "action": "Reload the demo after creating tasks and changing preferences",
+    "observed": "Reload restores the seed Home/task list and five tabs with empty Recent activity. Transcript reset and reset of a nondefault model are not demonstrated by this frame.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:27:53.926Z",
+    "title": "Reload · Seed Home and tabs"
+  },
+  {
+    "id": "157-clean-task-reset",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/157-clean-task-reset.jpg",
+    "action": "Scenes → Idle and blinking",
+    "observed": "Fresh-session main task reset to queued.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:28:21.297Z"
+  },
+  {
+    "id": "158-home-final",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/158-home-final.jpg",
+    "action": "Idle scene → Home after reload",
+    "observed": "Clean Home reference with seed tasks and idle agents.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:28:22.104Z"
+  },
+  {
+    "id": "159-task-pause-preview",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/159-task-pause-preview.jpg",
+    "action": "Queued task → Pause",
+    "observed": "Toast says Pausing stops agents after their current step, with Disabled in this preview so the run can finish. No pause is performed.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:35:44.893Z",
+    "title": "Pause · Disabled in preview"
+  },
+  {
+    "id": "160-task-test-receipt-settled",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/160-task-test-receipt-settled.jpg",
+    "action": "Blocked replay → Collapse all → expand Forge pnpm test → bring receipt into view",
+    "observed": "Settled expanded test receipt visibly shows pnpm test, exit 0, four test files passed and 42 tests passed. These are scripted demo results.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:38:31.075Z",
+    "title": "Test receipt · Expanded"
+  },
+  {
+    "id": "161-task-deploy-failure-settled",
+    "path": "/Users/nish/Documents/neko/docs/evidence/orbit-reference-2026-10-06/161-task-deploy-failure-settled.jpg",
+    "action": "Blocked replay → expand Forge Deploy failed → bring receipt into view → dismiss toast",
+    "observed": "Unobstructed expanded failure receipt shows aurora deploy --preview, exit 1, DEPLOY_TOKEN missing from the preview environment, and the Resolve action. The failure and permission flow are scripted demo behavior.",
+    "url": "https://orbit-agent-workspace.vercel.app/",
+    "at": "2026-10-05T23:38:46.080Z",
+    "title": "Deploy failure · Unobstructed"
+  }
+]

@@ -1,0 +1,84 @@
+{
+  "verifiedAt": "2026-10-05T23:46:28.385356+00:00",
+  "manifestSha256": "f419fc657d4ab11c5e8ed22540be4ceda9bfb83d14d5ff892f556f4548b25c5d",
+  "captureCount": 161,
+  "paperCaptureCount": 161,
+  "captionMismatches": [],
+  "sourceHashMismatches": [],
+  "missingLocalLinks": [],
+  "designExports": [
+    {
+      "path": "design/00-navigation-task-flow.png",
+      "dimensions": [
+        1600,
+        1100
+      ],
+      "sha256": "6895087b3062ab2217232c03f4a66636c4bbca18645807036b466fbd4b8e2552"
+    },
+    {
+      "path": "design/a-home-light.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "sha256": "49c8f4c2a54e4cf0385e1e14fcd86d8abac34d7bd231d8f138cf036d22acc3eb"
+    },
+    {
+      "path": "design/a-home.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "sha256": "920975d771fc342c85c9f174a79ae0e3b43c1bda56bbe1bb0bd69f78a63caab5"
+    },
+    {
+      "path": "design/a-states.png",
+      "dimensions": [
+        1440,
+        1821
+      ],
+      "sha256": "e251bcf04d5c1f7176a67af27d8c59814d706829f2e054f153f0d9af5919d2cc"
+    },
+    {
+      "path": "design/a-task-review.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "sha256": "0cb8dfe61bad11efc04188721a578c38c1369183134aa4f77bb34ca953ad1ad2"
+    },
+    {
+      "path": "design/b-agents.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "sha256": "1074a66ab81c1462ccb37c1ed2c2367df56428294b691898d68063faf7dce729"
+    },
+    {
+      "path": "design/b-home.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "sha256": "60dbb42aa5ceca728a6a788c6eb66b17e5f5fac58c15d880603d44ba335d0efc"
+    },
+    {
+      "path": "design/b-task.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "sha256": "5c742b3aa8f14e9ab93dcd307903d7092f26b3a40c318b4a2b43f87db6bd5eab"
+    },
+    {
+      "path": "design/b-tools.png",
+      "dimensions": [
+        1440,
+        900
+      ],
+      "sha256": "f590d9261018a2588e5b87cbac4d7e93a570f3bfc99a8e2814a51a4b9ee6d638"
+    }
+  ],
+  "limits": "Static artifact and source verification only. Independent baseline QA covers158. Parent checked follow-ups159-161. No native build, interaction, animation or provider verification."
+}

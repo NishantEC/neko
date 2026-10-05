@@ -1,0 +1,343 @@
+- banner:
+  - button "Toggle sidebar":
+  - generic: Aurora
+  - generic: /
+  - generic: Build landing page
+  - button "Search or run a command":
+    - generic: Search Aurora
+    - generic: ⌘K
+  - button "Sonnet 5.5":
+    - generic: Sonnet 5.5
+  - button "Toggle inspector" [pressed]:
+  - button "Account": SD
+- complementary "Navigation":
+  - generic: Workspace
+  - button "Home":
+    - generic: Home
+  - button "Projects":
+    - generic: Projects
+  - button "Agents":
+    - generic: Agents
+  - button "Tasks 1 need you":
+    - generic: Tasks
+    - generic: 1 need you
+  - button "Workflows":
+    - generic: Workflows
+  - generic: Resources
+  - button "Files":
+    - generic: Files
+  - button "Conversations":
+    - generic: Conversations
+  - button "Runs":
+    - generic: Runs
+  - button "Activity":
+    - generic: Activity
+  - generic: Agents
+  - generic: 6 online
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - button "Quill Needs you":
+    - generic: Quill
+    - generic: Needs you
+  - button "Forge ⠋ Running":
+    - generic: Forge
+    - generic: ⠋
+    - generic: Running
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - button "Settings ⌘,":
+    - generic: Settings
+    - generic: ⌘,
+  - button "Account":
+    - generic: Account
+- main:
+  - tablist "Open tabs":
+    - tab "Home Close Home":
+      - generic: Home
+      - button "Close Home":
+    - tab "Build landing page Close Build landing page" [selected]:
+      - generic: Build landing page
+      - button "Close Build landing page":
+    - tab "Chat":
+      - generic: Chat
+    - tab "page.tsx":
+      - generic: page.tsx
+    - tab "research.md":
+      - generic: research.md
+    - tab "Review Orbit demo access… Close Review Orbit demo access…":
+      - generic: Review Orbit demo access…
+      - button "Close Review Orbit demo access…":
+    - tab "Projects Close Projects":
+      - generic: Projects
+      - button "Close Projects":
+    - tab "Agents Close Agents":
+      - generic: Agents
+      - button "Close Agents":
+    - tab "Tasks Close Tasks":
+      - generic: Tasks
+      - button "Close Tasks":
+    - tab "Competitor digest Close Competitor digest":
+      - generic: Competitor digest
+      - button "Close Competitor digest":
+    - tab "Workflows Close Workflows":
+      - generic: Workflows
+      - button "Close Workflows":
+    - tab "Files Close Files":
+      - generic: Files
+      - button "Close Files":
+    - tab "Conversations Close Conversations":
+      - generic: Conversations
+      - button "Close Conversations":
+    - tab "Runs Close Runs":
+      - generic: Runs
+      - button "Close Runs":
+    - tab "Activity Close Activity":
+      - generic: Activity
+      - button "Close Activity":
+    - tab "Settings Close Settings":
+      - generic: Settings
+      - button "Close Settings":
+  - generic: TASK-142
+  - generic: Running
+  - button "Pause":
+    - text: Pause
+  - button "More actions":
+  - heading "Build the Aurora landing page" [level=1]
+  - generic: Orchestrated by Atlas
+  - generic: feat/landing
+  - generic: Started 04:43
+  - generic: 5 agents
+  - generic: 0:35
+  - generic: Plan
+  - generic: 3 of 6
+  - list:
+    - generic: Research competitor landing pages
+    - generic: Scout
+    - generic: 7.5s
+    - generic: Synthesize findings into recommendations
+    - generic: Sage
+    - generic: 6.3s
+    - generic: Generate hero and pricing designs
+    - generic: Pixel
+    - generic: 6.5s
+    - generic: Write headline and page copy
+    - generic: Quill
+    - generic: …
+    - generic: Implement page in Next.js
+    - generic: Forge
+    - generic: …
+    - generic: Run tests and deploy preview
+    - generic: Forge
+    - generic: —
+  - generic: Execution
+  - button "Expand all"
+  - button "Collapse all"
+  - generic: 04:43:55
+  - generic: SD
+  - generic: You
+  - generic: Created task
+  - generic: TASK-142
+  - button "04:43:57 Atlas Planned task 6 steps 1.9s" [expanded]:
+    - generic: 04:43:57
+    - generic: Atlas
+    - generic: Planned task
+    - generic: 6 steps
+    - generic: 1.9s
+  - generic: Plan
+  - generic: 6 steps · 5 agents
+  - list:
+    - generic: Research competitor landing pages · Scout
+    - generic: Synthesize findings into recommendations · Sage
+    - generic: Generate hero and pricing designs · Pixel
+    - generic: Write headline and page copy · Quill
+    - generic: Implement page in Next.js · Forge
+    - generic: Run tests and deploy preview · Forge
+  - generic: 04:43:59
+  - generic: Atlas → Scout
+  - generic: brief.md
+  - button "04:44:01 Scout Searched web \"ai workspace landing page 2026\" 12 sources 2.9s" [expanded]:
+    - generic: 04:44:01
+    - generic: Scout
+    - generic: Searched web
+    - generic: "\"ai workspace landing page 2026\""
+    - generic: 12 sources
+    - generic: 2.9s
+  - code: web.search("ai workspace landing page 2026")
+  - generic: 12 results
+  - generic: How we rebuilt our homepage around the live product
+  - emphasis: lumen-labs.example
+  - generic: "Pricing pages that convert: 2026 benchmark"
+  - emphasis: northwind.example
+  - generic: "Agents in the product tour: what worked"
+  - emphasis: fabrikam.example
+  - generic: "Design teardown: 30 AI tool landing pages"
+  - emphasis: contoso.example
+  - generic: Why we stopped charging per agent
+  - emphasis: tailspin.example
+  - generic: + 7 more
+  - emphasis
+  - button "04:44:04 Scout Wrote 2.4k words 2.0s" [expanded]:
+    - generic: 04:44:04
+    - generic: Scout
+    - generic: Wrote
+    - generic: 2.4k words
+    - generic: 2.0s
+  - code: fs.write("docs/research.md")
+  - generic: 2.4k words
+  - generic: "## Summary 9 of 12 pages lead with a live product view. Pages that name each agent's job hold attention longer. 8 of 12 price per seat; none price per agent."
+  - generic: 04:44:06
+  - generic: Scout → Sage
+  - generic: findings.md
+  - generic: 12 sources
+  - button "04:44:09 Sage Analyzed 14 documents 3 patterns 4.7s":
+    - generic: 04:44:09
+    - generic: Sage
+    - generic: Analyzed 14 documents
+    - generic: 3 patterns
+    - generic: 4.7s
+  - code: python analyze.py --inputs 14
+  - generic: 4 files · 3,842 rows
+  - generic: docs/research.md
+  - emphasis: 2.4k words
+  - generic: customer_feedback.pdf
+  - emphasis: 3,842 entries
+  - generic: interviews/ (8 transcripts)
+  - emphasis: 61k words
+  - generic: analytics_q3.csv
+  - emphasis: 14 MB
+  - generic: "patterns: 3 confidence: high contradictions: 0"
+  - generic: 04:44:14
+  - generic: Sage → Pixel
+  - generic: recommendations.md
+  - generic: 04:44:14
+  - generic: Sage → Quill
+  - generic: messaging.md
+  - button "04:44:18 Pixel Generated 3 variants hero · pricing hero · pricing 3.9s":
+    - generic: 04:44:18
+    - generic: Pixel
+    - generic: Generated 3 variants
+    - generic: hero · pricing
+    - generic: hero · pricing
+    - generic: 3.9s
+  - code: design/hero
+  - generic: 3 variants · 1440 × 900
+  - figure "A · Editorial":
+    - generic: A · Editorial
+  - figure "B · Product-first":
+    - generic: B · Product-first
+  - figure "C · Agent-forward":
+    - generic: C · Agent-forward
+  - button "04:44:18 Quill Drafted copy headline · subhead 3 options 2.6s":
+    - generic: 04:44:18
+    - generic: Quill
+    - generic: Drafted copy
+    - generic: headline · subhead
+    - generic: 3 options
+    - generic: 2.6s
+  - code: content/landing.md
+  - generic: 3 options
+  - list:
+    - listitem: Your team, plus a few tireless agents.
+    - listitem: Hand off the busywork. Keep the decisions.
+    - listitem: Research, design and code, delegated.
+  - generic: 04:44:21
+  - generic: Quill
+  - generic: Needs approval
+  - generic: “Your team, plus a few tireless agents.”
+  - button "Approve"
+  - button "Discuss"
+  - generic: 04:44:22
+  - generic: Pixel → Forge
+  - generic: hero-specs.json
+  - button "04:44:25 Forge Ran pnpm install +3 packages 4.3s":
+    - generic: 04:44:25
+    - generic: Forge
+    - generic: Ran
+    - generic: pnpm install
+    - generic: +3 packages
+    - generic: 4.3s
+  - code: pnpm install
+  - generic: exit 0
+  - generic: "Packages: +3 Done in 3.8s"
+  - generic: 04:44:30
+  - generic: Forge
+  - generic: Editing
+  - generic: app/(marketing)/page.tsx
+  - generic: +10 −1
+- complementary "Inspector":
+  - tablist:
+    - tab "Agents" [active] [selected]
+    - tab "Context"
+  - button "Close inspector":
+  - generic: Active
+  - generic: "3"
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - paragraph: Coordinating 5 agents
+  - button "Quill Needs you":
+    - generic: Quill
+    - generic: Needs you
+  - paragraph: Waiting for approval · headline
+  - button "Forge ⠋ Running":
+    - generic: Forge
+    - generic: ⠋
+    - generic: Running
+  - paragraph: Implementing hero section
+  - generic: Idle
+  - generic: "3"
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - generic: Ready for research
+  - paragraph: Ready for research
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - generic: Ready to analyze
+  - paragraph: Ready to analyze
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - generic: Ready for design task
+  - paragraph: Ready for design task
+  - generic: Offline
+  - generic: "1"
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - generic: Back at 18:00
+  - paragraph: Back at 18:00
+  - generic: Run
+  - generic: "#218"
+  - generic: Elapsed
+  - generic: 0:35
+  - generic: Tokens
+  - generic: 18.6k
+- contentinfo:
+  - generic: feat/landing
+  - generic: "Run #218"
+  - button "Agents working":
+    - generic: 2 agents working
+  - button "Scenes":
+    - generic: Scenes
+  - 'button "Motion: Full"':
+    - generic: "Motion: Full"
+  - generic: 18.6k tok
+  - button "Toggle terminal, new output":
+- status:
+  - paragraph: Quill needs your approval
+  - generic: “Your team, plus a few tireless agents.”
+  - button "Approve"
+  - button "Dismiss":

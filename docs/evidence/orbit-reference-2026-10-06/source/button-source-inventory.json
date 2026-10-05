@@ -1,0 +1,298 @@
+[
+  {
+    "line": 707,
+    "opening_tag": "<button class=\"ib\" id=\"nav-toggle\" aria-label=\"Toggle sidebar\" title=\"Toggle sidebar  \u2318B\">"
+  },
+  {
+    "line": 709,
+    "opening_tag": "<button class=\"search\" id=\"search-btn\" aria-label=\"Search or run a command\">"
+  },
+  {
+    "line": 711,
+    "opening_tag": "<button class=\"pillbtn\" id=\"model-btn\" aria-haspopup=\"menu\">"
+  },
+  {
+    "line": 712,
+    "opening_tag": "<button class=\"ib\" id=\"insp-toggle\" aria-label=\"Toggle inspector\" aria-pressed=\"true\" title=\"Toggle inspector  \u2318I\">"
+  },
+  {
+    "line": 713,
+    "opening_tag": "<button class=\"me\" id=\"me-btn\" aria-label=\"Account\">"
+  },
+  {
+    "line": 724,
+    "opening_tag": "<button class=\"bp-tab\" aria-selected=\"true\">"
+  },
+  {
+    "line": 725,
+    "opening_tag": "<button class=\"bp-tab\" aria-selected=\"false\" data-bp=\"output\">"
+  },
+  {
+    "line": 726,
+    "opening_tag": "<button class=\"bp-tab\" aria-selected=\"false\" data-bp=\"problems\">"
+  },
+  {
+    "line": 729,
+    "opening_tag": "<button class=\"ib\" id=\"bp-close\" aria-label=\"Close panel\" title=\"Close panel  \u2318J\">"
+  },
+  {
+    "line": 738,
+    "opening_tag": "<button role=\"tab\" aria-selected=\"true\" data-ipane=\"agents\">"
+  },
+  {
+    "line": 738,
+    "opening_tag": "<button role=\"tab\" aria-selected=\"false\" data-ipane=\"context\">"
+  },
+  {
+    "line": 739,
+    "opening_tag": "<button class=\"ib insp-close\" id=\"insp-close\" aria-label=\"Close inspector\">"
+  },
+  {
+    "line": 754,
+    "opening_tag": "<button class=\"sbi\" id=\"sb-crew\" aria-label=\"Agents working\">"
+  },
+  {
+    "line": 756,
+    "opening_tag": "<button class=\"sbi\" id=\"sb-scenes\" aria-haspopup=\"menu\">"
+  },
+  {
+    "line": 757,
+    "opening_tag": "<button class=\"sbi hide-xs\" id=\"sb-motion\">"
+  },
+  {
+    "line": 759,
+    "opening_tag": "<button class=\"sbi hide-xs\" id=\"sb-term\" aria-label=\"Toggle terminal\" title=\"Terminal  \u2318J\">"
+  },
+  {
+    "line": 1198,
+    "opening_tag": "<button class=\"ni\" data-nav=\"${k}\" title=\"${l}\">"
+  },
+  {
+    "line": 1201,
+    "opening_tag": "<button class=\"ra\" data-open-agent=\"${a.id}\" title=\"${a.name} \u00b7 ${a.role}\">"
+  },
+  {
+    "line": 1202,
+    "opening_tag": "<button class=\"ni\" data-nav=\"settings\" title=\"Settings\">"
+  },
+  {
+    "line": 1202,
+    "opening_tag": "<button class=\"ni\" id=\"acct-btn\" title=\"Account\">"
+  },
+  {
+    "line": 1220,
+    "opening_tag": "<button class=\"ag-row\" data-open-agent=\"${a.id}\">"
+  },
+  {
+    "line": 1231,
+    "opening_tag": "<button class=\"ctx-row\" style=\"width:100%\" data-open-tab=\"file:research.md\">"
+  },
+  {
+    "line": 1234,
+    "opening_tag": "<button class=\"ctx-row\" style=\"width:100%\" data-open-tab=\"file:page.tsx\">"
+  },
+  {
+    "line": 1350,
+    "opening_tag": "<button class=\"tab-x\" data-close-tab=\"${esc(k)}\" aria-label=\"Close ${esc(m.title)}\">"
+  },
+  {
+    "line": 1381,
+    "opening_tag": "<button class=\"btn\" data-tv-act=\"pause\">"
+  },
+  {
+    "line": 1381,
+    "opening_tag": "<button class=\"ib\" data-tv-act=\"more\" aria-label=\"More actions\">"
+  },
+  {
+    "line": 1387,
+    "opening_tag": "<button data-tv-act=\"expand\">"
+  },
+  {
+    "line": 1387,
+    "opening_tag": "<button data-tv-act=\"collapse\">"
+  },
+  {
+    "line": 1507,
+    "opening_tag": "<button class=\"ref\" data-open-tab=\"file:page.tsx\">"
+  },
+  {
+    "line": 1508,
+    "opening_tag": "<button class=\"btn warn\" data-resolve>"
+  },
+  {
+    "line": 1643,
+    "opening_tag": "<button type=\"button\" class=\"pillbtn\" id=\"comp-ctx\">"
+  },
+  {
+    "line": 1643,
+    "opening_tag": "<button type=\"button\" class=\"pillbtn\" id=\"comp-agent\">"
+  },
+  {
+    "line": 1643,
+    "opening_tag": "<button type=\"button\" class=\"pillbtn\" id=\"comp-model\">"
+  },
+  {
+    "line": 1643,
+    "opening_tag": "<button type=\"submit\" class=\"send\" aria-label=\"Send\">"
+  },
+  {
+    "line": 1661,
+    "opening_tag": "<button class=\"tc-row\" aria-expanded=\"false\">"
+  },
+  {
+    "line": 1687,
+    "opening_tag": "<button type=\"button\" class=\"ib\" aria-label=\"Copy code\" data-copy>"
+  },
+  {
+    "line": 1732,
+    "opening_tag": "<button class=\"ref\" data-open-tab=\"task:142\">"
+  },
+  {
+    "line": 1732,
+    "opening_tag": "<button class=\"ref\" data-open-tab=\"file:research.md\">"
+  },
+  {
+    "line": 1771,
+    "opening_tag": "<button class=\"orb\" data-open-agent=\"${id}\" data-ac=\"${id}\" aria-label=\"${A[id].name}, ${A[id].role}\">"
+  },
+  {
+    "line": 1772,
+    "opening_tag": "<button class=\"hero-atlas\" id=\"hero-atlas\" aria-label=\"Atlas, your orchestrator. Poke to say hi.\">"
+  },
+  {
+    "line": 1775,
+    "opening_tag": "<button type=\"submit\" class=\"send\" aria-label=\"Start task\">"
+  },
+  {
+    "line": 1776,
+    "opening_tag": "<button type=\"button\" class=\"hchip\" data-suggest=\"${esc(t)}\">"
+  },
+  {
+    "line": 1783,
+    "opening_tag": "<button class=\"btn\" data-cmd=\"create-agent\">"
+  },
+  {
+    "line": 1784,
+    "opening_tag": "<button class=\"btn pri\" data-cmd=\"new-task\">"
+  },
+  {
+    "line": 1786,
+    "opening_tag": "<button class=\"btn\" data-scene=\"run\">"
+  },
+  {
+    "line": 1787,
+    "opening_tag": "<button class=\"btn\" data-cmd=\"new-task\">"
+  },
+  {
+    "line": 1788,
+    "opening_tag": "<button class=\"btn\" data-cmd=\"new-task\">"
+  },
+  {
+    "line": 1789,
+    "opening_tag": "<button class=\"btn\" data-cmd=\"new-task\">"
+  },
+  {
+    "line": 1808,
+    "opening_tag": "<button class=\"tog\" role=\"switch\" id=\"set-rm\" aria-checked=\"${M.reduced}\" aria-label=\"Reduce motion\">"
+  },
+  {
+    "line": 1809,
+    "opening_tag": "<button class=\"btn\" data-cmd=\"switch-model\">"
+  },
+  {
+    "line": 1810,
+    "opening_tag": "<button aria-pressed=\"${S.autonomy === 'ask'}\" data-auto=\"ask\">"
+  },
+  {
+    "line": 1810,
+    "opening_tag": "<button aria-pressed=\"${S.autonomy === 'safe'}\" data-auto=\"safe\">"
+  },
+  {
+    "line": 1810,
+    "opening_tag": "<button aria-pressed=\"${S.autonomy === 'full'}\" data-auto=\"full\">"
+  },
+  {
+    "line": 1811,
+    "opening_tag": "<button class=\"btn\">"
+  },
+  {
+    "line": 1884,
+    "opening_tag": "<button class=\"btn warn\" data-resolve>"
+  },
+  {
+    "line": 1884,
+    "opening_tag": "<button class=\"btn\" data-approve>"
+  },
+  {
+    "line": 1885,
+    "opening_tag": "<button data-open-tab=\"tasks\">"
+  },
+  {
+    "line": 1886,
+    "opening_tag": "<button data-open-tab=\"activity\">"
+  },
+  {
+    "line": 1900,
+    "opening_tag": "<button class=\"ib ac-x\" id=\"ac-x\" aria-label=\"Close\">"
+  },
+  {
+    "line": 1905,
+    "opening_tag": "<button data-set-state=\"${s}\" data-ac=\"${id}\" aria-pressed=\"false\">"
+  },
+  {
+    "line": 1906,
+    "opening_tag": "<button class=\"btn\" data-msg=\"${id}\">"
+  },
+  {
+    "line": 1906,
+    "opening_tag": "<button class=\"btn pri\" data-assign=\"${id}\" ${id === 'ward' ? 'disabled' : ''}>"
+  },
+  {
+    "line": 1933,
+    "opening_tag": "<button class=\"mi${it.danger ? ' danger' : ''}\" role=\"menuitem\" data-mi=\"${k}\" ${it.disabled ? 'aria-disabled=\"true\"' : ''}>"
+  },
+  {
+    "line": 2033,
+    "opening_tag": "<button class=\"pi\" role=\"option\" id=\"pi-${k}\" data-pi=\"${k}\" style=\"--d:${d++}\">"
+  },
+  {
+    "line": 2072,
+    "opening_tag": "<button type=\"button\" role=\"radio\" data-nt=\"${a.id}\" aria-checked=\"${a.id === ntAgent}\" ${off ? 'disabled' : ''}>"
+  },
+  {
+    "line": 2073,
+    "opening_tag": "<button type=\"button\" class=\"btn\" data-dismiss>"
+  },
+  {
+    "line": 2073,
+    "opening_tag": "<button type=\"submit\" class=\"btn pri\" id=\"nt-go\">"
+  },
+  {
+    "line": 2085,
+    "opening_tag": "<button class=\"btn\" data-dismiss>"
+  },
+  {
+    "line": 2085,
+    "opening_tag": "<button class=\"btn pri\" id=\"grant\">"
+  },
+  {
+    "line": 2092,
+    "opening_tag": "<button class=\"btn ${o.actionCls || ''}\">"
+  },
+  {
+    "line": 2092,
+    "opening_tag": "<button class=\"ib\" aria-label=\"Dismiss\">"
+  },
+  {
+    "line": 2203,
+    "opening_tag": "<button class=\"btn pri\" data-approve>"
+  },
+  {
+    "line": 2203,
+    "opening_tag": "<button class=\"btn\" data-open-tab=\"chat\">"
+  },
+  {
+    "line": 2256,
+    "opening_tag": "<button class=\"ref\" data-open-tab=\"file:page.tsx\">"
+  }
+]

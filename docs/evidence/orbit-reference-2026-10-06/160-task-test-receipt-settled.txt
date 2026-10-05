@@ -1,0 +1,345 @@
+- banner:
+  - button "Toggle sidebar":
+  - generic: Aurora
+  - generic: /
+  - generic: Build landing page
+  - button "Search or run a command":
+    - generic: Search Aurora
+    - generic: ⌘K
+  - button "Opus 5.5":
+    - generic: Opus 5.5
+  - button "Toggle inspector":
+  - button "Account": SD
+- complementary "Navigation":
+  - generic: Workspace
+  - button "Home":
+    - generic: Home
+  - button "Projects":
+    - generic: Projects
+  - button "Agents":
+    - generic: Agents
+  - button "Tasks 2 need you":
+    - generic: Tasks
+    - generic: 2 need you
+  - button "Workflows":
+    - generic: Workflows
+  - generic: Resources
+  - button "Files":
+    - generic: Files
+  - button "Conversations":
+    - generic: Conversations
+  - button "Runs":
+    - generic: Runs
+  - button "Activity":
+    - generic: Activity
+  - generic: Agents
+  - generic: 6 online
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - button "Quill Needs you":
+    - generic: Quill
+    - generic: Needs you
+  - button "Forge Blocked":
+    - generic: Forge
+    - generic: Blocked
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - button "Settings ⌘,":
+    - generic: Settings
+    - generic: ⌘,
+  - button "Account":
+    - generic: Account
+- main:
+  - tablist "Open tabs":
+    - tab "Home Close Home":
+      - generic: Home
+      - button "Close Home":
+    - tab "Build landing page Close Build landing page" [selected]:
+      - generic: Build landing page
+      - button "Close Build landing page":
+    - tab "Chat":
+      - generic: Chat
+    - tab "page.tsx":
+      - generic: page.tsx
+    - tab "research.md":
+      - generic: research.md
+  - generic: TASK-142
+  - generic: Blocked
+  - button "Pause":
+    - text: Pause
+  - button "More actions":
+  - heading "Build the Aurora landing page" [level=1]
+  - generic: Orchestrated by Atlas
+  - generic: feat/landing
+  - generic: Started 05:05
+  - generic: 5 agents
+  - generic: 2:43
+  - generic: Plan
+  - generic: 4 of 6
+  - list:
+    - generic: Research competitor landing pages
+    - generic: Scout
+    - generic: 6.2s
+    - generic: Synthesize findings into recommendations
+    - generic: Sage
+    - generic: 4.5s
+    - generic: Generate hero and pricing designs
+    - generic: Pixel
+    - generic: 4.6s
+    - generic: Write headline and page copy
+    - generic: Quill
+    - generic: …
+    - generic: Implement page in Next.js
+    - generic: Forge
+    - generic: 6.6s
+    - generic: Run tests and deploy preview
+    - generic: Forge
+    - generic: …
+  - generic: Execution
+  - button "Expand all"
+  - button "Collapse all"
+  - generic: 05:05:45
+  - generic: SD
+  - generic: You
+  - generic: Created task
+  - generic: TASK-142
+  - button "05:05:46 Atlas Planned task 6 steps 1.7s":
+    - generic: 05:05:46
+    - generic: Atlas
+    - generic: Planned task
+    - generic: 6 steps
+    - generic: 1.7s
+  - generic: Plan
+  - generic: 6 steps · 5 agents
+  - list:
+    - generic: Research competitor landing pages · Scout
+    - generic: Synthesize findings into recommendations · Sage
+    - generic: Generate hero and pricing designs · Pixel
+    - generic: Write headline and page copy · Quill
+    - generic: Implement page in Next.js · Forge
+    - generic: Run tests and deploy preview · Forge
+  - generic: 05:05:48
+  - generic: Atlas → Scout
+  - generic: brief.md
+  - button "05:05:50 Scout Searched web \"ai workspace landing page 2026\" 12 sources 2.6s":
+    - generic: 05:05:50
+    - generic: Scout
+    - generic: Searched web
+    - generic: "\"ai workspace landing page 2026\""
+    - generic: 12 sources
+    - generic: 2.6s
+  - code: web.search("ai workspace landing page 2026")
+  - generic: 12 results
+  - generic: How we rebuilt our homepage around the live product
+  - emphasis: lumen-labs.example
+  - generic: "Pricing pages that convert: 2026 benchmark"
+  - emphasis: northwind.example
+  - generic: "Agents in the product tour: what worked"
+  - emphasis: fabrikam.example
+  - generic: "Design teardown: 30 AI tool landing pages"
+  - emphasis: contoso.example
+  - generic: Why we stopped charging per agent
+  - emphasis: tailspin.example
+  - generic: + 7 more
+  - emphasis
+  - button "05:05:53 Scout Wrote 2.4k words 1.6s":
+    - generic: 05:05:53
+    - generic: Scout
+    - generic: Wrote
+    - generic: 2.4k words
+    - generic: 1.6s
+  - code: fs.write("docs/research.md")
+  - generic: 2.4k words
+  - generic: "## Summary 9 of 12 pages lead with a live product view. Pages that name each agent's job hold attention longer. 8 of 12 price per seat; none price per agent."
+  - generic: 05:05:54
+  - generic: Scout → Sage
+  - generic: findings.md
+  - generic: 12 sources
+  - button "05:05:56 Sage Analyzed 14 documents 3 patterns 3.4s":
+    - generic: 05:05:56
+    - generic: Sage
+    - generic: Analyzed 14 documents
+    - generic: 3 patterns
+    - generic: 3.4s
+  - code: python analyze.py --inputs 14
+  - generic: 4 files · 3,842 rows
+  - generic: docs/research.md
+  - emphasis: 2.4k words
+  - generic: customer_feedback.pdf
+  - emphasis: 3,842 entries
+  - generic: interviews/ (8 transcripts)
+  - emphasis: 61k words
+  - generic: analytics_q3.csv
+  - emphasis: 14 MB
+  - generic: "patterns: 3 confidence: high contradictions: 0"
+  - generic: 05:06:00
+  - generic: Sage → Pixel
+  - generic: recommendations.md
+  - generic: 05:06:00
+  - generic: Sage → Quill
+  - generic: messaging.md
+  - button "05:06:02 Pixel Generated 3 variants hero · pricing hero · pricing 3.3s":
+    - generic: 05:06:02
+    - generic: Pixel
+    - generic: Generated 3 variants
+    - generic: hero · pricing
+    - generic: hero · pricing
+    - generic: 3.3s
+  - code: design/hero
+  - generic: 3 variants · 1440 × 900
+  - figure "A · Editorial":
+    - generic: A · Editorial
+  - figure "B · Product-first":
+    - generic: B · Product-first
+  - figure "C · Agent-forward":
+    - generic: C · Agent-forward
+  - button "05:06:02 Quill Drafted copy headline · subhead 3 options 2.4s":
+    - generic: 05:06:02
+    - generic: Quill
+    - generic: Drafted copy
+    - generic: headline · subhead
+    - generic: 3 options
+    - generic: 2.4s
+  - code: content/landing.md
+  - generic: 3 options
+  - list:
+    - listitem: Your team, plus a few tireless agents.
+    - listitem: Hand off the busywork. Keep the decisions.
+    - listitem: Research, design and code, delegated.
+  - generic: 05:06:05
+  - generic: Quill
+  - generic: Needs approval
+  - generic: “Your team, plus a few tireless agents.”
+  - button "Approve"
+  - button "Discuss"
+  - generic: 05:06:06
+  - generic: Pixel → Forge
+  - generic: hero-specs.json
+  - button "05:06:08 Forge Ran pnpm install +3 packages 1.7s":
+    - generic: 05:06:08
+    - generic: Forge
+    - generic: Ran
+    - generic: pnpm install
+    - generic: +3 packages
+    - generic: 1.7s
+  - code: pnpm install
+  - generic: exit 0
+  - generic: "Packages: +3 Done in 3.8s"
+  - button "05:06:09 Forge Edited app/(marketing)/page.tsx +26 −1 3.8s":
+    - generic: 05:06:09
+    - generic: Forge
+    - generic: Edited
+    - generic: app/(marketing)/page.tsx
+    - generic: +26 −1
+    - generic: 3.8s
+  - code: app/(marketing)/page.tsx
+  - generic: "+26"
+  - generic: −1
+  - generic: "@@ -8,5 +10,27 @@ export default function Page() {"
+  - generic: "- {/* TODO: landing page */}"
+  - generic: + <section className="hero">
+  - generic: + <h1>Your team, plus a few tireless agents.</h1>
+  - generic: "+ <AgentActivity agents={[\"scout\", \"sage\", \"forge\"]} live />"
+  - generic: …
+  - button "Open page.tsx":
+    - text: Open page.tsx
+  - button "05:06:13 Forge Ran pnpm test 42 passed 2.1s" [expanded]:
+    - generic: 05:06:13
+    - generic: Forge
+    - generic: Ran
+    - generic: pnpm test
+    - generic: 42 passed
+    - generic: 2.1s
+  - code: pnpm test
+  - generic: exit 0
+  - generic: Test Files 4 passed (4) Tests 42 passed (42)
+  - button "05:06:15 Forge Deploy failed aurora deploy --preview DEPLOY_TOKEN is not set 2.5s":
+    - generic: 05:06:15
+    - generic: Forge
+    - generic: Deploy failed
+    - generic: aurora deploy --preview
+    - generic: DEPLOY_TOKEN is not set
+    - generic: 2.5s
+  - code: aurora deploy --preview
+  - generic: exit 1
+  - paragraph:
+    - code: DEPLOY_TOKEN
+    - text: is not set for the preview environment. Forge can't deploy until it has a token.
+  - button "Resolve":
+    - text: Resolve
+- complementary "Inspector":
+  - tablist:
+    - tab "Agents" [selected]
+    - tab "Context"
+  - button "Close inspector":
+  - generic: Active
+  - generic: "3"
+  - button "Atlas Working":
+    - generic: Atlas
+    - generic: Working
+  - paragraph: Coordinating 5 agents
+  - button "Quill Needs you":
+    - generic: Quill
+    - generic: Needs you
+  - paragraph: Waiting for approval · headline
+  - button "Forge Blocked":
+    - generic: Forge
+    - generic: Blocked
+  - paragraph: Blocked — DEPLOY_TOKEN is not set
+  - generic: Idle
+  - generic: "3"
+  - button "Scout Idle":
+    - generic: Scout
+    - generic: Idle
+  - generic: Ready for research
+  - paragraph: Ready for research
+  - button "Sage Idle":
+    - generic: Sage
+    - generic: Idle
+  - generic: Ready to analyze
+  - paragraph: Ready to analyze
+  - button "Pixel Idle":
+    - generic: Pixel
+    - generic: Idle
+  - generic: Ready for design task
+  - paragraph: Ready for design task
+  - generic: Offline
+  - generic: "1"
+  - button "Ward Offline":
+    - generic: Ward
+    - generic: Offline
+  - generic: Back at 18:00
+  - paragraph: Back at 18:00
+  - generic: Run
+  - generic: "#218"
+  - generic: Elapsed
+  - generic: 2:43
+  - generic: Tokens
+  - generic: 59.4k
+- contentinfo:
+  - generic: feat/landing
+  - generic: "Run #218"
+  - button "Agents working":
+    - generic: Atlas working
+  - button "Scenes":
+    - generic: Scenes
+  - 'button "Motion: Full"':
+    - generic: "Motion: Full"
+  - generic: 59.4k tok
+  - button "Toggle terminal, new error":
+- status:
+  - paragraph: Forge is blocked
+  - generic: Missing API key · DEPLOY_TOKEN is not set
+  - button "Resolve"
+  - button "Dismiss":
