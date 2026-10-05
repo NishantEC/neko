@@ -85,6 +85,7 @@ enum ComposerMention {
 
 /// Presentation only. Each surface owns dispatch, validation and authority.
 struct SharedComposer<Controls: View>: View {
+    @Environment(\.ink) private var ink
     @Binding var text: String
     let attachments: [ComposerAttachment]
     let placeholder: String
@@ -112,49 +113,59 @@ struct SharedComposer<Controls: View>: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !attachments.isEmpty { ComposerAttachmentStrip(attachments: attachments, remove: onRemove) }
-            ComposerView(
-                text: $text,
-                onSubmit: { if state.canSubmit { onSend() } },
-                onInterruptAndSubmit: { if state.canSubmit { (onInterrupt ?? onSend)() } },
-                onAttach: onAttach, onError: onError,
-                onSubmitWithContext: onContext.map { action in { if state.canSubmit { action() } } },
-                onMenuKey: onMenuKey,
-                placeholder: placeholder, accessibilityLabel: accessibilityLabel, accessibilityHelp: accessibilityHelp
-            )
-            if let validationError {
-                Text(validationError).font(.system(size: 11)).foregroundStyle(NekoStyle.amber).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 4) {
+                if !attachments.isEmpty { ComposerAttachmentStrip(attachments: attachments, remove: onRemove) }
+                ComposerView(
+                    text: $text,
+                    onSubmit: { if state.canSubmit { onSend() } },
+                    onInterruptAndSubmit: { if state.canSubmit { (onInterrupt ?? onSend)() } },
+                    onAttach: onAttach, onError: onError,
+                    onSubmitWithContext: onContext.map { action in { if state.canSubmit { action() } } },
+                    onMenuKey: onMenuKey,
+                    placeholder: placeholder, accessibilityLabel: accessibilityLabel, accessibilityHelp: accessibilityHelp
+                )
+                if let validationError {
+                    Text(validationError).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(alignment: .bottom, spacing: 8) {
+                    Button("Attach files", systemImage: "plus", action: onChooseAttachments)
+                        .labelStyle(.iconOnly).font(NekoFont.body)
+                        .frame(width: 28, height: 28).contentShape(Rectangle())
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
+                        .help("Attach images or files; you can also paste or drop them")
+                        .accessibilityLabel("Attach images or files")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 10) { controls() }
+                        VStack(alignment: .leading, spacing: 6) { controls() }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Spacer(minLength: 4)
+                    Button {
+                        if state.primary == .stop { onStop() } else { onSend() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            if state.primary == .submitting { ProgressView().controlSize(.mini) }
+                            else { Image(systemName: state.primary == .stop ? "stop.fill" : state.primary == .queue ? "text.badge.plus" : "arrow.up") }
+                            Text(actionLabel)
+                        }.font(NekoFont.meta.weight(.medium)).padding(.horizontal, 10).frame(height: 28)
+                            .foregroundStyle(state.buttonEnabled ? Color.white : Color.secondary)
+                            .background(state.buttonEnabled ? NekoStyle.accent : Color.primary.opacity(0.06), in: Capsule())
+                    }.buttonStyle(.plain).disabled(!state.buttonEnabled).accessibilityLabel(actionLabel)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
             }
-            HStack(spacing: 8) {
-                Button(action: onChooseAttachments) {
-                    Image(systemName: "plus").font(.system(size: 13, weight: .medium)).frame(width: 26, height: 26)
-                }.buttonStyle(.plain).foregroundStyle(.secondary)
-                    .help("Attach images or files; you can also paste or drop them")
-                    .accessibilityLabel("Attach images or files")
-                controls()
-                Spacer(minLength: 4)
-                Button {
-                    if state.primary == .stop { onStop() } else { onSend() }
-                } label: {
-                    HStack(spacing: 5) {
-                        if state.primary == .submitting { ProgressView().controlSize(.mini) }
-                        else { Image(systemName: state.primary == .stop ? "stop.fill" : state.primary == .queue ? "text.badge.plus" : "arrow.up") }
-                        Text(actionLabel)
-                    }.font(.system(size: 12, weight: .medium)).padding(.horizontal, 10).frame(height: 28)
-                        .foregroundStyle(state.buttonEnabled ? Color.white : Color.secondary)
-                        .background(state.buttonEnabled ? NekoStyle.accent : Color.primary.opacity(0.06), in: Capsule())
-                }.buttonStyle(.plain).disabled(!state.buttonEnabled).accessibilityLabel(actionLabel)
-            }
+            .padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 8)
+            .background(ink.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(ink.lineStrong))
             Text(state.primary == .queue ? "Return to queue · Shift-Return for a new line" : "Return to send · Shift-Return for a new line")
-                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .font(NekoFont.meta).foregroundStyle(.secondary)
+                .padding(.horizontal, NekoLayout.rowInset)
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .liquidGlass(radius: 16)
     }
 }
 
 struct ComposerAttachmentStrip: View {
+    @Environment(\.ink) private var ink
     let attachments: [ComposerAttachment]
     let remove: (ComposerAttachment) -> Void
     var body: some View {
@@ -163,11 +174,14 @@ struct ComposerAttachmentStrip: View {
                 ForEach(attachments) { attachment in
                     HStack(spacing: 6) {
                         Image(systemName: attachment.isImage ? "photo" : "doc")
-                        Text(attachment.name).lineLimit(1)
-                        Button { remove(attachment) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
+                        Text(attachment.name).lineLimit(1).frame(maxWidth: 180)
+                        Button { remove(attachment) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .medium)).frame(width: 24, height: 24).contentShape(Rectangle()) }
                             .buttonStyle(.plain).accessibilityLabel("Remove \(attachment.name)")
-                    }.font(.system(size: 11)).foregroundStyle(.secondary)
-                        .padding(.horizontal, 9).frame(height: 26).liquidGlassCapsule()
+                    }.font(NekoFont.meta).foregroundStyle(.secondary)
+                        .padding(.leading, 9).padding(.trailing, 2).frame(height: 28)
+                        .background(ink.raised, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(ink.line))
+                        .help(attachment.name)
                 }
             }
         }.scrollIndicators(.never)
@@ -232,10 +246,11 @@ struct ComposerRuntimeMenu: View {
         } label: {
             HStack(spacing: 4) {
                 Text(label).lineLimit(1).truncationMode(.middle)
-                Text("Global").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text("Global").font(NekoFont.meta).foregroundStyle(.secondary)
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
-            }.font(.system(size: 12)).foregroundStyle(.secondary)
+            }.font(NekoFont.meta).foregroundStyle(.secondary)
         }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(maxWidth: 220, alignment: .leading)
+            .accessibilityLabel("Global runtime: \(label)")
             .disabled(model.busy).help("Global runtime for future runs. Active work keeps its current runtime.")
             .task { catalog = await AgentModelCatalog.load(model) }
     }
@@ -245,5 +260,22 @@ struct ComposerRuntimeMenu: View {
     }
     private func select(_ provider: String, model selected: String = "") {
         Task { await model.workbench(.command("SetAgentRuntime", ["runtime": .object(["provider": .string(provider), "model": .string(selected)])])) }
+    }
+}
+
+/// Shared message metadata; timestamps are shown only when the record has one.
+struct ChatAuthorLine: View {
+    let author: String
+    var timestamp: Int = 0
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(author).font(NekoFont.heading).foregroundStyle(.primary)
+            if timestamp > 0 {
+                let date = Date(timeIntervalSince1970: Double(timestamp) / 1000)
+                Text(date, format: .dateTime.hour().minute())
+                    .font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
+                    .help(date.formatted(date: .abbreviated, time: .shortened))
+            }
+        }.accessibilityElement(children: .combine)
     }
 }

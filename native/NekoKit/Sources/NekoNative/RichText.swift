@@ -161,12 +161,14 @@ enum NativeAttachmentPath {
 struct ReadableText: View {
     let text: String
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(NativeMarkdown.parse(text).enumerated()), id: \.offset) { _, block in
+                Group {
                 switch block {
                 case .paragraph(let value): inline(value)
                 case .heading(let level, let value):
-                    inline(value).font(level == 1 ? .title2.bold() : level == 2 ? .title3.bold() : .headline).accessibilityAddTraits(.isHeader)
+                    inline(value).font(level <= 2 ? NekoFont.title : NekoFont.heading)
+                        .padding(.top, 6).accessibilityAddTraits(.isHeader)
                 case .code(let language, let code):
                     if language.lowercased() == "diff" || language.lowercased() == "patch" { NativeDiffBlock(code: code) }
                     else if ReplyStyle.terminalLanguages.contains(language.lowercased()) { NativeTerminalBlock(language: language, code: code) }
@@ -180,14 +182,24 @@ struct ReadableText: View {
                 case .image(let alt, let path): NativeAttachmentImage(alt: alt, reference: path)
                 case .divider: Divider()
                 }
+                }.padding(.bottom, blockSpacing(block))
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
             .environment(\.openURL, OpenURLAction { url in
                 ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") ? .systemAction : .discarded
             })
     }
+    private func blockSpacing(_ block: NativeMarkdownBlock) -> CGFloat {
+        switch block {
+        case .listItem: 5
+        case .heading: 8
+        default: 12
+        }
+    }
     private func inline(_ value: String) -> some View {
-        Text((try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+        Text((try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value))
+            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -195,18 +207,21 @@ private struct NativeCodeBlock: View {
     let language: String
     let code: String
     @State private var copied = false
+    @Environment(\.ink) private var ink
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(language.isEmpty ? "Code" : language).font(.caption).foregroundStyle(.secondary)
+                Text(language.isEmpty ? "Code" : language).font(NekoFont.meta).foregroundStyle(.secondary)
                 Spacer()
                 Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     copied = NSPasteboard.general.setString(code, forType: .string)
-                }.buttonStyle(.borderless).accessibilityLabel("Copy code")
-            }
-            ScrollView(.horizontal) { Text(code).font(.system(.callout, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: true, vertical: false) }
-        }.padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                }.buttonStyle(.borderless).font(NekoFont.meta).accessibilityLabel("Copy code")
+            }.padding(.horizontal, 12).padding(.vertical, 8)
+            Divider()
+            ScrollView(.horizontal) { Text(code).font(NekoFont.mono).textSelection(.enabled).fixedSize(horizontal: true, vertical: false).padding(12) }
+        }.background(ink.panel, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(ink.line))
     }
 }
 

@@ -77,69 +77,58 @@ struct ToolsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                GlassSegmented(selection: $tab, options: [
-                    .init(value: 0, title: "Connections"),
-                    .init(value: 1, title: "Skills")
-                ])
-                Spacer()
+        ManagementScroll {
+            PageIntro(title: "Tools & skills", message: "Connections provide access. Skills provide instructions.") {
                 if tab == 0 {
-                    Menu {
+                    Menu("Add connection", systemImage: "plus") {
                         Button("Browse MCP servers", systemImage: "square.grid.2x2") { showRegistrySheet = true }
                         Button("Import from this Mac", systemImage: "square.and.arrow.down") { showImportSheet = true }
                         Button("Add connection manually", systemImage: "plus") { showManualSheet = true }
-                    } label: {
-                        Label("Add connection", systemImage: "plus")
                     }
-                    .menuStyle(.button).buttonStyle(.bordered).controlSize(.large)
-                    .frame(height: NekoControlMetrics.height())
+                    .menuStyle(.button).controlSize(.regular).disabled(busy || model.busy)
                 }
             }
-            .padding(.bottom, 16)
-
-            if let error = validation ?? model.error {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.callout).foregroundStyle(.orange)
-                    .textSelection(.enabled)
-                    .padding(.bottom, 12)
-            }
-            ScrollView {
-                Group {
-                    if tab == 0 { connectionsBody }
-                    else if workspace.isEmpty {
-                        ContentUnavailableView("Choose a workspace for skills", systemImage: "folder", description: Text("Choose a workspace in the sidebar to see skills in its folders."))
-                    } else { skillsBody }
+            HStack {
+                Picker("Tools section", selection: $tab) {
+                    Text("Connections").tag(0)
+                    Text("Skills").tag(1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 28)
+                .pickerStyle(.segmented).labelsHidden().controlSize(.regular).frame(width: 240)
+                Spacer()
+                if busy { ProgressView().controlSize(.small).accessibilityLabel("Updating tools and skills") }
             }
-            .disabled(busy || model.busy)
+            operationFeedback
+            if tab == 0 { connectionsBody }
+            else if workspace.isEmpty {
+                EmptyRow(text: "Choose a workspace in the sidebar to see its skills.")
+            } else { skillsBody.disabled(busy || model.busy) }
         }
-        .frame(maxWidth: 940, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.horizontal, 32)
-        .padding(.top, 16)
-        .navigationTitle("Tools & skills")
-        .navigationSubtitle("Connections provide access. Skills provide instructions.")
-        .toolbar {
-            if busy {
-                ToolbarItem(placement: .primaryAction) {
-                    ProgressView().controlSize(.small).accessibilityLabel("Updating tools and skills")
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .top)
+        .font(NekoFont.body)
+        .controlSize(.regular)
         .sheet(item: $selectedConnection) { selection in
             if let connection = connections.first(where: { $0.recordID == selection.id }) {
                 connectionDetail(connection)
             } else {
-                ContentUnavailableView("Connection unavailable", systemImage: "link", description: Text("Close this window and choose a connection again."))
-                    .frame(width: 560, height: 300)
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Connection unavailable").font(NekoFont.title)
+                    Text("This connection may have been removed or its workspace changed.").font(NekoFont.body).foregroundStyle(N.text3)
+                    Button("Done") { selectedConnection = nil }.keyboardShortcut(.cancelAction)
+                }.padding(NekoLayout.pageInset).frame(width: 480)
             }
         }
         .sheet(isPresented: $showImportSheet) { importSheet }
         .sheet(isPresented: $showManualSheet) { manualSheet }
         .sheet(isPresented: $showRegistrySheet) { MCPRegistryBrowser(model: model) }
+    }
+
+    @ViewBuilder private var operationFeedback: some View {
+        if let error = validation ?? model.error {
+            DisclosureGroup {
+                Text(error).font(NekoFont.meta).textSelection(.enabled).padding(.top, 4)
+            } label: {
+                Label(error, systemImage: "exclamationmark.triangle").font(NekoFont.body).lineLimit(2)
+            }.foregroundStyle(NekoStyle.amber)
+        }
     }
 
     private func send(_ family: String, _ name: String, _ fields: [String: JSONValue]? = nil, onSuccess: (() -> Void)? = nil) {
@@ -155,36 +144,29 @@ struct ToolsView: View {
     }
 
     private var connectionsBody: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Connections").font(.system(size: 14, weight: .semibold)).foregroundStyle(N.text)
-                Text("\(connections.count)").font(.caption).foregroundStyle(N.text4)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("\(connections.count) \(connections.count == 1 ? "connection" : "connections")").monospacedDigit()
                 Spacer()
-                if workspace.isEmpty {
-                    Text("All workspaces").font(.caption).foregroundStyle(N.text4)
-                } else {
-                    Text(model.workspaces.first { $0.recordID == workspace }?["name"].string ?? "Selected workspace")
-                        .font(.caption).foregroundStyle(N.text4)
-                }
-            }
-            .padding(.bottom, 10)
-            if workspace.isEmpty {
-                    Text("Choose a workspace in the sidebar to see the connections it can use.")
-                    .font(.callout).foregroundStyle(N.text3)
-                    .padding(.bottom, 14)
-            }
+                Text(workspace.isEmpty ? "All workspaces" : (model.workspaces.first { $0.recordID == workspace }?["name"].string ?? "Selected workspace"))
+                    .lineLimit(1)
+            }.font(NekoFont.meta).foregroundStyle(N.text3)
             if connections.isEmpty {
-                ContentUnavailableView("No connections yet", systemImage: "link", description: Text("Browse MCP servers, import from this Mac, or add a URL manually."))
-                    .frame(maxWidth: .infinity, minHeight: 240)
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(model.connected ? "No connections yet" : "Waiting for connections…", systemImage: "link").font(NekoFont.heading)
+                    Text("Browse MCP servers, import from this Mac, or add a URL manually.").font(NekoFont.body).foregroundStyle(N.text3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).padding(NekoLayout.rowInset)
+                .background(N.card, in: RoundedRectangle(cornerRadius: 10))
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(connections.enumerated()), id: \.element.recordID) { index, connection in
                         connectionRow(connection)
-                        if index < connections.count - 1 { Divider().padding(.leading, 48) }
+                        if index < connections.count - 1 { Divider().padding(.leading, 44) }
                     }
                 }
-                .background(N.card.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
-                .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(N.line.opacity(0.7)))
+                .background(N.card, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(N.line))
             }
         }
     }
@@ -193,13 +175,13 @@ struct ToolsView: View {
         let items = unlinkedCandidates
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Import from this Mac").font(.title2.weight(.semibold))
+                Text("Import from this Mac").font(NekoFont.title)
                 Spacer()
                 Button("Done") { showImportSheet = false }
             }
             .padding(.bottom, 6)
             Text("Review connections already configured in other apps. Nothing is linked until you choose it.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(NekoFont.body).foregroundStyle(.secondary)
                 .padding(.bottom, 18)
             HStack {
                 Menu {
@@ -213,20 +195,22 @@ struct ToolsView: View {
                 Spacer()
                 Button("Scan again", systemImage: "arrow.clockwise") {
                     send("SetupImport", "Discover", ["repositories": .array(folders), "source_id": .null])
-                }
+                }.disabled(busy || model.busy)
             }
             .controlSize(.small)
             .padding(.bottom, 10)
+            operationFeedback
+            if busy { ProgressView("Updating connections…").controlSize(.small).padding(.bottom, 10) }
             if workspace.isEmpty {
                 Text("Choose a workspace above to link a connection.")
-                    .font(.callout).foregroundStyle(N.text3)
+                    .font(NekoFont.body).foregroundStyle(N.text3)
                     .padding(.bottom, 12)
             }
             ScrollView {
                 if items.isEmpty {
                     VStack {
                         ContentUnavailableView("No new connections found", systemImage: "magnifyingglass", description: Text("Scan again after adding a tool in Codex, Claude, or a project folder."))
-                    }.frame(maxWidth: .infinity, minHeight: 260)
+                    }.frame(maxWidth: .infinity, minHeight: 160)
                 } else {
                     VStack(spacing: 0) {
                         ForEach(Array(items.enumerated()), id: \.element.recordID) { index, candidate in
@@ -239,28 +223,30 @@ struct ToolsView: View {
                 }
             }
         }
-        .padding(24)
+        .padding(NekoLayout.pageInset)
         .frame(width: 670, height: 570)
     }
 
     private var manualSheet: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Add connection").font(.title2.weight(.semibold))
+                Text("Add connection").font(NekoFont.title)
                 Spacer()
                 Button("Done") { showManualSheet = false }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    addConnection
+                    operationFeedback
+                    if busy { ProgressView("Adding connection…").controlSize(.small) }
+                    addConnection.disabled(busy || model.busy)
                     LabeledContent("OAuth client ID (advanced)") { TextField("Only if the tool asks for one", text: $clientID).labelsHidden() }
                     Text("Connecting makes discovered tools available here. Neko asks before chat actions that may change data.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(NekoFont.meta).foregroundStyle(.secondary)
                     Button("Browse hosted MCP servers") { showManualSheet = false; showRegistrySheet = true }
                 }
             }
         }
-        .padding(24)
+        .padding(NekoLayout.pageInset)
         .frame(width: 650, height: 620)
     }
 
@@ -299,23 +285,23 @@ struct ToolsView: View {
                         .frame(width: 24)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(candidate["name"].string)
-                            .font(.system(size: 14, weight: .medium)).foregroundStyle(N.text)
+                            .font(NekoFont.heading).foregroundStyle(N.text)
                         Text(source.isEmpty ? "Local configuration" : source)
-                            .font(.caption).foregroundStyle(N.text4)
+                            .font(NekoFont.meta).foregroundStyle(N.text4)
                     }
                     Spacer(minLength: 10)
                     if !problem.isEmpty {
-                        Text("Needs setup").font(.caption).foregroundStyle(NekoStyle.amber)
+                        Text("Needs setup").font(NekoFont.meta).foregroundStyle(NekoStyle.amber)
                     } else if candidate["metadata"]["enabled_at_source"].string == "false" {
-                        Text("Paused at source").font(.caption).foregroundStyle(N.text4)
+                        Text("Paused at source").font(NekoFont.meta).foregroundStyle(N.text4)
                     } else {
-                        Text(localProcess ? "Local" : "Remote").font(.caption).foregroundStyle(N.text4)
+                        Text(localProcess ? "Local" : "Remote").font(NekoFont.meta).foregroundStyle(N.text4)
                     }
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10, weight: .semibold)).foregroundStyle(N.text4)
                 }
                 .padding(.horizontal, 16)
-                .frame(minHeight: 64)
+                .padding(.vertical, 10)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -323,7 +309,7 @@ struct ToolsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if !problem.isEmpty {
                         Label(problem, systemImage: "exclamationmark.triangle")
-                            .font(.callout).foregroundStyle(NekoStyle.amber)
+                            .font(NekoFont.body).foregroundStyle(NekoStyle.amber)
                     }
                     Text(candidate["metadata"]["config_summary"].string)
                         .font(.system(.caption, design: .monospaced))
@@ -331,12 +317,12 @@ struct ToolsView: View {
                         .textSelection(.enabled)
                     if localProcess {
                         Text("This executable runs on your Mac outside the agent sandbox. Review its command before trusting it.")
-                            .font(.caption).foregroundStyle(N.text4)
+                            .font(NekoFont.meta).foregroundStyle(N.text4)
                     }
                     Button(localProcess ? "Trust and connect" : "Connect") {
                         send("Mcp", "LinkSource", ["workspace_id": .string(workspace), "candidate_id": candidate["id"], "trust_local_process": .bool(localProcess)])
                     }
-                    .disabled(workspace.isEmpty || !problem.isEmpty || candidate["metadata"]["enabled_at_source"].string == "false")
+                    .disabled(busy || model.busy || workspace.isEmpty || !problem.isEmpty || candidate["metadata"]["enabled_at_source"].string == "false")
                     .controlSize(.small)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -353,26 +339,24 @@ struct ToolsView: View {
             toolSearch = ""
             selectedConnection = ConnectionSelection(id: connection.recordID)
         } label: {
-            HStack(spacing: 13) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(N.text3)
-                    .frame(width: 32)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(connection["label"].string).font(.system(size: 14, weight: .medium)).foregroundStyle(N.text)
-                    Text("\(scope)  ·  \(status)").font(.caption).foregroundStyle(N.text4)
-                }
-                Spacer(minLength: 10)
-                Text(summary)
-                    .font(.caption).foregroundStyle(N.text3)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(N.text4)
+            HStack(spacing: 12) {
+                Image(systemName: connection["config"]["transport"].string == "http" ? "link" : "terminal")
+                    .font(NekoFont.body).foregroundStyle(N.text3).frame(width: 18).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(connection["label"].string).font(NekoFont.heading).foregroundStyle(N.text).lineLimit(1)
+                    Text(scope).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(status).foregroundStyle(status == "Needs attention" || status == "Sign in needed" ? NekoStyle.amber : N.text3)
+                    if summary != status { Text(summary).foregroundStyle(N.text3).monospacedDigit() }
+                }.font(NekoFont.meta).fixedSize()
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(N.text3).accessibilityHidden(true)
             }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 64)
+            .padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(connection["label"].string), \(status), \(summary)")
+        .accessibilityLabel("\(connection["label"].string), \(scope), \(status), \(summary)")
     }
 
     private func connectionDetail(_ connection: JSONValue) -> some View {
@@ -380,105 +364,94 @@ struct ToolsView: View {
         let filtered = connection["tools"].array.filter {
             toolSearch.isEmpty || ($0["name"].string + " " + $0["description"].string).localizedCaseInsensitiveContains(toolSearch)
         }
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(connection["label"].string).font(.title2.weight(.semibold))
-                    Text(ToolsPresentation.toolSummary(connection))
-                        .font(.callout).foregroundStyle(.secondary)
+                    Text(connection["label"].string).font(NekoFont.title).lineLimit(2)
+                    Text("\(ToolsPresentation.connectionStatus(connection)) · \(ToolsPresentation.toolSummary(connection))")
+                        .font(NekoFont.meta).foregroundStyle(N.text3)
                 }
                 Spacer()
-                Button("Done") { selectedConnection = nil }
+                if busy { ProgressView().controlSize(.small) }
+                Button("Done") { selectedConnection = nil }.keyboardShortcut(.cancelAction)
             }
-            .padding(.bottom, 18)
-            if !connection["error"].string.isEmpty {
-                Label(connection["error"].string, systemImage: "exclamationmark.triangle")
-                    .font(.callout).foregroundStyle(.orange).textSelection(.enabled).padding(.bottom, 14)
-            }
-            HStack {
-                Button("Refresh tools") { send("Mcp", "Discover", ["connection_id": connection["id"]]) }
-                    .disabled(!connection["enabled"].bool)
-                Button(connection["enabled"].bool ? "Pause connection" : "Enable connection") {
-                    send("Mcp", "SetEnabled", ["connection_id": connection["id"], "enabled": .bool(!connection["enabled"].bool)])
-                }
-                if connection["config"]["transport"].string == "http" {
-                    Button(ToolsPresentation.connectionStatus(connection) == "Sign in needed" ? "Retry sign-in" : "Sign in") {
-                        send("Mcp", "Authenticate", ["connection_id": connection["id"], "client_id": clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .null : .string(clientID.trimmingCharacters(in: .whitespacesAndNewlines))])
-                    }.disabled(!connection["enabled"].bool)
-                }
-                Spacer()
-            }
-            .controlSize(.small)
-            .padding(.bottom, 18)
-            DisclosureGroup("Connection details") {
-                Text(connection["config"]["url"].string.isEmpty ? connection["config"]["command"].string : connection["config"]["url"].string)
-                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .font(.callout)
-            .padding(.bottom, 18)
-            HStack {
-                Text("Tools").font(.headline)
-                Spacer()
-                if count > 0 { NekoSearchField(title: "Search tools", text: $toolSearch).frame(width: 220) }
-            }
-            .padding(.bottom, 10)
             Divider()
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 16) {
+                    operationFeedback
+                    if !connection["error"].string.isEmpty {
+                        DisclosureGroup {
+                            Text(connection["error"].string).font(NekoFont.meta).textSelection(.enabled)
+                        } label: {
+                            Label(connection["error"].string, systemImage: "exclamationmark.triangle").lineLimit(2)
+                        }.foregroundStyle(NekoStyle.amber)
+                    }
+                    HStack(spacing: 8) {
+                        Button("Refresh tools") { send("Mcp", "Discover", ["connection_id": connection["id"]]) }.disabled(!connection["enabled"].bool)
+                        Button(connection["enabled"].bool ? "Pause connection" : "Enable connection") {
+                            send("Mcp", "SetEnabled", ["connection_id": connection["id"], "enabled": .bool(!connection["enabled"].bool)])
+                        }
+                        if connection["config"]["transport"].string == "http" {
+                            Button(ToolsPresentation.connectionStatus(connection) == "Sign in needed" ? "Retry sign-in" : "Sign in") {
+                                send("Mcp", "Authenticate", ["connection_id": connection["id"], "client_id": clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .null : .string(clientID.trimmingCharacters(in: .whitespacesAndNewlines))])
+                            }.disabled(!connection["enabled"].bool)
+                        }
+                    }.controlSize(.small).disabled(busy || model.busy)
+                    DisclosureGroup("Connection details") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            LabeledContent("Workspace", value: connection["workspace_id"].string.isEmpty ? "All workspaces" : (model.workspaces.first { $0.recordID == connection["workspace_id"].string }?["name"].string ?? "Unavailable"))
+                            Text(connection["config"]["url"].string.isEmpty ? connection["config"]["command"].string : connection["config"]["url"].string)
+                                .font(NekoFont.mono).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            if connection["config"]["transport"].string != "http" {
+                                Text("Arguments: \(connection["config"]["args"].array.map(\.string).joined(separator: " "))").textSelection(.enabled)
+                                if !connection["config"]["cwd"].string.isEmpty { Text("Working directory: \(connection["config"]["cwd"].string)").textSelection(.enabled) }
+                                Text(connection["trusted"].bool ? "Trusted local executable" : "Local executable trust required").foregroundStyle(N.text3)
+                            } else {
+                                LabeledContent("OAuth client ID") { TextField("Only if the server asks for one", text: $clientID).labelsHidden() }
+                            }
+                        }.font(NekoFont.meta).padding(.top, 8)
+                    }
+                    HStack {
+                        Text("Tools").font(NekoFont.heading)
+                        Spacer()
+                        if count > 0 { NekoSearchField(title: "Search tools", text: $toolSearch).frame(width: 220) }
+                    }
                     if count == 0 {
-                        Text(ToolsPresentation.connectionStatus(connection) == "Sign in needed" ? "Sign in again. Neko will discover its tools automatically, then watch for relevant work when the server offers a read-only source." : connection["discovered_ms"] == .null ? "Neko is discovering this connection's tools automatically. You can refresh if it takes too long." : "This connection did not expose any tools. Use Refresh tools to check again.")
-                            .font(.callout).foregroundStyle(.secondary).padding(.vertical, 22)
+                        Text(!connection["enabled"].bool ? "Enable this connection to discover its tools." : ToolsPresentation.connectionStatus(connection) == "Sign in needed" ? "Sign in to discover this server’s tools." : connection["discovered_ms"] == .null ? "Discovering tools. Refresh if this takes too long." : "This server exposed no tools. Refresh to check again.")
+                            .font(NekoFont.body).foregroundStyle(N.text3).padding(.vertical, 8)
                     } else if filtered.isEmpty {
-                        Text("No tools match your search.").font(.callout).foregroundStyle(.secondary).padding(.vertical, 22)
+                        Text("No tools match your search.").font(NekoFont.body).foregroundStyle(N.text3)
                     }
-                    ForEach(Array(filtered.enumerated()), id: \.offset) { index, tool in
-                        toolRow(tool, connection: connection)
-                        if index < filtered.count - 1 { Divider() }
+                    VStack(spacing: 0) {
+                        ForEach(Array(filtered.enumerated()), id: \.offset) { index, tool in
+                            toolRow(tool, connection: connection)
+                            if index < filtered.count - 1 { Divider() }
+                        }
                     }
-                }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(24)
-        .frame(width: 700, height: 620)
+        .font(NekoFont.body).padding(NekoLayout.pageInset)
+        .frame(width: 680, height: 570)
     }
 
     private func toolRow(_ tool: JSONValue, connection: JSONValue) -> some View {
-        return VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(tool["name"].string).font(.system(size: 14, weight: .medium))
-                Spacer(minLength: 12)
-                Text(!connection["enabled"].bool ? "Paused" : (connection["error"].string.isEmpty ? "Available" : "Needs attention"))
-                    .font(.caption).foregroundStyle(N.text4)
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                if !tool["description"].string.isEmpty { Text(tool["description"].string).textSelection(.enabled) }
+                Text(tool["read_only"].bool ? "The server declares this tool read-only. Chat lookups can run without another prompt." : "Chat asks before each call. Enabled responsibilities may use their selected connections unattended.")
+                Text("Input schema").font(NekoFont.heading)
+                Text(tool["input_schema"].string.isEmpty ? String(data: (try? JSONEncoder().encode(tool["input_schema"])) ?? Data(), encoding: .utf8) ?? "Unavailable" : tool["input_schema"].string)
+                    .font(NekoFont.mono).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }.font(NekoFont.meta).foregroundStyle(N.text2).padding(.top, 8)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(tool["name"].string).font(NekoFont.heading).foregroundStyle(N.text)
+                Text(tool["read_only"].bool ? "Declared read-only" : "May change data").font(NekoFont.meta).foregroundStyle(N.text3)
+                if !tool["description"].string.isEmpty { Text(tool["description"].string).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2) }
             }
-            if !tool["description"].string.isEmpty {
-                Text(tool["description"].string)
-                    .font(.callout).foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            HStack(spacing: 10) {
-                Text(tool["read_only"].bool ? "Declared read-only" : "May change data")
-                    .font(.caption).foregroundStyle(N.text4)
-                DisclosureGroup("Details") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(tool["description"].string).textSelection(.enabled)
-                        Text(tool["read_only"].bool ? "The server declares this tool read-only. Chat lookups can run without another prompt." : "Chat asks before each call. Enabled responsibilities may use their selected connections unattended.")
-                        Text("Input schema").fontWeight(.medium)
-                        Text(tool["input_schema"].string)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(N.text3)
-                    .padding(.top, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .fixedSize(horizontal: true, vertical: false)
-            }
-            .font(.caption)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
     }
 
     private var addConnection: some View {
@@ -486,11 +459,16 @@ struct ToolsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 LabeledContent("Connection name") { TextField("Name", text: $label).labelsHidden() }
                 if workspace.isEmpty {
-                    Text("Scope: Available in every workspace when connected.").font(.callout)
+                    Text("Scope: Available in every workspace when connected.").font(NekoFont.body)
                 } else {
                     Toggle("Available in all workspaces", isOn: $global)
                 }
-                Toggle("Local executable", isOn: $local).onChange(of: local) { _, _ in trust = false; target = "" }
+                Picker("Connection type", selection: $local) {
+                    Text("Hosted server").tag(false)
+                    Text("Local executable").tag(true)
+                }
+                .pickerStyle(.segmented).controlSize(.regular)
+                .onChange(of: local) { _, _ in trust = false; target = "" }
                 LabeledContent(local ? "Absolute executable path" : "Server URL") {
                     TextField(local ? "/path/to/executable" : "https://example.com/mcp", text: $target).labelsHidden()
                 }
@@ -507,11 +485,11 @@ struct ToolsView: View {
                             }
                         }
                     }
-                    Text("Local servers execute code outside worker sandboxes. Nothing is downloaded automatically.").font(.caption)
+                    Text("Local servers execute code outside worker sandboxes. Nothing is downloaded automatically.").font(NekoFont.meta)
                     Toggle("I trust this executable and its arguments", isOn: $trust)
                 }
                 LabeledContent("Credentials (optional JSON)") { SecureField("Credentials", text: $credentials).labelsHidden() }
-                Text("Use {\"bearer\":\"…\"} for HTTP or {\"environment\":{\"TOKEN\":\"…\"}} for local servers. Stored in Keychain. Keep secrets out of URLs and arguments.").font(.caption).foregroundStyle(.secondary)
+                Text("Use {\"bearer\":\"…\"} for HTTP or {\"environment\":{\"TOKEN\":\"…\"}} for local servers. Stored in Keychain. Keep secrets out of URLs and arguments.").font(NekoFont.meta).foregroundStyle(.secondary)
                 Button("Add server", action: addServer).disabled(label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || target.isEmpty || (local && !trust))
             }.padding(8)
                 .onChange(of: target) { _, _ in trust = false }
@@ -551,9 +529,8 @@ struct ToolsView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Skills").font(.system(size: 14, weight: .semibold)).foregroundStyle(N.text)
                     Text("Instructions from this workspace's folders. A skill cannot access tools on its own.")
-                        .font(.callout).foregroundStyle(N.text3)
+                        .font(NekoFont.body).foregroundStyle(N.text3)
                 }
                 Spacer(minLength: 12)
                 Button("Refresh", systemImage: "arrow.clockwise") { send("Skills", "Refresh") }.controlSize(.small)
@@ -566,8 +543,8 @@ struct ToolsView: View {
                         if index < visibleSkills.count - 1 { Divider().padding(.leading, 46) }
                     }
                 }
-                .background(N.card.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
-                .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(N.line.opacity(0.7)))
+                .background(N.card, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(N.line))
             }
             ForEach(SkillPresentation.unavailable(enabled: model.snapshot["skills"]["enabled"].array, available: model.snapshot["skills"]["available"].array, workspace: workspace), id: \.self) { record in
                 GroupBox("Unavailable enabled skill") {
@@ -588,16 +565,16 @@ struct ToolsView: View {
                     Link("Browse skills.sh", destination: URL(string: "https://skills.sh")!)
                     LabeledContent("GitHub SKILL.md URL") { TextField("https://github.com/…/SKILL.md", text: $repositoryURL).labelsHidden() }
                     Text("Only the instruction file is previewed. Scripts and references are not installed.")
-                        .font(.caption).foregroundStyle(N.text3)
+                        .font(NekoFont.meta).foregroundStyle(N.text3)
                     Button("Fetch for review") { send("Skills", "PreviewRepository", ["workspace_id": .string(workspace), "url": .string(repositoryURL)]) }.disabled(repositoryURL.isEmpty)
                 }.padding(.top, 12)
             } label: {
                 Label("Find a skill", systemImage: "plus")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(NekoFont.heading)
             }
             .padding(16)
-            .background(N.card.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
-            .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(N.line.opacity(0.7)))
+            .background(N.card, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(N.line))
             ForEach(Array(model.snapshot["skills"]["proposals"].array.filter { $0["workspace_id"].string == workspace }.enumerated()), id: \.offset) { _, proposal in proposalCard(proposal) }
         }
     }
@@ -620,19 +597,19 @@ struct ToolsView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "text.book.closed").foregroundStyle(N.text3).frame(width: 28)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(skill["name"].string).font(.system(size: 14, weight: .medium)).foregroundStyle(N.text)
-                        Text(skill["description"].string).font(.caption).foregroundStyle(N.text4).lineLimit(1)
+                        Text(skill["name"].string).font(NekoFont.heading).foregroundStyle(N.text)
+                        Text(skill["description"].string).font(NekoFont.meta).foregroundStyle(N.text4).lineLimit(1)
                     }
                     Spacer()
                     Text(record == nil ? "Available" : changed ? "Changed" : "Enabled")
-                        .font(.caption).foregroundStyle(changed ? NekoStyle.amber : N.text3)
-                    Image(systemName: expandedSkills.contains(key) ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(N.text4)
-                }.contentShape(Rectangle()).padding(.horizontal, 16).frame(minHeight: 64)
+                        .font(NekoFont.meta).foregroundStyle(changed ? NekoStyle.amber : N.text3)
+                    Image(systemName: expandedSkills.contains(key) ? "chevron.up" : "chevron.down").font(NekoFont.meta).foregroundStyle(N.text4)
+                }.contentShape(Rectangle()).padding(.horizontal, 16).padding(.vertical, 10)
             }.buttonStyle(.plain)
             if expandedSkills.contains(key) {
                 VStack(alignment: .leading, spacing: 8) {
-                Text(skill["description"].string).font(.callout).foregroundStyle(N.text3)
-                Text(skill["path"].string).font(.caption).foregroundStyle(N.text4).textSelection(.enabled)
+                Text(skill["description"].string).font(NekoFont.body).foregroundStyle(N.text3)
+                Text(skill["path"].string).font(NekoFont.meta).foregroundStyle(N.text4).textSelection(.enabled)
                 if changed { Text("Instructions changed. Review them before enabling the updated version.").foregroundStyle(.orange) }
                 Button("Open instructions to review") {
                     if !NSWorkspace.shared.open(URL(fileURLWithPath: skill["path"].string)) { validation = "Could not open this instruction file." }
@@ -659,18 +636,18 @@ struct ToolsView: View {
         return GroupBox("Review: " + proposal["name"].string) {
             VStack(alignment: .leading, spacing: 10) {
                 Text(proposal["source"].string).textSelection(.enabled)
-                Text(proposal["audit_status"].string).font(.caption)
+                Text(proposal["audit_status"].string).font(NekoFont.meta)
                 if let url = URL(string: auditURL), !auditURL.isEmpty {
                     Button("View published source and audit links") {
                         if NSWorkspace.shared.open(url) { openedAudits.insert(key) }
                     }
-                    Text("Read the published audit results. If none are available, do not confirm or install. Confirmation records your review, not a passing audit.").font(.caption)
+                    Text("Read the published audit results. If none are available, do not confirm or install. Confirmation records your review, not a passing audit.").font(NekoFont.meta)
                     Button("I reviewed the linked published audit results") {
                         send("Skills", "ConfirmAuditReview", ["id": proposal["id"], "content_hash": proposal["content_hash"], "audit_url": proposal["audit_url"]])
                     }.disabled(!openedAudits.contains(key))
                 }
                 ScrollView { Text(proposal["body"].string).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 300)
-                Text("Accept saves these exact instructions. Enable separately after installation.").font(.caption)
+                Text("Accept saves these exact instructions. Enable separately after installation.").font(NekoFont.meta)
                 HStack {
                     Button("Accept & save reviewed content") { decide(proposal, accept: true) }.disabled(!reviewed)
                     Button("Reject") { decide(proposal, accept: false) }

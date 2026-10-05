@@ -18,17 +18,17 @@ extension EnvironmentValues {
 /// Native macOS values for the chat surface. Colors follow the system dark
 /// palette so controls read as AppKit rather than as a web page.
 enum ReplyStyle {
-    static let groupFill = Color.white.opacity(0.045)
-    static let groupStroke = Color.white.opacity(0.07)
-    static let codeFill = Color(nsColor: NSColor(white: 0.08, alpha: 1))
-    static let hairline = Color.white.opacity(0.07)
+    static let groupFill = N.card
+    static let groupStroke = N.line
+    static let codeFill = N.panel
+    static let hairline = N.line
     static let green = Color(nsColor: .systemGreen)
     static let red = Color(nsColor: .systemRed)
     static let orange = Color(nsColor: .systemOrange)
-    static let body = Font.system(size: 13)
-    static let small = Font.system(size: 12)
-    static let caption = Font.system(size: 11)
-    static let mono = Font.system(size: 11, design: .monospaced)
+    static let body = NekoFont.body
+    static let small = NekoFont.meta
+    static let caption = NekoFont.meta
+    static let mono = NekoFont.mono
     static let terminalLanguages: Set<String> = ["sh", "bash", "zsh", "shell", "console", "terminal", "log", "output", "text-output"]
     static let viewKinds: Set<String> = ["neko-chart", "neko-choices", "neko-form", "neko-plan", "neko-files", "neko-sources"]
 }
@@ -292,13 +292,16 @@ struct ReplySources: View {
     let items: [String]
     var body: some View {
         if !items.isEmpty {
-            HStack(spacing: 6) {
-                Text("Sources").font(ReplyStyle.caption).foregroundStyle(.secondary)
-                ForEach(items.prefix(8), id: \.self) { item in
-                    Text(item).font(ReplyStyle.caption).foregroundStyle(NekoStyle.accent.opacity(0.95)).lineLimit(1)
-                        .padding(.horizontal, 7).frame(height: 20)
-                        .background(NekoStyle.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                }
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        Text(item).font(ReplyStyle.caption).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }.padding(.top, 6)
+            } label: {
+                Label("Sources · \(items.count)", systemImage: "text.quote")
+                    .font(ReplyStyle.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -328,6 +331,8 @@ struct NativeTableBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
+                Text("\(rows.count) \(rows.count == 1 ? "row" : "rows") · \(headers.count) columns")
+                    .font(ReplyStyle.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button(copied ? "Copied" : "Copy as CSV") {
                     let csv = ([headers] + rows).map { $0.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: ",") }.joined(separator: "\n")
@@ -343,10 +348,12 @@ struct NativeTableBlock: View {
                             if sortColumn == index { ascending.toggle() } else { sortColumn = index; ascending = true }
                         } label: {
                             HStack(spacing: 3) {
-                                Text(header).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                                Text(header).font(NekoFont.heading).foregroundStyle(.secondary)
                                 if sortColumn == index { Image(systemName: ascending ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary) }
                             }.padding(.horizontal, 6).frame(width: columnWidth, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
+                            .accessibilityLabel("Sort by \(header)")
+                            .accessibilityValue(sortColumn == index ? (ascending ? "Ascending" : "Descending") : "Not sorted")
                     }
                 }.padding(.horizontal, 10).padding(.vertical, 8)
                 Divider()
@@ -354,14 +361,14 @@ struct NativeTableBlock: View {
                     HStack(alignment: .top, spacing: 0) {
                         ForEach(Array(headers.indices), id: \.self) { column in
                             let cell = row.indices.contains(column) ? row[column] : ""
-                            Text(inline(cell)).font(ReplyStyle.small.monospacedDigit())
+                            Text(inline(cell)).font(ReplyStyle.body.monospacedDigit())
                                 .foregroundStyle(tone(cell, column: column))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 6).frame(width: columnWidth, alignment: .leading)
                         }
                     }
                     .padding(.horizontal, 10).padding(.vertical, 8)
-                    .background(index % 2 == 1 ? Color.white.opacity(0.035) : .clear)
+                    .background(index % 2 == 1 ? Color.primary.opacity(0.025) : .clear)
                 }
             }
             }
@@ -611,20 +618,21 @@ struct ReplyTicketRow: View {
     let workspace: String
     let open: () -> Void
     @State private var hover = false
+    @Environment(\.ink) private var ink
     var body: some View {
         Button(action: open) {
             HStack(spacing: 10) {
-                Circle().fill(ticketStatusColor(status)).frame(width: 8, height: 8)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(ReplyStyle.body).lineLimit(1)
+                StatusGlyph(status: status, size: 14).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(NekoFont.heading).lineLimit(2)
                     Text([workspace, friendlyTaskStatus(status)].filter { !$0.isEmpty }.joined(separator: " · ")).font(ReplyStyle.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12).frame(height: 44)
-            .background(hover ? Color.white.opacity(0.07) : ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ReplyStyle.groupStroke))
+            .padding(.horizontal, 10).padding(.vertical, 10)
+            .background(hover ? ink.raisedHover : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(alignment: .top) { ink.line.frame(height: 1) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

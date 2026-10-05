@@ -55,6 +55,12 @@ its top row useful and mouse-accessible with the sidebar expanded or collapsed.
 Page bodies and side panels respect the native top safe area. Hiding the toolbar
 background does not remove its mouse-hit region; content must not draw controls
 underneath it.
+The native craft pass uses one shared graphite surface ramp and bounded page
+widths: 820pt for management and 720pt for conversations. Native segmented
+pickers own focus and keyboard selection. Management headers expose their
+actions separately to accessibility; long source/check details use explicit
+disclosures. Active watches appear before suggestions. Settings and editors
+use grouped native forms. See `docs/design/native-polish.md`.
 Home and ticket chats share a native `NSTextView` composer and attachment strip.
 `ComposerDraftStore` keeps text, durable attachment references and revisions per
 workspace/profile or ticket ID in `AppModel`; navigation preserves them, app quit

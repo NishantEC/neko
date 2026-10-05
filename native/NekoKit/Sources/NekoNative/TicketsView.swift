@@ -213,20 +213,22 @@ struct TicketsView: View {
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
+        .frame(maxWidth: NekoLayout.pageWidth)
+        .frame(maxWidth: .infinity)
         .overlay { if Self.columns.allSatisfy({ tasks(in: $0).isEmpty }) { ContentUnavailableView("No tickets", systemImage: "tray", description: Text(search.isEmpty ? "Ask Neko for work in Home, and its tickets appear here." : "No ticket matches “\(search)”.")) } }
     }
     private func listRow(_ task: JSONValue, color: Color) -> some View {
         let status = task["status"].string
         return HStack(spacing: 10) {
-            Circle().fill(ticketStatusColor(status)).frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(task["title"].string).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                Text("\(workspaceName(task)) · \(friendlyTaskStatus(status))").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            StatusGlyph(status: status, size: 14).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(task["title"].string).font(NekoFont.heading).lineLimit(2)
+                Text("\(workspaceName(task)) · \(friendlyTaskStatus(status))").font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 8)
-            Text(relative(task["updated_at_ms"].int)).font(.system(size: 11)).foregroundStyle(.tertiary)
+            Text(relative(task["updated_at_ms"].int)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 7)
         .contextMenu { moveMenu(task) }
     }
 
@@ -234,28 +236,28 @@ struct TicketsView: View {
 
     private var board: some View {
         ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: NekoLayout.rowInset) {
                 ForEach(Self.columns, id: \.id) { column in
                     let items = tasks(in: column)
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 8) {
-                            Circle().fill(column.color).frame(width: 8, height: 8)
-                            Text(column.title).font(.system(size: 13, weight: .semibold))
-                            Text(String(items.count)).font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary)
+                            Text(column.title).font(NekoFont.heading)
+                            Text(String(items.count)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
                             Spacer(minLength: 0)
-                        }.padding(.horizontal, 6).frame(height: 30)
+                        }.padding(.horizontal, NekoLayout.rowInset).frame(height: 32)
+                        .overlay(alignment: .bottom) { N.line.frame(height: 1) }
                         .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
                         ScrollView(.vertical) {
-                            LazyVStack(spacing: 8) {
+                            LazyVStack(spacing: 10) {
                                 ForEach(items, id: \.recordID) { task in
                                     card(task)
                                         .draggable(task.recordID) { card(task).frame(width: 260).opacity(0.9) }
                                 }
                                 if items.isEmpty {
                                     Text(dropTarget == column.id ? "Drop to move here" : "Nothing here")
-                                        .font(.system(size: 12)).foregroundStyle(.tertiary).frame(maxWidth: .infinity, minHeight: 60)
+                                        .font(NekoFont.meta).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 72)
                                 }
-                            }.padding(6)
+                            }.padding(.horizontal, 2).padding(.bottom, 12)
                         }.scrollIndicators(.never)
                     }
                     .frame(width: 280).frame(maxHeight: .infinity, alignment: .top)
@@ -269,14 +271,13 @@ struct TicketsView: View {
                         withAnimation(.snappy(duration: 0.15)) { dropTarget = inside ? column.id : (dropTarget == column.id ? nil : dropTarget) }
                     }
                 }
-            }.padding(.horizontal, 20).padding(.vertical, 14)
+            }.padding(.horizontal, NekoLayout.pageInset).padding(.vertical, NekoLayout.sectionGap)
         }.scrollIndicators(.never)
     }
     private func card(_ task: JSONValue) -> some View {
-        let index = model.workspaces.firstIndex { $0.recordID == task["workspace_id"].string } ?? 0
         let status = task["status"].string
         return Button { selected = task.recordID } label: {
-            TicketCard(id: "NEK-" + String(task.recordID.prefix(4)).uppercased(), title: task["title"].string, workspace: workspaceName(task), workspaceColor: workspaceColor(index), meta: friendlyTaskStatus(status), highlighted: selected == task.recordID, activity: .forTask(status), note: status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task))
+            TicketCard(id: "NEK-" + String(task.recordID.prefix(4)).uppercased(), title: task["title"].string, workspace: workspaceName(task), status: status, updated: relative(task["updated_at_ms"].int), highlighted: selected == task.recordID, note: status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task))
         }
         .buttonStyle(.plain)
         .contextMenu { moveMenu(task) }
@@ -420,9 +421,9 @@ struct TicketDetail: View {
         VStack(spacing: 0) {
         if fullPage { FullDiskAccessBanner() }
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
                 if !fullPage { HStack(alignment: .top) {
-                    Text(ticket["title"].string).font(.title2.bold()).textSelection(.enabled)
+                    Text(ticket["title"].string).font(NekoFont.title).textSelection(.enabled)
                     Spacer()
                     Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
                 }
@@ -463,10 +464,14 @@ struct TicketDetail: View {
                         Button("Delete…", role: .destructive) { confirmDelete = true }
                     }
                 }.disabled(model.busy) }
-            }.padding(28).frame(maxWidth: 760, alignment: .leading)
+            }.font(NekoFont.body)
+                .frame(maxWidth: NekoLayout.readingWidth, alignment: .leading)
+                .padding(NekoLayout.pageInset)
+                .frame(maxWidth: .infinity)
         }.frame(maxWidth: .infinity).defaultScrollAnchor(.bottom)
-        Divider().opacity(0.5)
-        TicketComposer(model: model, id: id, status: ticket["status"].string).frame(maxWidth: 760)
+        TicketComposer(model: model, id: id, status: ticket["status"].string)
+            .frame(maxWidth: NekoLayout.readingWidth)
+            .padding(.horizontal, NekoLayout.pageInset).padding(.top, 8).padding(.bottom, 14)
         }.frame(maxWidth: .infinity)
                 .toolbar { if fullPage { agentToolbar } }
                 .confirmationDialog("Delete this ticket?", isPresented: $confirmDelete) {
@@ -494,7 +499,7 @@ struct TicketDetail: View {
                 }
             }.padding(.top, 10)
         } label: {
-            Text("Previous work & history").font(.system(size: 12)).foregroundStyle(.secondary)
+            Label("Previous work & history", systemImage: "clock.arrow.circlepath").font(NekoFont.meta).foregroundStyle(.secondary)
         }
     }
     @ToolbarContentBuilder private var agentToolbar: some ToolbarContent {
@@ -623,7 +628,14 @@ struct TicketDetail: View {
             }
         }
     }
-    @ViewBuilder private func section(_ title: String, _ text: String) -> some View { if !text.isEmpty { Text(title).font(.headline); ReadableText(text: text) } }
+    @ViewBuilder private func section(_ title: String, _ text: String) -> some View {
+        if !text.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title).font(NekoFont.heading).accessibilityAddTraits(.isHeader)
+                ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
+            }
+        }
+    }
 }
 
 /// The latest answer stays readable; large evidence lists live in the supporting
@@ -636,39 +648,44 @@ private struct TicketOutcomeReadback: View {
 
     var body: some View {
         let review = TicketPresentation.review(result)
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(outcome.title).font(.headline)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(outcome.title).font(NekoFont.title).accessibilityAddTraits(.isHeader)
+                    ChatAuthorLine(author: "Neko")
+                }
                 Spacer()
                 if !result.isEmpty {
                     Button(copied ? "Copied" : "Copy result", systemImage: copied ? "checkmark" : "doc.on.doc") {
                         NSPasteboard.general.clearContents()
                         copied = NSPasteboard.general.setString(result, forType: .string)
                     }
-                    .controlSize(.small)
+                    .buttonStyle(.borderless).controlSize(.small).font(NekoFont.meta)
                     .help("Copy the full saved result, including the reviewer response")
                 }
             }
-            Text(outcome.note).font(.caption).foregroundStyle(.secondary)
+            Text(outcome.note).font(NekoFont.meta).foregroundStyle(.secondary)
             if review.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("No result text was saved for this ticket.").foregroundStyle(.secondary)
             } else {
-                ReadableText(text: review.body)
+                ReadableText(text: review.body).font(NekoFont.chat).lineSpacing(4)
             }
-            Divider()
-            Text(outcome.reviewIsCurrent ? "Independent review" : "Recorded independent review").font(.headline)
-            if let verdict = review.verdict {
-                Label(verdict.passed ? "Reviewer reported passed" : "Reviewer found issues", systemImage: verdict.passed ? "checkmark.shield" : "exclamationmark.shield")
-                    .font(.subheadline)
-                    .foregroundStyle(!verdict.passed ? Color.orange : outcome.reviewIsCurrent ? Color.green : Color.secondary)
-                ReadableText(text: verdict.summary)
-                ForEach(Array(verdict.findings.enumerated()), id: \.offset) { _, finding in ReadableText(text: "• " + finding) }
-                Text("\(verdict.files.count) files reviewed · \(verdict.tests.count) checks reported").font(.caption).foregroundStyle(.secondary)
-                Text("This is the recorded reviewer response; the ticket status reflects the current verification gate.").font(.caption).foregroundStyle(.secondary)
-            } else {
-                Text(outcome == .reviewing ? "No structured reviewer verdict yet." : "No structured reviewer verdict is available. Any saved review text remains in the result.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
+            Divider().padding(.top, 8)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(outcome.reviewIsCurrent ? "Independent review" : "Recorded independent review").font(NekoFont.heading)
+                if let verdict = review.verdict {
+                    Label(verdict.passed ? "Reviewer reported passed" : "Reviewer found issues", systemImage: verdict.passed ? "checkmark.shield" : "exclamationmark.shield")
+                        .font(NekoFont.body)
+                        .foregroundStyle(!verdict.passed ? Color.orange : outcome.reviewIsCurrent ? Color.green : Color.secondary)
+                    ReadableText(text: verdict.summary)
+                    ForEach(Array(verdict.findings.enumerated()), id: \.offset) { _, finding in ReadableText(text: "• " + finding) }
+                    Text("\(verdict.files.count) files reviewed · \(verdict.tests.count) checks reported").font(.caption).foregroundStyle(.secondary)
+                    Text("This is the recorded reviewer response; the ticket status reflects the current verification gate.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text(outcome == .reviewing ? "No structured reviewer verdict yet." : "No structured reviewer verdict is available. Any saved review text remains in the result.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }.font(NekoFont.body)
             TicketCommandEvidenceView(events: events)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -680,35 +697,38 @@ struct TicketCard: View {
     let id: String
     let title: String
     let workspace: String
-    let workspaceColor: Color
-    let meta: String
+    let status: String
+    let updated: String
     let highlighted: Bool
-    var activity: NekoActivity = .idle
     /// Why a stopped ticket stopped, shown under its title.
     var note: String? = nil
     @State private var hover = false
+    @Environment(\.ink) private var ink
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text(id).font(.system(size: 12)).foregroundStyle(N.text4)
-                Spacer()
-                Label { Text(meta).lineLimit(1) } icon: { PixelGlyph(activity: activity, size: 10) }
-                    .font(.system(size: 11)).foregroundStyle(activity.animates ? N.text2 : N.text4)
+            HStack(alignment: .top, spacing: 10) {
+                StatusGlyph(status: status, size: 14).padding(.top, 2).accessibilityHidden(true)
+                Text(title).font(NekoFont.heading).foregroundStyle(.primary).lineSpacing(2).lineLimit(3)
+                    .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
-            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(N.text).lineSpacing(2).lineLimit(3).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             if let note {
-                Text(note).font(.system(size: 11)).foregroundStyle(NekoStyle.amber).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                Text(note).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 6) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous).fill(workspaceColor).frame(width: 8, height: 8)
-                Text(workspace).font(.system(size: 12)).foregroundStyle(N.text3).lineLimit(1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(friendlyTaskStatus(status)).font(NekoFont.meta).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(workspace).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(updated).monospacedDigit().lineLimit(1)
+                }.font(NekoFont.meta).foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
+        .padding(NekoLayout.rowInset)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(hover ? N.selected : N.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(highlighted ? NekoStyle.accent.opacity(0.35) : Color.white.opacity(hover ? 0.1 : 0.06)))
-        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(hover ? ink.raisedHover : ink.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(highlighted ? NekoStyle.accent : hover ? ink.lineStrong : ink.line))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .help(id)
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
     }
 }

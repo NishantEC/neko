@@ -60,55 +60,58 @@ struct TicketCommandReceiptView: View {
     let receipt: TicketCommandReceipt
     var role: String? = nil
     @State private var copied = false
+    @Environment(\.ink) private var ink
 
     var body: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(receipt.notices, id: \.self) { notice in
                     Label(notice, systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(NekoStyle.amber)
+                        .font(NekoFont.meta).foregroundStyle(NekoStyle.amber)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let command = receipt.command {
-                    Text(command).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    Text(command).font(NekoFont.mono).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let output = receipt.output {
-                    Text(receipt.outputTruncated ? "Saved output · shortened" : "Saved output").font(.caption).foregroundStyle(.secondary)
+                    Text(receipt.outputTruncated ? "Saved output · shortened" : "Saved output").font(NekoFont.meta).foregroundStyle(.secondary)
                     if output.isEmpty {
-                        Text("No output was recorded.").font(.caption).foregroundStyle(.secondary)
+                        Text("No output was recorded.").font(NekoFont.meta).foregroundStyle(.secondary)
                     } else {
                         ScrollView([.horizontal, .vertical]) {
-                            Text(output).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                            Text(output).font(NekoFont.mono).textSelection(.enabled)
                                 .fixedSize(horizontal: true, vertical: false).padding(10)
                         }.frame(maxHeight: 220)
-                            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+                            .background(ink.raised, in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
                 HStack {
                     Button(copied ? "Copied" : "Copy saved record", systemImage: copied ? "checkmark" : "doc.on.doc") {
                         NSPasteboard.general.clearContents()
                         copied = NSPasteboard.general.setString(receipt.rawRecord, forType: .string)
-                    }.controlSize(.small).help("Copy only the record retained by Neko, including its truncation flags")
+                    }.buttonStyle(.borderless).controlSize(.small).font(NekoFont.meta)
+                        .help("Copy only the record retained by Neko, including its truncation flags")
                     Spacer()
                 }
                 if receipt.isIncomplete {
                     DisclosureGroup("Raw saved record") {
-                        Text(receipt.rawRecord).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        Text(receipt.rawRecord).font(NekoFont.mono).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                    }.font(.caption)
+                    }.font(NekoFont.meta)
                 }
             }.padding(.top, 8)
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(receipt.title).font(NekoFont.mono).lineLimit(2).foregroundStyle(.primary)
                 HStack(spacing: 6) {
                     if let role { Text(TicketThread.agentName(role)); Text("·") }
                     Text(receipt.status)
                     if receipt.outputTruncated { Text("· Shortened output") }
-                }.font(.caption).foregroundStyle(receipt.isIncomplete || receipt.failed ? NekoStyle.amber : .secondary)
-                Text(receipt.title).font(.system(size: 12, design: .monospaced)).lineLimit(2)
+                }.font(NekoFont.meta).foregroundStyle(receipt.isIncomplete || receipt.failed ? NekoStyle.amber : .secondary)
             }
         }
+        .padding(.vertical, 4)
         .onChange(of: receipt) { _, _ in copied = false }
     }
 }
@@ -117,6 +120,7 @@ struct TicketCommandReceiptView: View {
 /// attempts and is not a complete journal of the current review.
 struct TicketCommandEvidenceView: View {
     let events: [JSONValue]
+    @Environment(\.ink) private var ink
     var body: some View {
         let records = events.compactMap { event -> (role: String, receipt: TicketCommandReceipt)? in
             guard let receipt = TicketCommandReceipt.from(event: event) else { return nil }
@@ -124,27 +128,29 @@ struct TicketCommandEvidenceView: View {
         }
         if !records.isEmpty {
             DisclosureGroup {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Retained commands across this agent’s history. These may include earlier attempts; older activity may no longer be saved.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(NekoFont.meta).foregroundStyle(.secondary)
                     ForEach(Array(records.enumerated()), id: \.offset) { _, record in
                         TicketCommandReceiptView(receipt: record.receipt, role: record.role)
                     }
                 }.padding(.top, 10)
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Saved command evidence · \(records.count)").font(.subheadline)
+                    Label("Saved command evidence · \(records.count)", systemImage: "terminal").font(NekoFont.meta).foregroundStyle(.secondary)
                     let incomplete = records.filter { $0.receipt.isIncomplete }.count
                     let shortened = records.filter { $0.receipt.outputTruncated }.count
-                    if incomplete > 0 || shortened > 0 {
-                        Text([incomplete > 0 ? "\(incomplete) incomplete records" : nil,
+                    let failed = records.filter { $0.receipt.failed }.count
+                    if incomplete > 0 || shortened > 0 || failed > 0 {
+                        Text([failed > 0 ? "\(failed) failed" : nil,
+                              incomplete > 0 ? "\(incomplete) incomplete records" : nil,
                               shortened > 0 ? "\(shortened) shortened outputs" : nil].compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(NekoStyle.amber)
+                            .font(NekoFont.meta).foregroundStyle(NekoStyle.amber)
                     }
                 }
             }
-            .padding(14)
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.12)))
+            .padding(.vertical, 10)
+            .overlay(alignment: .top) { ink.line.frame(height: 1) }
         }
     }
 }

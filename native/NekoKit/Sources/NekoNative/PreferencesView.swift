@@ -138,6 +138,17 @@ struct PreferencesView: View {
     @State private var checkingUpdates = false
     @State private var updateStatus: Updates.Status?
     @State private var updateNote: String?
+    private var tabDescription: String {
+        switch settingsTab {
+        case "AI": "Choose the runtime and model for new work."
+        case "Search": "Choose which folders appear in the quick panel."
+        case "Permissions": "Review what Neko can access on this Mac."
+        case "Diagnostics": "Check local runtimes and the connection to Neko."
+        case "Agents": "Manage the optional legacy agent directory."
+        case "About": "Your workspace, native on your Mac."
+        default: "Make Neko fit the way you use your Mac."
+        }
+    }
     private func checkUpdates() {
         checkingUpdates = true
         Task { updateStatus = await Updates.check(); checkingUpdates = false }
@@ -161,7 +172,7 @@ struct PreferencesView: View {
         Task { _ = await model.workbench(.command("SetTaskBudget", ["cents": value])) }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 20) {
             GlassSegmented(selection: $settingsTab, options: [
                 .init(value: "General", title: "General", symbol: "gearshape"),
                 .init(value: "AI", title: "AI", symbol: "cpu"),
@@ -171,18 +182,36 @@ struct PreferencesView: View {
                 .init(value: "Agents", title: "Agents", symbol: "person.2"),
                 .init(value: "About", title: "About", symbol: "info.circle")
             ])
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(settingsTab).font(NekoFont.title).foregroundStyle(N.text)
+                Text(tabDescription).font(NekoFont.body).foregroundStyle(N.text3)
+            }.padding(.horizontal, 16).accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
             Group {
                 switch settingsTab {
                 case "General":
                 Form {
-                    HotkeySettingsView(model: model)
-                    preferenceToggle("Launch at login", "launch-at-login")
-                    Toggle("Show a floating status while Neko works", isOn: Binding(get: { presence }, set: { presence = $0; PresenceController.enabled = $0; PresenceController.shared.refresh() }))
-                    Text("A small capsule in the corner while tickets run or a reply is pending. It shows how work ended for a few seconds, then hides. Click it to open Neko.").font(.caption).foregroundStyle(.secondary)
-                    Toggle("Clipboard history", isOn: Binding(get: { clipboard.enabled ?? false }, set: { value in setClipboard(value) })).disabled(clipboard.enabled == nil)
-                    Text("Saves copied content locally. Turning this off stops new capture; existing history remains.").font(.caption).foregroundStyle(.secondary)
-                    if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
+                    Section("Quick access") {
+                        HotkeySettingsView(model: model)
+                        preferenceToggle("Launch at login", "launch-at-login")
+                        Toggle(isOn: Binding(get: { presence }, set: { presence = $0; PresenceController.enabled = $0; PresenceController.shared.refresh() })) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Show activity while Neko works")
+                                Text("A small status in the corner. Click it to return to Neko.")
+                                    .font(NekoFont.meta).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Section("Clipboard") {
+                        Toggle(isOn: Binding(get: { clipboard.enabled ?? false }, set: { value in setClipboard(value) })) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Save clipboard history")
+                                Text("Stored on this Mac. Turning it off stops capture and keeps existing history.")
+                                    .font(NekoFont.meta).foregroundStyle(.secondary)
+                            }
+                        }.disabled(clipboard.enabled == nil)
+                        if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
+                    }
                 }.formStyle(.grouped)
                 case "AI":
 
@@ -222,11 +251,13 @@ struct PreferencesView: View {
                             Text("This model runs through an external proxy. Choose Claude Code or OpenCode above to run Claude and other models with their own logins instead.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        DisclosureGroup("Use an exact model ID") {
                         HStack {
                             TextField("Or enter an exact model ID", text: $customModel)
                                 .textFieldStyle(.roundedBorder)
                             Button("Use ID") { agentModel = customModel.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 .disabled(!validModelID(customModel.trimmingCharacters(in: .whitespacesAndNewlines)))
+                        }
                         }
                         HStack {
                             Button(checking ? "Checking…" : "Check & use model") { checkAndUse() }
@@ -259,16 +290,36 @@ struct PreferencesView: View {
                         Text("Counts the cost Claude Code and OpenCode report for each ticket and stops the ticket when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                }.padding()
+                }.formStyle(.grouped)
                 case "Search":
 
-                VStack(alignment: .leading) {
-                    Text("Search folders").font(.headline)
-                    List(folders, id: \.self) { folder in
-                        HStack { Text(folder["title"].string); Spacer(); Button("Remove") { activate("folder-scope", folder["id"].string) } }
+                Form {
+                    Section("Included folders") {
+                        if folders.isEmpty {
+                            Label("No folders added", systemImage: "folder")
+                                .foregroundStyle(.secondary).padding(.vertical, 8)
+                        }
+                        ForEach(folders, id: \.self) { folder in
+                            HStack(spacing: 12) {
+                                Image(systemName: "folder").foregroundStyle(.secondary)
+                                Text(folder["title"].string).textSelection(.enabled)
+                                Spacer()
+                                Button("Remove") { activate("folder-scope", folder["id"].string) }
+                            }.padding(.vertical, 4)
+                        }
                     }
-                    HStack { TextField("Folder path", text: $path); Button("Choose…") { choose() }; Button("Add") { activate("folder-scope", path, action: "add") }.disabled(path.trimmingCharacters(in: .whitespaces).isEmpty) }
-                }.padding()
+                    Section("Add a folder") {
+                        TextField("Folder path", text: $path, prompt: Text("/Users/you/Documents"))
+                            .textFieldStyle(.roundedBorder)
+                        HStack {
+                            Button("Choose folder…") { choose() }
+                            Spacer()
+                            Button("Add folder") { activate("folder-scope", path, action: "add") }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                }.formStyle(.grouped)
                 case "Permissions":
 
                 PermissionsView(model: model)
@@ -278,11 +329,13 @@ struct PreferencesView: View {
                 case "Agents":
 
                 Form {
+                    Section("Legacy providers") {
                     Text(agents.isEmpty ? "No agent provider is turned on." : "\(agents.count) agents visible from the configured provider.")
                     preferenceToggle("Show agents", "agents-enabled")
                     preferenceToggle("Include idle agents", "agents-include-idle")
                     Text("Legacy agent providers are opt-in. These settings do not enable a provider.").font(.caption).foregroundStyle(.secondary)
-                }.padding()
+                    }
+                }.formStyle(.grouped)
                 case "About":
 
                 VStack(spacing: 16) {
@@ -297,16 +350,17 @@ struct PreferencesView: View {
                     }.padding(.top, 8)
                     if let updateStatus { Text(updateStatus.message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                     if let updateNote { Text(updateNote).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled) }
-                }.padding()
+                }.frame(maxWidth: .infinity).padding(.top, 28)
                 default: EmptyView()
                 }
             }
+            .scrollContentBackground(.hidden)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .disabled(pending)
-            if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled).padding() }
         }
-        .frame(maxWidth: 860, maxHeight: .infinity)
-        .padding(.horizontal, 28).padding(.top, 16).padding(.bottom, 20)
+        .font(NekoFont.body)
+        .frame(maxWidth: NekoLayout.pageWidth, maxHeight: .infinity)
+        .padding(.horizontal, NekoLayout.pageInset).padding(.top, 20).padding(.bottom, 20)
         .navigationTitle("Settings")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {

@@ -56,133 +56,156 @@ struct MCPRegistryBrowser: View {
     @State private var loading = false
     @State private var connecting = false
     @State private var error: String?
+    @State private var searchError: String?
     @State private var scope: String = ""
     private var visibleResults: [RegistryServer] { results.filter { $0.url != RegistryCatalog.sentry.url } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Find a connection").font(.title2.weight(.semibold))
-                    Text("Browse hosted MCP servers. Review the destination before connecting.")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
+                Text("Browse MCP servers").font(NekoFont.title)
                 Spacer()
-                Button("Done") { dismiss() }
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
-            .padding(.bottom, 20)
-            NekoSearchField(title: "Search the MCP Registry", text: $query)
-                .padding(.bottom, 14)
-            HStack(spacing: 8) {
-                Image(systemName: "folder").foregroundStyle(.secondary)
+            HStack(spacing: 14) {
+                NekoSearchField(title: "Search the public registry", text: $query)
                 Picker("Available in", selection: $scope) {
                     Text("All workspaces").tag("")
                     ForEach(model.workspaces, id: \.recordID) { item in Text(item["name"].string).tag(item.recordID) }
                 }
-                .labelsHidden().frame(maxWidth: 220)
-                Spacer()
-                if loading { ProgressView().controlSize(.small) }
-                Text("Public registry · hosted servers only").font(.caption).foregroundStyle(.tertiary)
+                .frame(width: 220).disabled(connecting || model.busy)
             }
-            .padding(.bottom, 12)
-            if let error {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.callout).foregroundStyle(.orange).padding(.bottom, 10)
+            if let searchError {
+                Label(searchError, systemImage: "exclamationmark.triangle")
+                    .font(NekoFont.meta).foregroundStyle(NekoStyle.amber).fixedSize(horizontal: false, vertical: true)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("FEATURED").font(.caption2.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 8)
-                    serverRow(RegistryCatalog.sentry, subtitle: "Sentry · official hosted server")
+                    Text("Featured").font(NekoFont.heading).foregroundStyle(N.text3).padding(.bottom, 8)
+                    serverRow(RegistryCatalog.sentry, subtitle: "Official Sentry server")
                     if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("REGISTRY RESULTS").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                            .padding(.top, 22).padding(.bottom, 8)
-                        if !loading && visibleResults.isEmpty {
-                            Text(results.isEmpty ? "No hosted servers found. Try another name or add a URL manually." : "Sentry is shown in Featured above.")
-                                .font(.callout).foregroundStyle(.secondary).padding(.vertical, 14)
+                        HStack {
+                            Text("Registry results").font(NekoFont.heading)
+                            Spacer()
+                            if loading { ProgressView().controlSize(.small).accessibilityLabel("Searching registry") }
+                            else { Text("\(visibleResults.count)").font(NekoFont.meta).monospacedDigit() }
                         }
-                        ForEach(visibleResults) { server in
-                            serverRow(server, subtitle: "Community listing · verify its publisher")
+                        .foregroundStyle(N.text3).padding(.top, 20).padding(.bottom, 8)
+                        if loading {
+                            Text("Searching hosted servers…").font(NekoFont.meta).foregroundStyle(N.text3).padding(.vertical, 12)
+                        } else if visibleResults.isEmpty, searchError == nil {
+                            Text(results.isEmpty ? "No hosted servers found. Try another name, or add a URL manually from Tools & skills." : "Sentry is shown in Featured above.")
+                                .font(NekoFont.body).foregroundStyle(N.text3).padding(.vertical, 12)
                         }
+                        ForEach(visibleResults) { server in serverRow(server, subtitle: "Community listing · verify publisher") }
                     }
-                }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider().padding(.vertical, 14)
-            if let addedID, let connection = model.snapshot["mcp"]["connections"].array.first(where: { $0.recordID == addedID }) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("\(connection["label"].string) added", systemImage: "checkmark.circle.fill")
-                        .font(.headline).foregroundStyle(.green)
-                    Text(connection["oauth"].bool ? "Signed in. Neko is discovering its tools automatically." : "Neko discovers tools automatically. Sign in if this server requires an account; a watch starts only when it offers a read-only work source.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Button("Sign in") { Task { await run("Authenticate", id: addedID) } }
-                        Button("Refresh tools") { Task { await run("Discover", id: addedID) } }
-                        Spacer()
-                        Button("Done") { dismiss() }
-                    }
-                    .disabled(connecting || model.busy)
-                }
-            } else if let selected {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(selected.shortName).font(.headline)
-                    Text(selected.url.absoluteString).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    Text("The server can expose tools that read or change data. Only connect a provider you trust. Signing in and background responsibilities are separate steps.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Spacer()
-                        Button("Cancel") { self.selected = nil }
-                        Button(connecting ? "Adding…" : "Add connection") { Task { await add(selected) } }
-                            .buttonStyle(.borderedProminent).disabled(connecting || model.busy)
-                    }.padding(.top, 6)
-                }
-            } else {
-                Text("Select a server to inspect its URL before adding it.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            Divider()
+            connectionReview
         }
-        .padding(24)
-        .frame(width: 660, height: 500)
+        .font(NekoFont.body).controlSize(.regular)
+        .padding(NekoLayout.pageInset).frame(width: 680, height: 600)
         .onAppear { scope = model.selectedWorkspace ?? "" }
-        .task(id: query) {
-            let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !term.isEmpty else { results = []; loading = false; error = nil; return }
-            loading = true
-            do {
-                try await Task.sleep(for: .milliseconds(300))
-                let found = try await RegistryCatalog.search(term)
-                guard !Task.isCancelled else { return }
-                results = found
-                error = nil
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !Task.isCancelled else { return }
-                results = []
-                self.error = error.localizedDescription
+        .onChange(of: scope) { _, _ in addedID = nil }
+        .task(id: query) { await searchRegistry() }
+    }
+
+    @ViewBuilder private var connectionReview: some View {
+        if let error {
+            DisclosureGroup {
+                Text(error).font(NekoFont.meta).textSelection(.enabled)
+            } label: {
+                Label(error, systemImage: "exclamationmark.triangle").lineLimit(2)
+            }.foregroundStyle(NekoStyle.amber)
+        }
+        if let addedID, let connection = model.snapshot["mcp"]["connections"].array.first(where: { $0.recordID == addedID }) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("\(connection["label"].string) added", systemImage: "checkmark.circle").font(NekoFont.heading)
+                Text("\(ToolsPresentation.connectionStatus(connection)) · \(ToolsPresentation.toolSummary(connection))")
+                    .font(NekoFont.meta).foregroundStyle(N.text3)
+                if !connection["error"].string.isEmpty {
+                    DisclosureGroup("Connection needs attention") {
+                        Text(connection["error"].string).font(NekoFont.meta).textSelection(.enabled)
+                    }.foregroundStyle(NekoStyle.amber)
+                }
+                HStack(spacing: 8) {
+                    Button("Sign in") { Task { await run("Authenticate", id: addedID) } }
+                    Button("Refresh tools") { Task { await run("Discover", id: addedID) } }
+                    if connecting { ProgressView().controlSize(.small) }
+                    Spacer()
+                    Button("Done") { dismiss() }
+                }.disabled(connecting || model.busy)
             }
-            loading = false
+        } else if let selected {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(selected.name).font(NekoFont.heading).lineLimit(2)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(selected.url.absoluteString).font(NekoFont.mono).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        Text("Connect only a provider you trust. Its tools may read or change data in the selected workspace. Read-only work sources can start a watch; manage these in Watching.")
+                            .font(NekoFont.meta).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(height: 88)
+                HStack(spacing: 8) {
+                    Text(scope.isEmpty ? "All workspaces" : (model.workspaces.first { $0.recordID == scope }?["name"].string ?? "Workspace"))
+                        .font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1)
+                    Spacer()
+                    Button("Cancel") { self.selected = nil; error = nil }.disabled(connecting)
+                    Button(connecting ? "Adding…" : "Add connection") { Task { await add(selected) } }
+                        .nekoPrimaryButton().disabled(connecting || model.busy)
+                }
+            }
+        } else {
+            Text("Select a hosted server to review its publisher, address and workspace access.")
+                .font(NekoFont.meta).foregroundStyle(N.text3)
         }
     }
 
     private func serverRow(_ server: RegistryServer, subtitle: String) -> some View {
-        Button { selected = server; error = nil } label: {
+        Button {
+            selected = server
+            addedID = nil
+            error = nil
+        } label: {
             HStack(spacing: 12) {
-                Image(systemName: "network").font(.system(size: 16)).foregroundStyle(.secondary).frame(width: 24)
+                Image(systemName: "network").font(NekoFont.body).foregroundStyle(N.text3).frame(width: 18).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(subtitle.hasPrefix("Community") ? server.name : server.shortName)
-                        .font(.system(size: 14, weight: .medium))
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                    if !server.description.isEmpty { Text(server.description).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-                }
-                Spacer()
-                Image(systemName: selected == server ? "checkmark.circle.fill" : "chevron.right")
-                    .foregroundStyle(selected == server ? Color.accentColor : .secondary)
+                    Text(server.shortName).font(NekoFont.heading).foregroundStyle(N.text).lineLimit(1)
+                    Text(subtitle).font(NekoFont.meta).foregroundStyle(N.text3)
+                    if !server.description.isEmpty { Text(server.description).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: selected == server ? "checkmark" : "chevron.right")
+                    .font(NekoFont.meta).foregroundStyle(N.text3).accessibilityHidden(true)
             }
-            .padding(13).frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .padding(NekoLayout.rowInset).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .background(selected == server ? Color.accentColor.opacity(0.1) : Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+        .buttonStyle(.plain).disabled(connecting || model.busy)
+        .background(selected == server ? N.selected : N.card, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected == server ? N.lineStrong : N.line))
         .padding(.bottom, 6)
+        .accessibilityLabel("\(server.name), \(subtitle)")
+        .accessibilityValue(selected == server ? "Selected" : "")
+    }
+
+    private func searchRegistry() async {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        results = []
+        searchError = nil
+        guard !term.isEmpty else { loading = false; return }
+        loading = true
+        do {
+            try await Task.sleep(for: .milliseconds(300))
+            let found = try await RegistryCatalog.search(term)
+            guard !Task.isCancelled else { return }
+            results = found
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            searchError = error.localizedDescription
+        }
+        loading = false
     }
 
     private func add(_ server: RegistryServer) async {

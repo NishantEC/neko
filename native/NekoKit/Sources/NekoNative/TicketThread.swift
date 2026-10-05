@@ -79,8 +79,9 @@ enum TicketThread {
 
 struct TicketThreadView: View {
     let ticket: JSONValue
+    @Environment(\.ink) private var ink
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
             ForEach(Array(TicketThread.items(ticket).enumerated()), id: \.offset) { _, item in row(item) }
             if let working = workingLine { workingRow(working) }
         }
@@ -99,41 +100,52 @@ struct TicketThreadView: View {
     @ViewBuilder private func row(_ item: TicketThread.Item) -> some View {
         switch item {
         case .brief(let text):
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Ticket", systemImage: "ticket").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                ReadableText(text: text).font(.system(size: 13)).lineSpacing(3)
+            VStack(alignment: .leading, spacing: 10) {
+                ChatAuthorLine(author: "Task brief", timestamp: ticket["created_at_ms"].int)
+                ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
             }
-            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .you(let text):
             HStack {
-                Spacer(minLength: 60)
+                Spacer(minLength: 32)
+                VStack(alignment: .trailing, spacing: 8) {
+                ChatAuthorLine(author: "You")
                 Group {
                     if text.contains("![") { ReadableText(text: text) }
                     else { Text(text).textSelection(.enabled) }
-                }.font(.system(size: 13)).lineSpacing(3)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(NekoStyle.accent.opacity(0.22), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }.font(NekoFont.chat).lineSpacing(3)
+                    .padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 10)
+                    .background(ink.raised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }.frame(maxWidth: 560, alignment: .trailing)
             }
         case .agent(let role, let text):
-            VStack(alignment: .leading, spacing: 4) {
-                Text(TicketThread.agentName(role)).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                ReadableText(text: text).font(.system(size: 13)).lineSpacing(3)
+            VStack(alignment: .leading, spacing: 10) {
+                ChatAuthorLine(author: TicketThread.agentName(role))
+                ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
             }
         case .steps(let role, let commands):
             DisclosureGroup {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 10) {
                     ForEach(Array(commands.enumerated()), id: \.offset) { _, receipt in
                         TicketCommandReceiptView(receipt: receipt)
                     }
-                }.padding(.top, 4)
+                }.padding(.top, 10)
             } label: {
-                Text("\(TicketThread.agentName(role)) · \(commands.count) saved \(commands.count == 1 ? "command" : "commands")").font(.system(size: 12)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("\(TicketThread.agentName(role)) · \(commands.count) saved \(commands.count == 1 ? "command" : "commands")", systemImage: "terminal")
+                        .font(NekoFont.meta).foregroundStyle(.secondary)
+                    let failed = commands.filter(\.failed).count
+                    let incomplete = commands.filter(\.isIncomplete).count
+                    if failed > 0 || incomplete > 0 {
+                        Text([failed > 0 ? "\(failed) failed" : nil, incomplete > 0 ? "\(incomplete) incomplete" : nil].compactMap { $0 }.joined(separator: " · "))
+                            .font(NekoFont.meta).foregroundStyle(NekoStyle.amber)
+                    }
+                }
             }
         case .status(let text):
             HStack(spacing: 6) {
-                Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1).frame(maxWidth: 24)
-                Text(text).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Rectangle().fill(ink.lineStrong).frame(height: 1).frame(maxWidth: 16)
+                Text(text).font(NekoFont.meta).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -141,7 +153,7 @@ struct TicketThreadView: View {
     private func workingRow(_ text: String) -> some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
-            Text(text).font(.system(size: 13)).foregroundStyle(.secondary)
+            Text(text).font(NekoFont.meta).foregroundStyle(.secondary)
         }
     }
 }
@@ -187,7 +199,7 @@ struct TicketComposer: View {
             onError: { model.error = $0 }
         ) {
             ComposerRuntimeMenu(model: model)
-        }.id(targetID).padding(12)
+        }.id(targetID)
     }
     private func send() {
         guard !sending, !model.busy else { return }

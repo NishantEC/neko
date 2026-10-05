@@ -231,24 +231,7 @@ struct NativeSidebar: View {
                 row("Home")
                 row("Tickets")
             }
-            ForEach(AgentSidebarGroup.allCases) { group in
-                let tasks = group.tasks(in: model.tasks)
-                if !tasks.isEmpty {
-                    Section(group.title) {
-                        ForEach(tasks.prefix(5), id: \.recordID) { task in
-                            HStack(spacing: 8) {
-                                Circle().fill(ticketStatusColor(task["status"].string)).frame(width: 6, height: 6)
-                                Text(task["title"].string).lineLimit(1)
-                            }
-                            .tag("agent:" + task.recordID)
-                            .help("NEK-" + String(task.recordID.prefix(4)).uppercased() + " · " + friendlyTaskStatus(task["status"].string))
-                        }
-                        if tasks.count > 5 {
-                            Text("Show all \(tasks.count)").foregroundStyle(.secondary).tag("group:" + group.rawValue)
-                        }
-                    }
-                }
-            }
+            ForEach(AgentSidebarGroup.allCases) { group in agentSection(group) }
             ForEach(PageInfo.groups.filter { $0.title != "Your day" }, id: \.title) { group in
                 Section(group.title) {
                     ForEach(group.keys, id: \.self) { key in row(key) }
@@ -291,6 +274,38 @@ struct NativeSidebar: View {
         .onChange(of: page) { _, value in if model.agentID == nil { selection = value } }
         .onChange(of: model.selectedWorkspace) { _, _ in model.agentID = nil }
     }
+    @ViewBuilder private func agentSection(_ group: AgentSidebarGroup) -> some View {
+        let tasks = group.tasks(in: model.tasks)
+        if !tasks.isEmpty {
+            Section {
+                ForEach(tasks.prefix(5), id: \.recordID) { task in
+                    agentRow(task)
+                }
+                if tasks.count > 5 {
+                    Text("Show all \(tasks.count)").foregroundStyle(.secondary).tag("group:" + group.rawValue)
+                }
+            } header: {
+                HStack {
+                    Text(group.title)
+                    Spacer()
+                    Text(tasks.count, format: .number).monospacedDigit()
+                }.accessibilityElement(children: .combine)
+            }
+        }
+    }
+    private func agentRow(_ task: JSONValue) -> some View {
+        let title = task["title"].string
+        let status = task["status"].string
+        let ticketCode = String(task.recordID.prefix(4)).uppercased()
+        let tooltip = "\(title)\nNEK-\(ticketCode) · \(friendlyTaskStatus(status))"
+        return HStack(spacing: 8) {
+            Circle().fill(ticketStatusColor(status))
+                .frame(width: 6, height: 6).frame(width: 18).accessibilityHidden(true)
+            Text(title).lineLimit(1)
+        }
+        .tag("agent:" + task.recordID)
+        .help(tooltip)
+    }
     private func row(_ key: String) -> some View {
         let attention = key == "Tickets" ? AgentSidebarGroup.needsYou.tasks(in: model.tasks).count : 0
         return Button {
@@ -320,9 +335,10 @@ struct WatchingStatus: View {
     var body: some View {
         let status = WatchingPresentation(connected: connected, snapshot: snapshot)
         HStack(spacing: 6) {
-            PixelGlyph(activity: status.active ? .watching : .idle, size: 11)
-            Text(status.title).font(.callout)
-        }.padding(.horizontal, 8).accessibilityElement(children: .combine)
+            Circle().fill(status.active ? NekoStyle.mint : Color.secondary)
+                .frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(status.title).font(NekoFont.meta)
+        }.accessibilityElement(children: .combine)
     }
 }
 
