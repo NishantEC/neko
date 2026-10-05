@@ -45,7 +45,6 @@ struct DesignLabConversation: View {
                 Label("Added to the local preview", systemImage: "checkmark")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Color.clear.frame(height: 1).id("preview-end")
         }
     }
 }

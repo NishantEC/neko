@@ -7,11 +7,15 @@ struct DesignLabView: View {
     var body: some View {
         ScrollViewReader { scroll in
             ScrollView {
-                DesignLabConversation(messages: preview.messages)
-                    .frame(maxWidth: 820)
-                    .padding(.horizontal, 44).padding(.top, 32)
-                    .padding(.bottom, composerHeight + 52)
-                    .frame(maxWidth: .infinity)
+                VStack(spacing: 0) {
+                    DesignLabConversation(messages: preview.messages)
+                        .frame(maxWidth: 820)
+                        .padding(.horizontal, 44).padding(.top, 32)
+                        .frame(maxWidth: .infinity)
+                        .id("preview-top")
+                    // Include the overlay clearance in the scroll target so sent text stays visible.
+                    Color.clear.frame(height: composerHeight + 52).id("preview-end")
+                }
             }
             .overlay(alignment: .bottom) {
                 DesignLabComposer(preview: preview)
@@ -20,7 +24,11 @@ struct DesignLabView: View {
                     .padding(.horizontal, 32).padding(.bottom, 24)
             }
             .onChange(of: preview.messages.count) { _, _ in
-                scroll.scrollTo("preview-end", anchor: .bottom)
+                if preview.messages.isEmpty {
+                    scroll.scrollTo("preview-top", anchor: .top)
+                } else {
+                    scroll.scrollTo("preview-end", anchor: .bottom)
+                }
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
