@@ -60,11 +60,56 @@ is explicitly labelled before it enters the progress channel.
 A read-only snapshot of the installed StreamChat ticket found 30 saved command
 records, including 10 with invalid JSON and one known nonzero exit code among the
 valid records. This establishes the legacy-data reproduction without sending a
-new task reply. Installation and screen-check evidence follows separately.
+new task reply.
 
 Local logs: `/tmp/neko-continuity-swift-final.log`,
 `/tmp/neko-continuity-core-tests.log`, `/tmp/neko-continuity-core-final.log`, and
 `/tmp/neko-continuity-daemon-final.log`.
+
+## Installed verification
+
+Source commit `e86b236` was built and signed with the existing development identity.
+The Rust release build completed in 36.93 seconds; the Swift production build in
+38.32 seconds. The optional native protocol contract test then passed against
+that exact bundled daemon in an isolated temporary data directory, including its
+restart/persistence checks (`/tmp/neko-continuity-protocol.log`). It did not use the
+normal Neko database or send a model request.
+
+Immediately before installation, the live gate reported 69 tickets, zero
+Planning/Building/Reviewing, zero Queued tickets, and zero pending/queued Home
+messages. The visible composer was empty. Installation succeeded, preserving
+data and credentials, and only `/Applications/Neko.app` was launched.
+
+The installed signature verifies. Installed and built executable hashes match:
+
+- Client: `b9ab839bd27ac5c39a0cd75dbab21aa7af2aee199d1578f6e84291f293ef09cb`
+- Daemon: `f3434948838b38973fda5b034e7f2a1d1249f704608a8c1a0b1000a5f92fb039`
+
+CUA screenshots and accessibility readbacks verified the real NEK-7E33 chat:
+
+- A compact evidence group beneath the independent review reports 30 saved
+  commands, 10 incomplete records and two shortened outputs.
+- Expanding the group exposes roles, recorded exit codes and command labels.
+  The known failed command reads “Failed · exit 1”.
+- Expanding damaged legacy records shows an explicit incomplete warning, a raw
+  record disclosure and Copy saved record; it never displays a blank command.
+- Copy saved record changed to Copied after accessibility activation. Unit tests
+  cover exact retained-text preservation; the clipboard payload was not reread.
+- A shortened reviewer output expands into its complete retained command and a
+  bounded scrolling output panel with an explicit shortening warning. A native
+  accessibility scroll action brought it onscreen for screenshot inspection.
+
+Screenshots confirmed readable spacing, aligned rows, visible warning text, and
+the preserved native sidebar, toolbar and composer. Home navigation worked and
+its composer remained empty. The coordinate mouse/scroll attempts on the long,
+quoted ticket window title returned the CUA `noWindowsAvailable` error; successful
+receipt interaction checks used accessibility actions. This does not establish
+physical mouse or drag behavior for the new controls.
+
+No task reply, acceptance, cancellation or runtime change was issued by these
+checks. The final snapshot had no active/pending work, and process inspection
+found exactly one installed app and one installed daemon. Local build/install
+logs: `/tmp/neko-continuity-build.log`, `/tmp/neko-continuity-install.log`.
 
 ## Boundaries
 
