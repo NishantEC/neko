@@ -15,16 +15,15 @@ extension EnvironmentValues {
     }
 }
 
-/// Native macOS values for the chat surface. Colors follow the system dark
-/// palette so controls read as AppKit rather than as a web page.
+/// Native macOS values for the chat surface, shared across light and dark modes.
 enum ReplyStyle {
     static let groupFill = N.card
     static let groupStroke = N.line
     static let codeFill = N.panel
     static let hairline = N.line
-    static let green = Color(nsColor: .systemGreen)
-    static let red = Color(nsColor: .systemRed)
-    static let orange = Color(nsColor: .systemOrange)
+    static let green = NekoStyle.mint
+    static let red = NekoStyle.coral
+    static let orange = NekoStyle.amber
     static let body = NekoFont.body
     static let small = NekoFont.meta
     static let caption = NekoFont.meta
@@ -34,12 +33,38 @@ enum ReplyStyle {
 }
 
 extension View {
-    /// The standard grouped container: a quiet fill and hairline, 8pt corners.
-    func replyGroup(padding: CGFloat = 10) -> some View {
+    /// An opaque group for related controls or evidence. Prose stays on the canvas.
+    func replyGroup(padding: CGFloat = NekoLayout.rowInset) -> some View {
         self.padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ReplyStyle.groupStroke))
+            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+/// Home and ticket replies share one quiet, readable user-message treatment.
+/// Keep saved text literal; attachment rendering follows the existing path.
+struct ChatUserMessage: View {
+    let text: String
+    var timestamp: Int = 0
+    var queued = false
+    @Environment(\.ink) private var ink
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Spacer(minLength: NekoLayout.pageInset)
+            VStack(alignment: .trailing, spacing: 10) {
+                ChatAuthorLine(author: "You", timestamp: timestamp)
+                Group {
+                    if text.contains("![") { ReadableText(text: text) }
+                    else { Text(text).textSelection(.enabled) }
+                }
+                .font(NekoFont.chat).lineSpacing(4)
+                .multilineTextAlignment(.leading)
+                .padding(NekoLayout.rowInset)
+                .background(ink.raised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                if queued { Label("Queued", systemImage: "clock").font(NekoFont.meta).foregroundStyle(.secondary) }
+            }.frame(maxWidth: 640, alignment: .trailing)
+        }.frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
@@ -79,9 +104,9 @@ struct ReplyChart: View {
     }
     var body: some View {
         let peak = max(bars.map(\.value).max() ?? 1, 1)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                Text(value["title"].string.isEmpty ? "Chart" : value["title"].string).font(.system(size: 12, weight: .semibold))
+                Text(value["title"].string.isEmpty ? "Chart" : value["title"].string).font(NekoFont.heading)
                 Spacer()
                 if !value["source"].string.isEmpty { Text(value["source"].string).font(ReplyStyle.caption).foregroundStyle(.secondary) }
             }
@@ -97,10 +122,10 @@ struct ReplyChart: View {
                     Text(format(bar.value) + value["unit"].string).font(ReplyStyle.caption.monospacedDigit())
                         .foregroundStyle(bar.highlight ? ReplyStyle.orange : .primary.opacity(0.75))
                         .frame(width: 64, alignment: .leading)
-                }.frame(height: 20)
+                }.frame(minHeight: 24)
             }
         }
-        .replyGroup(padding: 12)
+        .replyGroup()
         .accessibilityElement(children: .combine)
     }
     private func format(_ number: Double) -> String {
@@ -115,21 +140,22 @@ struct ReplyChoices: View {
     @Environment(\.replyActions) private var actions
     var body: some View {
         let options = value["options"].array
-        VStack(alignment: .leading, spacing: 8) {
-            Text(value["question"].string).font(.system(size: 13, weight: .semibold))
-            VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(value["question"].string).font(NekoFont.heading)
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                     Button { selected = index } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: selected == index ? "largecircle.fill.circle" : "circle")
                                 .foregroundStyle(selected == index ? NekoStyle.accent : .secondary)
-                            VStack(alignment: .leading, spacing: 1) {
+                            VStack(alignment: .leading, spacing: 5) {
                                 Text(option["label"].string).font(ReplyStyle.body)
                                 if !option["detail"].string.isEmpty { Text(option["detail"].string).font(ReplyStyle.caption).foregroundStyle(.secondary) }
                             }
                             Spacer(minLength: 0)
-                        }.contentShape(Rectangle())
+                        }.padding(.vertical, 4).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(sent)
+                        .accessibilityAddTraits(selected == index ? .isSelected : [])
                 }
             }
             HStack {
@@ -145,7 +171,7 @@ struct ReplyChoices: View {
                 .disabled(selected == nil || sent)
             }.controlSize(.small)
         }
-        .replyGroup(padding: 12)
+        .replyGroup()
     }
 }
 
@@ -157,8 +183,8 @@ struct ReplyForm: View {
     @Environment(\.replyActions) private var actions
     private var fields: [JSONValue] { value["fields"].array }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !value["title"].string.isEmpty { Text(value["title"].string).font(.system(size: 13, weight: .semibold)) }
+        VStack(alignment: .leading, spacing: 16) {
+            if !value["title"].string.isEmpty { Text(value["title"].string).font(NekoFont.heading) }
             VStack(spacing: 0) {
                 ForEach(Array(fields.enumerated()), id: \.offset) { index, field in
                     HStack {
@@ -166,7 +192,7 @@ struct ReplyForm: View {
                         Spacer(minLength: 12)
                         control(index, field)
                     }
-                    .padding(.horizontal, 12).frame(minHeight: 34)
+                    .padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 8).frame(minHeight: 48)
                     if index < fields.count - 1 { Divider().opacity(0.6) }
                 }
             }.replyGroup(padding: 0)
@@ -215,20 +241,20 @@ struct ReplyPlan: View {
     @Environment(\.replyActions) private var actions
     var body: some View {
         let steps = value["steps"].array.map { $0.string.isEmpty ? $0["title"].string : $0.string }
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
-                Text(value["title"].string.isEmpty ? "Plan" : value["title"].string).font(.system(size: 13, weight: .semibold))
+                Text(value["title"].string.isEmpty ? "Plan" : value["title"].string).font(NekoFont.heading)
                 Spacer()
                 Text("\(steps.count) \(steps.count == 1 ? "step" : "steps")\(value["estimate"].string.isEmpty ? "" : " · " + value["estimate"].string)")
                     .font(ReplyStyle.caption).foregroundStyle(.secondary)
             }
             VStack(spacing: 0) {
                 ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                    HStack(spacing: 8) {
-                        Text("\(index + 1)").font(ReplyStyle.caption.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 16, alignment: .trailing)
-                        Text(step).font(ReplyStyle.body).textSelection(.enabled)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("\(index + 1)").font(ReplyStyle.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 20, alignment: .trailing)
+                        Text(step).font(ReplyStyle.body).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
-                    }.padding(.horizontal, 10).frame(minHeight: 28)
+                    }.padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 12)
                     if index < steps.count - 1 { Divider().opacity(0.6) }
                 }
             }.replyGroup(padding: 0)
@@ -263,21 +289,22 @@ struct ReplyFiles: View {
                         Image(nsImage: NSWorkspace.shared.icon(forFile: file.path)).resizable().frame(width: 28, height: 28)
                         VStack(alignment: .leading, spacing: 1) {
                             Text((file.path as NSString).lastPathComponent).font(ReplyStyle.body).lineLimit(1)
+                                .foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) : .primary)
                             Text(file.note.isEmpty ? ReplyFiles.location(file.path) : ReplyFiles.location(file.path) + " · " + file.note)
-                                .font(ReplyStyle.caption).foregroundStyle(selected ? Color.white.opacity(0.8) : .secondary).lineLimit(1)
+                                .font(ReplyStyle.caption).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor).opacity(0.8) : .secondary).lineLimit(1)
                         }
                         Spacer(minLength: 8)
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)]) }
-                            .buttonStyle(.borderless).font(ReplyStyle.caption).foregroundStyle(selected ? Color.white : .secondary)
+                            .buttonStyle(.borderless).font(ReplyStyle.caption).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) : .secondary)
                     }
-                    .padding(.horizontal, 8).frame(height: 40)
-                    .background(selected ? Color(nsColor: .selectedContentBackgroundColor) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .padding(.horizontal, 10).padding(.vertical, 12)
+                    .background(selected ? Color(nsColor: .selectedContentBackgroundColor) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) { NSWorkspace.shared.open(URL(fileURLWithPath: file.path)) }
                     .onTapGesture { selection = file.path }
                     .help(file.path)
                 }
-            }.replyGroup(padding: 4)
+            }.replyGroup(padding: 8)
         }
     }
     static func location(_ path: String) -> String {
@@ -316,7 +343,7 @@ struct NativeTableBlock: View {
     @State private var ascending = true
     @State private var copied = false
     @State private var availableWidth: CGFloat = 600
-    private var columnWidth: CGFloat { max(160, (availableWidth - 20) / CGFloat(max(1, headers.count))) }
+    private var columnWidth: CGFloat { max(160, (availableWidth - 24) / CGFloat(max(1, headers.count))) }
     private var sorted: [[String]] {
         guard let column = sortColumn else { return rows }
         return rows.sorted { a, b in
@@ -329,7 +356,7 @@ struct NativeTableBlock: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("\(rows.count) \(rows.count == 1 ? "row" : "rows") · \(headers.count) columns")
                     .font(ReplyStyle.caption).foregroundStyle(.secondary)
@@ -355,7 +382,7 @@ struct NativeTableBlock: View {
                             .accessibilityLabel("Sort by \(header)")
                             .accessibilityValue(sortColumn == index ? (ascending ? "Ascending" : "Descending") : "Not sorted")
                     }
-                }.padding(.horizontal, 10).padding(.vertical, 8)
+                }.padding(.horizontal, 12).padding(.vertical, 12)
                 Divider()
                 ForEach(Array(sorted.enumerated()), id: \.offset) { index, row in
                     HStack(alignment: .top, spacing: 0) {
@@ -367,14 +394,13 @@ struct NativeTableBlock: View {
                                 .padding(.horizontal, 6).frame(width: columnWidth, alignment: .leading)
                         }
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .padding(.horizontal, 12).padding(.vertical, 12)
                     .background(index % 2 == 1 ? Color.primary.opacity(0.025) : .clear)
                 }
             }
             }
-            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ReplyStyle.groupStroke))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .textSelection(.enabled)
         }
         .background(GeometryReader { geometry in
@@ -426,7 +452,7 @@ struct NativeDiffBlock: View {
                     NSPasteboard.general.clearContents()
                     copied = NSPasteboard.general.setString(code, forType: .string)
                 }.buttonStyle(.borderless).font(ReplyStyle.caption)
-            }.padding(.horizontal, 10).padding(.vertical, 6)
+            }.padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 12)
             ForEach(Array(all.enumerated()), id: \.offset) { index, file in
                 if index > 0 { Divider().opacity(0.6) }
                 Button {
@@ -439,7 +465,7 @@ struct NativeDiffBlock: View {
                         Spacer()
                         if file.added > 0 { Text("+\(file.added)").font(ReplyStyle.caption.monospacedDigit()).foregroundStyle(ReplyStyle.green) }
                         if file.removed > 0 { Text("−\(file.removed)").font(ReplyStyle.caption.monospacedDigit()).foregroundStyle(ReplyStyle.red) }
-                    }.padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
+                    }.padding(.horizontal, NekoLayout.rowInset).frame(minHeight: 40).contentShape(Rectangle())
                 }.buttonStyle(.plain)
                 if expanded.contains(index) {
                     Divider().opacity(0.6)
@@ -448,11 +474,11 @@ struct NativeDiffBlock: View {
                             ForEach(Array(file.lines.prefix(lineLimits[index, default: 400]).enumerated()), id: \.offset) { _, line in
                                 Text(line.isEmpty ? " " : line)
                                     .font(ReplyStyle.mono)
-                                    .foregroundStyle(line.hasPrefix("@@") ? Color.secondary : .primary.opacity(line.hasPrefix("+") || line.hasPrefix("-") ? 0.95 : 0.65))
-                                    .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 17, alignment: .leading)
+                                    .foregroundStyle(line.hasPrefix("@@") ? Color.secondary : .primary.opacity(line.hasPrefix("+") || line.hasPrefix("-") ? 0.95 : 0.85))
+                                    .padding(.horizontal, NekoLayout.rowInset).frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
                                     .background(line.hasPrefix("+") ? ReplyStyle.green.opacity(0.13) : line.hasPrefix("-") ? ReplyStyle.red.opacity(0.14) : .clear)
                             }
-                        }.padding(.vertical, 4).fixedSize(horizontal: true, vertical: false)
+                        }.padding(.vertical, 8).fixedSize(horizontal: true, vertical: false)
                     }.textSelection(.enabled)
                     let shown = min(file.lines.count, lineLimits[index, default: 400])
                     if shown < file.lines.count {
@@ -461,14 +487,13 @@ struct NativeDiffBlock: View {
                             Spacer()
                             Button("Show next \(min(400, file.lines.count - shown)) lines") { lineLimits[index] = shown + 400 }
                                 .buttonStyle(.borderless)
-                        }.font(ReplyStyle.caption).padding(10)
+                        }.font(ReplyStyle.caption).padding(NekoLayout.rowInset)
                     }
                 }
             }
         }
-        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ReplyStyle.groupStroke))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -496,14 +521,14 @@ struct NativeTerminalBlock: View {
                     NSPasteboard.general.clearContents()
                     copied = NSPasteboard.general.setString(code, forType: .string)
                 }.buttonStyle(.borderless).font(ReplyStyle.caption)
-            }.padding(.horizontal, 10).frame(height: 28)
+            }.padding(.horizontal, NekoLayout.rowInset).frame(minHeight: 44)
             Divider().opacity(0.6)
             ScrollView(.horizontal) {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(output.prefix(lineLimit).enumerated()), id: \.offset) { _, line in
                         Text(line.isEmpty ? " " : line).font(ReplyStyle.mono).foregroundStyle(color(line))
                     }
-                }.padding(10).fixedSize(horizontal: true, vertical: false)
+                }.padding(NekoLayout.rowInset).fixedSize(horizontal: true, vertical: false)
             }.textSelection(.enabled)
             if output.count > lineLimit {
                 HStack {
@@ -511,18 +536,18 @@ struct NativeTerminalBlock: View {
                     Spacer()
                     Button("Show next \(min(300, output.count - lineLimit)) lines") { lineLimit += 300 }
                         .buttonStyle(.borderless)
-                }.font(ReplyStyle.caption).padding(10)
+                }.font(ReplyStyle.caption).padding(NekoLayout.rowInset)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ReplyStyle.groupStroke))
+        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
     private func color(_ line: String) -> Color {
         let text = line.trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("✓") || text.hasPrefix("PASS") || text.hasPrefix("ok ") { return Color(nsColor: .systemGreen).opacity(0.9) }
-        if text.hasPrefix("✗") || text.hasPrefix("FAIL") || text.lowercased().hasPrefix("error") { return Color(nsColor: .systemRed).opacity(0.95) }
-        return .primary.opacity(0.75)
+        if text.hasPrefix("✓") || text.hasPrefix("PASS") || text.hasPrefix("ok ") { return ReplyStyle.green }
+        if text.hasPrefix("✗") || text.hasPrefix("FAIL") || text.lowercased().hasPrefix("error") { return ReplyStyle.red }
+        return .primary.opacity(0.85)
     }
 }
 
@@ -560,13 +585,13 @@ struct ReplySteps: View {
                     VStack(spacing: 0) {
                         ForEach(items) { row in
                             HStack(spacing: 8) {
-                                Image(systemName: symbol(row.status)).symbolRenderingMode(.palette)
-                                    .foregroundStyle(.white, color(row.status)).font(.system(size: 12)).frame(width: 14)
+                                Image(systemName: symbol(row.status)).symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(color(row.status)).font(.system(size: 12)).frame(width: 14)
                                 Text(verb(row.status)).font(ReplyStyle.small).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
                                 Text(row.tool).font(ReplyStyle.small).lineLimit(1)
                                 if !row.detail.isEmpty { Text("· " + row.detail).font(ReplyStyle.small).foregroundStyle(.tertiary).lineLimit(1) }
                                 Spacer(minLength: 0)
-                            }.padding(.horizontal, 10).frame(height: 24)
+                            }.padding(.horizontal, NekoLayout.rowInset).frame(minHeight: 34)
                         }
                     }.padding(.vertical, 4).replyGroup(padding: 0)
                 }
@@ -588,18 +613,17 @@ struct ReplyErrorCallout: View {
     let message: String
     let retry: (() -> Void)?
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.white, ReplyStyle.red).font(.system(size: 16))
-            VStack(alignment: .leading, spacing: 6) {
-                Text("This reply didn’t finish").font(.system(size: 13, weight: .semibold))
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.circle").foregroundStyle(ReplyStyle.red).font(.system(size: 18))
+            VStack(alignment: .leading, spacing: 10) {
+                Text("This reply didn’t finish").font(NekoFont.heading)
                 if !message.isEmpty { Text(message).font(ReplyStyle.small).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                 if let retry { Button("Try Again", action: retry).buttonStyle(.borderedProminent).controlSize(.small) }
             }
             Spacer(minLength: 0)
         }
-        .padding(12)
-        .background(ReplyStyle.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ReplyStyle.red.opacity(0.25)))
+        .padding(NekoLayout.rowInset)
+        .background(ReplyStyle.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
@@ -621,17 +645,18 @@ struct ReplyTicketRow: View {
     @Environment(\.ink) private var ink
     var body: some View {
         Button(action: open) {
-            HStack(spacing: 10) {
-                StatusGlyph(status: status, size: 14).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(NekoFont.heading).lineLimit(2)
+            HStack(alignment: .top, spacing: 12) {
+                StatusGlyph(status: status, size: 16).padding(.top, 2).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title).font(NekoFont.heading).lineSpacing(3).lineLimit(2)
                     Text([workspace, friendlyTaskStatus(status)].filter { !$0.isEmpty }.joined(separator: " · ")).font(ReplyStyle.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 10).padding(.vertical, 10)
-            .background(hover ? ink.raisedHover : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, 12).padding(.vertical, NekoLayout.rowInset)
+            .background(hover ? ink.raisedHover : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(alignment: .top) { ink.line.frame(height: 1) }
             .contentShape(Rectangle())
         }
@@ -643,10 +668,10 @@ struct ReplyTicketRow: View {
 
 func ticketStatusColor(_ status: String) -> Color {
     switch status {
-    case "AwaitingApproval": Color(nsColor: .systemOrange)
+    case "AwaitingApproval": NekoStyle.amber
     case "ReadyForReview": Color(nsColor: .systemBlue)
-    case "Completed": Color(nsColor: .systemGreen)
-    case "Failed": Color(nsColor: .systemRed)
+    case "Completed": NekoStyle.mint
+    case "Failed": NekoStyle.coral
     case "Cancelled": Color.secondary
     default: NekoStyle.accent
     }

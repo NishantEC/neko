@@ -119,6 +119,7 @@ enum HotkeyFallbacks {
 
 struct PreferencesView: View {
     @AppStorage("neko.settings.tab") private var settingsTab = "General"
+    @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     @ObservedObject var model: AppModel
     @State private var settings: [JSONValue] = []
     @State private var folders: [JSONValue] = []
@@ -171,26 +172,38 @@ struct PreferencesView: View {
         switch budgetCents { case .none: value = .null; case .cents(let c): value = .number(Double(c)); case .invalid: return }
         Task { _ = await model.workbench(.command("SetTaskBudget", ["cents": value])) }
     }
+    private var sectionPicker: some View {
+        Picker("Settings section", selection: $settingsTab) {
+            ForEach(["General", "AI", "Search", "Permissions", "Diagnostics", "Agents", "About"], id: \.self) {
+                Text($0).tag($0)
+            }
+        }
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            GlassSegmented(selection: $settingsTab, options: [
-                .init(value: "General", title: "General", symbol: "gearshape"),
-                .init(value: "AI", title: "AI", symbol: "cpu"),
-                .init(value: "Search", title: "Search", symbol: "magnifyingglass"),
-                .init(value: "Permissions", title: "Permissions", symbol: "lock.shield"),
-                .init(value: "Diagnostics", title: "Diagnostics", symbol: "stethoscope"),
-                .init(value: "Agents", title: "Agents", symbol: "person.2"),
-                .init(value: "About", title: "About", symbol: "info.circle")
-            ])
+        VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
+            ViewThatFits(in: .horizontal) {
+                sectionPicker.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
+                sectionPicker.pickerStyle(.menu).fixedSize()
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(settingsTab).font(NekoFont.title).foregroundStyle(N.text)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(settingsTab).font(NekoFont.display).foregroundStyle(N.text)
                 Text(tabDescription).font(NekoFont.body).foregroundStyle(N.text3)
-            }.padding(.horizontal, 16).accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
             Group {
                 switch settingsTab {
                 case "General":
                 Form {
+                    Section {
+                        Picker("Appearance", selection: $appearance) {
+                            ForEach(NekoAppearance.allCases) { option in
+                                Text(option.title).tag(option.rawValue)
+                            }
+                        }.pickerStyle(.segmented)
+                    } header: { Text("Appearance") } footer: {
+                        Text("System follows your Mac’s light or dark appearance.")
+                    }
                     Section("Quick access") {
                         HotkeySettingsView(model: model)
                         preferenceToggle("Launch at login", "launch-at-login")
@@ -238,7 +251,7 @@ struct PreferencesView: View {
                                 Label(source.connection, systemImage: source.ready ? "checkmark.circle" : "exclamationmark.circle")
                                     .foregroundStyle(source.ready ? Color.secondary : NekoStyle.amber)
                             }
-                            if let note = source.note { Text(note).font(.caption).foregroundStyle(.secondary) }
+                            if let note = source.note { Text(note).font(NekoFont.meta).foregroundStyle(.secondary) }
                             Picker("Model", selection: $agentModel) {
                                 Text(source.defaultTitle).tag("")
                                 ForEach(source.models) { entry in
@@ -250,11 +263,11 @@ struct PreferencesView: View {
                             }
                             .onChange(of: agentModel) { _, _ in check = nil }
                             if let selected = catalog.model(agentProvider, agentModel) {
-                                if let reason = selected.reason ?? selected.description { Text(reason).font(.caption).foregroundStyle(.secondary) }
+                                if let reason = selected.reason ?? selected.description { Text(reason).font(NekoFont.meta).foregroundStyle(.secondary) }
                             }
                         } else if agentProvider == "opencodex" {
                             Text("This model runs through an external proxy. Choose Claude Code or OpenCode above to run Claude and other models with their own logins instead.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(NekoFont.meta).foregroundStyle(.secondary)
                         }
                         DisclosureGroup("Use an exact model ID") {
                         HStack {
@@ -277,10 +290,10 @@ struct PreferencesView: View {
                         if let check {
                             Label(check.message, systemImage: check.ok ? "checkmark.circle.fill" : "xmark.circle")
                                 .foregroundStyle(check.ok ? Color.green : (check.unavailable ? NekoStyle.amber : Color.red))
-                                .font(.callout)
+                                .font(NekoFont.body)
                         }
                         Text("Checking sends one short reply through the same runner tasks use, so it may use quota. A failed check keeps your current model. New conversations, tasks and background checks use the saved model; work already running is not interrupted.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(NekoFont.meta).foregroundStyle(.secondary)
                     }
                     Section("Budget") {
                         LabeledContent("Stop a ticket after") {
@@ -291,9 +304,9 @@ struct PreferencesView: View {
                                 Button("Save budget") { saveBudget() }.disabled(pending || budgetCents == .invalid)
                             }
                         }
-                        if budgetCents == .invalid { Text("Enter an amount between 0.01 and 1000, or leave it empty.").font(.caption).foregroundStyle(NekoStyle.amber) }
+                        if budgetCents == .invalid { Text("Enter an amount between 0.01 and 1000, or leave it empty.").font(NekoFont.meta).foregroundStyle(NekoStyle.amber) }
                         Text("Counts the cost Claude Code and OpenCode report for each ticket and stops the ticket when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(NekoFont.meta).foregroundStyle(.secondary)
                     }
                 }.formStyle(.grouped)
                 case "Search":
@@ -339,34 +352,36 @@ struct PreferencesView: View {
                     Text(agents.isEmpty ? "No agent provider is turned on." : "\(agents.count) agents visible from the configured provider.")
                     preferenceToggle("Show agents", "agents-enabled")
                     preferenceToggle("Include idle agents", "agents-include-idle")
-                    Text("Legacy agent providers are opt-in. These settings do not enable a provider.").font(.caption).foregroundStyle(.secondary)
+                    Text("Legacy agent providers are opt-in. These settings do not enable a provider.").font(NekoFont.meta).foregroundStyle(.secondary)
                     }
                 }.formStyle(.grouped)
                 case "About":
 
                 VStack(spacing: 16) {
                     BrandMark(size: 72)
-                    Text("Neko").font(.title.bold())
+                    Text("Neko").font(NekoFont.display)
                     Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
                     Text("Your workspace, native on your Mac.").foregroundStyle(.secondary)
-                    if let build = Updates.Build.current { Text("Build \(String(build.commit.prefix(7)))").font(.caption.monospaced()).foregroundStyle(.secondary) }
+                    if let build = Updates.Build.current { Text("Build \(String(build.commit.prefix(7)))").font(NekoFont.mono).foregroundStyle(.secondary) }
                     HStack {
                         Button(checkingUpdates ? "Checking…" : "Check for updates") { checkUpdates() }.disabled(checkingUpdates)
                         if case .behind = updateStatus { Button("Update now") { runUpdate() }.buttonStyle(.borderedProminent) }
                     }.padding(.top, 8)
-                    if let updateStatus { Text(updateStatus.message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center) }
-                    if let updateNote { Text(updateNote).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled) }
+                    if let updateStatus { Text(updateStatus.message).font(NekoFont.body).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+                    if let updateNote { Text(updateNote).font(NekoFont.meta).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled) }
                 }.frame(maxWidth: .infinity).padding(.top, 28)
                 default: EmptyView()
                 }
             }
             .scrollContentBackground(.hidden)
+            .contentMargins(.horizontal, 0, for: .scrollContent)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .disabled(pending)
         }
         .font(NekoFont.body)
+        .controlSize(.regular)
         .frame(maxWidth: NekoLayout.pageWidth, maxHeight: .infinity)
-        .padding(.horizontal, NekoLayout.pageInset).padding(.top, 20).padding(.bottom, 20)
+        .padding(NekoLayout.pageInset)
         .navigationTitle("Settings")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {

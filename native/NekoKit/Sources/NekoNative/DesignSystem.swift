@@ -5,26 +5,26 @@ import SwiftUI
 enum NekoStyle {
     // One meaning per colour. OKLCH values; see Palette section below.
     static let accent = Color(nsColor: .systemBlue)
-    static let amber = Color.oklch(0.80, 0.13, 78)       // needs approval
-    static let sky = Color.oklch(0.76, 0.10, 222)        // ready to review
-    static let mint = Color.oklch(0.76, 0.12, 158)       // done
-    static let coral = Color.oklch(0.68, 0.16, 27)       // failed
+    static let amber = Color.adaptive(light: 0x895600, dark: 0xE8BB68) // needs approval
+    static let sky = Color.adaptive(light: 0x1765A9, dark: 0x8FC4EF)   // ready to review
+    static let mint = Color.adaptive(light: 0x247A50, dark: 0x83D3AC)  // done
+    static let coral = Color.adaptive(light: 0xB23838, dark: 0xF19E98) // failed
     static let lilac = Color.oklch(0.74, 0.09, 300)      // workspace tag only
     static let rose = Color.oklch(0.74, 0.09, 350)       // workspace tag only
     static let pearl = Color.oklch(0.975, 0.003, 264)
     static let plum = Color.oklch(0.16, 0.004, 264)
     static let signature = LinearGradient(colors: [accent, accent], startPoint: .top, endPoint: .bottom)
-    static let radius: CGFloat = 12
-    static let radiusSmall: CGFloat = 7
+    static let radius: CGFloat = 18
+    static let radiusSmall: CGFloat = 10
 }
 
 enum NekoFont {
-    static let display = Font.system(size: 24, weight: .semibold)
-    static let title = Font.system(size: 17, weight: .semibold)
-    static let heading = Font.system(size: 13, weight: .semibold)
-    static let body = Font.system(size: 13)
-    static let chat = Font.system(size: 14)
-    static let meta = Font.system(size: 12)
+    static let display = Font.system(size: 28, weight: .semibold)
+    static let title = Font.system(size: 20, weight: .semibold)
+    static let heading = Font.system(size: 15, weight: .semibold)
+    static let body = Font.system(size: 15)
+    static let chat = Font.system(size: 15)
+    static let meta = Font.system(size: 13)
     static let label = Font.system(size: 11, weight: .medium)
     static let mono = Font.system(size: 12, weight: .regular, design: .monospaced)
 }
@@ -32,27 +32,27 @@ enum NekoFont {
 /// Bounded content keeps paragraphs and controls in the same visual lanes.
 /// Board columns and native window chrome intentionally fill their container.
 enum NekoLayout {
-    static let pageWidth: CGFloat = 820
-    static let readingWidth: CGFloat = 720
-    static let pageInset: CGFloat = 28
-    static let sectionGap: CGFloat = 24
-    static let rowInset: CGFloat = 14
+    static let pageWidth: CGFloat = 880
+    static let readingWidth: CGFloat = 760
+    static let pageInset: CGFloat = 32
+    static let sectionGap: CGFloat = 28
+    static let rowInset: CGFloat = 18
 }
 
 struct Ink {
     let scheme: ColorScheme
     var dark: Bool { scheme == .dark }
-    var base: Color { dark ? N.canvas : NekoStyle.pearl }
-    var panel: Color { dark ? N.panel : .white }
-    var raised: Color { dark ? N.card : Color.black.opacity(0.025) }
-    var raisedHover: Color { dark ? N.selected : Color.black.opacity(0.045) }
-    var line: Color { dark ? N.line : Color.black.opacity(0.08) }
-    var lineStrong: Color { dark ? N.lineStrong : Color.black.opacity(0.14) }
-    var faint: Color { dark ? N.text4 : Color.black.opacity(0.55) }
+    var base: Color { N.canvas }
+    var panel: Color { N.panel }
+    var raised: Color { N.card }
+    var raisedHover: Color { N.selected }
+    var line: Color { N.line }
+    var lineStrong: Color { N.lineStrong }
+    var faint: Color { N.text4 }
 }
 
 extension EnvironmentValues { var ink: Ink { Ink(scheme: colorScheme) } }
-extension Ink { static var panelColor: Color { Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(red: 0.078, green: 0.082, blue: 0.090, alpha: 1) : .white }) } }
+extension Ink { static var panelColor: Color { N.panel } }
 
 // MARK: - Structure
 struct HairlineShape: Shape {
@@ -101,7 +101,7 @@ struct NoiseOverlay: View { var body: some View { Color.clear } }
 
 // MARK: - Surfaces
 @MainActor struct NekoCardModifier: ViewModifier {
-    var padding: CGFloat = 16
+    var padding: CGFloat = 20
     var radius: CGFloat = NekoStyle.radius
     var highlighted = false
     var interactive = false
@@ -126,62 +126,24 @@ extension View {
     func stableSplitPane() -> some View {
         frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
     }
-    /// A floating notice over page content: opaque so the page never shows
-    /// through its text, with a hairline edge and a soft lift.
+    /// A functional notice above page content, using the platform material.
     func nekoToast() -> some View {
         self
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.regularMaterial).opacity(0.6))
-            }
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
-            .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
-            .frame(maxWidth: 720)
-            .padding(.horizontal, 16).padding(.top, 8)
+            .padding(.horizontal, 18).padding(.vertical, 14)
+            .liquidGlass(radius: 18)
+            .frame(maxWidth: NekoLayout.readingWidth)
+            .padding(.horizontal, 24).padding(.top, 8)
             .frame(maxWidth: .infinity)
     }
-    func nekoCard(padding: CGFloat = 16, radius: CGFloat = NekoStyle.radius, highlighted: Bool = false, interactive: Bool = false) -> some View {
+    func nekoCard(padding: CGFloat = 20, radius: CGFloat = NekoStyle.radius, highlighted: Bool = false, interactive: Bool = false) -> some View {
         modifier(NekoCardModifier(padding: padding, radius: radius, highlighted: highlighted, interactive: interactive))
     }
 }
 
 // MARK: - Buttons
-struct NekoPrimaryButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var enabled
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 12.5, weight: .medium))
-            .foregroundStyle(scheme == .dark ? Color.black : .white)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(scheme == .dark ? Color.white.opacity(configuration.isPressed ? 0.8 : 0.94) : Color.black.opacity(configuration.isPressed ? 0.75 : 0.9), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .opacity(enabled ? 1 : 0.35)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
-    }
-}
-
-@MainActor struct NekoGhostButtonStyle: ButtonStyle {
-    @Environment(\.ink) private var ink
-    @Environment(\.isEnabled) private var enabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var hover = false
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 12.5))
-            .padding(.horizontal, 11).padding(.vertical, 6)
-            .background(configuration.isPressed ? ink.raisedHover : (hover ? ink.raised : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(hover ? ink.lineStrong : ink.line))
-            .opacity(enabled ? 1 : 0.45)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hover)
-            .onHover { hover = $0 }
-    }
-}
-
 extension View {
-    func nekoGlassButton() -> some View { buttonStyle(NekoGhostButtonStyle()) }
-    func nekoPrimaryButton() -> some View { buttonStyle(NekoPrimaryButtonStyle()) }
+    func nekoGlassButton() -> some View { buttonStyle(.bordered) }
+    func nekoPrimaryButton() -> some View { buttonStyle(.borderedProminent) }
 }
 
 struct GlassActions<Content: View>: View {
@@ -381,16 +343,16 @@ func friendlyTaskStatus(_ status: String) -> String {
 /// One neutral surface ramp for the native app, shared by legacy Ink consumers.
 /// Small secondary text remains readable on the brightest content surface.
 enum N {
-    static let canvas = Color(red: 0.055, green: 0.059, blue: 0.067)
-    static let panel = Color(red: 0.078, green: 0.082, blue: 0.090)
-    static let card = Color(red: 0.110, green: 0.114, blue: 0.125)
-    static let selected = Color(red: 0.153, green: 0.157, blue: 0.173)
-    static let line = Color.white.opacity(0.065)
-    static let lineStrong = Color.white.opacity(0.15)
-    static let text = Color(red: 0.949, green: 0.949, blue: 0.957)
-    static let text2 = Color(red: 0.792, green: 0.792, blue: 0.808)
-    static let text3 = Color(red: 0.671, green: 0.671, blue: 0.698)
-    static let text4 = Color(red: 0.596, green: 0.596, blue: 0.631)
+    static let canvas = Color.adaptive(light: 0xF7F8FA, dark: 0x202329)
+    static let panel = Color.adaptive(light: 0xFFFFFF, dark: 0x272B32)
+    static let card = Color.adaptive(light: 0xFFFFFF, dark: 0x2C3038)
+    static let selected = Color.primary.opacity(0.065)
+    static let line = Color.primary.opacity(0.08)
+    static let lineStrong = Color.primary.opacity(0.16)
+    static let text = Color(nsColor: .labelColor)
+    static let text2 = Color.adaptive(light: 0x424954, dark: 0xD7DBE2)
+    static let text3 = Color.adaptive(light: 0x606875, dark: 0xB9C0CA)
+    static let text4 = Color.adaptive(light: 0x666E7A, dark: 0xA8B0BC)
     static let sidebarWidth: CGFloat = 232
     static let headerHeight: CGFloat = 48
     static let rowHeight: CGFloat = 30
@@ -410,7 +372,7 @@ struct OutlineTag: View {
     var body: some View {
         Text(text).font(.system(size: 12)).foregroundStyle(N.text3)
             .padding(.horizontal, 10).padding(.vertical, 4)
-            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.white.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(N.line))
     }
 }
 
@@ -501,15 +463,26 @@ struct StatusPill: View {
 
 // MARK: - Looks (selectable variants)
 
+enum NekoAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .system: "System"; case .light: "Light"; case .dark: "Dark" }
+    }
+    var colorScheme: ColorScheme? {
+        switch self { case .system: nil; case .light: .light; case .dark: .dark }
+    }
+}
+
 enum NekoLook: String, CaseIterable, Identifiable {
     case system, ambient, dense, mascot
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .system: "System — pure native glass"
-        case .ambient: "Ambient — colour under the glass"
-        case .dense: "Dense — Linear-style rows"
-        case .mascot: "Mascot — expressive Today"
+        case .system: "Neutral"
+        case .ambient: "Ambient"
+        case .dense: "Neutral (legacy)"
+        case .mascot: "Ambient with mascot"
         }
     }
 }
@@ -527,16 +500,26 @@ extension EnvironmentValues {
 struct LookBackground: View {
     let look: String
     @Environment(\.accessibilityReduceTransparency) private var opaque
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         switch NekoLook(rawValue: look) ?? .ambient {
         case .system, .dense:
-            Color.clear
+            N.canvas
         case .ambient, .mascot:
             if opaque { Color(nsColor: .windowBackgroundColor) } else { field.extendsUnderSidebar() }
         }
     }
-    /// In-app backdrop stays quiet; the animated gem field is onboarding-only.
-    @ViewBuilder private var field: some View { N.canvas }
+    /// A static, quiet field gives floating controls material to sample without
+    /// competing with the conversation or making content itself translucent.
+    private var field: some View {
+        ZStack {
+            N.canvas
+            RadialGradient(colors: [NekoStyle.accent.opacity(scheme == .dark ? 0.10 : 0.045), .clear],
+                           center: .topLeading, startRadius: 0, endRadius: 680)
+            RadialGradient(colors: [NekoStyle.mint.opacity(0.035), .clear],
+                           center: .bottomTrailing, startRadius: 0, endRadius: 460)
+        }.allowsHitTesting(false).accessibilityHidden(true)
+    }
 }
 
 extension View {
@@ -558,6 +541,15 @@ extension View {
 // MARK: - OKLCH
 
 extension Color {
+    /// AppKit resolves these in the hosting window's appearance, including sheets.
+    static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let rgb = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            return NSColor(srgbRed: Double((rgb >> 16) & 0xFF) / 255,
+                           green: Double((rgb >> 8) & 0xFF) / 255,
+                           blue: Double(rgb & 0xFF) / 255, alpha: 1)
+        })
+    }
     /// OKLCH → sRGB (Björn Ottosson). Out-of-gamut channels are clamped.
     static func oklch(_ l: Double, _ c: Double, _ hDegrees: Double, opacity: Double = 1) -> Color {
         let h = hDegrees * .pi / 180

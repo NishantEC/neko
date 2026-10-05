@@ -161,14 +161,15 @@ enum NativeAttachmentPath {
 struct ReadableText: View {
     let text: String
     var body: some View {
+        let blocks = NativeMarkdown.parse(text)
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(NativeMarkdown.parse(text).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 Group {
                 switch block {
                 case .paragraph(let value): inline(value)
                 case .heading(let level, let value):
                     inline(value).font(level <= 2 ? NekoFont.title : NekoFont.heading)
-                        .padding(.top, 6).accessibilityAddTraits(.isHeader)
+                        .padding(.top, index == 0 ? 0 : 12).accessibilityAddTraits(.isHeader)
                 case .code(let language, let code):
                     if language.lowercased() == "diff" || language.lowercased() == "patch" { NativeDiffBlock(code: code) }
                     else if ReplyStyle.terminalLanguages.contains(language.lowercased()) { NativeTerminalBlock(language: language, code: code) }
@@ -176,13 +177,14 @@ struct ReadableText: View {
                 case .table(let headers, let rows): NativeTableBlock(headers: headers, rows: rows)
                 case .view(let kind, let source): ReplyBlockView(kind: kind, source: source)
                 case .listItem(let marker, let value):
-                    HStack(alignment: .top, spacing: 8) { Text(marker).frame(minWidth: 16, alignment: .trailing); inline(value) }
+                    HStack(alignment: .top, spacing: 10) { Text(marker).foregroundStyle(.secondary).frame(minWidth: 20, alignment: .trailing); inline(value) }
                 case .quote(let value):
-                    HStack(alignment: .top, spacing: 10) { RoundedRectangle(cornerRadius: 2).fill(.secondary.opacity(0.4)).frame(width: 3); inline(value).foregroundStyle(.secondary) }.fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .top, spacing: 14) { RoundedRectangle(cornerRadius: 2).fill(N.lineStrong).frame(width: 3); inline(value).foregroundStyle(.secondary) }
+                        .padding(.vertical, 4).fixedSize(horizontal: false, vertical: true)
                 case .image(let alt, let path): NativeAttachmentImage(alt: alt, reference: path)
                 case .divider: Divider()
                 }
-                }.padding(.bottom, blockSpacing(block))
+                }.padding(.bottom, index == blocks.count - 1 ? 0 : blockSpacing(block))
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
             .environment(\.openURL, OpenURLAction { url in
@@ -191,9 +193,10 @@ struct ReadableText: View {
     }
     private func blockSpacing(_ block: NativeMarkdownBlock) -> CGFloat {
         switch block {
-        case .listItem: 5
-        case .heading: 8
-        default: 12
+        case .listItem: 7
+        case .heading: 10
+        case .code, .table, .view, .image, .divider: 20
+        default: 16
         }
     }
     private func inline(_ value: String) -> some View {
@@ -217,11 +220,11 @@ private struct NativeCodeBlock: View {
                     NSPasteboard.general.clearContents()
                     copied = NSPasteboard.general.setString(code, forType: .string)
                 }.buttonStyle(.borderless).font(NekoFont.meta).accessibilityLabel("Copy code")
-            }.padding(.horizontal, 12).padding(.vertical, 8)
+            }.padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 12)
             Divider()
-            ScrollView(.horizontal) { Text(code).font(NekoFont.mono).textSelection(.enabled).fixedSize(horizontal: true, vertical: false).padding(12) }
-        }.background(ink.panel, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(ink.line))
+            ScrollView(.horizontal) { Text(code).font(NekoFont.mono).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: true, vertical: false).padding(NekoLayout.rowInset) }
+        }.background(ink.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -233,7 +236,7 @@ private struct NativeAttachmentImage: View {
            let values = try? path.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
            values.isRegularFile == true, let size = values.fileSize, size <= 32 * 1024 * 1024,
            let image = NSImage(contentsOf: path) {
-            Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 420).clipShape(RoundedRectangle(cornerRadius: 10)).accessibilityLabel(alt.isEmpty ? "Attached image" : alt)
+            Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 420).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)).accessibilityLabel(alt.isEmpty ? "Attached image" : alt)
         } else {
             Label(alt.isEmpty ? "Image not loaded" : "\(alt) · image not loaded", systemImage: "photo").font(.callout).foregroundStyle(.secondary)
         }

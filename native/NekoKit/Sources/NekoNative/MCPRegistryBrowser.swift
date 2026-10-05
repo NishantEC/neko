@@ -61,7 +61,7 @@ struct MCPRegistryBrowser: View {
     private var visibleResults: [RegistryServer] { results.filter { $0.url != RegistryCatalog.sentry.url } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 24) {
             HStack {
                 Text("Browse MCP servers").font(NekoFont.title)
                 Spacer()
@@ -105,7 +105,7 @@ struct MCPRegistryBrowser: View {
             connectionReview
         }
         .font(NekoFont.body).controlSize(.regular)
-        .padding(NekoLayout.pageInset).frame(width: 680, height: 600)
+        .padding(NekoLayout.pageInset).frame(width: 720, height: 660)
         .onAppear { scope = model.selectedWorkspace ?? "" }
         .onChange(of: scope) { _, _ in addedID = nil }
         .task(id: query) { await searchRegistry() }
@@ -170,7 +170,7 @@ struct MCPRegistryBrowser: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "network").font(NekoFont.body).foregroundStyle(N.text3).frame(width: 18).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(server.shortName).font(NekoFont.heading).foregroundStyle(N.text).lineLimit(1)
                     Text(subtitle).font(NekoFont.meta).foregroundStyle(N.text3)
                     if !server.description.isEmpty { Text(server.description).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1) }
@@ -181,9 +181,9 @@ struct MCPRegistryBrowser: View {
             .padding(NekoLayout.rowInset).contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(connecting || model.busy)
-        .background(selected == server ? N.selected : N.card, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected == server ? N.lineStrong : N.line))
-        .padding(.bottom, 6)
+        .background(selected == server ? N.selected : N.card, in: RoundedRectangle(cornerRadius: NekoStyle.radius))
+        .overlay(RoundedRectangle(cornerRadius: NekoStyle.radius).strokeBorder(selected == server ? Color.accentColor.opacity(0.5) : N.line))
+        .padding(.bottom, 10)
         .accessibilityLabel("\(server.name), \(subtitle)")
         .accessibilityValue(selected == server ? "Selected" : "")
     }

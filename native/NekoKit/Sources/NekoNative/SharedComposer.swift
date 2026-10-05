@@ -113,8 +113,8 @@ struct SharedComposer<Controls: View>: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 if !attachments.isEmpty { ComposerAttachmentStrip(attachments: attachments, remove: onRemove) }
                 ComposerView(
                     text: $text,
@@ -128,10 +128,10 @@ struct SharedComposer<Controls: View>: View {
                 if let validationError {
                     Text(validationError).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).fixedSize(horizontal: false, vertical: true)
                 }
-                HStack(alignment: .bottom, spacing: 8) {
+                HStack(alignment: .bottom, spacing: 12) {
                     Button("Attach files", systemImage: "plus", action: onChooseAttachments)
                         .labelStyle(.iconOnly).font(NekoFont.body)
-                        .frame(width: 28, height: 28).contentShape(Rectangle())
+                        .frame(width: 32, height: 32).contentShape(Rectangle())
                         .buttonStyle(.borderless).foregroundStyle(.secondary)
                         .help("Attach images or files; you can also paste or drop them")
                         .accessibilityLabel("Attach images or files")
@@ -147,16 +147,15 @@ struct SharedComposer<Controls: View>: View {
                             if state.primary == .submitting { ProgressView().controlSize(.mini) }
                             else { Image(systemName: state.primary == .stop ? "stop.fill" : state.primary == .queue ? "text.badge.plus" : "arrow.up") }
                             Text(actionLabel)
-                        }.font(NekoFont.meta.weight(.medium)).padding(.horizontal, 10).frame(height: 28)
+                        }.font(NekoFont.meta.weight(.medium)).padding(.horizontal, 14).frame(height: 34)
                             .foregroundStyle(state.buttonEnabled ? Color.white : Color.secondary)
                             .background(state.buttonEnabled ? NekoStyle.accent : Color.primary.opacity(0.06), in: Capsule())
                     }.buttonStyle(.plain).disabled(!state.buttonEnabled).accessibilityLabel(actionLabel)
                         .fixedSize(horizontal: true, vertical: false)
                 }
             }
-            .padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 8)
-            .background(ink.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(ink.lineStrong))
+            .padding(.horizontal, 20).padding(.vertical, 14)
+            .liquidGlass(radius: 24)
             Text(state.primary == .queue ? "Return to queue · Shift-Return for a new line" : "Return to send · Shift-Return for a new line")
                 .font(NekoFont.meta).foregroundStyle(.secondary)
                 .padding(.horizontal, NekoLayout.rowInset)

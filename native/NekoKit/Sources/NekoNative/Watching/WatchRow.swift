@@ -15,8 +15,8 @@ struct WatchRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 18) {
                 WatchRowHeader(instruction: item["instruction"].string, status: status,
                                needsAttention: item["enabled"].bool && item["failures"].int > 0,
                                expanded: $expanded)
@@ -24,13 +24,14 @@ struct WatchRow: View {
                     get: { item["enabled"].bool },
                     set: { enabled in setEnabled(enabled) }
                 ))
-                .labelsHidden().toggleStyle(.switch).controlSize(.mini).disabled(model.busy)
+                .labelsHidden().toggleStyle(.switch).controlSize(.regular).disabled(model.busy)
                 actions
             }
             if expanded { WatchRowDetails(model: model, item: item, onEdit: onEdit) }
         }
         .padding(.vertical, NekoLayout.rowInset)
         .overlay(alignment: .top) { N.line.frame(height: 1) }
+        .accessibilityElement(children: .contain)
         .modifier(WatchActivationConfirmation(model: model, item: item, isPresented: $confirmingActivation))
     }
 
