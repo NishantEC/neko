@@ -576,7 +576,9 @@ struct ToolsView: View {
             .padding(16)
             .background(N.card, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(N.line))
-            ForEach(Array(model.snapshot["skills"]["proposals"].array.filter { $0["workspace_id"].string == workspace }.enumerated()), id: \.offset) { _, proposal in proposalCard(proposal) }
+            ForEach(model.snapshot["skills"]["proposals"].array.filter { $0["workspace_id"].string == workspace }, id: \.recordID) { proposal in
+                proposalCard(proposal)
+            }
         }
     }
 
@@ -634,10 +636,10 @@ struct ToolsView: View {
         let key = proposal["id"].string + ":" + proposal["content_hash"].string
         let auditURL = proposal["audit_url"].string
         let reviewed = auditURL.isEmpty || proposal["audit_reviewed_hash"].string == proposal["content_hash"].string
-        return GroupBox("Review: " + proposal["name"].string) {
+        return DisclosureGroup {
             VStack(alignment: .leading, spacing: 10) {
-                Text(proposal["source"].string).textSelection(.enabled)
-                Text(proposal["audit_status"].string).font(NekoFont.meta)
+                Text(proposal["source"].string).font(NekoFont.meta).foregroundStyle(N.text3).textSelection(.enabled)
+                Text(proposal["audit_status"].string).font(NekoFont.meta).foregroundStyle(N.text3)
                 if let url = URL(string: auditURL), !auditURL.isEmpty {
                     Button("View published source and audit links") {
                         if NSWorkspace.shared.open(url) { openedAudits.insert(key) }
@@ -647,14 +649,29 @@ struct ToolsView: View {
                         send("Skills", "ConfirmAuditReview", ["id": proposal["id"], "content_hash": proposal["content_hash"], "audit_url": proposal["audit_url"]])
                     }.disabled(!openedAudits.contains(key))
                 }
-                ScrollView { Text(proposal["body"].string).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 300)
-                Text("Accept saves these exact instructions. Enable separately after installation.").font(NekoFont.meta)
+                ScrollView {
+                    Text(verbatim: proposal["body"].string)
+                        .font(NekoFont.mono).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                }
+                .frame(height: 240)
+                .background(N.canvas, in: RoundedRectangle(cornerRadius: 6))
+                .accessibilityLabel("Proposed skill instructions")
+                Text("Accept saves these exact instructions. Enable separately after installation.").font(NekoFont.meta).foregroundStyle(N.text3)
                 HStack {
                     Button("Accept & save reviewed content") { decide(proposal, accept: true) }.disabled(!reviewed)
                     Button("Reject") { decide(proposal, accept: false) }
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 12)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(proposal["name"].string).font(NekoFont.heading).foregroundStyle(N.text).lineLimit(2)
+                Text("Suggested skill · Review instructions").font(NekoFont.meta).foregroundStyle(N.text3)
+            }
         }
+        .padding(16)
+        .background(N.card, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(N.line))
     }
 
     private func decide(_ proposal: JSONValue, accept: Bool) {
