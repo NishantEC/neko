@@ -40,3 +40,27 @@ navigation and asynchronous snapshot-ordering tests passed.
 Logs: `/tmp/neko-typing-baseline.log`, `/tmp/neko-typing-red.log`,
 `/tmp/neko-sizing-red.log`, `/tmp/neko-typing-green.log`. These are temporary
 local logs. AppKit tests use in-memory views; they do not replace live checks.
+
+## Installed verification
+
+Installed code: `4aef0ee8f503bd398bd6e25c51f0cc0bebe7b7d1`. The signed release
+build completed in 32.37 seconds. Bundle signing passed strict verification;
+installed client and daemon binaries matched the build output. Immediately
+before replacement there were zero active/queued tickets and zero pending/queued
+Home messages. Final inspection found one client and one daemon, both from
+`/Applications/Neko.app`. Data and credentials were preserved.
+
+Native UI checks on macOS 26.5.1 confirmed full-width typing in Home and the same
+NEK-9523 composer that reproduced the problem. Screenshots showed both typed
+lines in the available space after Shift-Return. Home undo and redo restored the
+typed content. A twelve-line agent draft grew to the height cap, scrolled to the
+caret, and survived navigation to Home and back. Home remained empty while the
+agent draft was retained. Both diagnostic drafts were cleared afterward; Send
+was disabled, Home was left open, and no message or task action was submitted.
+Screenshots were reviewed in the chat rather than saved as repository artifacts.
+
+The notification counts are deterministic test measurements, not a claimed
+end-to-end latency benchmark. Physical rapid typing, a live OS input-method
+session, older macOS versions and all possible sources of scrolling/frame lag
+remain outside this check. Marked text preservation was tested with AppKit views.
+No daemon execution behavior changed. Commits remain local to main.
