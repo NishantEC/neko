@@ -1,6 +1,7 @@
 # Pearl composer and plugin direction
 
-Status: proposed, not implemented. Paper mockups reviewed on 2026-10-05.
+Status: native visual preview implemented; production adoption and plugin host proposed.
+Paper mockups reviewed on 2026-10-05.
 
 **2026-10-06 update:** the native Design lab implements the visual study. The user
 selected Inline; production adoption and the plugin host remain proposed. The
