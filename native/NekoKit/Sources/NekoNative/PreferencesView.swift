@@ -201,6 +201,8 @@ struct PreferencesView: View {
                                     .font(NekoFont.meta).foregroundStyle(.secondary)
                             }
                         }
+                        .accessibilityLabel("Show activity while Neko works")
+                        .accessibilityHint("A small status in the corner. Click it to return to Neko.")
                     }
                     Section("Clipboard") {
                         Toggle(isOn: Binding(get: { clipboard.enabled ?? false }, set: { value in setClipboard(value) })) {
@@ -209,7 +211,10 @@ struct PreferencesView: View {
                                 Text("Stored on this Mac. Turning it off stops capture and keeps existing history.")
                                     .font(NekoFont.meta).foregroundStyle(.secondary)
                             }
-                        }.disabled(clipboard.enabled == nil)
+                        }
+                        .accessibilityLabel("Save clipboard history")
+                        .accessibilityHint("Stored on this Mac. Turning it off stops capture and keeps existing history.")
+                        .disabled(clipboard.enabled == nil)
                         if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
                     }
                 }.formStyle(.grouped)
@@ -301,10 +306,11 @@ struct PreferencesView: View {
                         }
                         ForEach(folders, id: \.self) { folder in
                             HStack(spacing: 12) {
-                                Image(systemName: "folder").foregroundStyle(.secondary)
+                                Image(systemName: "folder").foregroundStyle(.secondary).accessibilityHidden(true)
                                 Text(folder["title"].string).textSelection(.enabled)
                                 Spacer()
                                 Button("Remove") { activate("folder-scope", folder["id"].string) }
+                                    .accessibilityLabel("Remove \(folder["title"].string) from search")
                             }.padding(.vertical, 4)
                         }
                     }

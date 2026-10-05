@@ -29,6 +29,7 @@ enum ToolsPresentation {
     static func toolSummary(_ connection: JSONValue) -> String {
         let count = connection["tools"].array.count
         if count > 0 { return "\(count) \(count == 1 ? "tool" : "tools")" }
+        if !connection["enabled"].bool || !connection["error"].string.isEmpty { return "No tools" }
         return connection["discovered_ms"] == .null ? "Discovering" : "No tools"
     }
 }
@@ -417,7 +418,7 @@ struct ToolsView: View {
                         if count > 0 { NekoSearchField(title: "Search tools", text: $toolSearch).frame(width: 220) }
                     }
                     if count == 0 {
-                        Text(!connection["enabled"].bool ? "Enable this connection to discover its tools." : ToolsPresentation.connectionStatus(connection) == "Sign in needed" ? "Sign in to discover this server’s tools." : connection["discovered_ms"] == .null ? "Discovering tools. Refresh if this takes too long." : "This server exposed no tools. Refresh to check again.")
+                        Text(!connection["enabled"].bool ? "Enable this connection to discover its tools." : ToolsPresentation.connectionStatus(connection) == "Sign in needed" ? "Sign in to discover this server’s tools." : !connection["error"].string.isEmpty ? "No tools were discovered. Review the connection error above, then refresh." : connection["discovered_ms"] == .null ? "Discovering tools. Refresh if this takes too long." : "This server exposed no tools. Refresh to check again.")
                             .font(NekoFont.body).foregroundStyle(N.text3).padding(.vertical, 8)
                     } else if filtered.isEmpty {
                         Text("No tools match your search.").font(NekoFont.body).foregroundStyle(N.text3)
