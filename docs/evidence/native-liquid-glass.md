@@ -135,3 +135,11 @@ measurement, draft handling and keyboard commands are unchanged.
   Both editors remained empty; no messages were sent. Screenshots were reviewed
   in chat. Narrow-window fallback, light appearance and active queue states
   were not exercised on screen in this correction.
+
+Follow-up `0eceb56` removes the redundant Send/Queue shortcut hint and expands
+the remaining wording to "Shift-Return for a new line". The signed release build
+and idle-gated installation passed, the installed source and client binary were
+verified, and active-window screenshots confirmed the wording inside both Home
+and agent composers. No text was entered or sent. The prior native suite was
+not rerun for this copy-only follow-up. Build/install logs are
+`/tmp/neko-newline-hint-build.log` and `/tmp/neko-newline-hint-install.log`.
