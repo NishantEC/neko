@@ -3,43 +3,6 @@ import AppKit
 @preconcurrency import ApplicationServices
 import NekoKit
 
-struct ChatDraftScope: Hashable {
-    let workspaceID: String?
-    let profileID: String
-}
-
-struct ScopedChatDrafts {
-    struct Submission { let scope: ChatDraftScope; let text: String; let revision: Int }
-    private var values: [ChatDraftScope: String] = [:]
-    private var attached: [ChatDraftScope: [ComposerAttachment]] = [:]
-    private var revisions: [ChatDraftScope: Int] = [:]
-    func text(for scope: ChatDraftScope) -> String { values[scope] ?? "" }
-    func attachments(for scope: ChatDraftScope) -> [ComposerAttachment] { attached[scope] ?? [] }
-    mutating func add(_ attachment: ComposerAttachment, for scope: ChatDraftScope) {
-        guard !attachments(for: scope).contains(attachment) else { return }
-        attached[scope, default: []].append(attachment)
-        revisions[scope, default: 0] += 1
-    }
-    mutating func remove(_ attachment: ComposerAttachment, for scope: ChatDraftScope) {
-        attached[scope]?.removeAll { $0 == attachment }
-        revisions[scope, default: 0] += 1
-    }
-    mutating func set(_ text: String, for scope: ChatDraftScope) {
-        guard values[scope] != text else { return }
-        values[scope] = text
-        revisions[scope, default: 0] += 1
-    }
-    func submission(for scope: ChatDraftScope) -> Submission {
-        let parts = [text(for: scope).trimmingCharacters(in: .whitespacesAndNewlines)] + attachments(for: scope).map(\.reference)
-        return Submission(scope: scope, text: parts.filter { !$0.isEmpty }.joined(separator: "\n"), revision: revisions[scope, default: 0])
-    }
-    mutating func complete(_ submission: Submission, succeeded: Bool) {
-        guard succeeded, revisions[submission.scope, default: 0] == submission.revision else { return }
-        set("", for: submission.scope)
-        attached[submission.scope] = []
-    }
-}
-
 struct ChatScrollMetrics: Equatable {
     var contentHeight: CGFloat = 0
     var originY: CGFloat = 0
@@ -55,6 +18,10 @@ struct ChatScrollFollowState {
     mutating func pin(for seconds: TimeInterval = 1.2, now: Date = Date()) {
         followsLatest = true
         pinnedUntil = now.addingTimeInterval(seconds)
+    }
+    mutating func userInteracted() {
+        pinnedUntil = .distantPast
+        followsLatest = false
     }
     mutating func update(_ metrics: ChatScrollMetrics, now: Date = Date()) {
         if now < pinnedUntil { followsLatest = true; previous = metrics; return }
@@ -104,7 +71,6 @@ struct TodayView: View {
     @State private var transcriptHeight: CGFloat = 0
     @State private var addingWorkspace = false
     @State private var composerHeight: CGFloat = 0
-    @State private var catalog = ModelCatalog()
     @AppStorage("neko.composer.mode") private var mode = "ask"
     @State private var menuIndex = 0
     @State private var menuDismissed: String?
@@ -125,7 +91,8 @@ struct TodayView: View {
         nonmutating set { model.chatDrafts.set(newValue, for: scope) }
     }
     private var sending: Bool { model.sendingChatScopes.contains(scope) }
-    private var replying: Bool { model.snapshot["conversation"].array.contains { $0["pending"].bool } }
+    private var replying: Bool { pendingTurn != nil }
+    private var chatQueueOccupied: Bool { model.snapshot["conversation"].array.contains { $0["pending"].bool || $0["queued"].bool } }
     private var attachments: [ComposerAttachment] { model.chatDrafts.attachments(for: scope) }
     private var workSummary: TodayWorkSummary { TodayWorkSummary(tasks: model.tasks, workspaceID: model.selectedWorkspace) }
     private var messages: [JSONValue] {
@@ -160,27 +127,40 @@ struct TodayView: View {
                                 Color.clear.preference(key: ChatScrollMetricsKey.self, value: ChatScrollMetrics(contentHeight: geometry.size.height, originY: geometry.frame(in: .named("chatTranscript")).minY, viewportHeight: viewport.size.height))
                             })
                     }.coordinateSpace(name: "chatTranscript")
+                        .background(ChatScrollIntentObserver(
+                            bottomExclusion: CGSize(width: min(720, max(280, outer.size.width - 64)), height: composerHeight),
+                            onInteraction: { scrollFollow.userInteracted() }
+                        ))
+                        .overlay(alignment: .bottom) {
+                            if !scrollFollow.followsLatest {
+                                Button("Jump to latest", systemImage: "arrow.down") {
+                                    scrollFollow.pin()
+                                    reader.scrollTo("bottom", anchor: .bottom)
+                                }.buttonStyle(.bordered).controlSize(.small)
+                                    .padding(.bottom, composerHeight + 8)
+                            }
+                        }
                         .onPreferenceChange(ChatScrollMetricsKey.self) { metrics in
                             let resized = abs(metrics.contentHeight - transcriptHeight) > 1
                             transcriptHeight = metrics.contentHeight
                             scrollFollow.update(metrics)
                             // Layout has now measured the completed reply, so
                             // scroll to its new bottom rather than the old one.
-                            if resized, scrollFollow.followsLatest { DispatchQueue.main.async { reader.scrollTo("bottom", anchor: .bottom) } }
+                            if resized, scrollFollow.followsLatest { DispatchQueue.main.async { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } } }
                         }
                         .onChange(of: messages.last) { _, _ in
                             if messages.last?["role"].string == "user" { scrollFollow.pin() }
                             guard scrollFollow.followsLatest else { return }
                             reader.scrollTo("bottom", anchor: .bottom)
-                            DispatchQueue.main.async { reader.scrollTo("bottom", anchor: .bottom) }
+                            DispatchQueue.main.async { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
                         }
                         .onChange(of: messages.count) { old, new in
                             guard new > old else { return }
                             guard messages.suffix(new - old).contains(where: { $0["role"].string == "user" }) else { return }
                             scrollFollow.pin()
-                            DispatchQueue.main.async { reader.scrollTo("bottom", anchor: .bottom) }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { reader.scrollTo("bottom", anchor: .bottom) }
+                            DispatchQueue.main.async { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
                         }
                         .onChange(of: scope) { _, _ in
                             scrollFollow = ChatScrollFollowState()
@@ -189,7 +169,7 @@ struct TodayView: View {
                         .onAppear {
                             reader.scrollTo("bottom", anchor: .bottom)
                             // The inspector and composer settle a moment later; follow them.
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { reader.scrollTo("bottom", anchor: .bottom) }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
                         }
                 }
                 }
@@ -205,12 +185,13 @@ struct TodayView: View {
         .toolbar { todayToolbar }
         .environment(\.replyActions, ReplyActions(send: { text in post(text) }, draft: { text in draft = text }))
         .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: messages.count)
-        .task { catalog = await AgentModelCatalog.load(model) }
         .onAppear {
             guard escapeMonitor == nil else { return }
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == 53, !event.isARepeat else { return event }
                 guard pendingTurn != nil else { lastEscape = .distantPast; return event }
+                if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { lastEscape = .distantPast; return event }
+                if !menuItems.isEmpty { lastEscape = .distantPast; return event }
                 let now = Date()
                 if now.timeIntervalSince(lastEscape) < 0.6 { lastEscape = .distantPast; stopReply(); return nil }
                 lastEscape = now
@@ -221,7 +202,8 @@ struct TodayView: View {
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
     }
     private func composer(availableWidth: CGFloat) -> some View {
-        let width = min(720, max(360, availableWidth - 96))
+        let width = min(720, max(280, availableWidth - 64))
+        let targetScope = scope
         return VStack(alignment: .leading, spacing: 8) {
             if let notice = toolAccessNotice {
                 HStack(spacing: 8) {
@@ -237,48 +219,28 @@ struct TodayView: View {
             let items = menuItems
             if !items.isEmpty { composerMenu(items) }
             approvalBar
-            VStack(alignment: .leading, spacing: 6) {
-                if !attachments.isEmpty { attachmentStrip }
-                ComposerView(
-                    text: Binding(get: { draft }, set: { draft = $0 }),
-                    onSubmit: { send() },
-                    onInterruptAndSubmit: { send(interrupt: true) },
-                    onAttach: { model.chatDrafts.add($0, for: scope) },
-                    onError: { model.error = $0 },
-                    onSubmitWithContext: { send(withContext: true) },
-                    onMenuKey: { handleMenuKey($0) }
-                ).id(scope)
-                HStack(spacing: 8) {
-                    Button(action: chooseAttachments) {
-                        Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary).frame(width: 24, height: 24)
-                            .background(Color.white.opacity(0.1), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Attach images or files; you can also paste or drop them")
-                    .accessibilityLabel("Attach images or files")
-                    GlassSegmented(selection: $mode, options: [
-                        .init(value: "ask", title: "Ask", help: "Ask: Neko answers now"),
-                        .init(value: "plan", title: "Plan", help: "Plan: Neko proposes a ticket with a plan for your approval, without changing anything")
-                    ], size: .small)
-                    runtimeMenu
-                    Spacer(minLength: 8)
-                    Button { send() } label: {
-                        Group {
-                            if sending { ProgressView().controlSize(.mini) }
-                            else { Image(systemName: "arrow.up").font(.system(size: 12, weight: .bold)) }
-                        }
-                        .foregroundStyle(canSend ? Color.white : Color.secondary)
-                        .frame(width: 26, height: 26)
-                        .background(canSend ? NekoStyle.accent : Color.white.opacity(0.1), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canSend)
-                    .accessibilityLabel(sending ? "Sending message" : replying ? "Queue message" : "Send message")
-                }
-            }
-            .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 8)
-            .liquidGlass(radius: 20)
+            SharedComposer(
+                text: Binding(get: { model.chatDrafts.text(for: targetScope) }, set: { model.chatDrafts.set($0, for: targetScope) }),
+                attachments: attachments,
+                placeholder: "Ask Neko, type / for commands or @ to add context",
+                accessibilityLabel: "Message to Neko",
+                accessibilityHelp: "Return sends or queues. Shift Return adds a line. Command Return interrupts and sends. Option Return includes the previous app's selection. Paste or drop images and files to attach them.",
+                state: composerState, validationError: payloadError,
+                onSend: { send() }, onStop: stopReply,
+                onAttach: { model.chatDrafts.add($0, for: targetScope) },
+                onRemove: { model.chatDrafts.remove($0, for: targetScope) },
+                onChooseAttachments: chooseAttachments,
+                onError: { model.error = $0 },
+                onInterrupt: { send(interrupt: true) },
+                onContext: { send(withContext: true) },
+                onMenuKey: handleMenuKey
+            ) {
+                GlassSegmented(selection: $mode, options: [
+                    .init(value: "ask", title: "Ask", help: "Ask: Neko answers now"),
+                    .init(value: "plan", title: "Plan", help: "Plan: Neko proposes a ticket with a plan for your approval, without changing anything")
+                ], size: .small)
+                ComposerRuntimeMenu(model: model)
+            }.id(targetScope)
         }
         .frame(width: width)
         .padding(.bottom, 16).padding(.top, 28)
@@ -472,8 +434,7 @@ struct TodayView: View {
             var items: [ComposerMenuItem] = []
             for workspace in model.workspaces where q.isEmpty || workspace["name"].string.lowercased().contains(q) {
                 items.append(ComposerMenuItem(id: "w:" + workspace.recordID, symbol: "folder", title: workspace["name"].string, detail: "Workspace") {
-                    model.selectedWorkspace = workspace.recordID
-                    replaceMention(with: "")
+                    replaceMention(with: "Workspace: " + workspace["name"].string)
                 })
             }
             for connection in model.snapshot["mcp"]["connections"].array where connection["enabled"].bool && (q.isEmpty || connection["label"].string.lowercased().contains(q)) {
@@ -541,10 +502,7 @@ struct TodayView: View {
         return true
     }
     private func replaceMention(with replacement: String) {
-        var words = draft.components(separatedBy: " ")
-        if let last = words.last, last.hasPrefix("@") { words[words.count - 1] = replacement.trimmingCharacters(in: .whitespaces) }
-        let joined = words.joined(separator: " ").trimmingCharacters(in: .whitespaces)
-        draft = joined.isEmpty ? "" : joined + " "
+        draft = ComposerMention.replacingTrailingMention(in: draft, with: replacement)
     }
     private func searchMentionFiles() async {
         guard let query = mentionQuery, query.count >= 2 else { mentionFiles = []; return }
@@ -579,42 +537,15 @@ struct TodayView: View {
         if !Task.isCancelled { mentionFiles = found }
     }
 
-    private var runtimeMenu: some View {
-        Menu {
-            ForEach(catalog.sources) { source in
-                Section(source.connection) {
-                    if source.ready {
-                        Button(source.defaultTitle) { selectRuntime(source.provider) }
-                        ForEach(source.models) { entry in
-                            Button(menuTitle(entry)) { selectRuntime(source.provider, model: entry.id) }
-                                .disabled(!entry.usable)
-                                .help(entry.reason ?? entry.description ?? "")
-                        }
-                    } else if let note = source.note {
-                        Text(note)
-                    }
-                }
-            }
-            Button("Refresh models") { Task { catalog = await AgentModelCatalog.load(model, refresh: true) } }
-            Divider()
-            Button("Model settings…") { NotificationCenter.default.post(name: .nekoNavigate, object: "Settings") }
-        } label: {
-            HStack(spacing: 4) {
-                Text(runtimeLabel).font(.system(size: 12))
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
-            }.foregroundStyle(.secondary)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Choose the agent runtime. Local providers need a running Ollama or LM Studio server.")
+    private var payloadError: String? {
+        ComposerPayload.validationError(ComposerPayload.homeText(model.chatDrafts.submission(for: scope).text, planOnly: mode == "plan"), limit: 4096)
     }
-
-    private var canSend: Bool { !model.chatDrafts.submission(for: scope).text.isEmpty && !sending && !model.busy }
+    private var composerState: ComposerActionState {
+        ComposerActionState(running: chatQueueOccupied, hasContent: !model.chatDrafts.submission(for: scope).text.isEmpty,
+                            submitting: sending, blocked: model.busy || payloadError != nil, queues: true, canStop: replying)
+    }
+    private var canSend: Bool { composerState.canSubmit }
     private var pendingTurn: JSONValue? { messages.last { $0["pending"].bool && $0["role"].string != "user" } ?? messages.last { $0["pending"].bool } }
-    /// With an empty draft the send button becomes Stop; typing while a reply
-    /// runs turns it back into Send so the new message queues.
-    private var showsStop: Bool { pendingTurn != nil && !sending && model.chatDrafts.submission(for: scope).text.isEmpty }
     private func stopReply() {
         guard let turn = pendingTurn else { return }
         Task { await model.workbench(.command("CancelChat", ["turn_id": turn["id"]])) }
@@ -626,6 +557,7 @@ struct TodayView: View {
         return text.isEmpty ? nil : text
     }
     private func retry(_ text: String) {
+        guard validateHomePayload(text) else { return }
         scrollFollow.pin()
         model.sendingChatScopes.insert(scope)
         let target = scope
@@ -635,43 +567,6 @@ struct TodayView: View {
         }
     }
 
-    private var runtimeLabel: String {
-        let runtime = model.snapshot["agent_runtime"]
-        return AgentModelCatalog.label(provider: runtime["provider"].string, model: runtime["model"].string, catalog: catalog)
-    }
-
-    private func menuTitle(_ entry: CatalogModel) -> String {
-        let selected = model.snapshot["agent_runtime"]["model"].string == entry.id
-        var title = (selected ? "✓ " : "") + entry.label
-        if entry.recommended { title += " · Recommended" }
-        if entry.access == .checked { title += " · Checked" }
-        if !entry.usable { title += " · Unavailable" }
-        return title
-    }
-
-    private func selectRuntime(_ provider: String, model selectedModel: String = "") {
-        Task { await model.workbench(.command("SetAgentRuntime", ["runtime": .object(["provider": .string(provider), "model": .string(selectedModel)])])) }
-    }
-
-    private var attachmentStrip: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(attachments) { attachment in
-                    HStack(spacing: 6) {
-                        Image(systemName: attachment.isImage ? "photo" : "doc")
-                        Text(attachment.name).lineLimit(1)
-                        Button { model.chatDrafts.remove(attachment, for: scope) } label: {
-                            Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Remove \(attachment.name)")
-                    }
-                    .font(.system(size: 11)).foregroundStyle(N.text2)
-                    .padding(.horizontal, 9).frame(height: 26).liquidGlassCapsule()
-                }
-            }
-        }.scrollIndicators(.never)
-    }
     private var toolAccessNotice: String? {
         let workspace = model.selectedWorkspace ?? (model.workspaces.count == 1 ? model.workspaces[0].recordID : "")
         guard !workspace.isEmpty else { return model.workspaces.count > 1 ? "Choose a workspace to use its tools." : nil }
@@ -847,20 +742,8 @@ struct TodayView: View {
         }.padding(.vertical, 5)
     }
     private func chooseAttachments() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = true
-        let selectedScope = scope
-        panel.begin { response in
-            guard response == .OK else { return }
-            Task { @MainActor in
-                for url in panel.urls {
-                    do { model.chatDrafts.add(try ComposerAttachmentStore.saveFile(url), for: selectedScope) }
-                    catch { model.error = error.localizedDescription }
-                }
-            }
-        }
+        let targetScope = scope
+        ComposerAttachmentPicker.choose(attach: { model.chatDrafts.add($0, for: targetScope) }, onError: { model.error = $0 })
     }
 
     private func send(interrupt: Bool = false, withContext: Bool = false) {
@@ -872,10 +755,7 @@ struct TodayView: View {
             model.chatDrafts.complete(submission, succeeded: true)
             return
         }
-        var text = SlashCommand.parse(submission.text)?.chatText ?? submission.text
-        if mode == "plan", SlashCommand.parse(submission.text) == nil {
-            text = "Plan only, and change nothing yet: propose a ticket with a short step-by-step plan for my approval.\n\n" + text
-        }
+        var text = ComposerPayload.homeText(submission.text, planOnly: mode == "plan")
         if withContext {
             if let snapshot = PreviousAppContext.shared.read() {
                 text = PreviousAppContext.attach(snapshot, to: text)
@@ -883,6 +763,7 @@ struct TodayView: View {
                 model.notice = AXIsProcessTrusted() ? "No previous app to read from. Sent without context." : "Allow Accessibility in Settings → Permissions to include the previous app. Sent without context."
             }
         }
+        guard validateHomePayload(text) else { return }
         model.sendingChatScopes.insert(submission.scope)
         Task {
             let saved = await model.workbench(.command(interrupt ? "InterruptAndSendMessage" : "SendMessage", ["text": .string(text), "workspace_id": submission.scope.workspaceID.map(JSONValue.string) ?? .null]))
@@ -894,12 +775,18 @@ struct TodayView: View {
     /// Sends text that came from a reply view (a choice, a form, Try Again).
     private func post(_ text: String) {
         let target = scope
-        guard !text.isEmpty, !model.sendingChatScopes.contains(target) else { return }
+        guard !text.isEmpty, !model.sendingChatScopes.contains(target), validateHomePayload(text) else { return }
         model.sendingChatScopes.insert(target)
         Task {
             _ = await model.workbench(.command("SendMessage", ["text": .string(text), "workspace_id": target.workspaceID.map(JSONValue.string) ?? .null]))
             model.sendingChatScopes.remove(target)
         }
+    }
+
+    private func validateHomePayload(_ text: String) -> Bool {
+        guard let error = ComposerPayload.validationError(text, limit: 4096) else { return true }
+        model.error = error
+        return false
     }
 
     private func runCommand(_ command: SlashCommand) {

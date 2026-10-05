@@ -55,6 +55,20 @@ its top row useful and mouse-accessible with the sidebar expanded or collapsed.
 Page bodies and side panels respect the native top safe area. Hiding the toolbar
 background does not remove its mouse-hit region; content must not draw controls
 underneath it.
+Home and ticket chats share a native `NSTextView` composer and attachment strip.
+`ComposerDraftStore` keeps text, durable attachment references and revisions per
+workspace/profile or ticket ID in `AppModel`; navigation preserves them, app quit
+does not. Successful sends clear only the submitted revision. The two adapters
+retain different commands: Home sends/queues/cancels chat, while ticket replies
+use `ReplyToTask` and can redirect active work. Return sends content and never
+activates Stop; Shift Return inserts a line. Complete serialized payloads are
+checked against the daemon's 4 KiB Home and 2 KiB ticket limits.
+Settled agent chats show their saved result and independent reviewer readback
+openly, with prior conversation, plans and decisions folded into history. Saved
+results during retries are labelled historical; display text does not determine
+approval or verification status. Rich tables wrap, and long terminal/diff previews
+have explicit line counts and incremental expansion of available output. These
+presentation changes are separate from runtime context compaction.
 `neko-core::neko_chat` stores the conversation in its own bounded setting,
 outside the task store's reserved capacity. Each message is one Codex turn with
 read-only filesystem access (`neko-daemon::workbench::converse`). A selected
@@ -123,7 +137,8 @@ OpenCodex's live model list through `ocx models live --json`, discards disabled
 entries, and displays real provider names; Neko does not independently fetch
 those providers' catalogs or import their credentials. Runs still use the Codex
 CLI with ephemeral configuration. Selection does not alter already-running
-work. The Home composer and main-window Settings → AI page both update it.
+work. Both chat composers and main-window Settings → AI update this global setting;
+the composer menu labels its scope. There is no per-conversation model override.
 The saved provider remains an explicit choice: Neko does not yet select or switch
 providers based on remaining quota. Worker concurrency is independent of account
 usage limits; starting another session does not reset those limits.

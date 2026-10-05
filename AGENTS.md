@@ -9,6 +9,14 @@ manages confirmed contextual preferences. Decision episodes persist independentl
 of task status, with immutable observations and contextual corrections; preferences
 never grant execution or publication authority. See `docs/architecture.md`.
 
+As of 2026-10-05, Home and ticket chats share the AppKit growing composer,
+attachment strip and revision-safe draft store. Drafts survive navigation, not
+app restart. Home send/queue/stop and ticket `ReplyToTask` remain separate adapters;
+Return never stops work. Runtime selection is labelled global, not per ticket.
+Settled agent chats expose the result and review while folding older plans,
+conversation and decisions. Rich output wraps table cells and makes available
+terminal/diff preview limits explicit. This is presentation, not runtime compaction.
+
 As of 2026-10-02, `/Applications/Neko.app` is built from `native/NekoKit`
 (SwiftUI/AppKit) over the same daemon and workbench protocol. The GPUI
 `workspace.rs` client described in the historical implementation record below

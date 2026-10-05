@@ -31,6 +31,9 @@ struct ComposerView: NSViewRepresentable {
     var onSubmitWithContext: (() -> Void)? = nil
     /// Returns true when an open menu used the key.
     var onMenuKey: ((ComposerMenuKey) -> Bool)? = nil
+    var placeholder = "Ask Neko, type / for commands or @ to add context"
+    var accessibilityLabel = "Message to Neko"
+    var accessibilityHelp = "Return sends or queues a message. Option Return sends it with the selection from the app you were just in. Shift Return adds a line. Command Return interrupts the current reply and sends. Paste or drop images and files to attach them."
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -62,8 +65,9 @@ struct ComposerView: NSViewRepresentable {
         editor.textContainer?.containerSize = NSSize(width: 100, height: CGFloat.greatestFiniteMagnitude)
         editor.minSize = NSSize(width: 0, height: 40)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        editor.setAccessibilityLabel("Message to Neko")
-        editor.setAccessibilityHelp("Return sends or queues a message. Option Return sends it with the selection from the app you were just in. Shift Return adds a line. Command Return interrupts the current reply and sends. Paste or drop images and files to attach them.")
+        editor.setAccessibilityLabel(accessibilityLabel)
+        editor.setAccessibilityHelp(accessibilityHelp)
+        editor.placeholder = placeholder
         editor.string = text
         editor.submit = onSubmit
         editor.interruptAndSubmit = onInterruptAndSubmit
@@ -94,6 +98,9 @@ struct ComposerView: NSViewRepresentable {
             editor.setSelectedRange(NSRange(location: min(selection.location, length), length: 0))
             editor.needsDisplay = true
         }
+        editor.setAccessibilityLabel(accessibilityLabel)
+        editor.setAccessibilityHelp(accessibilityHelp)
+        if editor.placeholder != placeholder { editor.placeholder = placeholder; editor.needsDisplay = true }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
@@ -121,6 +128,7 @@ struct ComposerView: NSViewRepresentable {
 }
 
 @MainActor private final class ComposerTextView: NSTextView {
+    var placeholder = ""
     var submit: (() -> Void)?
     var interruptAndSubmit: (() -> Void)?
     var submitWithContext: (() -> Void)?
@@ -197,7 +205,7 @@ struct ComposerView: NSViewRepresentable {
                 .font: font ?? NSFont.systemFont(ofSize: 13),
                 .foregroundColor: NSColor.placeholderTextColor
             ]
-            ("Ask Neko, type / for commands or @ to add context" as NSString).draw(
+            (placeholder as NSString).draw(
                 at: NSPoint(x: textContainerInset.width, y: textContainerInset.height), withAttributes: attributes)
         }
     }

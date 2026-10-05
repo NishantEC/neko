@@ -312,14 +312,17 @@ struct NativeTableBlock: View {
     @State private var sortColumn: Int?
     @State private var ascending = true
     @State private var copied = false
+    @State private var availableWidth: CGFloat = 600
+    private var columnWidth: CGFloat { max(160, (availableWidth - 20) / CGFloat(max(1, headers.count))) }
     private var sorted: [[String]] {
         guard let column = sortColumn else { return rows }
         return rows.sorted { a, b in
             let x = a.indices.contains(column) ? a[column] : "", y = b.indices.contains(column) ? b[column] : ""
             let nx = Double(x.filter { "0123456789.-−".contains($0) }.replacingOccurrences(of: "−", with: "-"))
             let ny = Double(y.filter { "0123456789.-−".contains($0) }.replacingOccurrences(of: "−", with: "-"))
-            let order = (nx != nil && ny != nil) ? nx! < ny! : x.localizedStandardCompare(y) == .orderedAscending
-            return ascending ? order : !order
+            if let nx, let ny { return ascending ? nx < ny : nx > ny }
+            let order = x.localizedStandardCompare(y)
+            return ascending ? order == .orderedAscending : order == .orderedDescending
         }
     }
     var body: some View {
@@ -332,6 +335,7 @@ struct NativeTableBlock: View {
                     copied = NSPasteboard.general.setString(csv, forType: .string)
                 }.buttonStyle(.borderless).font(ReplyStyle.caption)
             }
+            ScrollView(.horizontal) {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     ForEach(Array(headers.enumerated()), id: \.offset) { index, header in
@@ -339,31 +343,37 @@ struct NativeTableBlock: View {
                             if sortColumn == index { ascending.toggle() } else { sortColumn = index; ascending = true }
                         } label: {
                             HStack(spacing: 3) {
-                                Text(header).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                                Text(header).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                                 if sortColumn == index { Image(systemName: ascending ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary) }
-                            }.frame(maxWidth: .infinity, alignment: index == 0 ? .leading : .trailing).contentShape(Rectangle())
+                            }.padding(.horizontal, 6).frame(width: columnWidth, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
-                }.padding(.horizontal, 10).frame(height: 24)
+                }.padding(.horizontal, 10).padding(.vertical, 8)
                 Divider()
                 ForEach(Array(sorted.enumerated()), id: \.offset) { index, row in
-                    HStack(spacing: 0) {
+                    HStack(alignment: .top, spacing: 0) {
                         ForEach(Array(headers.indices), id: \.self) { column in
                             let cell = row.indices.contains(column) ? row[column] : ""
                             Text(inline(cell)).font(ReplyStyle.small.monospacedDigit())
                                 .foregroundStyle(tone(cell, column: column))
-                                .lineLimit(1).frame(maxWidth: .infinity, alignment: column == 0 ? .leading : .trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 6).frame(width: columnWidth, alignment: .leading)
                         }
                     }
-                    .padding(.horizontal, 10).frame(height: 22)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
                     .background(index % 2 == 1 ? Color.white.opacity(0.035) : .clear)
                 }
+            }
             }
             .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ReplyStyle.groupStroke))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .textSelection(.enabled)
         }
+        .background(GeometryReader { geometry in
+            Color.clear.onAppear { availableWidth = geometry.size.width }
+                .onChange(of: geometry.size.width) { _, width in availableWidth = width }
+        })
     }
     private func inline(_ value: String) -> AttributedString {
         (try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value)
@@ -380,6 +390,8 @@ struct NativeTableBlock: View {
 struct NativeDiffBlock: View {
     let code: String
     @State private var expanded: Set<Int> = [0]
+    @State private var lineLimits: [Int: Int] = [:]
+    @State private var copied = false
     private struct FileDiff { var name: String; var lines: [String]; var added: Int; var removed: Int }
     private var files: [FileDiff] {
         var result: [FileDiff] = []
@@ -400,6 +412,14 @@ struct NativeDiffBlock: View {
     var body: some View {
         let all = files
         VStack(spacing: 0) {
+            HStack {
+                Text("Changes").font(ReplyStyle.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(copied ? "Copied" : "Copy full diff") {
+                    NSPasteboard.general.clearContents()
+                    copied = NSPasteboard.general.setString(code, forType: .string)
+                }.buttonStyle(.borderless).font(ReplyStyle.caption)
+            }.padding(.horizontal, 10).padding(.vertical, 6)
             ForEach(Array(all.enumerated()), id: \.offset) { index, file in
                 if index > 0 { Divider().opacity(0.6) }
                 Button {
@@ -418,7 +438,7 @@ struct NativeDiffBlock: View {
                     Divider().opacity(0.6)
                     ScrollView(.horizontal) {
                         VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(file.lines.prefix(400).enumerated()), id: \.offset) { _, line in
+                            ForEach(Array(file.lines.prefix(lineLimits[index, default: 400]).enumerated()), id: \.offset) { _, line in
                                 Text(line.isEmpty ? " " : line)
                                     .font(ReplyStyle.mono)
                                     .foregroundStyle(line.hasPrefix("@@") ? Color.secondary : .primary.opacity(line.hasPrefix("+") || line.hasPrefix("-") ? 0.95 : 0.65))
@@ -427,6 +447,15 @@ struct NativeDiffBlock: View {
                             }
                         }.padding(.vertical, 4).fixedSize(horizontal: true, vertical: false)
                     }.textSelection(.enabled)
+                    let shown = min(file.lines.count, lineLimits[index, default: 400])
+                    if shown < file.lines.count {
+                        HStack {
+                            Text("Showing \(shown) of \(file.lines.count) lines").foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Show next \(min(400, file.lines.count - shown)) lines") { lineLimits[index] = shown + 400 }
+                                .buttonStyle(.borderless)
+                        }.font(ReplyStyle.caption).padding(10)
+                    }
                 }
             }
         }
@@ -440,6 +469,7 @@ struct NativeTerminalBlock: View {
     let language: String
     let code: String
     @State private var copied = false
+    @State private var lineLimit = 300
     private var command: String? {
         let first = code.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? ""
         return first.hasPrefix("$ ") ? String(first.dropFirst(2)) : nil
@@ -463,11 +493,19 @@ struct NativeTerminalBlock: View {
             Divider().opacity(0.6)
             ScrollView(.horizontal) {
                 VStack(alignment: .leading, spacing: 1) {
-                    ForEach(Array(output.prefix(300).enumerated()), id: \.offset) { _, line in
+                    ForEach(Array(output.prefix(lineLimit).enumerated()), id: \.offset) { _, line in
                         Text(line.isEmpty ? " " : line).font(ReplyStyle.mono).foregroundStyle(color(line))
                     }
                 }.padding(10).fixedSize(horizontal: true, vertical: false)
             }.textSelection(.enabled)
+            if output.count > lineLimit {
+                HStack {
+                    Text("Showing \(lineLimit) of \(output.count) lines").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Show next \(min(300, output.count - lineLimit)) lines") { lineLimit += 300 }
+                        .buttonStyle(.borderless)
+                }.font(ReplyStyle.caption).padding(10)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))

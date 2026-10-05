@@ -10,7 +10,8 @@ import NekoKit
     @Published var agentFilter = "all"
     @Published var agentSearch = ""
     @Published var includeStoppedAgents = true
-    @Published var ticketDrafts: [String: String] = [:]
+    @Published var ticketDrafts = ComposerDraftStore<String>()
+    @Published var sendingTicketIDs: Set<String> = []
 
     func openAgent(_ id: String, from page: String? = nil) {
         if agentID == nil { agentReturnPage = page ?? "Home" }

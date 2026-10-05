@@ -65,6 +65,55 @@ enum TicketPresentation {
               let verdict = try? JSONDecoder().decode(Review.self, from: data) else { return (result, nil) }
         return (String(result[..<range.lowerBound]), verdict)
     }
+    /// Saved plans and results survive replies/retries. Only the ticket's current
+    /// phase decides whether they belong at the latest end or in previous work.
+    struct Conversation {
+        let foldsHistory: Bool
+        let showsPlan: Bool
+        let planTitle: String
+        let outcome: Outcome
+    }
+    enum Outcome: Equatable {
+        case ready, completed, reviewing, stopped, previous
+
+        var belongsInHistory: Bool { self == .previous }
+        var reviewIsCurrent: Bool { self == .ready || self == .completed }
+        var title: String {
+            switch self {
+            case .ready, .completed: "Result"
+            case .reviewing: "Result under review"
+            case .stopped: "Last recorded result"
+            case .previous: "Previous result"
+            }
+        }
+        var note: String {
+            switch self {
+            case .ready: "Ready for your review"
+            case .completed: "Ticket completed"
+            case .reviewing: "Independent review is in progress. This output has not cleared the current review."
+            case .stopped: "Work stopped. This saved output may be from an earlier attempt."
+            case .previous: "Saved from earlier work; it does not describe the current attempt."
+            }
+        }
+    }
+    static func conversation(_ ticket: JSONValue) -> Conversation {
+        let status = ticket["status"].string
+        let outcome: Outcome
+        switch status {
+        case "ReadyForReview": outcome = .ready
+        case "Completed": outcome = .completed
+        case "Reviewing": outcome = .reviewing
+        case "Failed", "Cancelled": outcome = .stopped
+        default: outcome = .previous
+        }
+        return Conversation(
+            foldsHistory: ["ReadyForReview", "Completed", "Failed", "Cancelled"].contains(status),
+            showsPlan: ["Planning", "AwaitingApproval"].contains(status)
+                && !ticket["plan"].string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            planTitle: status == "Planning" ? "Saved plan · being revised" : "Plan",
+            outcome: outcome
+        )
+    }
     static func canProposeSplit(_ ticket: JSONValue, splits: [JSONValue]) -> Bool {
         ticket["status"].string == "AwaitingApproval" && !splits.contains { split in
             split["parent_id"] == ticket["id"] || split["subtasks"].array.contains { $0["task_id"] == ticket["id"] }
@@ -357,6 +406,16 @@ struct TicketDetail: View {
     }
     @Environment(\.dismiss) private var dismiss
     private var ticket: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == id } ?? .null }
+    private var conversation: TicketPresentation.Conversation { TicketPresentation.conversation(ticket) }
+    private var decisions: [JSONValue] {
+        DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { $0["task_id"].string == id })
+    }
+    private var hasPreviousWork: Bool {
+        (conversation.foldsHistory && (!ticket["goal"].string.isEmpty || !ticket["events"].array.isEmpty))
+            || (!conversation.showsPlan && !ticket["plan"].string.isEmpty)
+            || (conversation.outcome.belongsInHistory && !ticket["result"].string.isEmpty)
+            || !decisions.isEmpty
+    }
     var body: some View {
         VStack(spacing: 0) {
         if fullPage { FullDiskAccessBanner() }
@@ -368,10 +427,12 @@ struct TicketDetail: View {
                     Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
                 }
                 Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary) }
-                ForEach(DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { $0["task_id"].string == id }).prefix(3), id: \.recordID) { DecisionCard(model: model, record: $0) }
-                DisclosureGroup { VStack(alignment: .leading, spacing: 22) { detailsBody }.padding(.top, 10) } label: { Text("Details: result, changes, risk, activity").font(.system(size: 12)).foregroundStyle(.secondary) }
-                TicketThreadView(ticket: ticket)
-                section("Plan", ticket["plan"].string)
+                if hasPreviousWork { previousWork }
+                if !conversation.foldsHistory { TicketThreadView(ticket: ticket) }
+                if conversation.showsPlan { section(conversation.planTitle, ticket["plan"].string) }
+                if !conversation.outcome.belongsInHistory {
+                    TicketOutcomeReadback(result: ticket["result"].string, outcome: conversation.outcome)
+                }
                 if ticket["status"].string == "Failed" { stoppedCallout }
                 if let question = TicketPresentation.waitingReason(ticket) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -382,6 +443,11 @@ struct TicketDetail: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                     .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(NekoStyle.amber.opacity(0.25)))
+                }
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 22) { detailsBody }.padding(.top, 10)
+                } label: {
+                    Text("Changes, evidence, risk & activity").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 if !fullPage { HStack {
                     switch ticket["status"].string {
@@ -410,6 +476,26 @@ struct TicketDetail: View {
                 } message: {
                     Text("Removes the ticket, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.")
                 }
+    }
+    private var previousWork: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 18) {
+                if conversation.foldsHistory { TicketThreadView(ticket: ticket) }
+                if !conversation.showsPlan { section("Saved plan", ticket["plan"].string) }
+                if conversation.outcome.belongsInHistory && !ticket["result"].string.isEmpty {
+                    TicketOutcomeReadback(result: ticket["result"].string, outcome: conversation.outcome)
+                }
+                if !decisions.isEmpty {
+                    DisclosureGroup("Decision history · \(decisions.count)") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(decisions, id: \.recordID) { DecisionCard(model: model, record: $0) }
+                        }.padding(.top, 8)
+                    }
+                }
+            }.padding(.top, 10)
+        } label: {
+            Text("Previous work & history").font(.system(size: 12)).foregroundStyle(.secondary)
+        }
     }
     @ToolbarContentBuilder private var agentToolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
@@ -443,22 +529,16 @@ struct TicketDetail: View {
     }
     @ViewBuilder private var detailsBody: some View {
             let review = TicketPresentation.review(ticket["result"].string)
-            section("Result", review.body)
             if !ticket["worktree"].string.isEmpty { changesSection }
             if let verdict = review.verdict {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(verdict.passed ? "Reviewer reported passed" : "Reviewer found issues", systemImage: verdict.passed ? "checkmark.shield" : "exclamationmark.shield").font(.headline).foregroundStyle(verdict.passed ? .green : .orange)
-                    ReadableText(text: verdict.summary)
-                    if !verdict.findings.isEmpty { ForEach(Array(verdict.findings.enumerated()), id: \.offset) { _, finding in ReadableText(text: "• " + finding) } }
-                    Text("\(verdict.files.count) files reviewed · \(verdict.tests.count) checks reported").font(.caption).foregroundStyle(.secondary)
-                    DisclosureGroup("Reviewed files and checks") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(Array(verdict.files.enumerated()), id: \.offset) { _, file in Label(file, systemImage: "doc").textSelection(.enabled) }
-                            ForEach(Array(verdict.tests.enumerated()), id: \.offset) { _, test in Label(test, systemImage: "terminal").textSelection(.enabled) }
-                        }.font(.caption)
-                    }
-                    Text("This summarizes the reviewer response. The ticket status reflects the daemon’s verification gate.").font(.caption).foregroundStyle(.secondary)
-                }.padding(16).nekoCard(padding: 0, radius: 12)
+                DisclosureGroup("Reviewed files and checks") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(verdict.files.enumerated()), id: \.offset) { _, file in Label(file, systemImage: "doc").textSelection(.enabled) }
+                        ForEach(Array(verdict.tests.enumerated()), id: \.offset) { _, test in Label(test, systemImage: "terminal").textSelection(.enabled) }
+                    }.font(.caption)
+                }
+            }
+            if !ticket["result"].string.isEmpty {
                 DisclosureGroup("Full result and raw reviewer response") { Text(ticket["result"].string).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
             }
             if ticket["supervision"] != .null {
@@ -545,6 +625,54 @@ struct TicketDetail: View {
         }
     }
     @ViewBuilder private func section(_ title: String, _ text: String) -> some View { if !text.isEmpty { Text(title).font(.headline); ReadableText(text: text) } }
+}
+
+/// The latest answer stays readable; large evidence lists live in the supporting
+/// disclosure. Copy always preserves the full saved result, including raw review.
+private struct TicketOutcomeReadback: View {
+    let result: String
+    let outcome: TicketPresentation.Outcome
+    @State private var copied = false
+
+    var body: some View {
+        let review = TicketPresentation.review(result)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(outcome.title).font(.headline)
+                Spacer()
+                if !result.isEmpty {
+                    Button(copied ? "Copied" : "Copy result", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                        NSPasteboard.general.clearContents()
+                        copied = NSPasteboard.general.setString(result, forType: .string)
+                    }
+                    .controlSize(.small)
+                    .help("Copy the full saved result, including the reviewer response")
+                }
+            }
+            Text(outcome.note).font(.caption).foregroundStyle(.secondary)
+            if review.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("No result text was saved for this ticket.").foregroundStyle(.secondary)
+            } else {
+                ReadableText(text: review.body)
+            }
+            Divider()
+            Text(outcome.reviewIsCurrent ? "Independent review" : "Recorded independent review").font(.headline)
+            if let verdict = review.verdict {
+                Label(verdict.passed ? "Reviewer reported passed" : "Reviewer found issues", systemImage: verdict.passed ? "checkmark.shield" : "exclamationmark.shield")
+                    .font(.subheadline)
+                    .foregroundStyle(!verdict.passed ? Color.orange : outcome.reviewIsCurrent ? Color.green : Color.secondary)
+                ReadableText(text: verdict.summary)
+                ForEach(Array(verdict.findings.enumerated()), id: \.offset) { _, finding in ReadableText(text: "• " + finding) }
+                Text("\(verdict.files.count) files reviewed · \(verdict.tests.count) checks reported").font(.caption).foregroundStyle(.secondary)
+                Text("This is the recorded reviewer response; the ticket status reflects the current verification gate.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text(outcome == .reviewing ? "No structured reviewer verdict yet." : "No structured reviewer verdict is available. Any saved review text remains in the result.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: result) { _, _ in copied = false }
+    }
 }
 
 struct TicketCard: View {
