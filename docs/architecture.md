@@ -50,6 +50,11 @@ All agents retains the List/Board switch and task move commands. Agent headers
 show status and approval/stop actions. An unanswered question or a no-work decision
 cannot be approved into a build. Accept locally records human acceptance of an
 isolated result; it does not apply changes to the project or publish them.
+Page titles, subtitles and primary actions use the native window toolbar, keeping
+its top row useful and mouse-accessible with the sidebar expanded or collapsed.
+Page bodies and side panels respect the native top safe area. Hiding the toolbar
+background does not remove its mouse-hit region; content must not draw controls
+underneath it.
 `neko-core::neko_chat` stores the conversation in its own bounded setting,
 outside the task store's reserved capacity. Each message is one Codex turn with
 read-only filesystem access (`neko-daemon::workbench::converse`). A selected

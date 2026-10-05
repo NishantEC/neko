@@ -109,7 +109,6 @@ struct TodayView: View {
     @State private var menuIndex = 0
     @State private var menuDismissed: String?
     @State private var mentionFiles: [String] = []
-    @Environment(\.sidebarCollapsed) private var sidebarCollapsed
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.nekoLook) private var look
     private var workspaceName: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
@@ -138,7 +137,6 @@ struct TodayView: View {
     var body: some View {
         GeometryReader { outer in
         VStack(spacing: 0) {
-        todayHeader
         FullDiskAccessBanner().padding(.bottom, 4)
         HStack(spacing: 0) {
             ZStack(alignment: .bottom) {
@@ -197,13 +195,15 @@ struct TodayView: View {
                 }
                 composer(availableWidth: outer.size.width)
             }
-            // Keep the transcript below the header row now that it reaches the window top.
+            // Keep scrolling transcript content below the page header.
             .clipped()
         }
         }
         }
+        .navigationTitle("Home")
+        .navigationSubtitle(headerSubtitle)
+        .toolbar { todayToolbar }
         .environment(\.replyActions, ReplyActions(send: { text in post(text) }, draft: { text in draft = text }))
-        .ignoresSafeArea(.container, edges: .top)
         .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.85), value: messages.count)
         .task { catalog = await AgentModelCatalog.load(model) }
         .onAppear {
@@ -315,23 +315,16 @@ struct TodayView: View {
         let status = replying ? "Working…" : pendingApproval != nil || conversationTickets.contains { ["AwaitingApproval", "ReadyForReview"].contains($0["status"].string) } ? "Waiting for you" : model.connected ? "Watching" : "Reconnecting…"
         return "\(workspaceName) · \(status)"
     }
-    private var todayHeader: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Home").font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                Text(headerSubtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 12)
-            // Work in the sidebar already counts tickets that need you, and a
-            // ticket's panel opens from the conversation, so only Stop lives here.
-            if replying {
+    @ToolbarContentBuilder private var todayToolbar: some ToolbarContent {
+        if replying {
+            ToolbarItem(placement: .primaryAction) {
                 toolbarIcon("stop.fill", help: "Stop the current reply") {
-                    if let current = messages.last(where: { $0["pending"].bool }) { Task { await model.workbench(.command("CancelChat", ["turn_id": current["id"]])) } }
-                }.padding(.horizontal, 2).frame(height: 28).liquidGlassCapsule()
+                    if let current = messages.last(where: { $0["pending"].bool }) {
+                        Task { await model.workbench(.command("CancelChat", ["turn_id": current["id"]])) }
+                    }
+                }
             }
         }
-        .padding(.leading, sidebarCollapsed ? 88 : 20).padding(.trailing, 14)
-        .frame(height: 52)
     }
     private func toolbarIcon(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {

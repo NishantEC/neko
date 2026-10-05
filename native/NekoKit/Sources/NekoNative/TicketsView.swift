@@ -80,8 +80,6 @@ struct TicketsView: View {
     private var search: String { model.agentSearch }
     @State private var confirmCancel: JSONValue?
     @AppStorage("neko.work.layout") private var layout = "board"
-    var sidebarHidden = false
-    private var collapsed: Bool { sidebarHidden }
     struct Column { let id: String; let title: String; let color: Color; let statuses: [String] }
     static let columns: [Column] = [
         Column(id: "approval", title: "Needs you", color: NekoStyle.amber, statuses: ["AwaitingApproval", "Failed"]),
@@ -102,11 +100,11 @@ struct TicketsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            toolbar
-            Divider().opacity(0.5)
             if layout == "list" { list } else { board }
         }
-        .ignoresSafeArea(.container, edges: .top)
+        .navigationTitle(model.agentFilter == "all" ? "All agents" : (AgentSidebarGroup(rawValue: model.agentFilter)?.title ?? "All agents"))
+        .navigationSubtitle("\(workspaceLabel) · \(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")\(startsWithoutAsking ? " · starts without asking" : "")")
+        .toolbar { listToolbar }
         .onChange(of: model.selectedWorkspace) { _, _ in selected = nil }
         .confirmationDialog("Cancel “\(confirmCancel?["title"].string ?? "")”?", isPresented: Binding(get: { confirmCancel != nil }, set: { if !$0 { confirmCancel = nil } })) {
             Button("Cancel Ticket", role: .destructive) {
@@ -121,20 +119,17 @@ struct TicketsView: View {
 
     }
 
-    private var toolbar: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(model.agentFilter == "all" ? "All agents" : (AgentSidebarGroup(rawValue: model.agentFilter)?.title ?? "All agents")).font(.system(size: 15, weight: .semibold))
-                Text("\(workspaceLabel) · \(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")\(startsWithoutAsking ? " · starts without asking" : "")")
-                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .layoutPriority(-1)
-            Spacer(minLength: 12)
-            NekoSearchField(title: "Search tickets", text: $model.agentSearch).frame(minWidth: 90, maxWidth: 180)
+    @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            NekoSearchField(title: "Search tickets", text: $model.agentSearch).frame(width: 180)
+        }.withoutSharedBackground()
+        ToolbarItem(placement: .primaryAction) {
             GlassSegmented(selection: $layout, options: [
                 .init(value: "list", title: "List", symbol: "list.bullet", help: "Show tickets as a list"),
                 .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tickets as a board")
             ], iconOnly: true)
+        }.withoutSharedBackground()
+        ToolbarItem(placement: .primaryAction) {
             Menu {
                 Toggle("Start tickets without asking", isOn: Binding(get: { startsWithoutAsking }, set: { value in
                     Task { await model.workbench(.command("SetStartWithoutApproval", ["enabled": .bool(value)])) }
@@ -152,10 +147,6 @@ struct TicketsView: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .help("Work options")
         }
-        .controlSize(.small)
-        .padding(.leading, collapsed ? 150 : 20).padding(.trailing, 16)
-        .frame(height: 52)
-        .animation(.snappy(duration: 0.25), value: collapsed)
     }
 
     // MARK: List
@@ -328,7 +319,6 @@ struct TicketDetail: View {
     /// Set when shown in a drawer, where there is no sheet to dismiss.
     var close: (() -> Void)? = nil
     var fullPage = false
-    @Environment(\.sidebarCollapsed) private var sidebarCollapsed
     @State private var confirmDelete = false
     @State private var changes: (files: [String], patch: String, truncated: Bool)?
     @State private var changesError: String?
@@ -369,7 +359,7 @@ struct TicketDetail: View {
     private var ticket: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == id } ?? .null }
     var body: some View {
         VStack(spacing: 0) {
-        if fullPage { agentHeader; Divider().opacity(0.5); FullDiskAccessBanner() }
+        if fullPage { FullDiskAccessBanner() }
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 if !fullPage { HStack(alignment: .top) {
@@ -412,6 +402,7 @@ struct TicketDetail: View {
         Divider().opacity(0.5)
         TicketComposer(model: model, id: id, status: ticket["status"].string).frame(maxWidth: 760)
         }.frame(maxWidth: .infinity)
+                .toolbar { if fullPage { agentToolbar } }
                 .confirmationDialog("Delete this ticket?", isPresented: $confirmDelete) {
                     Button("Delete ticket", role: .destructive) {
                         Task { if await model.workbench(.command("DeleteTask", ["task_id": .string(id)])) { if let close { close() } else { dismiss() } } }
@@ -420,28 +411,35 @@ struct TicketDetail: View {
                     Text("Removes the ticket, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.")
                 }
     }
-    private var agentHeader: some View {
-        HStack(spacing: 10) {
+    @ToolbarContentBuilder private var agentToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
             Button { close?() } label: { Label("Neko", systemImage: "arrow.left") }
-                .buttonStyle(.plain).keyboardShortcut(.cancelAction).help("Back to \(model.agentReturnPage == "Tickets" ? "All agents" : model.agentReturnPage)")
-            Text("·").foregroundStyle(.tertiary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("NEK-" + String(id.prefix(4)).uppercased() + "  " + ticket["title"].string).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                Text(friendlyTaskStatus(ticket["status"].string)).font(.system(size: 11)).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 12)
-            if ticket["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason(ticket) == nil { action("Approve", "ApproveTask").buttonStyle(.borderedProminent) }
-            if ticket["status"].string == "ReadyForReview" { action("Accept locally", "CompleteTask").buttonStyle(.borderedProminent) }
-            if ["Failed", "Cancelled"].contains(ticket["status"].string) { action("Start again", "StartTask") }
-            if !["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { action("Stop", "CancelTask") }
+                .keyboardShortcut(.cancelAction)
+                .help("Back to \(model.agentReturnPage == "Tickets" ? "All agents" : model.agentReturnPage)")
+                .disabled(model.busy)
+        }
+        if ticket["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason(ticket) == nil {
+            ToolbarItem(placement: .primaryAction) { action("Approve", "ApproveTask").buttonStyle(.borderedProminent).disabled(model.busy) }
+        }
+        if ticket["status"].string == "ReadyForReview" {
+            ToolbarItem(placement: .primaryAction) { action("Accept locally", "CompleteTask").buttonStyle(.borderedProminent).disabled(model.busy) }
+        }
+        if ["Failed", "Cancelled"].contains(ticket["status"].string) {
+            ToolbarItem(placement: .primaryAction) { action("Start again", "StartTask").disabled(model.busy) }
+        }
+        if !["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) {
+            ToolbarItem(placement: .primaryAction) { action("Stop", "CancelTask").disabled(model.busy) }
+        }
+        ToolbarItem(placement: .primaryAction) {
             Menu {
                 if TicketPresentation.waitingReason(ticket) == nil && TicketPresentation.canProposeSplit(ticket, splits: model.snapshot["splits"].array) { action("Propose parallel work", "ProposeSplit") }
                 if !ticket["worktree"].string.isEmpty { Button("Reveal working folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
                 if ["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { Button("Delete…", role: .destructive) { confirmDelete = true } }
-            } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Agent actions")
+            } label: {
+                Label("Agent actions", systemImage: "ellipsis")
+            }
+            .disabled(model.busy)
         }
-        .controlSize(.small).disabled(model.busy)
-        .padding(.leading, sidebarCollapsed ? 150 : 20).padding(.trailing, 16).frame(height: 52)
     }
     @ViewBuilder private var detailsBody: some View {
             let review = TicketPresentation.review(ticket["result"].string)

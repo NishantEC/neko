@@ -749,6 +749,13 @@ extension View {
     }
 }
 
+extension ToolbarContent {
+    /// Custom search and segmented controls already draw their own surfaces.
+    @ToolbarContentBuilder func withoutSharedBackground() -> some ToolbarContent {
+        if #available(macOS 26, *) { sharedBackgroundVisibility(.hidden) } else { self }
+    }
+}
+
 
 // MARK: - Plain (in-app) variants: no colour, no shaders. Gem styling is onboarding-only.
 

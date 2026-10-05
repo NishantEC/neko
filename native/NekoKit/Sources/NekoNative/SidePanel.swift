@@ -34,8 +34,6 @@ struct SidePanel<Panel: View>: ViewModifier {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        // Both pages that use it draw up to the window's top edge.
-        .ignoresSafeArea(.container, edges: .top)
     }
 
     private var handle: some View {
