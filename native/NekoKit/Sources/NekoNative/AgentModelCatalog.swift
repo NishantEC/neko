@@ -1,6 +1,23 @@
 import Foundation
 import NekoKit
 
+struct CatalogRuntimeOption: Hashable, Identifiable {
+    let id: String
+    let label: String
+    var description: String?
+
+    static func parse(_ value: JSONValue) -> [Self]? {
+        guard case .array(let rows) = value else { return nil }
+        var seen = Set<String>()
+        return rows.compactMap { row in
+            let id = row["id"].string
+            guard !id.isEmpty, seen.insert(id).inserted else { return nil }
+            return Self(id: id, label: row["label"].string.isEmpty ? id : row["label"].string,
+                        description: row["description"].string.isEmpty ? nil : row["description"].string)
+        }
+    }
+}
+
 /// One model in Neko's own catalog, read by the daemon from the runtime itself.
 struct CatalogModel: Hashable, Identifiable {
     enum Access: String { case listed, checked, unavailable }
@@ -11,6 +28,12 @@ struct CatalogModel: Hashable, Identifiable {
     var access: Access = .listed
     var reason: String?
     var reasoningEfforts: [String] = []
+    /// nil is unknown; [] explicitly means this axis is unsupported.
+    var effortOptions: [CatalogRuntimeOption]?
+    var defaultEffort: String?
+    /// Additional tiers only; the picker supplies Normal with wire ID `default`.
+    var speedOptions: [CatalogRuntimeOption]?
+    var defaultSpeed: String?
     var usable: Bool { access != .unavailable }
 }
 
@@ -62,7 +85,11 @@ struct ModelCatalog: Hashable {
                         recommended: model["recommended"].bool,
                         access: CatalogModel.Access(rawValue: model["access"].string) ?? .listed,
                         reason: model["reason"].string.isEmpty ? nil : model["reason"].string,
-                        reasoningEfforts: model["reasoning_efforts"].array.map(\.string)
+                        reasoningEfforts: model["reasoning_efforts"].array.map(\.string),
+                        effortOptions: CatalogRuntimeOption.parse(model["effort_options"]),
+                        defaultEffort: model["default_effort"].string.isEmpty ? nil : model["default_effort"].string,
+                        speedOptions: CatalogRuntimeOption.parse(model["speed_options"])?.filter { $0.id != "default" },
+                        defaultSpeed: model["default_speed"].string.isEmpty ? nil : model["default_speed"].string
                     )
                 }
             )
@@ -82,9 +109,15 @@ struct ModelCheckResult: Equatable {
 /// Talks to the daemon's catalog. Listing never generates tokens; checking
 /// sends one short prompt and may use quota.
 enum AgentModelCatalog {
-    @MainActor static func load(_ model: AppModel, refresh: Bool = false) async -> ModelCatalog {
-        guard let reply = try? await model.request(.command("AgentModels", ["refresh": .bool(refresh)])) else { return ModelCatalog() }
+    @MainActor static func fetch(_ model: AppModel, refresh: Bool = false) async throws -> ModelCatalog {
+        let reply = try await model.request(.command("AgentModels", ["refresh": .bool(refresh)]))
+        guard case .array = reply["AgentModels"]["sources"] else {
+            throw NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: "The daemon returned an unreadable model catalog. Refresh models to try again."])
+        }
         return ModelCatalog.parse(reply["AgentModels"])
+    }
+    @MainActor static func load(_ model: AppModel, refresh: Bool = false) async -> ModelCatalog {
+        (try? await fetch(model, refresh: refresh)) ?? ModelCatalog()
     }
 
     /// With save, the daemon makes this the default only if the check passes.

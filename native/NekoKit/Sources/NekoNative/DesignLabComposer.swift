@@ -6,7 +6,7 @@ struct DesignLabComposer: View {
     var body: some View {
         GlassGroup(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                if preview.layout == .context {
+                if preview.layout == .separate {
                     DesignLabControls(preview: preview, expanded: true)
                         .padding(.horizontal, 22).padding(.vertical, 16)
                     Divider().overlay { Color.primary.opacity(0.025) }

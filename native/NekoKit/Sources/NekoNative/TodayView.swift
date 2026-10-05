@@ -223,27 +223,29 @@ struct TodayView: View {
             let items = menuItems
             if !items.isEmpty { composerMenu(items) }
             approvalBar
-            SharedComposer(
-                text: Binding(get: { model.chatDrafts.text(for: targetScope) }, set: { model.chatDrafts.set($0, for: targetScope) }),
-                attachments: attachments,
-                placeholder: "Ask Neko, type / for commands or @ to add context",
-                accessibilityLabel: "Message to Neko",
-                accessibilityHelp: "Return sends or queues. Shift Return adds a line. Command Return interrupts and sends. Option Return includes the previous app's selection. Paste or drop images and files to attach them.",
-                state: composerState, validationError: payloadError,
-                onSend: { send() }, onStop: stopReply,
-                onAttach: { model.chatDrafts.add($0, for: targetScope) },
-                onRemove: { model.chatDrafts.remove($0, for: targetScope) },
-                onChooseAttachments: chooseAttachments,
-                onError: { model.error = $0 },
-                onInterrupt: { send(interrupt: true) },
-                onContext: { send(withContext: true) },
-                onMenuKey: handleMenuKey
-            ) {
-                GlassSegmented(selection: $mode, options: [
-                    .init(value: "ask", title: "Ask", help: "Ask: Neko answers now"),
-                    .init(value: "plan", title: "Plan", help: "Plan: Neko proposes a ticket with a plan for your approval, without changing anything")
-                ], size: .small)
-                ComposerRuntimeMenu(model: model)
+            ComposerRuntimeScope(model: model, conversationID: RuntimeSelectionScope.home(targetScope)) { selection in
+                SharedComposer(
+                    text: Binding(get: { model.chatDrafts.text(for: targetScope) }, set: { model.chatDrafts.set($0, for: targetScope) }),
+                    attachments: attachments,
+                    placeholder: "Ask Neko, type / for commands or @ to add context",
+                    accessibilityLabel: "Message to Neko",
+                    accessibilityHelp: "Return sends or queues. Shift Return adds a line. Command Return interrupts and sends. Option Return includes the previous app's selection. Paste or drop images and files to attach them.",
+                    state: composerState, validationError: payloadError,
+                    onSend: { send() }, onStop: stopReply,
+                    onAttach: { model.chatDrafts.add($0, for: targetScope) },
+                    onRemove: { model.chatDrafts.remove($0, for: targetScope) },
+                    onChooseAttachments: chooseAttachments,
+                    onError: { model.error = $0 },
+                    onInterrupt: { send(interrupt: true) },
+                    onContext: { send(withContext: true) },
+                    onMenuKey: handleMenuKey
+                ) {
+                    GlassSegmented(selection: $mode, options: [
+                        .init(value: "ask", title: "Ask", help: "Ask: Neko answers now"),
+                        .init(value: "plan", title: "Plan", help: "Plan: Neko proposes a ticket with a plan for your approval, without changing anything")
+                    ], size: .small)
+                    ComposerRuntimePicker(model: model, selection: selection)
+                }
             }.id(targetScope)
         }
         .frame(width: width)

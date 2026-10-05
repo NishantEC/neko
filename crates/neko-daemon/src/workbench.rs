@@ -20,11 +20,14 @@ mod splits;
 mod replies;
 #[path = "workbench/review_repair.rs"]
 mod review_repair;
+#[path = "workbench/runtime_settings.rs"]
+mod runtime_settings;
 
 struct TaskClaim {
     task: Task,
     authority: responsibilities::RunAuthority,
     read_only_reply: bool,
+    runtime: Option<AgentRuntime>,
 }
 
 struct Active {
@@ -43,7 +46,7 @@ pub struct Controller {
 fn record_host_failure(db: &Db, snapshot: &Snapshot, id: &str) -> Result<(), String> {
     // A failure may precede a model run or discard its stale output.
     let mut host_context = snapshot.clone();
-    host_context.agent_runtime = AgentRuntime { provider: "host".into(), model: String::new() };
+    host_context.agent_runtime = AgentRuntime { provider: "host".into(), model: String::new(), ..Default::default() };
     host_context.working_preferences.clear();
     decision_context::record_task_observation_with_context(db, snapshot, id, decision_context::HostObservation::Failure, &host_context)?;
     Ok(())
@@ -77,6 +80,14 @@ impl Controller {
 
     pub fn command(&self, command: Command) -> Result<Snapshot, String> {
         match command {
+            Command::SetConversationRuntime { conversation_id, preferences } => self.set_conversation_runtime(
+                conversation_id, preferences, |before, preferences| {
+                    let catalog = neko_core::agent_catalog::catalog(false);
+                    let runtime = neko_core::runtime_selection::preview(&catalog, preferences, &before.agent_runtime)?;
+                    let check = neko_core::agent_catalog::check(&runtime);
+                    if check.ok { Ok(()) } else { Err(check.message) }
+                },
+            ),
             Command::Schedules(command) => self.schedule_command(command),
             Command::SetupImport(command) => self.import_command(command),
             Command::Skills(command) => {
@@ -577,7 +588,7 @@ impl Controller {
                         task.status = TaskStatus::Building;
                         store::append_event(task, "supervisor", "Standing responsibility authorized this evidenced low-risk bug fix. Assignment and permission rechecked; no publication allowed.");
                     }
-                    Some(TaskClaim { task: task.clone(), authority, read_only_reply: false })
+                    Some(TaskClaim { task: task.clone(), authority, read_only_reply: false, runtime: None })
                 })
                 .collect();
             save_with_failure_records(&db, &snapshot, &already_failed)?;
@@ -637,7 +648,20 @@ impl Controller {
     }
 
     fn execute(&self, claim: &TaskClaim, cancel: &AtomicBool) -> Result<(), String> {
-        let claim = self.prepare_reply_claim(claim, cancel, supervision::reply_intent)?;
+        let snapshot = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
+        if !claim.authority.valid(&snapshot) { return Err("Task scope changed before runtime selection".into()); }
+        store::within_budget(&snapshot, &claim.task.id)?;
+        let preferences = decision_context::context_about(&snapshot, &claim.task.workspace_id, Some(&claim.task.id), &claim.task.title);
+        let context = neko_core::runtime_selection::task_context(&claim.task, &preferences, snapshot.task_budget_cents, replies::latest(&claim.task).map(|r| r.0));
+        let selection = neko_core::runtime_selection::resolve(&snapshot,
+            &neko_core::runtime_selection::task_id(&claim.task.id), &store::new_id(), &context, cancel)?;
+        self.commit_authorized(&claim.authority, |current| {
+            if cancel.load(Ordering::Acquire) { return Err("Cancelled".into()); }
+            neko_core::runtime_selection::record(current, selection.clone());
+            Ok(())
+        })?;
+        let captured = TaskClaim { task:claim.task.clone(), authority:claim.authority.clone(), read_only_reply:claim.read_only_reply, runtime:Some(selection.runtime) };
+        let claim = self.prepare_reply_claim(&captured, cancel, supervision::reply_intent)?;
         self.ensure_task_root(&claim, cancel)?;
         self.execute_with_worktree(&claim, cancel, native_runner::create_worktree_cancellable)
     }
@@ -645,7 +669,8 @@ impl Controller {
     /// Give a ticket a Git folder before its checkout is created, if it has none.
     fn ensure_task_root(&self, claim: &TaskClaim, cancel: &AtomicBool) -> Result<(), String> {
         let task = &claim.task;
-        let snapshot = store::load(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
+        let mut snapshot = store::load(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
+        if let Some(runtime) = &claim.runtime { snapshot.agent_runtime = runtime.clone(); }
         // Stale authority is reported by the execution guard itself.
         if task.worktree.is_some() || !claim.authority.valid(&snapshot) {
             return Ok(());
@@ -674,12 +699,13 @@ impl Controller {
     ) -> Result<(), String> {
         let task = &claim.task;
         let authority = &claim.authority;
-        let snapshot = store::load(
+        let mut snapshot = store::load(
             &self
                 .db
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         )?;
+        if let Some(runtime) = &claim.runtime { snapshot.agent_runtime = runtime.clone(); }
         if !authority.valid(&snapshot) {
             return Err("Claimed task authority changed before execution".into());
         }
@@ -826,7 +852,13 @@ impl Controller {
                 let session_state = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
                 let session = if native_runner::supports_sessions(&snapshot.agent_runtime) {
                     match session_state.task_sessions.get(&task.id) {
-                        Some(id) => native_runner::Session::Resume(id.clone()),
+                        Some(id) if native_runner::supports_resume(&snapshot.agent_runtime) => native_runner::Session::Resume(id.clone()),
+                        Some(_) => {
+                            self.update_task_authorized(&task.id, authority, |t| {
+                                store::append_event(t, "system", "The runtime did not advertise a default effort for this model. Starting fresh from ticket history so an earlier effort pin cannot carry over.");
+                            })?;
+                            native_runner::Session::Start
+                        }
                         None => native_runner::Session::Start,
                     }
                 } else {
@@ -1226,6 +1258,25 @@ fn converse(
         }
         return;
     }
+    let conversation_id = neko_core::runtime_selection::home_id(&snapshot.agent_profiles.active_profile_id, chosen);
+    let preferences = chosen.map(|workspace| decision_context::context_about(&snapshot, workspace, None, message)).unwrap_or_default();
+    let context = format!("Human message: {message}\nConfirmed contextual preferences: {preferences}");
+    let selection = match neko_core::runtime_selection::resolve(&snapshot, &conversation_id, pending, &context, cancel) {
+        Ok(selection) => selection,
+        Err(error) => return finish(&error, vec![], true),
+    };
+    let recorded = (|| -> Result<(), String> {
+        let guard = db.lock().map_err(|_| "Chat storage unavailable")?;
+        let mut current = store::load(&guard)?;
+        if cancel.load(Ordering::Acquire) || !current.conversation.iter().any(|m| m.id == pending && m.pending)
+            || current.agent_profiles.revision != snapshot.agent_profiles.revision {
+            return Err("Reply stopped before runtime selection completed".into());
+        }
+        neko_core::runtime_selection::record(&mut current, selection.clone());
+        store::save(&guard, &current)
+    })();
+    if let Err(error) = recorded { return finish(&error, vec![], true); }
+    snapshot.agent_runtime = selection.runtime;
     // A chosen workspace runs in its repository. Otherwise the turn gets an
     // empty scratch directory, never Neko's own data directory.
     let scratch = match chosen {
@@ -1847,6 +1898,7 @@ mod tests {
             task: state.tasks[0].clone(),
             authority: responsibilities::RunAuthority::for_task(&state, &state.tasks[0]).unwrap(),
             read_only_reply: false,
+            runtime: None,
         };
         controller.ensure_task_root(&claim, &AtomicBool::new(false)).unwrap();
         let saved = controller.command(Command::Snapshot).unwrap();

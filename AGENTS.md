@@ -11,21 +11,15 @@ and evidence stay opaque. Preserve `stableSplitPane`, the native top safe area,
 and navigation-owned drafts when changing these surfaces. See
 `docs/design/native-polish.md` and `docs/evidence/native-liquid-glass.md`.
 
-Design lab (2026-10-05) is an interactive native preview page, with Inline/Context
-composer layouts, real availability-gated Liquid Glass and illustrative agents
-and plugins. Its local observation model has no AppModel, IPC or provider
-dependency. Preview Send appends locally; plugin switches do not install or grant
-anything. It reuses the AppKit editor, including its local attachment store.
-Production Home/agent composers are unchanged. Treat it as a design study, not
-as evidence of a shipped plugin host or live child-agent integration.
-
-Design lab refinement (2026-10-06): Inline is the selected direction. The task
-control shows Neko for an unsplit task and counts only distinct existing child
-ticket IDs in an approved split. Planning/building/review are phases, not three
-simultaneous agents. The sample-state menu demonstrates One task, Split task and
-Review without starting work. `TaskTeamSummary` derives membership/status counts
-from the snapshot shape; it is currently used only by the preview. Decorative
-beads use a pointer-driven Metal pearl shader, with no idle animation timer.
+Design lab (2026-10-06) is an interactive native preview page. Inline is the
+selected composer direction; Separate exposes individual model/effort/speed
+controls. Both reuse production selector views against labelled sample metadata.
+Its observation model has no AppModel, IPC or provider dependency; sends and
+Apply sample stay local. Plugin switches do not install or grant anything.
+Home/ticket composers use real per-conversation settings and capability discovery.
+Task membership stays in the sample conversation, derived by `TaskTeamSummary`
+from distinct child ticket IDs in approved splits, never phases or workspace totals.
+Decorative beads use a pointer-driven Metal pearl shader with no idle timer.
 Reduce Motion disables movement; Reduce Transparency/Increased Contrast use a
 solid fallback. System Liquid Glass remains a separate native material.
 
@@ -39,7 +33,15 @@ never grant execution or publication authority. See `docs/architecture.md`.
 As of 2026-10-05, Home and ticket chats share the AppKit growing composer,
 attachment strip and revision-safe draft store. Drafts survive navigation, not
 app restart. Home send/queue/stop and ticket `ReplyToTask` remain separate adapters;
-Return never stops work. Runtime selection is labelled global, not per ticket.
+Return never stops work. Settings → AI owns global runtime defaults. Composer
+runtime pins are per Home profile/workspace or per ticket. `runtime_selection`
+uses tool-free model judgment over advertised capabilities; independent pins
+win, unsupported choices fail, and classifier failure uses a validated default.
+Automatic paid speed needs its own saved preference. There is no quota-aware
+failover. Captured choices/reasons persist in a bounded 200-dispatch history;
+active workers retain them through recovery, and changes affect the next run.
+Manual pin saves perform a bounded inference check before commit. Requested
+service tier is not proof of the tier actually served.
 Settled agent chats expose the result and review while folding older plans,
 conversation and decisions. Rich output wraps table cells and makes available
 terminal/diff preview limits explicit. This is presentation, not runtime compaction.

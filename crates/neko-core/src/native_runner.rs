@@ -152,6 +152,14 @@ pub fn supports_sessions(runtime: &neko_protocol::workbench::AgentRuntime) -> bo
     matches!(runtime.provider.as_str(), "" | "codex" | "opencodex")
 }
 
+/// Never resume with an omitted effort that could retain a previous pin.
+/// The caller can start fresh from ticket history when an old catalog lacks a default.
+pub fn supports_resume(runtime: &neko_protocol::workbench::AgentRuntime) -> bool {
+    supports_sessions(runtime) && (!matches!(runtime.provider.as_str(), "" | "codex")
+        || runtime.reasoning_effort.is_some()
+        || crate::agent_catalog::cached_codex_default_effort(runtime).is_some())
+}
+
 pub fn run(
     spec: &RunSpec,
     cancel: &AtomicBool,
@@ -204,6 +212,7 @@ fn run_configured_session(
     mut on_event: impl FnMut(String),
     extraction: bool,
 ) -> Result<String, String> {
+    crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
     if spec.prompt.trim().is_empty() || spec.prompt.len() > MAX_PROMPT {
         return Err(format!(
             "Task prompt must contain between 1 and {MAX_PROMPT} bytes"
@@ -239,6 +248,11 @@ fn run_configured_session(
     if !spec.runtime.model.is_empty() {
         command.args(["-m", spec.runtime.model.as_str()]);
     }
+    let default_effort = if matches!(session, Session::Resume(_)) && spec.runtime.reasoning_effort.is_none()
+        && matches!(spec.runtime.provider.as_str(), "" | "codex") {
+        crate::agent_catalog::cached_codex_default_effort(&spec.runtime)
+    } else { None };
+    configure_codex_runtime(&mut command, &spec.runtime, session, default_effort.as_deref())?;
     command.current_dir(&directory).args(["--json"]);
     if *session == Session::Ephemeral {
         command.arg("--ephemeral");
@@ -442,6 +456,39 @@ fn run_configured_session(
     answer
         .filter(|text| !text.trim().is_empty())
         .ok_or_else(|| "Codex completed without a final answer".into())
+}
+
+/// Apply settings to both `exec` and `exec resume`. These are per-process TOML
+/// config overrides supported by Codex, not flags for the underlying model.
+/// The admission resolver should persist concrete model/effort choices before
+/// execution. For legacy unpinned resumes, its fresh catalog default is required:
+/// TOML has no null override and `none` is a reasoning value, not "unset".
+/// A fixed non-reasoning default of `none` is valid. An unknown default fails
+/// before spawning. The daemon's missing-rollout fallback does NOT catch this
+/// error: callers must resolve the default or explicitly start a fresh session.
+fn configure_codex_runtime(
+    command: &mut Command,
+    runtime: &neko_protocol::workbench::AgentRuntime,
+    session: &Session,
+    default_effort: Option<&str>,
+) -> Result<(), String> {
+    crate::agent_catalog::validate_runtime_shape(runtime)?;
+    if !matches!(runtime.provider.as_str(), "" | "codex") { return Ok(()); }
+    let effort = runtime.reasoning_effort.as_deref().or_else(|| {
+        matches!(session, Session::Resume(_)).then_some(default_effort).flatten()
+    });
+    if matches!(session, Session::Resume(_)) && effort.is_none() {
+        return Err("Resolve the model’s default effort before resuming; refresh models and retry".into());
+    }
+    if let Some(effort) = effort {
+        if !crate::agent_catalog::valid_option_id(effort) { return Err("Invalid default effort".into()); }
+        command.args(["-c", &format!("model_reasoning_effort=\"{effort}\"")]);
+    }
+    // Always explicit: omission on resume can retain the previous Fast tier.
+    // Advertised defaults never authorize spending on an accelerated tier.
+    let speed = runtime.service_tier.as_deref().unwrap_or("default");
+    command.args(["-c", &format!("service_tier=\"{speed}\"")]);
+    Ok(())
 }
 
 pub fn create_worktree(repository: &Path, task_id: &str) -> Result<PathBuf, String> {
@@ -1570,6 +1617,121 @@ mod tests {
     }
 
     #[test]
+    fn effort_and_speed_reach_fresh_and_resumed_exec_without_changing_permissions() {
+        let (temp, executable, mut spec) = fixture(
+            "printf '%s\\n' \"$@\" > arguments\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"ok\"}}' '{\"type\":\"turn.completed\"}'",
+        );
+        spec.runtime.model = "gpt-fixture".into();
+        for session in [Session::Ephemeral, Session::Start, Session::Resume("saved-session".into())] {
+            for writable in [false, true] {
+                spec.writable = writable;
+                for speed in [Some("priority"), Some("default"), None] {
+                    spec.runtime.reasoning_effort = Some("high".into());
+                    spec.runtime.service_tier = speed.map(str::to_owned);
+                    run_configured_session(&executable, &spec, None, &session, &AtomicBool::new(false), |_| {}, false).unwrap();
+                    let args: Vec<String> = fs::read_to_string(temp.path().join("arguments")).unwrap().lines().map(str::to_owned).collect();
+                    assert!(args.windows(2).any(|w| w == ["-c", "model_reasoning_effort=\"high\""]));
+                    let expected = format!("service_tier=\"{}\"", speed.unwrap_or("default"));
+                    assert!(args.windows(2).any(|w| w[0] == "-c" && w[1] == expected));
+                    assert_eq!(args.iter().filter(|a| a.starts_with("service_tier=")).count(), 1);
+                    assert_eq!(args.contains(&"--dangerously-bypass-approvals-and-sandbox".into()), writable);
+                    assert_eq!(args.contains(&"default_permissions=\"neko\"".into()), !writable);
+                    if matches!(session, Session::Resume(_)) { assert_eq!(&args[..2], ["exec", "resume"]); }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unpinned_resume_uses_advertised_effort_and_always_clears_fast() {
+        let runtime = neko_protocol::workbench::AgentRuntime::default();
+        for default in ["low", "medium", "none"] {
+            let mut command = Command::new("codex");
+            configure_codex_runtime(&mut command, &runtime, &Session::Resume("saved".into()), Some(default)).unwrap();
+            let args: Vec<_> = command.get_args().map(|s| s.to_str().unwrap()).collect();
+            assert_eq!(args, ["-c", &format!("model_reasoning_effort=\"{default}\""), "-c", "service_tier=\"default\""]);
+        }
+        let mut command = Command::new("codex");
+        assert!(configure_codex_runtime(&mut command, &runtime, &Session::Resume("saved".into()), None).unwrap_err().contains("default effort"));
+        let mut command = Command::new("codex");
+        configure_codex_runtime(&mut command, &runtime, &Session::Start, Some("ultra")).unwrap();
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["-c", "service_tier=\"default\""]);
+    }
+
+    #[test]
+    fn unresolved_resume_does_not_silently_fallback_but_explicit_fresh_start_works() {
+        let (temp, executable, mut spec) = fixture(
+            "printf '%s\\n' \"$@\" > arguments\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"ok\"}}' '{\"type\":\"turn.completed\"}'",
+        );
+        spec.runtime.model = "neko-unlisted-default-fixture".into();
+        let error = run_configured_session(&executable, &spec, None, &Session::Resume("saved".into()), &AtomicBool::new(false), |_| {}, false).unwrap_err();
+        assert!(error.contains("default effort"));
+        assert!(!temp.path().join("arguments").exists(), "no hidden fallback or inherited effort");
+        run_configured_session(&executable, &spec, None, &Session::Start, &AtomicBool::new(false), |_| {}, false).unwrap();
+        let args = fs::read_to_string(temp.path().join("arguments")).unwrap();
+        assert!(!args.contains("resume") && !args.contains("model_reasoning_effort="));
+        assert!(args.contains("service_tier=\"default\""));
+    }
+
+    /// Authenticated inference, explicitly opted into by the person running
+    /// this test. Two tiny turns, normal service only, in a disposable directory.
+    #[test]
+    #[ignore = "Opt-in authenticated fresh/resume settings probe; consumes quota"]
+    fn live_ticket_session_roundtrip() {
+        let executable = resolve_codex().unwrap();
+        let source = crate::agent_catalog::discover_codex(&executable, Duration::from_secs(15)).unwrap();
+        let model = std::env::var("NEKO_LIVE_CODEX_MODEL").ok().or(source.default_model).expect("Codex advertises a default");
+        let entry = source.models.iter().find(|m| m.id == model).unwrap();
+        assert!(["low", "high"].iter().all(|effort| entry.reasoning_efforts.iter().any(|e| e == effort)));
+        let temp = TempDir::new().unwrap();
+        let mut spec = RunSpec {
+            directory: temp.path().to_owned(),
+            prompt: "This is a Neko settings check. Do not use any tools. Reply exactly NEKO_SETTINGS_OK.".into(),
+            writable: false,
+            timeout: Duration::from_secs(90),
+            runtime: neko_protocol::workbench::AgentRuntime {
+                provider: "codex".into(), model,
+                reasoning_effort: Some("low".into()), service_tier: Some("default".into()),
+                ..Default::default()
+            },
+        };
+        let mut events = Vec::new();
+        let answer = run_configured_session(&executable, &spec, None, &Session::Start, &AtomicBool::new(false), |e| events.push(e), false).unwrap();
+        assert_eq!(answer.trim(), "NEKO_SETTINGS_OK");
+        let id = events.iter().find_map(|e| e.strip_prefix(SESSION_EVENT)).expect("fresh run reports session").to_owned();
+        spec.runtime.reasoning_effort = Some("high".into());
+        spec.prompt = "This is the resumed Neko settings check. Do not use any tools. Reply exactly NEKO_SETTINGS_OK.".into();
+        let answer = run_configured_session(&executable, &spec, None, &Session::Resume(id.clone()), &AtomicBool::new(false), |_| {}, false).unwrap();
+        assert_eq!(answer.trim(), "NEKO_SETTINGS_OK");
+        let path = probe_session_file(&id).expect("probe's own persisted session");
+        let rows: Vec<serde_json::Value> = fs::read_to_string(path).unwrap().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let contexts: Vec<_> = rows.iter().filter(|r| r["type"] == "turn_context").map(|r| &r["payload"]).collect();
+        eprintln!("LIVE_SETTINGS {} {:?}: {:?}", executable.display(), codex_version_label(&executable), contexts.iter().map(|r| (&r["effort"], &r["service_tier"])).collect::<Vec<_>>());
+        assert!(contexts.iter().any(|r| r["effort"] == "low"));
+        assert!(contexts.iter().any(|r| r["effort"] == "high"));
+        // 0.160.0 stores low/high after normalization but omits service_tier.
+        // Argv fixtures prove Normal was requested. Neither saved context nor
+        // successful inference establishes the tier actually served.
+        assert!(contexts.iter().all(|r| r["service_tier"].is_null() || r["service_tier"] == "default"));
+        eprintln!("LIVE_SETTINGS Normal requested on both turns; actual served tier unreported");
+        assert!(!rows.iter().any(|r| r["type"] == "response_item" && matches!(r["payload"]["type"].as_str(), Some("function_call" | "custom_tool_call"))));
+    }
+
+    #[test]
+    fn unsupported_adapter_axes_fail_before_spawning() {
+        let (temp, executable, mut spec) = fixture("touch invoked");
+        for provider in ["claude", "opencode", "opencodex", "ollama", "lmstudio"] {
+            spec.runtime.provider = provider.into();
+            for (effort, speed) in [(Some("high"), None), (None, Some("default")), (None, Some("priority"))] {
+                spec.runtime.reasoning_effort = effort.map(str::to_owned);
+                spec.runtime.service_tier = speed.map(str::to_owned);
+                assert!(run_with_executable(&executable, &spec, &AtomicBool::new(false), |_| {}).unwrap_err().contains("adapter"));
+                assert!(!temp.path().join("invoked").exists());
+            }
+        }
+    }
+
+    #[test]
     fn selected_runtime_reaches_codex_exec() {
         let (temp, executable, mut spec) = fixture(
             "printf '%s\\n' \"$@\" > arguments\ncat >/dev/null\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"ok\"}}' '{\"type\":\"turn.completed\"}'",
@@ -1849,6 +2011,8 @@ sleep 10
             runtime: neko_protocol::workbench::AgentRuntime {
                 provider: "codex".into(),
                 model: std::env::var("NEKO_LIVE_CODEX_MODEL").unwrap_or_default(),
+                reasoning_effort: Some("low".into()),
+                ..Default::default()
             },
         };
         let mut saved = None;
@@ -2506,6 +2670,7 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"P
 printf '%s\n' '{"type":"turn.completed"}'
 "#,
         );
+        spec.runtime.reasoning_effort = Some("high".into());
         let mut events = Vec::new();
         run_configured_session(&executable, &spec, None, &Session::Start, &AtomicBool::new(false), |e| events.push(e), false).unwrap();
         let args = fs::read_to_string(temp.path().join("args")).unwrap();

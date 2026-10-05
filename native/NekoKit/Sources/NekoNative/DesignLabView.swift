@@ -33,7 +33,7 @@ struct DesignLabView: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .navigationTitle("Design lab")
-        .navigationSubtitle("Liquid Glass · local preview")
+        .navigationSubtitle("Sample models · local preview")
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Picker("Composer layout", selection: $preview.layout) {

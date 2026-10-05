@@ -17,7 +17,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use neko_protocol::agent_models::{
-    CatalogModel, ModelAccess, ModelCatalog, ModelCheck, ModelSource, SourceStatus,
+    CatalogModel, ModelAccess, ModelCatalog, ModelCheck, ModelSource, RuntimeOption, SourceStatus,
 };
 use neko_protocol::workbench::AgentRuntime;
 use serde_json::{Value, json};
@@ -30,10 +30,12 @@ const MAX_MODELS: usize = 200;
 const CHECK_REPLY: &str = "NEKO_OK";
 const CHECK_PROMPT: &str = "This is a connection check. Do not use any tools. Reply with exactly NEKO_OK and nothing else.";
 
+type CheckKey = (String, String, Option<String>, Option<String>);
+
 struct State {
     catalog: Option<ModelCatalog>,
-    /// "provider\u{0}model" -> latest explicit check outcome.
-    checks: BTreeMap<String, (bool, String)>,
+    /// Full requested runtime -> latest explicit check outcome.
+    checks: BTreeMap<CheckKey, (bool, String)>,
 }
 
 fn state() -> &'static Mutex<State> {
@@ -41,8 +43,8 @@ fn state() -> &'static Mutex<State> {
     STATE.get_or_init(|| Mutex::new(State { catalog: None, checks: BTreeMap::new() }))
 }
 
-fn key(provider: &str, model: &str) -> String {
-    format!("{}\u{0}{model}", canonical_provider(provider))
+fn key(runtime: &AgentRuntime) -> CheckKey {
+    (canonical_provider(&runtime.provider).into(), runtime.model.clone(), runtime.reasoning_effort.clone(), runtime.service_tier.clone())
 }
 
 fn canonical_provider(provider: &str) -> &str {
@@ -51,6 +53,20 @@ fn canonical_provider(provider: &str) -> &str {
 
 /// The current catalog, read fresh when `refresh` is set or the cache is old.
 pub fn catalog(refresh: bool) -> ModelCatalog {
+    let now = crate::now_unix_ms();
+    if !refresh {
+        let guard = state().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(cached) = &guard.catalog {
+            if now - cached.read_at_ms < CACHE_TTL_MS {
+                return with_checks(cached.clone(), &guard.checks);
+            }
+        }
+    }
+    // Dispatch can admit many tickets at once. Share one metadata refresh;
+    // model execution remains concurrent and never holds this gate.
+    static DISCOVERY: OnceLock<Mutex<()>> = OnceLock::new();
+    let _discovery = DISCOVERY.get_or_init(|| Mutex::new(())).lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let now = crate::now_unix_ms();
     if !refresh {
         let guard = state().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -80,13 +96,16 @@ pub fn catalog(refresh: bool) -> ModelCatalog {
     with_checks(fresh, &guard.checks)
 }
 
-fn with_checks(mut catalog: ModelCatalog, checks: &BTreeMap<String, (bool, String)>) -> ModelCatalog {
+fn with_checks(mut catalog: ModelCatalog, checks: &BTreeMap<CheckKey, (bool, String)>) -> ModelCatalog {
     for source in &mut catalog.sources {
         for model in &mut source.models {
             if model.access == ModelAccess::Unavailable {
                 continue;
             }
-            if let Some((ok, message)) = checks.get(&key(&source.provider, &model.id)) {
+            // A model row represents the unpinned runtime. Neither success nor
+            // failure with a particular effort/tier proves other combinations.
+            let runtime = AgentRuntime { provider: source.provider.clone(), model: model.id.clone(), ..Default::default() };
+            if let Some((ok, message)) = checks.get(&key(&runtime)) {
                 model.access = if *ok { ModelAccess::Checked } else { ModelAccess::Unavailable };
                 if !*ok {
                     model.reason = Some(message.clone());
@@ -188,7 +207,7 @@ pub(crate) fn discover_codex(executable: &Path, timeout: Duration) -> Result<Mod
                 }
             }
         };
-        send(json!({"method": "initialize", "id": 1, "params": {"clientInfo": {"name": "neko", "title": "Neko", "version": env!("CARGO_PKG_VERSION")}}}))?;
+        send(json!({"method": "initialize", "id": 1, "params": {"clientInfo": {"name": "neko", "title": "Neko", "version": env!("CARGO_PKG_VERSION")}, "capabilities": {"experimentalApi": true}}}))?;
         reply(1)?;
         send(json!({"method": "initialized", "params": {}}))?;
         send(json!({"method": "account/read", "id": 2, "params": {"refreshToken": false}}))?;
@@ -241,6 +260,8 @@ pub(crate) fn codex_catalog(account: &Value, pages: &[Value]) -> ModelSource {
         if is_default {
             default_model = Some(id.to_string());
         }
+        let effort_options = codex_efforts(row);
+        let speed_options = codex_speeds(row);
         models.push(CatalogModel {
             id: id.into(),
             label: row["displayName"].as_str().filter(|s| !s.is_empty()).unwrap_or(id).chars().take(80).collect(),
@@ -254,14 +275,11 @@ pub(crate) fn codex_catalog(account: &Value, pages: &[Value]) -> ModelSource {
             } else {
                 None
             },
-            reasoning_efforts: row["supportedReasoningEfforts"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|e| e["reasoningEffort"].as_str())
-                .filter(|e| e.len() <= 16 && e.bytes().all(|b| b.is_ascii_alphanumeric()))
-                .map(str::to_owned)
-                .collect(),
+            reasoning_efforts: effort_options.iter().flatten().map(|e| e.id.clone()).collect(),
+            effort_options,
+            default_effort: option_id(&row["defaultReasoningEffort"]).map(str::to_owned),
+            speed_options,
+            default_speed: option_id(&row["defaultServiceTier"]).map(|id| codex_speed_id(id).to_owned()),
         });
     }
     ModelSource {
@@ -277,6 +295,81 @@ pub(crate) fn codex_catalog(account: &Value, pages: &[Value]) -> ModelSource {
         default_model,
         models,
     }
+}
+
+/// Runtime values become TOML strings in argv. Accept identifiers, never flags
+/// or arbitrary configuration fragments. This is syntax, not capability proof.
+pub(crate) fn valid_option_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        && !id.starts_with('-')
+}
+
+fn option_id(value: &Value) -> Option<&str> {
+    value.as_str().filter(|id| valid_option_id(id))
+}
+
+fn option_label(id: &str) -> String {
+    match id {
+        "xhigh" => "Extra high".into(),
+        "priority" | "fast" => "Fast".into(),
+        _ => {
+            let mut chars = id.chars();
+            chars.next().map(|c| c.to_ascii_uppercase().to_string() + chars.as_str()).unwrap_or_default()
+        }
+    }
+}
+
+fn option_description(row: &Value) -> Option<String> {
+    row["description"].as_str().map(|s| s.chars().take(240).collect())
+}
+
+fn codex_efforts(row: &Value) -> Option<Vec<RuntimeOption>> {
+    let rows = row["supportedReasoningEfforts"].as_array()?;
+    let mut options: Vec<RuntimeOption> = Vec::new();
+    for row in rows {
+        let Some(id) = option_id(&row["reasoningEffort"]) else { continue };
+        if options.iter().any(|o| o.id == id) { continue; }
+        options.push(RuntimeOption {
+            id: id.into(),
+            label: row["label"].as_str().filter(|s| !s.is_empty()).map(|s| s.chars().take(80).collect()).unwrap_or_else(|| option_label(id)),
+            description: option_description(row),
+        });
+    }
+    Some(options)
+}
+
+fn codex_speed_id(id: &str) -> &str {
+    match id {
+        "fast" => "priority",
+        "normal" => "default",
+        _ => id,
+    }
+}
+
+fn codex_speeds(row: &Value) -> Option<Vec<RuntimeOption>> {
+    let tiers = row["serviceTiers"].as_array();
+    let additional = row["additionalSpeedTiers"].as_array();
+    if tiers.is_none() && additional.is_none() { return None; }
+    let mut options: Vec<RuntimeOption> = Vec::new();
+    // Structured native entries take precedence over string aliases.
+    for tier in tiers.into_iter().flatten().chain(additional.into_iter().flatten()) {
+        let Some(wire_id) = option_id(&tier["id"]).or_else(|| option_id(tier)) else { continue };
+        let id = codex_speed_id(wire_id);
+        if id == "default" { continue; }
+        let option = RuntimeOption {
+            id: id.into(),
+            label: tier["name"].as_str().or_else(|| tier["label"].as_str()).filter(|s| !s.is_empty())
+                .map(|s| s.chars().take(80).collect()).unwrap_or_else(|| option_label(id)),
+            description: option_description(tier),
+        };
+        if let Some(existing) = options.iter_mut().find(|o| o.id == id) {
+            // Prefer the native priority entry even if an alias came first.
+            if wire_id == "priority" && tier.is_object() { *existing = option; }
+        } else {
+            options.push(option);
+        }
+    }
+    Some(options)
 }
 
 fn plan_label(plan: Option<&str>) -> String {
@@ -402,6 +495,8 @@ pub(crate) fn claude_catalog(response: &Value) -> ModelSource {
             access: if signed_out { ModelAccess::Unavailable } else { ModelAccess::Listed },
             reason: signed_out.then(|| "Sign in to Claude Code, then refresh models.".into()),
             reasoning_efforts: Vec::new(),
+            effort_options: Some(Vec::new()), default_effort: None,
+            speed_options: Some(Vec::new()), default_speed: None,
         });
     }
     if let Some(default) = &default_model {
@@ -473,6 +568,8 @@ pub(crate) fn opencode_catalog(text: &str) -> ModelSource {
                 access: ModelAccess::Listed,
                 reason: None,
                 reasoning_efforts: Vec::new(),
+                effort_options: Some(Vec::new()), default_effort: None,
+                speed_options: Some(Vec::new()), default_speed: None,
             })
             .collect(),
     }
@@ -562,7 +659,7 @@ fn local_source(provider: &str, label: &str, url: &str, parse: fn(&Value) -> Vec
         note,
         models: names
             .into_iter()
-            .map(|id| CatalogModel { label: id.clone(), id, description: None, recommended: false, access: ModelAccess::Listed, reason: None, reasoning_efforts: Vec::new() })
+            .map(|id| CatalogModel { label: id.clone(), id, description: None, recommended: false, access: ModelAccess::Listed, reason: None, reasoning_efforts: Vec::new(), effort_options: Some(Vec::new()), default_effort: None, speed_options: Some(Vec::new()), default_speed: None })
             .collect(),
         ..base
     }
@@ -592,8 +689,79 @@ pub fn valid_model_id(id: &str) -> bool {
 
 // ---------------------------------------------------------------- Check
 
+/// Transport validation is shared with execution. Other adapters have no
+/// verified mapping for these axes, even if the underlying model supports them.
+pub(crate) fn validate_runtime_shape(runtime: &AgentRuntime) -> Result<(), String> {
+    if !runtime.model.is_empty() && !valid_model_id(&runtime.model) {
+        return Err("invalid model id".into());
+    }
+    if !matches!(runtime.provider.as_str(), "" | "codex" | "ollama" | "lmstudio" | "opencodex" | "claude" | "opencode") {
+        return Err("unsupported provider".into());
+    }
+    if [&runtime.reasoning_effort, &runtime.service_tier].into_iter().flatten().any(|id| !valid_option_id(id)) {
+        return Err("Invalid runtime effort or speed identifier".into());
+    }
+    if !matches!(runtime.provider.as_str(), "" | "codex") && (runtime.reasoning_effort.is_some() || runtime.service_tier.is_some()) {
+        return Err("This adapter does not support effort or speed overrides".into());
+    }
+    Ok(())
+}
+
+fn selected_model<'a>(runtime: &AgentRuntime, catalog: &'a ModelCatalog) -> Option<&'a CatalogModel> {
+    let source = catalog.sources.iter().find(|s| s.provider == canonical_provider(&runtime.provider))?;
+    let id = if runtime.model.is_empty() { source.default_model.as_deref()? } else { &runtime.model };
+    source.models.iter().find(|m| m.id == id)
+}
+
+/// Check the complete concrete runtime against advertised capabilities. Model
+/// access is independent: an old failed check must not prevent a fresh retry.
+pub fn validate_runtime(runtime: &AgentRuntime, catalog: &ModelCatalog) -> Result<(), String> {
+    validate_runtime_shape(runtime)?;
+    if runtime.reasoning_effort.is_none() && runtime.service_tier.as_deref().is_none_or(|s| s == "default") {
+        return Ok(());
+    }
+    let model = selected_model(runtime, catalog).ok_or("Runtime capabilities are unknown; refresh models before choosing effort or speed")?;
+    if let Some(effort) = &runtime.reasoning_effort {
+        // A non-reasoning model can advertise an empty ladder plus the fixed
+        // default `none`. The resolver may send that default to clear a resume.
+        let fixed_default = model.effort_options.as_ref().is_some_and(Vec::is_empty)
+            && model.default_effort.as_ref() == Some(effort);
+        if !fixed_default && !model.effort_options.as_ref().is_some_and(|options| options.iter().any(|o| &o.id == effort)) {
+            return Err("This model does not advertise that effort level; refresh models and choose again".into());
+        }
+    }
+    if let Some(speed) = &runtime.service_tier {
+        if speed != "default" && !model.speed_options.as_ref().is_some_and(|options| options.iter().any(|o| &o.id == speed)) {
+            return Err("This model does not advertise that speed; refresh models and choose again".into());
+        }
+    }
+    Ok(())
+}
+
+/// Legacy callers may resume without a resolved effort. Use only a fresh
+/// advertised default; do not block execution on discovery or invent a ladder.
+pub(crate) fn cached_codex_default_effort(runtime: &AgentRuntime) -> Option<String> {
+    let guard = state().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let catalog = guard.catalog.as_ref()?;
+    if crate::now_unix_ms() - catalog.read_at_ms >= CACHE_TTL_MS { return None; }
+    let model = selected_model(runtime, catalog)?;
+    let effort = model.default_effort.as_ref()?;
+    let resolved = AgentRuntime { reasoning_effort: Some(effort.clone()), ..runtime.clone() };
+    validate_runtime(&resolved, catalog).ok()?;
+    Some(effort.clone())
+}
+
 /// One explicit, minimal prompt through the real runner. May use quota.
 pub fn check(runtime: &AgentRuntime) -> ModelCheck {
+    // Validation errors are about this selection, not account/model access.
+    let validation = validate_runtime_shape(runtime).and_then(|_| {
+        if runtime.reasoning_effort.is_some() || runtime.service_tier.as_deref().is_some_and(|s| s != "default") {
+            validate_runtime(runtime, &catalog(false))
+        } else { Ok(()) }
+    });
+    if let Err(message) = validation {
+        return ModelCheck { runtime: runtime.clone(), ok: false, unavailable: false, message };
+    }
     let outcome = run_check(runtime);
     let (ok, unavailable, message) = match outcome {
         Ok(()) => (true, false, "Checked. This model is ready to use.".to_string()),
@@ -604,18 +772,13 @@ pub fn check(runtime: &AgentRuntime) -> ModelCheck {
     };
     let mut guard = state().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if ok || unavailable {
-        guard.checks.insert(key(&runtime.provider, &runtime.model), (ok, message.clone()));
+        guard.checks.insert(key(runtime), (ok, message.clone()));
     }
     ModelCheck { runtime: runtime.clone(), ok, unavailable, message }
 }
 
 fn run_check(runtime: &AgentRuntime) -> Result<(), String> {
-    if !runtime.model.is_empty() && !valid_model_id(&runtime.model) {
-        return Err("invalid model id".into());
-    }
-    if !matches!(runtime.provider.as_str(), "" | "codex" | "ollama" | "lmstudio" | "opencodex" | "claude" | "opencode") {
-        return Err("unsupported provider".into());
-    }
+    validate_runtime_shape(runtime)?;
     let scratch = Scratch::new("neko-model-check")?;
     let spec = crate::native_runner::RunSpec {
         directory: scratch.0.clone(),
@@ -772,6 +935,144 @@ impl Drop for Scratch {
 mod tests {
     use super::*;
 
+    fn capability_fixture() -> ModelCatalog {
+        // Shapes from the 2026-10-06 Codex model/list capture, plus a synthetic
+        // third tier to prove we preserve future choices without inventing any.
+        ModelCatalog { read_at_ms: 0, sources: vec![codex_catalog(&json!({"account":{"type":"apiKey"}}), &[json!({"data":[
+            {"model":"astra","isDefault":true,"defaultReasoningEffort":"low",
+             "supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Lighter reasoning"},{"reasoningEffort":"high"},{"reasoningEffort":"xhigh"},{"reasoningEffort":"ultra","description":"Automatic task delegation"}],
+             "serviceTiers":[{"id":"priority","name":"Fast","description":"2x speed, increased usage"}],"additionalSpeedTiers":["fast","priority"],"defaultServiceTier":null},
+            {"model":"luna","defaultReasoningEffort":"medium",
+             "supportedReasoningEfforts":[{"reasoningEffort":"medium"},{"reasoningEffort":"max"}],
+             "serviceTiers":[],"additionalSpeedTiers":[]},
+            {"model":"non-reasoning","defaultReasoningEffort":"none","supportedReasoningEfforts":[],
+             "serviceTiers":[{"id":"default","name":"Normal"},{"id":"fast","name":"Alias"},{"id":"priority","name":"Fast","description":"Native tier"},{"id":"batch","name":"Batch","description":"Deferred processing"}],
+             "additionalSpeedTiers":["normal","fast","batch","express"],"defaultServiceTier":"fast"},
+            {"model":"unknown"}
+        ]})])] }
+    }
+
+    #[test]
+    fn capability_ladders_defaults_descriptions_and_native_speed_aliases() {
+        let catalog = capability_fixture();
+        let models = &catalog.sources[0].models;
+        assert_eq!(models[0].default_effort.as_deref(), Some("low"));
+        assert_eq!(models[0].reasoning_efforts, ["low", "high", "xhigh", "ultra"]);
+        let efforts = models[0].effort_options.as_ref().unwrap();
+        assert_eq!(efforts[0].description.as_deref(), Some("Lighter reasoning"));
+        assert_eq!(efforts[2].label, "Extra high");
+        assert_eq!(efforts[3].description.as_deref(), Some("Automatic task delegation"));
+        assert_eq!(models[1].default_effort.as_deref(), Some("medium"));
+        assert_eq!(models[1].reasoning_efforts, ["medium", "max"]);
+        assert_eq!(models[1].speed_options, Some(vec![]));
+        assert_eq!(models[2].effort_options, Some(vec![]));
+        assert_eq!(models[2].default_effort.as_deref(), Some("none"));
+        assert!(models[3].effort_options.is_none() && models[3].speed_options.is_none());
+        let speeds = models[0].speed_options.as_ref().unwrap();
+        assert_eq!(speeds.len(), 1);
+        assert_eq!((&*speeds[0].id, &*speeds[0].label), ("priority", "Fast"));
+        assert_eq!(speeds[0].description.as_deref(), Some("2x speed, increased usage"));
+        assert_eq!(models[0].default_speed, None);
+        let speeds = models[2].speed_options.as_ref().unwrap();
+        assert_eq!(speeds.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["priority", "batch", "express"]);
+        assert_eq!(speeds[0].description.as_deref(), Some("Native tier"));
+        assert_eq!(models[2].default_speed.as_deref(), Some("priority"));
+        assert!(!models.iter().flat_map(|m| m.speed_options.iter().flatten()).any(|s| s.id == "ultrafast"));
+    }
+
+    #[test]
+    fn selection_validation_is_per_model_and_per_adapter() {
+        let catalog = capability_fixture();
+        let mut runtime = AgentRuntime { model: "astra".into(), reasoning_effort: Some("high".into()), service_tier: Some("priority".into()), ..Default::default() };
+        assert!(validate_runtime(&runtime, &catalog).is_ok());
+        runtime.model = "luna".into();
+        assert!(validate_runtime(&runtime, &catalog).unwrap_err().contains("effort"));
+        runtime.reasoning_effort = Some("medium".into());
+        assert!(validate_runtime(&runtime, &catalog).unwrap_err().contains("speed"));
+        runtime.service_tier = Some("default".into());
+        assert!(validate_runtime(&runtime, &catalog).is_ok());
+        runtime.model = "unknown".into();
+        assert!(validate_runtime(&runtime, &catalog).is_err());
+        runtime.model = "non-reasoning".into();
+        runtime.reasoning_effort = Some("none".into());
+        assert!(validate_runtime(&runtime, &catalog).is_ok(), "fixed default clears inherited effort");
+        runtime.reasoning_effort = Some("high".into());
+        assert!(validate_runtime(&runtime, &catalog).is_err());
+        for provider in ["claude", "opencode", "opencodex", "ollama", "lmstudio"] {
+            runtime.provider = provider.into();
+            assert!(validate_runtime(&runtime, &catalog).unwrap_err().contains("adapter"));
+            runtime.reasoning_effort = None;
+            assert!(validate_runtime(&runtime, &catalog).unwrap_err().contains("adapter"), "even explicit Normal has no adapter mapping");
+        }
+        runtime.provider.clear();
+        runtime.service_tier = Some("priority\"\nfeatures.apps=true".into());
+        assert!(validate_runtime_shape(&runtime).is_err());
+    }
+
+    #[test]
+    fn check_identity_never_promotes_an_axis_failure_to_model_access() {
+        let base = AgentRuntime { model: "astra".into(), ..Default::default() };
+        let fast = AgentRuntime { service_tier: Some("priority".into()), ..base.clone() };
+        let high = AgentRuntime { reasoning_effort: Some("high".into()), ..base.clone() };
+        let other = AgentRuntime { provider: "opencodex".into(), ..base.clone() };
+        assert_ne!(key(&base), key(&fast));
+        assert_ne!(key(&base), key(&high));
+        assert_ne!(key(&base), key(&other));
+        assert_eq!(key(&base), key(&AgentRuntime { provider: "codex".into(), ..base.clone() }));
+        let mut checks = BTreeMap::new();
+        checks.insert(key(&base), (true, "ok".into()));
+        checks.insert(key(&fast), (false, "Fast quota exhausted".into()));
+        checks.insert(key(&high), (false, "Effort rejected".into()));
+        assert_eq!(with_checks(capability_fixture(), &checks).sources[0].models[0].access, ModelAccess::Checked);
+        checks.remove(&key(&base));
+        assert_eq!(with_checks(capability_fixture(), &checks).sources[0].models[0].access, ModelAccess::Listed);
+    }
+
+    #[test]
+    fn unverified_adapters_expose_no_controls() {
+        let claude = claude_catalog(&json!({"models":[{"value":"opus"}]}));
+        let opencode = opencode_catalog("anthropic/claude-x");
+        for model in claude.models.iter().chain(&opencode.models) {
+            assert_eq!(model.effort_options, Some(vec![]));
+            assert_eq!(model.speed_options, Some(vec![]));
+            assert!(model.default_effort.is_none() && model.default_speed.is_none());
+        }
+        let invalid = AgentRuntime { provider: "claude".into(), model: "opus".into(), reasoning_effort: Some("high".into()), ..Default::default() };
+        let result = check(&invalid);
+        assert!(!result.ok && !result.unavailable);
+        assert!(result.message.contains("adapter"));
+        assert_eq!(result.runtime, invalid);
+    }
+
+    #[test]
+    fn discovery_requests_experimental_capabilities_without_inference() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::TempDir::new().unwrap();
+        let executable = temp.path().join("fixture-codex");
+        let requests = temp.path().join("requests");
+        let body = format!(r#"#!/bin/sh
+IFS= read -r request
+printf '%s\n' "$request" > "{requests}"
+printf '%s\n' '{{"id":1,"result":{{}}}}'
+IFS= read -r request
+printf '%s\n' "$request" >> "{requests}"
+IFS= read -r request
+printf '%s\n' "$request" >> "{requests}"
+printf '%s\n' '{{"id":2,"result":{{"account":{{"type":"apiKey"}}}}}}'
+IFS= read -r request
+printf '%s\n' "$request" >> "{requests}"
+printf '%s\n' '{{"id":3,"result":{{"data":[{{"model":"fixture","supportedReasoningEfforts":[],"serviceTiers":[]}}],"nextCursor":null}}}}'
+"#, requests = requests.display());
+        std::fs::write(&executable, body).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let source = discover_codex(&executable, Duration::from_secs(5)).unwrap();
+        let requests: Vec<Value> = std::fs::read_to_string(requests).unwrap().lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+        assert_eq!(requests[0]["params"]["capabilities"]["experimentalApi"], true);
+        assert_eq!(requests.iter().map(|r| r["method"].as_str().unwrap()).collect::<Vec<_>>(), ["initialize", "initialized", "account/read", "model/list"]);
+        assert_eq!(source.models[0].effort_options, Some(vec![]));
+        assert_eq!(source.models[0].speed_options, Some(vec![]));
+    }
+
     #[test]
     fn codex_catalog_reports_plan_default_and_efforts() {
         let account = json!({"account": {"type": "chatgpt", "email": "x@example.com", "planType": "pro"}, "requiresOpenaiAuth": true});
@@ -854,8 +1155,8 @@ mod tests {
     #[test]
     fn checks_mark_catalog_entries() {
         let mut checks = BTreeMap::new();
-        checks.insert(key("", "gpt-a"), (true, "ok".to_string()));
-        checks.insert(key("codex", "gpt-b"), (false, "No plan".to_string()));
+        checks.insert(key(&AgentRuntime { model: "gpt-a".into(), ..Default::default() }), (true, "ok".to_string()));
+        checks.insert(key(&AgentRuntime { provider: "codex".into(), model: "gpt-b".into(), ..Default::default() }), (false, "No plan".to_string()));
         let catalog = ModelCatalog {
             read_at_ms: 0,
             sources: vec![codex_catalog(&json!({"account": {"type": "apiKey"}}), &[json!({"data": [{"model": "gpt-a"}, {"model": "gpt-b"}]})])],

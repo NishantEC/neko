@@ -73,6 +73,8 @@ public actor DaemonClient {
         if request["Workbench"]["Mcp"].object["Authenticate"] != nil { return max(150, defaultTimeout) }
         // A model check runs one real, bounded (90 s) runner turn.
         if request.object["CheckAgentModel"] != nil { return max(120, defaultTimeout) }
+        // Saving conversation pins performs that same bounded check before commit.
+        if request["Workbench"].object["SetConversationRuntime"] != nil { return max(120, defaultTimeout) }
         return defaultTimeout
     }
 }

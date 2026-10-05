@@ -171,12 +171,54 @@ pub struct AgentRuntime {
     /// Empty lets the selected provider choose its default model.
     #[serde(default)]
     pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    /// Adapter wire ID. `default` explicitly requests normal service on Codex.
+    #[serde(default)]
+    pub service_tier: Option<String>,
+}
+
+/// Each pin is independent. Unpinned axes are chosen at the next run boundary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePreferences {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub service_tier: Option<String>,
+    #[serde(default)]
+    pub allow_paid_speed: bool,
+}
+
+/// Captured before execution; requested settings are not proof of served tier.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeSelection {
+    pub conversation_id: String,
+    pub run_id: String,
+    pub runtime: AgentRuntime,
+    pub preferences: RuntimePreferences,
+    pub reason: String,
+    pub automatic: bool,
+    pub selected_at_ms: i64,
+    pub catalog_read_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
     #[serde(default)]
     pub agent_runtime: AgentRuntime,
+    #[serde(default)]
+    pub conversation_runtime: BTreeMap<String, RuntimePreferences>,
+    /// Advances even for a no-op reset, so a slow check cannot undo it.
+    #[serde(default)]
+    pub conversation_runtime_revisions: BTreeMap<String, u64>,
+    /// Most recent 200 dispatch decisions, in dispatch order.
+    #[serde(default)]
+    pub runtime_selections: Vec<RuntimeSelection>,
     /// Stop a ticket once its reported agent cost reaches this many cents.
     /// Only runtimes that report a price (Claude Code, OpenCode) count.
     #[serde(default)]
@@ -379,6 +421,7 @@ pub enum ChatToolStatus {
 pub enum Command {
     DecisionContext(crate::decision_context::DecisionContextCommand),
     SetAgentRuntime { runtime: AgentRuntime },
+    SetConversationRuntime { conversation_id: String, preferences: RuntimePreferences },
     AgentProfiles(crate::agent_profiles::ProfileCommand),
     Schedules(crate::scheduled_plans::ScheduleCommand),
     SetupImport(crate::setup_import::ImportCommand),

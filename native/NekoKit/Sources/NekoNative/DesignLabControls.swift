@@ -3,30 +3,17 @@ import SwiftUI
 struct DesignLabControls: View {
     @Bindable var preview: DesignLabModel
     var expanded = false
-    @State private var showingAgents = false
     @State private var showingPlugins = false
 
     var body: some View {
         HStack(spacing: expanded ? 18 : 8) {
-            if expanded {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 24) {
-                        ForEach(preview.visibleAgents) { agent in
-                            Button { preview.selectedAgent = agent } label: {
-                                HStack(spacing: 9) {
-                                    DesignLabOrb(color: agent.color, size: 28)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(agent.title).font(.system(size: 12, weight: .semibold))
-                                        Text(agent.status).font(.system(size: 10)).foregroundStyle(.secondary)
-                                    }
-                                }.padding(.vertical, 2).contentShape(Rectangle())
-                            }.buttonStyle(DesignLabHoverStyle()).help("Open \(agent.title) sample task")
-                        }
-                    }
-                    agentButton
-                }
-                Spacer(minLength: 0)
-            } else { agentButton }
+            ComposerRuntimeControls(
+                selection: preview.runtime,
+                layout: expanded ? .separate : .inline,
+                sample: true,
+                refresh: preview.refreshRuntimeSample,
+                apply: preview.runtime.applySample
+            )
             Button(action: openPlugins) {
                 HStack(spacing: 7) {
                     Image(systemName: "puzzlepiece.extension").font(.system(size: 12))
@@ -47,26 +34,5 @@ struct DesignLabControls: View {
         }
     }
 
-    private var agentButton: some View {
-        Button(action: openAgents) {
-            HStack(spacing: 8) {
-                HStack(spacing: -3) {
-                    ForEach(preview.visibleAgents) { agent in DesignLabOrb(color: agent.color, size: 22) }
-                }
-                Text(preview.team.label).font(.system(size: 12, weight: .medium))
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 10).frame(height: 34)
-            .contentShape(.rect(cornerRadius: 11))
-        }
-        .buttonStyle(DesignLabHoverStyle()).fixedSize()
-        .accessibilityLabel("Preview task team, \(preview.team.label), \(preview.teamActivity)")
-        .help("\(preview.team.label) · \(preview.teamActivity). Open task details.")
-        .popover(isPresented: $showingAgents, arrowEdge: .bottom) {
-            DesignLabAgentMenu(preview: preview, close: { showingAgents = false })
-        }
-    }
-
-    private func openAgents() { showingPlugins = false; showingAgents.toggle() }
-    private func openPlugins() { showingAgents = false; showingPlugins.toggle() }
+    private func openPlugins() { showingPlugins.toggle() }
 }

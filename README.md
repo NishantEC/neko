@@ -70,8 +70,11 @@ Approved children run in isolated worktrees, then integrate into the parent task
 review. Conflicts, cancellation and restart preserve their evidence.
 Every eligible ticket starts its own worker on the next supervisor tick (within
 two seconds), without a fixed global or workspace agent cap. Dependencies and
-approvals still gate execution. The selected runtime handles each run; automatic
-switching between providers based on remaining usage is not implemented.
+approvals still gate execution. Each conversation can pin model, effort and speed,
+or let **Neko decides** select from connected runtime capabilities. Automatic
+paid acceleration is off unless enabled for that conversation. Choices and reasons
+are saved before each run; active work keeps its captured settings. Quota-aware
+provider failover is not implemented.
 Closing this window does not
 stop the daemon. Dismissing the palette hides only the palette.
 

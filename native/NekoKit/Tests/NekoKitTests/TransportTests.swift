@@ -7,6 +7,7 @@ import Testing
     let authentication: JSONValue = .object(["Workbench": .object(["Mcp": .command("Authenticate", ["connection_id": .string("server")])])])
     #expect(DaemonClient.requestTimeout(authentication) == 150)
     #expect(DaemonClient.requestTimeout(.string("Ping")) == 30)
+    #expect(DaemonClient.requestTimeout(.command("Workbench", ["SetConversationRuntime": .object([:])] )) == 120)
     #expect(DaemonClient.requestTimeout(.command("Search", ["query": .string("Authenticate")])) == 30)
 }
 

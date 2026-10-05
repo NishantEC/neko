@@ -181,7 +181,7 @@ mod tests {
     #[test]
     #[ignore = "Uses the signed-in Codex account for three small tool-free intent checks"]
     fn live_ticket_reply_intent_follows_the_human_request() {
-        let runtime = AgentRuntime { provider: "codex".into(), model: String::new() };
+        let runtime = AgentRuntime { provider: "codex".into(), model: String::new(), ..Default::default() };
         let cancel = std::sync::atomic::AtomicBool::new(false);
         for (text, expected) in [
             ("In that case, let's figure out what's waiting on it. What's causing it, and then fix it, right?", ReplyIntent::Work),
