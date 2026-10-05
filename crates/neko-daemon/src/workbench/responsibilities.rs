@@ -829,6 +829,7 @@ mod tests {
                 task: state.tasks[1].clone(),
                 authority: authority.clone(),
                 read_only_reply: false,
+            runtime: None,
             };
             match revoke {
                 0 => state.mcp.responsibilities[0].prepare_low_risk = false,

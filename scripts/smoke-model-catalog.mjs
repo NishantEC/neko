@@ -69,12 +69,12 @@ try {
     console.log('check', model, '->', good.ok, good.message, Date.now() - started, 'ms');
     assert.equal(good.ok, true);
     let snapshot = (await request({ Workbench: 'Snapshot' })).Workbench;
-    assert.deepEqual(snapshot.agent_runtime, { provider: 'codex', model });
+    assert.deepEqual(snapshot.agent_runtime, { provider: 'codex', model, reasoning_effort: null, service_tier: null });
     const bad = (await request({ CheckAgentModel: { runtime: { provider: 'codex', model: 'neko-no-such-model' }, save: true } }, 130000)).AgentModelCheck;
     console.log('check neko-no-such-model ->', bad.ok, bad.unavailable, bad.message);
     assert.equal(bad.ok, false);
     snapshot = (await request({ Workbench: 'Snapshot' })).Workbench;
-    assert.deepEqual(snapshot.agent_runtime, { provider: 'codex', model }, 'a failed check must keep the previous model');
+    assert.deepEqual(snapshot.agent_runtime, { provider: 'codex', model, reasoning_effort: null, service_tier: null }, 'a failed check must keep the previous model');
     const marked = (await request({ AgentModels: { refresh: false } })).AgentModels.sources[0].models.find(m => m.id === model);
     assert.equal(marked.access, 'checked');
     for (const [provider, pick] of [['claude', s => s.models.find(m => m.id === 'haiku')?.id], ['opencode', s => s.models.find(m => m.id.endsWith('-free'))?.id ?? s.models[0]?.id]]) {

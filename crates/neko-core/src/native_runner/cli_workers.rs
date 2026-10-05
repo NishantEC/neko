@@ -125,6 +125,7 @@ const WRITE_TOOLS: &[&str] = &["Bash", "Read", "Grep", "Glob", "Edit", "MultiEdi
 const BRIDGE_TOOLS: &[&str] = &["mcp__neko__neko_list_tools", "mcp__neko__neko_call_tool"];
 
 pub(crate) fn claude_args(spec: &RunSpec, bridge: Option<&BridgeConfig>, extraction: bool) -> Result<Vec<String>, String> {
+    crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
     let mut args: Vec<String> = [
         "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "", "--strict-mcp-config",
         "--disable-slash-commands", "--no-session-persistence", "--permission-mode",
@@ -370,6 +371,7 @@ pub(crate) fn run(
     on_event: &mut dyn FnMut(String),
     extraction: bool,
 ) -> Result<String, String> {
+    crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
     if extraction && (spec.writable || bridge.is_some()) {
         return Err("Extraction cannot receive write or tool authority".into());
     }
@@ -450,7 +452,7 @@ mod tests {
     use super::*;
 
     fn spec(writable: bool) -> RunSpec {
-        RunSpec { directory: PathBuf::from("/tmp"), prompt: "x".into(), writable, timeout: Duration::from_secs(5), runtime: neko_protocol::workbench::AgentRuntime { provider: "claude".into(), model: "sonnet".into() } }
+        RunSpec { directory: PathBuf::from("/tmp"), prompt: "x".into(), writable, timeout: Duration::from_secs(5), runtime: neko_protocol::workbench::AgentRuntime { provider: "claude".into(), model: "sonnet".into(), ..Default::default() } }
     }
 
     #[test]
@@ -636,7 +638,7 @@ mod tests {
             prompt: format!("Do exactly these three steps with your tools, then reply DONE.\n1. Create the file hello.txt containing the word hi.\n2. Run this shell command: cat hello.txt\n3. Run this shell command: touch {}", escape.display()),
             writable: true,
             timeout: Duration::from_secs(240),
-            runtime: neko_protocol::workbench::AgentRuntime { provider: provider.into(), model: model.into() },
+            runtime: neko_protocol::workbench::AgentRuntime { provider: provider.into(), model: model.into(), ..Default::default() },
         };
         let mut events = Vec::new();
         let agent = Agent::for_provider(provider).unwrap();

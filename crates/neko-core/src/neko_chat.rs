@@ -724,7 +724,7 @@ mod tests {
         assert!(!is_capability_question("help me fix the failing build"));
         assert!(!is_capability_question("what can you do about the flaky test"));
         let mut snapshot = Snapshot::default();
-        snapshot.agent_runtime = neko_protocol::workbench::AgentRuntime { provider: "claude".into(), model: "sonnet".into() };
+        snapshot.agent_runtime = neko_protocol::workbench::AgentRuntime { provider: "claude".into(), model: "sonnet".into(), ..Default::default() };
         let answer = capability_answer(&snapshot, None);
         assert!(answer.contains("Claude Code with sonnet"), "{answer}");
         assert!(answer.contains("No workspaces yet") && answer.contains("No tools connected"));

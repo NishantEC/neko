@@ -5,7 +5,7 @@ import NekoKit
 /// Deliberately has no AppModel, IPC or provider dependency. This page is a local design study.
 @MainActor @Observable final class DesignLabModel {
     enum Layout: String, CaseIterable, Identifiable {
-        case inline = "Inline", context = "Context"
+        case inline = "Inline", separate = "Separate"
         var id: Self { self }
     }
 
@@ -31,6 +31,10 @@ import NekoKit
             self == .repository ? "Issues, pull requests and repository context" : "Native layouts and accessibility patterns"
         }
     }
+
+    var runtime = RuntimeSelectionState(conversationID: "sample:design-lab", catalog: RuntimeSelectionSample.catalog)
+
+    func refreshRuntimeSample() { runtime.catalog = RuntimeSelectionSample.catalog }
 
     var layout = Layout.inline
     var scenario = Scenario.single
@@ -96,6 +100,7 @@ import NekoKit
     }
 
     func reset() {
+        runtime = RuntimeSelectionState(conversationID: "sample:design-lab", catalog: RuntimeSelectionSample.catalog)
         draft = "Keep the dark background neutral. No blue wash."
         plugins = Set(Plugin.allCases)
         messages = []

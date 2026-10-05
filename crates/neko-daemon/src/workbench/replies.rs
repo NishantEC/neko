@@ -22,6 +22,7 @@ impl Controller {
             task: claim.task.clone(),
             authority: claim.authority.clone(),
             read_only_reply: false,
+            runtime: claim.runtime.clone(),
         };
         loop {
             if cancel.load(Ordering::Acquire) {
@@ -47,7 +48,7 @@ impl Controller {
                 .and_then(|r| r.pending.first())
                 .map(String::as_str)
                 .ok_or("Unread reply is missing its human message")?;
-            let result = infer(text, &state.agent_runtime, cancel);
+            let result = infer(text, claim.runtime.as_ref().unwrap_or(&state.agent_runtime), cancel);
             if cancel.load(Ordering::Acquire) {
                 return Err("Task cancelled".into());
             }
@@ -115,6 +116,7 @@ mod tests {
             task: state.tasks[0].clone(),
             authority: responsibilities::RunAuthority::for_task(&state, &state.tasks[0]).unwrap(),
             read_only_reply: false,
+            runtime: None,
         }
     }
 

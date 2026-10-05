@@ -386,6 +386,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             return load(db);
         }
         Command::SetAgentRuntime { runtime } => {
+            crate::runtime_selection::validate_preferences(&neko_protocol::workbench::RuntimePreferences {
+                reasoning_effort: runtime.reasoning_effort.clone(), service_tier: runtime.service_tier.clone(), ..Default::default()
+            })?;
             if !matches!(runtime.provider.as_str(), "" | "codex" | "ollama" | "lmstudio" | "opencodex" | "claude" | "opencode") {
                 return Err("Choose Codex, Claude Code, OpenCode, Ollama or LM Studio".into());
             }
@@ -401,6 +404,24 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 return Err("Model name may use letters, numbers, hyphens, underscores, colons, dots, and slashes (up to 120 characters)".into());
             }
             snapshot.agent_runtime = runtime;
+        }
+        Command::SetConversationRuntime { conversation_id, preferences } => {
+            crate::runtime_selection::validate_scope(&snapshot, &conversation_id)?;
+            crate::runtime_selection::validate_preferences(&preferences)?;
+            if !snapshot.conversation_runtime_revisions.contains_key(&conversation_id) && snapshot.conversation_runtime_revisions.len() >= 1000 {
+                return Err("Conversation settings limit reached".into());
+            }
+            let revision = snapshot.conversation_runtime_revisions.get(&conversation_id).copied().unwrap_or(0)
+                .checked_add(1).ok_or("Conversation settings revision exhausted")?;
+            snapshot.conversation_runtime_revisions.insert(conversation_id.clone(), revision);
+            if preferences == Default::default() {
+                snapshot.conversation_runtime.remove(&conversation_id);
+            } else {
+                if !snapshot.conversation_runtime.contains_key(&conversation_id) && snapshot.conversation_runtime.len() >= 1000 {
+                    return Err("Conversation settings limit reached".into());
+                }
+                snapshot.conversation_runtime.insert(conversation_id, preferences);
+            }
         }
         Command::AgentProfiles(command) => crate::agent_profiles::apply(&mut snapshot, command)?,
         Command::Schedules(neko_protocol::scheduled_plans::ScheduleCommand::List) => {
@@ -1018,6 +1039,10 @@ fn remove_tasks(snapshot: &mut Snapshot, ids: &[String]) {
     snapshot.tasks.retain(|t| !ids.contains(&t.id));
     snapshot.splits.retain(|s| !ids.contains(&s.parent_id));
     for id in ids {
+        let conversation = crate::runtime_selection::task_id(id);
+        snapshot.conversation_runtime.remove(&conversation);
+        snapshot.conversation_runtime_revisions.remove(&conversation);
+        snapshot.runtime_selections.retain(|s| s.conversation_id != conversation);
         snapshot.task_roots.remove(id);
         snapshot.start_when_planned.remove(id);
         snapshot.task_read_only.remove(id);
@@ -1451,6 +1476,13 @@ fn unique_ids<'a>(ids: impl Iterator<Item = &'a str>) -> Result<HashSet<&'a str>
 }
 
 fn validate(snapshot: &Snapshot) -> Result<(), String> {
+    if snapshot.conversation_runtime.len() > 1000 || snapshot.conversation_runtime_revisions.len() > 1000 || snapshot.runtime_selections.len() > 200 {
+        return Err("Runtime settings history exceeds its limit".into());
+    }
+    for (id, preferences) in &snapshot.conversation_runtime {
+        bounded("Conversation ID", id, 600)?;
+        crate::runtime_selection::validate_preferences(preferences)?;
+    }
     crate::agent_profiles::validate(snapshot)?;
     crate::scheduled_plans::validate(snapshot)?;
     if snapshot.splits.len() > snapshot.tasks.len() {
@@ -2053,23 +2085,23 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         let runtime = neko_protocol::workbench::AgentRuntime {
             provider: "ollama".into(),
-            model: "qwen3:8b".into(),
+            model: "qwen3:8b".into(), ..Default::default()
         };
         apply(&db, Command::SetAgentRuntime { runtime: runtime.clone() }).unwrap();
         assert_eq!(load(&db).unwrap().agent_runtime, runtime);
         let routed = neko_protocol::workbench::AgentRuntime {
-            provider: "opencodex".into(), model: "anthropic/claude-sonnet-5".into(),
+            provider: "opencodex".into(), model: "anthropic/claude-sonnet-5".into(), ..Default::default()
         };
         apply(&db, Command::SetAgentRuntime { runtime: routed.clone() }).unwrap();
         assert_eq!(load(&db).unwrap().agent_runtime, routed);
         assert!(apply(&db, Command::SetAgentRuntime {
             runtime: neko_protocol::workbench::AgentRuntime {
-                provider: "opencodex".into(), model: "/".into(),
+                provider: "opencodex".into(), model: "/".into(), ..Default::default()
             }
         }).is_err());
         assert!(apply(&db, Command::SetAgentRuntime {
             runtime: neko_protocol::workbench::AgentRuntime {
-                provider: "unknown".into(), model: String::new()
+                provider: "unknown".into(), model: String::new(), ..Default::default()
             }
         }).is_err());
         assert_eq!(load(&db).unwrap().agent_runtime, routed);

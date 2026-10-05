@@ -69,16 +69,16 @@ material fallback on older supported systems; content cards remain opaque.
 The content canvas is solid neutral charcoal in dark mode, with no decorative
 gradient wash. Native sidebar and control materials retain their own appearance.
 Design lab is a separate sidebar page for a local, interactive composer study.
-It offers Inline (selected direction) and Context layouts with real Liquid Glass,
-Metal pearl beads, native popovers, sample plugin toggles and the existing AppKit text editor.
-Its observation model has no AppModel/IPC/provider dependency: sends append only
-to the sample conversation. Pasted/dropped files use the shared local attachment
-store. It does not install plugins or start workers. Preview state resets when
-leaving the page; Home and agent conversations keep their production behavior.
-The task control counts distinct existing child ticket IDs from approved splits,
-never phase sessions or all workspace tickets. A task without children shows
-Neko. Working/waiting/review-needed/completed/stopped counts follow task statuses.
-One task, Split task and Review are selectable sample states, not runtime actions.
+It offers Inline (selected direction) and Separate model/effort/speed layouts with
+real Liquid Glass, the Metal pearl, native popovers and the existing AppKit editor.
+Both use the production selector components against an explicitly illustrative
+catalog; model/speed names there do not establish live runtime availability.
+The observation model has no AppModel/IPC/provider dependency. Send appends only
+to the sample conversation and Apply sample changes only the local preview.
+Plugin switches do not install or grant anything. Task membership stays with the
+conversation, derived from distinct child ticket IDs in approved sample splits.
+One task, Split task and Review demonstrate task states, not runtime actions.
+Home and agent composers use the same selector with real daemon catalog/settings.
 Pearl lighting follows pointer events and has no idle render timer; Reduce Motion
 holds the light/scale still, and transparency/contrast preferences select a solid
 fallback. The shader applies only to beads, not the system glass composer.
@@ -178,19 +178,37 @@ trusted connections and after sign-in, retrying failures without blocking the
 client. The responsibility scheduler then evaluates eligibility for a
 plan-only source watch. Package listings are not installed automatically.
 
-`native_runner` starts ephemeral Codex processes in isolated task worktrees.
-The saved `agent_runtime` snapshot chooses the Codex account (default), the
-CLI's Ollama/LM Studio local adapter, or an available model routed through an
-installed OpenCodex loopback proxy for each new run. The native picker obtains
-OpenCodex's live model list through `ocx models live --json`, discards disabled
-entries, and displays real provider names; Neko does not independently fetch
-those providers' catalogs or import their credentials. Runs still use the Codex
-CLI with ephemeral configuration. Selection does not alter already-running
-work. Both chat composers and main-window Settings → AI update this global setting;
-the composer menu labels its scope. There is no per-conversation model override.
-The saved provider remains an explicit choice: Neko does not yet select or switch
-providers based on remaining quota. Worker concurrency is independent of account
-usage limits; starting another session does not reset those limits.
+`native_runner` starts Neko-owned CLI processes in task worktrees. Settings → AI
+sets the global default; each Home conversation (profile + workspace) and each
+ticket has independent model, effort and speed pins in `conversation_runtime`.
+The daemon's `agent_catalog` reads provider-native metadata, including Codex
+app-server effort descriptions, defaults and service tiers. Unknown capability
+metadata is distinct from an explicitly unsupported control. Fast aliases are
+normalized to the adapter's wire ID; no tier is invented from another account.
+
+Before a Home reply or task worker, `runtime_selection` asks a bounded tool-free
+supervisor to choose among connected, advertised candidates. Manual pins win.
+A failed or malformed selection uses a validated connected default with those
+pins. No viable pinned candidate stops explicitly rather than silently changing
+it. The selector has no quota feed and does not claim quota-aware failover. A legacy
+OpenCodex setting absent from discovery requires an explicit connected-model
+selection; it is never silently reinterpreted as a Codex provider pin.
+Automatic paid acceleration requires a saved conversation preference; a manual
+speed pin is an explicit choice. Settings are checked with one minimal inference
+before manual pins are saved; failure preserves the prior preferences.
+
+The resolved request and reason are persisted before execution in bounded
+`runtime_selections` history (200 dispatches). A worker captures that request
+through planning/building/review recovery; edits apply to the next worker or
+Home turn. Execution passes model, effort and service tier to fresh and resumed
+Codex processes using per-process configuration. If an older catalog cannot
+resolve a default effort for resume, the worker explicitly starts fresh from
+saved ticket history instead of retaining an earlier effort pin. This is requested runtime
+configuration, not confirmation of the tier actually served. Other adapters keep
+model selection but reject effort/speed overrides until their mapping is supported.
+Settings never change execution, tool, workspace or publication authority.
+Worker concurrency is independent of account usage limits; another session does
+not reset those limits.
 A scoped, expiring capability in environment variables connects a temporary
 stdio bridge back to the daemon. Only `neko_list_tools` and `neko_call_tool`
 are enabled and preapproved. Upstream configurations and credentials are not

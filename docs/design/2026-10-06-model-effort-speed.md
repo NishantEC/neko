@@ -161,5 +161,8 @@ Do not ship a Neko decides control until it selects and records a real runtime.
 - A bounded real inference check for each implemented adapter path, reporting
   actual versus merely requested settings where the runtime exposes them.
 
-This research pass verified source and live catalog metadata. It did not modify
-the app, run model inference, rerun test suites or verify a new native UI.
+The research above preceded implementation. The approved implementation now adds
+per-conversation pins, bounded automatic selection and native controls; see
+`docs/evidence/model-effort-speed.md` for exact execution and UI evidence. Quota-aware
+failover, served-tier confirmation and non-Codex effort/speed mappings remain outside
+this implementation.

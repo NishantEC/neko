@@ -220,51 +220,6 @@ enum ComposerRuntimeLabel {
     }
 }
 
-struct ComposerRuntimeMenu: View {
-    @ObservedObject var model: AppModel
-    @State private var catalog = ModelCatalog()
-    private var provider: String { model.snapshot["agent_runtime"]["provider"].string }
-    private var selectedModel: String { model.snapshot["agent_runtime"]["model"].string }
-    private var label: String {
-        ComposerRuntimeLabel.text(provider: provider, model: selectedModel, catalog: catalog)
-    }
-    var body: some View {
-        Menu {
-            Text("Global runtime · applies to future runs")
-            ForEach(catalog.sources) { source in
-                Section(source.connection) {
-                    if source.ready {
-                        Button(source.defaultTitle) { select(source.provider) }
-                        ForEach(source.models) { entry in
-                            Button(title(entry, provider: source.provider)) { select(source.provider, model: entry.id) }
-                                .disabled(!entry.usable).help(entry.reason ?? entry.description ?? "")
-                        }
-                    } else if let note = source.note { Text(note) }
-                }
-            }
-            Button("Refresh models") { Task { catalog = await AgentModelCatalog.load(model, refresh: true) } }
-            Divider()
-            Button("Model settings…") { NotificationCenter.default.post(name: .nekoNavigate, object: "Settings") }
-        } label: {
-            HStack(spacing: 4) {
-                Text(label).lineLimit(1).truncationMode(.middle)
-                Text("Global").font(NekoFont.meta).foregroundStyle(.secondary)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
-            }.font(NekoFont.meta).foregroundStyle(.secondary)
-        }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(maxWidth: 220, alignment: .leading)
-            .accessibilityLabel("Global runtime: \(label)")
-            .disabled(model.busy).help("Global runtime for future runs. Active work keeps its current runtime.")
-            .task { catalog = await AgentModelCatalog.load(model) }
-    }
-    private func title(_ entry: CatalogModel, provider source: String) -> String {
-        let selected = (provider.isEmpty ? "codex" : provider) == source && selectedModel == entry.id
-        return (selected ? "✓ " : "") + entry.label + (entry.recommended ? " · Recommended" : "") + (entry.access == .checked ? " · Checked" : "") + (!entry.usable ? " · Unavailable" : "")
-    }
-    private func select(_ provider: String, model selected: String = "") {
-        Task { await model.workbench(.command("SetAgentRuntime", ["runtime": .object(["provider": .string(provider), "model": .string(selected)])])) }
-    }
-}
-
 /// Shared message metadata; timestamps are shown only when the record has one.
 struct ChatAuthorLine: View {
     let author: String

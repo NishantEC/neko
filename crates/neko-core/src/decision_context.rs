@@ -691,7 +691,7 @@ pub(crate) fn record_user_command(
     };
     let user = AgentRuntime {
         provider: "user".into(),
-        model: String::new(),
+        model: String::new(), ..Default::default()
     };
     record(
         db,

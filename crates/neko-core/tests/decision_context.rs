@@ -1158,7 +1158,7 @@ fn missing_responsibilities_and_evicted_receipts_never_block_cancellation_or_fai
         workbench::save(&db, &failed).unwrap();
         let host = neko_protocol::workbench::AgentRuntime {
             provider: "host".into(),
-            model: String::new(),
+            model: String::new(), ..Default::default()
         };
         let observed = context::record_task_observation(
             &db,
@@ -1270,7 +1270,7 @@ fn user_and_host_actions_do_not_claim_to_have_consulted_model_preferences() {
     });
     let runtime = neko_protocol::workbench::AgentRuntime {
         provider: "host".into(),
-        model: String::new(),
+        model: String::new(), ..Default::default()
     };
     let observation = context::record_task_observation(
         &db,
@@ -1400,7 +1400,7 @@ fn duplicate_scoped_receipts_survive_atomic_failure_and_restart_recovery() {
                 assert_eq!(failed.tasks[0].status, TaskStatus::Failed);
                 let host = neko_protocol::workbench::AgentRuntime {
                     provider: "host".into(),
-                    model: String::new(),
+                    model: String::new(), ..Default::default()
                 };
                 context::record_task_observation(
                     &db,

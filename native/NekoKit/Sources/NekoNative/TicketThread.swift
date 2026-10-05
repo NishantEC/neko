@@ -171,23 +171,25 @@ struct TicketComposer: View {
     }
     var body: some View {
         let targetID = id
-        SharedComposer(
-            text: Binding(get: { model.ticketDrafts.text(for: targetID) }, set: { model.ticketDrafts.set($0, for: targetID) }),
-            attachments: model.ticketDrafts.attachments(for: targetID),
-            placeholder: placeholder,
-            accessibilityLabel: "Message to ticket agent",
-            accessibilityHelp: "Return sends a reply to this agent. Shift Return adds a line. Command Return also sends a reply. New direction pauses active work and the agent reassesses it. Paste or drop images and files to attach them.",
-            state: composerState, validationError: payloadError,
-            onSend: send,
-            onStop: { Task { await model.workbench(.command("CancelTask", ["task_id": .string(targetID)])) } },
-            onAttach: { model.ticketDrafts.add($0, for: targetID) },
-            onRemove: { model.ticketDrafts.remove($0, for: targetID) },
-            onChooseAttachments: {
-                ComposerAttachmentPicker.choose(attach: { model.ticketDrafts.add($0, for: targetID) }, onError: { model.error = $0 })
-            },
-            onError: { model.error = $0 }
-        ) {
-            ComposerRuntimeMenu(model: model)
+        ComposerRuntimeScope(model: model, conversationID: RuntimeSelectionScope.task(targetID)) { selection in
+            SharedComposer(
+                text: Binding(get: { model.ticketDrafts.text(for: targetID) }, set: { model.ticketDrafts.set($0, for: targetID) }),
+                attachments: model.ticketDrafts.attachments(for: targetID),
+                placeholder: placeholder,
+                accessibilityLabel: "Message to ticket agent",
+                accessibilityHelp: "Return sends a reply to this agent. Shift Return adds a line. Command Return also sends a reply. New direction pauses active work and the agent reassesses it. Paste or drop images and files to attach them.",
+                state: composerState, validationError: payloadError,
+                onSend: send,
+                onStop: { Task { await model.workbench(.command("CancelTask", ["task_id": .string(targetID)])) } },
+                onAttach: { model.ticketDrafts.add($0, for: targetID) },
+                onRemove: { model.ticketDrafts.remove($0, for: targetID) },
+                onChooseAttachments: {
+                    ComposerAttachmentPicker.choose(attach: { model.ticketDrafts.add($0, for: targetID) }, onError: { model.error = $0 })
+                },
+                onError: { model.error = $0 }
+            ) {
+                ComposerRuntimePicker(model: model, selection: selection)
+            }
         }.id(targetID)
     }
     private func send() {

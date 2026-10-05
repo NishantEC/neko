@@ -36,6 +36,7 @@ pub mod onboarding;
 pub mod permissions;
 pub mod preferences;
 pub mod provider;
+pub mod runtime_selection;
 pub mod schedule_import;
 pub mod schedule_time;
 pub mod scheduled_plans;

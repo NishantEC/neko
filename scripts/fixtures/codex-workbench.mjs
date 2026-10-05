@@ -6,6 +6,19 @@ import readline from 'node:readline';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 const args = process.argv.slice(2);
+if (args[0] === 'app-server') {
+  for await (const line of readline.createInterface({ input: process.stdin })) {
+    const request = JSON.parse(line);
+    if (request.id == null) continue;
+    const result = request.method === 'account/read' ? { account: { type: 'chatgpt', planType: 'pro' } }
+      : request.method === 'model/list' ? { data: [{ id: 'fixture', model: 'fixture', displayName: 'Fixture', isDefault: true,
+          supportedReasoningEfforts: [{ reasoningEffort: 'low', description: 'Fixture low' }, { reasoningEffort: 'high', description: 'Fixture high' }],
+          defaultReasoningEffort: 'low', serviceTiers: [{ id: 'priority', name: 'Fast' }], additionalSpeedTiers: ['fast'] }], nextCursor: null }
+      : {};
+    process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
+  }
+  process.exit(0);
+}
 assert.equal(args[0], 'exec');
 assert.ok(args.includes('--ignore-user-config'));
 const fullAccess = args.includes('--dangerously-bypass-approvals-and-sandbox');
@@ -14,6 +27,15 @@ let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 assert.ok(args.includes('skills.include_instructions=false'), 'Neko must control injected skill instructions');
 for (const feature of ['apps','browser_use','computer_use','plugins','remote_plugin','multi_agent','hooks','workspace_dependencies','skill_mcp_dependency_install']) assert.ok(args.includes(`features.${feature}=false`), `Ambient ${feature} bypasses Neko authority`);
+if (prompt.startsWith('Select runtime settings for this Neko conversation.') || prompt.startsWith('This is a connection check.')) {
+  assert.ok(args.includes('features.shell_tool=false'));
+  assert.ok(!args.some(arg => arg.startsWith('mcp_servers.')));
+  assert.deepEqual(fs.readdirSync(process.cwd()), []);
+  const text = prompt.startsWith('This is a connection check.') ? 'NEKO_OK'
+    : JSON.stringify({ candidate: 0, reasoning_effort: 'high', service_tier: 'default', reason: 'The fixture task needs investigation.' });
+  process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'agent_message',text}})}\n${JSON.stringify({type:'turn.completed'})}\n`);
+  process.exit(0);
+}
 if (prompt.startsWith("Classify the user's latest ticket message.")) {
   for (const feature of ['shell_tool','unified_exec','view_image','code_mode_host']) assert.ok(args.includes(`features.${feature}=false`));
   assert.ok(args.includes('--ephemeral'));
