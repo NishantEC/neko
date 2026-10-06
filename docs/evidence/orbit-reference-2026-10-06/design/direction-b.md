@@ -1,3 +1,5 @@
+> Archived and unapproved: this layout exploration exceeded the user’s visual-only request. See [the active visual study](../../../design/orbit-visual-style.md).
+
 # B · Execution workspace
 
 Open [page 3 in Paper](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-3-0) to compare the four B artboards. All are **1440×900**, editable, screenshot-reviewed, exported and finished.

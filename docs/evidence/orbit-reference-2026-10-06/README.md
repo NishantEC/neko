@@ -1,6 +1,6 @@
 # Orbit reference audit — 6 October 2026
 
-Open the [Paper reference atlas](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-4-0). Compare it with [Neko · Orbit redesign](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-3-0).
+Open the [Paper reference atlas](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-4-0). The active scope is [Neko · Visual styling only](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-5-0). The earlier product/layout proposal was outside the user’s request and is archived.
 
 This folder contains 161 unchanged JPEG browser captures, a DOM snapshot for each, an action/result manifest, the public-source inventory and the native capability comparison. The visible reference product calls itself Aurora; the public page title is Orbit Agent Workspace.
 
@@ -13,7 +13,7 @@ This folder contains 161 unchanged JPEG browser captures, a DOM snapshot for eac
 | [Manifest](manifest.json) | Capture timestamp, source URL and local path. Some early filenames describe the intended state; the final caption records what was actually observed. |
 | [Source behavior map](source-behavior-map.md) | Complete public-source inventory: pages, actions, menus, scenes, role definitions and implementation gaps. |
 | [Native capability map](native-capability-map.md) | Neko source/adapters available for implementation; this is source verification, not a running-app test. |
-| [Native direction](../../design/orbit-native-direction.md) | Design recommendation, navigation/task flows, parity contract and implementation sequence. |
+| [Visual style](../../design/orbit-visual-style.md) | Active component styling study; preserve existing screens and behavior. |
 
 ## Browser coverage
 

@@ -1,3 +1,5 @@
+> Archived and unapproved: this layout exploration exceeded the user’s visual-only request. See [the active visual study](../../../design/orbit-visual-style.md).
+
 Review **A · Focused conversation** in [Paper](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-3-0).
 
 Completed three static 1440×900 native SwiftUI/AppKit main mockups and one 1440×1821 shared state sheet on the existing page. No implementation edits, daemon calls/restarts or installation. Only Direction A nodes were created/changed; Direction B nodes were left untouched. HEAD remains `aef9df8`; the pre-existing untracked Orbit reference directory remains untouched.

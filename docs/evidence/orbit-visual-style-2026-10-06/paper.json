@@ -1,0 +1,16 @@
+{
+  "fileId": "01M3YBQPKND2A0GY02E3Z13H1G",
+  "pageId": "p-5-0",
+  "artboardId": "CRF-0",
+  "scope": "Visual styling only. Existing navigation, screens, controls and behavior remain.",
+  "variants": [
+    "01 Quiet ink",
+    "02 Native glass"
+  ],
+  "dimensions": [
+    1440,
+    1052
+  ],
+  "pngSha256": "16b5c538f2630aa032eee98c68c2528f8292c0ada6a929efb9b73a285b3ef240",
+  "verification": "Paper screenshot reviewed for contrast, spacing, type, alignment and clipping; static glass approximation only. Native app unchanged."
+}

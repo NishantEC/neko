@@ -1,8 +1,8 @@
-# Neko: Orbit reference and native direction
+# Archived: out-of-scope Orbit product proposal
 
-Review **B · Execution workspace** on [Neko · Orbit redesign](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-3-0), then compare **A · Focused conversation**.
+**Superseded by the user’s scope correction on 2026-10-06. Do not implement this product/layout proposal.** The request is visual design only: preserve Neko’s screens, navigation and behavior. Use [the active visual study](orbit-visual-style.md). The original mockups remain on [Archive · Out-of-scope layouts](https://app.paper.design/file/01M3YBQPKND2A0GY02E3Z13H1G/p-3-0) solely as history.
 
-Status: design proposal, 2026-10-06. No production Swift/Rust code changed. No daemon restart or installation. The reference audit used the public [Orbit demo](https://orbit-agent-workspace.vercel.app/), which calls its visible workspace Aurora.
+Status: archived, unapproved proposal, 2026-10-06. No production Swift/Rust code changed. No daemon restart or installation. The reference audit used the public [Orbit demo](https://orbit-agent-workspace.vercel.app/), which calls its visible workspace Aurora.
 
 ## What the reference gets right
 
