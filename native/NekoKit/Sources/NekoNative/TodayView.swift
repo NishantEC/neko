@@ -111,7 +111,7 @@ struct TodayView: View {
                 GeometryReader { viewport in
                 ScrollViewReader { reader in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: NekoLayout.sectionGap + 8) {
+                        LazyVStack(alignment: .leading, spacing: NekoLayout.messageGap) {
                             if messages.isEmpty {
                                 todayHero
                                 if model.workspaces.isEmpty { howNekoWorks } else { brief }
@@ -303,7 +303,7 @@ struct TodayView: View {
         if message["role"].string == "user" {
             ChatUserMessage(text: message["text"].string, timestamp: message["at_ms"].int, queued: message["queued"].bool)
         } else {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: NekoLayout.authorGap) {
                 ChatAuthorLine(author: "Neko", timestamp: message["at_ms"].int)
                 if message["pending"].bool {
                     let now = ChatActivity.describe(message, model: model)

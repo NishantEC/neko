@@ -28,4 +28,10 @@ The comparison contains existing message, task-row, attachment, Ask/Plan, model/
 
 Paper screenshots were reviewed after the initial component pass and after the final comparison. An inherited black text color was corrected before duplication. The final sheet has readable primary/secondary text, aligned controls, consistent spacing and no clipped content. Export dimensions and SHA-256 are recorded in [the Paper mapping](../evidence/orbit-visual-style-2026-10-06/paper.json).
 
-The current source and the installed-selector evidence informed the existing composer controls. This turn changed design/documentation only. No Swift/Rust code, installed app, daemon, permissions or behavior changed, and application tests were not rerun. Actual Liquid Glass, hover, keyboard handling, typing performance and system appearance remain native implementation checks.
+The current source and the installed-selector evidence informed the existing composer controls. The initial study changed design/documentation only; its Paper review did not establish native rendering or behavior.
+
+## Selected implementation · 02 Native glass
+
+The user selected Native glass. The SwiftUI implementation uses real system glass on the existing composer, opaque content surfaces, shared attachment chips and a circular action. Conversation spacing follows the 24/8/16 rhythm. The existing navigation, native sidebar, controls and runtime behavior remain intact. Reduce Transparency and Increased Contrast replace only the composer background, preserving editor identity. Design lab shares the production component styling.
+
+Source verification: 131 XCTest cases passed, and the Swift Testing runner reported 11 tests passed with its optional real-daemon test skipped. Independent read-only review found no actionable issues. Installation and native screen checks are recorded separately after verification.

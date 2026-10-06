@@ -250,9 +250,9 @@ struct TicketsView: View {
     private func listRow(_ task: JSONValue) -> some View {
         let status = task["status"].string
         let note = status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task)
-        return HStack(alignment: .top, spacing: 14) {
+        return HStack(alignment: .top, spacing: 16) {
             StatusGlyph(status: status, size: 16).padding(.top, 2).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(task["title"].string).font(NekoFont.heading).lineSpacing(3).lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("\(workspaceName(task)) · \(friendlyTaskStatus(status))").font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1)
@@ -742,6 +742,7 @@ struct TicketCard: View {
     var note: String? = nil
     @State private var hover = false
     @Environment(\.ink) private var ink
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
@@ -761,12 +762,16 @@ struct TicketCard: View {
                 }.font(NekoFont.meta).foregroundStyle(.secondary)
             }
         }
-        .padding(NekoLayout.rowInset)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(hover ? ink.raisedHover : ink.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(highlighted ? NekoStyle.accent : .clear))
+        .background {
+            RoundedRectangle(cornerRadius: NekoStyle.radius).fill(ink.panel)
+                .overlay(RoundedRectangle(cornerRadius: NekoStyle.radius).fill(hover ? ink.raisedHover : .clear))
+        }
+        .overlay(RoundedRectangle(cornerRadius: NekoStyle.radius).strokeBorder(highlighted ? NekoStyle.accent : ink.line))
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .help(id)
-        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hover)
+        .onHover { hover = $0 }
     }
 }

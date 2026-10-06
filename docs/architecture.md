@@ -66,6 +66,11 @@ widths: 880pt for management and 760pt for conversations, with 32pt outer insets
 Appearance follows macOS by default and can be set to Light or Dark in Settings
 or the sidebar. The floating composer uses Liquid Glass on macOS 26, with a
 material fallback on older supported systems; content cards remain opaque.
+Reduce Transparency and Increased Contrast use an opaque composer background
+without replacing its editor. Home, ticket chats and Design lab share the glass
+surface, attachment chips and circular primary action. The selected Orbit visual
+study refines surface colors and component spacing without changing navigation
+or the composer adapters.
 The content canvas is solid neutral charcoal in dark mode, with no decorative
 gradient wash. Native sidebar and control materials retain their own appearance.
 Design lab is a separate sidebar page for a local, interactive composer study.

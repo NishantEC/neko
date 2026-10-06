@@ -52,7 +52,7 @@ struct ChatUserMessage: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             Spacer(minLength: NekoLayout.pageInset)
-            VStack(alignment: .trailing, spacing: 10) {
+            VStack(alignment: .trailing, spacing: NekoLayout.authorGap) {
                 ChatAuthorLine(author: "You", timestamp: timestamp)
                 Group {
                     if text.contains("![") { ReadableText(text: text) }
@@ -60,7 +60,7 @@ struct ChatUserMessage: View {
                 }
                 .font(NekoFont.chat).lineSpacing(4)
                 .multilineTextAlignment(.leading)
-                .padding(NekoLayout.rowInset)
+                .padding(NekoLayout.messageInset)
                 .background(ink.raised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 if queued { Label("Queued", systemImage: "clock").font(NekoFont.meta).foregroundStyle(.secondary) }
             }.frame(maxWidth: 640, alignment: .trailing)
@@ -647,7 +647,7 @@ struct ReplyTicketRow: View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 12) {
                 StatusGlyph(status: status, size: 16).padding(.top, 2).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(title).font(NekoFont.heading).lineSpacing(3).lineLimit(2)
                     Text([workspace, friendlyTaskStatus(status)].filter { !$0.isEmpty }.joined(separator: " · ")).font(ReplyStyle.caption).foregroundStyle(.secondary)
                 }
@@ -655,9 +655,9 @@ struct ReplyTicketRow: View {
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
             }
             .multilineTextAlignment(.leading)
-            .padding(.horizontal, 12).padding(.vertical, NekoLayout.rowInset)
+            .padding(.horizontal, 12).padding(.vertical, 16)
             .background(hover ? ink.raisedHover : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(alignment: .top) { ink.line.frame(height: 1) }
+            .overlay(alignment: .top) { Hairline() }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
