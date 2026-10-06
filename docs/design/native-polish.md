@@ -33,4 +33,4 @@ The first craft pass became too dense and flat: opaque composer backing and a fo
 
 ## Verification
 
-See `docs/evidence/native-liquid-glass.md` for this revision's tests, installation and screen verification. `native-polish.md` records the superseded craft pass. A source review or unit test is not evidence of physical mouse, divider drag, live model or provider-compaction behavior.
+See `docs/evidence/native-liquid-glass.md` for the earlier workspace pass and [native-glass-visual-style-2026-10-06.md](../evidence/native-glass-visual-style-2026-10-06.md) for the selected component styling, installation and screen verification. A source review or unit test is not evidence of physical mouse, divider drag, live model or provider-compaction behavior.
