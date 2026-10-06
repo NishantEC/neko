@@ -114,7 +114,7 @@ struct SharedComposer<Controls: View>: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             if !attachments.isEmpty { ComposerAttachmentStrip(attachments: attachments, remove: onRemove) }
             ComposerView(
                 text: $text,
@@ -129,7 +129,7 @@ struct SharedComposer<Controls: View>: View {
                 Text(validationError).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).fixedSize(horizontal: false, vertical: true)
             }
             HStack(alignment: .bottom, spacing: 12) {
-                Button("Attach files", systemImage: "plus", action: onChooseAttachments)
+                Button("Attach files", systemImage: "paperclip", action: onChooseAttachments)
                     .labelStyle(.iconOnly).font(NekoFont.body)
                     .frame(width: 32, height: 32).contentShape(Rectangle())
                     .buttonStyle(.borderless).foregroundStyle(.secondary)
@@ -147,22 +147,14 @@ struct SharedComposer<Controls: View>: View {
                 .font(.caption2).foregroundStyle(.secondary)
                 .frame(height: 34)
                 .accessibilityHidden(true) // The editor's help already describes these shortcuts.
-                Button {
+                ComposerPrimaryButton(label: actionLabel, symbol: state.primary == .stop ? "stop.fill" : state.primary == .queue ? "text.badge.plus" : "arrow.up",
+                                      enabled: state.buttonEnabled, submitting: state.primary == .submitting) {
                     if state.primary == .stop { onStop() } else { onSend() }
-                } label: {
-                    HStack(spacing: 5) {
-                        if state.primary == .submitting { ProgressView().controlSize(.mini) }
-                        else { Image(systemName: state.primary == .stop ? "stop.fill" : state.primary == .queue ? "text.badge.plus" : "arrow.up") }
-                        Text(actionLabel)
-                    }.font(NekoFont.meta.weight(.medium)).padding(.horizontal, 14).frame(height: 34)
-                        .foregroundStyle(state.buttonEnabled ? Color.white : Color.secondary)
-                        .background(state.buttonEnabled ? NekoStyle.accent : Color.primary.opacity(0.06), in: Capsule())
-                }.buttonStyle(.plain).disabled(!state.buttonEnabled).accessibilityLabel(actionLabel)
-                    .fixedSize(horizontal: true, vertical: false)
+                }
             }
         }
-        .padding(.horizontal, 20).padding(.vertical, 14)
-        .liquidGlass(radius: 24)
+        .padding(18)
+        .modifier(ComposerSurface())
     }
 }
 
@@ -172,21 +164,86 @@ struct ComposerAttachmentStrip: View {
     let remove: (ComposerAttachment) -> Void
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 ForEach(attachments) { attachment in
-                    HStack(spacing: 6) {
-                        Image(systemName: attachment.isImage ? "photo" : "doc")
-                        Text(attachment.name).lineLimit(1).frame(maxWidth: 180)
-                        Button { remove(attachment) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .medium)).frame(width: 24, height: 24).contentShape(Rectangle()) }
-                            .buttonStyle(.plain).accessibilityLabel("Remove \(attachment.name)")
-                    }.font(NekoFont.meta).foregroundStyle(.secondary)
-                        .padding(.leading, 9).padding(.trailing, 2).frame(height: 28)
-                        .background(ink.raised, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(ink.line))
-                        .help(attachment.name)
+                    ComposerAttachmentChip(name: attachment.name, isImage: attachment.isImage) { remove(attachment) }
                 }
             }
         }.scrollIndicators(.never)
+    }
+}
+
+/// One native sampling surface behind the editor. Accessibility changes replace
+/// the background only, preserving the live NSTextView and its selection.
+struct ComposerSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var opaque
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        content.background {
+            let shape = RoundedRectangle(cornerRadius: 24)
+            if opaque || contrast == .increased {
+                shape.fill(N.card)
+                    .overlay(shape.strokeBorder(N.lineStrong, lineWidth: contrast == .increased ? 2 : 1))
+            } else if #available(macOS 26, *) {
+                Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 24))
+            } else {
+                shape.fill(.regularMaterial)
+                    .overlay(shape.strokeBorder(N.line))
+            }
+        }
+    }
+}
+
+/// Plain controls sit inside the shared glass surface; no nested blur or shader.
+struct ComposerPrimaryButton: View {
+    let label: String
+    var symbol = "arrow.up"
+    var enabled = true
+    var submitting = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if submitting { ProgressView().controlSize(.mini) }
+                else { Image(systemName: symbol).font(.system(size: 16, weight: .semibold)) }
+            }
+            .frame(width: 34, height: 34)
+            .foregroundStyle(enabled ? Color.adaptive(light: 0xFFFFFF, dark: 0x19191C) : N.text4)
+            .background(enabled ? Color.adaptive(light: 0x29292D, dark: 0xECEDEF) : N.selected, in: Circle())
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain).disabled(!enabled)
+        .accessibilityLabel(label).help(label)
+    }
+}
+
+struct ComposerAttachmentChip: View {
+    let name: String
+    let isImage: Bool
+    var detail: String? = nil
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isImage ? "photo" : "doc")
+                .font(.system(size: 17)).foregroundStyle(N.text3).frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(NekoFont.meta.weight(.medium)).foregroundStyle(.primary)
+                    .lineLimit(1).truncationMode(.middle)
+                Text(detail ?? (isImage ? "Image" : "File"))
+                    .font(.system(size: 12)).foregroundStyle(N.text3)
+            }.frame(maxWidth: 210, alignment: .leading)
+            Button(action: remove) {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .medium))
+                    .frame(width: 24, height: 24).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(N.text3).accessibilityLabel("Remove \(name)")
+        }
+        .padding(10)
+        .background(N.attachment, in: RoundedRectangle(cornerRadius: 10))
+        .help(name)
     }
 }
 

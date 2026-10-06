@@ -37,6 +37,9 @@ enum NekoLayout {
     static let pageInset: CGFloat = 32
     static let sectionGap: CGFloat = 28
     static let rowInset: CGFloat = 18
+    static let messageGap: CGFloat = 24
+    static let authorGap: CGFloat = 8
+    static let messageInset: CGFloat = 16
 }
 
 struct Ink {
@@ -69,8 +72,9 @@ struct Hairline: View {
     var dashed = false
     var vertical = false
     @Environment(\.ink) private var ink
+    @Environment(\.colorSchemeContrast) private var contrast
     var body: some View {
-        HairlineShape(vertical: vertical).stroke(ink.line, style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 3] : []))
+        HairlineShape(vertical: vertical).stroke(contrast == .increased ? ink.lineStrong : ink.line, style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 3] : []))
             .frame(maxWidth: vertical ? 1 : .infinity, maxHeight: vertical ? .infinity : 1)
             .frame(width: vertical ? 1 : nil, height: vertical ? nil : 1)
             .accessibilityHidden(true)
@@ -343,16 +347,17 @@ func friendlyTaskStatus(_ status: String) -> String {
 /// One neutral surface ramp for the native app, shared by legacy Ink consumers.
 /// Small secondary text remains readable on the brightest content surface.
 enum N {
-    static let canvas = Color.adaptive(light: 0xF7F8FA, dark: 0x1C1C1E)
-    static let panel = Color.adaptive(light: 0xFFFFFF, dark: 0x242426)
-    static let card = Color.adaptive(light: 0xFFFFFF, dark: 0x2C2C2E)
+    static let canvas = Color.adaptive(light: 0xF7F8FA, dark: 0x101011)
+    static let panel = Color.adaptive(light: 0xFFFFFF, dark: 0x19191C)
+    static let card = Color.adaptive(light: 0xFFFFFF, dark: 0x1D1D20)
+    static let attachment = Color.adaptive(light: 0xF0EEF3, dark: 0x292631)
     static let selected = Color.primary.opacity(0.065)
-    static let line = Color.primary.opacity(0.08)
-    static let lineStrong = Color.primary.opacity(0.16)
+    static let line = Color.adaptive(light: 0xE2E2E7, dark: 0x2A2A2E)
+    static let lineStrong = Color.adaptive(light: 0xC8C8CE, dark: 0x48484E)
     static let text = Color(nsColor: .labelColor)
-    static let text2 = Color.adaptive(light: 0x424954, dark: 0xD7DBE2)
-    static let text3 = Color.adaptive(light: 0x606875, dark: 0xB9C0CA)
-    static let text4 = Color.adaptive(light: 0x666E7A, dark: 0xA8B0BC)
+    static let text2 = Color.adaptive(light: 0x424954, dark: 0xD7D7DC)
+    static let text3 = Color.adaptive(light: 0x606875, dark: 0xB9B9C0)
+    static let text4 = Color.adaptive(light: 0x666E7A, dark: 0xA5A5AD)
     static let sidebarWidth: CGFloat = 232
     static let headerHeight: CGFloat = 48
     static let rowHeight: CGFloat = 30

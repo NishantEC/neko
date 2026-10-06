@@ -31,7 +31,7 @@ struct DesignLabView: View {
                 }
             }
         }
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(N.canvas)
         .navigationTitle("Design lab")
         .navigationSubtitle("Sample models · local preview")
         .toolbar {

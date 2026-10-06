@@ -81,7 +81,7 @@ struct TicketThreadView: View {
     let ticket: JSONValue
     @Environment(\.ink) private var ink
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoLayout.sectionGap + 8) {
+        VStack(alignment: .leading, spacing: NekoLayout.messageGap) {
             ForEach(Array(TicketThread.items(ticket).enumerated()), id: \.offset) { _, item in row(item) }
             if let working = workingLine { workingRow(working) }
         }
@@ -100,7 +100,7 @@ struct TicketThreadView: View {
     @ViewBuilder private func row(_ item: TicketThread.Item) -> some View {
         switch item {
         case .brief(let text):
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: NekoLayout.authorGap) {
                 ChatAuthorLine(author: "Task brief", timestamp: ticket["created_at_ms"].int)
                 ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
             }
@@ -108,7 +108,7 @@ struct TicketThreadView: View {
         case .you(let text):
             ChatUserMessage(text: text)
         case .agent(let role, let text):
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: NekoLayout.authorGap) {
                 ChatAuthorLine(author: TicketThread.agentName(role))
                 ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
             }

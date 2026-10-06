@@ -11,23 +11,11 @@ struct DesignLabComposer: View {
                         .padding(.horizontal, 22).padding(.vertical, 16)
                     Divider().overlay { Color.primary.opacity(0.025) }
                 }
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 16) {
                     if let name = preview.attachmentName {
-                        HStack(spacing: 10) {
-                            Image(systemName: "doc.richtext")
-                                .font(.system(size: 17)).frame(width: 32, height: 34)
-                                .background(.purple.opacity(0.12), in: .rect(cornerRadius: 8))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                                Text("Reference · preview").font(.system(size: 11)).foregroundStyle(.secondary)
-                            }
-                            Button("Remove attachment", systemImage: "xmark") { preview.attachmentName = nil }
-                                .labelStyle(.iconOnly).buttonStyle(.plain)
-                                .frame(width: 28, height: 28).contentShape(Rectangle())
-                        }
-                        .padding(8).padding(.trailing, 4)
-                        .background(.purple.opacity(0.09), in: .rect(cornerRadius: 16))
-                        .fixedSize(horizontal: false, vertical: true)
+                        ComposerAttachmentChip(name: name, isImage: true, detail: "Reference · preview") {
+                            preview.attachmentName = nil
+                        }.fixedSize(horizontal: false, vertical: true)
                     }
                     ComposerView(
                         text: $preview.draft,
@@ -41,7 +29,7 @@ struct DesignLabComposer: View {
                     if let error = preview.error {
                         Text(error).font(.caption).foregroundStyle(NekoStyle.amber)
                     }
-                }.padding(.horizontal, 22).padding(.top, 20).padding(.bottom, 12)
+                }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 16)
                 HStack(spacing: 12) {
                     Button("Add sample attachment", systemImage: "paperclip") {
                         preview.attachmentName = "appearance-reference.png"
@@ -58,19 +46,12 @@ struct DesignLabComposer: View {
                         Text("Shift-Return\nfor a new line").multilineTextAlignment(.trailing).fixedSize()
                     }
                     .font(.system(size: 10)).foregroundStyle(.secondary).accessibilityHidden(true)
-                    Button(action: preview.send) {
-                        ZStack {
-                            DesignLabOrb(size: 42)
-                            Image(systemName: "arrow.up").font(.system(size: 18, weight: .semibold)).foregroundStyle(.black.opacity(0.78))
-                        }.frame(width: 44, height: 44).contentShape(Circle())
-                    }
-                    .buttonStyle(DesignLabHoverStyle(circular: true)).disabled(!preview.canSend)
-                    .accessibilityLabel("Send preview message").help("Send to this local preview")
+                    ComposerPrimaryButton(label: "Send preview message", enabled: preview.canSend, action: preview.send)
                 }
-                .padding(.horizontal, 16).padding(.bottom, 14)
+                .padding(.horizontal, 18).padding(.bottom, 18)
             }
             // One sampling surface. Controls inside it are plain, not glass-on-glass.
-            .liquidGlass(radius: 28)
+            .modifier(ComposerSurface())
         }
     }
 }

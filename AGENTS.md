@@ -11,6 +11,14 @@ and evidence stay opaque. Preserve `stableSplitPane`, the native top safe area,
 and navigation-owned drafts when changing these surfaces. See
 `docs/design/native-polish.md` and `docs/evidence/native-liquid-glass.md`.
 
+The selected Orbit visual study (2026-10-06, 02 · Native glass) refines existing
+components only: neutral near-black dark surfaces, 24/8/16 conversation spacing,
+shared attachment chips and a circular composer action. Home, ticket chats and
+Design lab share the composer surface. Reduce Transparency or Increased Contrast
+replaces its background with an opaque surface without replacing the editor.
+Navigation, control behavior and runtime authority remain unchanged. See
+`docs/design/orbit-visual-style.md`.
+
 Design lab (2026-10-06) is an interactive native preview page. Inline is the
 selected composer direction; Separate exposes individual model/effort/speed
 controls. Both reuse production selector views against labelled sample metadata.
