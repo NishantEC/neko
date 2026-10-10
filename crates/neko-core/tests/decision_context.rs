@@ -30,6 +30,8 @@ fn fixture(db: &Db) -> Snapshot {
             created_at_ms: 1,
             updated_at_ms: 1,
             source_revision: Some("revision-1".into()),
+            base_commit: None,
+            pull_request: None,
             supervision: None,
         });
     }

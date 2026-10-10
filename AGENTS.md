@@ -78,7 +78,9 @@ snapshots in `neko-core::workbench`, the daemon's `workbench` supervisor, and
 `native_runner` ephemeral Codex CLI processes. A scout plans read-only,
 explicit approval or a direct human work request allows an isolated-worktree build, and a
 independent reviewer returns a result for human review. Authorized builders and
-reviewers have full local filesystem access for dependency setup, caches and tests. No publication occurs.
+reviewers have full local filesystem access for dependency setup, caches and tests. Workers never push;
+once an independent review passes, the daemon commits the reviewed worktree, pushes its task branch and opens
+(or reuses) a GitHub pull request via `gh` (`native_runner::publish`, `workbench/publish.rs`). Nothing merges.
 Every eligible ticket starts its own worker on the next two-second supervisor
 tick, without a fixed global or workspace cap. Active claims prevent duplicate
 workers for one ticket; dependencies, approvals and scope checks still apply.
@@ -170,7 +172,7 @@ durable scope markers keep later manual pauses paused. Background leases expose
 and call only tools declared read-only, which still relies on the trusted
 server's honesty rather than creating a security boundary.
 No automatic installation, marketplace, arbitrary swarm, cloud execution,
-cross-workspace sharing or automatic PR publication is claimed. Legacy
+cross-workspace sharing, automatic merging or deployment is claimed. Legacy
 Codex/Paseo providers remain opt-in via `NEKO_LEGACY_AGENTS=1`.
 
 `NEKO_DATA_DIR` isolates socket/database/task worktrees for development without

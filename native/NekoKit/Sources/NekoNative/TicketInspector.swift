@@ -55,7 +55,7 @@ struct TicketInspector: View {
                             row("Checks run") { Text("\(verdict.tests.count)") }
                             row("Files read") { Text("\(verdict.files.count)") }
                         }
-                        row("Publish") { Text("Not pushed") }.padding(.top, 10)
+                        row("Publish") { publishValue }.padding(.top, 10)
                         actions.padding(.top, 16)
                     }.padding(.horizontal, 20).padding(.bottom, 24)
                 }
@@ -91,6 +91,18 @@ struct TicketInspector: View {
                 Button(role: .destructive) { run("CancelTask") } label: { Text("Cancel Ticket").frame(maxWidth: .infinity) }.buttonStyle(.borderless).foregroundStyle(.red)
             }
         }.controlSize(.regular).disabled(model.busy)
+    }
+    /// Neko opens a pull request itself once the independent review passes;
+    /// the button retries that, for example after signing in to GitHub.
+    @ViewBuilder private var publishValue: some View {
+        let link = ticket["pull_request"]["url"].string
+        if let url = URL(string: link), !link.isEmpty {
+            Link("Pull request #\(url.lastPathComponent)", destination: url).help(link)
+        } else if ["ReadyForReview", "Completed"].contains(ticket["status"].string) {
+            Button("Open pull request") { run("PublishTask") }.buttonStyle(.link).disabled(model.busy)
+        } else {
+            Text("Not pushed")
+        }
     }
     private func wide(_ title: String, _ command: String, prominent: Bool) -> some View {
         Button { run(command) } label: { Text(title).frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent)

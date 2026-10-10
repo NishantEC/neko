@@ -64,7 +64,7 @@ and re-plans in its preserved worktree. Agents investigate missing reproduction
 steps and tests themselves; they ask for decisions or access they cannot obtain.
 Unattended watches keep their existing low-risk approval rules.
 Questions and no-work decisions wait for a reply;
-Accept locally marks a reviewed result accepted without applying or publishing it. **Propose parallel subtasks**
+Once an independent review passes, Neko commits the reviewed worktree, pushes its task branch and opens a GitHub pull request with `gh` (never merging); the ticket shows the link, and **Open pull request** retries after a failure. Accept locally marks the result accepted without applying it to your checkout. **Propose parallel subtasks**
 on an awaiting plan generates two or three scoped proposals for your approval.
 Approved children run in isolated worktrees, then integrate into the parent task worktree for a final independent
 review. Conflicts, cancellation and restart preserve their evidence.
@@ -120,8 +120,8 @@ Pausing a responsibility prevents future wakes and cancels its active watch.
 Revocation cannot undo a remote action already sent. Connected MCP tools
 can themselves mutate external systems: a server's read-only annotation is
 not a security guarantee. Background watches expose and call only tools
-declared read-only; trust the server before connecting it. Permission to prepare a local fix does not grant
-push, PR creation, messages, or deployment.
+declared read-only; trust the server before connecting it. Agents never push themselves; Neko publishes only an
+independently reviewed result as a pull request. Messages, merges and deployment are not granted.
 
 The local Codex CLI must be installed and authenticated. `NEKO_CODEX_PATH`
 can select an absolute executable path. You can select a model in the
@@ -147,7 +147,7 @@ Historical Linear records, tasks and worktrees are preserved. Old polling and
 standing grants are disabled; reconnect with a user-added MCP server.
 Legacy Paseo/Codex Desktop imports remain opt-in through `NEKO_LEGACY_AGENTS`.
 No marketplace, arbitrary swarm, cross-workspace grants, cloud scheduling,
-or automatic publication is included. Checks do not run while the Mac sleeps.
+automatic merging or deployment is included. Checks do not run while the Mac sleeps.
 
 OAuth requires usable server discovery and a public client registration
 (server registration or a client ID supplied by you). This implementation

@@ -55,7 +55,13 @@ chats; their drafts, originating page and board filter persist in `AppModel`.
 All agents retains the List/Board switch and task move commands. Agent headers
 show status and approval/stop actions. An unanswered question or a no-work decision
 cannot be approved into a build. Accept locally records human acceptance of an
-isolated result; it does not apply changes to the project or publish them.
+isolated result; it does not apply changes to the project checkout. Publishing
+is separate: after an independent review passes, the daemon (never a model run)
+commits the reviewed worktree, pushes `codex/neko-<id>` without writing upstream
+config, and opens or reuses a GitHub pull request through `gh`
+(`native_runner::publish`, daemon `workbench/publish.rs`). A ticket that changed
+before the push is not published; subtasks ship inside their parent's pull
+request; nothing merges. `Task::base_commit` keeps Changes correct after the commit.
 Page titles, subtitles and primary actions use the native window toolbar, keeping
 its top row useful and mouse-accessible with the sidebar expanded or collapsed.
 Page bodies and side panels respect the native top safe area. Hiding the toolbar
@@ -269,7 +275,7 @@ creates ordinary child tickets, sharing the same scheduler limits. Dependencies
 receive earlier verified patches in separate scopes. The daemon integrates
 child patches into the isolated parent and independently verifies that result;
 conflicts preserve every worktree and block completion. No original-checkout
-merge or publication occurs. See `docs/evidence/parallel-verifier.md` for proof
+merge occurs; the verified parent result is published as one pull request. See `docs/evidence/parallel-verifier.md` for proof
 and historical verification limits; `docs/evidence/full-access-supervision.md` records the current execution model.
 Cancellation terminates the process group; interrupted tasks fail on restart
 with worktrees retained. Model risk and source interpretation are judgments,
