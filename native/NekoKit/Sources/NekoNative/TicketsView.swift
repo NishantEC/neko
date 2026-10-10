@@ -146,6 +146,7 @@ struct TicketsView: View {
     }
     private var workspaceLabel: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
     private var startsWithoutAsking: Bool { model.snapshot["start_without_approval"].bool }
+    private var plansFirst: Bool { model.snapshot["plan_first"].bool }
     private var hasVisibleTasks: Bool { Self.columns.contains { !tasks(in: $0).isEmpty } }
 
     var body: some View {
@@ -183,10 +184,16 @@ struct TicketsView: View {
         }.withoutSharedBackground()
         ToolbarItem(placement: .primaryAction) {
             Menu {
-                Toggle("Start tickets without asking", isOn: Binding(get: { startsWithoutAsking }, set: { value in
-                    Task { await model.workbench(.command("SetStartWithoutApproval", ["enabled": .bool(value)])) }
+                Toggle("Plan before working", isOn: Binding(get: { plansFirst }, set: { value in
+                    Task { await model.workbench(.command("SetPlanFirst", ["enabled": .bool(value)])) }
                 }))
-                Text("New tickets from chat begin working once planned. Watched sources keep their own rules. Nothing is pushed without you.")
+                Text(plansFirst ? "Every ticket first writes a read-only plan for you to approve." : "Tickets start working right away. The agent stops for your approval only on critical work.")
+                if plansFirst {
+                    Toggle("Start tickets without asking", isOn: Binding(get: { startsWithoutAsking }, set: { value in
+                        Task { await model.workbench(.command("SetStartWithoutApproval", ["enabled": .bool(value)])) }
+                    }))
+                    Text("Planned chat and manual tickets begin working without waiting for approval.")
+                }
                 Divider()
                 Toggle("Show failed and cancelled", isOn: $model.includeStoppedAgents)
                 Button("Clear finished tickets") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }

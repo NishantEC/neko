@@ -105,6 +105,10 @@ try {
     id: '', name: 'Smoke workspace', repository: repo, instructions: 'Only this disposable test repository. Do not access outside files, use network, or publish anything.', away_enabled: false,
   } } });
   const workspaceId = created.workspaces[0].id;
+  // Most scenarios below cover the opt-in plan-first flow; direct work, the
+  // default, is covered on its own further down.
+  assert.equal(created.plan_first, false, 'Tickets work directly by default');
+  await command({ SetPlanFirst: { enabled: true } });
   const queued = await command({ CreateTask: { workspace_id: workspaceId, title: 'Isolated smoke task', goal: 'Create exactly one file neko-smoke.txt containing exactly Isolated task output followed by a newline. Verify its bytes locally. No other changes or network access.' } });
   const taskId = queued.tasks[0].id;
   const plan = await waitFor(taskId, 'AwaitingApproval');
@@ -378,6 +382,26 @@ try {
     assert.ok(directed.events.some(e=>e.message.startsWith('Your reply requests local work.')));
     assert.equal(fs.readFileSync(path.join(directed.worktree,'neko-smoke.txt'),'utf8'),'Isolated task output\n');
     console.log('Question stayed read-only with global autostart; direct fix reply completed without another approval.');
+    // Default: a ticket is a normal writing session. The agent itself stops
+    // for approval on critical work, and closes tickets with nothing to do.
+    await command({ SetPlanFirst: { enabled: false } });
+    const directTicket = async goal => (await command({CreateTask:{workspace_id:workspaceId,title:'Direct ticket',goal}})).tasks.at(-1).id;
+    const plainId = await directTicket('Create and verify the isolated smoke output');
+    const plain = await waitFor(plainId,'ReadyForReview');
+    assert.ok(!plain.events.some(e => e.role === 'scout'), 'No read-only planning phase by default');
+    assert.equal(fs.readFileSync(path.join(plain.worktree,'neko-smoke.txt'),'utf8'),'Isolated task output\n');
+    const criticalId = await directTicket('DIRECT_CRITICAL: create and verify the isolated smoke output');
+    const critical = await waitFor(criticalId,'AwaitingApproval');
+    assert.ok(critical.events.some(e => e.message === 'Needs your approval before changing anything: touches production data'));
+    assert.match(critical.plan, /Migration plan/);
+    await command({ApproveTask:{task_id:criticalId}});
+    const approved = await waitFor(criticalId,'ReadyForReview');
+    assert.equal(fs.readFileSync(path.join(approved.worktree,'neko-smoke.txt'),'utf8'),'Isolated task output\n');
+    const noopId = await directTicket('DIRECT_NOOP: create and verify the isolated smoke output');
+    const noop = await waitFor(noopId,'Completed');
+    assert.ok(noop.events.some(e => e.message.startsWith('Nothing to change: already fixed upstream')));
+    await command({ SetPlanFirst: { enabled: true } });
+    console.log('Direct work by default: writes immediately, stops for critical work, closes no-op tickets.');
     const beforeWake = await command('Snapshot');
     const receiptCount = beforeWake.mcp.receipts.length;
     await mcp({ Wake: { responsibility_id: responsibilityId } });
