@@ -189,11 +189,12 @@ pub(crate) struct Parser {
     pub failure: Option<String>,
     pub completed: bool,
     last_text: Option<String>,
+    stall: super::StallGuard,
 }
 
 impl Parser {
     pub(crate) fn new(agent: Agent, extraction: bool) -> Self {
-        Self { agent, extraction, commands: Default::default(), answer: None, failure: None, completed: false, last_text: None }
+        Self { agent, extraction, commands: Default::default(), answer: None, failure: None, completed: false, last_text: None, stall: super::StallGuard::new() }
     }
 
     pub(crate) fn line(&mut self, line: &[u8], on_event: &mut dyn FnMut(String)) -> Result<(), String> {
@@ -209,9 +210,13 @@ impl Parser {
         }
     }
 
-    fn receipt(&self, command: Option<&str>, exit_code: Option<i64>, output: Option<&str>, on_event: &mut dyn FnMut(String)) {
+    fn receipt(&self, command: Option<&str>, exit_code: Option<i64>, output: Option<&str>, on_event: &mut dyn FnMut(String)) -> Result<(), String> {
         on_event("Command completed".into());
         on_event(crate::workbench::verification_command_event(command, exit_code, output));
+        // Start events are not tracked for these CLIs, so only the repeated
+        // identical failure check applies, never the quiet limit.
+        self.stall.command_started();
+        self.stall.command_finished(command, exit_code, output)
     }
 
     fn claude(&mut self, value: &serde_json::Value, on_event: &mut dyn FnMut(String)) -> Result<(), String> {
@@ -257,7 +262,7 @@ impl Parser {
                         let (code, body) = claude_exit(output, is_error);
                         (Some(code), Some(body))
                     }).unwrap_or((is_error.then_some(1), None));
-                    self.receipt(command.as_deref(), exit_code, body, on_event);
+                    self.receipt(command.as_deref(), exit_code, body, on_event)?;
                 }
             }
             Some("result") => {
@@ -292,7 +297,7 @@ impl Parser {
                 if tool == "bash" && matches!(state["status"].as_str(), Some("completed" | "error")) {
                     let exit = state["metadata"]["exit"].as_i64().or_else(|| (state["status"] == "error").then_some(1));
                     let output = state["output"].as_str().or_else(|| state["error"].as_str());
-                    self.receipt(state["input"]["command"].as_str(), exit, output, on_event);
+                    self.receipt(state["input"]["command"].as_str(), exit, output, on_event)?;
                 } else if matches!(tool, "edit" | "write" | "patch" | "multiedit") {
                     on_event("Updating workspace files".into());
                 }

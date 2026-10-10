@@ -331,6 +331,7 @@ fn run_configured_session(
     let mut answer = None;
     let mut completed = false;
     let mut failure = None;
+    let stall = StallGuard::new();
     let mut parse_line = |line: &[u8]| -> Result<(), String> {
         if line.iter().all(u8::is_ascii_whitespace) {
             return Ok(());
@@ -395,12 +396,16 @@ fn run_configured_session(
                             &format!("Command {}", item["status"].as_str().unwrap_or("running")),
                             MAX_EVENT,
                         ));
+                        if value["type"].as_str() == Some("item.started") {
+                            stall.command_started();
+                        }
                         if value["type"].as_str() == Some("item.completed") {
                             on_event(crate::workbench::verification_command_event(
                                 item["command"].as_str(),
                                 item["exit_code"].as_i64(),
                                 item["aggregated_output"].as_str(),
                             ));
+                            stall.command_finished(item["command"].as_str(), item["exit_code"].as_i64(), item["aggregated_output"].as_str())?;
                         }
                     }
                     Some("file_change") => on_event("Updating workspace files".into()),
@@ -421,7 +426,8 @@ fn run_configured_session(
     } else {
         prompt
     };
-    let output = execute(command, prompt.as_bytes(), cancel, spec.timeout, |bytes| {
+    let quiet = (!extraction).then_some((&stall, QUIET_LIMIT));
+    let output = execute_watched(command, prompt.as_bytes(), cancel, spec.timeout, quiet, |bytes| {
         for &byte in bytes {
             if byte == b'\n' {
                 parse_line(&pending)?;
@@ -1134,6 +1140,52 @@ struct ProcessOutput {
     stderr: String,
 }
 
+/// Stops an agent that is visibly stuck instead of letting it burn the rest
+/// of its time limit. Two signals, both conservative:
+/// - the same command failing with identical output `MAX_IDENTICAL_FAILURES`
+///   times in one run (a successful repeat is never counted);
+/// - complete silence for `QUIET_LIMIT` while no command is running. A long
+///   build or test run is allowed to be quiet; a stalled model is not.
+pub(crate) struct StallGuard {
+    running: std::cell::Cell<u32>,
+    failures: std::cell::RefCell<std::collections::HashMap<u64, u32>>,
+}
+
+pub(crate) const MAX_IDENTICAL_FAILURES: u32 = 4;
+pub(crate) const QUIET_LIMIT: Duration = Duration::from_secs(600);
+
+impl StallGuard {
+    pub(crate) fn new() -> Self {
+        Self { running: std::cell::Cell::new(0), failures: Default::default() }
+    }
+
+    pub(crate) fn command_started(&self) {
+        self.running.set(self.running.get().saturating_add(1));
+    }
+
+    pub(crate) fn command_finished(&self, command: Option<&str>, exit_code: Option<i64>, output: Option<&str>) -> Result<(), String> {
+        self.running.set(self.running.get().saturating_sub(1));
+        if exit_code == Some(0) {
+            return Ok(());
+        }
+        use std::hash::{Hash, Hasher};
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        (command, exit_code, output).hash(&mut hash);
+        let mut failures = self.failures.borrow_mut();
+        let seen = failures.entry(hash.finish()).or_default();
+        *seen += 1;
+        if *seen >= MAX_IDENTICAL_FAILURES {
+            let command = bounded_text(command.unwrap_or("a command").trim(), 200);
+            return Err(format!("Agent stopped: it ran `{command}` {seen} times with the same failure, so it was stuck repeating itself"));
+        }
+        Ok(())
+    }
+
+    fn quiet_allowed(&self) -> bool {
+        self.running.get() > 0
+    }
+}
+
 /// Owns a process group, including any shell/tool descendants. Unwinding a
 /// callback, malformed output, cancellation and every I/O error all clean up.
 struct ProcessGroup {
@@ -1352,6 +1404,19 @@ fn execute(
     timeout: Duration,
     stdout_chunk: impl FnMut(&[u8]) -> Result<(), String>,
 ) -> Result<ProcessOutput, String> {
+    execute_watched(command, input, cancel, timeout, None, stdout_chunk)
+}
+
+/// `execute`, additionally ending the run after `quiet` of silence while the
+/// guard reports no command running.
+fn execute_watched(
+    command: Command,
+    input: &[u8],
+    cancel: &AtomicBool,
+    timeout: Duration,
+    quiet: Option<(&StallGuard, Duration)>,
+    stdout_chunk: impl FnMut(&[u8]) -> Result<(), String>,
+) -> Result<ProcessOutput, String> {
     // Only the real daemon dispatches this helper flag before normal startup.
     // Library fixtures and other embedding hosts retain direct execution.
     let helper = std::env::current_exe()
@@ -1362,6 +1427,7 @@ fn execute(
         input,
         cancel,
         timeout,
+        quiet,
         stdout_chunk,
         helper.as_deref(),
     )
@@ -1372,6 +1438,7 @@ fn execute_with_guard(
     input: &[u8],
     cancel: &AtomicBool,
     timeout: Duration,
+    quiet: Option<(&StallGuard, Duration)>,
     mut stdout_chunk: impl FnMut(&[u8]) -> Result<(), String>,
     guardian: Option<&Path>,
 ) -> Result<ProcessOutput, String> {
@@ -1414,12 +1481,20 @@ fn execute_with_guard(
     let mut stderr_eof = false;
     let mut status = None;
     let mut buffer = [0; 8192];
+    let mut last_output = Instant::now();
     loop {
         if cancel.load(Ordering::Acquire) {
             return Err("Task cancelled".into());
         }
         if start.elapsed() >= timeout {
             return Err("Task timed out".into());
+        }
+        if let Some((guard, limit)) = quiet {
+            if guard.quiet_allowed() {
+                last_output = Instant::now();
+            } else if last_output.elapsed() >= limit {
+                return Err(format!("Agent stopped: no output for {} minutes while no command was running, so it looked stalled", limit.as_secs() / 60));
+            }
         }
         let mut progressed = false;
         if written == input.len() {
@@ -1451,6 +1526,7 @@ fn execute_with_guard(
                     }
                     stdout_chunk(&buffer[..n])?;
                     progressed = true;
+                    last_output = Instant::now();
                 }
                 Err(e)
                     if matches!(
@@ -1494,6 +1570,44 @@ fn execute_with_guard(
         if !progressed {
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+}
+
+#[cfg(test)]
+mod stall_tests {
+    use super::*;
+
+    #[test]
+    fn only_identical_repeated_failures_stop_an_agent() {
+        let guard = StallGuard::new();
+        for _ in 0..10 {
+            guard.command_finished(Some("git status"), Some(0), Some("clean")).unwrap();
+        }
+        for attempt in 1..MAX_IDENTICAL_FAILURES {
+            guard.command_finished(Some("cargo test"), Some(101), Some(&format!("failed {attempt}"))).unwrap();
+            guard.command_finished(Some("cargo test"), Some(101), Some("error[E0425]")).unwrap();
+        }
+        let error = guard.command_finished(Some("cargo test"), Some(101), Some("error[E0425]")).unwrap_err();
+        assert!(error.contains("`cargo test` 4 times"), "{error}");
+    }
+
+    #[test]
+    fn silence_ends_a_run_only_while_no_command_is_running() {
+        let sleeper = || {
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", "sleep 2"]);
+            command
+        };
+        let cancel = AtomicBool::new(false);
+        let guard = StallGuard::new();
+        let error = execute_watched(sleeper(), b"", &cancel, Duration::from_secs(10), Some((&guard, Duration::from_millis(300))), |_| Ok(()))
+            .err()
+            .expect("a silent agent with nothing running is stopped");
+        assert!(error.contains("no output"), "{error}");
+        guard.command_started();
+        let output = execute_watched(sleeper(), b"", &cancel, Duration::from_secs(10), Some((&guard, Duration::from_millis(300))), |_| Ok(()))
+            .unwrap_or_else(|e| panic!("a quiet running command is allowed: {e}"));
+        assert!(output.status.success());
     }
 }
 
@@ -2118,6 +2232,7 @@ sleep 10
             &[],
             &AtomicBool::new(false),
             Duration::from_secs(10),
+            None,
             |_| Ok(()),
             Some(Path::new(&guard)),
         );
@@ -2155,6 +2270,7 @@ sleep 10
             b"original prompt",
             &AtomicBool::new(false),
             GUARDIAN_FIXTURE_DEADLINE,
+            None,
             |_| Ok(()),
             Some(&helper),
         )
@@ -2187,6 +2303,7 @@ sleep 10
                 &[],
                 &cancel,
                 GUARDIAN_FIXTURE_DEADLINE,
+                None,
                 |_| Ok(()),
                 Some(&helper),
             )

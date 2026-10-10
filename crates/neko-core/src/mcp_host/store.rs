@@ -347,6 +347,9 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
                 .find(|r| r.id == responsibility_id && r.enabled)
                 .ok_or("Responsibility is missing or paused")?;
             r.next_due_ms = now;
+            // Asking for a check means a real look, not a replay of the last
+            // reads; the full wake records a fresh probe.
+            state.mcp.probes.remove(&responsibility_id);
         }
         McpCommand::RemoveResponsibility { responsibility_id } => {
             let before = state.mcp.responsibilities.len();
@@ -354,6 +357,7 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
                 .mcp
                 .responsibilities
                 .retain(|r| r.id != responsibility_id);
+            state.mcp.probes.remove(&responsibility_id);
             if state.mcp.responsibilities.len() == before {
                 return Err("Responsibility is already gone".into());
             }

@@ -23,7 +23,19 @@ pub struct Host {
     call_slot: Mutex<()>,
     auth: Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
     discovery_retry: Mutex<std::collections::HashMap<String, Instant>>,
+    /// Successful read-only calls made by each in-flight background wake,
+    /// keyed by run id. The wake's owner takes them to record its probe.
+    watch_calls: Mutex<std::collections::HashMap<String, Vec<ProbeCall>>>,
 }
+
+/// Background wakes and probe replays: read-only tools only.
+fn background_run(run_id: &str) -> bool {
+    run_id.starts_with("watch:")
+}
+const PROBE_RUN_PREFIX: &str = "watch:probe:";
+/// One tool call at a time reaches upstream servers. A call arriving while
+/// another runs waits this long before giving up, instead of failing at once.
+const CALL_SLOT_WAIT: Duration = Duration::from_secs(15);
 
 /// Removes an in-flight authentication marker on success, failure or unwind.
 struct AuthAttempt {
@@ -260,7 +272,70 @@ impl Host {
             call_slot: Mutex::new(()),
             auth: Mutex::new(Default::default()),
             discovery_retry: Mutex::new(Default::default()),
+            watch_calls: Mutex::new(Default::default()),
         }
+    }
+
+    fn wait_for_call_slot(&self) -> Option<std::sync::MutexGuard<'_, ()>> {
+        let deadline = Instant::now() + CALL_SLOT_WAIT;
+        loop {
+            match self.call_slot.try_lock() {
+                Ok(guard) => return Some(guard),
+                Err(std::sync::TryLockError::Poisoned(poisoned)) => return Some(poisoned.into_inner()),
+                Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(100)),
+                Err(std::sync::TryLockError::WouldBlock) => return None,
+            }
+        }
+    }
+
+    /// The read-only calls a background wake made, for its probe.
+    pub fn take_watch_calls(&self, run_id: &str) -> Vec<ProbeCall> {
+        self.watch_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(run_id).unwrap_or_default()
+    }
+
+    /// Replay a responsibility's recorded calls through the normal scoped,
+    /// read-only bridge path (same grants, receipts and revocation checks).
+    /// `Ok(false)` only when every call succeeded and returned what the last
+    /// wake saw; any difference or failure means a full wake should run.
+    pub fn probe_changed(
+        self: &Arc<Self>,
+        responsibility: &str,
+        workspace_id: &str,
+        connection_ids: Vec<String>,
+        profile_revision: u64,
+        calls: &[ProbeCall],
+    ) -> Result<bool, String> {
+        let run_id = format!("{PROBE_RUN_PREFIX}{responsibility}:{}", store::new_id());
+        let lease = self.lease(&run_id, workspace_id, connection_ids, profile_revision)?;
+        for call in calls {
+            let raw = self.bridge(BridgeRequest {
+                token: neko_protocol::workbench::Secret(lease.token().into()),
+                action: BridgeAction::Call {
+                    connection_id: call.connection_id.clone(),
+                    tool_name: call.tool_name.clone(),
+                    arguments_json: call.arguments_json.clone(),
+                },
+            })?;
+            let reply: serde_json::Value = serde_json::from_str(&raw).map_err(|_| "Invalid probe reply")?;
+            let result = reply.get("result").ok_or("Probe reply has no result")?;
+            if result.get("isError").and_then(|v| v.as_bool()) == Some(true) {
+                return Err(format!("{} reported an error", call.tool_name));
+            }
+            let current = policy::authorize(
+                &store::load(&*self.db.lock().map_err(|_| "Workspace storage unavailable")?)?,
+                workspace_id,
+                &call.connection_id,
+                &call.tool_name,
+            )?
+            .schema_hash
+            .clone();
+            if current != call.schema_hash
+                || neko_core::mcp_host::responsibility::result_fingerprint(&result.to_string()) != call.fingerprint
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Discover one new or previously failed trusted connection per tick. A
@@ -561,9 +636,8 @@ impl Host {
                 .map(|(_, snapshot)| snapshot),
             McpCommand::Discover { connection_id } => {
                 let _slot = self
-                    .call_slot
-                    .try_lock()
-                    .map_err(|_| "Another MCP operation is running; retry shortly")?;
+                    .wait_for_call_slot()
+                    .ok_or("Another MCP operation is running; retry shortly")?;
                 let connection = self.connection(&connection_id)?;
                 let result = self
                     .resolved_transport(&connection, &AtomicBool::new(false))
@@ -862,7 +936,7 @@ impl Host {
                             continue;
                         }
                         for t in &c.tools {
-                            if scope.run_id.starts_with("watch:") && !t.read_only {
+                            if background_run(&scope.run_id) && !t.read_only {
                                 continue;
                             }
                             if policy::authorize(&state, &scope.workspace_id, id, &t.name).is_ok() {
@@ -889,7 +963,7 @@ impl Host {
                 let tool =
                     policy::authorize(&state, &scope.workspace_id, &connection_id, &tool_name)?
                         .clone();
-                if scope.run_id.starts_with("watch:") && !tool.read_only {
+                if background_run(&scope.run_id) && !tool.read_only {
                     return Err("This background watch can call only tools declared read-only; ask Neko in chat for a write action".into());
                 }
                 let connection = state
@@ -906,7 +980,7 @@ impl Host {
                     &arguments_json,
                     std::time::Duration::from_secs(540),
                 )?;
-                let _slot = self.call_slot.try_lock().map_err(|_| {
+                let _slot = self.wait_for_call_slot().ok_or_else(|| {
                     if let Some(call_id) = &chat_call {
                         let _ = self.finish_chat_call(&scope, call_id, false);
                     }
@@ -994,11 +1068,11 @@ impl Host {
                     let mut state = store::load(&db)?;
                     state.mcp.receipts.push(ToolReceipt {
                         id: receipt_id.clone(),
-                        run_id: scope.run_id,
-                        workspace_id: scope.workspace_id,
-                        connection_id,
-                        tool_name,
-                        schema_hash: tool.schema_hash,
+                        run_id: scope.run_id.clone(),
+                        workspace_id: scope.workspace_id.clone(),
+                        connection_id: connection_id.clone(),
+                        tool_name: tool_name.clone(),
+                        schema_hash: tool.schema_hash.clone(),
                         at_ms: store::now_ms(),
                         success,
                     });
@@ -1010,6 +1084,20 @@ impl Host {
                 let raw = result?;
                 let result: serde_json::Value =
                     serde_json::from_str(&raw).map_err(|_| "Invalid MCP result")?;
+                if success && background_run(&scope.run_id) && !scope.run_id.starts_with(PROBE_RUN_PREFIX) {
+                    self.watch_calls
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .entry(scope.run_id.clone())
+                        .or_default()
+                        .push(ProbeCall {
+                            connection_id: connection_id.clone(),
+                            tool_name: tool_name.clone(),
+                            schema_hash: tool.schema_hash.clone(),
+                            arguments_json: arguments_json.clone(),
+                            fingerprint: neko_core::mcp_host::responsibility::result_fingerprint(&raw),
+                        });
+                }
                 Ok(serde_json::json!({"receipt_id": receipt_id, "result": result}).to_string())
             }
         }
@@ -1350,6 +1438,67 @@ mod tests {
             connection_id: "source".into(), tool_name: "delete".into(), arguments_json: "{}".into(),
         }}).unwrap_err();
         assert!(error.contains("read-only"));
+    }
+    #[test]
+    fn probe_replays_a_wakes_reads_and_sees_only_meaningful_changes() {
+        let temp = std::env::temp_dir().join(format!("neko-probe-{}", store::new_id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let items = temp.join("items.json");
+        std::fs::write(&items, r#"[{"id":"A-1","status":"open"}]"#).unwrap();
+        let script = temp.join("server.mjs");
+        std::fs::write(&script, r#"import readline from 'node:readline';
+import fs from 'node:fs';
+const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n');
+for await (const line of readline.createInterface({ input: process.stdin })) {
+  const r = JSON.parse(line);
+  if (r.id === undefined) continue;
+  if (r.method === 'initialize') send(r.id, { protocolVersion: r.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'probe', version: '1' } });
+  else if (r.method === 'tools/list') send(r.id, { tools: [{ name: 'list_issues', description: 'Read issues', annotations: { readOnlyHint: true }, inputSchema: { type: 'object', properties: {} } }] });
+  else if (r.method === 'tools/call') send(r.id, { content: [{ type: 'text', text: JSON.stringify({ issues: JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), lastSeen: Date.now() }) }], isError: false });
+  else send(r.id, {});
+}
+"#).unwrap();
+        let node = String::from_utf8(std::process::Command::new("which").arg("node").output().unwrap().stdout).unwrap().trim().to_owned();
+        let config = ServerConfig::Stdio { command: node, args: vec![script.display().to_string(), items.display().to_string()], cwd: None };
+        let tools = transport::discover(&config, &Default::default(), &AtomicBool::new(false)).unwrap();
+        let h = host();
+        {
+            let db = h.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.mcp.connections.push(McpConnection {
+                oauth: false, id: "issues".into(), workspace_id: "w".into(), label: "Issues".into(), config,
+                enabled: true, trusted: true, has_credentials: false, tools: tools.clone(),
+                discovered_ms: Some(1), error: None, source_link: None,
+            });
+            state.mcp.grants.push(ToolGrant { workspace_id: "w".into(), connection_id: "issues".into(), tool_name: "list_issues".into(), schema_hash: tools[0].schema_hash.clone() });
+            store::save(&db, &state).unwrap();
+        }
+        let revision = store::load(&h.db.lock().unwrap()).unwrap().agent_profiles.revision;
+        // A full wake reads the issues; its read is recorded for the probe.
+        let lease = h.lease("watch:wake", "w", vec!["issues".into()], revision).unwrap();
+        h.bridge(BridgeRequest { token: neko_protocol::workbench::Secret(lease.token().into()), action: BridgeAction::Call {
+            connection_id: "issues".into(), tool_name: "list_issues".into(), arguments_json: "{}".into(),
+        }}).unwrap();
+        drop(lease);
+        let calls = h.take_watch_calls("watch:wake");
+        assert_eq!(calls.len(), 1);
+        assert!(h.take_watch_calls("watch:wake").is_empty(), "taken once");
+
+        // Only the volatile lastSeen differs: no model run needed.
+        assert!(!h.probe_changed("r", "w", vec!["issues".into()], revision, &calls).unwrap());
+        assert!(h.watch_calls.lock().unwrap().is_empty(), "probe replays are not recorded as wake reads");
+        // A real change in the issues does wake the model.
+        std::fs::write(&items, r#"[{"id":"A-1","status":"closed"}]"#).unwrap();
+        assert!(h.probe_changed("r", "w", vec!["issues".into()], revision, &calls).unwrap());
+        // Losing the grant is an error, never a silent "no change".
+        {
+            let db = h.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.mcp.grants.clear();
+            store::save(&db, &state).unwrap();
+        }
+        assert!(h.probe_changed("r", "w", vec!["issues".into()], revision, &calls).is_err());
+        std::fs::remove_dir_all(temp).unwrap();
     }
     #[test]
     fn imported_disabled_connection_is_created_disabled_without_touching_other_connections() {

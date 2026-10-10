@@ -1,6 +1,6 @@
 # Reference clones — read-only
 
-`refs/` holds seven third-party repositories, cloned here for reading. They are
+`refs/` holds eight third-party repositories, cloned here for reading. They are
 not part of neko's build, are not vendored into it, and are not committed —
 `.gitignore` keeps everything in this directory out of the repository except
 this file. Only this README is tracked, because what it records is a rule, not
@@ -28,6 +28,7 @@ attributed exception.
 | `codux` (duxweb/codux) | **GPL-3.0** | **forbidden — never copy a line.** Copyleft would infect neko |
 | `agent-sessions` (jazzyalex/agent-sessions) | MIT (verified from its own `LICENSE`, 2026-08-22) | permitted with attribution — inspiration only. Swift/AppKit, so nothing is copyable in practice anyway |
 | `paseo` (getpaseo/paseo) | **AGPL-3.0** (verified from its own `LICENSE`, 2026-08-24) | **forbidden — never copy a line.** Stricter than the two GPL entries below: AGPL's copyleft reaches *network use*, not only distribution |
+| `laruche` (infinition/LaRuche) | **MPL-2.0** (verified from its own `LICENSE`, 2026-10-10) | inspiration only. MPL is per-file copyleft: a copied file stays MPL and its source must be offered with any distributed binary. Rust personal-agent peer: supervision, memory, watchers, evals |
 
 The two GPL-3.0 entries are the reason this file exists. neko's own source is
 MIT end to end and is meant to stay that way; a copied line from `waku` or

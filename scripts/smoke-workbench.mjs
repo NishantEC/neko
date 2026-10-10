@@ -160,7 +160,10 @@ try {
     const rejected = await waitFor(id,'Failed');
     assert.ok(rejected.events.some(e => e.message.includes('Independent verification failed')));
     assert.match(rejected.result,/Broken builder output/);
-    assert.equal(rejected.events.filter(e => e.message.includes('Recovery pass')).length, 3, 'Unresolved recovery must stop after three supervised attempts');
+    // The broken builder fails identically every time: one supervised retry
+    // shows the direction did not help, so recovery stops instead of repeating it.
+    assert.equal(rejected.events.filter(e => e.message.includes('Recovery pass')).length, 1, 'An identical repeated failure must stop recovery after one supervised attempt');
+    assert.ok(rejected.events.some(e => e.message.includes('same failure came back')) || rejected.result.includes('same failure came back') || JSON.stringify(rejected).includes('same failure came back'));
     const repair = await command({CreateTask:{workspace_id:workspaceId,title:'Repair review feedback',goal:'REPAIR_REQUIRED COMMITTED_REPAIR: create and independently verify the requested file'}});
     const repairId = repair.tasks.at(-1).id;
     await waitFor(repairId,'AwaitingApproval');

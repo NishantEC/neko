@@ -1052,7 +1052,11 @@ impl Controller {
                 let review_run = self.run_native(
                     &native_runner::RunSpec {
                         directory: directory.clone(),
-                        prompt: format!("{}\nHost-observed diff base: {}\nHost-observed changed files (verify every file, including committed edits and untracked additions): {}\nInherited dependency files: {:?}\nRequired approved checks (execute every command exactly and report it in tests; if blocked, fail): {:?}", prompt(workspace, &review_task, "reviewer", &memory), split.and_then(|s| s.base.as_deref()).unwrap_or(&base), changed.join(", "), inherited, required_checks),
+                        prompt: format!("{}\nHost-observed diff base: {}\nHost-observed changed files (verify every file, including committed edits and untracked additions): {}\nInherited dependency files: {:?}\nRequired approved checks (execute every command exactly and report it in tests; if blocked, fail): {:?}{}", prompt(workspace, &review_task, "reviewer", &memory), split.and_then(|s| s.base.as_deref()).unwrap_or(&base), changed.join(", "), inherited, required_checks,
+                            match repairs.earlier_failures() {
+                                earlier if earlier.is_empty() => String::new(),
+                                earlier => format!("\nEarlier blockers on this ticket, already sent back for repair. Verify each is now resolved. Do not re-raise one that is fixed or contradict what was asked before; if one is still unresolved, say so plainly in findings:\n{earlier}"),
+                            }),
                         writable: true,
                         timeout: Duration::from_secs(600),
                         runtime: snapshot.agent_runtime.clone(),
