@@ -144,6 +144,10 @@ pub struct Task {
     /// The pull request Neko opened for this ticket's reviewed result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request: Option<PullRequest>,
+    /// The local `main` commit this ticket's reviewed result landed as, for
+    /// repositories set to land on main instead of opening pull requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landed_commit: Option<String>,
 }
 
 /// A reviewed result Neko pushed and opened for review. Never merged by Neko.
@@ -245,6 +249,11 @@ pub struct Snapshot {
     /// Once planned they build without asking again.
     #[serde(default)]
     pub start_when_planned: BTreeSet<String>,
+    /// Repositories (canonical checkout paths) whose reviewed tickets
+    /// fast-forward local `main` instead of opening a pull request. Nothing
+    /// is pushed for these.
+    #[serde(default)]
+    pub land_on_main: BTreeSet<String>,
     /// A human asked for an answer or plan without changes. Clarifications do
     /// not lift this restriction; a new work request or explicit approval does.
     #[serde(default)]
@@ -524,6 +533,12 @@ pub enum Command {
     /// or asks for it explicitly. Never merges.
     PublishTask {
         task_id: String,
+    },
+    /// Choose how reviewed tickets in one repository are delivered: landed
+    /// on local `main`, or (the default) opened as a pull request.
+    SetLandOnMain {
+        repository: String,
+        enabled: bool,
     },
     /// Remove one finished (completed, failed or cancelled) ticket and its
     /// subtasks from history. Worktrees on disk and files are untouched.

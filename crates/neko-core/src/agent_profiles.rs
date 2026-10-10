@@ -416,6 +416,7 @@ mod tests {
             source_revision: None,
             base_commit: None,
             pull_request: None,
+            landed_commit: None,
             supervision: None,
         });
         let command = || ProfileCommand::AssignWorkspace {

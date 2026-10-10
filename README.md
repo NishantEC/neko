@@ -68,7 +68,7 @@ and re-plans in its preserved worktree. Agents investigate missing reproduction
 steps and tests themselves; they ask for decisions or access they cannot obtain.
 Unattended watches keep their existing low-risk approval rules.
 Questions and no-work decisions wait for a reply;
-Once an independent review passes, Neko commits the reviewed worktree, pushes its task branch and opens a GitHub pull request with `gh` (never merging); the ticket shows the link, and **Open pull request** retries after a failure. Accept locally marks the result accepted without applying it to your checkout. **Propose parallel subtasks**
+Once an independent review passes, Neko commits the reviewed worktree, pushes its task branch and opens a GitHub pull request with `gh` (never merging); the ticket shows the link, and **Open pull request** retries after a failure. Accept locally marks the result accepted without applying it to your checkout. Turn on **Land on main** for a repository in the ticket inspector to fast-forward your local `main` instead of opening a pull request; nothing is pushed, and conflicts or overwriting your local edits are refused. **Propose parallel subtasks**
 on an awaiting plan generates two or three scoped proposals for your approval.
 Approved children run in isolated worktrees, then integrate into the parent task worktree for a final independent
 review. Conflicts, cancellation and restart preserve their evidence.

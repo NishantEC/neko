@@ -56,6 +56,7 @@ struct TicketInspector: View {
                             row("Files read") { Text("\(verdict.files.count)") }
                         }
                         row("Publish") { publishValue }.padding(.top, 10)
+                        deliveryToggle
                         actions.padding(.top, 16)
                     }.padding(.horizontal, 20).padding(.bottom, 24)
                 }
@@ -92,16 +93,38 @@ struct TicketInspector: View {
             }
         }.controlSize(.regular).disabled(model.busy)
     }
-    /// Neko opens a pull request itself once the independent review passes;
-    /// the button retries that, for example after signing in to GitHub.
+    /// Neko delivers a reviewed result itself once the independent review
+    /// passes: a pull request, or local main for repositories set to land
+    /// there. The button retries, for example after signing in to GitHub.
     @ViewBuilder private var publishValue: some View {
         let link = ticket["pull_request"]["url"].string
-        if let url = URL(string: link), !link.isEmpty {
+        let landed = ticket["landed_commit"].string
+        if !landed.isEmpty {
+            Text("Landed on main · \(landed.prefix(7))").help(landed)
+        } else if let url = URL(string: link), !link.isEmpty {
             Link("Pull request #\(url.lastPathComponent)", destination: url).help(link)
         } else if ["ReadyForReview", "Completed"].contains(ticket["status"].string) {
-            Button("Open pull request") { run("PublishTask") }.buttonStyle(.link).disabled(model.busy)
+            Button(landsOnMain ? "Land on main" : "Open pull request") { run("PublishTask") }.buttonStyle(.link).disabled(model.busy)
         } else {
-            Text("Not pushed")
+            Text("Not delivered")
+        }
+    }
+    /// The ticket's own repository checkout, where delivery is configured.
+    private var repository: String { model.snapshot["task_roots"][ticket.recordID].string }
+    private var landsOnMain: Bool {
+        guard !repository.isEmpty else { return false }
+        let resolved = URL(fileURLWithPath: repository).resolvingSymlinksInPath().path
+        return model.snapshot["land_on_main"].array.contains { $0.string == resolved || $0.string == repository }
+    }
+    @ViewBuilder private var deliveryToggle: some View {
+        if !repository.isEmpty {
+            row("Delivery") {
+                Toggle("Land on main", isOn: Binding(get: { landsOnMain }, set: { enabled in
+                    Task { await model.workbench(.command("SetLandOnMain", ["repository": .string(repository), "enabled": .bool(enabled)])) }
+                }))
+                .toggleStyle(.switch).controlSize(.mini).disabled(model.busy)
+                .help("On: reviewed tickets in \((repository as NSString).lastPathComponent) fast-forward your local main, nothing pushed. Off: Neko opens a pull request.")
+            }
         }
     }
     private func wide(_ title: String, _ command: String, prominent: Bool) -> some View {

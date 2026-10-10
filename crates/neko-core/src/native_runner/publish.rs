@@ -6,7 +6,7 @@
 //! the machine. Workers themselves are still told not to push. Nothing here
 //! merges: a pull request is a proposal for the person to accept.
 
-use super::{AtomicBool, Command, Duration, Path, PathBuf, bounded_text, execute, executable_directories, git_command, git_output, MAX_EVENT};
+use super::{AtomicBool, Command, Duration, Path, PathBuf, bounded_text, checkout_lock, execute, executable_directories, git_command, git_output, wait_for_checkout, MAX_EVENT};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
@@ -70,6 +70,119 @@ pub fn publish(
     publish_with(&resolve_gh()?, directory, base, title, body, proceed, cancel)
 }
 
+/// The task worktree's own `codex/neko-*` branch; nothing else is published.
+fn task_branch(directory: &Path, cancel: &AtomicBool) -> Result<String, String> {
+    let branch = git_output(directory, &["symbolic-ref", "--short", "HEAD"], cancel)
+        .map_err(|_| "The task worktree is not on its own branch".to_string())?
+        .trim()
+        .to_owned();
+    if !branch.starts_with(TASK_BRANCH_PREFIX) {
+        return Err(format!("Refusing to publish branch {branch}: only Neko task branches are published"));
+    }
+    Ok(branch)
+}
+
+/// A git command that can write commits even where no identity is configured.
+fn identified_git(directory: &Path, cancel: &AtomicBool) -> Command {
+    let mut command = git_command(directory);
+    if git_output(directory, &["config", "user.email"], cancel).is_err() {
+        command.args(["-c", "user.name=Neko", "-c", "user.email=neko@localhost.invalid"]);
+    }
+    command
+}
+
+/// Commit everything the reviewer saw. Returns false when the branch has
+/// nothing beyond `base`, so there is nothing to deliver.
+fn commit_reviewed(directory: &Path, base: &str, title: &str, cancel: &AtomicBool) -> Result<bool, String> {
+    let dirty = !git_output(directory, &["status", "--porcelain=v1", "-z", "--untracked-files=all"], cancel)?.is_empty();
+    if dirty {
+        let mut add = git_command(directory);
+        add.args(["add", "-A"]);
+        run("git add", add, b"", cancel, PUSH_TIMEOUT)?;
+        let mut commit = identified_git(directory, cancel);
+        commit.args(["commit", "--no-verify", "--quiet", "-F", "-"]);
+        let message = format!("{}\n\nReviewed by Neko before publishing.\n", one_line(title));
+        run("git commit", commit, message.as_bytes(), cancel, PUSH_TIMEOUT)?;
+    }
+    Ok(git_output(directory, &["rev-parse", "HEAD"], cancel)?.trim() != base.trim())
+}
+
+/// The ordinary checkout a task worktree was created from.
+pub fn source_checkout(directory: &Path, cancel: &AtomicBool) -> Result<PathBuf, String> {
+    let common = git_output(directory, &["rev-parse", "--path-format=absolute", "--git-common-dir"], cancel)?;
+    let common = Path::new(common.trim());
+    let checkout = common.parent().filter(|_| common.file_name().is_some_and(|n| n == ".git"))
+        .ok_or("The task's repository is not an ordinary checkout")?;
+    checkout.canonicalize().map_err(|_| "The task's repository is missing".into())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Landed {
+    /// What `main` points at now.
+    pub commit: String,
+    /// `main` had moved on, so the reviewed change was rebased onto it first.
+    pub rebased: bool,
+    /// Where `main` was just before landing: the base of what this ticket added.
+    pub onto: String,
+}
+
+pub const LANDING_BRANCH: &str = "main";
+
+/// Commit the reviewed worktree and fast-forward the source checkout's local
+/// `main` to it. Nothing is pushed. When `main` has moved on since the ticket
+/// started, the change is rebased onto it; a conflicting rebase is undone and
+/// reported, leaving `main` untouched. Local edits in the source checkout are
+/// kept: Git refuses the fast-forward rather than overwrite them.
+pub fn land(
+    directory: &Path,
+    base: &str,
+    title: &str,
+    proceed: &dyn Fn() -> bool,
+    cancel: &AtomicBool,
+) -> Result<Option<Landed>, String> {
+    let branch = task_branch(directory, cancel)?;
+    let source = source_checkout(directory, cancel)?;
+    let target = format!("refs/heads/{LANDING_BRANCH}");
+    git_output(&source, &["rev-parse", "--verify", "--quiet", &target], cancel)
+        .map_err(|_| format!("This repository has no {LANDING_BRANCH} branch to land on"))?;
+    if !commit_reviewed(directory, base, title, cancel)? {
+        return Ok(None);
+    }
+    // One landing at a time per repository; worktree creation shares the lock.
+    let lock = checkout_lock(&source, cancel)?;
+    let _guard = wait_for_checkout(&lock, cancel)?;
+    let mut rebased = false;
+    let ancestor = git_command(directory).args(["merge-base", "--is-ancestor", &target, "HEAD"]).status()
+        .map_err(|e| format!("Cannot compare with {LANDING_BRANCH}: {e}"))?.success();
+    if !ancestor {
+        let mut rebase = identified_git(directory, cancel);
+        rebase.args(["rebase", "--quiet", &target]);
+        if let Err(error) = run("git rebase", rebase, b"", cancel, PUSH_TIMEOUT) {
+            let mut abort = git_command(directory);
+            abort.args(["rebase", "--abort"]);
+            let _ = run("git rebase --abort", abort, b"", cancel, PUSH_TIMEOUT);
+            return Err(format!("{LANDING_BRANCH} has moved on and the reviewed change conflicts with it, so nothing was landed ({error})"));
+        }
+        rebased = true;
+    }
+    if !proceed() {
+        return Err(format!("The ticket changed before landing; {LANDING_BRANCH} was not touched"));
+    }
+    let onto = git_output(&source, &["rev-parse", &target], cancel)?.trim().to_owned();
+    let on_target = git_output(&source, &["symbolic-ref", "--quiet", "HEAD"], cancel).is_ok_and(|head| head.trim() == target);
+    let mut advance = git_command(&source);
+    if on_target {
+        // Updates the checked-out files too; refuses to overwrite local edits.
+        advance.args(["merge", "--ff-only", "--quiet", &branch]);
+    } else {
+        // Moves the branch without touching whatever is checked out; refuses a non-fast-forward.
+        advance.args(["fetch", "--quiet", ".", &format!("{branch}:{target}")]);
+    }
+    run(&format!("Fast-forwarding {LANDING_BRANCH}"), advance, b"", cancel, PUSH_TIMEOUT)?;
+    let commit = git_output(&source, &["rev-parse", &target], cancel)?.trim().to_owned();
+    Ok(Some(Landed { commit, rebased, onto }))
+}
+
 fn publish_with(
     gh: &Path,
     directory: &Path,
@@ -79,33 +192,13 @@ fn publish_with(
     proceed: &dyn Fn() -> bool,
     cancel: &AtomicBool,
 ) -> Result<Option<Published>, String> {
-    let branch = git_output(directory, &["symbolic-ref", "--short", "HEAD"], cancel)
-        .map_err(|_| "The task worktree is not on its own branch".to_string())?
-        .trim()
-        .to_owned();
-    if !branch.starts_with(TASK_BRANCH_PREFIX) {
-        return Err(format!("Refusing to publish branch {branch}: only Neko task branches are published"));
-    }
+    let branch = task_branch(directory, cancel)?;
     // The configured URL, not `remote get-url`, which applies local rewrites.
     let remote = git_output(directory, &["config", "--get", "remote.origin.url"], cancel)
         .map_err(|_| "This repository has no origin remote".to_string())?;
     let repository = github_repository(&remote)
         .ok_or_else(|| format!("Origin is not a GitHub repository ({}); only GitHub pull requests are supported", remote.trim()))?;
-
-    let dirty = !git_output(directory, &["status", "--porcelain=v1", "-z", "--untracked-files=all"], cancel)?.is_empty();
-    if dirty {
-        let mut add = git_command(directory);
-        add.args(["add", "-A"]);
-        run("git add", add, b"", cancel, PUSH_TIMEOUT)?;
-        let mut commit = git_command(directory);
-        if git_output(directory, &["config", "user.email"], cancel).is_err() {
-            commit.args(["-c", "user.name=Neko", "-c", "user.email=neko@localhost.invalid"]);
-        }
-        commit.args(["commit", "--no-verify", "--quiet", "-F", "-"]);
-        let message = format!("{}\n\nReviewed by Neko before publishing.\n", one_line(title));
-        run("git commit", commit, message.as_bytes(), cancel, PUSH_TIMEOUT)?;
-    }
-    if git_output(directory, &["rev-parse", "HEAD"], cancel)?.trim() == base.trim() {
+    if !commit_reviewed(directory, base, title, cancel)? {
         return Ok(None);
     }
     if !proceed() {
@@ -294,4 +387,85 @@ mod tests {
         git(&f.worktree, &["remote", "set-url", "origin", "https://gitlab.com/acme/widgets.git"]);
         assert!(publish_with(&f.gh, &f.worktree, &f.base, "t", "b", &|| true, &cancel).unwrap_err().contains("not a GitHub repository"));
     }
+
+    /// A source checkout on `main` plus a task worktree branched from it.
+    fn landing_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, String) {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("repo");
+        fs::create_dir(&source).unwrap();
+        git(&source, &["init", "--quiet", "-b", "main"]);
+        git(&source, &["config", "user.email", "test@example.com"]);
+        git(&source, &["config", "user.name", "Test"]);
+        git(&source, &["config", "commit.gpgsign", "false"]);
+        fs::write(source.join("a.txt"), "one\n").unwrap();
+        fs::write(source.join("b.txt"), "b\n").unwrap();
+        git(&source, &["add", "."]);
+        git(&source, &["commit", "--quiet", "-m", "base"]);
+        let base = git(&source, &["rev-parse", "HEAD"]);
+        let worktree = root.path().join("task");
+        git(&source, &["worktree", "add", "--quiet", "-b", "codex/neko-t1", worktree.to_str().unwrap(), "HEAD"]);
+        (root, source.canonicalize().unwrap(), worktree, base)
+    }
+
+    #[test]
+    fn lands_the_reviewed_change_on_main_and_updates_the_checkout() {
+        let (_root, source, worktree, base) = landing_fixture();
+        assert_eq!(source_checkout(&worktree, &AtomicBool::new(false)).unwrap(), source);
+        fs::write(worktree.join("a.txt"), "two\n").unwrap();
+        let landed = land(&worktree, &base, "Fix a", &|| true, &AtomicBool::new(false)).unwrap().unwrap();
+        assert!(!landed.rebased);
+        assert_eq!(landed.commit, git(&source, &["rev-parse", "main"]));
+        assert_eq!(fs::read_to_string(source.join("a.txt")).unwrap(), "two\n", "checked-out main is updated");
+        assert_eq!(git(&source, &["log", "-1", "--format=%s", "main"]), "Fix a");
+        assert_eq!(land(&worktree, &landed.commit, "Fix a", &|| true, &AtomicBool::new(false)).unwrap(), None);
+    }
+
+    #[test]
+    fn rebases_onto_a_newer_main_and_refuses_conflicts_without_touching_main() {
+        let (_root, source, worktree, base) = landing_fixture();
+        fs::write(source.join("b.txt"), "b2\n").unwrap();
+        git(&source, &["commit", "--quiet", "-am", "meanwhile"]);
+        fs::write(worktree.join("a.txt"), "two\n").unwrap();
+        let landed = land(&worktree, &base, "Fix a", &|| true, &AtomicBool::new(false)).unwrap().unwrap();
+        assert!(landed.rebased);
+        assert_eq!(git(&source, &["log", "--format=%s", "main"]).lines().collect::<Vec<_>>(), ["Fix a", "meanwhile", "base"]);
+
+        // Now a conflicting change on main.
+        let start = git(&source, &["rev-parse", "main"]);
+        fs::write(source.join("a.txt"), "three\n").unwrap();
+        git(&source, &["commit", "--quiet", "-am", "conflicting"]);
+        let main_before = git(&source, &["rev-parse", "main"]);
+        fs::write(worktree.join("a.txt"), "four\n").unwrap();
+        let error = land(&worktree, &start, "Fix again", &|| true, &AtomicBool::new(false)).unwrap_err();
+        assert!(error.contains("conflicts"), "{error}");
+        assert_eq!(git(&source, &["rev-parse", "main"]), main_before);
+        assert!(!worktree.join(".git").join("rebase-merge").exists());
+        assert_eq!(git(&worktree, &["symbolic-ref", "--short", "HEAD"]), "codex/neko-t1", "the aborted rebase leaves the task branch checked out");
+    }
+
+    #[test]
+    fn moves_main_without_touching_another_checked_out_branch_and_keeps_local_edits() {
+        let (_root, source, worktree, base) = landing_fixture();
+        git(&source, &["switch", "--quiet", "-c", "feature"]);
+        fs::write(worktree.join("a.txt"), "two\n").unwrap();
+        let landed = land(&worktree, &base, "Fix a", &|| true, &AtomicBool::new(false)).unwrap().unwrap();
+        assert_eq!(landed.commit, git(&source, &["rev-parse", "main"]));
+        assert_eq!(git(&source, &["symbolic-ref", "--short", "HEAD"]), "feature");
+        assert_eq!(fs::read_to_string(source.join("a.txt")).unwrap(), "one\n", "the feature checkout is untouched");
+
+        // Back on main with an uncommitted edit to the file the next landing changes.
+        git(&source, &["switch", "--quiet", "main"]);
+        fs::write(source.join("a.txt"), "my local edit\n").unwrap();
+        let before = git(&source, &["rev-parse", "main"]);
+        fs::write(worktree.join("a.txt"), "three\n").unwrap();
+        assert!(land(&worktree, &landed.commit, "Fix b", &|| true, &AtomicBool::new(false)).is_err());
+        assert_eq!(git(&source, &["rev-parse", "main"]), before);
+        assert_eq!(fs::read_to_string(source.join("a.txt")).unwrap(), "my local edit\n");
+        // A stale ticket never moves main.
+        fs::write(source.join("a.txt"), "two\n").unwrap();
+        let error = land(&worktree, &landed.commit, "Fix b", &|| false, &AtomicBool::new(false)).unwrap_err();
+        assert!(error.contains("not touched"), "{error}");
+        assert_eq!(git(&source, &["rev-parse", "main"]), before);
+    }
+
 }
