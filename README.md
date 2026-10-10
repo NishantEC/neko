@@ -33,8 +33,10 @@ a workspace.
 4. A trusted connected source with a currently granted, read-declared tool for
    listing changing work starts one plan-only watch in each available workspace. An
    untried chat suggestion for that source is started instead of adding a
-   duplicate. You can refine or pause the watch; checks run every ten minutes
-   while the daemon is running, and failures back off. Sources with no such
+   duplicate. You can refine or pause the watch; a cheap check replays the
+   last check's read-only tool calls every three minutes and wakes the model only
+   when the results changed (or at least every three hours), and failures back
+   off for at most an hour. Sources with no such
    tools need review before unattended checking. Search-only reference catalogs
    stay available on demand rather than becoming empty recurring checks.
 5. Keep **Plan only**, or explicitly allow low-risk local fixes. A read-only
@@ -44,7 +46,9 @@ a workspace.
    caches and tests. The host rejects reviews that change source or Git state.
    A fresh supervisor investigates worker errors and rejected checks, then
    directs the same ticket agent through up to three recovery attempts or asks
-   one necessary question. Every repaired result needs a fresh passing review.
+   one necessary question, stopping early when the same failure repeats.
+   Agents stuck repeating one failing command, or silent for ten minutes with
+   nothing running, are stopped. Every repaired result needs a fresh passing review.
 
 Open the full app from the Dock, menu bar **Open Neko Workspace**, or the
 palette's **Open Neko Workspace** command. **Home** is a conversation with

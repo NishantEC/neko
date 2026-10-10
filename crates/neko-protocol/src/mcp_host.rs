@@ -138,6 +138,30 @@ pub struct McpState {
     pub auto_watch_scopes: Vec<String>,
     pub receipts: Vec<ToolReceipt>,
     pub sources: Vec<SourceEvidence>,
+    /// Per responsibility: the read-only calls its last full wake made and a
+    /// fingerprint of what they returned. Replaying them is the cheap check
+    /// that decides whether a model run is needed at all.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub probes: std::collections::BTreeMap<String, WatchProbe>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WatchProbe {
+    /// Fingerprint of the instruction and connections the calls were made
+    /// under. Editing either makes the probe stale.
+    pub basis: String,
+    pub calls: Vec<ProbeCall>,
+    pub last_full_wake_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProbeCall {
+    pub connection_id: String,
+    pub tool_name: String,
+    pub schema_hash: String,
+    pub arguments_json: String,
+    /// Fingerprint of the result with fields that change on every read removed.
+    pub fingerprint: String,
 }
 impl Default for McpState {
     fn default() -> Self {
@@ -149,6 +173,7 @@ impl Default for McpState {
             auto_watch_scopes: vec![],
             receipts: vec![],
             sources: vec![],
+            probes: Default::default(),
         }
     }
 }

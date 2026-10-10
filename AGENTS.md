@@ -96,7 +96,11 @@ host-observed diff coverage; findings, missing evidence and conflicts fail
 closed. A fresh recovery supervisor investigates worker errors, rejected reviews
 and scout questions on directly authorized work. It directs the same saved
 agent through up to three recovery attempts, or asks one necessary user-owned
-question. Unchanged patches may still represent dependency/test setup progress.
+question. The same failure (compared case-, spacing- and number-insensitively)
+coming back after an attempt stops recovery early, and each reviewer sees the
+earlier blockers. Codex/Claude/OpenCode runs stop when one command fails with
+identical output four times; Codex runs also stop after ten silent minutes with
+no command running (`native_runner::StallGuard`); quiet long commands are allowed. Unchanged patches may still represent dependency/test setup progress.
 Every repaired result receives a fresh independent review. HEAD, index, Git
 control metadata, tracked content (including preexisting dirty files) and
 nonignored untracked files are captured before/after reviewers and recovery
@@ -159,8 +163,14 @@ can use shell networking for dependency setup.
 Remote tools may mutate systems when called: local-fix authority is not
 publication authority and cancellation cannot undo completed remote effects.
 
-Generic responsibilities wake every ten minutes while the daemon runs, with
-durable due claims and bounded backoff. Successful scoped receipts back source
+Generic responsibilities run a full model wake at most every ten minutes, with
+durable due claims and backoff capped at one hour. A successful wake records its
+read-only tool calls as a probe (`McpState::probes`); every three minutes the
+daemon replays them through the normal scoped bridge and compares normalized
+result fingerprints (volatile fields such as counts, cursors and last-seen
+times ignored). No change means no model run. Any change, probe error, edited
+instruction/connections, a manual Check now, or three hours since the last full
+wake runs a full wake. A failed wake keeps the old probe so a change is not lost. Successful scoped receipts back source
 observations; a fresh unchanged actionable source plus a bounded low-risk
 model assessment can authorize a local fix when explicitly enabled. Manual
 tasks, missing evidence and sensitive/uncertain changes still need approval.

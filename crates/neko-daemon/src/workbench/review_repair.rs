@@ -41,6 +41,23 @@ pub(super) fn feedback(task: &neko_protocol::workbench::Task, review: &str) -> n
 #[derive(Default)]
 pub(super) struct RepairBudget {
     instructions: Vec<String>,
+    /// Every blocker recovery was asked about, oldest first.
+    failures: Vec<String>,
+}
+
+/// Wording-insensitive identity of a failure: case, punctuation, spacing and
+/// numbers (ids, counts, durations) do not make two failures different.
+fn failure_fingerprint(failure: &str) -> String {
+    let mut out = String::new();
+    for c in failure.chars().take(16_384) {
+        let c = if c.is_ascii_digit() { '#' } else { c.to_ascii_lowercase() };
+        if c.is_alphanumeric() || c == '#' {
+            out.push(c);
+        } else if !out.ends_with(' ') {
+            out.push(' ');
+        }
+    }
+    out.trim().to_owned()
 }
 
 impl RepairBudget {
@@ -62,6 +79,24 @@ impl RepairBudget {
     }
 
     pub(super) fn history(&self) -> String { self.instructions.join("\n\n") }
+
+    /// Record a blocker before spending a recovery attempt on it. The same
+    /// failure coming back after a supervised attempt means that direction did
+    /// not work; spending the remaining attempts repeating it only burns time.
+    pub(super) fn note_failure(&mut self, failure: &str) -> Result<(), String> {
+        let fingerprint = failure_fingerprint(failure);
+        if self.failures.iter().any(|seen| failure_fingerprint(seen) == fingerprint) {
+            return Err("The same failure came back after a recovery attempt, so Neko stopped instead of repeating it; worktree and evidence preserved".into());
+        }
+        self.failures.push(failure.chars().take(4096).collect());
+        Ok(())
+    }
+
+    /// Earlier blockers for the next reviewer, so it checks they are fixed
+    /// instead of contradicting or forgetting what it already asked for.
+    pub(super) fn earlier_failures(&self) -> String {
+        self.failures.iter().enumerate().map(|(i, f)| format!("{}. {f}", i + 1)).collect::<Vec<_>>().join("\n")
+    }
 
     pub(super) fn instruction(&self) -> String {
         self.instructions.last().map(|instruction| format!(
@@ -103,6 +138,17 @@ mod tests {
         assert_eq!(budget.attempts(), 3);
         assert!(budget.instruction().contains("Resolve the missing local test dependency"));
     }
+
+    #[test]
+    fn the_same_failure_twice_stops_recovery_but_a_new_one_does_not() {
+        let mut budget = RepairBudget::default();
+        budget.note_failure("Independent verification failed: test `cargo test` fails at line 42.").unwrap();
+        budget.note_failure("Claimed check `npm test` has no successful receipt").unwrap();
+        let error = budget.note_failure("independent verification FAILED:  test cargo test fails at line 57").unwrap_err();
+        assert!(error.contains("same failure"));
+        assert!(budget.earlier_failures().starts_with("1. Independent verification failed"));
+        assert!(budget.earlier_failures().contains("\n2. Claimed check"));
+    }
 }
 
 pub(super) struct Recovery<'a> {
@@ -128,6 +174,7 @@ impl super::Controller {
         use neko_core::{native_runner, workbench as store};
         use neko_protocol::workbench::TaskStatus;
         budget.check().map_err(|e| format!("{}\n{e}", request.failure))?;
+        budget.note_failure(request.failure).map_err(|e| format!("{}\n{e}", request.failure))?;
         self.check_budget(&request.task.id)?;
         self.update_task_authorized(&request.task.id, authority, |t| {
             store::append_event(t, "coordinator", "Investigating the blocker and deciding the next useful step.");
