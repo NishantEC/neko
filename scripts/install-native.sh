@@ -7,6 +7,8 @@ data_directory="$HOME/Library/Application Support/neko"
 bundle="$repo_root/target/native/Neko.app"
 dry_run=0
 clean_data=0
+# Successful installs keep this many app backups (including the new one).
+keep_backups=3
 skip_build=0
 for option in "$@"; do
   case "$option" in
@@ -18,6 +20,17 @@ for option in "$@"; do
   esac
 done
 [[ ! -L "$application" && ! -L "$data_directory" ]] || { printf 'Refusing symlinked installation or data targets.\n' >&2; exit 2; }
+# Delete all but the newest $2 backup directories directly inside $1. Only
+# real directories named .neko-native-backup.* are ever touched.
+prune_backups() {
+  local root="$1" keep="$2" index=0 entry
+  while IFS= read -r entry; do
+    index=$((index + 1))
+    (( index > keep )) || continue
+    [[ -d "$entry" && ! -L "$entry" && "$(basename "$entry")" == .neko-native-backup.* ]] || continue
+    rm -rf -- "$entry"
+  done < <(/bin/ls -1dt "$root"/.neko-native-backup.* 2>/dev/null || true)
+}
 is_installed_executable() {
   case "$1" in
     '/Applications/Neko.app/Contents/MacOS/neko'|'/Applications/Neko.app/Contents/MacOS/neko-daemon'|/Applications/.neko-native-backup.*/previous-Neko.app/Contents/MacOS/neko|/Applications/.neko-native-backup.*/previous-Neko.app/Contents/MacOS/neko-daemon) return 0 ;;
@@ -44,7 +57,7 @@ if (( dry_run )); then
   else printf 'Would run scripts/build-native.sh and verify the resulting signed SwiftUI bundle.\n'; fi
   printf 'Would stop only installed Neko executables, including installer backups; matching PIDs:\n'
   installed_pids
-  printf 'Would back up the existing app in a unique /Applications/.neko-native-backup.* directory.\n'
+  printf 'Would back up the existing app in a unique /Applications/.neko-native-backup.* directory, keeping the newest %s backups.\n' "$keep_backups"
   printf 'Would unregister the build output and installer backups, then register /Applications/Neko.app with Launch Services.\n'
   if (( clean_data )); then printf 'Would move %s into a sibling recoverable backup after checking its socket is unused.\n' "$data_directory"
   else printf 'User data remains in place.\n'; fi
@@ -101,6 +114,7 @@ for previous_bundle in /Applications/.neko-native-backup.*/previous-Neko.app; do
   "$launch_services" -u "$previous_bundle" || true
 done
 "$launch_services" -f "$application"
-printf 'Installed native /Applications/Neko.app. Previous bundle backup: %s\n' "$backup_root"
+prune_backups /Applications "$keep_backups"
+printf 'Installed native /Applications/Neko.app. Previous bundle backup: %s (keeping the newest %s)\n' "$backup_root" "$keep_backups"
 if [[ -n "$data_backup" ]]; then printf 'Previous Neko data backup: %s/neko\n' "$data_backup"; fi
 printf 'Credentials and preferences preserved. Launch /Applications/Neko.app when ready.\n'
