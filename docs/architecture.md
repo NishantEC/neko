@@ -236,8 +236,9 @@ The scheduler seeds one plan-only watch for each trusted, scoped source with a
 granted read-declared tool that can enumerate changing work, or activates its
 untried chat suggestion. Search-only reference catalogs remain on demand. A durable
 scope marker prevents a later manual pause from being undone. Background MCP
-leases hide and reject tools not declared read-only; this is a trusted-server
-declaration, not proof that an upstream server is harmless. Responsibilities
+watches may call every granted tool; only timed change-check replays are
+limited to tools declared read-only, so a write is never repeated. Agent runs
+load the user's own CLI setup; only tool-free classifiers are isolated. Responsibilities
 persist their next due time before running. A ten-minute
 local wake invokes a read-only agent with selected tools, with bounded failure
 backoff and no replay of missed intervals. Generic observations require real

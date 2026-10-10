@@ -120,34 +120,27 @@ pub(crate) fn sandbox_profile(agent: Agent, home: &Path, temp: &Path) -> Result<
     Ok(format!("(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write*\n  {})\n", allow.join("\n  ")))
 }
 
-const READ_TOOLS: &[&str] = &["Bash", "Read", "Grep", "Glob"];
-const WRITE_TOOLS: &[&str] = &["Bash", "Read", "Grep", "Glob", "Edit", "MultiEdit", "Write"];
-const BRIDGE_TOOLS: &[&str] = &["mcp__neko__neko_list_tools", "mcp__neko__neko_call_tool"];
 
 pub(crate) fn claude_args(spec: &RunSpec, bridge: Option<&BridgeConfig>, extraction: bool) -> Result<Vec<String>, String> {
     crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
-    let mut args: Vec<String> = [
-        "-p", "--output-format", "stream-json", "--verbose", "--setting-sources", "", "--strict-mcp-config",
-        "--disable-slash-commands", "--no-session-persistence", "--permission-mode",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-    args.push(if spec.writable && !extraction { "bypassPermissions" } else { "dontAsk" }.into());
+    let mut args: Vec<String> = ["-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--permission-mode"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    // Agents run like the user's own Claude Code: their settings, CLAUDE.md,
+    // hooks, plugins, skills and MCP servers, every built-in tool, and no
+    // permission prompts. A read-only run is still kept off the disk by the
+    // sandbox. Only tool-free extraction is isolated from all of that.
+    args.push(if extraction { "dontAsk" } else { "bypassPermissions" }.into());
     if !spec.runtime.model.is_empty() && spec.runtime.model != "default" {
         args.extend(["--model".into(), spec.runtime.model.clone()]);
     }
     if extraction {
+        args.extend(["--setting-sources".into(), String::new(), "--strict-mcp-config".into(), "--disable-slash-commands".into()]);
         args.extend(["--tools".into(), String::new()]);
         return Ok(args);
     }
-    let tools = if spec.writable { WRITE_TOOLS } else { READ_TOOLS };
-    args.push("--tools".into());
-    args.extend(tools.iter().map(|t| t.to_string()));
-    args.push("--allowedTools".into());
-    args.extend(tools.iter().map(|t| t.to_string()));
     if let Some(bridge) = bridge {
-        args.extend(BRIDGE_TOOLS.iter().map(|t| t.to_string()));
         if !bridge.executable.is_absolute() {
             return Err("Invalid scoped bridge configuration".into());
         }
@@ -165,7 +158,9 @@ pub(crate) fn opencode_config(spec: &RunSpec, bridge: Option<&BridgeConfig>, ext
         // extraction run is discarded by the parser anyway.
         serde_json::json!({"edit": "deny", "bash": "ask", "webfetch": "deny"})
     } else {
-        serde_json::json!({"edit": if spec.writable { "allow" } else { "deny" }, "bash": "allow", "webfetch": "deny"})
+        // Everything the user's own OpenCode can do; a read-only run keeps
+        // only file edits off, which its sandbox would refuse anyway.
+        serde_json::json!({"edit": if spec.writable { "allow" } else { "deny" }, "bash": "allow", "webfetch": "allow"})
     };
     if spec.writable && !extraction {
         // Permit ordinary local tools outside the project without globally
@@ -408,7 +403,10 @@ pub(crate) fn run(
             if !spec.runtime.model.is_empty() {
                 command.args(["-m", spec.runtime.model.as_str()]);
             }
-            command.env("OPENCODE_CONFIG", &config).env("OPENCODE_DISABLE_PROJECT_CONFIG", "1").env("OPENCODE_DISABLE_AUTOUPDATE", "1");
+            command.env("OPENCODE_CONFIG", &config).env("OPENCODE_DISABLE_AUTOUPDATE", "1");
+            if extraction {
+                command.env("OPENCODE_DISABLE_PROJECT_CONFIG", "1");
+            }
         }
     }
     command.current_dir(directory).env("PWD", directory).env("TMPDIR", &scratch);
@@ -473,22 +471,25 @@ mod tests {
     }
 
     #[test]
-    fn claude_roles_get_the_right_tools() {
-        let read = claude_args(&spec(false), None, false).unwrap();
-        assert!(read.contains(&"Bash".to_string()) && !read.contains(&"Edit".to_string()));
-        assert!(read.windows(2).any(|w| w == ["--model", "sonnet"]));
-        assert!(read.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]));
-        let write = claude_args(&spec(true), None, false).unwrap();
-        assert!(write.contains(&"Edit".to_string()));
-        assert!(write.windows(2).any(|w| w == ["--permission-mode", "bypassPermissions"]));
-        assert!(!write.iter().any(|a| a.contains("WebFetch") || a.contains("WebSearch")));
+    fn agents_get_the_users_whole_claude_code_and_extraction_gets_nothing() {
+        for writable in [false, true] {
+            let args = claude_args(&spec(writable), None, false).unwrap();
+            assert!(args.windows(2).any(|w| w == ["--model", "sonnet"]));
+            assert!(args.windows(2).any(|w| w == ["--permission-mode", "bypassPermissions"]));
+            // No tool list, no settings isolation: their settings, CLAUDE.md,
+            // hooks, plugins, skills and MCP servers all load.
+            for isolating in ["--tools", "--allowedTools", "--setting-sources", "--strict-mcp-config", "--disable-slash-commands"] {
+                assert!(!args.iter().any(|a| a == isolating), "{isolating} must not limit an agent");
+            }
+        }
         let extract = claude_args(&spec(false), None, true).unwrap();
         assert!(extract.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()));
-        assert!(!extract.contains(&"Bash".to_string()));
+        assert!(extract.windows(2).any(|w| w[0] == "--setting-sources" && w[1].is_empty()));
+        assert!(extract.contains(&"--strict-mcp-config".to_string()));
         assert!(extract.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]));
         let bridge = BridgeConfig { executable: "/bin/neko-daemon".into(), socket: "/s".into(), token: "secret".into() };
         let bridged = claude_args(&spec(false), Some(&bridge), false).unwrap();
-        assert!(bridged.contains(&"mcp__neko__neko_call_tool".to_string()));
+        assert!(bridged.iter().any(|a| a.contains("--mcp-bridge")), "Neko's tools are added alongside the user's");
         assert!(!bridged.iter().any(|a| a.contains("secret")), "the token never appears in argv");
     }
 
@@ -496,7 +497,9 @@ mod tests {
     fn opencode_permissions_follow_the_role() {
         assert_eq!(opencode_config(&spec(false), None, false)["permission"]["edit"], "deny");
         assert_eq!(opencode_config(&spec(true), None, false)["permission"]["edit"], "allow");
-        assert_eq!(opencode_config(&spec(true), None, false)["permission"]["webfetch"], "deny");
+        assert_eq!(opencode_config(&spec(true), None, false)["permission"]["webfetch"], "allow");
+        assert_eq!(opencode_config(&spec(false), None, false)["permission"]["webfetch"], "allow");
+        assert_eq!(opencode_config(&spec(true), None, true)["permission"]["webfetch"], "deny");
         assert_eq!(opencode_config(&spec(true), None, false)["permission"]["external_directory"], "allow");
         assert!(opencode_config(&spec(false), None, false)["permission"]["external_directory"].is_null());
         let extraction = opencode_config(&spec(true), None, true);
