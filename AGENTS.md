@@ -75,7 +75,14 @@ window; the hotkey remains a separate palette, dismissed with native
 
 Native work uses `neko-protocol::workbench`, daemon-owned bounded SQLite
 snapshots in `neko-core::workbench`, the daemon's `workbench` supervisor, and
-`native_runner` ephemeral Codex CLI processes. A scout plans read-only,
+`native_runner` ephemeral Codex CLI processes. **By default (2026-10-11) a ticket
+is a normal writing session**: it builds straight away in its isolated worktree
+with no read-only plan or approval step (`Snapshot::plan_first` off). The agent
+itself stops on critical work (`NEEDS_APPROVAL:` → AwaitingApproval; approving
+builds it without asking again), closes tickets with nothing to do (`NO_CHANGE:`
+→ Completed; a reply reopens), and routes `QUESTION:` through recovery first.
+Read-only replies, pending split proposals and the "Plan before working" setting
+keep the older flow: a scout plans read-only,
 explicit approval or a direct human work request allows an isolated-worktree build, and a
 independent reviewer returns a result for human review. Authorized builders and
 reviewers have full local filesystem access for dependency setup, caches and tests. Workers never push;

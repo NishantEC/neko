@@ -245,6 +245,11 @@ pub struct Snapshot {
     /// waiting for approval. Off by default. Nothing is ever published.
     #[serde(default)]
     pub start_without_approval: bool,
+    /// Off (the default): a ticket is a normal session that writes code right
+    /// away, and the agent itself stops for approval only for critical work.
+    /// On: every ticket first gets a read-only plan to approve.
+    #[serde(default)]
+    pub plan_first: bool,
     /// Tickets you started by hand (for example by dropping them on Working).
     /// Once planned they build without asking again.
     #[serde(default)]
@@ -533,6 +538,10 @@ pub enum Command {
     /// or asks for it explicitly. Never merges.
     PublishTask {
         task_id: String,
+    },
+    /// Whether tickets plan read-only before working (see `Snapshot::plan_first`).
+    SetPlanFirst {
+        enabled: bool,
     },
     /// Choose how reviewed tickets in one repository are delivered: landed
     /// on local `main`, or (the default) opened as a pull request.

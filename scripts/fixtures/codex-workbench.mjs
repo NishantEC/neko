@@ -211,6 +211,15 @@ const outputFile = prompt.match(/SUBTASK_FILE=([a-z]+\.txt)/)?.[1] || 'neko-smok
 if (!responsibility && !scout && !supervisor && !review && prompt.includes('PARALLEL_HOLD')) await new Promise(resolve=>setTimeout(resolve,9000));
 if (!responsibility && !scout && !supervisor && !review) {
   assert.equal(fullAccess, true, 'Authorized builder has full local access, including resume');
+  // Direct work: the agent decides to stop on critical work or no-op tickets.
+  const directFirstRun = prompt.includes('There is no separate planning step');
+  const stop = directFirstRun && prompt.includes('DIRECT_CRITICAL') ? 'Migration plan: alter the table.\nNEEDS_APPROVAL: touches production data'
+    : directFirstRun && prompt.includes('DIRECT_NOOP') ? 'Investigated the report.\nNO_CHANGE: already fixed upstream' : null;
+  if (stop) {
+    process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'agent_message',text:stop}})}\n${JSON.stringify({type:'turn.completed'})}\n`);
+    process.exit(0);
+  }
+  if (prompt.includes('DIRECT_CRITICAL')) assert.ok(prompt.includes('The user approved the plan above'), 'An approved critical plan must not ask again');
   if (prompt.includes('WORKER_ERROR') && !prompt.includes('SUPERVISOR_RECOVERY')) throw new Error('Transient worker startup failure');
   const repair = prompt.includes('REPAIR_REQUIRED');
   if (prompt.includes('ENVIRONMENT_RECOVERY') && prompt.includes('SUPERVISOR_RECOVERY')) {

@@ -736,7 +736,15 @@ impl Controller {
         // tickets only; watched sources keep their own low-risk rules.
         let start_without_approval = snapshot.start_without_approval && !source_linked && !claim.read_only_reply;
         let direct_work = snapshot.start_when_planned.contains(&task.id) && !claim.read_only_reply;
-        let supervised = source_linked && !direct_work && !claim.read_only_reply;
+        // By default a ticket is a normal session that writes code, as a
+        // developer would; the agent itself stops for approval when the work
+        // is critical. Read-only requests, pending split proposals and the
+        // "plan before working" setting keep the read-only planning phase.
+        let read_only_request = claim.read_only_reply || snapshot.task_read_only.contains(&task.id);
+        let pending_split = snapshot.splits.iter().any(|s| s.parent_id == task.id && !s.approved);
+        let work_directly = !snapshot.plan_first && !read_only_request && !pending_split;
+        let first_direct_run = work_directly && task.status == TaskStatus::Queued;
+        let supervised = source_linked && !direct_work && !claim.read_only_reply && !work_directly;
         let workspace = snapshot
             .workspaces
             .iter()
@@ -804,7 +812,7 @@ impl Controller {
             let base = native_runner::head(&directory, cancel)?;
             self.update_task(&task.id, |t| t.base_commit = Some(base))?;
         }
-        let planning = task.status == TaskStatus::Queued;
+        let planning = task.status == TaskStatus::Queued && !work_directly;
         let role = if planning && supervised {
             "supervisor"
         } else if planning {
@@ -854,6 +862,13 @@ impl Controller {
                 } else if claim.read_only_reply {
                     "The user's latest request is read-only. Answer their question or give the requested plan. No local changes are authorized by this message."
                 } else { "" };
+                let direction = if first_direct_run {
+                    format!("{direction}\n{DIRECT_WORK}")
+                } else if work_directly && !task.plan.trim().is_empty() {
+                    format!("{direction}\nThe user approved the plan above. Carry it out now; do not ask for approval again.")
+                } else {
+                    direction.to_owned()
+                };
                 let spec = native_runner::RunSpec {
                     directory: directory.clone(),
                     prompt: format!("{}\n{direction}\nOriginal checkout (read-only reference for local toolchain and dependency setup): {task_root}. This isolated worktree may lack ignored dependencies. Prepare test prerequisites from repository conventions and available offline caches using normal dependency installation, local caches and temporary files. Authorized execution has full local filesystem access. Keep task source edits in this worktree and preserve unrelated user files and shared dependencies. Read-only planning remains read-only.\n{}", prompt(
@@ -1011,6 +1026,44 @@ impl Controller {
                     Ok(())
                 })?;
             } else {
+                if first_direct_run {
+                    match direct_stop(&result) {
+                        Some(DirectStop::Question(question)) => {
+                            // As with any directly authorized work, try to
+                            // resolve the question before handing it to the user.
+                            let evidence = review_repair::feedback(task, &result);
+                            if !self.recover_task(review_repair::Recovery {
+                                workspace, task: &evidence, directory: &directory,
+                                runtime: &snapshot.agent_runtime, memory: &memory, planning: false,
+                                failure: &format!("The agent stopped with a question: {question}. Determine whether available investigation can resolve it within the user's request."),
+                            }, &mut repairs, authority, cancel)? { return Ok(()); }
+                            attempt_task = evidence;
+                            continue;
+                        }
+                        Some(stop) => {
+                            return self.commit_authorized(authority, |state| {
+                                state.start_when_planned.remove(&task.id);
+                                let t = state.tasks.iter_mut().find(|t| t.id == task.id).ok_or("Task no longer exists")?;
+                                t.result = result.clone();
+                                match stop {
+                                    DirectStop::NeedsApproval(why) => {
+                                        t.plan = result.clone();
+                                        t.status = TaskStatus::AwaitingApproval;
+                                        store::append_event(t, "supervisor", &format!("Needs your approval before changing anything: {why}"));
+                                    }
+                                    DirectStop::NoChange(why) => {
+                                        t.status = TaskStatus::Completed;
+                                        store::append_event(t, "supervisor", &format!("Nothing to change: {why}. Reply to reopen it."));
+                                    }
+                                    DirectStop::Question(_) => unreachable!(),
+                                }
+                                t.updated_at_ms = store::now_ms();
+                                Ok(())
+                            });
+                        }
+                        None => {}
+                    }
+                }
                 self.update_task_authorized(&task.id, authority, |t| {
                     t.result = result.clone();
                     t.status = TaskStatus::Reviewing;
@@ -1857,6 +1910,32 @@ fn propose_ticket_skill(
 }
 
 /// The planner's closing `QUESTION:` line, when it needs an answer first.
+/// How a ticket works by default: like a developer handed the issue.
+const DIRECT_WORK: &str = "Work on this ticket directly, as a developer would: investigate, change the code in this worktree and verify it. There is no separate planning step and no approval to wait for. Stop before changing anything only when the work is critical (production data or migrations, authentication or security, payments, deleting data, large irreversible rewrites): then reply with your plan and end with a final line `NEEDS_APPROVAL: <why>`. If after investigating there is nothing to change (not a real bug, already fixed, not actionable), end with a final line `NO_CHANGE: <why>`. If a decision only the user can make blocks you, end with a final line `QUESTION: <question>`. Otherwise finish the work.";
+
+enum DirectStop {
+    NeedsApproval(String),
+    NoChange(String),
+    Question(String),
+}
+
+/// The agent's own decision to stop instead of finishing the work.
+fn direct_stop(result: &str) -> Option<DirectStop> {
+    let line = result.lines().rev().map(str::trim).find(|l| !l.is_empty())?;
+    let line = line.trim_start_matches(['*', '_', '#', '`', ' ']);
+    let (kind, rest) = line.split_once(':')?;
+    let detail: String = rest.trim().trim_matches(['*', '_', '`', ' ']).chars().take(1000).collect();
+    if detail.is_empty() {
+        return None;
+    }
+    match kind.trim_matches(['*', '_', '`', ' ']) {
+        "NEEDS_APPROVAL" => Some(DirectStop::NeedsApproval(detail)),
+        "NO_CHANGE" => Some(DirectStop::NoChange(detail)),
+        "QUESTION" => Some(DirectStop::Question(detail)),
+        _ => None,
+    }
+}
+
 fn plan_question(plan: &str) -> Option<String> {
     let line = plan.lines().rev().map(str::trim).find(|l| !l.is_empty())?;
     let question = line.trim_start_matches(['*', '_', '#', ' ']).strip_prefix("QUESTION:")?.trim_start_matches(['*', '_', ' ']).trim();
@@ -2761,5 +2840,20 @@ mod tests {
             snapshot.tasks[0].worktree.as_deref(),
             Some("/task-checkout")
         );
+    }
+}
+
+#[cfg(test)]
+mod direct_stop_tests {
+    use super::*;
+
+    #[test]
+    fn reads_only_the_agents_final_stop_line() {
+        assert!(matches!(direct_stop("Plan...\n\n**NEEDS_APPROVAL:** drops a production table"), Some(DirectStop::NeedsApproval(w)) if w == "drops a production table"));
+        assert!(matches!(direct_stop("Checked.\nNO_CHANGE: already fixed in 4f2a"), Some(DirectStop::NoChange(w)) if w == "already fixed in 4f2a"));
+        assert!(matches!(direct_stop("QUESTION: which tenant?\n"), Some(DirectStop::Question(_))));
+        assert!(direct_stop("Fixed it.\nNO_CHANGE: was mentioned earlier\nAll tests pass.").is_none(), "only the last line counts");
+        assert!(direct_stop("NEEDS_APPROVAL:").is_none());
+        assert!(direct_stop("Implemented the fix and ran cargo test.").is_none());
     }
 }

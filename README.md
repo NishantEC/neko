@@ -11,6 +11,12 @@ in your local Codex/Claude setup, or add your own server in **Tools & skills →
 or required. Multiple connections, including instances of the same server,
 have separate workspace scope, credentials, and permissions.
 
+Tickets start working right away, like a developer handed the issue: no
+read-only planning or approval step. The agent stops for your approval only on
+critical work (production data, migrations, security, payments, deleting data),
+and closes tickets with nothing to change. Turn on **Plan before working** in
+the tickets menu to plan every ticket first.
+
 Code tasks need a Git repository because Neko builds in an isolated worktree;
 non-Git folders can still be attached. When a workspace has multiple folders,
 Neko's agent can name the folder for a ticket. For a home folder or another

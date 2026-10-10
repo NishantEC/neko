@@ -908,6 +908,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::SetStartWithoutApproval { enabled } => {
             snapshot.start_without_approval = enabled;
         }
+        Command::SetPlanFirst { enabled } => {
+            snapshot.plan_first = enabled;
+        }
         Command::DecideMemoryProposal { id, accept } => {
             crate::memory_learning::decide(db, &snapshot, &id, accept)?;
             return load(db);
