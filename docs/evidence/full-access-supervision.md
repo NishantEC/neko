@@ -84,7 +84,7 @@ for Athena/NaviHealth and `local-only` for Neko. Those are instance choices.
 
 | Capability | Remaining Neko work |
 | --- | --- |
-| Delivery | Selectable local landing, direct PR and review pipelines; existing Accept locally only acknowledges a result. |
+| Delivery | Selectable local landing and standing merge policies. Reviewed results are published as GitHub pull requests (2026-10-10); Accept locally only acknowledges a result. |
 | Runtime selection | Per-task dispatch profiles and fresh quota-aware intake routing; current runs keep the chosen runtime. Firstmate evidence establishes intake routing, not universal mid-run failover. |
 | Continuous supervision | Stale-worker handling and external PR/check lifecycle beyond local phase recovery. |
 | Tool exposure | Firstmate-style installed CLI/browser tools and controlled delegation alongside Neko's user-owned MCP tools. |
@@ -92,5 +92,5 @@ for Athena/NaviHealth and `local-only` for Neko. Those are instance choices.
 The next complete delivery slice is landing an approved exact result into a
 clean project checkout, checking the target branch and fast-forward ancestry,
 and persisting the outcome. Divergence requires reconciliation without
-replacing unrelated work. PR delivery and standing merge policies need their
-own explicit product contracts; full filesystem access alone is not that contract.
+replacing unrelated work. Standing merge policies need their
+own explicit product contract; full filesystem access alone is not that contract.

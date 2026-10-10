@@ -137,6 +137,20 @@ pub struct Task {
     pub source_revision: Option<String>,
     #[serde(default)]
     pub supervision: Option<SupervisorDecision>,
+    /// Commit the task worktree was created from: the base of everything the
+    /// ticket changed, including commits Neko makes when publishing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_commit: Option<String>,
+    /// The pull request Neko opened for this ticket's reviewed result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<PullRequest>,
+}
+
+/// A reviewed result Neko pushed and opened for review. Never merged by Neko.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PullRequest {
+    pub url: String,
+    pub branch: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -503,6 +517,12 @@ pub enum Command {
         text: String,
     },
     CompleteTask {
+        task_id: String,
+    },
+    /// Commit, push and open a pull request for a reviewed result. Neko also
+    /// does this on its own once an independent review passes; this retries
+    /// or asks for it explicitly. Never merges.
+    PublishTask {
         task_id: String,
     },
     /// Remove one finished (completed, failed or cancelled) ticket and its

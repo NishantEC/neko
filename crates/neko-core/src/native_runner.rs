@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 const MAX_PROMPT: usize = 256 * 1024;
 
 pub(crate) mod cli_workers;
+pub mod publish;
 mod review_state;
 pub use review_state::{ReviewState, capture_review_state};
 const MAX_LINE: usize = 256 * 1024;

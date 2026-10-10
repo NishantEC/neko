@@ -912,6 +912,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             crate::memory_learning::decide(db, &snapshot, &id, accept)?;
             return load(db);
         }
+        // Pushing and opening a pull request needs the network; the daemon
+        // runs it outside the storage lock and records the outcome itself.
+        Command::PublishTask { .. } => return Err("Publishing is handled by the Neko daemon".into()),
     }
     save(db, &snapshot)?;
     load(db)
@@ -1349,6 +1352,8 @@ pub fn create_task(
         created_at_ms: now,
         updated_at_ms: now,
         source_revision: None,
+        base_commit: None,
+        pull_request: None,
         supervision: None,
     };
     append_event(&mut task, "system", "Queued for planning.");

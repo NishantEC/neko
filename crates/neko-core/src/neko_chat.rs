@@ -1153,6 +1153,8 @@ mod tests {
                 created_at_ms: 0,
                 updated_at_ms: 0,
                 source_revision: None,
+                base_commit: None,
+                pull_request: None,
                 supervision: None,
             });
         }

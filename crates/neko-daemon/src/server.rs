@@ -297,8 +297,9 @@ impl AppState {
     }
 }
 
-/// What a ticket's worktree changed, against its own HEAD (workers can't
-/// commit), including new files. Only Neko's own task worktrees are read.
+/// What a ticket's worktree changed since its checkout started, including
+/// commits and new files. Older tickets without a recorded start compare
+/// against their own HEAD. Only Neko's own task worktrees are read.
 fn task_changes(state: &AppState, task_id: &str) -> Result<(Vec<String>, String, bool), String> {
     const LIMIT: usize = 512 * 1024;
     let snapshot = neko_core::workbench::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
@@ -310,7 +311,10 @@ fn task_changes(state: &AppState, task_id: &str) -> Result<(Vec<String>, String,
         return Err("Only Neko’s own task worktrees can be shown".into());
     }
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let base = neko_core::native_runner::head(&directory, &cancel)?;
+    let base = match &task.base_commit {
+        Some(base) => base.clone(),
+        None => neko_core::native_runner::head(&directory, &cancel)?,
+    };
     let files = neko_core::native_runner::changed_files(&directory, &base, &cancel)?;
     let patch = neko_core::native_runner::task_patch(&directory, &base, &cancel)?;
     let truncated = patch.len() > LIMIT;

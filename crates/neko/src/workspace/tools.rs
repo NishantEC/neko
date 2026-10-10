@@ -665,7 +665,7 @@ fn responsibilities(
         ));
     }
     body.child(button("responsibility-prepare", if root.responsibility_prepare { "Low-risk local fixes allowed" } else { "Plan only — fixes need approval" }, !root.busy, root.responsibility_prepare, cx, |root, _, cx| { root.responsibility_prepare = !root.responsibility_prepare; cx.notify(); }))
-        .child(note("Local fixes require fresh source evidence and a bounded low-risk assessment. No push, PR, message or deployment permission is implied. Tool grants themselves may allow remote changes: review them carefully."))
+        .child(note("Local fixes require fresh source evidence and a bounded low-risk assessment. Agents never push; Neko opens a pull request only for an independently reviewed result. No message, merge or deployment permission is implied. Tool grants themselves may allow remote changes: review them carefully."))
         .child(button("responsibility-add", if root.responsibility_editing.is_some() { "Save responsibility" } else { "Start responsibility" }, !root.busy, true, cx, |root, _, cx| {
             let Some(workspace) = root.selection.workspace.as_deref() else { return; };
             match responsibility_from_form(workspace, &value(&root.responsibility_instruction, cx), &root.responsibility_connections, root.responsibility_prepare) {
