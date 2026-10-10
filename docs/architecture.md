@@ -62,6 +62,10 @@ config, and opens or reuses a GitHub pull request through `gh`
 (`native_runner::publish`, daemon `workbench/publish.rs`). A ticket that changed
 before the push is not published; subtasks ship inside their parent's pull
 request; nothing merges. `Task::base_commit` keeps Changes correct after the commit.
+Repositories in `Snapshot::land_on_main` (`SetLandOnMain`) are delivered by
+fast-forwarding local `main` instead (`publish::land`): rebased onto a newer
+`main` when needed, serialized per repository, refusing conflicts and
+overwrites of local edits; nothing is pushed.
 Page titles, subtitles and primary actions use the native window toolbar, keeping
 its top row useful and mouse-accessible with the sidebar expanded or collapsed.
 Page bodies and side panels respect the native top safe area. Hiding the toolbar

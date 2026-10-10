@@ -247,6 +247,7 @@ mod tests {
                 source_revision: Some("revision-1".into()),
                 base_commit: None,
                 pull_request: None,
+                landed_commit: None,
                 supervision: Some(decision),
             }],
             ..Default::default()

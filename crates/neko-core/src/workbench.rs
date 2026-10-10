@@ -915,6 +915,20 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         // Pushing and opening a pull request needs the network; the daemon
         // runs it outside the storage lock and records the outcome itself.
         Command::PublishTask { .. } => return Err("Publishing is handled by the Neko daemon".into()),
+        Command::SetLandOnMain { repository, enabled } => {
+            let path = std::path::Path::new(repository.trim())
+                .canonicalize()
+                .map_err(|_| "That repository folder no longer exists")?;
+            if !path.join(".git").exists() {
+                return Err("Choose the repository's own checkout folder".into());
+            }
+            let path = path.to_string_lossy().into_owned();
+            if enabled {
+                snapshot.land_on_main.insert(path);
+            } else {
+                snapshot.land_on_main.remove(&path);
+            }
+        }
     }
     save(db, &snapshot)?;
     load(db)
@@ -1354,6 +1368,7 @@ pub fn create_task(
         source_revision: None,
         base_commit: None,
         pull_request: None,
+        landed_commit: None,
         supervision: None,
     };
     append_event(&mut task, "system", "Queued for planning.");

@@ -1,6 +1,7 @@
-//! Opening a pull request for a reviewed ticket. Neko does this on its own as
-//! soon as an independent review passes, the way a person would push their
-//! finished branch, and again when asked. It never merges.
+//! Delivering a reviewed ticket. Neko does this on its own as soon as an
+//! independent review passes, and again when asked. Repositories listed in
+//! `Snapshot::land_on_main` fast-forward local `main` (nothing pushed);
+//! every other repository gets a pull request, which Neko never merges.
 //!
 //! Network work runs outside the storage lock. A ticket that is no longer
 //! ready for review when the push is about to happen is left alone.
@@ -28,24 +29,60 @@ pub(super) fn publish_task(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBo
     }
     let outcome = publish_unlocked(db, task_id, cancel);
     in_flight().lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(task_id);
+    let main = native_runner::publish::LANDING_BRANCH;
     let message = match &outcome {
-        Ok(Some(published)) if published.created => format!("Opened a pull request: {}", published.url),
-        Ok(Some(published)) => format!("Pushed the reviewed changes to the open pull request: {}", published.url),
-        Ok(None) => "Nothing new to publish since the last push.".into(),
-        Err(error) => format!("Couldn't open a pull request: {error}. The reviewed result stays local."),
+        Ok(Some(Delivered::PullRequest(published))) if published.created => format!("Opened a pull request: {}", published.url),
+        Ok(Some(Delivered::PullRequest(published))) => format!("Pushed the reviewed changes to the open pull request: {}", published.url),
+        Ok(Some(Delivered::Landed(landed))) => format!(
+            "Landed on {main} as {}{}. Nothing was pushed.",
+            &landed.commit[..landed.commit.len().min(10)],
+            if landed.rebased { ", rebased onto newer work first (the review covered the change before the rebase)" } else { "" }
+        ),
+        Ok(None) => "Nothing new to deliver since the last time.".into(),
+        Err(Failure { landing: true, error }) => format!("Couldn't land on {main}: {error}. The reviewed result stays in its worktree."),
+        Err(Failure { error, .. }) => format!("Couldn't open a pull request: {error}. The reviewed result stays local."),
     };
     let db = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut snapshot = store::load(&db)?;
     let Some(task) = snapshot.tasks.iter_mut().find(|t| t.id == task_id) else { return Ok(()) };
-    if let Ok(Some(published)) = &outcome {
-        task.pull_request = Some(PullRequest { url: published.url.clone(), branch: published.branch.clone() });
+    match &outcome {
+        Ok(Some(Delivered::PullRequest(published))) => {
+            task.pull_request = Some(PullRequest { url: published.url.clone(), branch: published.branch.clone() });
+        }
+        Ok(Some(Delivered::Landed(landed))) => {
+            task.landed_commit = Some(landed.commit.clone());
+            // Keep Changes meaningful after a rebase onto newer work.
+            task.base_commit = Some(landed.onto.clone());
+        }
+        _ => {}
     }
     store::append_event(task, "supervisor", &message);
     task.updated_at_ms = store::now_ms();
     store::save(&db, &snapshot)
 }
 
-fn publish_unlocked(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBool) -> Result<Option<native_runner::publish::Published>, String> {
+enum Delivered {
+    PullRequest(native_runner::publish::Published),
+    Landed(native_runner::publish::Landed),
+}
+
+struct Failure {
+    landing: bool,
+    error: String,
+}
+
+impl From<String> for Failure {
+    fn from(error: String) -> Self {
+        Self { landing: false, error }
+    }
+}
+impl From<&str> for Failure {
+    fn from(error: &str) -> Self {
+        error.to_owned().into()
+    }
+}
+
+fn publish_unlocked(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBool) -> Result<Option<Delivered>, Failure> {
     let snapshot = store::load(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("That ticket no longer exists")?;
     if !publishable(task.status) {
@@ -65,7 +102,13 @@ fn publish_unlocked(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBool) -> 
             .and_then(|s| s.tasks.into_iter().find(|t| t.id == task_id))
             .is_some_and(|t| publishable(t.status))
     };
-    native_runner::publish::publish(&directory, &base, &task.title, &body(task), &still_reviewed, cancel)
+    let source = native_runner::publish::source_checkout(&directory, cancel)?;
+    if snapshot.land_on_main.contains(&*source.to_string_lossy()) {
+        return native_runner::publish::land(&directory, &base, &task.title, &still_reviewed, cancel)
+            .map(|landed| landed.map(Delivered::Landed))
+            .map_err(|error| Failure { landing: true, error });
+    }
+    Ok(native_runner::publish::publish(&directory, &base, &task.title, &body(task), &still_reviewed, cancel)?.map(Delivered::PullRequest))
 }
 
 /// Only Neko's own task worktrees are ever committed to and pushed.
@@ -120,7 +163,7 @@ mod tests {
             id: "t1".into(), workspace_id: "w".into(), issue_id: None, title: "Fix".into(),
             goal: "SECRET source text".into(), status: TaskStatus::ReadyForReview, plan: String::new(),
             result: result.into(), worktree: None, events: vec![], created_at_ms: 0, updated_at_ms: 0,
-            source_revision: None, supervision: None, base_commit: None, pull_request: None,
+            source_revision: None, supervision: None, base_commit: None, pull_request: None, landed_commit: None,
         }
     }
 

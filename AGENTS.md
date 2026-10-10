@@ -81,6 +81,9 @@ independent reviewer returns a result for human review. Authorized builders and
 reviewers have full local filesystem access for dependency setup, caches and tests. Workers never push;
 once an independent review passes, the daemon commits the reviewed worktree, pushes its task branch and opens
 (or reuses) a GitHub pull request via `gh` (`native_runner::publish`, `workbench/publish.rs`). Nothing merges.
+Repositories listed in `Snapshot::land_on_main` (per checkout, toggled in the ticket inspector) instead
+fast-forward local `main` with nothing pushed: a moved `main` is rebased onto, a conflict or an overwrite of
+local edits is refused, and the ticket records `landed_commit`. The `neko` repo itself is set to land on main.
 Every eligible ticket starts its own worker on the next two-second supervisor
 tick, without a fixed global or workspace cap. Active claims prevent duplicate
 workers for one ticket; dependencies, approvals and scope checks still apply.
