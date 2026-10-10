@@ -123,9 +123,11 @@ manual pause remains in effect.
 Pausing a responsibility prevents future wakes and cancels its active watch.
 Revocation cannot undo a remote action already sent. Connected MCP tools
 can themselves mutate external systems: a server's read-only annotation is
-not a security guarantee. Background watches expose and call only tools
-declared read-only; trust the server before connecting it. Agents never push themselves; Neko publishes only an
-independently reviewed result as a pull request. Messages, merges and deployment are not granted.
+not a security guarantee. Agents, including unattended watches, run with your
+whole Claude Code / Codex setup (config, MCP servers, skills, plugins, web
+search, sub-agents) and may act on external systems as you would. Committing,
+pushing and pull requests stay with Neko, which delivers only independently
+reviewed work.
 
 The local Codex CLI must be installed and authenticated. `NEKO_CODEX_PATH`
 can select an absolute executable path. You can select a model in the

@@ -20,13 +20,23 @@ if (args[0] === 'app-server') {
   process.exit(0);
 }
 assert.equal(args[0], 'exec');
-assert.ok(args.includes('--ignore-user-config'));
 const fullAccess = args.includes('--dangerously-bypass-approvals-and-sandbox');
 assert.equal(args.includes('default_permissions="neko"'), !fullAccess, 'Full access must not be overridden by a restricted profile');
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
-assert.ok(args.includes('skills.include_instructions=false'), 'Neko must control injected skill instructions');
-for (const feature of ['apps','browser_use','computer_use','plugins','remote_plugin','multi_agent','hooks','workspace_dependencies','skill_mcp_dependency_install']) assert.ok(args.includes(`features.${feature}=false`), `Ambient ${feature} bypasses Neko authority`);
+// Tool-free classifiers are isolated from the user's setup; agents get all of it.
+const classifier = ['Select runtime settings for this Neko conversation.', 'This is a connection check.', "Classify the user's latest ticket message.", 'Extract bounded memory proposals'].some(start => prompt.startsWith(start));
+const ambient = ['apps','browser_use','computer_use','plugins','remote_plugin','multi_agent','hooks','workspace_dependencies','skill_mcp_dependency_install'];
+if (classifier) {
+  assert.ok(args.includes('--ignore-user-config') && args.includes('--ignore-rules'), 'Classifiers must not load the user config');
+  assert.ok(args.includes('skills.include_instructions=false'));
+  for (const feature of ambient) assert.ok(args.includes(`features.${feature}=false`), `Classifier must disable ${feature}`);
+} else {
+  assert.ok(!args.includes('--ignore-user-config') && !args.includes('--ignore-rules'), 'Agents run with the user config');
+  assert.ok(!args.includes('skills.include_instructions=false') && !args.includes('web_search="disabled"'), 'Agents keep skills and web search');
+  for (const feature of ambient) assert.ok(!args.includes(`features.${feature}=false`), `Agents keep ${feature}`);
+  assert.ok(args.includes('features.default_mode_request_user_input=false'), 'Unattended agents cannot wait for a person');
+}
 if (prompt.startsWith('Select runtime settings for this Neko conversation.') || prompt.startsWith('This is a connection check.')) {
   assert.ok(args.includes('features.shell_tool=false'));
   assert.ok(!args.some(arg => arg.startsWith('mcp_servers.')));
@@ -64,7 +74,7 @@ if (prompt.startsWith('Extract one reusable skill')) {
   process.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
   process.exit(0);
 }
-const responsibility = prompt.includes("Investigate the user's standing responsibility");
+const responsibility = prompt.includes("Carry out the user's standing responsibility");
 assert.ok(!args.includes('features.code_mode_host=false'), 'Ordinary scoped tools require code-mode host transport');
 const chat = prompt.includes("You are Neko, the user's personal engineering agent");
 if (chat) {

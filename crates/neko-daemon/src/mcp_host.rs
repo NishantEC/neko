@@ -28,9 +28,14 @@ pub struct Host {
     watch_calls: Mutex<std::collections::HashMap<String, Vec<ProbeCall>>>,
 }
 
-/// Background wakes and probe replays: read-only tools only.
+/// Background wakes, which may use every granted tool, including writes.
 fn background_run(run_id: &str) -> bool {
     run_id.starts_with("watch:")
+}
+/// Probe replays repeat earlier calls on a timer, so they may only ever
+/// repeat a read: replaying a write would repeat its side effect.
+fn probe_run(run_id: &str) -> bool {
+    run_id.starts_with(PROBE_RUN_PREFIX)
 }
 const PROBE_RUN_PREFIX: &str = "watch:probe:";
 /// One tool call at a time reaches upstream servers. A call arriving while
@@ -936,7 +941,7 @@ impl Host {
                             continue;
                         }
                         for t in &c.tools {
-                            if background_run(&scope.run_id) && !t.read_only {
+                            if probe_run(&scope.run_id) && !t.read_only {
                                 continue;
                             }
                             if policy::authorize(&state, &scope.workspace_id, id, &t.name).is_ok() {
@@ -963,8 +968,8 @@ impl Host {
                 let tool =
                     policy::authorize(&state, &scope.workspace_id, &connection_id, &tool_name)?
                         .clone();
-                if background_run(&scope.run_id) && !tool.read_only {
-                    return Err("This background watch can call only tools declared read-only; ask Neko in chat for a write action".into());
+                if probe_run(&scope.run_id) && !tool.read_only {
+                    return Err("A change check replays only tools declared read-only".into());
                 }
                 let connection = state
                     .mcp
@@ -1084,7 +1089,8 @@ impl Host {
                 let raw = result?;
                 let result: serde_json::Value =
                     serde_json::from_str(&raw).map_err(|_| "Invalid MCP result")?;
-                if success && background_run(&scope.run_id) && !scope.run_id.starts_with(PROBE_RUN_PREFIX) {
+                // Only reads become probe calls; a watch's writes are never replayed.
+                if success && tool.read_only && background_run(&scope.run_id) && !probe_run(&scope.run_id) {
                     self.watch_calls
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1405,7 +1411,7 @@ mod tests {
         Arc::new(Host::new(Arc::new(Mutex::new(db))))
     }
     #[test]
-    fn background_run_sees_only_read_declared_tools_and_cannot_call_write_tool() {
+    fn watches_get_every_granted_tool_but_change_checks_only_repeat_reads() {
         let h = host();
         {
             let db = h.db.lock().unwrap();
@@ -1429,15 +1435,19 @@ mod tests {
             store::save(&db, &state).unwrap();
         }
         let revision = store::load(&h.db.lock().unwrap()).unwrap().agent_profiles.revision;
+        // A watch acts as the user would: every granted tool, writes included.
         let lease = h.lease("watch:test", "w", vec!["source".into()], revision).unwrap();
-        let token = || neko_protocol::workbench::Secret(lease.token().into());
+        let tools = h.bridge(BridgeRequest { token: neko_protocol::workbench::Secret(lease.token().into()), action: BridgeAction::List }).unwrap();
+        assert!(tools.contains("lookup") && tools.contains("delete"));
+        // A change check replays calls on a timer, so it may only ever repeat reads.
+        let probe = h.lease(&format!("{PROBE_RUN_PREFIX}r:1"), "w", vec!["source".into()], revision).unwrap();
+        let token = || neko_protocol::workbench::Secret(probe.token().into());
         let tools = h.bridge(BridgeRequest { token: token(), action: BridgeAction::List }).unwrap();
-        assert!(tools.contains("lookup"));
-        assert!(!tools.contains("delete"));
+        assert!(tools.contains("lookup") && !tools.contains("delete"));
         let error = h.bridge(BridgeRequest { token: token(), action: BridgeAction::Call {
             connection_id: "source".into(), tool_name: "delete".into(), arguments_json: "{}".into(),
         }}).unwrap_err();
-        assert!(error.contains("read-only"));
+        assert!(error.contains("read-only"), "{error}");
     }
     #[test]
     fn probe_replays_a_wakes_reads_and_sees_only_meaningful_changes() {

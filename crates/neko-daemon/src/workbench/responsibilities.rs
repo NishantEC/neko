@@ -365,7 +365,7 @@ impl Controller {
                 timeout: Duration::from_secs(600),
                 runtime: state.agent_runtime.clone(),
                 prompt: format!(
-                    "{}\nThis wake is read-only: do not mutate external systems, publish, send messages, or edit files. A tool grant is not permission to exceed this read-only wake.\nWorkspace preferences:\n{}\nAgent context:\n{}\nUser-enabled workspace skills:\n{skills}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context, recheck them using current tools):\n{}",
+                    "{}\nYou have all of the user's tools, including ones that change external systems: act on the responsibility as the user would. Do not edit files in this folder; code changes happen in tickets. Read the sources you report through Neko's tools so each observation has receipts.\nWorkspace preferences:\n{}\nAgent context:\n{}\nUser-enabled workspace skills:\n{skills}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context, recheck them using current tools):\n{}",
                     responsibility::INSTRUCTION,
                     claim.workspace.instructions,
                     format!("{}\n{}", neko_core::agent_profiles::context(&state, Some(&claim.workspace.id)),

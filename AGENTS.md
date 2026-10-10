@@ -160,9 +160,18 @@ with selected connections separately authorizes unattended checks. Local
 executable trust is separate; server annotations are not a security boundary.
 A per-run daemon bridge keeps upstream credentials out of worker configuration
 and rechecks current connection scope and schema.
-Its two tools alone are preapproved within the bridge. Restricted planning and
-watch runs keep shell networking disabled; authorized full-access task phases
-can use shell networking for dependency setup.
+**Agents run with everything the user's own CLI has (2026-10-11, owner
+decision: "it replaces a developer").** Codex agents load the user's config and
+rules, skills, plugins, hooks, web search, sub-agents and browser/computer use
+(only features that wait for a human answer stay off: `UNATTENDED_DISABLED_FEATURES`).
+Claude Code agents load the user's settings, CLAUDE.md, hooks, plugins, skills
+and MCP servers with every built-in tool and `bypassPermissions`. OpenCode
+loads project config and may fetch. Neko's bridge is added alongside. Tool-free
+classifiers (reply intent, runtime selection, memory extraction) stay fully
+isolated. Two checks remain because they are about correctness, not permission:
+read-only phases stay off the disk, and a reviewer cannot change what it reviews.
+Agents may message people and update issues; committing, pushing and pull
+requests stay with Neko so only reviewed work leaves the machine.
 Remote tools may mutate systems when called: local-fix authority is not
 publication authority and cancellation cannot undo completed remote effects.
 
@@ -181,9 +190,10 @@ Editing responsibility instructions/connections invalidates old eligibility.
 Trusted, connected sources with a granted read-declared tool that lists changing work now get one
 plan-only watch per available workspace without a second activation. An
 untried chat suggestion for that source is activated instead of duplicated;
-durable scope markers keep later manual pauses paused. Background leases expose
-and call only tools declared read-only, which still relies on the trusted
-server's honesty rather than creating a security boundary.
+durable scope markers keep later manual pauses paused. Background watches may
+call every granted tool, writes included, and act as the user would; only the
+timed change-check replays are limited to tools declared read-only, so a write
+is never repeated.
 No automatic installation, marketplace, arbitrary swarm, cloud execution,
 cross-workspace sharing, automatic merging or deployment is claimed. Legacy
 Codex/Paseo providers remain opt-in via `NEKO_LEGACY_AGENTS=1`.
@@ -6627,8 +6637,9 @@ this boundary. Profile revisions fence both capability issuance and result
 commit under the database lock. Learning proposals require explicit acceptance;
 shared profile memory never shares tool authority. `docs/architecture.md`'s final
 two sections and `docs/evidence/memory-learning.md` describe these current seams.
-Native CLI runs disable ambient plugins/agent spawning so only Neko-managed tools
-and workers participate. Do not re-enable those features as a compatibility fix.
+Agent CLI runs keep the user's full setup (config, plugins, skills, sub-agents,
+web, MCP servers); only tool-free classifier runs are isolated. See the
+"Agents run with everything" paragraph near the top before narrowing this.
 
 ## Maintaining this file
 

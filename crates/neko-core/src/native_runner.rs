@@ -38,9 +38,10 @@ const MAX_STDOUT: usize = 4 * 1024 * 1024;
 const MAX_STDERR: usize = 64 * 1024;
 const MAX_ANSWER: usize = 64 * 1024;
 const MAX_EVENT: usize = 2048;
-// Neko owns the agent pool and tool grants. Ambient tools must not bypass its
-// scoped bridge, even in ordinary writable task actors. All names are recognized
-// by the supported CLI; ignore-user-config alone does not suppress built-ins.
+// Agents run like the user's own Codex: their config, rules, MCP servers,
+// skills, plugins, web search, sub-agents and browser/computer use. Only the
+// tool-free extraction calls (classifiers in an empty folder) switch all of
+// this off. All names are recognized by the supported CLI.
 const AMBIENT_DISABLED_FEATURES: &[&str] = &[
     "image_generation",
     "skill_search",
@@ -70,6 +71,14 @@ const AMBIENT_DISABLED_FEATURES: &[&str] = &[
     "request_permissions_tool",
     "default_mode_request_user_input",
     "standalone_web_search",
+    "tool_call_mcp_elicitation",
+    "auth_elicitation",
+];
+// These wait for a person to answer. Neko's runs are unattended, so they
+// would only stall; every other capability stays on.
+const UNATTENDED_DISABLED_FEATURES: &[&str] = &[
+    "request_permissions_tool",
+    "default_mode_request_user_input",
     "tool_call_mcp_elicitation",
     "auth_elicitation",
 ];
@@ -258,7 +267,10 @@ fn run_configured_session(
     if *session == Session::Ephemeral {
         command.arg("--ephemeral");
     }
-    command.args(["--ignore-user-config", "--ignore-rules", "--skip-git-repo-check"]);
+    if extraction {
+        command.args(["--ignore-user-config", "--ignore-rules"]);
+    }
+    command.arg("--skip-git-repo-check");
     // This supported flag applies to both exec and exec resume (which has no
     // --sandbox option). Do not also supply a named restricted profile: it
     // would contradict full access or win during permission resolution.
@@ -269,15 +281,10 @@ fn run_configured_session(
         command.args(["-c", "default_permissions=\"neko\""]);
         command.args(["-c", &permission_profile()]);
     }
-    command
-        .args([
-            "-c",
-            "approval_policy=\"never\"",
-            "-c",
-            "skills.include_instructions=false",
-            "-c",
-            "web_search=\"disabled\"",
-        ]);
+    command.args(["-c", "approval_policy=\"never\""]);
+    if extraction {
+        command.args(["-c", "skills.include_instructions=false", "-c", "web_search=\"disabled\""]);
+    }
     match session {
         Session::Resume(id) => {
             if id.is_empty() || id.len() > 128 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
@@ -293,11 +300,12 @@ fn run_configured_session(
     if let Some(bridge) = bridge {
         configure_bridge(&mut command, bridge)?;
     }
-    for feature in AMBIENT_DISABLED_FEATURES {
+    let disabled = if extraction { AMBIENT_DISABLED_FEATURES } else { UNATTENDED_DISABLED_FEATURES };
+    for feature in disabled {
         command.args(["-c", &format!("features.{feature}=false")]);
     }
-    command.args(["-c", "features.skip_host_skill_discovery=true"]);
     if extraction {
+        command.args(["-c", "features.skip_host_skill_discovery=true"]);
         if spec.writable || bridge.is_some() {
             return Err("Extraction cannot receive write or tool authority".into());
         }
@@ -762,7 +770,7 @@ fn prompt_with_git(prompt: &str) -> String {
         None => "No direct developer Git executable is available. The /usr/bin/git launcher may fail when its cache is not writable; report that failure as missing evidence.".into(),
     };
     format!(
-        "{prompt}\n\nHost tool instruction: {instruction} Sandbox permissions are unchanged. Report real Git failures and missing diff evidence; never treat an error as a clean result.\n"
+        "{prompt}\n\nHost tool instruction: {instruction} Report real Git failures and missing diff evidence; never treat an error as a clean result. You have the user's own configuration, skills and tools. Where their instructions (CLAUDE.md, AGENTS.md, skills, output style) conflict with the role or the exact reply format this prompt asks for, follow this prompt: Neko reads your reply mechanically.\n"
     )
 }
 
@@ -1990,26 +1998,16 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"d
                 .unwrap()
                 .contains("UNIQUE_SKILL_INSTRUCTION")
         );
-        assert!(
-            fs::read_to_string(temp.path().join("arguments"))
-                .unwrap()
-                .contains("skills.include_instructions=false")
-        );
         let arguments = fs::read_to_string(temp.path().join("arguments")).unwrap();
-        for feature in [
-            "apps",
-            "browser_use",
-            "computer_use",
-            "multi_agent",
-            "hooks",
-            "plugins",
-            "remote_plugin",
-            "skill_mcp_dependency_install",
-        ] {
-            assert!(
-                arguments.contains(&format!("features.{feature}=false")),
-                "Ambient {feature} bypasses Neko authority"
-            );
+        // Agents run like the user's own Codex: skills, plugins, hooks,
+        // sub-agents and browser/computer use all stay available.
+        assert!(!arguments.contains("skills.include_instructions=false"));
+        assert!(!arguments.contains("skip_host_skill_discovery"));
+        for feature in ["apps", "browser_use", "computer_use", "multi_agent", "hooks", "plugins", "remote_plugin", "skill_mcp_dependency_install"] {
+            assert!(!arguments.contains(&format!("features.{feature}=false")), "{feature} must stay available");
+        }
+        for feature in UNATTENDED_DISABLED_FEATURES {
+            assert!(arguments.contains(&format!("features.{feature}=false")), "{feature} would wait for a person who is not there");
         }
         assert!(
             !arguments.contains("features.shell_tool=false"),
@@ -2403,8 +2401,6 @@ printf '%s\n' '{"type":"turn.completed"}'
             "exec",
             "--json",
             "--ephemeral",
-            "--ignore-user-config",
-            "--ignore-rules",
             "approval_policy=\"never\"",
             "default_permissions=\"neko\"",
         ] {
@@ -2413,6 +2409,8 @@ printf '%s\n' '{"type":"turn.completed"}'
                 "Missing {expected}: {args}"
             );
         }
+        // The user's own config and rules load for agents.
+        assert!(!args.lines().any(|arg| arg == "--ignore-user-config" || arg == "--ignore-rules"), "{args}");
         assert!(args.contains("extends=\":read-only\""), "{args}");
         assert!(args.contains("/Pictures\"=\"none\""), "privacy folders must be denied: {args}");
         assert!(!args.contains("--dangerously-bypass-approvals-and-sandbox"));
@@ -2835,10 +2833,14 @@ printf '%s' '{"type":"turn.completed"}'
         assert!(args.contains("--dangerously-bypass-approvals-and-sandbox"), "{args}");
         assert!(!args.contains("permissions.neko") && !args.contains("default_permissions"));
         assert!(!args.contains("workspace-write") && !args.contains("sandbox_workspace_write"));
-        for feature in AMBIENT_DISABLED_FEATURES {
+        for feature in UNATTENDED_DISABLED_FEATURES {
             assert!(args.contains(&format!("features.{feature}=false")));
         }
-        assert!(args.contains("web_search=\"disabled\""));
+        for feature in AMBIENT_DISABLED_FEATURES.iter().filter(|f| !UNATTENDED_DISABLED_FEATURES.contains(f)) {
+            assert!(!args.contains(&format!("features.{feature}=false")), "{feature} must stay available");
+        }
+        assert!(!args.contains("web_search=\"disabled\""), "agents can search the web");
+        assert!(!args.contains("--ignore-user-config"));
     }
 
     #[test]
