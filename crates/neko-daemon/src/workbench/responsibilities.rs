@@ -196,10 +196,11 @@ impl RunAuthority {
                         && current.responsibility_id == source.responsibility_id
                         && current.connection_id == source.connection_id
                         && current.external_id == source.external_id
-                        && current.revision == source.revision
-                        && current.title == source.title
-                        && current.description == source.description
-                        && current.eligible == source.eligible
+                        // Same item, still actionable. Its revision, title and
+                        // description are left out: a busy Sentry issue's
+                        // event count and last-seen time change on every
+                        // check, which threw away every ticket working on it.
+                        && (current.eligible || !source.eligible)
                 })
             })
     }
@@ -1056,5 +1057,16 @@ mod tests {
         assert_eq!(state.tasks.len(), 2);
         assert_eq!(state.mcp.sources.len(), 1);
         assert_eq!(state.mcp.responsibilities[0].failures, 0);
+
+        // A busy issue's counts change on every check: work continues.
+        let busier = raw.replace("\"revision\":\"v1\"", "\"revision\":\"v2\"").replace("Current bug", "Current bug, 152 events, last seen now");
+        controller.finish_wake(&claim, Ok(&busier), vec![], 0, 103).unwrap();
+        let state = controller.command(Command::Snapshot).unwrap();
+        assert!(authority.valid(&state), "a changed revision or description must not cancel ongoing work");
+        // The item stops being actionable: the work stops.
+        let resolved = busier.replace("\"eligible\":true", "\"eligible\":false");
+        controller.finish_wake(&claim, Ok(&resolved), vec![], 0, 104).unwrap();
+        let state = controller.command(Command::Snapshot).unwrap();
+        assert!(!authority.valid(&state), "a source that is no longer actionable stops its work");
     }
 }

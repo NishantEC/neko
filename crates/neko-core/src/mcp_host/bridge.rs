@@ -244,7 +244,12 @@ mod tests {
     #[test]
     fn only_server_discovery_is_answered_before_rmcp() {
         let reply = discovery_refusal(r#"{"jsonrpc":"2.0","id":"probe-1","method":"server/discover","params":{}}"#).unwrap();
-        assert_eq!(reply, r#"{"error":{"code":-32601,"message":"Method not found"},"id":"probe-1","jsonrpc":"2.0"}"#);
+        // Compared as values: key order depends on serde_json features that
+        // workspace builds unify differently.
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&reply).unwrap(),
+            serde_json::json!({"jsonrpc":"2.0","id":"probe-1","error":{"code":-32601,"message":"Method not found"}})
+        );
         assert!(discovery_refusal(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#).is_none());
         assert!(discovery_refusal(r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"x","arguments":{"q":"server/discover"}}}"#).is_none());
     }
