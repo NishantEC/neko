@@ -427,21 +427,27 @@ pub(crate) fn run(
     let prompt = if extraction { spec.prompt.clone() } else { prompt_with_git(&spec.prompt) };
     let mut parser = Parser::new(agent, extraction);
     let mut pending: Vec<u8> = Vec::new();
+    let mut oversized = false;
     let output = execute(command, prompt.as_bytes(), cancel, spec.timeout, |bytes| {
         for &byte in bytes {
             if byte == b'\n' {
-                parser.line(&pending, on_event)?;
-                pending.clear();
-            } else {
-                if pending.len() >= MAX_LINE {
-                    return Err(format!("{} JSON line exceeded the output limit", agent.label()));
+                // An oversized event (a huge tool result) is skipped, not fatal.
+                if !std::mem::take(&mut oversized) {
+                    parser.line(&pending, on_event)?;
                 }
-                pending.push(byte);
+                pending.clear();
+            } else if !oversized {
+                if pending.len() >= MAX_LINE {
+                    oversized = true;
+                    pending.clear();
+                } else {
+                    pending.push(byte);
+                }
             }
         }
         Ok(())
     })?;
-    if !pending.is_empty() {
+    if !pending.is_empty() && !oversized {
         parser.line(&pending, on_event)?;
     }
     if !output.status.success() {

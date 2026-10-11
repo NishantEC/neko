@@ -33,8 +33,14 @@ pub(crate) mod cli_workers;
 pub mod publish;
 mod review_state;
 pub use review_state::{ReviewState, capture_review_state};
+/// One event line kept for parsing. A longer line (a tool returned a very
+/// large result) is skipped rather than failing the run: it is progress
+/// detail, and the final answer is bounded separately.
 const MAX_LINE: usize = 256 * 1024;
-const MAX_STDOUT: usize = 4 * 1024 * 1024;
+/// Total output over a run. Lines are parsed and dropped as they arrive, so
+/// this bounds runaway chatter, not memory; a watch listing many issues can
+/// legitimately produce tens of megabytes of tool results.
+const MAX_STDOUT: usize = 64 * 1024 * 1024;
 const MAX_STDERR: usize = 64 * 1024;
 const MAX_ANSWER: usize = 64 * 1024;
 const MAX_EVENT: usize = 2048;
@@ -435,21 +441,26 @@ fn run_configured_session(
         prompt
     };
     let quiet = (!extraction).then_some((&stall, QUIET_LIMIT));
+    let mut oversized = false;
     let output = execute_watched(command, prompt.as_bytes(), cancel, spec.timeout, quiet, |bytes| {
         for &byte in bytes {
             if byte == b'\n' {
-                parse_line(&pending)?;
-                pending.clear();
-            } else {
-                if pending.len() >= MAX_LINE {
-                    return Err("Codex JSON line exceeded the output limit".into());
+                if !std::mem::take(&mut oversized) {
+                    parse_line(&pending)?;
                 }
-                pending.push(byte);
+                pending.clear();
+            } else if !oversized {
+                if pending.len() >= MAX_LINE {
+                    oversized = true;
+                    pending.clear();
+                } else {
+                    pending.push(byte);
+                }
             }
         }
         Ok(())
     })?;
-    if !pending.is_empty() {
+    if !pending.is_empty() && !oversized {
         parse_line(&pending)?;
     }
     if !output.status.success() {
@@ -1584,6 +1595,25 @@ fn execute_with_guard(
 #[cfg(test)]
 mod stall_tests {
     use super::*;
+
+    #[test]
+    fn an_oversized_tool_event_is_skipped_not_fatal() {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("codex");
+        fs::write(&executable, format!(
+            "#!/bin/sh\ncat > /dev/null\nprintf '%s' '{{\"type\":\"item.completed\",\"item\":{{\"type\":\"mcp_tool_call\",\"result\":\"'\nhead -c {} /dev/zero | tr '\\0' x\nprintf '%s\\n' '\"}}}}'\nprintf '%s\\n' '{{\"type\":\"item.completed\",\"item\":{{\"type\":\"agent_message\",\"text\":\"Done\"}}}}'\nprintf '%s\\n' '{{\"type\":\"turn.completed\"}}'\n",
+            MAX_LINE + 4096
+        )).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let spec = RunSpec {
+            directory: temp.path().to_owned(),
+            prompt: "x".into(),
+            writable: true,
+            timeout: Duration::from_secs(20),
+            runtime: Default::default(),
+        };
+        assert_eq!(run_with_executable(&executable, &spec, &AtomicBool::new(false), |_| {}).unwrap(), "Done");
+    }
 
     #[test]
     fn only_identical_repeated_failures_stop_an_agent() {
