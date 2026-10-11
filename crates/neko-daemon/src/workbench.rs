@@ -1459,6 +1459,7 @@ fn converse(
                 executable: std::env::current_exe().map_err(|e| e.to_string())?,
                 socket: neko_protocol::socket_path(),
                 token: lease.token().into(),
+                sources_through_bridge: false,
             };
             // Lease drop also cancels any approval waiter and in-flight call.
             native_runner::run_with_bridge(&spec, &bridge, cancel, |_| {})

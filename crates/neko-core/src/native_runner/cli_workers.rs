@@ -144,6 +144,10 @@ pub(crate) fn claude_args(spec: &RunSpec, bridge: Option<&BridgeConfig>, extract
         if !bridge.executable.is_absolute() {
             return Err("Invalid scoped bridge configuration".into());
         }
+        if bridge.sources_through_bridge {
+            // A watch's findings must cite Neko receipts: MCP only via the bridge.
+            args.push("--strict-mcp-config".into());
+        }
         // The bridge reads its token and socket from the inherited environment.
         let config = serde_json::json!({"mcpServers": {"neko": {"type": "stdio", "command": bridge.executable, "args": ["--mcp-bridge"]}}});
         args.extend(["--mcp-config".into(), config.to_string()]);
@@ -493,10 +497,13 @@ mod tests {
         assert!(extract.windows(2).any(|w| w[0] == "--setting-sources" && w[1].is_empty()));
         assert!(extract.contains(&"--strict-mcp-config".to_string()));
         assert!(extract.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]));
-        let bridge = BridgeConfig { executable: "/bin/neko-daemon".into(), socket: "/s".into(), token: "secret".into() };
+        let bridge = BridgeConfig { executable: "/bin/neko-daemon".into(), socket: "/s".into(), token: "secret".into(), sources_through_bridge: false };
         let bridged = claude_args(&spec(false), Some(&bridge), false).unwrap();
         assert!(bridged.iter().any(|a| a.contains("--mcp-bridge")), "Neko's tools are added alongside the user's");
         assert!(!bridged.iter().any(|a| a.contains("secret")), "the token never appears in argv");
+        assert!(!bridged.contains(&"--strict-mcp-config".to_string()), "agents keep the user's own servers");
+        let watch = BridgeConfig { sources_through_bridge: true, ..bridge };
+        assert!(claude_args(&spec(false), Some(&watch), false).unwrap().contains(&"--strict-mcp-config".to_string()), "a watch reads sources only through Neko");
     }
 
     #[test]

@@ -113,6 +113,11 @@ pub struct BridgeConfig {
     pub executable: PathBuf,
     pub socket: PathBuf,
     pub token: String,
+    /// A watch check: its findings must cite receipts from Neko's bridge, so
+    /// its MCP servers come only through the bridge (which carries the same
+    /// connections, writes included). Everything else from the user's setup
+    /// still loads. Ordinary agents keep the user's own servers alongside.
+    pub sources_through_bridge: bool,
 }
 fn configure_bridge(command: &mut Command, bridge: &BridgeConfig) -> Result<(), String> {
     if !bridge.executable.is_absolute() || !bridge.socket.is_absolute() || bridge.token.is_empty() {
@@ -122,10 +127,36 @@ fn configure_bridge(command: &mut Command, bridge: &BridgeConfig) -> Result<(), 
         .map_err(|_| "Invalid bridge executable")?;
     command.args(["-c", &format!("mcp_servers.neko={{command={executable},args=[\"--mcp-bridge\"],env_vars=[\"NEKO_MCP_TOKEN\",\"NEKO_MCP_SOCKET\"],required=true,tool_timeout_sec=600,enabled_tools=[\"neko_list_tools\",\"neko_call_tool\"],default_tools_approval_mode=\"prompt\",tools={{neko_list_tools={{approval_mode=\"approve\"}},neko_call_tool={{approval_mode=\"approve\"}}}}}}")]);
     command.args(["-c", "shell_environment_policy.exclude=[\"NEKO_MCP_*\"]"]);
+    if bridge.sources_through_bridge {
+        for name in user_codex_mcp_servers() {
+            if name != "neko" {
+                command.args(["-c", &format!("mcp_servers.{}.enabled=false", toml_key(&name))]);
+            }
+        }
+    }
     command
         .env("NEKO_MCP_TOKEN", &bridge.token)
         .env("NEKO_MCP_SOCKET", &bridge.socket);
     Ok(())
+}
+
+/// MCP server names in the user's own Codex config.
+fn user_codex_mcp_servers() -> Vec<String> {
+    let home = std::env::var_os("CODEX_HOME").map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".codex")));
+    let Some(text) = home.and_then(|h| fs::read_to_string(h.join("config.toml")).ok()) else { return vec![] };
+    text.parse::<toml::Table>().ok()
+        .and_then(|t| t.get("mcp_servers").and_then(|v| v.as_table()).map(|s| s.keys().cloned().collect()))
+        .unwrap_or_default()
+}
+
+/// A TOML key, quoted unless it is a bare key.
+fn toml_key(name: &str) -> String {
+    if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        name.to_owned()
+    } else {
+        format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
+    }
 }
 
 pub fn run_with_bridge(
@@ -1678,7 +1709,7 @@ mod tests {
         let bridge = super::BridgeConfig {
             executable: "/app/neko-daemon".into(),
             socket: "/tmp/neko.sock".into(),
-            token: "synthetic-secret-token".into(),
+            token: "synthetic-secret-token".into(), sources_through_bridge: false,
         };
         super::configure_bridge(&mut command, &bridge).unwrap();
         let args: Vec<_> = command
