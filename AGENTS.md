@@ -91,8 +91,11 @@ once an independent review passes, the daemon commits the reviewed worktree, pus
 Repositories listed in `Snapshot::land_on_main` (per checkout, toggled in the ticket inspector) instead
 fast-forward local `main` with nothing pushed: a moved `main` is rebased onto, a conflict or an overwrite of
 local edits is refused, and the ticket records `landed_commit`. The `neko` repo itself is set to land on main.
-Every eligible ticket starts its own worker on the next two-second supervisor
-tick, without a fixed global or workspace cap. Active claims prevent duplicate
+Every eligible ticket starts its own worker without a fixed global or
+workspace cap, but new workers are paced (`workbench/admission.rs`): a burst of
+six, then one every ten seconds, and none while the one-minute load average is
+20 or more (this machine restarted at load 240 on 2026-10-11). Running work is
+never touched. Active claims prevent duplicate
 workers for one ticket; dependencies, approvals and scope checks still apply.
 Git checkout creation serializes per shared repository with cancellable waiting;
 model work stays concurrent. Restarted split parents wait for verified children.
@@ -189,7 +192,14 @@ daemon replays them through the normal scoped bridge and compares normalized
 result fingerprints (volatile fields such as counts, cursors and last-seen
 times ignored). No change means no model run. Any change, probe error, edited
 instruction/connections, a manual Check now, or three hours since the last full
-wake runs a full wake. A failed wake keeps the old probe so a change is not lost. Successful scoped receipts back source
+wake runs a full wake. A failed wake keeps the old probe so a change is not lost. A wake
+whose tool calls failed is marked `Degraded:` and records no probe, so a
+blind watch keeps running full checks instead of a probe of its few working
+reads saying "no change". A call refused because the vendor changed the tool
+since discovery rediscovers that connection (at most every 10 minutes),
+re-grants it and retries once (`Host::bridge`); a recovered call does not
+degrade the wake. Oversized agent event lines (a huge tool result) are skipped
+rather than failing the run; total output per run is capped at 64 MiB. Successful scoped receipts back source
 observations; a fresh unchanged actionable source plus a bounded low-risk
 model assessment can authorize a local fix when explicitly enabled. Manual
 tasks, missing evidence and sensitive/uncertain changes still need approval.
