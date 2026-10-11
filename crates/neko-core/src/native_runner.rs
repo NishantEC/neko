@@ -2537,9 +2537,11 @@ printf '%s\n' '{error}'
 
     #[test]
     fn oversized_unterminated_stdout_is_bounded() {
+        // The oversized line is skipped without being buffered; with no
+        // completed turn the run still fails rather than succeeding.
         let (_temp, exe, spec) = fixture("head -c 400000 /dev/zero | tr '\\000' x");
         let err = run_with_executable(&exe, &spec, &AtomicBool::new(false), |_| {}).unwrap_err();
-        assert!(err.contains("limit"), "{err}");
+        assert!(err.contains("without completing"), "{err}");
     }
 
     #[test]
@@ -2887,7 +2889,8 @@ printf '%s' '{"type":"turn.completed"}'
 
     #[test]
     fn repeated_valid_events_also_have_a_total_output_limit() {
-        let (_temp, exe, spec) = fixture("yes '{\"type\":\"unknown\"}' | head -c 5000000");
+        // Just over MAX_STDOUT of individually valid ~200 KB events.
+        let (_temp, exe, spec) = fixture("awk 'BEGIN{s=sprintf(\"%200000s\",\"\"); gsub(/ /,\"x\",s); for(i=0;i<345;i++) print \"{\\\"type\\\":\\\"unknown\\\",\\\"pad\\\":\\\"\" s \"\\\"}\"}'");
         let err = run_with_executable(&exe, &spec, &AtomicBool::new(false), |_| {}).unwrap_err();
         assert!(err.contains("limit"), "{err}");
     }
