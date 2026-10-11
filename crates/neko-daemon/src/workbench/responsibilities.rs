@@ -460,6 +460,7 @@ impl Controller {
             executable: std::env::current_exe().map_err(|_| "Cannot locate Neko MCP bridge")?,
             socket: neko_protocol::socket_path(),
             token: lease.token().into(),
+            sources_through_bridge: run_id.starts_with("watch:"),
         };
         let lease = Mutex::new(Some(lease));
         let finished = AtomicBool::new(false);
