@@ -624,7 +624,7 @@ fn create_worktree_in_cancellable(
         .canonicalize()
         .map_err(|e| format!("Repository unavailable: {e}"))?;
     let checkout = checkout_lock(&repository, cancel)?;
-    let _checkout = wait_for_checkout(&checkout, cancel)?;
+    let checkout_guard = wait_for_checkout(&checkout, cancel)?;
     if git_output(&repository, &["rev-parse", "--is-inside-work-tree"], cancel)?.trim() != "true" {
         return Err("Choose a non-bare Git repository".into());
     }
@@ -696,7 +696,121 @@ fn create_worktree_in_cancellable(
             bounded_text(&output.stderr, MAX_EVENT)
         ));
     }
+    // Seeding only copies files. Release the shared checkout lock first so a
+    // large clone never delays another ticket's checkout of this repository.
+    drop(checkout_guard);
+    seed_dependency_folders(&repository, &path, cancel);
     Ok(path)
+}
+
+/// Deepest directory level searched for dependency folders: the root plus
+/// workspace packages such as `packages/ui` or `apps/web/packages/kit`.
+const DEPENDENCY_SEARCH_DEPTH: usize = 4;
+/// Bounds the walk, so an unusual tree cannot turn checkout into a crawl.
+const MAX_SEEDED_DEPENDENCY_FOLDERS: usize = 64;
+/// Bounds one clone. A clone that fails or times out is removed.
+const DEPENDENCY_SEED_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Gives a fresh task worktree the source checkout's installed JavaScript
+/// dependencies as APFS copy-on-write clones (`cp -c`): no network, almost no
+/// extra disk, and the agent's own install then reconciles only lockfile
+/// differences instead of downloading everything again. Before this, every
+/// ticket in a large repository spent a full install and its disk.
+///
+/// Best effort by design. Only folders the new worktree's Git ignores are
+/// seeded, so before/after snapshots and reviews never see them; any failure
+/// leaves the worktree exactly as `git worktree add` made it, and the agent's
+/// own dependency setup does the full work as before. Copying runs no
+/// repository code. Returns how many folders were seeded.
+fn seed_dependency_folders(source: &Path, worktree: &Path, cancel: &AtomicBool) -> usize {
+    let mut candidates = Vec::new();
+    collect_dependency_folders(source, source, 0, &mut candidates);
+    candidates.retain(|relative| {
+        let destination = worktree.join(relative);
+        // A package the ticket's commit lacks has no folder to seed into.
+        !destination.exists() && destination.parent().is_some_and(Path::is_dir)
+    });
+    if candidates.is_empty() {
+        return 0;
+    }
+    let ignored = ignored_paths(worktree, &candidates, cancel);
+    let mut seeded = 0;
+    for relative in candidates.iter().filter(|relative| ignored.contains(relative)) {
+        if cancel.load(Ordering::Acquire) {
+            break;
+        }
+        let destination = worktree.join(relative);
+        let mut copy = Command::new("/bin/cp");
+        copy.arg("-c").arg("-R").arg(source.join(relative)).arg(&destination);
+        match execute(copy, &[], cancel, DEPENDENCY_SEED_TIMEOUT, |_| Ok(())) {
+            Ok(output) if output.status.success() => seeded += 1,
+            _ => {
+                let _ = fs::remove_dir_all(&destination);
+            }
+        }
+    }
+    seeded
+}
+
+/// Relative paths of `node_modules` folders under `root`. Hidden folders
+/// (`.git`, nested worktrees) and existing dependency folders are never
+/// walked, and symlinked folders are neither walked nor returned.
+fn collect_dependency_folders(root: &Path, directory: &Path, depth: usize, found: &mut Vec<PathBuf>) {
+    if depth > DEPENDENCY_SEARCH_DEPTH {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(fs::DirEntry::file_name);
+    for entry in entries {
+        if found.len() >= MAX_SEEDED_DEPENDENCY_FOLDERS {
+            return;
+        }
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let name = entry.file_name();
+        let path = entry.path();
+        if name == "node_modules" {
+            if let Ok(relative) = path.strip_prefix(root) {
+                found.push(relative.to_path_buf());
+            }
+        } else if !name.as_encoded_bytes().starts_with(b".") && name != "target" {
+            collect_dependency_folders(root, &path, depth + 1, found);
+        }
+    }
+}
+
+/// Which `candidates` the worktree's Git ignores. Each is asked about as a
+/// directory (trailing `/`), because the folder does not exist yet and a
+/// `node_modules/` pattern only matches directories. Any Git failure answers
+/// "none", which seeds nothing.
+fn ignored_paths(worktree: &Path, candidates: &[PathBuf], cancel: &AtomicBool) -> Vec<PathBuf> {
+    let mut command = git_command(worktree);
+    command.args(["check-ignore", "--stdin", "-z"]);
+    let mut input = Vec::new();
+    for candidate in candidates {
+        input.extend_from_slice(candidate.as_os_str().as_encoded_bytes());
+        input.extend_from_slice(b"/\0");
+    }
+    let mut stdout = Vec::new();
+    let Ok(output) = execute(command, &input, cancel, Duration::from_secs(15), |chunk| {
+        stdout.extend_from_slice(chunk);
+        Ok(())
+    }) else {
+        return Vec::new();
+    };
+    // Exit status 1 means "nothing is ignored", which is an answer, not a failure.
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Vec::new();
+    }
+    stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| PathBuf::from(String::from_utf8_lossy(path.strip_suffix(b"/").unwrap_or(path)).into_owned()))
+        .collect()
 }
 
 /// Fixed installed developer-tool candidates, resolved on the host before the
@@ -2812,6 +2926,52 @@ printf '%s\n' '{"type":"turn.completed"}'
         );
         assert!(!path.join("hook-ran").exists());
         assert!(create_worktree_in(&repo, "task-123", &root).is_err());
+    }
+
+    fn committed_fixture(repo: &Path, files: &[(&str, &str)]) {
+        fs::create_dir_all(repo).unwrap();
+        git(repo, &["init", "-q"]);
+        for (name, contents) in files {
+            let file = repo.join(name);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, contents).unwrap();
+        }
+        git(repo, &["add", "."]);
+        git(repo, &["-c", "user.name=Neko Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]);
+    }
+
+    fn install(repo: &Path, folder: &str) {
+        fs::create_dir_all(repo.join(folder)).unwrap();
+        fs::write(repo.join(folder).join("index.js"), "module.exports = 1;\n").unwrap();
+    }
+
+    #[test]
+    fn new_worktrees_are_seeded_with_ignored_dependency_folders() {
+        let temp = TempDir::new().unwrap();
+        let repo = temp.path().join("repository");
+        committed_fixture(&repo, &[(".gitignore", "node_modules/\n"), ("packages/ui/package.json", "{}\n")]);
+        // Installed after the commit, exactly like a developer's checkout.
+        install(&repo, "node_modules/left-pad");
+        install(&repo, "packages/ui/node_modules/tiny");
+        // A package the ticket's commit lacks has nowhere to be seeded.
+        install(&repo, "scratch/node_modules/stray");
+        let path = create_worktree_in(&repo, "task-deps", &temp.path().join("worktrees")).unwrap();
+        assert!(path.join("node_modules/left-pad/index.js").is_file());
+        assert!(path.join("packages/ui/node_modules/tiny/index.js").is_file());
+        assert!(!path.join("scratch").exists());
+        assert_eq!(git(&path, &["status", "--porcelain"]), "", "seeded folders must stay invisible to snapshots and review");
+        assert!(repo.join("node_modules/left-pad/index.js").is_file(), "the source checkout is untouched");
+    }
+
+    #[test]
+    fn dependency_folders_git_does_not_ignore_are_never_seeded() {
+        let temp = TempDir::new().unwrap();
+        let repo = temp.path().join("repository");
+        committed_fixture(&repo, &[("README.md", "fixture\n")]);
+        install(&repo, "node_modules/left-pad");
+        let path = create_worktree_in(&repo, "task-unignored", &temp.path().join("worktrees")).unwrap();
+        assert!(!path.join("node_modules").exists(), "an unignored folder would surface in the ticket's diff");
+        assert_eq!(git(&path, &["status", "--porcelain"]), "");
     }
 
     #[test]

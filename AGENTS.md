@@ -98,7 +98,13 @@ six, then one every ten seconds, and none while the one-minute load average is
 never touched. Active claims prevent duplicate
 workers for one ticket; dependencies, approvals and scope checks still apply.
 Git checkout creation serializes per shared repository with cancellable waiting;
-model work stays concurrent. Restarted split parents wait for verified children.
+model work stays concurrent. After that lock is released, a new task worktree is
+seeded with APFS copy-on-write clones of the source checkout's Git-ignored
+`node_modules` folders (`native_runner::seed_dependency_folders`, best effort):
+the agent's own install then reconciles lockfile differences instead of a full
+download, a seeded folder never appears in snapshots or review, and any failure
+leaves the plain checkout (measured on hme/athena: 39s and 62 MB of real disk
+for a 2.3 GB `node_modules`). Restarted split parents wait for verified children.
 The selected runtime runs each phase; quota-aware provider switching is not
 implemented. An awaiting
 plan can request a read-only two/three-subtask proposal; explicit approval
