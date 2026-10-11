@@ -465,12 +465,9 @@ fn run_configured_session(
     }
     if !output.status.success() {
         return Err(format!(
-            "Codex exited with {}: {}{}",
+            "Codex exited with {}: {}",
             output.status,
-            bounded_text(output.stderr.trim(), MAX_EVENT),
-            failure
-                .map(|message| format!(" {message}"))
-                .unwrap_or_default()
+            exit_reason(failure.as_deref(), &output.stderr)
         ));
     }
     if let Some(error) = failure {
@@ -1154,6 +1151,22 @@ fn bounded_text(text: &str, max: usize) -> String {
     text[..end].to_owned()
 }
 
+/// Why a CLI run failed, most useful first. The turn's own failure ("out of
+/// credits") leads; stderr follows without the connection warnings a user's
+/// own MCP servers print when one is not signed in, which otherwise filled
+/// the bounded message and hid the real reason.
+fn exit_reason(failure: Option<&str>, stderr: &str) -> String {
+    let noise = |line: &&str| line.contains("rmcp::transport") || line.contains("AuthRequired") || line.trim() == "Reading additional input from stdin...";
+    let detail = stderr.lines().filter(|line| !noise(line)).collect::<Vec<_>>().join("\n");
+    let reason = match (failure, detail.trim()) {
+        (Some(failure), "") => failure.to_owned(),
+        (Some(failure), detail) => format!("{failure} ({detail})"),
+        (None, "") => "no details".to_owned(),
+        (None, detail) => detail.to_owned(),
+    };
+    bounded_text(&reason, MAX_EVENT)
+}
+
 struct ProcessOutput {
     status: ExitStatus,
     stderr: String,
@@ -1595,6 +1608,14 @@ fn execute_with_guard(
 #[cfg(test)]
 mod stall_tests {
     use super::*;
+
+    #[test]
+    fn the_real_failure_leads_and_mcp_sign_in_noise_is_dropped() {
+        let stderr = "2026 ERROR rmcp::transport::worker: worker quit with fatal: AuthRequired(...)\nReading additional input from stdin...\n";
+        assert_eq!(exit_reason(Some("Your workspace is out of credits."), stderr), "Your workspace is out of credits.");
+        assert_eq!(exit_reason(None, "boom\n"), "boom");
+        assert_eq!(exit_reason(Some("failed"), "context: x"), "failed (context: x)");
+    }
 
     #[test]
     fn an_oversized_tool_event_is_skipped_not_fatal() {
