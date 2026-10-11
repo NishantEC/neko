@@ -273,6 +273,7 @@ impl Controller {
         claim: &WakeClaim,
         result: Result<&str, &str>,
         calls: Vec<neko_protocol::mcp_host::ProbeCall>,
+        failures: u32,
         now: i64,
     ) -> Result<(), String> {
         let db = self
@@ -303,7 +304,13 @@ impl Controller {
             // The calls this wake made become the cheap check for the next ones.
             // A failed wake keeps the old probe, so a change it could not
             // process is still seen as a change next time.
-            responsibility::record_probe(&mut candidate, &claim.responsibility.id, calls, now);
+            if failures == 0 {
+                responsibility::record_probe(&mut candidate, &claim.responsibility.id, calls, now);
+            } else {
+                // A check that could not read everything is degraded: say so,
+                // and keep running full checks until its reads work again.
+                responsibility::mark_degraded(&mut candidate, &claim.responsibility.id, failures);
+            }
             // Saving the cloned state is the commit point for all observations.
             if store::save(&db, &candidate).is_ok() {
                 return Ok(());
@@ -386,11 +393,12 @@ impl Controller {
             };
             self.run_native(&spec, &claim.run_id, &authority, &cancel, |_| {})
         })();
-        let calls = self.mcp.take_watch_calls(&claim.run_id);
+        let (calls, failures) = self.mcp.take_watch_calls(&claim.run_id);
         self.finish_wake(
             &claim,
             result.as_deref().map_err(String::as_str),
             calls,
+            failures,
             store::now_ms(),
         )
     }
@@ -683,7 +691,7 @@ mod tests {
     fn invalid_result_records_failure_and_backoff_without_creating_tasks() {
         let controller = configured();
         let claim = controller.claim_due(100).unwrap().unwrap();
-        controller.finish_wake(&claim, Ok("not JSON"), vec![], 101).unwrap();
+        controller.finish_wake(&claim, Ok("not JSON"), vec![], 0, 101).unwrap();
         let state = controller.command(Command::Snapshot).unwrap();
         assert_eq!(state.tasks.len(), 1);
         assert_eq!(state.mcp.responsibilities[0].failures, 1);
@@ -698,12 +706,12 @@ mod tests {
         };
         // A failed wake records no probe: its reads were never processed.
         let claim = controller.claim_due(100).unwrap().unwrap();
-        controller.finish_wake(&claim, Ok("not JSON"), vec![call.clone()], 101).unwrap();
+        controller.finish_wake(&claim, Ok("not JSON"), vec![call.clone()], 0, 101).unwrap();
         assert!(controller.command(Command::Snapshot).unwrap().mcp.probes.is_empty());
 
         let due = controller.command(Command::Snapshot).unwrap().mcp.responsibilities[0].next_due_ms;
         let claim = controller.claim_due(due).unwrap().unwrap();
-        controller.finish_wake(&claim, Ok(r#"{"summary":"Checked 2 issues","observations":[]}"#), vec![call], due + 1).unwrap();
+        controller.finish_wake(&claim, Ok(r#"{"summary":"Checked 2 issues","observations":[]}"#), vec![call], 0, due + 1).unwrap();
         let state = controller.command(Command::Snapshot).unwrap();
         let r = &state.mcp.responsibilities[0];
         assert_eq!(r.next_due_ms, due + 1 + responsibility::PROBE_INTERVAL_MS, "a watch with a probe checks again soon");
@@ -730,7 +738,7 @@ mod tests {
             store::save(&db, &state).unwrap();
         }
         controller
-            .finish_wake(&claim, Ok(r#"{"summary":"late","observations":[]}"#), vec![], 101)
+            .finish_wake(&claim, Ok(r#"{"summary":"late","observations":[]}"#), vec![], 0, 101)
             .unwrap();
         assert!(
             !controller
@@ -885,7 +893,7 @@ mod tests {
                     });
                 store::save(&db, &state).unwrap();
             }
-            controller.finish_wake(&claim, Ok(r#"{"summary":"Checked","observations":[{"connection_id":"c","external_id":"item","revision":"v1","title":"Bug","description":"Current bug","receipt_ids":["proof"],"eligible":true}]}"#), vec![], now).unwrap();
+            controller.finish_wake(&claim, Ok(r#"{"summary":"Checked","observations":[{"connection_id":"c","external_id":"item","revision":"v1","title":"Bug","description":"Current bug","receipt_ids":["proof"],"eligible":true}]}"#), vec![], 0, now).unwrap();
             let mut state = controller.command(Command::Snapshot).unwrap();
             let task = &mut state.tasks[1];
             task.status = TaskStatus::AwaitingApproval;
@@ -999,7 +1007,7 @@ mod tests {
             store::save(&db, &state).unwrap();
         }
         let raw = r#"{"summary":"Old instruction completed","observations":[{"connection_id":"c","external_id":"item","revision":"v1","title":"Bug","description":"Current bug","receipt_ids":["proof"],"eligible":true}]}"#;
-        controller.finish_wake(&claim, Ok(raw), vec![], 101).unwrap();
+        controller.finish_wake(&claim, Ok(raw), vec![], 0, 101).unwrap();
         let state = controller.command(Command::Snapshot).unwrap();
         assert_eq!(state.tasks.len(), 1);
         assert!(state.mcp.sources.is_empty());
@@ -1035,10 +1043,10 @@ mod tests {
             store::save(&db, &state).unwrap();
         }
         let raw = r#"{"summary":"Checked","observations":[{"connection_id":"c","external_id":"item","revision":"v1","title":"Bug","description":"Current bug","receipt_ids":["proof"],"eligible":true}]}"#;
-        controller.finish_wake(&claim, Ok(raw), vec![], 101).unwrap();
+        controller.finish_wake(&claim, Ok(raw), vec![], 0, 101).unwrap();
         let prior = controller.command(Command::Snapshot).unwrap();
         let authority = RunAuthority::for_task(&prior, &prior.tasks[1]).unwrap();
-        controller.finish_wake(&claim, Ok(raw), vec![], 102).unwrap();
+        controller.finish_wake(&claim, Ok(raw), vec![], 0, 102).unwrap();
         let state = controller.command(Command::Snapshot).unwrap();
         assert!(
             authority.valid(&state),

@@ -17,7 +17,7 @@ struct SuggestedResponsibilityCard: View {
                 VStack(alignment: .leading, spacing: 14) {
                     ManagementSavedText(text: item["instruction"].string)
                     Text("Sources: \(tools.isEmpty ? "None selected" : tools.joined(separator: ", "))")
-                    Text(item["prepare_low_risk"].bool ? "May prepare low-risk fixes; reviewed results open a pull request." : "Local work waits for approval.")
+                    Text(!model.snapshot["plan_first"].bool ? "Tickets start working right away; reviewed results are delivered." : item["prepare_low_risk"].bool ? "May prepare low-risk fixes; reviewed results are delivered." : "Local work waits for approval.")
                     if !missing.isEmpty {
                         Label("Connect or discover tools for \(missing.joined(separator: ", ")) to start.", systemImage: "exclamationmark.triangle").foregroundStyle(NekoStyle.amber)
                     }

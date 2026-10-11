@@ -283,6 +283,21 @@ pub fn record_probe(state: &mut Snapshot, responsibility: &str, calls: Vec<Probe
     state.mcp.probes.insert(responsibility.into(), WatchProbe { basis, calls: kept, last_full_wake_ms: now });
 }
 
+/// Prefix for a check that could not read all of its sources.
+pub const DEGRADED: &str = "Degraded: ";
+
+/// A wake whose tool calls failed saw only part of its sources. It records
+/// no probe (an old one is dropped), so the next check is a full one, and its
+/// summary says what went wrong first instead of reading as all clear.
+pub fn mark_degraded(state: &mut Snapshot, responsibility: &str, failures: u32) {
+    state.mcp.probes.remove(responsibility);
+    if let Some(r) = state.mcp.responsibilities.iter_mut().find(|r| r.id == responsibility) {
+        let summary = r.last_result.strip_prefix(UNCHANGED).unwrap_or(&r.last_result).to_owned();
+        let plural = if failures == 1 { "" } else { "s" };
+        r.last_result = format!("{DEGRADED}{failures} tool call{plural} failed during this check. {summary}").chars().take(8192).collect();
+    }
+}
+
 /// The replayed calls returned what the last wake saw: keep its summary and
 /// check again soon, without a model run.
 pub fn finish_unchanged(r: &mut Responsibility, previous: &str, now: i64) {
@@ -540,6 +555,18 @@ mod tests {
             finish(r, Err("down"), 0);
         }
         assert_eq!(r.next_due_ms, MAX_BACKOFF_MS);
+    }
+
+
+    #[test]
+    fn a_check_with_failed_reads_is_degraded_and_loses_its_probe() {
+        let mut state = state();
+        let id = state.mcp.responsibilities[0].id.clone();
+        record_probe(&mut state, &id, vec![call("list", "{}")], 0);
+        state.mcp.responsibilities[0].last_result = "Checked 3 issues.".into();
+        mark_degraded(&mut state, &id, 2);
+        assert!(state.mcp.probes.is_empty(), "a degraded check must run in full next time");
+        assert_eq!(state.mcp.responsibilities[0].last_result, "Degraded: 2 tool calls failed during this check. Checked 3 issues.");
     }
 
 }

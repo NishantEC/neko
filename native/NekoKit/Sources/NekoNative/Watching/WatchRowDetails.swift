@@ -25,7 +25,7 @@ struct WatchRowDetails: View {
                 }
                 LabeledContent("Sources", value: sources.isEmpty ? "No sources selected" : sources)
                 if model.selectedWorkspace == nil { LabeledContent("Workspace", value: workspace) }
-                Text(item["prepare_low_risk"].bool ? "Low-risk fixes allowed · reviewed results open a PR" : "Plans require approval before local work")
+                Text(!model.snapshot["plan_first"].bool ? "Tickets start working right away · reviewed results are delivered" : item["prepare_low_risk"].bool ? "Low-risk fixes allowed · reviewed results are delivered" : "Plans require approval before local work")
                     .foregroundStyle(N.text3)
             }.font(NekoFont.meta)
             if !item["last_result"].string.isEmpty {
