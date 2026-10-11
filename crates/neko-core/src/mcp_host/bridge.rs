@@ -77,6 +77,14 @@ impl ServerHandler for Bridge {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
     }
+    /// Stop before 2026-07-28's stateless lifecycle. Claude Code 2.1 opens
+    /// with `server/discover` at that version, then re-lists tools forever
+    /// and registers none of the bridge's, so a watch running on Claude saw
+    /// no Neko tools at all. Refusing the version makes Claude fall back to
+    /// the `initialize` handshake, which works; Codex already uses it.
+    fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
+        std::borrow::Cow::Borrowed(ProtocolVersion::known_up_to(&ProtocolVersion::V_2025_11_25))
+    }
     async fn list_tools(
         &self,
         _: Option<PaginatedRequestParams>,
@@ -156,6 +164,41 @@ fn exchange(socket: PathBuf, token: String, action: BridgeAction) -> Result<Stri
     Err("Neko bridge did not return a result".into())
 }
 
+/// The reply a server without `server/discover` gives, for that request only.
+fn discovery_refusal(line: &str) -> Option<String> {
+    if !line.contains("server/discover") {
+        return None;
+    }
+    let message: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    (message.get("method")?.as_str()? == "server/discover").then(|| {
+        serde_json::json!({"jsonrpc":"2.0","id":message.get("id").cloned().unwrap_or(serde_json::Value::Null),"error":{"code":-32601,"message":"Method not found"}}).to_string()
+    })
+}
+
+async fn filter_discovery(
+    input: impl tokio::io::AsyncRead + Unpin,
+    mut forward: impl tokio::io::AsyncWrite + Unpin,
+    mut output: impl tokio::io::AsyncWrite + Unpin,
+) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    let mut lines = tokio::io::BufReader::new(input);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match lines.read_line(&mut line).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let sent = match discovery_refusal(&line) {
+            Some(reply) => output.write_all(format!("{reply}\n").as_bytes()).await.and(output.flush().await),
+            None => forward.write_all(line.as_bytes()).await,
+        };
+        if sent.is_err() {
+            break;
+        }
+    }
+}
+
 pub fn run_if_requested() -> bool {
     if std::env::args().nth(1).as_deref() != Some("--mcp-bridge") {
         return false;
@@ -171,7 +214,14 @@ pub fn run_if_requested() -> bool {
             .build()
             .map_err(|_| "Cannot start bridge runtime")?;
         runtime.block_on(async move {
-            let input = super::transport::FrameBounded::new(tokio::io::stdin());
+            // rmcp treats a session that opens with `server/discover` as the
+            // 2026-07-28 stateless lifecycle for good, even when that request
+            // fails, and then rejects Claude Code's initialize-style tool
+            // listing. Answer discovery here the way a pre-2026 server does,
+            // so the client falls back to `initialize` before rmcp sees it.
+            let (forward, rmcp_input) = tokio::io::duplex(1 << 20);
+            tokio::spawn(filter_discovery(tokio::io::stdin(), forward, tokio::io::stdout()));
+            let input = super::transport::FrameBounded::new(rmcp_input);
             let transport =
                 rmcp::transport::async_rw::AsyncRwTransport::new_server(input, tokio::io::stdout());
             let service = Arc::new(Bridge { socket, token })
@@ -191,6 +241,13 @@ pub fn run_if_requested() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_server_discovery_is_answered_before_rmcp() {
+        let reply = discovery_refusal(r#"{"jsonrpc":"2.0","id":"probe-1","method":"server/discover","params":{}}"#).unwrap();
+        assert_eq!(reply, r#"{"error":{"code":-32601,"message":"Method not found"},"id":"probe-1","jsonrpc":"2.0"}"#);
+        assert!(discovery_refusal(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#).is_none());
+        assert!(discovery_refusal(r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"x","arguments":{"q":"server/discover"}}}"#).is_none());
+    }
     #[test]
     fn only_explicit_bridge_operations_are_accepted() {
         assert!(matches!(
