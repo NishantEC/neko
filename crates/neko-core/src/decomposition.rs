@@ -58,7 +58,7 @@ pub fn validate(plans: &[SubtaskPlan]) -> Result<(), String> {
 
 pub fn parse(answer: &str) -> Result<Vec<SubtaskPlan>, String> {
     let mut plans: Vec<SubtaskPlan> =
-        serde_json::from_str(answer).map_err(|e| format!("Invalid split proposal: {e}"))?;
+        serde_json::from_str(crate::verification::json_answer(answer)).map_err(|e| format!("Invalid split proposal: {e}"))?;
     validate(&plans)?;
     for p in &mut plans {
         p.task_id = None;

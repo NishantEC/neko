@@ -130,6 +130,49 @@ fn literal_script(script: &str) -> Option<String> {
     (quoted && quote.is_none()).then_some(out)
 }
 
+/// The JSON an agent answered with. Agents running with the user's own setup
+/// (their output style, CLAUDE.md, skills) often wrap the required JSON in a
+/// sentence or a ```json fence. The structure is still validated strictly by
+/// the caller; this only finds it: the whole answer when it is JSON, else a
+/// fenced block, else the last complete JSON value in the text.
+pub fn json_answer(text: &str) -> &str {
+    let trimmed = text.trim();
+    let is_json = |s: &str| serde_json::from_str::<serde_json::Value>(s).is_ok();
+    if is_json(trimmed) {
+        return trimmed;
+    }
+    let mut fenced = None;
+    let mut rest = trimmed;
+    while let Some(open) = rest.find("```") {
+        let after = &rest[open + 3..];
+        let body_start = after.find('\n').map_or(after.len(), |n| n + 1);
+        let body = &after[body_start..];
+        let Some(close) = body.find("```") else { break };
+        let block = body[..close].trim();
+        if is_json(block) {
+            fenced = Some(block);
+        }
+        rest = &body[close + 3..];
+    }
+    if let Some(block) = fenced {
+        return block;
+    }
+    // The last complete JSON value wins; for one that ends at the same place,
+    // the outermost (earliest start) wins.
+    let mut best: Option<(usize, usize)> = None;
+    for (start, c) in trimmed.char_indices().filter(|(_, c)| *c == '{' || *c == '[') {
+        let _ = c;
+        let mut values = serde_json::Deserializer::from_str(&trimmed[start..]).into_iter::<serde_json::Value>();
+        if let Some(Ok(_)) = values.next() {
+            let end = start + values.byte_offset();
+            if best.is_none_or(|(_, best_end)| end > best_end) {
+                best = Some((start, end));
+            }
+        }
+    }
+    best.map_or(trimmed, |(start, end)| &trimmed[start..end])
+}
+
 pub fn accept(
     answer: &str,
     changed: &[String],
@@ -137,7 +180,42 @@ pub fn accept(
     receipts: &[String],
     required_checks: &[String],
 ) -> Result<Verdict, String> {
-    let verdict: Verdict = serde_json::from_str(answer.trim())
+    accept_in(answer, changed, allowed, receipts, required_checks, None)
+}
+
+/// A receipt's command with harmless leading steps removed: `uptime`/`pwd`
+/// (agents told to check machine load first) and `cd` into the reviewed
+/// worktree itself. A `cd` anywhere else is kept, so a check run in another
+/// directory never proves one claimed for this worktree.
+fn without_benign_prefix(command: &str, worktree: Option<&str>) -> String {
+    let worktree = worktree.map(|w| w.trim_end_matches('/'));
+    let mut rest = command.trim();
+    while let Some((head, tail)) = rest.split_once("&&") {
+        let head = head.trim();
+        let benign = matches!(head, "uptime" | "pwd" | "true")
+            || head.strip_prefix("cd ").is_some_and(|target| {
+                let target = target.trim().trim_matches(|c| c == '"' || c == '\'').trim_end_matches('/');
+                worktree.is_some_and(|w| target == w) || target == "."
+            });
+        if !benign {
+            break;
+        }
+        rest = tail.trim();
+    }
+    rest.to_owned()
+}
+
+/// `accept`, with the reviewed worktree known so a receipt that only adds a
+/// `cd` into it still proves the claimed check.
+pub fn accept_in(
+    answer: &str,
+    changed: &[String],
+    allowed: &[String],
+    receipts: &[String],
+    required_checks: &[String],
+    worktree: Option<&str>,
+) -> Result<Verdict, String> {
+    let verdict: Verdict = serde_json::from_str(json_answer(answer))
         .map_err(|e| format!("Verifier returned a malformed verdict: {e}"))?;
     if !verdict.passed || !verdict.findings.is_empty() {
         return Err(format!(
@@ -179,7 +257,9 @@ pub fn accept(
                 // Unidentifiable/shortened receipts cannot be skipped in favor
                 // of an earlier success: they may describe a later failed run.
                 !r.has_complete_command() || r.command.as_ref().is_some_and(|command| {
-                    normalized_command(command) == normalized_command(test)
+                    let ran = normalized_command(command);
+                    let claimed = normalized_command(test);
+                    ran == claimed || without_benign_prefix(&ran, worktree) == claimed.trim()
                 })
             })
             .last()
@@ -198,6 +278,29 @@ mod tests {
     use super::*;
     fn answer() -> String {
         serde_json::json!({"passed":true,"findings":[],"files":["src/a.rs"],"tests":["cargo test"],"summary":"Verified boundary"}).to_string()
+    }
+    #[test]
+    fn a_cd_into_the_worktree_and_a_load_check_still_prove_the_claimed_check() {
+        let files = vec!["src/a.rs".into()];
+        let receipt = |command: &str| vec![format!("VERIFICATION_COMMAND {}", serde_json::json!({"command": command, "exit_code": 0, "output": "ok"}))];
+        let wt = "/Users/x/task-worktrees/abc";
+        for ran in [r#"cd "/Users/x/task-worktrees/abc" && uptime && cargo test"#, "cd /Users/x/task-worktrees/abc/ && cargo test", "pwd && cargo test"] {
+            assert!(accept_in(&answer(), &files, &files, &receipt(ran), &[], Some(wt)).is_ok(), "{ran}");
+        }
+        for ran in ["cd /tmp/elsewhere && cargo test", "cargo build && cargo test", "rm -rf x && cargo test"] {
+            assert!(accept_in(&answer(), &files, &files, &receipt(ran), &[], Some(wt)).is_err(), "{ran}");
+        }
+    }
+
+    #[test]
+    fn finds_the_json_an_agent_wrapped_in_prose_or_a_fence() {
+        let json = r#"{"passed":true,"tests":["cargo test"]}"#;
+        assert_eq!(json_answer(json), json);
+        assert_eq!(json_answer(&format!("Review done.\n\n```json\n{json}\n```\nThanks")), json);
+        assert_eq!(json_answer(&format!("Checked {{the}} diff. Result: {json}")), json, "the outermost complete value at the end wins");
+        assert_eq!(json_answer(&format!("{{\"draft\":1}} then final {json}")), json, "the last value wins");
+        assert_eq!(json_answer("[1,2] plain"), "[1,2]");
+        assert_eq!(json_answer("no json here"), "no json here");
     }
     #[test]
     fn independent_review_requires_successful_actual_command_receipts() {

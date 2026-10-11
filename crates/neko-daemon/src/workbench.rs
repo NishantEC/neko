@@ -591,7 +591,10 @@ impl Controller {
             // No fixed cap, but new agents are paced and held back while the
             // machine is overloaded; running work is never touched.
             let mut positions = positions;
-            if !positions.is_empty() {
+            // Scheduler tests share one process and the machine's real load,
+            // so pacing would make them order- and load-dependent; it has its
+            // own tests in `admission`.
+            if !positions.is_empty() && !cfg!(test) {
                 positions.truncate(admission::admit(positions.len(), admission::load_average(), std::time::Instant::now()));
             }
             let claims: Vec<_> = positions.into_iter()
@@ -1152,12 +1155,13 @@ impl Controller {
                 if let Some(split) = split {
                     allowed.extend(split.subtasks.iter().flat_map(|p| p.files.clone()));
                 }
-                if let Err(error) = neko_core::verification::accept(
+                if let Err(error) = neko_core::verification::accept_in(
                     &review,
                     &changed,
                     &allowed,
                     &receipts,
                     &required_checks,
+                    directory.to_str(),
                 ) {
                     // Split parents only integrate independently verified children;
                     // letting a parent builder repair them would bypass that boundary.

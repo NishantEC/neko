@@ -32,7 +32,7 @@ pub fn apply_result(
     if raw.len() > 49_152 {
         return Err("Responsibility result exceeds 48 KiB".into());
     }
-    let result: WakeResult = serde_json::from_str(raw)
+    let result: WakeResult = serde_json::from_str(crate::verification::json_answer(raw))
         .map_err(|_| "Responsibility did not return valid observations; no work was authorized")?;
     if result.summary.len() > 8192 || result.observations.len() > 4 {
         return Err("Responsibility result exceeds its limits".into());
