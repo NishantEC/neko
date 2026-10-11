@@ -552,9 +552,13 @@ struct ManagementEditor: View {
                             Label("Choose access for \(missingToolAccess.joined(separator: ", ")) in Tools & skills before turning this on.", systemImage: "exclamationmark.circle")
                                 .font(NekoFont.meta).foregroundStyle(NekoStyle.amber)
                         }
-                        Toggle("Allow preparation of low-risk local fixes", isOn: $prepare)
+                        if model.snapshot["plan_first"].bool {
+                            Toggle("Allow preparation of low-risk local fixes", isOn: $prepare)
+                        }
                     } header: { Text("Authority") } footer: {
-                        Text("Remote tool permission and publication authority are separate.")
+                        Text(model.snapshot["plan_first"].bool
+                             ? "Remote tool permission and publication authority are separate."
+                             : "Tickets from this watch start working right away; the agent stops for your approval only on critical work.")
                     }
                     Section("Connected tools") {
                         ForEach(model.snapshot["mcp"]["connections"].array.filter { $0["workspace_id"].string.isEmpty || $0["workspace_id"].string == effectiveWorkspace }, id: \.self) { connection in

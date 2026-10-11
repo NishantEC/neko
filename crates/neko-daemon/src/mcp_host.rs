@@ -26,7 +26,18 @@ pub struct Host {
     /// Successful read-only calls made by each in-flight background wake,
     /// keyed by run id. The wake's owner takes them to record its probe.
     watch_calls: Mutex<std::collections::HashMap<String, Vec<ProbeCall>>>,
+    /// Failed calls per in-flight background wake: a wake that could not read
+    /// its sources is degraded, and must not be summarised by a cheap probe.
+    watch_failures: Mutex<std::collections::HashMap<String, u32>>,
+    /// When each connection was last rediscovered because a tool changed.
+    rediscovered: Mutex<std::collections::HashMap<String, Instant>>,
 }
+
+/// A vendor changed a tool's definition since it was discovered.
+const SCHEMA_CHANGED: &str = "MCP tool schema changed or tool is unavailable";
+/// Rediscovering a connection because a tool changed happens at most this
+/// often, so a server whose tools change on every call cannot loop.
+const REDISCOVER_COOLDOWN: Duration = Duration::from_secs(600);
 
 /// Background wakes, which may use every granted tool, including writes.
 fn background_run(run_id: &str) -> bool {
@@ -278,6 +289,8 @@ impl Host {
             auth: Mutex::new(Default::default()),
             discovery_retry: Mutex::new(Default::default()),
             watch_calls: Mutex::new(Default::default()),
+            watch_failures: Mutex::new(Default::default()),
+            rediscovered: Mutex::new(Default::default()),
         }
     }
 
@@ -293,9 +306,50 @@ impl Host {
         }
     }
 
-    /// The read-only calls a background wake made, for its probe.
-    pub fn take_watch_calls(&self, run_id: &str) -> Vec<ProbeCall> {
-        self.watch_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(run_id).unwrap_or_default()
+    /// The read-only calls a background wake made, for its probe, and how
+    /// many of its calls failed.
+    pub fn take_watch_calls(&self, run_id: &str) -> (Vec<ProbeCall>, u32) {
+        let calls = self.watch_calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(run_id).unwrap_or_default();
+        let failures = self.watch_failures.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(run_id).unwrap_or_default();
+        (calls, failures)
+    }
+
+    /// Refresh one connection's tools from its server and grant what it now
+    /// offers, exactly as the Discover command does.
+    fn rediscover(&self, connection_id: &str) -> Result<(), String> {
+        let _slot = self
+            .wait_for_call_slot()
+            .ok_or("Another MCP operation is running; retry shortly")?;
+        let connection = self.connection(connection_id)?;
+        let result = self
+            .resolved_transport(&connection, &AtomicBool::new(false))
+            .and_then(|(config, secrets)| transport::discover(&config, &secrets, &AtomicBool::new(false)));
+        let db = self.db.lock().map_err(|_| "Workspace storage unavailable")?;
+        let mut state = store::load(&db)?;
+        let c = state.mcp.connections.iter_mut().find(|c| c.id == connection_id).ok_or("MCP connection missing")?;
+        if !c.enabled {
+            return Err("Connection was paused during discovery".into());
+        }
+        let ok = match result {
+            Ok(tools) => {
+                c.tools = tools;
+                c.discovered_ms = Some(store::now_ms());
+                c.error = None;
+                true
+            }
+            Err(error) => {
+                c.error = Some(error);
+                false
+            }
+        };
+        let tools = c.tools.clone();
+        state.mcp.grants.retain(|g| {
+            g.connection_id != connection_id || tools.iter().any(|t| t.name == g.tool_name && t.schema_hash == g.schema_hash)
+        });
+        if ok {
+            policy::allow_discovered_tools(&mut state, connection_id);
+        }
+        store::save(&db, &state)
     }
 
     /// Replay a responsibility's recorded calls through the normal scoped,
@@ -640,55 +694,8 @@ impl Host {
                 )
                 .map(|(_, snapshot)| snapshot),
             McpCommand::Discover { connection_id } => {
-                let _slot = self
-                    .wait_for_call_slot()
-                    .ok_or("Another MCP operation is running; retry shortly")?;
-                let connection = self.connection(&connection_id)?;
-                let result = self
-                    .resolved_transport(&connection, &AtomicBool::new(false))
-                    .and_then(|(config, secrets)| {
-                        transport::discover(&config, &secrets, &AtomicBool::new(false))
-                    });
-                let db = self
-                    .db
-                    .lock()
-                    .map_err(|_| "Workspace storage unavailable")?;
-                let mut state = store::load(&db)?;
-                let c = state
-                    .mcp
-                    .connections
-                    .iter_mut()
-                    .find(|c| c.id == connection_id)
-                    .ok_or("MCP connection missing")?;
-                if !c.enabled {
-                    return Err("Connection was paused during discovery".into());
-                }
-                match result {
-                    Ok(tools) => {
-                        c.tools = tools;
-                        c.discovered_ms = Some(store::now_ms());
-                        c.error = None;
-                    }
-                    Err(error) => {
-                        c.error = Some(error);
-                    }
-                }
-                state.mcp.grants.retain(|g| {
-                    g.connection_id != connection_id
-                        || c.tools
-                            .iter()
-                            .any(|t| t.name == g.tool_name && t.schema_hash == g.schema_hash)
-                });
-                if state
-                    .mcp
-                    .connections
-                    .iter()
-                    .any(|c| c.id == connection_id && c.error.is_none())
-                {
-                    policy::allow_discovered_tools(&mut state, &connection_id);
-                }
-                store::save(&db, &state)?;
-                store::load(&db)
+                self.rediscover(&connection_id)?;
+                store::load(&*self.db.lock().map_err(|_| "Workspace storage unavailable")?)
             }
             command => {
                 if let McpCommand::SetEnabled {
@@ -921,7 +928,45 @@ impl Host {
         })
     }
 
+    /// One tool call or catalog read for a run. A call refused because the
+    /// vendor changed the tool since discovery rediscovers that connection
+    /// (rate-limited) and retries once, so an upstream update does not
+    /// silently blind every agent and watch until somebody clicks Discover.
     pub fn bridge(&self, request: BridgeRequest) -> Result<String, String> {
+        let result = self.bridge_once(request.clone());
+        let BridgeAction::Call { connection_id, .. } = &request.action else { return result };
+        match result {
+            Err(error) if error.contains(SCHEMA_CHANGED) && self.may_rediscover(connection_id) => {
+                match self.rediscover(connection_id) {
+                    Ok(()) => {
+                        let retried = self.bridge_once(request.clone());
+                        if retried.is_ok() {
+                            // Recovered: the first attempt does not degrade the wake.
+                            if let Ok(scope) = self.registry.get(&request.token.0, store::now_ms()) {
+                                if let Some(count) = self.watch_failures.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_mut(&scope.run_id) {
+                                    *count = count.saturating_sub(1);
+                                }
+                            }
+                        }
+                        retried
+                    }
+                    Err(rediscovery) => Err(format!("{error}; automatic rediscovery failed: {rediscovery}")),
+                }
+            }
+            other => other,
+        }
+    }
+
+    fn may_rediscover(&self, connection_id: &str) -> bool {
+        let mut last = self.rediscovered.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if last.get(connection_id).is_some_and(|at| at.elapsed() < REDISCOVER_COOLDOWN) {
+            return false;
+        }
+        last.insert(connection_id.to_owned(), Instant::now());
+        true
+    }
+
+    fn bridge_once(&self, request: BridgeRequest) -> Result<String, String> {
         let scope = self.registry.get(&request.token.0, store::now_ms())?;
         let state = store::load(
             &*self
@@ -1085,6 +1130,9 @@ impl Host {
                         state.mcp.receipts.remove(0);
                     }
                     store::save(&db, &state)?;
+                }
+                if !success && background_run(&scope.run_id) && !probe_run(&scope.run_id) {
+                    *self.watch_failures.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(scope.run_id.clone()).or_default() += 1;
                 }
                 let raw = result?;
                 let result: serde_json::Value =
@@ -1463,7 +1511,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
   const r = JSON.parse(line);
   if (r.id === undefined) continue;
   if (r.method === 'initialize') send(r.id, { protocolVersion: r.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'probe', version: '1' } });
-  else if (r.method === 'tools/list') send(r.id, { tools: [{ name: 'list_issues', description: 'Read issues', annotations: { readOnlyHint: true }, inputSchema: { type: 'object', properties: {} } }] });
+  else if (r.method === 'tools/list') send(r.id, { tools: [{ name: 'list_issues', description: fs.existsSync(process.argv[2] + '.v2') ? 'Read issues (v2)' : 'Read issues', annotations: { readOnlyHint: true }, inputSchema: { type: 'object', properties: {} } }] });
   else if (r.method === 'tools/call') send(r.id, { content: [{ type: 'text', text: JSON.stringify({ issues: JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), lastSeen: Date.now() }) }], isError: false });
   else send(r.id, {});
 }
@@ -1490,15 +1538,32 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
             connection_id: "issues".into(), tool_name: "list_issues".into(), arguments_json: "{}".into(),
         }}).unwrap();
         drop(lease);
-        let calls = h.take_watch_calls("watch:wake");
-        assert_eq!(calls.len(), 1);
-        assert!(h.take_watch_calls("watch:wake").is_empty(), "taken once");
+        let (calls, failures) = h.take_watch_calls("watch:wake");
+        assert_eq!((calls.len(), failures), (1, 0));
+        assert!(h.take_watch_calls("watch:wake").0.is_empty(), "taken once");
 
         // Only the volatile lastSeen differs: no model run needed.
         assert!(!h.probe_changed("r", "w", vec!["issues".into()], revision, &calls).unwrap());
         assert!(h.watch_calls.lock().unwrap().is_empty(), "probe replays are not recorded as wake reads");
         // A real change in the issues does wake the model.
         std::fs::write(&items, r#"[{"id":"A-1","status":"closed"}]"#).unwrap();
+        assert!(h.probe_changed("r", "w", vec!["issues".into()], revision, &calls).unwrap());
+
+        // The vendor changes the tool. The next call rediscovers the
+        // connection, re-grants it and succeeds instead of failing forever.
+        std::fs::write(format!("{}.v2", items.display()), "").unwrap();
+        let lease = h.lease("watch:after-update", "w", vec!["issues".into()], revision).unwrap();
+        h.bridge(BridgeRequest { token: neko_protocol::workbench::Secret(lease.token().into()), action: BridgeAction::Call {
+            connection_id: "issues".into(), tool_name: "list_issues".into(), arguments_json: "{}".into(),
+        }}).unwrap();
+        drop(lease);
+        let state = store::load(&h.db.lock().unwrap()).unwrap();
+        let tool = &state.mcp.connections.iter().find(|c| c.id == "issues").unwrap().tools[0];
+        assert_eq!(tool.description, "Read issues (v2)");
+        assert!(state.mcp.grants.iter().any(|g| g.connection_id == "issues" && g.schema_hash == tool.schema_hash), "the updated tool is granted");
+        // The refused first attempt recovered on retry, so the wake is not degraded.
+        assert_eq!(h.take_watch_calls("watch:after-update").1, 0);
+        // The old probe now reports a change (the tool itself changed).
         assert!(h.probe_changed("r", "w", vec!["issues".into()], revision, &calls).unwrap());
         // Losing the grant is an error, never a silent "no change".
         {

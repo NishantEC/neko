@@ -22,6 +22,8 @@ mod replies;
 mod review_repair;
 #[path = "workbench/publish.rs"]
 mod publish;
+#[path = "workbench/admission.rs"]
+mod admission;
 #[path = "workbench/runtime_settings.rs"]
 mod runtime_settings;
 
@@ -586,6 +588,12 @@ impl Controller {
                         .then_some(index)
                 })
                 .collect();
+            // No fixed cap, but new agents are paced and held back while the
+            // machine is overloaded; running work is never touched.
+            let mut positions = positions;
+            if !positions.is_empty() {
+                positions.truncate(admission::admit(positions.len(), admission::load_average(), std::time::Instant::now()));
+            }
             let claims: Vec<_> = positions.into_iter()
                 .filter_map(|index| {
                     // Capture the authority while AwaitingApproval still
