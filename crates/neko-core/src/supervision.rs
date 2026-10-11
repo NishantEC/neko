@@ -36,7 +36,7 @@ pub fn parse_decision(text: &str) -> Result<SupervisorDecision, String> {
     if text.len() > MAX_DECISION_BYTES {
         return Err("Supervisor response exceeds 16 KiB".into());
     }
-    let decision: SupervisorDecision = serde_json::from_str(text.trim())
+    let decision: SupervisorDecision = serde_json::from_str(crate::verification::json_answer(text))
         .map_err(|_| "Supervisor did not return the required decision; manual review required")?;
     validate_decision(&decision)?;
     Ok(decision)

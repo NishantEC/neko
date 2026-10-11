@@ -12,7 +12,7 @@ pub(super) enum Decision {
 }
 
 pub(super) fn parse(answer: &str) -> Result<Decision, String> {
-    let decision: Decision = serde_json::from_str(answer.trim())
+    let decision: Decision = serde_json::from_str(neko_core::verification::json_answer(answer))
         .map_err(|e| format!("Recovery supervisor returned an invalid decision: {e}"))?;
     let (reason, detail) = match &decision {
         Decision::Retry { reason, instructions } => (reason, instructions),
