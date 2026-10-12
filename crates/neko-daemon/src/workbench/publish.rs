@@ -238,8 +238,9 @@ fn unfenced(text: &str) -> String {
     }
 }
 
-/// A small cat for the sign-off.
-const MARK: &str = " /\\_/\\\n( o.o )\n > ^ <";
+/// A tiny cat for the sign-off. Inline code, so `=` can never turn the line
+/// above it into a heading.
+const MARK: &str = "=^.^=";
 
 /// Bound the description and sign it.
 fn finish(mut text: String) -> String {
@@ -249,7 +250,7 @@ fn finish(mut text: String) -> String {
         text.truncate(end);
         text.push_str("\n… (shortened)");
     }
-    format!("{}\n\n---\n\n```\n{MARK}\n```\nOpened by neko after an independent review passed. Not merged.\n", text.trim_end())
+    format!("{}\n\n---\n\n`{MARK}` Opened by neko after an independent review passed. Not merged.\n", text.trim_end())
 }
 
 /// The fallback description: what the agent reported doing plus the
@@ -295,7 +296,7 @@ mod tests {
         let body = finish(body(&task(&format!("Changed a.rs to fix the crash.\n\nIndependent review:\n{review}"))));
         assert!(body.starts_with("Changed a.rs to fix the crash.\n\n### Independent review\n\nLooks right.\n"), "{body}");
         assert!(body.contains("- `cargo test 'x'`"), "{body}");
-        assert!(body.contains(&format!("```\n{MARK}\n```")), "{body}");
+        assert!(body.contains(&format!("`{MARK}` Opened by neko")), "{body}");
         assert!(body.ends_with("Not merged.\n"));
     }
 
@@ -310,8 +311,8 @@ mod tests {
     }
 
     #[test]
-    fn the_mark_is_a_small_cat() {
-        assert_eq!(MARK, " /\\_/\\\n( o.o )\n > ^ <");
+    fn the_sign_off_is_one_line_with_a_tiny_cat() {
+        assert!(finish("## Issue\nx".into()).ends_with("\n---\n\n`=^.^=` Opened by neko after an independent review passed. Not merged.\n"));
     }
 
     #[test]
