@@ -62,6 +62,9 @@ config, and opens or reuses a GitHub pull request through `gh`
 (`native_runner::publish`, daemon `workbench/publish.rs`). A ticket that changed
 before the push is not published; subtasks ship inside their parent's pull
 request; nothing merges. `Task::base_commit` keeps Changes correct after the commit.
+The description is written by a read-only model run over the committed diff and
+ticket evidence (issue, impact, cause, fix, options and why, verification, risks)
+and rewritten on each push to an open pull request; the evidence is the fallback.
 Repositories in `Snapshot::land_on_main` (`SetLandOnMain`) are delivered by
 fast-forwarding local `main` instead (`publish::land`): rebased onto a newer
 `main` when needed, serialized per repository, refusing conflicts and
