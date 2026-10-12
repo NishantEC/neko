@@ -102,18 +102,18 @@ fn publish_unlocked(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBool) -> 
             .and_then(|s| s.tasks.into_iter().find(|t| t.id == task_id))
             .is_some_and(|t| publishable(t.status))
     };
-    let source = native_runner::publish::source_checkout(&directory, cancel)?;
-    if snapshot.land_on_main.contains(&*source.to_string_lossy()) {
-        return native_runner::publish::land(&directory, &base, &task.title, &still_reviewed, cancel)
-            .map(|landed| landed.map(Delivered::Landed))
-            .map_err(|error| Failure { landing: true, error });
-    }
     let issue_url = task.issue_id.as_deref()
         .and_then(|id| snapshot.issues.iter().find(|i| i.id == id))
         .map(|i| i.url.clone())
         .filter(|u| !u.is_empty());
     let describe = || describe(task, issue_url.as_deref(), &directory, &base, &snapshot.agent_runtime, cancel);
-    Ok(native_runner::publish::publish(&directory, &base, &task.title, &describe, &still_reviewed, cancel)?.map(Delivered::PullRequest))
+    let source = native_runner::publish::source_checkout(&directory, cancel)?;
+    if snapshot.land_on_main.contains(&*source.to_string_lossy()) {
+        return native_runner::publish::land(&directory, &base, &describe, &still_reviewed, cancel)
+            .map(|landed| landed.map(Delivered::Landed))
+            .map_err(|error| Failure { landing: true, error });
+    }
+    Ok(native_runner::publish::publish(&directory, &base, &describe, &still_reviewed, cancel)?.map(Delivered::PullRequest))
 }
 
 /// Only Neko's own task worktrees are ever committed to and pushed.
@@ -129,8 +129,9 @@ fn owned_worktree(task: &Task) -> Result<std::path::PathBuf, String> {
 
 /// A description a reviewer can reason with: the issue, its impact, the
 /// cause, the fix, the alternatives and why this one won, and how it was
-/// checked. A read-only agent writes it from the committed diff and the
-/// ticket's evidence; if that fails, the evidence itself is the description.
+/// checked, under a Conventional Commits title. A read-only agent writes it
+/// from the staged diff and the ticket's evidence; if that fails, the
+/// evidence itself is the description.
 fn describe(
     task: &Task,
     issue_url: Option<&str>,
@@ -138,7 +139,7 @@ fn describe(
     base: &str,
     runtime: &neko_protocol::workbench::AgentRuntime,
     cancel: &AtomicBool,
-) -> String {
+) -> native_runner::publish::Description {
     let written = native_runner::run(
         &native_runner::RunSpec {
             directory: directory.to_path_buf(),
@@ -150,15 +151,18 @@ fn describe(
         cancel,
         |_| {},
     );
-    let text = written.ok().map(|t| unfenced(&t)).filter(|t| t.contains("## ")).unwrap_or_else(|| body(task));
-    finish(text)
+    let (title, text) = written.ok().map(|t| split_title(&unfenced(&t))).unwrap_or_default();
+    let text = if text.contains("## ") { text } else { body(task) };
+    let title = title.filter(|t| conventional(t)).unwrap_or_else(|| fallback_title(&task.title));
+    native_runner::publish::Description { title, body: finish(text) }
 }
 
 fn description_prompt(task: &Task, issue_url: Option<&str>, base: &str) -> String {
     let (work, review) = task.result.rsplit_once("\n\nIndependent review:\n").unwrap_or((&task.result, ""));
     format!(
-        "Write the description for a pull request a teammate will review. Read the change yourself with `git diff {base}..HEAD` and `git log {base}..HEAD`, and open any file you need for context. Do not edit anything.\n\
-         Return ONLY GitHub markdown, with no preamble and no surrounding code fence, using exactly these sections in this order:\n\
+        "Write the commit title and pull request description for a change a teammate will review. Read the change yourself with `git diff --cached {base}` (it is staged, not yet committed) and `git log {base}..HEAD`, look at `git log -20 --format=%s` for how this repository names commits, and open any file you need for context. Do not edit, stage or commit anything.\n\
+         Your first line must be `TITLE: ` followed by a Conventional Commits subject: `type(scope): summary`, type one of feat, fix, perf, refactor, test, docs, build, ci, chore, revert; scope optional, taken from the area of the code the change lives in and matching this repository's habits; summary lowercase, imperative, no trailing period, the whole subject at most 72 characters.\n\
+         After that line, return ONLY GitHub markdown, with no preamble and no surrounding code fence, using exactly these sections in this order:\n\
          ## Issue: what was wrong, where it lives, and how it showed up. Link the source if one is given.\n\
          ## Impact: who or what it affected, how badly, and what happens if it is left unfixed.\n\
          ## Root cause: why it happened, pointing at the code.\n\
@@ -175,6 +179,44 @@ fn description_prompt(task: &Task, issue_url: Option<&str>, base: &str) -> Strin
         work = clip(work, 6000),
         review = clip(review, 3000),
     )
+}
+
+/// The `TITLE:` line, wherever the agent put it, and the text without it.
+fn split_title(text: &str) -> (Option<String>, String) {
+    let mut title = None;
+    let rest: Vec<&str> = text.lines().filter(|line| {
+        match line.trim().strip_prefix("TITLE:") {
+            Some(t) if title.is_none() => { title = Some(t.trim().trim_matches('`').trim().to_owned()); false }
+            _ => true,
+        }
+    }).collect();
+    (title, rest.join("\n").trim().to_owned())
+}
+
+const COMMIT_TYPES: &[&str] = &["feat", "fix", "perf", "refactor", "test", "docs", "build", "ci", "chore", "revert", "style"];
+
+/// `type(scope)!: summary`, with a known type and a non-empty one-line summary.
+fn conventional(subject: &str) -> bool {
+    let Some((head, summary)) = subject.split_once(": ") else { return false };
+    let head = head.strip_suffix('!').unwrap_or(head);
+    let kind = match head.split_once('(') {
+        Some((kind, scope)) => match scope.strip_suffix(')') {
+            Some(scope) if !scope.is_empty() && !scope.contains(['(', ')', ' ']) => kind,
+            _ => return false,
+        },
+        None => head,
+    };
+    COMMIT_TYPES.contains(&kind) && !summary.trim().is_empty() && !subject.contains('\n') && subject.chars().count() <= 100
+}
+
+/// When no agent title is usable: keep a ticket title that is already
+/// conventional, otherwise call it a fix (what most tickets are).
+fn fallback_title(title: &str) -> String {
+    let line = title.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("reviewed change");
+    if conventional(line) { return line.to_owned(); }
+    let mut chars = line.chars();
+    let summary: String = chars.next().map(|c| c.to_lowercase().chain(chars).collect()).unwrap_or_default();
+    format!("fix: {}", summary.trim_end_matches('.'))
 }
 
 fn clip(text: &str, limit: usize) -> String {
@@ -196,9 +238,8 @@ fn unfenced(text: &str) -> String {
     }
 }
 
-/// The neko mark (`crates/neko/src/menu_bar.rs`'s `MARK_ROWS`), one cell per
-/// two block characters so it stays square in a monospace font.
-const MARK: &str = "  ██          ██\n  ████      ████\n  ██████  ██████\n  ██████████████\n  ██  ██████  ██\n██████████████████\n    ██████████\n      ██████";
+/// A small cat for the sign-off.
+const MARK: &str = " /\\_/\\\n( o.o )\n > ^ <";
 
 /// Bound the description and sign it.
 fn finish(mut text: String) -> String {
@@ -264,17 +305,24 @@ mod tests {
         for section in ["## Issue", "## Impact", "## Root cause", "## Fix", "## Options considered", "## Verification", "## Risks"] {
             assert!(prompt.contains(section), "{section}");
         }
-        assert!(prompt.contains("git diff abc123..HEAD"));
+        assert!(prompt.contains("git diff --cached abc123") && prompt.contains("TITLE: "));
         assert!(prompt.contains("SECRET source text") && prompt.contains("https://linear.app/x/1"));
     }
 
     #[test]
-    fn the_mark_matches_the_menu_bar_grid() {
-        const ROWS: [&[usize]; 8] = [&[1, 7], &[1, 2, 6, 7], &[1, 2, 3, 5, 6, 7], &[1, 2, 3, 4, 5, 6, 7], &[1, 3, 4, 5, 7], &[0, 1, 2, 3, 4, 5, 6, 7, 8], &[2, 3, 4, 5, 6], &[3, 4, 5]];
-        let drawn: Vec<String> = ROWS.iter()
-            .map(|row| (0..9).map(|c| if row.contains(&c) { "██" } else { "  " }).collect::<String>().trim_end().to_owned())
-            .collect();
-        assert_eq!(MARK, drawn.join("\n"));
+    fn the_mark_is_a_small_cat() {
+        assert_eq!(MARK, " /\\_/\\\n( o.o )\n > ^ <");
+    }
+
+    #[test]
+    fn the_title_line_is_split_out_and_checked() {
+        let (title, rest) = split_title("TITLE: `fix(service-worker): wait for an activating worker`\n\n## Issue\nx");
+        assert_eq!(title.as_deref(), Some("fix(service-worker): wait for an activating worker"));
+        assert_eq!(rest, "## Issue\nx");
+        for good in ["fix: x", "feat(chat): y", "refactor(api)!: z"] { assert!(conventional(good), "{good}"); }
+        for bad in ["Fix the crash", "fixed: x", "fix(): x", "fix(a b): x", "fix:x", "fix: "] { assert!(!conventional(bad), "{bad}"); }
+        assert_eq!(fallback_title("YrError: Inactive Service Worker."), "fix: yrError: Inactive Service Worker");
+        assert_eq!(fallback_title("feat(ui): keep it"), "feat(ui): keep it");
     }
 
     #[test]
