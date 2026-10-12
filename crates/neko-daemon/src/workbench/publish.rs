@@ -250,7 +250,7 @@ fn finish(mut text: String) -> String {
         text.truncate(end);
         text.push_str("\n… (shortened)");
     }
-    format!("{}\n\n---\n\n`{MARK}` Opened by neko after an independent review passed. Not merged.\n", text.trim_end())
+    format!("{}\n\n---\n\n`{MARK}` neko\n", text.trim_end())
 }
 
 /// The fallback description: what the agent reported doing plus the
@@ -296,8 +296,7 @@ mod tests {
         let body = finish(body(&task(&format!("Changed a.rs to fix the crash.\n\nIndependent review:\n{review}"))));
         assert!(body.starts_with("Changed a.rs to fix the crash.\n\n### Independent review\n\nLooks right.\n"), "{body}");
         assert!(body.contains("- `cargo test 'x'`"), "{body}");
-        assert!(body.contains(&format!("`{MARK}` Opened by neko")), "{body}");
-        assert!(body.ends_with("Not merged.\n"));
+        assert!(body.ends_with(&format!("`{MARK}` neko\n")), "{body}");
     }
 
     #[test]
@@ -312,7 +311,7 @@ mod tests {
 
     #[test]
     fn the_sign_off_is_one_line_with_a_tiny_cat() {
-        assert!(finish("## Issue\nx".into()).ends_with("\n---\n\n`=^.^=` Opened by neko after an independent review passed. Not merged.\n"));
+        assert!(finish("## Issue\nx".into()).ends_with("\n---\n\n`=^.^=` neko\n"));
     }
 
     #[test]

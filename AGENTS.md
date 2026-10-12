@@ -90,7 +90,7 @@ once an independent review passes, the daemon commits the reviewed worktree, pus
 (or reuses) a GitHub pull request via `gh` (`native_runner::publish`, `workbench/publish.rs`). Nothing merges.
 Before committing, a read-only agent reads the staged diff and ticket evidence and writes a Conventional Commits
 subject (the commit and PR title; repo conventions for scope) plus the description (Issue, Impact, Root cause, Fix,
-Options considered, Verification, Risks; signed with a one-line `=^.^=` footer). Both are rewritten on every push to an open
+Options considered, Verification, Risks; signed `` `=^.^=` neko ``). Both are rewritten on every push to an open
 PR, and landing on main uses the same subject. If the agent fails, the evidence is the body and the title is `fix: …`.
 Repositories listed in `Snapshot::land_on_main` (per checkout, toggled in the ticket inspector) instead
 fast-forward local `main` with nothing pushed: a moved `main` is rebased onto, a conflict or an overwrite of
