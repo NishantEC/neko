@@ -63,11 +63,11 @@ pub fn publish(
     directory: &Path,
     base: &str,
     title: &str,
-    body: &str,
+    describe: &dyn Fn() -> String,
     proceed: &dyn Fn() -> bool,
     cancel: &AtomicBool,
 ) -> Result<Option<Published>, String> {
-    publish_with(&resolve_gh()?, directory, base, title, body, proceed, cancel)
+    publish_with(&resolve_gh()?, directory, base, title, describe, proceed, cancel)
 }
 
 /// The task worktree's own `codex/neko-*` branch; nothing else is published.
@@ -188,7 +188,7 @@ fn publish_with(
     directory: &Path,
     base: &str,
     title: &str,
-    body: &str,
+    describe: &dyn Fn() -> String,
     proceed: &dyn Fn() -> bool,
     cancel: &AtomicBool,
 ) -> Result<Option<Published>, String> {
@@ -201,6 +201,8 @@ fn publish_with(
     if !commit_reviewed(directory, base, title, cancel)? {
         return Ok(None);
     }
+    // Written after the commit, so it can describe exactly what is pushed.
+    let body = describe();
     if !proceed() {
         return Err("The ticket changed before publishing; nothing was pushed".into());
     }
@@ -212,6 +214,11 @@ fn publish_with(
     list.args(["pr", "list", "-R", &repository, "--head", &branch, "--state", "open", "--json", "url", "--jq", ".[0].url // empty"]);
     let existing = capture("gh pr list", list, b"", cancel, GH_TIMEOUT)?;
     if let Some(url) = pull_request_url(&existing) {
+        // Keep the description true to what is now on the branch. The push
+        // already succeeded, so a failed edit is not a failed publish.
+        let mut edit = gh_command(gh, directory);
+        edit.args(["pr", "edit", &url, "-R", &repository, "--body-file", "-"]);
+        let _ = capture("gh pr edit", edit, body.as_bytes(), cancel, GH_TIMEOUT);
         return Ok(Some(Published { url, branch, created: false }));
     }
     let mut create = gh_command(gh, directory);
@@ -338,7 +345,7 @@ mod tests {
         fs::write(f.worktree.join("a.txt"), "two\n").unwrap();
         fs::write(f.worktree.join("new.txt"), "added\n").unwrap();
         let cancel = AtomicBool::new(false);
-        let published = publish_with(&f.gh, &f.worktree, &f.base, "Fix the widget\nextra", "What changed", &|| true, &cancel).unwrap().unwrap();
+        let published = publish_with(&f.gh, &f.worktree, &f.base, "Fix the widget\nextra", &|| String::from("What changed"), &|| true, &cancel).unwrap().unwrap();
         assert_eq!(published, Published { url: "https://github.com/acme/widgets/pull/7".into(), branch: "codex/neko-task1".into(), created: true });
         // Everything the reviewer saw is committed and on the remote branch.
         assert!(git(&f.worktree, &["status", "--porcelain"]).is_empty());
@@ -359,19 +366,22 @@ mod tests {
         let f = fixture(true);
         fs::write(f.worktree.join("a.txt"), "two\n").unwrap();
         let cancel = AtomicBool::new(false);
-        let published = publish_with(&f.gh, &f.worktree, &f.base, "Fix", "body", &|| true, &cancel).unwrap().unwrap();
+        let published = publish_with(&f.gh, &f.worktree, &f.base, "Fix", &|| String::from("body"), &|| true, &cancel).unwrap().unwrap();
         assert_eq!(published.url, "https://github.com/acme/widgets/pull/3");
         assert!(!published.created);
-        assert!(!fs::read_to_string(&f.log).unwrap().contains("pr create"));
+        let calls = fs::read_to_string(&f.log).unwrap();
+        assert!(!calls.contains("pr create"), "{calls}");
+        assert!(calls.contains("pr edit https://github.com/acme/widgets/pull/3 -R acme/widgets --body-file -"), "{calls}");
+        assert_eq!(fs::read_to_string(format!("{}.body", f.log.display())).unwrap(), "body");
     }
 
     #[test]
     fn nothing_changed_publishes_nothing_and_a_stale_ticket_never_pushes() {
         let f = fixture(false);
         let cancel = AtomicBool::new(false);
-        assert_eq!(publish_with(&f.gh, &f.worktree, &f.base, "Fix", "body", &|| true, &cancel).unwrap(), None);
+        assert_eq!(publish_with(&f.gh, &f.worktree, &f.base, "Fix", &|| String::from("body"), &|| true, &cancel).unwrap(), None);
         fs::write(f.worktree.join("a.txt"), "two\n").unwrap();
-        let error = publish_with(&f.gh, &f.worktree, &f.base, "Fix", "body", &|| false, &cancel).unwrap_err();
+        let error = publish_with(&f.gh, &f.worktree, &f.base, "Fix", &|| String::from("body"), &|| false, &cancel).unwrap_err();
         assert!(error.contains("nothing was pushed"), "{error}");
         assert!(Process::new("git").current_dir(&f.bare).args(["rev-parse", "--verify", "refs/heads/codex/neko-task1"]).output().unwrap().stdout.is_empty());
         assert!(!f.log.exists());
@@ -382,10 +392,10 @@ mod tests {
         let f = fixture(false);
         let cancel = AtomicBool::new(false);
         git(&f.worktree, &["switch", "--quiet", "main"]);
-        assert!(publish_with(&f.gh, &f.worktree, &f.base, "t", "b", &|| true, &cancel).unwrap_err().contains("only Neko task branches"));
+        assert!(publish_with(&f.gh, &f.worktree, &f.base, "t", &|| String::from("b"), &|| true, &cancel).unwrap_err().contains("only Neko task branches"));
         git(&f.worktree, &["switch", "--quiet", "codex/neko-task1"]);
         git(&f.worktree, &["remote", "set-url", "origin", "https://gitlab.com/acme/widgets.git"]);
-        assert!(publish_with(&f.gh, &f.worktree, &f.base, "t", "b", &|| true, &cancel).unwrap_err().contains("not a GitHub repository"));
+        assert!(publish_with(&f.gh, &f.worktree, &f.base, "t", &|| String::from("b"), &|| true, &cancel).unwrap_err().contains("not a GitHub repository"));
     }
 
     /// A source checkout on `main` plus a task worktree branched from it.
