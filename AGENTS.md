@@ -88,9 +88,10 @@ independent reviewer returns a result for human review. Authorized builders and
 reviewers have full local filesystem access for dependency setup, caches and tests. Workers never push;
 once an independent review passes, the daemon commits the reviewed worktree, pushes its task branch and opens
 (or reuses) a GitHub pull request via `gh` (`native_runner::publish`, `workbench/publish.rs`). Nothing merges.
-A read-only agent writes the description from the committed diff and ticket evidence (Issue, Impact, Root cause,
-Fix, Options considered, Verification, Risks; signed with the neko mark), rewritten on every push to an open PR;
-if it fails, the builder/review evidence is used instead.
+Before committing, a read-only agent reads the staged diff and ticket evidence and writes a Conventional Commits
+subject (the commit and PR title; repo conventions for scope) plus the description (Issue, Impact, Root cause, Fix,
+Options considered, Verification, Risks; signed with a small ASCII cat). Both are rewritten on every push to an open
+PR, and landing on main uses the same subject. If the agent fails, the evidence is the body and the title is `fix: …`.
 Repositories listed in `Snapshot::land_on_main` (per checkout, toggled in the ticket inspector) instead
 fast-forward local `main` with nothing pushed: a moved `main` is rebased onto, a conflict or an overwrite of
 local edits is refused, and the ticket records `landed_commit`. The `neko` repo itself is set to land on main.
