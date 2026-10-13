@@ -30,7 +30,7 @@ struct FullDiskAccessBanner: View {
         Group {
             if !granted && !dismissed {
                 HStack(spacing: 12) {
-                    Image(systemName: "folder.badge.gearshape").font(.system(size: 18)).foregroundStyle(NekoStyle.amber)
+                    Image(systemName: "folder.badge.gearshape").font(NekoFont.of(.subtitle)).foregroundStyle(NekoStyle.amber)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(opened ? "Turn on Neko in the list, then reopen Neko" : "Allow Neko once, instead of folder by folder").font(NekoFont.body.weight(.semibold))
                         Text(opened ? "System Settings → Privacy & Security → Full Disk Access. macOS offers to reopen Neko when you switch it on."
@@ -38,10 +38,10 @@ struct FullDiskAccessBanner: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(opened ? "Open Settings again" : "Allow access…") { FullDiskAccess.openSettings(); opened = true }.nekoGlassButton()
+                    Button(opened ? "Open Settings again" : "Allow access…") { FullDiskAccess.openSettings(); opened = true }.nekoButton(.secondary)
                     Button("Not now") { dismissed = true }.buttonStyle(.plain).foregroundStyle(.secondary)
                 }
-                .nekoCard(padding: 12, radius: 12).padding(.horizontal, 16).padding(.top, 8)
+                .nekoCard(padding: 12, radius: NekoRadius.lg).padding(.horizontal, 16).padding(.top, 8)
             }
         }
         .task {

@@ -3,7 +3,7 @@ import SwiftUI
 /// A decorative Metal surface alongside system glass; never a shader on glass itself.
 /// Only pointer/press events change its uniforms. There is no idle render timer.
 struct DesignLabOrb: View {
-    var color: Color = Color(red: 0.84, green: 0.86, blue: 0.93)
+    var color: Color = PearlTint.mist
     var size: CGFloat = 28
     @Environment(\.designLabPearlFocus) private var focus
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -26,7 +26,7 @@ struct DesignLabOrb: View {
                     .float2(Float(size), Float(size)),
                     .float2(Float(pointer.x), Float(pointer.y)),
                     .float(focus.hovered ? 1 : 0),
-                    .color(color), .color(Color(red: 0.78, green: 0.93, blue: 0.94)),
+                    .color(color), .color(PearlTint.aqua),
                     .color(.white)
                 ))
         } else {
@@ -72,11 +72,11 @@ private struct DesignLabHoverLabel: View {
             .environment(\.designLabPearlFocus, enabled ? focus : DesignLabPearlFocus())
             .background {
                 if !circular {
-                    RoundedRectangle(cornerRadius: 11).fill(.primary.opacity(hovered ? 0.085 : 0.025))
+                    RoundedRectangle(cornerRadius: NekoRadius.md).fill(.primary.opacity(hovered ? 0.085 : 0.025))
                 }
             }
             .scaleEffect(scale)
-            .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: scale)
+            .nekoAnimation(.reveal, value: scale)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { bounds = $0 }
             .onContinuousHover { phase in
                 switch phase {

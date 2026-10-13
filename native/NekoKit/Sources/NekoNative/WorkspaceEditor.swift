@@ -23,7 +23,7 @@ struct WorkspaceEditor: View {
                 }
                 Section {
                     if folders.isEmpty {
-                        EmptyRow(text: "Choose at least one folder where this work lives.")
+                        NekoEmptyState("Choose at least one folder where this work lives.")
                     }
                     ForEach(folders, id: \.self) { path in
                         HStack(alignment: .top, spacing: 10) {
@@ -33,7 +33,7 @@ struct WorkspaceEditor: View {
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button("Remove folder", systemImage: "minus.circle") { folders.removeAll { $0 == path } }
-                                .labelStyle(.iconOnly).buttonStyle(.borderless)
+                                .labelStyle(.iconOnly).nekoButton(.quiet)
                                 .accessibilityLabel("Remove \(path)").help("Remove \(path)")
                         }.padding(.vertical, 6)
                     }
@@ -56,7 +56,7 @@ struct WorkspaceEditor: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(saving ? "Saving…" : "Save workspace") { Task { await save() } }
-                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .nekoButton(.primary).keyboardShortcut(.defaultAction)
                     .disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || folders.isEmpty)
             }
         }.font(NekoFont.body).controlSize(.regular).padding(NekoLayout.pageInset).frame(width: 620).background(N.canvas)

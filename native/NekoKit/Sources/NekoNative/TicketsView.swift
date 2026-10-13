@@ -307,13 +307,13 @@ struct TicketsView: View {
                     }
                     .frame(width: 300).frame(maxHeight: .infinity, alignment: .top)
                     // Columns are plain; only the one under a dragged card lights up.
-                    .background(dropTarget == column.id ? column.color.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(dropTarget == column.id ? column.color.opacity(0.5) : .clear))
+                    .background(dropTarget == column.id ? column.color.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous).strokeBorder(dropTarget == column.id ? column.color.opacity(0.5) : .clear))
                     .dropDestination(for: String.self) { ids, _ in
                         guard let id = ids.first else { return false }
                         return move(id, to: column)
                     } isTargeted: { inside in
-                        withAnimation(.snappy(duration: 0.15)) { dropTarget = inside ? column.id : (dropTarget == column.id ? nil : dropTarget) }
+                        withNekoAnimation(.press) { dropTarget = inside ? column.id : (dropTarget == column.id ? nil : dropTarget) }
                     }
                 }
             }.padding(.horizontal, NekoLayout.pageInset).padding(.vertical, NekoLayout.sectionGap)
@@ -435,7 +435,7 @@ struct TicketDetail: View {
                     ScrollView([.vertical, .horizontal]) {
                         Text(changes.patch).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                     }.frame(maxHeight: 320).padding(NekoLayout.rowInset)
-                        .background(N.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
                 }
             }
         }
@@ -488,7 +488,7 @@ struct TicketDetail: View {
                         Text("Reply below so the agent can reassess its plan.").font(NekoFont.meta).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(NekoLayout.rowInset)
-                    .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
                 }
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: NekoLayout.sectionGap) { detailsBody }.padding(.top, 16)
@@ -555,10 +555,10 @@ struct TicketDetail: View {
                 .disabled(model.busy)
         }
         if ticket["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason(ticket) == nil {
-            ToolbarItem(placement: .primaryAction) { action("Approve", "ApproveTask").buttonStyle(.borderedProminent).disabled(model.busy) }
+            ToolbarItem(placement: .primaryAction) { action("Approve", "ApproveTask").nekoButton(.primary).disabled(model.busy) }
         }
         if ticket["status"].string == "ReadyForReview" {
-            ToolbarItem(placement: .primaryAction) { action("Accept locally", "CompleteTask").buttonStyle(.borderedProminent).disabled(model.busy) }
+            ToolbarItem(placement: .primaryAction) { action("Accept locally", "CompleteTask").nekoButton(.primary).disabled(model.busy) }
         }
         if ["Failed", "Cancelled"].contains(ticket["status"].string) {
             ToolbarItem(placement: .primaryAction) { action("Start again", "StartTask").disabled(model.busy) }
@@ -616,7 +616,7 @@ struct TicketDetail: View {
                             Button("Open subtask") { model.openAgent(task.recordID) }
                         } else { Text(split["approved"].bool ? "Subtask not available in this snapshot" : "Awaiting approval").foregroundStyle(.secondary) }
                     }.padding(NekoLayout.rowInset)
-                        .background(N.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .background(N.card, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
                 }
             }
             if !ticket["worktree"].string.isEmpty { Button("Reveal working folder", systemImage: "folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
@@ -640,7 +640,7 @@ struct TicketDetail: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(NekoLayout.rowInset)
-        .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
     }
     private func chooseFolder() {
         let panel = NSOpenPanel()
@@ -705,7 +705,7 @@ private struct TicketOutcomeReadback: View {
                         NSPasteboard.general.clearContents()
                         copied = NSPasteboard.general.setString(result, forType: .string)
                     }
-                    .buttonStyle(.borderless).controlSize(.small).font(NekoFont.meta)
+                    .nekoButton(.quiet).controlSize(.small).font(NekoFont.meta)
                     .help("Copy the full saved result, including the reviewer response")
                 }
             }
@@ -748,7 +748,6 @@ struct TicketCard: View {
     /// Why a stopped ticket stopped, shown under its title.
     var note: String? = nil
     @State private var hover = false
-    @Environment(\.ink) private var ink
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -772,13 +771,13 @@ struct TicketCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: NekoStyle.radius).fill(ink.panel)
-                .overlay(RoundedRectangle(cornerRadius: NekoStyle.radius).fill(hover ? ink.raisedHover : .clear))
+            RoundedRectangle(cornerRadius: NekoRadius.xl).fill(N.panel)
+                .overlay(RoundedRectangle(cornerRadius: NekoRadius.xl).fill(hover ? N.selected : .clear))
         }
-        .overlay(RoundedRectangle(cornerRadius: NekoStyle.radius).strokeBorder(highlighted ? NekoStyle.accent : ink.line))
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: NekoRadius.xl).strokeBorder(highlighted ? NekoStyle.accent : N.line))
+        .contentShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
         .help(id)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hover)
+        .nekoAnimation(.hover, value: hover)
         .onHover { hover = $0 }
     }
 }

@@ -17,9 +17,9 @@ struct DesignLabPluginLibrary: View {
             Divider()
             ForEach(DesignLabModel.Plugin.allCases) { plugin in
                 HStack(spacing: 16) {
-                    Image(systemName: plugin.symbol).font(.system(size: 20)).foregroundStyle(.purple)
+                    Image(systemName: plugin.symbol).font(NekoFont.of(.title)).foregroundStyle(.purple)
                         .frame(width: 44, height: 44)
-                        .background(.purple.opacity(0.08), in: .rect(cornerRadius: 13))
+                        .background(.purple.opacity(0.08), in: .rect(cornerRadius: NekoRadius.lg))
                     VStack(alignment: .leading, spacing: 6) {
                         Text(plugin.rawValue).font(.headline)
                         Text(plugin.detail).font(.caption).foregroundStyle(.secondary)

@@ -86,7 +86,6 @@ enum ComposerMention {
 
 /// Presentation only. Each surface owns dispatch, validation and authority.
 struct SharedComposer<Controls: View>: View {
-    @Environment(\.ink) private var ink
     @Binding var text: String
     let attachments: [ComposerAttachment]
     let placeholder: String
@@ -132,7 +131,7 @@ struct SharedComposer<Controls: View>: View {
                 Button("Attach files", systemImage: "paperclip", action: onChooseAttachments)
                     .labelStyle(.iconOnly).font(NekoFont.body)
                     .frame(width: 32, height: 32).contentShape(Rectangle())
-                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .nekoButton(.quiet).foregroundStyle(.secondary)
                     .help("Attach images or files; you can also paste or drop them")
                     .accessibilityLabel("Attach images or files")
                 ViewThatFits(in: .horizontal) {
@@ -159,7 +158,6 @@ struct SharedComposer<Controls: View>: View {
 }
 
 struct ComposerAttachmentStrip: View {
-    @Environment(\.ink) private var ink
     let attachments: [ComposerAttachment]
     let remove: (ComposerAttachment) -> Void
     var body: some View {
@@ -181,12 +179,12 @@ struct ComposerSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         content.background {
-            let shape = RoundedRectangle(cornerRadius: 24)
+            let shape = RoundedRectangle(cornerRadius: NekoRadius.hero)
             if opaque || contrast == .increased {
                 shape.fill(N.card)
                     .overlay(shape.strokeBorder(N.lineStrong, lineWidth: contrast == .increased ? 2 : 1))
             } else if #available(macOS 26, *) {
-                Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 24))
+                Color.clear.glassEffect(.regular, in: .rect(cornerRadius: NekoRadius.hero))
             } else {
                 shape.fill(.regularMaterial)
                     .overlay(shape.strokeBorder(N.line))
@@ -207,11 +205,11 @@ struct ComposerPrimaryButton: View {
         Button(action: action) {
             Group {
                 if submitting { ProgressView().controlSize(.mini) }
-                else { Image(systemName: symbol).font(.system(size: 16, weight: .semibold)) }
+                else { Image(systemName: symbol).font(NekoFont.of(.body, weight: .semibold)) }
             }
             .frame(width: 34, height: 34)
-            .foregroundStyle(enabled ? Color.adaptive(light: 0xFFFFFF, dark: 0x19191C) : N.text4)
-            .background(enabled ? Color.adaptive(light: 0x29292D, dark: 0xECEDEF) : N.selected, in: Circle())
+            .foregroundStyle(enabled ? N.onInverse : N.text4)
+            .background(enabled ? N.inverse : N.selected, in: Circle())
             .contentShape(Circle())
         }
         .buttonStyle(.plain).disabled(!enabled)
@@ -228,21 +226,21 @@ struct ComposerAttachmentChip: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: isImage ? "photo" : "doc")
-                .font(.system(size: 17)).foregroundStyle(N.text3).frame(width: 24)
+                .font(NekoFont.of(.subtitle)).foregroundStyle(N.text3).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).font(NekoFont.meta.weight(.medium)).foregroundStyle(.primary)
                     .lineLimit(1).truncationMode(.middle)
                 Text(detail ?? (isImage ? "Image" : "File"))
-                    .font(.system(size: 12)).foregroundStyle(N.text3)
+                    .font(NekoFont.caption).foregroundStyle(N.text3)
             }.frame(maxWidth: 210, alignment: .leading)
             Button(action: remove) {
-                Image(systemName: "xmark").font(.system(size: 10, weight: .medium))
+                Image(systemName: "xmark").font(NekoFont.of(.micro, weight: .medium))
                     .frame(width: 24, height: 24).contentShape(Rectangle())
             }
             .buttonStyle(.plain).foregroundStyle(N.text3).accessibilityLabel("Remove \(name)")
         }
         .padding(10)
-        .background(N.attachment, in: RoundedRectangle(cornerRadius: 10))
+        .background(N.attachment, in: RoundedRectangle(cornerRadius: NekoRadius.md))
         .help(name)
     }
 }

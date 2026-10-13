@@ -16,7 +16,7 @@ struct TicketInspector: View {
         Group {
             if ticket == .null {
                 VStack(spacing: 8) {
-                    Image(systemName: "tray").font(.system(size: 26)).foregroundStyle(.tertiary)
+                    Image(systemName: "tray").font(NekoFont.of(.headline)).foregroundStyle(.tertiary)
                     Text("No ticket yet").font(NekoFont.heading)
                     Text("When Neko proposes work in this chat, its ticket shows here.").font(NekoFont.meta).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -36,7 +36,7 @@ struct TicketInspector: View {
                         }
                         if !ticket["worktree"].string.isEmpty {
                             header("Changes")
-                            if changes.isEmpty { Text(loadedFor == id ? "No changes yet" : "Loading…").font(.system(size: 12)).foregroundStyle(.secondary) }
+                            if changes.isEmpty { Text(loadedFor == id ? "No changes yet" : "Loading…").font(NekoFont.caption).foregroundStyle(.secondary) }
                             ForEach(changes.prefix(12), id: \.self) { file in
                                 row((file as NSString).lastPathComponent, wide: true) {
                                     if let counts = changeCounts[file] {
@@ -47,7 +47,7 @@ struct TicketInspector: View {
                                     }
                                 }.help(file)
                             }
-                            if changes.count > 12 { Text("and \(changes.count - 12) more").font(.system(size: 11)).foregroundStyle(.tertiary) }
+                            if changes.count > 12 { Text("and \(changes.count - 12) more").font(NekoFont.of(.small)).foregroundStyle(.tertiary) }
                         }
                         if let verdict = TicketPresentation.review(ticket["result"].string).verdict {
                             header("Checks")
@@ -89,7 +89,7 @@ struct TicketInspector: View {
                 }
             }
             if !["Completed", "Cancelled", "Failed"].contains(status) {
-                Button(role: .destructive) { run("CancelTask") } label: { Text("Cancel Ticket").frame(maxWidth: .infinity) }.buttonStyle(.borderless).foregroundStyle(.red)
+                Button(role: .destructive) { run("CancelTask") } label: { Text("Cancel Ticket").frame(maxWidth: .infinity) }.nekoButton(.quiet).foregroundStyle(.red)
             }
         }.controlSize(.regular).disabled(model.busy)
     }
@@ -128,7 +128,7 @@ struct TicketInspector: View {
         }
     }
     private func wide(_ title: String, _ command: String, prominent: Bool) -> some View {
-        Button { run(command) } label: { Text(title).frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent)
+        Button { run(command) } label: { Text(title).frame(maxWidth: .infinity) }.nekoButton(.primary)
     }
     private func run(_ command: String) {
         guard let id else { return }

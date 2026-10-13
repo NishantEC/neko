@@ -16,16 +16,16 @@ struct DesignLabControls: View {
             )
             Button(action: openPlugins) {
                 HStack(spacing: 7) {
-                    Image(systemName: "puzzlepiece.extension").font(.system(size: 12))
-                    Text("Plugins").font(.system(size: 12, weight: .medium))
+                    Image(systemName: "puzzlepiece.extension").font(NekoFont.caption)
+                    Text("Plugins").font(NekoFont.of(.caption, weight: .medium))
                     Text(preview.plugins.count, format: .number)
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .font(NekoFont.of(.micro, weight: .medium).monospacedDigit())
                         .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(.primary.opacity(0.07), in: .rect(cornerRadius: 4))
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
+                        .background(.primary.opacity(0.07), in: .rect(cornerRadius: NekoRadius.xs))
+                    Image(systemName: "chevron.down").font(NekoFont.of(.micro, weight: .semibold)).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 10).frame(height: 34)
-                .contentShape(.rect(cornerRadius: 11))
+                .contentShape(.rect(cornerRadius: NekoRadius.md))
             }
             .buttonStyle(DesignLabHoverStyle()).fixedSize().accessibilityLabel("Preview plugins, \(preview.plugins.count) selected")
             .popover(isPresented: $showingPlugins, arrowEdge: .bottom) {

@@ -114,12 +114,12 @@ struct WorkspaceView: View {
         .environment(\.nekoLook, NekoLook(rawValue: look) ?? .ambient)
         .safeAreaInset(edge: .top) {
             if let notice = model.notice, model.error == nil {
-                HStack(spacing: 10) { Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint); Text(notice).font(NekoFont.body); Spacer(); Button { model.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
-                    .nekoToast().transition(.move(edge: .top))
+                NekoNotice(kind: .success, text: notice) { model.notice = nil }.transition(.move(edge: .top))
             }
             if let error = model.error {
-                HStack(spacing: 10) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(NekoStyle.amber); Text(error).font(NekoFont.body).textSelection(.enabled).lineLimit(2); Spacer(); Button("Retry") { Task { await model.refresh() } }.nekoGlassButton(); Button { model.error = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)) }.buttonStyle(.plain).accessibilityLabel("Dismiss") }
-                    .nekoToast().transition(.move(edge: .top))
+                NekoNotice(kind: .warning, text: error) { model.error = nil } actions: {
+                    Button("Retry") { Task { await model.refresh() } }.nekoButton(.secondary)
+                }.transition(.move(edge: .top))
             }
         }
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
@@ -130,92 +130,6 @@ struct WorkspaceView: View {
             // Development only: NEKO_NOTICE_DEMO="text" shows a notice to check the toast's look.
             if let demo = ProcessInfo.processInfo.environment["NEKO_NOTICE_DEMO"], !demo.isEmpty { model.notice = demo }
         }
-    }
-}
-
-struct NekoSidebar: View {
-    @ObservedObject var model: AppModel
-    @Binding var page: String
-    let pages: [(String, String)]
-    @Binding var addingWorkspace: Bool
-    @Namespace private var selection
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(height: 52) // native traffic lights live here
-            HStack(spacing: 8) {
-                BrandMark(size: 20).clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                Text("Neko").font(.system(size: 13, weight: .semibold)).foregroundStyle(N.text)
-                Spacer()
-                Button { PaletteController.shared.toggle(model: model) } label: {
-                    Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(N.text4).frame(width: 24, height: 24).contentShape(Rectangle())
-                }.buttonStyle(.plain).help("Quick panel ⌘K").accessibilityLabel("Open quick panel")
-            }.padding(.horizontal, 10).frame(height: 32)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 1) {
-                    GlassGroup(spacing: 2) { VStack(alignment: .leading, spacing: 1) { ForEach(pages, id: \.0) { item in navRow(item.0, icon: item.1) } } }
-                    HStack {
-                        Text("Workspaces").font(.system(size: 12, weight: .medium)).foregroundStyle(N.text4)
-                        Spacer()
-                        Button { model.selectedWorkspace = nil; addingWorkspace = true } label: { Image(systemName: "plus").font(.system(size: 11)).foregroundStyle(N.text4).frame(width: 20, height: 20).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Add workspace")
-                    }.padding(.horizontal, 10).frame(height: 26).padding(.top, 23)
-                    workspaceRow(nil, name: "All workspaces", color: Color.white.opacity(0.22))
-                    ForEach(Array(model.workspaces.enumerated()), id: \.element.recordID) { index, workspace in
-                        workspaceRow(workspace.recordID, name: workspace["name"].string, color: workspaceColor(index))
-                    }
-                }.padding(.top, 12)
-            }.scrollIndicators(.never)
-            HStack(spacing: 8) {
-                StatusPill(text: WatchingPresentation(connected: model.connected, snapshot: model.snapshot).title, live: WatchingPresentation(connected: model.connected, snapshot: model.snapshot).active)
-                Spacer()
-                if model.selectedWorkspace != nil {
-                    Button { addingWorkspace = true } label: { Image(systemName: "gearshape").font(.system(size: 11)).foregroundStyle(N.text4) }.buttonStyle(.plain).help("Workspace settings").accessibilityLabel("Workspace settings")
-                }
-                Text("⌘K").font(.system(size: 11)).foregroundStyle(N.text4)
-            }.padding(.horizontal, 10).frame(height: 44)
-        }
-        .padding(.horizontal, 10)
-    }
-    private func navRow(_ title: String, icon: String) -> some View {
-        let selected = page == title
-        let attention = title == "Tickets" ? StatusSummary(snapshot: model.snapshot).needsAttention : 0
-        return Button { withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { page = title } } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon).font(.system(size: 12.5)).frame(width: 16).foregroundStyle(selected ? N.text : N.text3)
-                Text(title).font(.system(size: 13, weight: selected ? .medium : .regular)).foregroundStyle(selected ? N.text : N.text2)
-                Spacer()
-                if attention > 0 {
-                    Text(String(attention)).font(.system(size: 11, weight: .semibold).monospacedDigit()).foregroundStyle(N.canvas)
-                        .padding(.horizontal, 6).frame(height: 16).background(NekoStyle.accent, in: Capsule())
-                }
-            }
-            .padding(.horizontal, 10).frame(height: N.rowHeight)
-            .modifier(SelectedGlass(selected: selected, namespace: selection))
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
-    }
-    private func workspaceRow(_ id: String?, name: String, color: Color) -> some View {
-        let selected = model.selectedWorkspace == id
-        return Button { model.selectedWorkspace = id; if id != nil { page = "Today" } } label: {
-            HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous).fill(color).frame(width: 8, height: 8).frame(width: 16)
-                Text(name).font(.system(size: 13)).foregroundStyle(selected ? N.text : N.text2).lineLimit(1)
-                Spacer()
-            }.padding(.horizontal, 10).frame(height: N.rowHeight).contentShape(Rectangle())
-                .background(selected ? N.selected : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }.buttonStyle(.plain)
-    }
-}
-
-func workspaceColor(_ index: Int) -> Color { [NekoStyle.mint, NekoStyle.sky, NekoStyle.lilac, NekoStyle.amber, NekoStyle.rose, NekoStyle.coral][index % 6] }
-
-/// Glass sits behind the row's own content, so the label stays sharp;
-/// the shared ID lets the pill morph between rows.
-struct SelectedGlass: ViewModifier {
-    let selected: Bool
-    let namespace: Namespace.ID
-    func body(content: Content) -> some View {
-        if selected { content.liquidGlass(radius: 8, interactive: true).glassMorphID("nav", in: namespace) }
-        else { content }
     }
 }
 
@@ -242,12 +156,12 @@ struct NativeSidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .font(.system(size: 14))
+        .font(NekoFont.of(.callout))
         .environment(\.defaultMinListRowHeight, 32)
         // Where Neko works sits at the top, like a Codex or Xcode project picker.
         .safeAreaInset(edge: .top, spacing: 0) {
             WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace)
-                .menuStyle(.button).buttonStyle(.borderless)
+                .menuStyle(.button).nekoButton(.quiet)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16).padding(.vertical, 12)
         }
@@ -259,10 +173,10 @@ struct NativeSidebar: View {
                 Menu {
                     Picker("Appearance", selection: $appearance) { ForEach(NekoAppearance.allCases) { Text($0.title).tag($0.rawValue) } }.pickerStyle(.inline)
                 } label: { Image(systemName: "paintpalette") }
-                .menuStyle(.button).buttonStyle(.borderless).menuIndicator(.hidden).fixedSize()
+                .menuStyle(.button).nekoButton(.quiet).menuIndicator(.hidden).fixedSize()
                 .help("Choose light, dark, or system appearance").accessibilityLabel("Appearance")
                 Button { PaletteController.shared.toggle(model: model) } label: { Image(systemName: "command") }
-                    .buttonStyle(.borderless).help("Quick panel (⌘K)").accessibilityLabel("Quick panel")
+                    .nekoButton(.quiet).help("Quick panel (⌘K)").accessibilityLabel("Quick panel")
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16).padding(.vertical, 14)
@@ -324,7 +238,7 @@ struct NativeSidebar: View {
         let selected = model.selectedWorkspace == id
         return Button { model.selectedWorkspace = id } label: {
             HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: 3, style: .continuous).fill(color).frame(width: 10, height: 10).frame(width: 18)
+                RoundedRectangle(cornerRadius: NekoRadius.micro, style: .continuous).fill(color).frame(width: 10, height: 10).frame(width: 18)
                 Text(name).lineLimit(1)
                 Spacer()
                 if selected { Image(systemName: "checkmark").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
@@ -414,23 +328,6 @@ struct WorkspaceMenu: View {
         .menuIndicator(.visible)
         .help("Choose where Neko works")
         .accessibilityLabel("Workspace: \(current)")
-    }
-}
-
-/// Arc: content floats in a calm, neutral card; colour stays on the window space around it.
-struct ArcCard: ViewModifier {
-    let enabled: Bool
-    func body(content: Content) -> some View {
-        if enabled {
-            content
-                .background(N.panel.opacity(0.94), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.08)))
-                .shadow(color: .black.opacity(0.35), radius: 16, y: 6)
-                .padding([.horizontal, .bottom], 10).padding(.top, 2)
-        } else {
-            content
-        }
     }
 }
 

@@ -409,7 +409,7 @@ private struct PaletteView: View {
                 if state.mode != nil { Button { state.leaveMode() } label: { Image(systemName: "chevron.left") }.buttonStyle(.plain).accessibilityLabel("Back to search") }
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField(state.mode.map { "Search \($0)…" } ?? "Search apps, files, and commands…", text: $state.query)
-                    .textFieldStyle(.plain).font(.system(size: 21)).focused($searchFocused)
+                    .textFieldStyle(.plain).font(NekoFont.of(.title)).focused($searchFocused)
                 if state.loading { ProgressView().controlSize(.small) }
             }.padding(22)
             Divider()
@@ -431,7 +431,7 @@ private struct PaletteView: View {
                                         }
                                         Spacer(minLength: 0)
                                         Text(row["accessory"].string).font(.caption).foregroundStyle(.secondary)
-                                    }.padding(10).contentShape(Rectangle()).background(index == state.selected ? state.theme.selected : .clear, in: RoundedRectangle(cornerRadius: 8))
+                                    }.padding(10).contentShape(Rectangle()).background(index == state.selected ? state.theme.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.md))
                                 }.buttonStyle(.plain).id(index)
                             }
                             if state.rows.isEmpty, !state.loading { Text("No results").foregroundStyle(.secondary).padding(32) }
@@ -456,7 +456,7 @@ private struct PaletteView: View {
             }.padding(12)
         }.frame(width: 760, height: 500).foregroundStyle(state.theme.text)
             .background(state.theme.surface.opacity(state.theme.alpha))
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)).clipShape(RoundedRectangle(cornerRadius: 16))
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: NekoRadius.xl)).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl))
             .preferredColorScheme(state.theme.light ? .light : .dark)
             .onAppear { searchFocused = true }
             .onChange(of: state.focusGeneration) { _, _ in searchFocused = true }
@@ -467,12 +467,12 @@ private struct PaletteView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(Array(state.selection["actions"].array.enumerated()), id: \.offset) { index, action in
                                 Button(role: action["destructive"].bool ? .destructive : nil) { state.activateSelection(action: action) } label: {
-                                    Text(action["label"].string).frame(maxWidth: .infinity, alignment: .leading).padding(6).background(state.selectedAction == index ? state.theme.selected : .clear, in: RoundedRectangle(cornerRadius: 6))
+                                    Text(action["label"].string).frame(maxWidth: .infinity, alignment: .leading).padding(6).background(state.selectedAction == index ? state.theme.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.sm))
                                 }.buttonStyle(.plain)
                             }
                             Divider()
                             Button("Close actions") { state.showActions = false }.keyboardShortcut(.escape, modifiers: [])
-                        }.padding(12).frame(width: 210).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).shadow(radius: 12).padding(.trailing, 12).padding(.bottom, 50)
+                        }.padding(12).frame(width: 210).background(.regularMaterial, in: RoundedRectangle(cornerRadius: NekoRadius.lg)).shadow(radius: 12).padding(.trailing, 12).padding(.bottom, 50)
                     }
                 }
             }
@@ -542,34 +542,3 @@ private struct PaletteIcon: View {
 
 /// These surface/text values mirror the shipped tokens in Rust theme.rs.
 /// Native controls and material still use AppKit's light/dark appearance.
-private struct PaletteTheme {
-    let light: Bool
-    let surface: Color
-    let alpha: Double
-    let selected: Color
-    let text: Color
-    static func named(_ id: String) -> PaletteTheme {
-        let values: [String: (Bool, UInt32, Double, UInt32, UInt32)] = [
-            "neutral": (false, 0x0d0d0d, 0.64, 0x2f2f2f, 0xe8e8e8),
-            "ember": (false, 0x350915, 0.86, 0x7b3820, 0xf9eee0),
-            "catnap": (false, 0x4b115b, 0.9, 0xa0186f, 0xfff2fd),
-            "catppuccin-mocha": (false, 0x1e1e2e, 0.84, 0x45475a, 0xcdd6f4),
-            "catppuccin-macchiato": (false, 0x24273a, 0.84, 0x494d64, 0xcad3f5),
-            "catppuccin-frappe": (false, 0x303446, 0.86, 0x51576d, 0xc6d0f5),
-            "catppuccin-latte": (true, 0xeff1f5, 0.88, 0xccd0da, 0x4c4f69),
-            "gruvbox-dark": (false, 0x282828, 0.85, 0x504945, 0xfbf1c7),
-            "gruvbox-light": (true, 0xfbf1c7, 0.9, 0xd5c4a1, 0x282828),
-            "solarized-dark": (false, 0x002b36, 0.86, 0x0d4553, 0xfdf6e3),
-            "solarized-light": (true, 0xfdf6e3, 0.9, 0xd9d2ba, 0x002b36),
-            "nord": (false, 0x2e3440, 0.85, 0x434c5e, 0xeceff4),
-            "tokyo-night": (false, 0x24283b, 0.85, 0x3b4261, 0xc0caf5),
-            "rose-pine": (false, 0x191724, 0.86, 0x403d52, 0xe0def4),
-            "rose-pine-dawn": (true, 0xfaf4ed, 0.9, 0xcecacd, 0x555076),
-            "dracula": (false, 0x282a36, 0.85, 0x44475a, 0xf8f8f2),
-            "everforest-dark": (false, 0x2d353b, 0.86, 0x3d484d, 0xd3c6aa)
-        ]
-        let value = values[id] ?? values["neutral"]!
-        func color(_ hex: UInt32) -> Color { Color(red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255) }
-        return PaletteTheme(light: value.0, surface: color(value.1), alpha: value.2, selected: color(value.3), text: color(value.4))
-    }
-}

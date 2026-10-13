@@ -28,7 +28,7 @@ struct ComposerRuntimeEffortControl: View {
                         Spacer()
                         Text(RuntimeSelectionLabel.effort(selection.draft, catalog: selection.catalog))
                         Button("Auto") { selection.draft.reasoningEffort = nil }
-                            .buttonStyle(.borderless).disabled(selection.draft.reasoningEffort == nil)
+                            .nekoButton(.quiet).disabled(selection.draft.reasoningEffort == nil)
                             .accessibilityLabel("Reset effort to Auto")
                     }
                 }
@@ -54,7 +54,7 @@ struct ComposerRuntimeEffortControl: View {
             HStack {
                 Text("Effort pin unavailable").font(.caption).foregroundStyle(NekoStyle.amber)
                 Spacer()
-                Button("Reset effort to Auto") { selection.draft.reasoningEffort = nil }.buttonStyle(.borderless)
+                Button("Reset effort to Auto") { selection.draft.reasoningEffort = nil }.nekoButton(.quiet)
             }
         }
     }

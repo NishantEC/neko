@@ -34,7 +34,7 @@ struct DesignLabComposer: View {
                     preview.attachmentName = "appearance-reference.png"
                 }
                 .labelStyle(.iconOnly).buttonStyle(.plain)
-                .font(.system(size: 17)).foregroundStyle(.secondary)
+                .font(NekoFont.of(.subtitle)).foregroundStyle(.secondary)
                 .frame(width: 32, height: 36).contentShape(Rectangle())
                 if preview.layout == .inline {
                     DesignLabControls(preview: preview)
@@ -44,7 +44,7 @@ struct DesignLabComposer: View {
                     Text("Shift-Return for a new line").fixedSize()
                     Text("Shift-Return\nfor a new line").multilineTextAlignment(.trailing).fixedSize()
                 }
-                .font(.system(size: 10)).foregroundStyle(.secondary).accessibilityHidden(true)
+                .font(NekoFont.of(.micro)).foregroundStyle(.secondary).accessibilityHidden(true)
                 ComposerPrimaryButton(label: "Send preview message", enabled: preview.canSend, action: preview.send)
             }
             .padding(.horizontal, 18).padding(.bottom, 18)

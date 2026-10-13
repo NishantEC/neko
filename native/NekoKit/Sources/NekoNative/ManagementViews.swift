@@ -26,38 +26,18 @@ struct ManagementDraft: Identifiable {
     return active.isEmpty ? "default" : active
 }
 
-/// List rows can coalesce several controls into one accessibility row on macOS.
-/// Eager stacks preserve each native button and toggle as a separate AX element.
-struct ManagementScroll<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: NekoLayout.sectionGap, content: content)
-                .frame(maxWidth: NekoLayout.pageWidth, alignment: .leading)
-                .padding(NekoLayout.pageInset)
-                .frame(maxWidth: .infinity, alignment: .top)
-        }
-        .font(NekoFont.body)
-        .foregroundStyle(N.text)
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
-        .accessibilityElement(children: .contain)
-    }
-}
-
 struct ProfilesView: View {
     @ObservedObject var model: AppModel
     @State private var draft: ManagementDraft?
     var body: some View {
         let profiles = model.snapshot["agent_profiles"]["profiles"].array
-        ManagementScroll {
-            PageIntro(title: "Profiles", message: "Instructions and memories for each kind of work.") {
+        NekoPage(title: "Profiles", message: "Instructions and memories for each kind of work.") {
                 Button("New profile", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) }
-            }
+            } content: {
             ForEach(profiles, id: \.recordID) { profile in
                 let active = model.snapshot["agent_profiles"]["active_profile_id"] == profile["id"]
                 let assigned = model.snapshot["agent_profiles"]["assignments"].array.filter { $0["profile_id"] == profile["id"] }.compactMap { a in model.workspaces.first { $0.recordID == a["workspace_id"].string }?["name"].string }
-                WorkspaceSection(name: profile["name"].string, color: active ? NekoStyle.accent : N.text4, detail: active ? "Default" : nil) {
+                NekoSection(title: profile["name"].string, marker: active ? NekoStyle.accent : N.text4, detail: active ? "Default" : nil) {
                     HStack(spacing: 8) {
                         if !active { Button("Make default") { submit(model, nested("AgentProfiles", "SetActive", ["profile_id": profile["id"]])) }.controlSize(.regular) }
                         Menu("Use in workspace") {
@@ -68,7 +48,7 @@ struct ProfilesView: View {
                         Button("Edit") { draft = ManagementDraft(value: profile) }.controlSize(.regular)
                     }
                 } content: {
-                    ManagementDetailText(text: profile["instructions"].string.isEmpty ? "No special instructions. Edit this profile to add a voice or working rules." : profile["instructions"].string, disclosure: "Full instructions")
+                    NekoReadMore(text: profile["instructions"].string.isEmpty ? "No special instructions. Edit this profile to add a voice or working rules." : profile["instructions"].string, disclosure: "Full instructions")
                     Text(assigned.isEmpty ? "Not used by a specific workspace." : "Used in " + assigned.joined(separator: ", "))
                         .font(NekoFont.meta).foregroundStyle(N.text3)
                     if profiles.count > 1 {
@@ -120,25 +100,24 @@ struct MemoryView: View {
     var body: some View {
         let memories = model.snapshot["memory"].array.filter(inScope)
         let proposals = model.snapshot["memory_proposals"].array.filter(inScope)
-        ManagementScroll {
-            PageIntro(title: "Memory", message: "Saved context and working guidance. Suggestions wait for your approval.") {
+        NekoPage(title: "Memory", message: "Saved context and working guidance. Suggestions wait for your approval.") {
                 if tab == "memories" { Button("Add memory", systemImage: "plus") { draft = ManagementDraft(value: .object([:])) } }
-            }
+            } content: {
             Picker("Memory view", selection: $tab) {
                 Text("Saved memories").tag("memories")
                 Text("Working style").tag("style")
             }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 300)
             if tab == "style" { WorkingStyleView(model: model) } else {
-            WorkspaceSection(name: "Memory settings", color: N.text4, grouped: true) { EmptyView() } content: {
+            NekoSection(title: "Memory settings", marker: N.text4, grouped: true) { EmptyView() } content: {
                 memoryToggle("Suggest new memories", key: "learning", help: "Propose context from chats and agents. Direct requests to remember something still work when this is off.")
                 Divider()
                 memoryToggle("Use saved memory", key: "use_memory", help: "Include memory in replies and tasks. Turning this off keeps saved memories here.")
             }
             if !proposals.isEmpty {
-                WorkspaceSection(name: "Suggested", color: NekoStyle.amber, detail: "\(proposals.count) waiting") { EmptyView() } content: {
+                NekoSection(title: "Suggested", marker: NekoStyle.amber, detail: "\(proposals.count) waiting") { EmptyView() } content: {
                     ForEach(proposals, id: \.recordID) { proposal in
                         VStack(alignment: .leading, spacing: 10) {
-                            ManagementDetailText(text: proposal["text"].string, disclosure: "Full suggestion")
+                            NekoReadMore(text: proposal["text"].string, disclosure: "Full suggestion")
                             HStack(spacing: 8) {
                                 Text(scopeLabel(proposal)).font(NekoFont.meta).foregroundStyle(N.text3)
                                 Spacer(minLength: 8)
@@ -151,11 +130,11 @@ struct MemoryView: View {
                     }
                 }
             }
-            WorkspaceSection(name: "Remembered", color: N.text4, detail: memories.isEmpty ? nil : "\(memories.count)") { EmptyView() } content: {
-                if memories.isEmpty { EmptyRow(text: "Nothing yet. Tell Neko \"remember that…\" in Home, or add one here.") }
+            NekoSection(title: "Remembered", marker: N.text4, detail: memories.isEmpty ? nil : "\(memories.count)") { EmptyView() } content: {
+                if memories.isEmpty { NekoEmptyState("Nothing yet. Tell Neko \"remember that…\" in Home, or add one here.") }
                 ForEach(memories, id: \.recordID) { entry in
                     VStack(alignment: .leading, spacing: 10) {
-                        ManagementDetailText(text: entry["text"].string, disclosure: "Full memory")
+                        NekoReadMore(text: entry["text"].string, disclosure: "Full memory")
                         HStack(spacing: 8) {
                             Text("\(entry["kind"].string.capitalized) · \(scopeLabel(entry))").font(NekoFont.meta).foregroundStyle(N.text3)
                             Spacer(minLength: 8)
@@ -207,109 +186,6 @@ private struct MemorySourceDetails: View {
     Array(model.workspaces.enumerated()).filter { model.selectedWorkspace == nil || $0.element.recordID == model.selectedWorkspace }
 }
 
-struct PageIntro<Action: View>: View {
-    let title: String
-    let message: String
-    @ViewBuilder var action: () -> Action
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(NekoFont.display).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
-            Text(message).font(NekoFont.body).foregroundStyle(N.text3)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-            .frame(maxWidth: NekoLayout.readingWidth, alignment: .leading)
-            .navigationTitle(title)
-            .toolbar { ToolbarItemGroup(placement: .primaryAction) { action() } }
-    }
-}
-
-struct WorkspaceSection<Trailing: View, Content: View>: View {
-    let name: String
-    let color: Color
-    var detail: String? = nil
-    var grouped = false
-    @ViewBuilder var trailing: () -> Trailing
-    @ViewBuilder var content: () -> Content
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    heading.fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 12)
-                    trailing().fixedSize()
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    heading
-                    trailing()
-                }
-            }
-            .controlSize(.regular)
-            VStack(alignment: .leading, spacing: 16, content: content)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(grouped ? NekoLayout.rowInset : 0)
-                .background {
-                    if grouped { RoundedRectangle(cornerRadius: 18, style: .continuous).fill(N.card) }
-                }
-        }
-        .accessibilityElement(children: .contain)
-    }
-    private var heading: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
-            Text(name).font(NekoFont.heading).foregroundStyle(N.text)
-            if let detail { Text(detail).font(NekoFont.meta).foregroundStyle(N.text3) }
-        }
-        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
-    }
-}
-
-struct EmptyRow: View {
-    let text: String
-    var body: some View {
-        Text(text).font(NekoFont.body).foregroundStyle(N.text3)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
-    }
-}
-
-/// Saved instructions and evidence are inert text, never executable chat blocks.
-/// Verbatim rendering also preserves file references whose targets no longer exist.
-struct ManagementSavedText: View {
-    let text: String
-    var body: some View {
-        Text(verbatim: text)
-            .font(NekoFont.body).foregroundStyle(N.text2).textSelection(.enabled).lineLimit(nil)
-            .lineSpacing(3)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// A brief readback with the complete saved content available on demand.
-struct ManagementDetailText: View {
-    let text: String
-    var disclosure = "Read more"
-    @State private var expanded = false
-    private var needsDisclosure: Bool { text.count > 240 || text.components(separatedBy: .newlines).count > 3 }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if needsDisclosure {
-                if !expanded {
-                    Text(verbatim: text.count > 240
-                        ? String(text.prefix(240)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
-                        : text)
-                        .lineLimit(3).lineSpacing(3).foregroundStyle(N.text2)
-                }
-                DisclosureGroup(disclosure, isExpanded: $expanded) {
-                    ManagementSavedText(text: text).padding(.top, 6)
-                }.font(NekoFont.meta)
-            } else {
-                ManagementSavedText(text: text)
-            }
-        }.font(NekoFont.body).textSelection(.enabled)
-    }
-}
-
 func relativeTime(_ ms: Int) -> String {
     ms <= 0 ? "Never" : RelativeDateTimeFormatter().localizedString(for: Date(timeIntervalSince1970: Double(ms) / 1000), relativeTo: .now)
 }
@@ -318,15 +194,14 @@ struct SchedulesView: View {
     @ObservedObject var model: AppModel
     @State private var draft: ManagementDraft?
     var body: some View {
-        ManagementScroll {
-            PageIntro(title: "Schedules", message: "Recurring briefs and reviews, delivered to All agents.") { EmptyView() }
-            if model.workspaces.isEmpty { EmptyRow(text: "Add a workspace in Workspaces, then create its first schedule here.") }
+        NekoPage(title: "Schedules", message: "Recurring briefs and reviews, delivered to All agents.") {
+            if model.workspaces.isEmpty { NekoEmptyState("Add a workspace in Workspaces, then create its first schedule here.") }
             ForEach(scopedWorkspaces(model), id: \.element.recordID) { index, workspace in
                 let items = model.snapshot["schedules"].array.filter { $0["workspace_id"].string == workspace.recordID }
-                WorkspaceSection(name: workspace["name"].string, color: workspaceColor(index), detail: items.isEmpty ? nil : "\(items.count) scheduled") {
+                NekoSection(title: workspace["name"].string, marker: workspaceColor(index), detail: items.isEmpty ? nil : "\(items.count) scheduled") {
                     Button("New schedule", systemImage: "plus") { draft = ManagementDraft(value: .object([:]), workspace: workspace.recordID) }.controlSize(.regular)
                 } content: {
-                    if items.isEmpty { EmptyRow(text: "Create a schedule for a morning brief, a weekly review, or another recurring task.") }
+                    if items.isEmpty { NekoEmptyState("Create a schedule for a morning brief, a weekly review, or another recurring task.") }
                     ForEach(items, id: \.recordID) { item in
                         VStack(alignment: .leading, spacing: 10) {
                             Toggle(isOn: Binding(get: { item["enabled"].bool }, set: { enabled in
@@ -339,7 +214,7 @@ struct SchedulesView: View {
                             }.toggleStyle(.switch).controlSize(.regular)
                             Text("\(ScheduleRecurrence.summary(item["rule"].string)) · \(item["timezone"].string)" + (item["next_due_ms"] == .null ? "" : " · next \(relativeTime(item["next_due_ms"].int))"))
                                 .font(NekoFont.meta).foregroundStyle(N.text3)
-                            ManagementDetailText(text: item["prompt"].string, disclosure: "Full instructions")
+                            NekoReadMore(text: item["prompt"].string, disclosure: "Full instructions")
                             HStack(spacing: 8) {
                                 Button("Run now") { submit(model, nested("Schedules", "RunNow", ["id": item["id"]])) }
                                 Button("Edit schedule") { draft = ManagementDraft(value: item, workspace: workspace.recordID) }
@@ -364,22 +239,21 @@ struct WorkspacesView: View {
     @ObservedObject var model: AppModel
     @State private var editing = false
     var body: some View {
-        ManagementScroll {
-            PageIntro(title: "Workspaces", message: "Project folders, connected tools, and the work Neko watches.") {
+        NekoPage(title: "Workspaces", message: "Project folders, connected tools, and the work Neko watches.") {
                 Button("Add workspace", systemImage: "plus") { model.selectedWorkspace = nil; editing = true }
-            }
+            } content: {
             if model.homeWorkspaceID == nil {
                 HStack(spacing: 12) {
-                    Image(systemName: "house").font(.system(size: 16)).foregroundStyle(N.text3).frame(width: 24)
+                    Image(systemName: "house").font(NekoFont.of(.body)).foregroundStyle(N.text3).frame(width: 24)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("A workspace for everyday work").font(NekoFont.heading).foregroundStyle(N.text)
                         Text("Use your home folder for work outside a specific project.").font(NekoFont.meta).foregroundStyle(N.text3)
                     }
                     Spacer()
-                    Button("Add home folder") { Task { await model.addHomeWorkspace() } }.buttonStyle(.bordered)
+                    Button("Add home folder") { Task { await model.addHomeWorkspace() } }.nekoButton(.secondary)
                 }
                 .padding(NekoLayout.rowInset)
-                .background(N.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .background(N.card, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
             }
             ForEach(Array(model.workspaces.enumerated()), id: \.element.recordID) { index, workspace in
                 row(workspace, color: workspaceColor(index))
@@ -396,7 +270,7 @@ struct WorkspacesView: View {
         let tickets = model.tasks.filter { $0["workspace_id"].string == id && !["Completed", "Cancelled"].contains($0["status"].string) }.count
         let isHome = id == model.homeWorkspaceID
         let detail = [isHome ? "Default · home folder" : nil, tickets == 0 ? nil : "\(tickets) open"].compactMap { $0 }.joined(separator: " · ")
-        return WorkspaceSection(name: workspace["name"].string, color: color, detail: detail.isEmpty ? nil : detail) {
+        return NekoSection(title: workspace["name"].string, marker: color, detail: detail.isEmpty ? nil : detail) {
             HStack(spacing: 8) {
                 Button("Sync now", systemImage: "arrow.clockwise") {
                     responsibilities.forEach { submit(model, nested("Mcp", "Wake", ["responsibility_id": $0["id"]])) }
@@ -413,7 +287,7 @@ struct WorkspacesView: View {
             DisclosureGroup("Folders · \(folders.count)  /  Tools · \(tools.count)") {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Folders").font(NekoFont.heading)
-                    if folders.isEmpty { EmptyRow(text: "No folders saved. Open Settings to add one.") }
+                    if folders.isEmpty { NekoEmptyState("No folders saved. Open Settings to add one.") }
                     ForEach(folders, id: \.self) { path in
                         Label((path as NSString).abbreviatingWithTildeInPath, systemImage: "folder")
                             .textSelection(.enabled)
@@ -423,7 +297,7 @@ struct WorkspacesView: View {
                         .textSelection(.enabled)
                     if !workspace["instructions"].string.isEmpty {
                         Text("Workspace instructions").font(NekoFont.heading)
-                        ManagementSavedText(text: workspace["instructions"].string)
+                        NekoSavedText(text: workspace["instructions"].string)
                     }
                 }.font(NekoFont.body).padding(.top, 8)
             }
@@ -520,8 +394,8 @@ struct ManagementEditor: View {
                         Text(contentLabel).font(NekoFont.heading)
                         TextEditor(text: $text).font(NekoFont.body)
                             .scrollContentBackground(.hidden).padding(12)
-                            .frame(height: 144).background(N.panel, in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(N.line))
+                            .frame(height: 144).background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.md))
+                            .overlay(RoundedRectangle(cornerRadius: NekoRadius.md).strokeBorder(N.line))
                             .accessibilityLabel(contentLabel)
                     }
                 } header: { Text(kind.rawValue) }
@@ -575,7 +449,7 @@ struct ManagementEditor: View {
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
-                Button(saving ? "Saving…" : "Save") { save() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || !kind.hasRequiredContent(name: name, text: text) || (kind == .memory && memoryKind == "workspace" && effectiveWorkspace == nil) || (kind == .responsibility && (connections.isEmpty || (enabled && !missingToolAccess.isEmpty))))
+                Button(saving ? "Saving…" : "Save") { save() }.nekoButton(.primary).keyboardShortcut(.defaultAction).disabled(saving || !kind.hasRequiredContent(name: name, text: text) || (kind == .memory && memoryKind == "workspace" && effectiveWorkspace == nil) || (kind == .responsibility && (connections.isEmpty || (enabled && !missingToolAccess.isEmpty))))
             }
         }.font(NekoFont.body).controlSize(.regular).padding(NekoLayout.pageInset).frame(width: 620).background(N.canvas).onAppear {
             name = original["name"].string

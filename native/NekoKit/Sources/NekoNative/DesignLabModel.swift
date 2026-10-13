@@ -71,7 +71,7 @@ import NekoKit
               activity: scenario == .split ? "This task waits for its two subtasks, then combines and reviews their results."
                   : scenario == .review ? "A fresh reviewer is checking the result. Review is a phase of this task, not another subtask."
                   : "One saved agent session is updating the appearance. It plans and builds; a fresh reviewer checks the result.",
-              color: Color(red: 0.84, green: 0.86, blue: 0.93))
+              color: PearlTint.mist)
     }
     var agents: [Agent] {
         team.children.map { task in
@@ -80,7 +80,7 @@ import NekoKit
                          status: task["status"].string == "Queued" ? "Waiting" : task["status"].string,
                          activity: tokens ? "Replacing fixed colours with shared appearance tokens."
                              : "Waiting for Shared colour tokens before adding the appearance control.",
-                         color: tokens ? Color(red: 0.83, green: 0.74, blue: 0.91) : Color(red: 0.72, green: 0.87, blue: 0.82))
+                         color: tokens ? PearlTint.lilac : PearlTint.mint)
         }
     }
     var visibleAgents: [Agent] { agents.isEmpty ? [owner] : agents }

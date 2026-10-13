@@ -279,7 +279,7 @@ struct PreferencesView: View {
                         }
                         HStack {
                             Button(checking ? "Checking…" : "Check & use model") { checkAndUse() }
-                                .buttonStyle(.borderedProminent)
+                                .nekoButton(.primary)
                                 .disabled(checking || pending || selectedUnavailable)
                             Button("Use without checking") { saveAgentRuntime() }
                                 .disabled(checking || pending || selectedUnavailable)
@@ -334,7 +334,7 @@ struct PreferencesView: View {
                             Button("Choose folder…") { choose() }
                             Spacer()
                             Button("Add folder") { activate("folder-scope", path, action: "add") }
-                                .buttonStyle(.borderedProminent)
+                                .nekoButton(.primary)
                                 .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
                     }
@@ -365,7 +365,7 @@ struct PreferencesView: View {
                     if let build = Updates.Build.current { Text("Build \(String(build.commit.prefix(7)))").font(NekoFont.mono).foregroundStyle(.secondary) }
                     HStack {
                         Button(checkingUpdates ? "Checking…" : "Check for updates") { checkUpdates() }.disabled(checkingUpdates)
-                        if case .behind = updateStatus { Button("Update now") { runUpdate() }.buttonStyle(.borderedProminent) }
+                        if case .behind = updateStatus { Button("Update now") { runUpdate() }.nekoButton(.primary) }
                     }.padding(.top, 8)
                     if let updateStatus { Text(updateStatus.message).font(NekoFont.body).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                     if let updateNote { Text(updateNote).font(NekoFont.meta).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled) }

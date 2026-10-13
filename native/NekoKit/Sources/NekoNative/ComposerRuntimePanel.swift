@@ -20,17 +20,17 @@ struct ComposerRuntimePanel: View {
             HStack(spacing: 10) {
                 if page == .models {
                     Button("Back to effort", systemImage: "chevron.left") { page = .effort }
-                        .labelStyle(.iconOnly).buttonStyle(.borderless)
+                        .labelStyle(.iconOnly).nekoButton(.quiet)
                 }
                 Text(title).font(.headline).help(page == .effort ? "Reasoning effort" : title)
                 Spacer()
                 if sample { Text("Sample").font(.caption).foregroundStyle(.secondary) }
                 if page == .effort && selection.draft.reasoningEffort != nil {
                     Button("Auto") { selection.draft.reasoningEffort = nil }
-                        .buttonStyle(.borderless).disabled(selection.saving).accessibilityLabel("Reset effort to Auto")
+                        .nekoButton(.quiet).disabled(selection.saving).accessibilityLabel("Reset effort to Auto")
                 }
                 Button("Refresh models", systemImage: "arrow.clockwise", action: refresh)
-                    .labelStyle(.iconOnly).buttonStyle(.borderless).disabled(selection.loading || selection.saving)
+                    .labelStyle(.iconOnly).nekoButton(.quiet).disabled(selection.loading || selection.saving)
             }
             if selection.loading {
                 HStack { ProgressView().controlSize(.small); Text("Loading models…").font(.caption) }
@@ -66,12 +66,12 @@ struct ComposerRuntimePanel: View {
                     ProgressView().controlSize(.small)
                     Text("Checking…").font(.caption)
                 } else if selection.dirty {
-                    Button("Discard", action: selection.discard).buttonStyle(.borderless)
+                    Button("Discard", action: selection.discard).nekoButton(.quiet)
                     Text("Not applied").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(sample ? "Apply sample" : "Check & apply", action: apply)
-                    .buttonStyle(.borderedProminent).disabled(!selection.canApply)
+                    .nekoButton(.primary).disabled(!selection.canApply)
             }
             Text(sample ? "Local sample. No check or worker runs."
                  : "One short check may use allowance. Applies to the next turn or worker.")

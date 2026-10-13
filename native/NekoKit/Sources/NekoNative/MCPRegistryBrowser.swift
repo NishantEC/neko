@@ -153,7 +153,7 @@ struct MCPRegistryBrowser: View {
                     Spacer()
                     Button("Cancel") { self.selected = nil; error = nil }.disabled(connecting)
                     Button(connecting ? "Adding…" : "Add connection") { Task { await add(selected) } }
-                        .nekoPrimaryButton().disabled(connecting || model.busy)
+                        .nekoButton(.primary).disabled(connecting || model.busy)
                 }
             }
         } else {
@@ -181,8 +181,8 @@ struct MCPRegistryBrowser: View {
             .padding(NekoLayout.rowInset).contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(connecting || model.busy)
-        .background(selected == server ? N.selected : N.card, in: RoundedRectangle(cornerRadius: NekoStyle.radius))
-        .overlay(RoundedRectangle(cornerRadius: NekoStyle.radius).strokeBorder(selected == server ? Color.accentColor.opacity(0.5) : N.line))
+        .background(selected == server ? N.selected : N.card, in: RoundedRectangle(cornerRadius: NekoRadius.xl))
+        .overlay(RoundedRectangle(cornerRadius: NekoRadius.xl).strokeBorder(selected == server ? Color.accentColor.opacity(0.5) : N.line))
         .padding(.bottom, 10)
         .accessibilityLabel("\(server.name), \(subtitle)")
         .accessibilityValue(selected == server ? "Selected" : "")

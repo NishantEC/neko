@@ -33,7 +33,7 @@ struct ComposerRuntimeSpeedControl: View {
                     } else {
                         Text(RuntimeSelectionLabel.speed(selection.draft, catalog: selection.catalog)).font(.caption).foregroundStyle(.secondary)
                         Button("Auto") { selection.draft.serviceTier = nil }
-                            .buttonStyle(.borderless).accessibilityLabel("Reset speed to Auto")
+                            .nekoButton(.quiet).accessibilityLabel("Reset speed to Auto")
                     }
                 }.help(details + " Off pins Normal; on pins \(option.label).")
             } else {
@@ -47,7 +47,7 @@ struct ComposerRuntimeSpeedControl: View {
             HStack {
                 Text(tier == "default" ? "Speed: Normal" : "Speed pin unavailable").font(.caption)
                 Spacer()
-                Button("Auto") { selection.draft.serviceTier = nil }.buttonStyle(.borderless)
+                Button("Auto") { selection.draft.serviceTier = nil }.nekoButton(.quiet)
                     .accessibilityLabel("Reset speed to Auto")
             }
         }

@@ -43,7 +43,7 @@ struct TicketPeek: View {
             } label: { Image(systemName: current.symbol) }
                 .menuStyle(.borderlessButton).menuIndicator(.visible).fixedSize()
                 .help("Open tickets as: \(current.title)")
-            Text(shortID).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(.secondary).padding(.leading, 6)
+            Text(shortID).font(NekoFont.of(.small, weight: .medium, design: .monospaced)).foregroundStyle(.secondary).padding(.leading, 6)
             Spacer(minLength: 8)
             iconButton(copied ? "checkmark" : "link", help: "Copy ticket ID") {
                 NSPasteboard.general.clearContents()
@@ -63,6 +63,6 @@ struct TicketPeek: View {
 
     private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol).frame(width: 24, height: 24).contentShape(Rectangle()) }
-            .buttonStyle(.borderless).help(help)
+            .nekoButton(.quiet).help(help)
     }
 }

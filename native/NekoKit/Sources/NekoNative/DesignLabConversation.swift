@@ -8,7 +8,7 @@ struct DesignLabConversation: View {
         VStack(alignment: .leading, spacing: 28) {
             HStack {
                 Label("SAMPLE CONVERSATION", systemImage: "circle.dotted")
-                    .font(.system(size: 10, weight: .semibold)).tracking(1.1).foregroundStyle(.secondary)
+                    .font(NekoFont.of(.micro, weight: .semibold)).tracking(1.1).foregroundStyle(.secondary)
                 Spacer()
                 Text("Try typing, sending and opening the controls.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -16,32 +16,32 @@ struct DesignLabConversation: View {
             HStack {
                 Spacer(minLength: 70)
                 Text("Ship dark mode: audit the colours, update the tokens, fix the contrast and add a toggle.")
-                    .font(.system(size: 16)).lineSpacing(5)
+                    .font(NekoFont.of(.body)).lineSpacing(5)
                     .padding(18)
-                    .background(Color.primary.opacity(0.045), in: .rect(cornerRadius: 20))
+                    .background(Color.primary.opacity(0.045), in: .rect(cornerRadius: NekoRadius.xl))
             }
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     DesignLabOrb(size: 30)
-                    Text("Neko").font(.system(size: 15, weight: .semibold))
+                    Text("Neko").font(NekoFont.heading)
                     Text("Just now").font(.caption).foregroundStyle(.secondary)
                 }
                 Text("A quieter canvas. A little more depth.")
-                    .font(.system(size: 28, weight: .semibold)).tracking(-0.6)
+                    .font(NekoFont.display).tracking(-0.6)
                 Text("Neko is tracing colours back to shared tokens. Task details and plugins stay within reach while the conversation gets the space.")
-                    .font(.system(size: 16)).lineSpacing(6).foregroundStyle(.secondary)
+                    .font(NekoFont.of(.body)).lineSpacing(6).foregroundStyle(.secondary)
             }
             DesignLabArtifact()
             HStack(spacing: 10) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint)
-                Text(taskActivity).font(.system(size: 14))
+                Text(taskActivity).font(NekoFont.of(.callout))
                 Spacer()
             }.padding(.vertical, 8)
             ForEach(Array(messages.enumerated()), id: \.offset) { _, message in
                 HStack {
                     Spacer(minLength: 70)
-                    Text(message).font(.system(size: 16)).textSelection(.enabled)
-                        .padding(18).background(Color.primary.opacity(0.045), in: .rect(cornerRadius: 20))
+                    Text(message).font(NekoFont.of(.body)).textSelection(.enabled)
+                        .padding(18).background(Color.primary.opacity(0.045), in: .rect(cornerRadius: NekoRadius.xl))
                 }
                 Label("Added to the local preview", systemImage: "checkmark")
                     .font(.caption).foregroundStyle(.secondary)

@@ -179,7 +179,7 @@ struct ReadableText: View {
                 case .listItem(let marker, let value):
                     HStack(alignment: .top, spacing: 10) { Text(marker).foregroundStyle(.secondary).frame(minWidth: 20, alignment: .trailing); inline(value) }
                 case .quote(let value):
-                    HStack(alignment: .top, spacing: 14) { RoundedRectangle(cornerRadius: 2).fill(N.lineStrong).frame(width: 3); inline(value).foregroundStyle(.secondary) }
+                    HStack(alignment: .top, spacing: 14) { RoundedRectangle(cornerRadius: NekoRadius.micro).fill(N.lineStrong).frame(width: 3); inline(value).foregroundStyle(.secondary) }
                         .padding(.vertical, 4).fixedSize(horizontal: false, vertical: true)
                 case .image(let alt, let path): NativeAttachmentImage(alt: alt, reference: path)
                 case .divider: Divider()
@@ -210,7 +210,6 @@ private struct NativeCodeBlock: View {
     let language: String
     let code: String
     @State private var copied = false
-    @Environment(\.ink) private var ink
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -219,12 +218,12 @@ private struct NativeCodeBlock: View {
                 Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     copied = NSPasteboard.general.setString(code, forType: .string)
-                }.buttonStyle(.borderless).font(NekoFont.meta).accessibilityLabel("Copy code")
+                }.nekoButton(.quiet).font(NekoFont.meta).accessibilityLabel("Copy code")
             }.padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 12)
             Divider()
             ScrollView(.horizontal) { Text(code).font(NekoFont.mono).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: true, vertical: false).padding(NekoLayout.rowInset) }
-        }.background(ink.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }.background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
     }
 }
 
@@ -236,7 +235,7 @@ private struct NativeAttachmentImage: View {
            let values = try? path.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
            values.isRegularFile == true, let size = values.fileSize, size <= 32 * 1024 * 1024,
            let image = NSImage(contentsOf: path) {
-            Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 420).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)).accessibilityLabel(alt.isEmpty ? "Attached image" : alt)
+            Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 420).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous)).accessibilityLabel(alt.isEmpty ? "Attached image" : alt)
         } else {
             Label(alt.isEmpty ? "Image not loaded" : "\(alt) · image not loaded", systemImage: "photo").font(.callout).foregroundStyle(.secondary)
         }

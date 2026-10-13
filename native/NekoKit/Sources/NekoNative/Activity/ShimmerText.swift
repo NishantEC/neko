@@ -4,7 +4,7 @@ import SwiftUI
 struct ShimmerText: View {
     let text: String
     var active = true
-    var font: Font = .system(size: 14, weight: .medium)
+    var font: Font = NekoFont.of(.callout, weight: .medium)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var running: Bool { active && !reduceMotion }

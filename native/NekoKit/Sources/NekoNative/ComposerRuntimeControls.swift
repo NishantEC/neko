@@ -42,10 +42,10 @@ struct ComposerRuntimeControls: View {
                 if selection.saving && pearl { ProgressView().controlSize(.mini).accessibilityLabel("Checking settings") }
                 if lightning { Image(systemName: "bolt.fill").accessibilityHidden(true) }
                 Text(title).lineLimit(1).truncationMode(.middle)
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
+                Image(systemName: "chevron.down").font(NekoFont.of(.micro, weight: .semibold)).foregroundStyle(.secondary)
             }
             .font(NekoFont.meta.weight(.medium)).padding(.horizontal, 8).frame(height: 34)
-            .contentShape(.rect(cornerRadius: 11))
+            .contentShape(.rect(cornerRadius: NekoRadius.md))
         }
         .buttonStyle(DesignLabHoverStyle())
         .accessibilityLabel("\(sample ? "Sample settings" : "Conversation settings"): \(title)")

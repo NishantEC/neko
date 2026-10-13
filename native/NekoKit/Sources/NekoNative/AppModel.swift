@@ -177,9 +177,3 @@ extension JSONValue {
     var recordID: String { self["id"].string }
 }
 
-extension View {
-    @ViewBuilder func nekoGlass() -> some View {
-        if #available(macOS 26, *) { self.glassEffect(.regular, in: .rect(cornerRadius: 18)) }
-        else { self.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18)) }
-    }
-}

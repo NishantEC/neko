@@ -26,7 +26,7 @@ struct ComposerRuntimeModelList: View {
                     Spacer()
                     if selection.draft.model == nil { Image(systemName: "checkmark") }
                 }.contentShape(Rectangle())
-            }.buttonStyle(.borderless).accessibilityHint("Reset only the model to Auto; keep effort and speed pins")
+            }.nekoButton(.quiet).accessibilityHint("Reset only the model to Auto; keep effort and speed pins")
             ForEach(selection.catalog.sources) { source in
                 let models = source.models.filter { matches($0, source: source) }
                 if !models.isEmpty || (!source.ready && query.isEmpty) {
@@ -53,7 +53,7 @@ struct ComposerRuntimeModelList: View {
                                         Image(systemName: "checkmark").accessibilityLabel("Selected")
                                     }
                                 }.padding(.vertical, 5).contentShape(Rectangle())
-                            }.buttonStyle(.borderless).disabled(!source.ready || !model.usable)
+                            }.nekoButton(.quiet).disabled(!source.ready || !model.usable)
                         }
                     }
                 }
