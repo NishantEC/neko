@@ -905,6 +905,25 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             }
             snapshot.task_budget_cents = cents;
         }
+        Command::SetMaxRunningTickets { limit } => {
+            if limit.is_some_and(|n| n == 0 || n > 50) {
+                return Err("Choose between 1 and 50 tickets at once, or no limit".into());
+            }
+            snapshot.max_running_tickets = limit;
+        }
+        Command::StartOver { keep_published } => {
+            if snapshot.tasks.iter().any(|t| !terminal(t.status) && t.status != TaskStatus::AwaitingApproval) {
+                return Err("Work is still running. Stop all work first, then start over.".into());
+            }
+            let published = |t: &Task| keep_published && (t.pull_request.is_some() || t.landed_commit.is_some());
+            let kept: HashSet<String> = snapshot.tasks.iter().filter(|t| published(t)).map(|t| t.id.clone()).collect();
+            let ids: Vec<String> = snapshot.tasks.iter().filter(|t| !kept.contains(&t.id)).map(|t| t.id.clone()).collect();
+            remove_tasks(&mut snapshot, &ids);
+            // Forgetting the filed issues is what lets watches file them again.
+            snapshot.mcp.sources.retain(|s| s.task_id.as_ref().is_some_and(|id| kept.contains(id)));
+            // Without a probe, each watch's next check is a full read.
+            snapshot.mcp.probes.clear();
+        }
         Command::SetStartWithoutApproval { enabled } => {
             snapshot.start_without_approval = enabled;
         }
@@ -1662,6 +1681,38 @@ fn validate(snapshot: &Snapshot) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn start_over_keeps_published_tickets_and_forgets_the_rest_of_the_filed_issues() {
+        use neko_protocol::mcp_host::SourceEvidence;
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let (published, failed, waiting) = (task(&db, &ws), task(&db, &ws), task(&db, &ws));
+        let mut state = load(&db).unwrap();
+        let source = |id: &str, task: Option<&str>| SourceEvidence {
+            task_id: task.map(str::to_owned), id: id.into(), responsibility_id: "r".into(), connection_id: "c".into(),
+            external_id: id.into(), revision: "1".into(), title: id.into(), description: String::new(), retrieved_ms: 0, receipt_ids: vec![], eligible: true,
+        };
+        for t in &mut state.tasks {
+            if t.id == published.id { t.status = TaskStatus::ReadyForReview; t.pull_request = Some(neko_protocol::workbench::PullRequest { url: "https://github.com/a/b/pull/1".into(), branch: "codex/neko-x".into() }); }
+            if t.id == failed.id { t.status = TaskStatus::Failed; }
+            if t.id == waiting.id { t.status = TaskStatus::Building; }
+        }
+        state.mcp.sources = vec![source("kept", Some(&published.id)), source("failed", Some(&failed.id)), source("untasked", None)];
+        save(&db, &state).unwrap();
+        let refused = apply(&db, Command::StartOver { keep_published: true }).unwrap_err();
+        assert!(refused.contains("Stop all work first"), "{refused}");
+        let mut state = load(&db).unwrap();
+        state.tasks.iter_mut().find(|t| t.id == waiting.id).unwrap().status = TaskStatus::AwaitingApproval;
+        save(&db, &state).unwrap();
+        let state = apply(&db, Command::StartOver { keep_published: true }).unwrap();
+        assert_eq!(state.tasks.iter().map(|t| t.id.clone()).collect::<Vec<_>>(), vec![published.id.clone()]);
+        assert_eq!(state.mcp.sources.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["kept"], "only the kept ticket's issue stays filed");
+        assert!(state.mcp.probes.is_empty());
+        let state = apply(&db, Command::StartOver { keep_published: false }).unwrap();
+        assert!(state.tasks.is_empty() && state.mcp.sources.is_empty());
+    }
+
+    #[test]
     fn ticket_budgets_count_reported_cost_only() {
         let db = Db::open_in_memory().unwrap();
         let repo = repository();
@@ -1679,6 +1730,9 @@ mod tests {
         assert!(within_budget(&state, &ticket.id).unwrap_err().contains("$0.50 budget ($0.55 reported)"));
         assert!(apply(&db, Command::SetTaskBudget { cents: Some(0) }).is_err());
         let state = apply(&db, Command::SetTaskBudget { cents: None }).unwrap();
+        assert_eq!(apply(&db, Command::SetMaxRunningTickets { limit: Some(1) }).unwrap().max_running_tickets, Some(1));
+        assert!(apply(&db, Command::SetMaxRunningTickets { limit: Some(0) }).is_err());
+        assert_eq!(apply(&db, Command::SetMaxRunningTickets { limit: None }).unwrap().max_running_tickets, None);
         assert!(!state.start_without_approval, "tickets wait for approval unless you opt in");
         assert!(apply(&db, Command::SetStartWithoutApproval { enabled: true }).unwrap().start_without_approval);
         assert!(!apply(&db, Command::SetStartWithoutApproval { enabled: false }).unwrap().start_without_approval);

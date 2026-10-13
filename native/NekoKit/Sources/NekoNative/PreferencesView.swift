@@ -122,6 +122,7 @@ struct PreferencesView: View {
     @State private var query = ""
     @State private var highlighted: SettingsTarget?
     @State private var searchFocus = 0
+    @State private var confirmingStartOver = false
     @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     @ObservedObject var model: AppModel
     @State private var settings: [JSONValue] = []
@@ -306,6 +307,24 @@ struct PreferencesView: View {
                         if budgetCents == .invalid { Text("Enter an amount between 0.01 and 1000, or leave it empty.").font(NekoFont.meta).foregroundStyle(NekoStyle.amber) }
                         Text("Counts the cost Claude Code and OpenCode report for each ticket and stops the ticket when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.")
                             .font(NekoFont.meta).foregroundStyle(.secondary)
+                        Picker("Tickets at once", selection: Binding(get: { model.snapshot["max_running_tickets"].int }, set: { setTicketLimit($0) })) {
+                            Text("No limit").tag(0)
+                            ForEach([1, 2, 3, 5], id: \.self) { Text("\($0)").tag($0) }
+                        }.settingsTarget(.ticketsAtOnce)
+                        Text("Other tickets wait their turn and start as running ones finish. Work already running is not stopped.")
+                            .font(NekoFont.meta).foregroundStyle(.secondary)
+                    }
+                    Section {
+                        LabeledContent("Start over") {
+                            Button("Start over…", role: .destructive) { confirmingStartOver = true }.nekoButton(.destructive)
+                        }.settingsTarget(.startOver)
+                        Text("Removes every ticket except those with a pull request, and lets your watches file their issues again from scratch. Memory, settings, workspaces, tools and watches stay.")
+                            .font(NekoFont.meta).foregroundStyle(.secondary)
+                    }
+                    .confirmationDialog("Start over?", isPresented: $confirmingStartOver, titleVisibility: .visible) {
+                        Button("Remove tickets and start over", role: .destructive) { startOver() }
+                    } message: {
+                        Text("Tickets without a pull request are removed, along with their worktrees and unpublished changes. Tickets with a pull request stay. This can’t be undone.")
                     }
                 }.formStyle(.grouped)
                 case .search:
@@ -400,6 +419,16 @@ struct PreferencesView: View {
         .task {
             await load()
             catalog = await AgentModelCatalog.load(model)
+        }
+    }
+    private func setTicketLimit(_ limit: Int) {
+        Task { _ = await model.workbench(.command("SetMaxRunningTickets", ["limit": limit > 0 ? .number(Double(limit)) : .null])) }
+    }
+    private func startOver() {
+        Task {
+            if await model.workbench(.command("StartOver", ["keep_published": .bool(true)])) {
+                model.notice = "Started over. Watches will file their issues again on their next check."
+            }
         }
     }
     /// Jump from a search result to its setting: switch tab, clear the

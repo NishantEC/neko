@@ -241,6 +241,10 @@ pub struct Snapshot {
     /// Only runtimes that report a price (Claude Code, OpenCode) count.
     #[serde(default)]
     pub task_budget_cents: Option<u32>,
+    /// At most this many tickets have a worker at once; new ones wait their
+    /// turn. `None` is no limit beyond the machine-load pacing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_running_tickets: Option<u32>,
     /// When on, a planned chat or manual ticket starts building without
     /// waiting for approval. Off by default. Nothing is ever published.
     #[serde(default)]
@@ -594,6 +598,16 @@ pub enum Command {
     },
     SetTaskBudget {
         cents: Option<u32>,
+    },
+    SetMaxRunningTickets {
+        limit: Option<u32>,
+    },
+    /// Remove every ticket (keeping ones with a pull request or landed commit
+    /// when `keep_published`) and forget which watched issues were filed, so
+    /// watches file them again from scratch. Memory, settings, workspaces,
+    /// connections and watches are kept. Refused while work is running.
+    StartOver {
+        keep_published: bool,
     },
     SetStartWithoutApproval {
         enabled: bool,

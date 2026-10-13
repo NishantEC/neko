@@ -23,7 +23,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
 /// lets search scroll to it and highlight it.
 enum SettingsTarget: String, CaseIterable, Identifiable, Sendable {
     case appearance, launchAtLogin, activityStatus, clipboardHistory
-    case runtime, model, customModel, budget
+    case runtime, model, customModel, budget, ticketsAtOnce, startOver
     case includedFolders, addFolder
     case permissions, diagnostics
     case legacyAgents
@@ -34,7 +34,7 @@ enum SettingsTarget: String, CaseIterable, Identifiable, Sendable {
     var tab: SettingsTab {
         switch self {
         case .appearance, .launchAtLogin, .activityStatus, .clipboardHistory: .general
-        case .runtime, .model, .customModel, .budget: .ai
+        case .runtime, .model, .customModel, .budget, .ticketsAtOnce, .startOver: .ai
         case .includedFolders, .addFolder: .search
         case .permissions: .permissions
         case .diagnostics: .diagnostics
@@ -53,6 +53,8 @@ enum SettingsTarget: String, CaseIterable, Identifiable, Sendable {
         case .model: "Model"
         case .customModel: "Exact model ID"
         case .budget: "Ticket budget"
+        case .ticketsAtOnce: "Tickets at once"
+        case .startOver: "Start over"
         case .includedFolders: "Included folders"
         case .addFolder: "Add a folder"
         case .permissions: "Permissions"
@@ -73,6 +75,8 @@ enum SettingsTarget: String, CaseIterable, Identifiable, Sendable {
         case .model: ["gpt", "sonnet", "opus", "llm", "check"]
         case .customModel: ["id", "custom", "manual"]
         case .budget: ["cost", "money", "limit", "spend", "dollars", "price"]
+        case .ticketsAtOnce: ["concurrency", "parallel", "one at a time", "queue", "limit", "workers"]
+        case .startOver: ["reset", "clear", "delete tickets", "fresh", "wipe"]
         case .includedFolders: ["files", "quick panel", "scope", "directories"]
         case .addFolder: ["folder", "directory", "path"]
         case .permissions: ["full disk access", "accessibility", "privacy", "access"]
