@@ -20,6 +20,7 @@ import NekoKit
             try render(PreviewCatalogue.page, size: CGSize(width: 900, height: 980), scheme: scheme, to: folder.appendingPathComponent("page-\(suffix).png"))
             try render(PreviewCatalogue.sheet, size: CGSize(width: 620, height: 420), scheme: scheme, to: folder.appendingPathComponent("sheet-\(suffix).png"))
             try render(PreviewCatalogue.controls, size: CGSize(width: 620, height: 360), scheme: scheme, to: folder.appendingPathComponent("controls-\(suffix).png"))
+            try render(PreviewCatalogue.settingsSearch, size: CGSize(width: 620, height: 300), scheme: scheme, to: folder.appendingPathComponent("settings-search-\(suffix).png"))
         }
     }
 
@@ -64,6 +65,13 @@ import NekoKit
                 NekoEmptyState(reason: .noMatches("billing"), block: true)
             }
         }
+    }
+
+    static var settingsSearch: some View {
+        VStack(alignment: .leading, spacing: NekoSpace.lg) {
+            NekoSearchField(title: "Find a setting", text: .constant("mo")).frame(width: 220)
+            SettingsSearchResults(query: "mo") { _ in }
+        }.padding(NekoLayout.pageInset)
     }
 
     static var sheet: some View {
