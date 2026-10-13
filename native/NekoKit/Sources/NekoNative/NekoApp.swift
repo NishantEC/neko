@@ -17,13 +17,17 @@ import NekoKit
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) { Button("Quick panel") { PaletteController.shared.toggle(model: model) }.keyboardShortcut("k", modifiers: [.command]) }
-            CommandGroup(replacing: .appSettings) { Button("Settings…") { model.requestedPage = "Settings"; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }.keyboardShortcut(",", modifiers: [.command]) }
+            CommandGroup(replacing: .appSettings) { Button("Settings…") { model.requestedPage = .settings; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }.keyboardShortcut(",", modifiers: [.command]) }
             CommandMenu("Work") {
                 Button("Stop all work") { Task { await StopAllWork.run(model) } }.keyboardShortcut(.escape, modifiers: [.command, .shift])
                 Button("Clear finished tickets") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
             }
         }
-        MenuBarExtra("Neko", systemImage: "cat") { StatusMenu(model: model) }
+        MenuBarExtra { StatusMenu(model: model) } label: {
+            // The icon says whether anything needs you, without opening the menu.
+            let state = MenuBarState(StatusSummary(snapshot: model.snapshot))
+            Image(nsImage: MenuBarIcon.image(for: state)).accessibilityLabel(state.accessibilityLabel)
+        }
     }
 }
 
@@ -36,7 +40,7 @@ struct StatusMenu: View {
         Divider()
         Button("Quick panel") { PaletteController.shared.toggle(model: model) }
         Button("Open Neko") { openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
-        Button("Settings…") { model.requestedPage = "Settings"; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
+        Button("Settings…") { model.requestedPage = .settings; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
         Divider()
         Button("Stop all work (\(StopAllWork.shortcutLabel))") { Task { await StopAllWork.run(model) } }
         Divider()
@@ -47,12 +51,11 @@ struct StatusMenu: View {
 
 struct WorkspaceView: View {
     @ObservedObject var model: AppModel
-    @State private var page = ProcessInfo.processInfo.environment["NEKO_START_PAGE"] ?? "Home"
+    @State private var page = Page.start()
     @State private var columns: NavigationSplitViewVisibility = ProcessInfo.processInfo.environment["NEKO_SIDEBAR"] == "hidden" ? .detailOnly : .all
     @AppStorage("neko.look") private var look = ProcessInfo.processInfo.environment["NEKO_LOOK"] ?? NekoLook.ambient.rawValue
     @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     @State private var addingWorkspace = false
-    private let pages = [("Home", "house"), ("Tickets", "tray"), ("Responsibilities", "waveform.path"), ("Tools & skills", "shippingbox"), ("Schedules", "calendar"), ("Memory", "text.alignleft"), ("Profiles", "person.2"), ("Settings", "gearshape")]
     var body: some View {
         Group {
             if model.loadingSetup {
@@ -60,13 +63,12 @@ struct WorkspaceView: View {
             } else if model.onboarding { OnboardingView(model: model) }
             else {
                 NavigationSplitView(columnVisibility: $columns) {
-                    NativeSidebar(model: model, page: $page, pages: pages, addingWorkspace: $addingWorkspace, look: $look)
+                    NativeSidebar(model: model, page: $page, addingWorkspace: $addingWorkspace)
                         .stableSplitPane()
                         .navigationSplitViewColumnWidth(min: 220, ideal: 252, max: 320)
                 } detail: {
                     // Home and agent chats place their permission banners within their content.
-                    let ownsToolbarRow = !["Workspaces", "Responsibilities", "Tools & skills", "Memory", "Profiles", "Schedules", "Settings", "Activity", "Reply views", "Design lab"].contains(page)
-                    let isToday = ownsToolbarRow && page != "Tickets" && model.agentID == nil
+                    let isToday = page == .home && model.agentID == nil
                     VStack(spacing: 0) {
                     // Other pages share the permission banner here.
                     if !isToday && model.agentID == nil { FullDiskAccessBanner() }
@@ -77,20 +79,7 @@ struct WorkspaceView: View {
                                 .navigationTitle("NEK-" + String(agentID.prefix(4)).uppercased() + "  " + ticket["title"].string)
                                 .navigationSubtitle(friendlyTaskStatus(ticket["status"].string))
                                 .id(agentID)
-                        } else { switch page {
-                        case "Tickets": TicketsView(model: model)
-                        case "Workspaces": WorkspacesView(model: model)
-                        case "Responsibilities": ResponsibilitiesView(model: model)
-                        case "Tools & skills": ToolsView(model: model)
-                        case "Memory": MemoryView(model: model)
-                        case "Profiles": ProfilesView(model: model)
-                        case "Schedules": SchedulesView(model: model)
-                        case "Settings": PreferencesView(model: model)
-                        case "Activity": ActivityGallery()
-                        case "Reply views": ReplyGallery()
-                        case "Design lab": DesignLabView()
-                        default: TodayView(model: model)
-                        } }
+                        } else { content(for: page) }
                     }
                     }
                     .stableSplitPane()
@@ -101,7 +90,6 @@ struct WorkspaceView: View {
                     // useful and clickable. Only backgrounds extend behind the toolbar.
                     .hiddenWindowToolbarBackground()
 
-                    .onReceive(NotificationCenter.default.publisher(for: .nekoNavigate)) { note in if let key = note.object as? String { model.agentID = nil; page = key == "Today" ? "Home" : key } }
                 }
             }
         }
@@ -123,12 +111,29 @@ struct WorkspaceView: View {
             }
         }
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
-        .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in model.requestedPage = "Settings" }
-        .onChange(of: model.requestedPage) { _, requested in if let requested { model.agentID = nil; page = requested == "Today" ? "Home" : requested; model.requestedPage = nil } }
+        .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in model.requestedPage = .settings }
+        .onChange(of: model.requestedPage) { _, requested in if let requested { model.agentID = nil; page = requested; model.requestedPage = nil } }
         .onAppear {
             if let requested = model.requestedPage { page = requested; model.requestedPage = nil }
             // Development only: NEKO_NOTICE_DEMO="text" shows a notice to check the toast's look.
             if let demo = ProcessInfo.processInfo.environment["NEKO_NOTICE_DEMO"], !demo.isEmpty { model.notice = demo }
+        }
+    }
+    /// The screen for each page. One switch, typed, so a new page cannot be forgotten.
+    @ViewBuilder private func content(for page: Page) -> some View {
+        switch page {
+        case .home: TodayView(model: model)
+        case .tickets: TicketsView(model: model)
+        case .workspaces: WorkspacesView(model: model)
+        case .watching: ResponsibilitiesView(model: model)
+        case .tools: ToolsView(model: model)
+        case .memory: MemoryView(model: model)
+        case .profiles: ProfilesView(model: model)
+        case .schedules: SchedulesView(model: model)
+        case .settings: PreferencesView(model: model)
+        case .activity: ActivityGallery()
+        case .replyViews: ReplyGallery()
+        case .designLab: DesignLabView()
         }
     }
 }
@@ -136,22 +141,21 @@ struct WorkspaceView: View {
 /// Native source-list sidebar: on macOS 26 this is the system's floating Liquid Glass sidebar.
 struct NativeSidebar: View {
     @ObservedObject var model: AppModel
-    @Binding var page: String
+    @Binding var page: Page
+    /// Row tags: a page's raw value, "agent:<id>" or "group:<filter>".
     @State private var selection: String?
-    let pages: [(String, String)]
     @Binding var addingWorkspace: Bool
-    @Binding var look: String
     @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     var body: some View {
         List(selection: $selection) {
             Section {
-                row("Home")
-                row("Tickets")
+                row(.home)
+                row(.tickets)
             }
             ForEach(AgentSidebarGroup.allCases) { group in agentSection(group) }
-            ForEach(PageInfo.groups.filter { $0.title != "Your day" }, id: \.title) { group in
+            ForEach(Page.sidebarGroups, id: \.title) { group in
                 Section(group.title) {
-                    ForEach(group.keys, id: \.self) { key in row(key) }
+                    ForEach(group.pages) { item in row(item) }
                 }
             }
         }
@@ -181,15 +185,15 @@ struct NativeSidebar: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16).padding(.vertical, 14)
         }
-        .onAppear { selection = page }
+        .onAppear { selection = page.rawValue }
         .onChange(of: selection) { _, value in
             guard let value else { return }
             if value.hasPrefix("agent:") { model.openAgent(String(value.dropFirst(6)), from: page) }
-            else if value.hasPrefix("group:") { model.showAgents(String(value.dropFirst(6))); page = "Tickets" }
-            else { guard value != page || model.agentID != nil else { return }; model.agentID = nil; if value == "Tickets" { model.agentFilter = "all" }; page = value }
+            else if value.hasPrefix("group:") { model.showAgents(String(value.dropFirst(6))); page = .tickets }
+            else if let chosen = Page(rawValue: value) { guard chosen != page || model.agentID != nil else { return }; model.agentID = nil; if chosen == .tickets { model.agentFilter = "all" }; page = chosen }
         }
-        .onChange(of: model.agentID) { _, id in selection = id.map { "agent:" + $0 } ?? page }
-        .onChange(of: page) { _, value in if model.agentID == nil { selection = value } }
+        .onChange(of: model.agentID) { _, id in selection = id.map { "agent:" + $0 } ?? page.rawValue }
+        .onChange(of: page) { _, value in if model.agentID == nil { selection = value.rawValue } }
         .onChange(of: model.selectedWorkspace) { _, _ in model.agentID = nil }
     }
     @ViewBuilder private func agentSection(_ group: AgentSidebarGroup) -> some View {
@@ -224,15 +228,15 @@ struct NativeSidebar: View {
         .tag("agent:" + task.recordID)
         .help(tooltip)
     }
-    private func row(_ key: String) -> some View {
-        let attention = key == "Tickets" ? AgentSidebarGroup.needsYou.tasks(in: model.tasks).count : 0
+    private func row(_ item: Page) -> some View {
+        let attention = item == .tickets ? AgentSidebarGroup.needsYou.tasks(in: model.tasks).count : 0
         return Button {
             model.agentID = nil
-            if key == "Tickets" { model.showAgents() }
-            page = key
+            if item == .tickets { model.showAgents() }
+            page = item
         } label: {
-            Label(PageInfo.title(key), systemImage: PageInfo.icon(key)).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-        }.buttonStyle(.plain).badge(attention).tag(key)
+            Label(item.title, systemImage: item.symbol).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }.buttonStyle(.plain).badge(attention).tag(item.rawValue)
     }
     private func workspaceRow(_ id: String?, name: String, color: Color) -> some View {
         let selected = model.selectedWorkspace == id
@@ -268,39 +272,6 @@ struct WatchingPresentation {
     var title: String {
         if !connected { return "Reconnecting…" }
         return count == 0 ? "Ready" : "Watching \(count)"
-    }
-}
-
-/// User-facing names follow the product loop: Neko watches, plans, then asks you.
-enum PageInfo {
-    static let groups: [(title: String, keys: [String])] = [
-        ("Your day", ["Home", "Tickets"]),
-        ("What Neko watches", ["Workspaces", "Responsibilities", "Schedules"]),
-        ("Teach Neko", ["Tools & skills", "Memory", "Profiles"]),
-        ("Neko", ["Design lab", "Settings"])
-    ]
-    static func title(_ key: String) -> String {
-        switch key {
-        case "Tickets": "All agents"
-        case "Responsibilities": "Watching"
-        case "Tools & skills": "Tools & skills"
-        default: key
-        }
-    }
-    static func icon(_ key: String) -> String {
-        switch key {
-        case "Home", "Today": "house"
-        case "Workspaces": "square.stack.3d.up"
-        case "Tickets": "checklist"
-        case "Responsibilities": "eye"
-        case "Schedules": "clock"
-        case "Tools & skills": "wrench.and.screwdriver"
-        case "Memory": "brain"
-        case "Profiles": "person.2"
-        case "Settings": "gearshape"
-        case "Design lab": "circle.hexagongrid"
-        default: "circle"
-        }
     }
 }
 

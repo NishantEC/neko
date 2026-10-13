@@ -9,12 +9,12 @@ import NekoKit
         model.agentSearch = "login"
         model.includeStoppedAgents = false
         model.ticketDrafts["a"] = "Use the staging environment"
-        model.openAgent("a", from: "Tickets")
+        model.openAgent("a", from: .tickets)
         model.openAgent("b")
-        XCTAssertEqual(model.agentReturnPage, "Tickets")
+        XCTAssertEqual(model.agentReturnPage, .tickets)
         model.closeAgent()
         XCTAssertNil(model.agentID)
-        XCTAssertEqual(model.requestedPage, "Tickets")
+        XCTAssertEqual(model.requestedPage, .tickets)
         XCTAssertEqual(model.agentFilter, "needs_you")
         XCTAssertEqual(model.agentSearch, "login")
         XCTAssertFalse(model.includeStoppedAgents)
@@ -25,9 +25,9 @@ import NekoKit
         model.agentFilter = "needs_you"
         model.showAgents()
         XCTAssertEqual(model.agentFilter, "all")
-        model.openAgent("a", from: "Memory")
+        model.openAgent("a", from: .memory)
         model.closeAgent()
-        XCTAssertEqual(model.requestedPage, "Memory")
+        XCTAssertEqual(model.requestedPage, .memory)
     }
     func testSidebarGroupsAreDisjointAndNewestFirst() {
         let rows: [JSONValue] = ["AwaitingApproval", "ReadyForReview", "Failed", "Queued", "Planning", "Building", "Reviewing", "Completed", "Cancelled"].enumerated().map {

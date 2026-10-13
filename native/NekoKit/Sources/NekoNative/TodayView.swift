@@ -214,7 +214,7 @@ struct TodayView: View {
                     Spacer()
                     Button("Set Up Tools") {
                         if model.selectedWorkspace == nil, model.workspaces.count == 1 { model.selectedWorkspace = model.workspaces[0].recordID }
-                        NotificationCenter.default.post(name: .nekoNavigate, object: "Tools & skills")
+                        model.requestedPage = .tools
                     }.controlSize(.small)
                 }.padding(.horizontal, NekoSpace.md).padding(.vertical, 7)
                     .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.md))
@@ -336,7 +336,7 @@ struct TodayView: View {
                     ReplyTicketRow(title: task["title"].string.isEmpty ? "Ticket" : task["title"].string,
                                    status: task["status"].string,
                                    workspace: model.workspaces.first { $0.recordID == task["workspace_id"].string }?["name"].string ?? "") {
-                        model.openAgent(id.string, from: "Home")
+                        model.openAgent(id.string, from: .home)
                     }
                 }
             }
@@ -409,7 +409,7 @@ struct TodayView: View {
         Task { await model.workbench(.command(command, ["task_id": .string(id)])) }
     }
     private func inspect(_ id: String) {
-        model.openAgent(id, from: "Home")
+        model.openAgent(id, from: .home)
     }
 
     // MARK: / and @ menus
@@ -627,7 +627,7 @@ struct TodayView: View {
             .padding(.vertical, NekoSpace.xxs)
             Button(watched.isEmpty ? "Start watching" : "Check now") {
                 if watched.isEmpty {
-                    if model.workspaces.isEmpty { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
+                    if model.workspaces.isEmpty { addingWorkspace = true } else { model.requestedPage = .watching }
                 } else {
                     for item in watched { Task { await model.workbench(.object(["Mcp": .command("Wake", ["responsibility_id": item["id"]])])) } }
                 }
@@ -643,13 +643,13 @@ struct TodayView: View {
             Text("How Neko works").font(NekoFont.heading).foregroundStyle(N.text2).padding(.bottom, NekoSpace.md).accessibilityAddTraits(.isHeader)
             LoopStep(number: 1, title: "Watch", detail: "Add a folder you work in, then the sources to keep an eye on: Linear, Sentry, GitHub, Slack.", done: !model.workspaces.isEmpty && watching,
                      action: model.workspaces.isEmpty ? "Add a workspace" : "Choose what to watch") {
-                if model.workspaces.isEmpty { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
+                if model.workspaces.isEmpty { addingWorkspace = true } else { model.requestedPage = .watching }
             }
             LoopStep(number: 2, title: "Plan", detail: "When something changes, Neko reads it and drafts the next step the way you would. Read only.", done: !model.tasks.isEmpty, action: "Try a plan") {
                 draft = "Look at this workspace and plan the most useful next step. Read only; explain your reasoning."
             }
             LoopStep(number: 3, title: "Ask you", detail: "Nothing changes without your approval. Plans and finished fixes wait for you in All agents.", done: model.tasks.contains { $0["status"].string == "Completed" }, action: "Open All agents") {
-                NotificationCenter.default.post(name: .nekoNavigate, object: "Tickets")
+                model.requestedPage = .tickets
             }
         }
     }
@@ -664,7 +664,7 @@ struct TodayView: View {
             } else {
                 ForEach(Array(recent), id: \.recordID) { task in
                     let status = task["status"].string
-                    BriefRow(dot: taskColor(status), title: task["title"].string, meta: friendlyTaskStatus(status) + (task["goal"].string.isEmpty ? "" : " · " + task["goal"].string), action: status == "AwaitingApproval" ? "Review plan" : status == "ReadyForReview" ? "Review" : "Open", status: status) { model.openAgent(task.recordID, from: "Home") }
+                    BriefRow(dot: taskColor(status), title: task["title"].string, meta: friendlyTaskStatus(status) + (task["goal"].string.isEmpty ? "" : " · " + task["goal"].string), action: status == "AwaitingApproval" ? "Review plan" : status == "ReadyForReview" ? "Review" : "Open", status: status) { model.openAgent(task.recordID, from: .home) }
                 }
             }
         }
@@ -790,7 +790,7 @@ struct TodayView: View {
     }
 
     private func runCommand(_ command: SlashCommand) {
-        let open = { (page: String) in NotificationCenter.default.post(name: .nekoNavigate, object: page) }
+        let open = { (page: Page) in model.requestedPage = page }
         switch command {
         case .stop: Task { await StopAllWork.run(model) }
         case .clearFinished:
@@ -801,9 +801,9 @@ struct TodayView: View {
                     model.notice = removed == 0 ? "No finished tickets to clear." : "Cleared \(removed) finished \(removed == 1 ? "ticket" : "tickets"). Files and worktrees are untouched."
                 }
             }
-        case .memory: open("Memory")
-        case .tickets: open("Tickets")
-        case .models, .permissions: open("Settings")
+        case .memory: open(.memory)
+        case .tickets: open(.tickets)
+        case .models, .permissions: open(.settings)
         case .setup: model.onboarding = true
         case .help: draft = "/"
         case .remember, .forget, .recall: break
@@ -890,7 +890,6 @@ struct RailRow: View {
     }
 }
 
-extension Notification.Name { static let nekoNavigate = Notification.Name("neko.navigate") }
 
 struct LoopStep: View {
     let number: Int
