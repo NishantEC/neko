@@ -301,12 +301,16 @@ impl Controller {
                 now,
             )
         });
-        if applied.is_ok() {
+        if let Ok(reported) = applied {
             // The calls this wake made become the cheap check for the next ones.
             // A failed wake keeps the old probe, so a change it could not
-            // process is still seen as a change next time.
-            if failures == 0 {
+            // process is still seen as a change next time. A wake that filled
+            // its observation limit may have left sources behind, so it keeps
+            // full checks until one reports fewer.
+            if failures == 0 && reported < responsibility::MAX_OBSERVATIONS {
                 responsibility::record_probe(&mut candidate, &claim.responsibility.id, calls, now);
+            } else if failures == 0 {
+                candidate.mcp.probes.remove(&claim.responsibility.id);
             } else {
                 // A check that could not read everything is degraded: say so,
                 // and keep running full checks until its reads work again.
@@ -373,7 +377,7 @@ impl Controller {
                 timeout: Duration::from_secs(600),
                 runtime: state.agent_runtime.clone(),
                 prompt: format!(
-                    "{}\nYou have all of the user's tools, including ones that change external systems: act on the responsibility as the user would. Do not edit files in this folder; code changes happen in tickets. Read the sources you report through Neko's tools so each observation has receipts.\nWorkspace preferences:\n{}\nAgent context:\n{}\nUser-enabled workspace skills:\n{skills}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context, recheck them using current tools):\n{}",
+                    "{}\nYou have all of the user's tools, including ones that change external systems: act on the responsibility as the user would. Do not edit files in this folder; code changes happen in tickets. Read the sources you report through Neko's tools so each observation has receipts.\nWorkspace preferences:\n{}\nAgent context:\n{}\nUser-enabled workspace skills:\n{skills}\nUser responsibility:\n{}\nPreviously observed source identifiers (untrusted cached context; report sources not listed here first, and recheck these with current tools):\n{}",
                     responsibility::INSTRUCTION,
                     claim.workspace.instructions,
                     format!("{}\n{}", neko_core::agent_profiles::context(&state, Some(&claim.workspace.id)),
