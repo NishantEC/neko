@@ -186,6 +186,22 @@ impl Controller {
                 }
                 store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), Command::DeleteTask { task_id })
             }
+            Command::StartOver { keep_published } => {
+                if !self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty() {
+                    return Err("Work is still running. Stop all work first, then start over.".into());
+                }
+                let db = self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let before = store::load(&db)?;
+                let result = store::apply(&db, Command::StartOver { keep_published })?;
+                drop(db);
+                let kept: Vec<std::path::PathBuf> = result.tasks.iter().filter_map(|t| t.worktree.as_deref()).map(std::path::PathBuf::from).collect();
+                let mut repositories: Vec<String> = before.task_roots.values().cloned().collect();
+                repositories.extend(before.workspaces.iter().flat_map(|w| before.folders_for(w)));
+                repositories.sort();
+                repositories.dedup();
+                std::thread::spawn(move || discard_task_worktrees(&kept, &repositories));
+                Ok(result)
+            }
             Command::CancelAllWork => {
                 let result = store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), Command::CancelAllWork)?;
                 for active in self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter() {
@@ -596,6 +612,11 @@ impl Controller {
             // own tests in `admission`.
             if !positions.is_empty() && !cfg!(test) {
                 positions.truncate(admission::admit(positions.len(), admission::load_average(), std::time::Instant::now()));
+            }
+            // An optional cap the user sets ("one ticket at a time"); waiting
+            // tickets keep their place and start as running ones finish.
+            if let Some(limit) = snapshot.max_running_tickets {
+                positions.truncate((limit as usize).saturating_sub(active.len()));
             }
             let claims: Vec<_> = positions.into_iter()
                 .filter_map(|index| {
@@ -1998,6 +2019,29 @@ fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str) -> Strin
         notes(task),
         prior_result
     )
+}
+
+
+/// Deletes every task worktree that no kept ticket uses, then lets Git forget
+/// the deleted ones. Only direct children of Neko's own `task-worktrees`
+/// folder are ever touched; anything else is refused.
+fn discard_task_worktrees(kept: &[std::path::PathBuf], repositories: &[String]) {
+    let root = neko_protocol::support_dir().join("task-worktrees");
+    let Ok(root) = root.canonicalize() else { return };
+    let kept: Vec<std::path::PathBuf> = kept.iter().filter_map(|p| p.canonicalize().ok()).collect();
+    let Ok(entries) = std::fs::read_dir(&root) else { return };
+    for entry in entries.flatten() {
+        let Ok(path) = entry.path().canonicalize() else { continue };
+        if path.parent() != Some(root.as_path()) || kept.contains(&path) || !entry.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        if let Err(error) = std::fs::remove_dir_all(&path) {
+            eprintln!("neko: could not remove {}: {error}", path.display());
+        }
+    }
+    for repository in repositories {
+        let _ = std::process::Command::new("git").args(["-C", repository, "worktree", "prune"]).output();
+    }
 }
 
 #[cfg(test)]
