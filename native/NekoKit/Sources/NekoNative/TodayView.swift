@@ -3,41 +3,6 @@ import AppKit
 @preconcurrency import ApplicationServices
 import NekoKit
 
-struct ChatScrollMetrics: Equatable {
-    var contentHeight: CGFloat = 0
-    var originY: CGFloat = 0
-    var viewportHeight: CGFloat = 0
-}
-
-struct ChatScrollFollowState {
-    private(set) var followsLatest = true
-    private var previous: ChatScrollMetrics?
-    private var pinnedUntil: Date = .distantPast
-    /// Sending a message always jumps to it, and the insertion animation's
-    /// intermediate offsets must not read as the user scrolling away.
-    mutating func pin(for seconds: TimeInterval = 1.2, now: Date = Date()) {
-        followsLatest = true
-        pinnedUntil = now.addingTimeInterval(seconds)
-    }
-    mutating func userInteracted() {
-        pinnedUntil = .distantPast
-        followsLatest = false
-    }
-    mutating func update(_ metrics: ChatScrollMetrics, now: Date = Date()) {
-        if now < pinnedUntil { followsLatest = true; previous = metrics; return }
-        // Reply growth must not look like the reader scrolling away. Only an
-        // offset change or unchanged content size updates their follow intent.
-        if let previous, abs(metrics.contentHeight - previous.contentHeight) < 1 || abs(metrics.originY - previous.originY) > 1 {
-            followsLatest = metrics.contentHeight + metrics.originY <= metrics.viewportHeight + 80
-        }
-        previous = metrics
-    }
-}
-
-enum ChatComposerClearance {
-    static func bottomSpace(for composerHeight: CGFloat) -> CGFloat { composerHeight + 24 }
-}
-
 private struct ChatComposerHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -46,21 +11,6 @@ private struct ChatComposerHeightKey: PreferenceKey {
 private struct ChatScrollMetricsKey: PreferenceKey {
     static let defaultValue = ChatScrollMetrics()
     static func reduce(value: inout ChatScrollMetrics, nextValue: () -> ChatScrollMetrics) { value = nextValue() }
-}
-
-struct ChatToolActivitySummary {
-    let calls: [JSONValue]
-    let receipts: [JSONValue]
-    var showsReceiptsSeparately: Bool { calls.isEmpty }
-    var count: Int { showsReceiptsSeparately ? receipts.count : calls.count }
-    var succeeded: Int { showsReceiptsSeparately ? receipts.filter { $0["success"].bool }.count : calls.filter { $0["status"].string == "succeeded" }.count }
-    var failed: Int { showsReceiptsSeparately ? receipts.filter { !$0["success"].bool }.count : calls.filter { ["failed", "denied"].contains($0["status"].string) }.count }
-    var awaitingApproval: Int { calls.filter { $0["status"].string == "awaiting_approval" }.count }
-    var title: String {
-        let noun = showsReceiptsSeparately ? "tool receipt" : "tool call"
-        let warning = awaitingApproval > 0 ? " · \(awaitingApproval) needs approval" : failed > 0 ? " · \(failed) failed" : ""
-        return "\(count) \(noun)\(count == 1 ? "" : "s")\(warning)"
-    }
 }
 
 struct TodayView: View {
@@ -72,11 +22,7 @@ struct TodayView: View {
     @State private var addingWorkspace = false
     @State private var composerHeight: CGFloat = 0
     @AppStorage("neko.composer.mode") private var mode = "ask"
-    @State private var menuIndex = 0
-    @State private var menuDismissed: String?
-    @State private var mentionFiles: [String] = []
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.nekoLook) private var look
+    @State private var menu = ComposerMenuState()
     private var workspaceName: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
     private var scope: ChatDraftScope {
         let profiles = model.snapshot["agent_profiles"]
@@ -112,8 +58,12 @@ struct TodayView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: NekoLayout.messageGap) {
                             if messages.isEmpty {
-                                todayHero
-                                if model.workspaces.isEmpty { howNekoWorks } else { brief }
+                                TodayHero(model: model, workSummary: workSummary, addingWorkspace: $addingWorkspace)
+                                if model.workspaces.isEmpty {
+                                    HowNekoWorks(model: model, addingWorkspace: $addingWorkspace) { draft = $0 }
+                                } else {
+                                    TodayBrief(model: model, workSummary: workSummary) { draft = $0 }
+                                }
                             }
                             ForEach(DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace }).prefix(3), id: \.recordID) { DecisionCard(model: model, record: $0) }
                             ForEach(messages, id: \.recordID) { message in
@@ -220,7 +170,7 @@ struct TodayView: View {
                     .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.md))
             }
             let items = menuItems
-            if !items.isEmpty { composerMenu(items) }
+            if !items.isEmpty { ComposerMenuList(items: items, index: $menu.index) }
             approvalBar
             ComposerRuntimeScope(model: model, conversationID: RuntimeSelectionScope.home(targetScope)) { selection in
                 SharedComposer(
@@ -262,8 +212,10 @@ struct TodayView: View {
         .onPreferenceChange(ChatComposerHeightKey.self) { height in
             if abs(height - composerHeight) > 1 { composerHeight = height }
         }
-        .task(id: mentionQuery) { await searchMentionFiles() }
-        .onChange(of: draft) { _, _ in menuIndex = 0 }
+        .task(id: menu.mentionQuery(in: draft)) {
+            if let files = await ComposerMentionSearch.files(matching: menu.mentionQuery(in: draft), model: model) { menu.mentionFiles = files }
+        }
+        .onChange(of: draft) { _, _ in menu.index = 0 }
     }
 
     // MARK: Header, messages, approvals
@@ -313,7 +265,9 @@ struct TodayView: View {
                 }
                 let receipts = model.snapshot["mcp"]["receipts"].array.filter { $0["run_id"].string == "chat:\(message.recordID)" }
                 let activity = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: receipts)
-                if activity.count > 0 { toolActivity(activity, turn: message.recordID, pending: message["pending"].bool) }
+                if activity.count > 0 {
+                    ChatToolActivity(model: model, activity: activity, turn: message.recordID, pending: message["pending"].bool, awaitingApprovals: awaitingApprovals)
+                }
                 if message["ticket_ids"].array.isEmpty &&
                     (message["text"].string.contains("I could not open every ticket") || message["text"].string.contains("No ticket was created")) {
                     Label("No ticket was created from this reply", systemImage: "exclamationmark.triangle.fill")
@@ -353,54 +307,27 @@ struct TodayView: View {
     @ViewBuilder private var approvalBar: some View {
         if let pending = pendingApproval {
             let connection = connectionName(pending.call["connection_id"].string)
-            approvalCard(symbol: "hand.raised.fill",
+            ChatApprovalCard(symbol: "hand.raised.fill",
                          title: "Allow \(pending.call["tool_name"].string)\(connection.isEmpty ? "" : " on \(connection)")?",
-                         detail: argumentSummary(pending.call["arguments_json"].string),
+                         detail: ChatApprovalCard.argumentSummary(pending.call["arguments_json"].string),
                          secondary: ("Deny", KeyboardShortcut("2", modifiers: .command), { decide(pending, false) }),
-                         primary: ("Allow", KeyboardShortcut("1", modifiers: .command), { decide(pending, true) }))
+                         primary: ("Allow", KeyboardShortcut("1", modifiers: .command), { decide(pending, true) }),
+                         busy: model.busy)
         } else if let task = conversationTickets.last(where: { $0["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason($0) == nil }) {
-            approvalCard(symbol: "exclamationmark.triangle.fill",
+            ChatApprovalCard(symbol: "exclamationmark.triangle.fill",
                          title: "Approve the plan for “\(task["title"].string)”?",
                          detail: "Work starts in its own copy of the folder. Nothing is pushed.",
                          secondary: ("Show Ticket", nil, { inspect(task.recordID) }),
-                         primary: ("Approve Plan", KeyboardShortcut("1", modifiers: .command), { ticketCommand("ApproveTask", task.recordID) }))
+                         primary: ("Approve Plan", KeyboardShortcut("1", modifiers: .command), { ticketCommand("ApproveTask", task.recordID) }),
+                         busy: model.busy)
         } else if let task = conversationTickets.last(where: { $0["status"].string == "ReadyForReview" }) {
-            approvalCard(symbol: "checkmark.seal.fill",
+            ChatApprovalCard(symbol: "checkmark.seal.fill",
                          title: "“\(task["title"].string)” is ready for review",
                          detail: "Its changes and checks are in the agent chat.",
                          secondary: ("Show Ticket", nil, { inspect(task.recordID) }),
-                         primary: ("Accept locally", KeyboardShortcut("1", modifiers: .command), { ticketCommand("CompleteTask", task.recordID) }))
+                         primary: ("Accept locally", KeyboardShortcut("1", modifiers: .command), { ticketCommand("CompleteTask", task.recordID) }),
+                         busy: model.busy)
         }
-    }
-    private func approvalCard(symbol: String, title: String, detail: String,
-                              secondary: (String, KeyboardShortcut?, () -> Void),
-                              primary: (String, KeyboardShortcut?, () -> Void)) -> some View {
-        VStack(alignment: .leading, spacing: NekoSpace.md) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: symbol).font(NekoFont.body).foregroundStyle(ReplyStyle.orange).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: NekoSpace.xxs) {
-                    Text(title).font(NekoFont.heading).fixedSize(horizontal: false, vertical: true)
-                    if !detail.isEmpty { Text(detail).font(NekoFont.meta).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                }
-            }
-            HStack(spacing: NekoSpace.sm) {
-                Spacer(minLength: 0)
-                Button(secondary.0, action: secondary.2).keyboardShortcut(secondary.1)
-                Button(primary.0, action: primary.2).nekoButton(.primary).keyboardShortcut(primary.1)
-            }
-        }
-        .controlSize(.small)
-        .disabled(model.busy)
-        .padding(NekoLayout.rowInset)
-        .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-    }
-    private func argumentSummary(_ json: String) -> String {
-        guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)) else { return json }
-        return value.object.sorted { $0.key < $1.key }.prefix(3).map { key, value in
-            let text: String
-            switch value { case .string(let s): text = s; case .number(let n): text = n.formatted(); case .bool(let b): text = b ? "yes" : "no"; default: text = "…" }
-            return "\(key): \(text.prefix(40))"
-        }.joined(separator: " · ")
     }
     private func decide(_ pending: (turn: String, call: JSONValue), _ approve: Bool) {
         Task { await model.workbench(.command("DecideChatTool", ["turn_id": .string(pending.turn), "call_id": pending.call["id"], "approve": .bool(approve)])) }
@@ -414,128 +341,22 @@ struct TodayView: View {
 
     // MARK: / and @ menus
 
-    private struct ComposerMenuItem: Identifiable {
-        let id: String
-        let symbol: String
-        let title: String
-        let detail: String
-        var shortcut = ""
-        let apply: () -> Void
-    }
-    /// The "@word" being typed at the end of the draft, if any.
-    private var mentionQuery: String? {
-        guard let last = draft.split(separator: " ", omittingEmptySubsequences: false).last, last.hasPrefix("@"),
-              !draft.hasSuffix(" "), menuDismissed != draft else { return nil }
-        return String(last.dropFirst())
-    }
     private var menuItems: [ComposerMenuItem] {
-        guard menuDismissed != draft else { return [] }
-        if let query = mentionQuery {
-            let q = query.lowercased()
-            var items: [ComposerMenuItem] = []
-            for workspace in model.workspaces where q.isEmpty || workspace["name"].string.lowercased().contains(q) {
-                items.append(ComposerMenuItem(id: "w:" + workspace.recordID, symbol: "folder", title: workspace["name"].string, detail: "Workspace") {
-                    replaceMention(with: "Workspace: " + workspace["name"].string)
-                })
-            }
-            for connection in model.snapshot["mcp"]["connections"].array where connection["enabled"].bool && (q.isEmpty || connection["label"].string.lowercased().contains(q)) {
-                let count = connection["tools"].array.count
-                items.append(ComposerMenuItem(id: "c:" + connection.recordID, symbol: "puzzlepiece.extension", title: connection["label"].string, detail: "\(count) \(count == 1 ? "tool" : "tools")") {
-                    replaceMention(with: "@\(connection["label"].string) ")
-                })
-            }
-            for path in mentionFiles {
-                items.append(ComposerMenuItem(id: "f:" + path, symbol: "doc", title: (path as NSString).lastPathComponent, detail: ReplyFiles.location(path)) {
-                    replaceMention(with: "\(path) ")
-                })
-            }
-            return Array(items.prefix(9))
-        }
-        let text = draft.trimmingCharacters(in: .whitespaces).lowercased()
-        guard text.hasPrefix("/"), !text.contains(" ") else { return [] }
-        var items: [ComposerMenuItem] = []
-        if "/plan".hasPrefix(text) {
-            items.append(ComposerMenuItem(id: "/plan", symbol: "list.number", title: "/plan", detail: "Plan first, start after you approve") { mode = "plan"; draft = "" })
-        }
-        for entry in SlashCommand.suggestions(for: draft) {
-            items.append(ComposerMenuItem(id: entry.name, symbol: "command", title: entry.name, detail: entry.detail, shortcut: entry.name == "/stop" ? "⌘⇧⎋" : "") {
-                draft = ["/remember", "/forget"].contains(entry.name) ? entry.name + " " : entry.name
-                if !["/remember", "/forget"].contains(entry.name) { send() }
-            })
-        }
-        return items
-    }
-    private func composerMenu(_ items: [ComposerMenuItem]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                let selected = index == min(menuIndex, items.count - 1)
-                Button { item.apply() } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: item.symbol).font(NekoFont.caption).frame(width: 16)
-                            .foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) : .secondary)
-                        Text(item.title).font(NekoFont.body).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) : .primary).frame(minWidth: 84, alignment: .leading)
-                        Text(item.detail).font(NekoFont.meta).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor).opacity(0.8) : .secondary).lineLimit(1)
-                        Spacer(minLength: 8)
-                        if !item.shortcut.isEmpty { Text(item.shortcut).font(NekoFont.meta).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor).opacity(0.8) : .secondary) }
-                    }
-                    .padding(.horizontal, NekoSpace.md).frame(minHeight: 34)
-                    .background(selected ? Color(nsColor: .selectedContentBackgroundColor) : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .onHover { if $0 { menuIndex = index } }
-            }
-        }
-        .padding(NekoSpace.sm)
-        .liquidGlass(radius: NekoRadius.xl)
-        .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+        menu.items(for: draft, model: model, actions: ComposerMenuActions(
+            replaceMention: { replacement in draft = ComposerMention.replacingTrailingMention(in: draft, with: replacement) },
+            plan: { mode = "plan"; draft = "" },
+            fill: { draft = $0 },
+            send: { send() }
+        ))
     }
     private func handleMenuKey(_ key: ComposerMenuKey) -> Bool {
         let items = menuItems
         guard !items.isEmpty else { return false }
-        switch key {
-        case .up: menuIndex = (min(menuIndex, items.count - 1) - 1 + items.count) % items.count
-        case .down: menuIndex = (min(menuIndex, items.count - 1) + 1) % items.count
-        case .accept: items[min(menuIndex, items.count - 1)].apply()
-        case .dismiss: menuDismissed = draft
-        }
+        if key == .accept { items[menu.selected(of: items.count)].apply() }
+        else { menu.navigate(key, count: items.count, draft: draft) }
         return true
     }
-    private func replaceMention(with replacement: String) {
-        draft = ComposerMention.replacingTrailingMention(in: draft, with: replacement)
-    }
-    private func searchMentionFiles() async {
-        guard let query = mentionQuery, query.count >= 2 else { mentionFiles = []; return }
-        try? await Task.sleep(for: .milliseconds(180))
-        guard !Task.isCancelled else { return }
-        let safe = query.filter { $0.isLetter || $0.isNumber || "._- ".contains($0) }
-        guard !safe.isEmpty else { mentionFiles = []; return }
-        let ids = model.selectedWorkspace.map { [$0] } ?? model.workspaces.map(\.recordID)
-        let folders = ids.flatMap { id -> [String] in
-            let listed = model.snapshot["workspace_folders"][id].array.map(\.string)
-            return listed.isEmpty ? [model.workspaces.first { $0.recordID == id }?["repository"].string ?? ""] : listed
-        }.filter { !$0.isEmpty }
-        guard !folders.isEmpty else { mentionFiles = []; return }
-        let found = await Task.detached { () -> [String] in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
-            process.arguments = folders.prefix(6).flatMap { ["-onlyin", $0] } + ["kMDItemFSName == '\(safe)*'cd"]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
-            guard (try? process.run()) != nil else { return [] }
-            let timer = DispatchWorkItem { if process.isRunning { process.terminate() } }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1.5, execute: timer)
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            timer.cancel()
-            let noisy = ["/node_modules/", "/.git/", "/target/", "/.build/", "/DerivedData/", "/Pods/", "/Library/", "/."]
-            return String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
-                .filter { path in !noisy.contains { path.contains($0) } }
-                .prefix(5).map { $0 }
-        }.value
-        if !Task.isCancelled { mentionFiles = found }
-    }
+
 
     private var payloadError: String? {
         ComposerPayload.validationError(ComposerPayload.homeText(model.chatDrafts.submission(for: scope).text, planOnly: mode == "plan"), limit: 4096)
@@ -544,27 +365,10 @@ struct TodayView: View {
         ComposerActionState(running: chatQueueOccupied, hasContent: !model.chatDrafts.submission(for: scope).text.isEmpty,
                             submitting: sending, blocked: model.busy || payloadError != nil, queues: true, canStop: replying)
     }
-    private var canSend: Bool { composerState.canSubmit }
     private var pendingTurn: JSONValue? { messages.last { $0["pending"].bool && $0["role"].string != "user" } ?? messages.last { $0["pending"].bool } }
     private func stopReply() {
         guard let turn = pendingTurn else { return }
         Task { await model.workbench(.command("CancelChat", ["turn_id": turn["id"]])) }
-    }
-    /// The user message that produced a failed reply, so Retry can resend it.
-    private func retryText(before reply: JSONValue) -> String? {
-        guard let index = messages.firstIndex(where: { $0.recordID == reply.recordID }) else { return nil }
-        let text = messages[..<index].last { $0["role"].string == "user" }?["text"].string ?? ""
-        return text.isEmpty ? nil : text
-    }
-    private func retry(_ text: String) {
-        guard validateHomePayload(text) else { return }
-        scrollFollow.pin()
-        model.sendingChatScopes.insert(scope)
-        let target = scope
-        Task {
-            _ = await model.workbench(.command("SendMessage", ["text": .string(text), "workspace_id": target.workspaceID.map(JSONValue.string) ?? .null]))
-            model.sendingChatScopes.remove(target)
-        }
     }
 
     private var toolAccessNotice: String? {
@@ -577,169 +381,8 @@ struct TodayView: View {
         let usable = connected.contains { !$0["tools"].array.isEmpty && $0["error"].string.isEmpty }
         return usable ? nil : "Connections are present, but no tools are available yet. Discover their tools in Tools & skills."
     }
-    @ViewBuilder private var suggestions: some View {
-        EmptyView()
-    }
-    private func suggestion(_ title: String, _ detail: String, _ prompt: String) -> some View {
-        SuggestionRow(title: title, detail: detail) { draft = prompt }
-    }
-    @ViewBuilder private var legacySuggestions: some View {
-        Button("Plan my next step", systemImage: "arrow.triangle.branch") { draft = "Help me decide the next small, useful step in this workspace. Read only and explain your reasoning." }.nekoButton(.secondary)
-        Button("Review a change", systemImage: "doc.text.magnifyingglass") { draft = "Review the current changes in this workspace. Do not modify files; explain risks and missing tests." }.nekoButton(.secondary)
-        Button("Remember a preference", systemImage: "bookmark") { draft = "Remember this preference: " }.nekoButton(.secondary)
-    }
-    private var greeting: some View {
-        let h = Calendar.current.component(.hour, from: Date())
-        let part = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
-        let waiting = model.tasks.filter { ["AwaitingApproval", "ReadyForReview", "Failed"].contains($0["status"].string) }.count
-        return VStack(alignment: .leading, spacing: NekoSpace.sm) {
-            if look == .mascot {
-                BrandMark(size: 84).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-                    .shadow(color: NekoStyle.accent.opacity(0.35), radius: 24, y: 10).padding(.bottom, NekoSpace.md)
-            }
-            Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(NekoFont.caption).foregroundStyle(N.text4)
-            Text("\(part).").font(NekoFont.scaled(look == .mascot ? 34 : look == .dense ? 20 : 26, weight: .semibold)).tracking(-0.5).foregroundStyle(N.text)
-            Text(waiting == 0 ? (WatchingPresentation(connected: model.connected, snapshot: model.snapshot).active ? "Nothing needs you right now. I'm watching." : "Connect a work source and start a watch to get useful updates here.") : "\(waiting) \(waiting == 1 ? "thing needs" : "things need") you. Review it in All agents.")
-                .font(NekoFont.of(.callout)).lineSpacing(4).foregroundStyle(N.text3)
-        }
-    }
-    private var todayHero: some View {
-        let h = Calendar.current.component(.hour, from: Date())
-        let part = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
-        let watched = model.snapshot["mcp"]["responsibilities"].array.filter {
-            $0["enabled"].bool && (model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace)
-        }
-        return VStack(alignment: .leading, spacing: 18) {
-            Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                .font(NekoFont.meta).foregroundStyle(N.text3)
-            Text(workSummary.needsYou.isEmpty ? "\(part). All quiet for now." : "\(part). There's work to review.")
-                .font(NekoFont.display).foregroundStyle(N.text)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(model.workspaces.isEmpty ? "Add a workspace to give Neko somewhere to start." : "Ask about your work, or let Neko watch for changes. You'll review anything it wants to do.")
-                .font(NekoFont.body).lineSpacing(4).foregroundStyle(N.text3)
-                .fixedSize(horizontal: false, vertical: true)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: NekoSpace.sm) {
-                Label("\(workSummary.needsYou.count) needs you", systemImage: "hand.raised")
-                Label("\(workSummary.working.count) in progress", systemImage: "circle.dotted")
-                Label("\(watched.count) watching", systemImage: "eye")
-            }
-            .font(NekoFont.meta).foregroundStyle(N.text3)
-            .padding(.vertical, NekoSpace.xxs)
-            Button(watched.isEmpty ? "Start watching" : "Check now") {
-                if watched.isEmpty {
-                    if model.workspaces.isEmpty { addingWorkspace = true } else { model.requestedPage = .watching }
-                } else {
-                    for item in watched { Task { await model.workbench(.object(["Mcp": .command("Wake", ["responsibility_id": item["id"]])])) } }
-                }
-            }
-            .nekoButton(.primary)
-            .accessibilityLabel(watched.isEmpty ? "Start watching" : "Check everything now")
-        }
-        .padding(.top, NekoLayout.sectionGap)
-    }
-    private var howNekoWorks: some View {
-        let watching = model.snapshot["mcp"]["responsibilities"].array.contains { $0["enabled"].bool }
-        return VStack(alignment: .leading, spacing: 0) {
-            Text("How Neko works").font(NekoFont.heading).foregroundStyle(N.text2).padding(.bottom, NekoSpace.md).accessibilityAddTraits(.isHeader)
-            LoopStep(number: 1, title: "Watch", detail: "Add a folder you work in, then the sources to keep an eye on: Linear, Sentry, GitHub, Slack.", done: !model.workspaces.isEmpty && watching,
-                     action: model.workspaces.isEmpty ? "Add a workspace" : "Choose what to watch") {
-                if model.workspaces.isEmpty { addingWorkspace = true } else { model.requestedPage = .watching }
-            }
-            LoopStep(number: 2, title: "Plan", detail: "When something changes, Neko reads it and drafts the next step the way you would. Read only.", done: !model.tasks.isEmpty, action: "Try a plan") {
-                draft = "Look at this workspace and plan the most useful next step. Read only; explain your reasoning."
-            }
-            LoopStep(number: 3, title: "Ask you", detail: "Nothing changes without your approval. Plans and finished fixes wait for you in All agents.", done: model.tasks.contains { $0["status"].string == "Completed" }, action: "Open All agents") {
-                model.requestedPage = .tickets
-            }
-        }
-    }
-    @ViewBuilder private var brief: some View {
-        let recent = Array((workSummary.needsYou + workSummary.working).prefix(5))
-        VStack(alignment: .leading, spacing: 0) {
-            Text(recent.isEmpty ? "Try asking" : "While you were away").font(NekoFont.heading).foregroundStyle(N.text2).padding(.bottom, NekoSpace.md).accessibilityAddTraits(.isHeader)
-            if recent.isEmpty {
-                BriefRow(dot: N.text4, title: "Plan my next step", meta: "Decide the next small, useful move · read only", action: "Ask") { draft = "Help me decide the next small, useful step in this workspace. Read only and explain your reasoning." }
-                BriefRow(dot: N.text4, title: "Review a change", meta: "Risks and missing tests · no edits", action: "Ask") { draft = "Review the current changes in this workspace. Do not modify files; explain risks and missing tests." }
-                BriefRow(dot: N.text4, title: "Remember a preference", meta: "Teach Neko how you work", action: "Ask") { draft = "Remember this preference: " }
-            } else {
-                ForEach(Array(recent), id: \.recordID) { task in
-                    let status = task["status"].string
-                    BriefRow(dot: taskColor(status), title: task["title"].string, meta: friendlyTaskStatus(status) + (task["goal"].string.isEmpty ? "" : " · " + task["goal"].string), action: status == "AwaitingApproval" ? "Review plan" : status == "ReadyForReview" ? "Review" : "Open", status: status) { model.openAgent(task.recordID, from: .home) }
-                }
-            }
-        }
-    }
-    private func toolActivity(_ activity: ChatToolActivitySummary, turn: String, pending: Bool) -> some View {
-        VStack(alignment: .leading, spacing: NekoSpace.sm) {
-            if activity.showsReceiptsSeparately || activity.calls.contains(where: { $0["status"].string != "awaiting_approval" }) {
-                DisclosureGroup {
-                VStack(alignment: .leading, spacing: 0) {
-                    if activity.showsReceiptsSeparately {
-                        ForEach(activity.receipts, id: \.recordID) { receipt in
-                            HStack(spacing: 7) {
-                                Image(systemName: receipt["success"].bool ? "checkmark" : "exclamationmark.triangle")
-                                Text(receipt["tool_name"].string)
-                                Spacer()
-                                Text(receipt["success"].bool ? "Done" : "Failed")
-                            }
-                            .font(NekoFont.caption)
-                            .foregroundStyle(receipt["success"].bool ? N.text3 : NekoStyle.amber)
-                            .padding(.vertical, 7)
-                            Divider().opacity(0.4)
-                        }
-                    } else {
-                        ForEach(activity.calls.filter { $0["status"].string != "awaiting_approval" }, id: \.recordID) { call in
-                            toolCall(call, turn: turn, pending: pending)
-                        }
-                    }
-                }.padding(.top, NekoSpace.sm)
-            } label: {
-                Label(activity.title, systemImage: activity.failed > 0 ? "exclamationmark.circle" : pending ? "circle.dotted" : "checkmark.circle")
-                    .font(NekoFont.meta)
-                    .foregroundStyle(activity.failed > 0 || activity.awaitingApproval > 0 ? NekoStyle.amber : N.text3)
-                }
-            } else {
-                Label(activity.title, systemImage: "hand.raised")
-                    .font(NekoFont.of(.caption, weight: .medium)).foregroundStyle(NekoStyle.amber)
-            }
-            ForEach(activity.calls.filter { $0["status"].string == "awaiting_approval" }, id: \.recordID) { call in
-                toolCall(call, turn: turn, pending: pending)
-            }
-        }
-        .padding(.top, NekoSpace.xxs)
-    }
     private var awaitingApprovals: Int {
         messages.filter { $0["pending"].bool }.flatMap { $0["tool_calls"].array }.filter { $0["status"].string == "awaiting_approval" }.count
-    }
-    private func toolCall(_ call: JSONValue, turn: String, pending: Bool) -> some View {
-        func decide(_ approve: Bool) { Task { await model.workbench(.command("DecideChatTool", ["turn_id": .string(turn), "call_id": call["id"], "approve": .bool(approve)])) } }
-        let status = call["status"].string
-        let connection = model.snapshot["mcp"]["connections"].array.first { $0.recordID == call["connection_id"].string }?["label"].string ?? "Removed connection"
-        return VStack(alignment: .leading, spacing: NekoSpace.xs) {
-            HStack(spacing: NekoSpace.sm) {
-                Image(systemName: status == "failed" || status == "denied" ? "exclamationmark.circle" : status == "awaiting_approval" ? "hand.raised" : "checkmark")
-                    .foregroundStyle(status == "failed" || status == "denied" || status == "awaiting_approval" ? NekoStyle.amber : N.text4)
-                    .frame(width: 14)
-                Text(call["tool_name"].string).fontWeight(.medium)
-                Text("· \(connection)").foregroundStyle(N.text4).lineLimit(1)
-                Spacer(minLength: 8)
-                Text(status.replacingOccurrences(of: "_", with: " ").capitalized).foregroundStyle(N.text4)
-            }.font(NekoFont.caption)
-            DisclosureGroup("Request details") {
-                Text(call["arguments_json"].string).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-            }.font(NekoFont.of(.small)).foregroundStyle(N.text4).padding(.leading, 22)
-            if pending && call["status"].string == "awaiting_approval" {
-                // Keyboard answers only when exactly one request is waiting, so ⌘1/⌘2 is never ambiguous.
-                let only = awaitingApprovals == 1
-                HStack {
-                    Button("Deny", role: .destructive) { decide(false) }.keyboardShortcut(only ? KeyboardShortcut("2", modifiers: .command) : nil)
-                    Button("Allow this request") { decide(true) }.nekoButton(.primary).keyboardShortcut(only ? KeyboardShortcut("1", modifiers: .command) : nil)
-                    if only { Text("⌘1 allow · ⌘2 deny").font(NekoFont.of(.small)).foregroundStyle(N.text4) }
-                }
-                .padding(.leading, 22).disabled(model.busy)
-            }
-            Divider().opacity(0.4)
-        }.padding(.vertical, 5)
     }
     private func chooseAttachments() {
         let targetScope = scope
@@ -808,113 +451,5 @@ struct TodayView: View {
         case .help: draft = "/"
         case .remember, .forget, .recall: break
         }
-    }
-}
-struct SuggestionRow: View {
-    let title: String
-    let detail: String
-    let action: () -> Void
-    @State private var hover = false
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Text(title).font(NekoFont.of(.meta, weight: .medium))
-                Text("·").foregroundStyle(.tertiary)
-                Text(detail).font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
-                Image(systemName: "arrow.right").font(NekoFont.of(.small)).foregroundStyle(.tertiary).offset(x: hover ? 2 : 0).opacity(hover ? 1 : 0)
-            }.padding(.horizontal, 10).padding(.vertical, NekoSpace.sm)
-            .background(hover ? N.card : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.sm, style: .continuous))
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain).onHover { h in withNekoAnimation(.hover) { hover = h } }
-    }
-}
-
-
-struct BriefRow: View {
-    let dot: Color
-    let title: String
-    let meta: String
-    let action: String
-    var status: String? = nil
-    let perform: () -> Void
-    @State private var hover = false
-    var body: some View {
-        Button(action: perform) {
-            HStack(alignment: .top, spacing: NekoSpace.md) {
-                Group {
-                    if let status { StatusGlyph(status: status, size: 14) }
-                    else { Image(systemName: "arrow.up.right").font(NekoFont.meta).foregroundStyle(dot) }
-                }.frame(width: 16, height: 20).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: NekoSpace.xs) {
-                    Text(title).font(NekoFont.body).foregroundStyle(N.text).lineLimit(2)
-                    Text(meta).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2)
-                }
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 12)
-                Text(action).font(NekoFont.meta).foregroundStyle(hover ? N.text : N.text2)
-                    .padding(.horizontal, NekoSpace.xs).frame(height: 26)
-                    .fixedSize()
-            }
-            .padding(.vertical, NekoLayout.rowInset).padding(.horizontal, NekoSpace.sm)
-            .background(hover ? N.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
-            .overlay(alignment: .top) { N.line.frame(height: 1).padding(.horizontal, NekoSpace.sm) }
-            .padding(.horizontal, -8)
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain).onHover { h in withNekoAnimation(.hover) { hover = h } }
-    }
-}
-
-struct RailRow: View {
-    let title: String
-    let meta: String
-    let status: String
-    let open: () -> Void
-    @State private var hover = false
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 10) {
-                StatusGlyph(status: status, size: 14)
-                VStack(alignment: .leading, spacing: NekoSpace.hair) {
-                    Text(title).font(NekoFont.meta).foregroundStyle(N.text).lineLimit(1)
-                    Text(meta).font(NekoFont.caption).foregroundStyle(N.text3).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, NekoSpace.xl).frame(height: 52)
-            .background(hover ? N.selected : .clear)
-            .overlay(alignment: .bottom) { N.line.frame(height: 1) }
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain).onHover { hover = $0 }
-    }
-}
-
-
-struct LoopStep: View {
-    let number: Int
-    let title: String
-    let detail: String
-    let done: Bool
-    let action: String
-    let perform: () -> Void
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            ZStack {
-                Circle().strokeBorder(done ? NekoStyle.mint : N.lineStrong, lineWidth: 1.5)
-                if done { Image(systemName: "checkmark").font(NekoFont.of(.micro, weight: .bold)).foregroundStyle(NekoStyle.mint) }
-                else { Text("\(number)").font(NekoFont.of(.small, weight: .semibold).monospacedDigit()).foregroundStyle(N.text3) }
-            }.frame(width: 22, height: 22).padding(.top, 1)
-            VStack(alignment: .leading, spacing: NekoSpace.xs) {
-                Text(title).font(NekoFont.heading).foregroundStyle(N.text)
-                Text(detail).font(NekoFont.body).lineSpacing(3).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 16)
-            Button(action, action: perform).nekoButton(.secondary).controlSize(.small).padding(.top, NekoSpace.hair)
-        }
-        .padding(.vertical, NekoLayout.rowInset)
-        .overlay(alignment: .top) { N.line.frame(height: 1) }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Step \(number), \(title)\(done ? ", done" : ""). \(detail)")
     }
 }
