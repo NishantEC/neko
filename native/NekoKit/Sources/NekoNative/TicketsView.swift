@@ -168,7 +168,7 @@ struct TicketsView: View {
         } message: {
             Text("It hasn’t been reviewed yet, so moving it to Done stops the work. Its files and worktree stay on disk.")
         }
-        .onChange(of: selected) { _, id in if let id { model.openAgent(id, from: "Tickets") } }
+        .onChange(of: selected) { _, id in if let id { model.openAgent(id, from: .tickets) } }
 
     }
 
@@ -247,7 +247,7 @@ struct TicketsView: View {
             Text(search.isEmpty ? "Ask Neko for work in Home. Agents matching this view will appear here." : "No ticket matches “\(search)”.")
         } actions: {
             if search.isEmpty {
-                Button("Open Home") { NotificationCenter.default.post(name: .nekoNavigate, object: "Home") }
+                Button("Open Home") { model.requestedPage = .home }
             } else {
                 Button("Clear search") { model.agentSearch = "" }
             }
@@ -551,7 +551,7 @@ struct TicketDetail: View {
         ToolbarItem(placement: .navigation) {
             Button { close?() } label: { Label("Neko", systemImage: "arrow.left") }
                 .keyboardShortcut(.cancelAction)
-                .help("Back to \(model.agentReturnPage == "Tickets" ? "All agents" : model.agentReturnPage)")
+                .help("Back to \(model.agentReturnPage.title)")
                 .disabled(model.busy)
         }
         if ticket["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason(ticket) == nil {

@@ -4,9 +4,9 @@ import NekoKit
 @MainActor final class AppModel: ObservableObject {
     @Published var snapshot: JSONValue = .object([:])
     @Published var selectedWorkspace: String?
-    @Published var requestedPage: String?
+    @Published var requestedPage: Page?
     @Published var agentID: String?
-    @Published var agentReturnPage = "Home"
+    @Published var agentReturnPage: Page = .home
     @Published var agentFilter = "all"
     @Published var agentSearch = ""
     @Published var includeStoppedAgents = true
@@ -14,15 +14,15 @@ import NekoKit
     let ticketDrafts = ComposerDraftStore<String>()
     @Published var sendingTicketIDs: Set<String> = []
 
-    func openAgent(_ id: String, from page: String? = nil) {
-        if agentID == nil { agentReturnPage = page ?? "Home" }
+    func openAgent(_ id: String, from page: Page? = nil) {
+        if agentID == nil { agentReturnPage = page ?? .home }
         agentID = id
     }
     func closeAgent() { agentID = nil; requestedPage = agentReturnPage }
     func showAgents(_ filter: String = "all") {
         agentFilter = filter
         agentID = nil
-        requestedPage = "Tickets"
+        requestedPage = .tickets
     }
     /// A short confirmation shown for a few seconds, e.g. after Stop all work.
     @Published var notice: String? {

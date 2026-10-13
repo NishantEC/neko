@@ -161,7 +161,7 @@ private struct MemorySourceDetails: View {
             DisclosureGroup(label) {
                 VStack(alignment: .leading, spacing: NekoSpace.sm) {
                     Text(source).font(NekoFont.meta.monospaced()).textSelection(.enabled)
-                    if let task { Button("Open source agent") { model.openAgent(task.recordID, from: "Memory") } }
+                    if let task { Button("Open source agent") { model.openAgent(task.recordID, from: .memory) } }
                 }.padding(.top, NekoSpace.xs)
             }.font(NekoFont.meta).foregroundStyle(N.text3)
         }

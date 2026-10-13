@@ -33,7 +33,7 @@ enum DecisionPresentation {
 struct DecisionCard: View {
     @ObservedObject var model: AppModel
     let record: JSONValue
-    var originPage = "Home"
+    var originPage: Page = .home
     @State private var correcting = false
     @State private var correction = ""
     var body: some View {
@@ -167,7 +167,7 @@ struct WorkingStyleView: View {
             if !records.isEmpty {
                 DisclosureGroup("Recent decisions · \(min(records.count, 12))") {
                     VStack(alignment: .leading, spacing: 18) {
-                        ForEach(records.prefix(12), id: \.recordID) { DecisionCard(model: model, record: $0, originPage: "Memory") }
+                        ForEach(records.prefix(12), id: \.recordID) { DecisionCard(model: model, record: $0, originPage: .memory) }
                     }.padding(.top, 10)
                 }.font(NekoFont.heading)
             }
@@ -191,7 +191,7 @@ struct WorkingStyleView: View {
                             if let record = model.snapshot["decision_records"].array.first(where: { $0["id"] == reference }) {
                                 VStack(alignment: .leading, spacing: NekoSpace.sm) {
                                     NekoSavedText(text: record["correction"]["text"].string.isEmpty ? record["rationale"].string : record["correction"]["text"].string)
-                                    if !record["task_id"].string.isEmpty { Button("Open agent") { model.openAgent(record["task_id"].string, from: "Memory") } }
+                                    if !record["task_id"].string.isEmpty { Button("Open agent") { model.openAgent(record["task_id"].string, from: .memory) } }
                                 }
                             } else { Text("This decision is outside the retained history.").foregroundStyle(N.text3) }
                         }

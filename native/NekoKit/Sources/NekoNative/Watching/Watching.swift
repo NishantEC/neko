@@ -51,7 +51,7 @@ enum Watching {
 
     @MainActor static func reviewAccess(_ model: AppModel, _ item: JSONValue) {
         model.selectedWorkspace = item["workspace_id"].string
-        NotificationCenter.default.post(name: .nekoNavigate, object: "Tools & skills")
+        model.requestedPage = .tools
     }
 
     @MainActor static func turnOn(_ model: AppModel, _ item: JSONValue) {
