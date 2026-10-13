@@ -10,12 +10,14 @@ clean_data=0
 # Successful installs keep this many app backups (including the new one).
 keep_backups=3
 skip_build=0
+skip_checks=0
 for option in "$@"; do
   case "$option" in
     --dry-run) dry_run=1 ;;
     --clean-data) clean_data=1 ;;
     --skip-build) skip_build=1 ;;
-    --help) printf '%s\n' 'Usage: bash scripts/install-native.sh [--dry-run] [--skip-build] [--clean-data]' 'Default preserves data and credentials. --clean-data moves only Neko data to a recoverable backup.'; exit 0 ;;
+    --skip-checks) skip_checks=1 ;;
+    --help) printf '%s\n' 'Usage: bash scripts/install-native.sh [--dry-run] [--skip-build] [--skip-checks] [--clean-data]' 'Default preserves data and credentials, and runs scripts/check.sh before building. --clean-data moves only Neko data to a recoverable backup.'; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$option" >&2; exit 2 ;;
   esac
 done
@@ -54,7 +56,7 @@ if (( dry_run )); then
   printf 'Dry run: no build, process signals, file moves, or installation.\n'
   printf 'Source: %s\nTarget: %s\n' "$bundle" "$application"
   if (( skip_build )); then validate_bundle "$bundle"; printf 'Existing signed native source bundle verified.\n'
-  else printf 'Would run scripts/build-native.sh and verify the resulting signed SwiftUI bundle.\n'; fi
+  else printf 'Would run scripts/check.sh%s, then scripts/build-native.sh, and verify the resulting signed SwiftUI bundle.\n' "$( (( skip_checks )) && printf ' (skipped)' )"; fi
   printf 'Would stop only installed Neko executables, including installer backups; matching PIDs:\n'
   installed_pids
   printf 'Would back up the existing app in a unique /Applications/.neko-native-backup.* directory, keeping the newest %s backups.\n' "$keep_backups"
@@ -64,6 +66,8 @@ if (( dry_run )); then
   printf 'Keychain credentials and macOS preferences remain unchanged.\n'
   exit 0
 fi
+# Nothing untested reaches /Applications: the gate runs before the build.
+if (( ! skip_build && ! skip_checks )); then "$repo_root/scripts/check.sh" || { printf 'Checks failed; nothing was installed. Re-run with --skip-checks to override.\n' >&2; exit 1; }; fi
 if (( ! skip_build )); then NEKO_NATIVE_PREVIEW=0 bash "$repo_root/scripts/build-native.sh"; fi
 validate_bundle "$bundle" || { printf 'Native bundle validation failed; installation untouched.\n' >&2; exit 1; }
 [[ -w /Applications ]] || { printf '/Applications is not writable; no installation changes made.\n' >&2; exit 1; }
