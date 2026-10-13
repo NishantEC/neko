@@ -236,6 +236,37 @@ in Rust on [GPUI](https://gpui.rs) (Zed's UI framework). See `README.md` for how
 to run it and `data/dim/plan.md` (in the firstmate home, not this repo) for the
 full product plan.
 
+## Native design system and the check gate (2026-10-14)
+
+`native/NekoKit/Sources/NekoNative/DesignSystem/` owns every visual value
+(`Tokens`, `Motion`, `Surfaces`, `Controls`, `Shell`, `Appearance`) and the
+screen shells: `NekoPage`, `NekoSection`, `NekoRow`, `NekoToggleRow`,
+`NekoDividedList`, `NekoSheet`, `NekoEmptyState`, `NekoNotice`. Rules and the
+catalogue are in `docs/design/principles.md`; FluidVoice (GPL-3.0, `refs/`)
+was the reference for the shape, not for code. **Screens compose shells and
+never draw their own chrome; to change how a page or sheet looks, change the
+shell.** `DesignSystemGuardTests` reads the sources and fails on a radius,
+font size, colour, animation curve or raw button style outside the design
+system (`Activity/` owns its glyph hues), and caps raw padding/spacing
+numbers at a ceiling that may only fall. Glass goes through
+`NekoGlassSurface`, which falls back to an opaque bordered card under Reduce
+Transparency or Increased Contrast; motion goes through `NekoMotion`, which
+disappears under Reduce Motion. Pages are a typed `Page` enum (raw values are
+the old keys, so `NEKO_START_PAGE` still works) and navigation sets
+`model.requestedPage` rather than posting strings. Settings is searchable
+(`SettingsTarget`, ⌘F). The ⌘K panel is built at launch and every show/hide
+carries a `PaletteGeneration` token so stale callbacks cannot close a fresh
+panel. `scripts/render-previews.sh` renders the shells offscreen in light and
+dark without showing or focusing a window; prominent buttons look grey and
+glass looks empty there, which is the inactive offscreen window, not a defect.
+
+`scripts/check.sh` is the gate: clippy's always-a-defect lints, every Rust
+test and the Swift tests (~70s). `install-native.sh` runs it first and
+installs nothing on failure (`--skip-checks` overrides); `.githooks/pre-commit`
+runs `--quick` (compile only) when Rust or Swift is staged, enabled with
+`git config core.hooksPath .githooks`. Both wait for load average < 20.
+`cargo fmt` is deliberately not in the gate: this codebase keeps long lines.
+
 ## Documentation written for people
 
 Four documents cover the shape of this project for a human reader. Point

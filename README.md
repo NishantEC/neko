@@ -283,16 +283,23 @@ MCP connections, scheduling, and task supervision. See
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | Native app, daemon/client split, wire protocol, workbench and MCP authority |
 | [docs/adding-a-provider.md](docs/adding-a-provider.md) | Adding a result type through the `Provider` seam |
+| [docs/design/principles.md](docs/design/principles.md) | Native design rules and the shell component catalogue |
 | `AGENTS.md` | Detailed engineering decisions and constraints |
 
 ## Development
 
 ```sh
-swift test --package-path native/NekoKit
-cargo test -p neko-core -p neko-daemon -p neko-protocol
+scripts/check.sh                 # the gate: clippy's hard lints, all Rust and Swift tests (~70s)
+scripts/check.sh --quick         # compile only; the pre-commit hook runs this
+scripts/render-previews.sh       # native shell components rendered offscreen, light and dark
 cargo build -p neko-daemon --bin neko-daemon
 node scripts/smoke-workbench.mjs
 ```
+
+Enable the hook once per clone with `git config core.hooksPath .githooks`.
+`scripts/install-native.sh` runs `scripts/check.sh` before it builds and
+installs nothing if a check fails. The native client's design rules are in
+[docs/design/principles.md](docs/design/principles.md).
 
 The smoke test uses isolated local data and a deterministic child fixture. It
 does not prove a live model, an authenticated MCP account, or production
