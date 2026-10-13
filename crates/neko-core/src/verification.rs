@@ -183,6 +183,10 @@ pub fn accept(
     accept_in(answer, changed, allowed, receipts, required_checks, None)
 }
 
+/// How a reviewer must run checks so each receipt proves exactly one. Sent to
+/// reviewers up front and repeated in the failure a retry reads.
+pub const STANDALONE_CHECKS: &str = "Run every check as its own shell command, exactly as listed in tests (a leading `cd` into the worktree is fine), with no `;`, `|`, `| tail` or other commands chained before it: a pipe reports the exit status of `tail`, not of the check, and the full output is captured already.";
+
 /// A receipt's command with harmless leading steps removed: `uptime`/`pwd`
 /// (agents told to check machine load first) and `cd` into the reviewed
 /// worktree itself. A `cd` anywhere else is kept, so a check run in another
@@ -266,7 +270,7 @@ pub fn accept_in(
             .is_some_and(|r| r.is_complete() && r.exit_code == Some(0));
         if !proven {
             return Err(format!(
-                "No successful independent execution evidence for: {test}"
+                "No successful independent execution evidence for: {test}. {STANDALONE_CHECKS}"
             ));
         }
     }
@@ -308,6 +312,10 @@ mod tests {
         assert!(accept(&answer(), &files, &files, &[], &[]).is_err());
         assert!(accept(&answer(), &files, &files, &[r#"VERIFICATION_COMMAND {"command":"cargo test","exit_code":1,"output":"FAILED"}"#.into()], &[]).is_err());
         assert!(accept(&answer(), &files, &files, &[r#"VERIFICATION_COMMAND {"command":"cargo test","exit_code":0,"output":"1 passed"}"#.into()], &[]).is_ok());
+        // A pipe reports tail's status, so it never proves the check; the
+        // failure says how to run it so a retry can correct itself.
+        let piped = accept(&answer(), &files, &files, &[r#"VERIFICATION_COMMAND {"command":"cargo test 2>&1 | tail -30","exit_code":0,"output":"1 passed"}"#.into()], &[]).unwrap_err();
+        assert!(piped.contains("No successful independent execution evidence for: cargo test") && piped.contains("as its own shell command"), "{piped}");
         // Structured findings still fail the gate, with a readable reason.
         let structured = r#"{"passed":false,"findings":[{"id":"R1","severity":"blocking","description":"Wrong repository checked out.","recommendation":"Choose the connect repo."}],"files":[],"tests":[],"summary":"Blocked"}"#;
         let error = accept(structured, &files, &files, &[], &[]).unwrap_err();
