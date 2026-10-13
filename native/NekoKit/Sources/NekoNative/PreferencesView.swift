@@ -118,7 +118,10 @@ enum HotkeyFallbacks {
 }
 
 struct PreferencesView: View {
-    @AppStorage("neko.settings.tab") private var settingsTab = "General"
+    @AppStorage("neko.settings.tab") private var settingsTab: SettingsTab = .general
+    @State private var query = ""
+    @State private var highlighted: SettingsTarget?
+    @State private var searchFocus = 0
     @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     @ObservedObject var model: AppModel
     @State private var settings: [JSONValue] = []
@@ -139,17 +142,6 @@ struct PreferencesView: View {
     @State private var checkingUpdates = false
     @State private var updateStatus: Updates.Status?
     @State private var updateNote: String?
-    private var tabDescription: String {
-        switch settingsTab {
-        case "AI": "Choose the runtime and model for new work."
-        case "Search": "Choose which folders appear in the quick panel."
-        case "Permissions": "Review what Neko can access on this Mac."
-        case "Diagnostics": "Check local runtimes and the connection to Neko."
-        case "Agents": "Manage the optional legacy agent directory."
-        case "About": "Your workspace, native on your Mac."
-        default: "Make Neko fit the way you use your Mac."
-        }
-    }
     private func checkUpdates() {
         checkingUpdates = true
         Task { updateStatus = await Updates.check(); checkingUpdates = false }
@@ -174,39 +166,42 @@ struct PreferencesView: View {
     }
     private var sectionPicker: some View {
         Picker("Settings section", selection: $settingsTab) {
-            ForEach(["General", "AI", "Search", "Permissions", "Diagnostics", "Agents", "About"], id: \.self) {
-                Text($0).tag($0)
-            }
+            ForEach(SettingsTab.allCases) { Text($0.title).tag($0) }
         }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
-            ViewThatFits(in: .horizontal) {
-                sectionPicker.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
-                sectionPicker.pickerStyle(.menu).fixedSize()
+            HStack(spacing: NekoSpace.md) {
+                ViewThatFits(in: .horizontal) {
+                    sectionPicker.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
+                    sectionPicker.pickerStyle(.menu).fixedSize()
+                }
+                Spacer(minLength: NekoSpace.md)
+                NekoSearchField(title: "Find a setting", text: $query, focusRequest: searchFocus).frame(width: 220)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .leading, spacing: 10) {
-                Text(settingsTab).font(NekoFont.display).foregroundStyle(N.text)
-                Text(tabDescription).font(NekoFont.body).foregroundStyle(N.text3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }.accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
+            NekoPageIntro(title: query.isEmpty ? settingsTab.title : "Results", message: query.isEmpty ? settingsTab.summary : "Choose a setting to jump to it.")
+                .accessibilityElement(children: .combine)
+            ScrollViewReader { proxy in
             Group {
+                if !query.isEmpty {
+                    ScrollView { SettingsSearchResults(query: query) { open($0) } }
+                } else {
                 switch settingsTab {
-                case "General":
+                case .general:
                 Form {
                     Section {
                         Picker("Appearance", selection: $appearance) {
                             ForEach(NekoAppearance.allCases) { option in
                                 Text(option.title).tag(option.rawValue)
                             }
-                        }.pickerStyle(.segmented)
+                        }.pickerStyle(.segmented).settingsTarget(.appearance)
                     } header: { Text("Appearance") } footer: {
                         Text("System follows your Mac’s light or dark appearance.")
                     }
                     Section("Quick access") {
                         HotkeySettingsView(model: model)
-                        preferenceToggle("Launch at login", "launch-at-login")
+                        preferenceToggle("Launch at login", "launch-at-login").settingsTarget(.launchAtLogin)
                         Toggle(isOn: Binding(get: { presence }, set: { presence = $0; PresenceController.enabled = $0; PresenceController.shared.refresh() })) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Show activity while Neko works")
@@ -214,6 +209,7 @@ struct PreferencesView: View {
                                     .font(NekoFont.meta).foregroundStyle(.secondary)
                             }
                         }
+                        .settingsTarget(.activityStatus)
                         .accessibilityLabel("Show activity while Neko works")
                         .accessibilityHint("A small status in the corner. Click it to return to Neko.")
                     }
@@ -225,13 +221,14 @@ struct PreferencesView: View {
                                     .font(NekoFont.meta).foregroundStyle(.secondary)
                             }
                         }
+                        .settingsTarget(.clipboardHistory)
                         .accessibilityLabel("Save clipboard history")
                         .accessibilityHint("Stored on this Mac. Turning it off stops capture and keeps existing history.")
                         .disabled(clipboard.enabled == nil)
                         if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
                     }
                 }.formStyle(.grouped)
-                case "AI":
+                case .ai:
 
                 Form {
                     Section("Agent runtime") {
@@ -242,6 +239,7 @@ struct PreferencesView: View {
                             if catalog.sources.isEmpty { Text("Codex").tag("codex") }
                             if agentProvider == "opencodex" { Text("Connected model (legacy)").tag("opencodex") }
                         }
+                        .settingsTarget(.runtime)
                         .onChange(of: agentProvider) { _, _ in check = nil; if model.snapshot["agent_runtime"]["provider"].string != agentProvider { agentModel = ""; customModel = "" } }
                         if catalog.sources.isEmpty {
                             HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Reading models from your runtimes…").foregroundStyle(.secondary) }
@@ -261,6 +259,7 @@ struct PreferencesView: View {
                                     Text(agentModel).tag(agentModel)
                                 }
                             }
+                            .settingsTarget(.model)
                             .onChange(of: agentModel) { _, _ in check = nil }
                             if let selected = catalog.model(agentProvider, agentModel) {
                                 if let reason = selected.reason ?? selected.description { Text(reason).font(NekoFont.meta).foregroundStyle(.secondary) }
@@ -276,7 +275,7 @@ struct PreferencesView: View {
                             Button("Use ID") { agentModel = customModel.trimmingCharacters(in: .whitespacesAndNewlines) }
                                 .disabled(!validModelID(customModel.trimmingCharacters(in: .whitespacesAndNewlines)))
                         }
-                        }
+                        }.settingsTarget(.customModel)
                         HStack {
                             Button(checking ? "Checking…" : "Check & use model") { checkAndUse() }
                                 .nekoButton(.primary)
@@ -303,16 +302,16 @@ struct PreferencesView: View {
                                 Spacer()
                                 Button("Save budget") { saveBudget() }.disabled(pending || budgetCents == .invalid)
                             }
-                        }
+                        }.settingsTarget(.budget)
                         if budgetCents == .invalid { Text("Enter an amount between 0.01 and 1000, or leave it empty.").font(NekoFont.meta).foregroundStyle(NekoStyle.amber) }
                         Text("Counts the cost Claude Code and OpenCode report for each ticket and stops the ticket when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.")
                             .font(NekoFont.meta).foregroundStyle(.secondary)
                     }
                 }.formStyle(.grouped)
-                case "Search":
+                case .search:
 
                 Form {
-                    Section("Included folders") {
+                    Section {
                         if folders.isEmpty {
                             Label("No folders added", systemImage: "folder")
                                 .foregroundStyle(.secondary).padding(.vertical, 8)
@@ -326,10 +325,10 @@ struct PreferencesView: View {
                                     .accessibilityLabel("Remove \(folder["title"].string) from search")
                             }.padding(.vertical, 4)
                         }
-                    }
+                    } header: { Text("Included folders").settingsTarget(.includedFolders) }
                     Section("Add a folder") {
                         TextField("Folder path", text: $path, prompt: Text("/Users/you/Documents"))
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.roundedBorder).settingsTarget(.addFolder)
                         HStack {
                             Button("Choose folder…") { choose() }
                             Spacer()
@@ -339,23 +338,23 @@ struct PreferencesView: View {
                         }
                     }
                 }.formStyle(.grouped)
-                case "Permissions":
+                case .permissions:
 
                 PermissionsView(model: model)
-                case "Diagnostics":
+                case .diagnostics:
 
                 DiagnosticsView(model: model)
-                case "Agents":
+                case .agents:
 
                 Form {
-                    Section("Legacy providers") {
+                    Section {
                     Text(agents.isEmpty ? "No agent provider is turned on." : "\(agents.count) agents visible from the configured provider.")
                     preferenceToggle("Show agents", "agents-enabled")
                     preferenceToggle("Include idle agents", "agents-include-idle")
                     Text("Legacy agent providers are opt-in. These settings do not enable a provider.").font(NekoFont.meta).foregroundStyle(.secondary)
-                    }
+                    } header: { Text("Legacy providers").settingsTarget(.legacyAgents) }
                 }.formStyle(.grouped)
-                case "About":
+                case .about:
 
                 VStack(spacing: 16) {
                     BrandMark(size: 72)
@@ -366,13 +365,21 @@ struct PreferencesView: View {
                     HStack {
                         Button(checkingUpdates ? "Checking…" : "Check for updates") { checkUpdates() }.disabled(checkingUpdates)
                         if case .behind = updateStatus { Button("Update now") { runUpdate() }.nekoButton(.primary) }
-                    }.padding(.top, 8)
+                    }.padding(.top, 8).settingsTarget(.updates)
                     if let updateStatus { Text(updateStatus.message).font(NekoFont.body).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                     if let updateNote { Text(updateNote).font(NekoFont.meta).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled) }
                 }.frame(maxWidth: .infinity).padding(.top, 28)
-                default: EmptyView()
+                }
                 }
             }
+            .onChange(of: highlighted) { _, target in
+                guard let target else { return }
+                // Let the tab's content mount before scrolling to it.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { withNekoAnimation(.reveal) { proxy.scrollTo(target, anchor: .center) } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { if highlighted == target { highlighted = nil } }
+            }
+            }
+            .environment(\.settingsHighlight, highlighted)
             .scrollContentBackground(.hidden)
             .contentMargins(.horizontal, 0, for: .scrollContent)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -383,11 +390,25 @@ struct PreferencesView: View {
         .frame(maxWidth: NekoLayout.pageWidth, maxHeight: .infinity)
         .padding(NekoLayout.pageInset)
         .navigationTitle("Settings")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Find a setting", systemImage: "magnifyingglass") { searchFocus += 1 }
+                    .keyboardShortcut("f", modifiers: .command).help("Find a setting (⌘F)")
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             await load()
             catalog = await AgentModelCatalog.load(model)
         }
+    }
+    /// Jump from a search result to its setting: switch tab, clear the
+    /// search, then scroll to and highlight the control.
+    private func open(_ target: SettingsTarget) {
+        settingsTab = target.tab
+        query = ""
+        highlighted = nil
+        DispatchQueue.main.async { highlighted = target }
     }
     private func preferenceToggle(_ title: String, _ id: String) -> some View {
         Toggle(title, isOn: Binding(get: { settings.first { $0["id"].string == id }?["accessory"].string == "On" }, set: { _ in activate("preference", id) }))

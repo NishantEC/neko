@@ -14,6 +14,8 @@ struct NekoSearchField: View {
     let title: String
     @Binding var text: String
     var size: ControlSize = .regular
+    /// Increment to move keyboard focus into the field (e.g. from ⌘F).
+    var focusRequest = 0
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -44,5 +46,6 @@ struct NekoSearchField: View {
         }
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture().onEnded { focused = true })
+        .onChange(of: focusRequest) { _, _ in focused = true }
     }
 }
