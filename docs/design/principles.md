@@ -30,7 +30,7 @@ token in `DesignSystem/Tokens.swift` or `DesignSystem/Motion.swift`:
 | --- | --- | --- |
 | Corner radius | `NekoRadius` | yes, no literals outside the design system |
 | Type | `NekoFont` | yes, no `.system(size:)` outside the design system |
-| Colour | `N` (surfaces, text, lines), `NekoStyle` (status) | yes, no hex or OKLCH literals outside the design system |
+| Colour | `N` (surfaces, text, lines), `NekoStyle` (status) | yes, no hex or OKLCH literals outside the design system (`Activity/` owns its glyph hues) |
 | Animation | `NekoMotion` | yes, no literal curves outside the design system |
 | Button role | `.nekoButton(_:)` | yes, no raw `.bordered`/`.borderedProminent`/`.borderless` |
 | Spacing | `NekoSpace`, `NekoLayout` | ratchet: the count of raw padding/spacing numbers may only fall |
@@ -93,6 +93,16 @@ offscreen render (`scripts/render-previews.sh`) checked against the result.
 Renders happen offscreen, so no window ever takes keyboard focus. A compile is
 not proof that a font, colour or material actually appeared.
 
+Two things an offscreen render cannot show, so do not read them as defects:
+prominent buttons and switches draw grey (the window is never active), and
+glass draws nothing (there is no desktop behind it). Check those in the app.
+
+## 10. One gate before main
+
+`scripts/check.sh` runs before every install and, in `--quick` form, before
+every commit that touches Rust or Swift. Nothing reaches `/Applications`
+untested.
+
 ## Component catalogue
 
 | Component | Use for |
@@ -103,7 +113,10 @@ not proof that a font, colour or material actually appeared.
 | `NekoSheet` | Every modal: header, scrolling body, footer actions, fixed width |
 | `NekoEmptyState` | Empty, no-matches and failed-to-load states, inline or as a block |
 | `NekoNotice` | The top-of-window notice and error toasts |
-| `NekoTag`, `KeyCap`, `NekoBadge` | Small labels, keyboard keys, counts |
+| `NekoToggleRow` | An on/off setting with its explanation |
+| `NekoDividedList`, `NekoItemFooter` | Items separated by dividers; an item's meta line and actions |
+| `NekoReadMore`, `NekoSavedText` | Saved text shown inert, folded when long |
+| `NekoBadge` | A count on a sidebar row or tab |
 | `StatusGlyph` | Ticket status ring |
 | `NekoIconTile` | A tinted symbol tile in onboarding and empty states |
 | `.nekoCard(...)` | An opaque raised surface |
