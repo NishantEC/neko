@@ -96,9 +96,15 @@ private final class SearchPanel: NSPanel {
     private var outsideMonitor: Any?
     private var localMonitor: Any?
     private var resignObserver: NSObjectProtocol?
+    /// Tokens for each show and hide, so late callbacks from an earlier one do nothing.
+    private var presentation = PaletteGeneration()
+    /// True from show until dismissal starts (the panel stays visible while it fades).
+    private var shown = false
 
     func configure(model: AppModel) async {
         self.model = model
+        // Build the panel now, off screen, so the first summon has nothing to construct.
+        preparePanel(model: model)
         NativeHotkeySettings.register = { [weak self] combo in
             guard let self else { throw DaemonClientError.disconnected }
             try self.register(combo: combo)
@@ -146,27 +152,33 @@ private final class SearchPanel: NSPanel {
         } else { throw NSError(domain: "Neko", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "The Neko shortcut is already in use. The previous shortcut is still active."]) }
     }
 
+    private func preparePanel(model: AppModel) {
+        guard panel == nil else { return }
+        let state = PaletteState(model: model)
+        content = state
+        let window = SearchPanel(contentRect: NSRect(x: 0, y: 0, width: 760, height: 500), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.isFloatingPanel = true
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.contentView = NSHostingView(rootView: PaletteView(state: state))
+        panel = window
+    }
+
     func toggle(model: AppModel) {
-        if panel?.isVisible == true { dismiss(); return }
+        if shown { dismiss(); return }
         self.model = model
         let frontmost = NSWorkspace.shared.frontmostApplication
         previousApplication = frontmost?.processIdentifier != ProcessInfo.processInfo.processIdentifier ? frontmost : nil
-        if panel == nil {
-            let state = PaletteState(model: model)
-            content = state
-            let window = SearchPanel(contentRect: NSRect(x: 0, y: 0, width: 760, height: 500), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            window.isFloatingPanel = true
-            window.level = .floating
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.hasShadow = true
-            window.isReleasedWhenClosed = false
-            window.delegate = self
-            window.contentView = NSHostingView(rootView: PaletteView(state: state))
-            panel = window
-        }
+        preparePanel(model: model)
         guard let panel else { return }
+        let token = presentation.advance()
+        shown = true
+        panel.alphaValue = 1
         let point = NSEvent.mouseLocation
         let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.main
         if let frame = screen?.visibleFrame {
@@ -177,10 +189,10 @@ private final class SearchPanel: NSPanel {
         NSApp.activate(ignoringOtherApps: true)
         content?.focusGeneration += 1
         resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: NSApp, queue: .main) { _ in
-            Task { @MainActor in PaletteController.shared.dismiss() }
+            Task { @MainActor in PaletteController.shared.dismiss(ifCurrent: token) }
         }
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
-            Task { @MainActor in PaletteController.shared.dismiss() }
+            Task { @MainActor in PaletteController.shared.dismiss(ifCurrent: token) }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { event in
             let consumed = MainActor.assumeIsolated {
@@ -207,8 +219,29 @@ private final class SearchPanel: NSPanel {
         }
     }
 
+    /// Dismiss only if nothing has been shown or hidden since `token`.
+    func dismiss(ifCurrent token: Int) { if presentation.isCurrent(token) { dismiss() } }
+
     func dismiss() {
-        panel?.orderOut(nil)
+        guard shown else { return }
+        shown = false
+        let token = presentation.advance()
+        if let panel {
+            // A short fade, or none under Reduce Motion. The panel is only
+            // ordered out if nothing newer has started in the meantime.
+            if NekoMotion.systemReducesMotion { panel.orderOut(nil) } else {
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 0.08
+                    panel.animator().alphaValue = 0
+                }, completionHandler: {
+                    Task { @MainActor in
+                        let controller = PaletteController.shared
+                        guard controller.presentation.isCurrent(token) else { return }
+                        panel.orderOut(nil); panel.alphaValue = 1
+                    }
+                })
+            }
+        }
         content?.cancelSearch()
         content?.revertThemePreview()
         if let outsideMonitor { NSEvent.removeMonitor(outsideMonitor); self.outsideMonitor = nil }
@@ -222,10 +255,11 @@ private final class SearchPanel: NSPanel {
     func windowDidResignKey(_ notification: Notification) {
         // AppKit changes key windows in stages. A sheet/menu transition may
         // briefly have no key window; application deactivation handles that case.
+        let token = presentation.generation
         Task { @MainActor [weak self] in
             await Task.yield()
-            guard let self, self.panel?.isVisible == true, let key = NSApp.keyWindow else { return }
-            if !self.owns(key) { self.dismiss() }
+            guard let self, self.shown, let key = NSApp.keyWindow else { return }
+            if !self.owns(key) { self.dismiss(ifCurrent: token) }
         }
     }
     func restoreAndPaste() async throws {
