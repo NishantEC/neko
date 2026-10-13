@@ -15,7 +15,7 @@ struct WatchRowDetails: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ManagementSavedText(text: item["instruction"].string)
+            NekoSavedText(text: item["instruction"].string)
             VStack(alignment: .leading, spacing: 12) {
                 LabeledContent("Status", value: item["enabled"].bool ? "Watching" : "Paused")
                 LabeledContent("Last checked", value: item["last_attempt_ms"] == .null ? "Not checked yet" : relativeTime(item["last_attempt_ms"].int))
@@ -31,7 +31,7 @@ struct WatchRowDetails: View {
             if !item["last_result"].string.isEmpty {
                 Divider()
                 Text("Last check result").font(NekoFont.heading)
-                ManagementSavedText(text: item["last_result"].string)
+                NekoSavedText(text: item["last_result"].string)
             }
             HStack {
                 Button("Check now") { submit(model, nested("Mcp", "Wake", ["responsibility_id": item["id"]])) }

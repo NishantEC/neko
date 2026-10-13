@@ -79,7 +79,6 @@ enum TicketThread {
 
 struct TicketThreadView: View {
     let ticket: JSONValue
-    @Environment(\.ink) private var ink
     var body: some View {
         VStack(alignment: .leading, spacing: NekoLayout.messageGap) {
             ForEach(Array(TicketThread.items(ticket).enumerated()), id: \.offset) { _, item in row(item) }
@@ -133,7 +132,7 @@ struct TicketThreadView: View {
             }
         case .status(let text):
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Rectangle().fill(ink.lineStrong).frame(height: 1).frame(maxWidth: 16)
+                Rectangle().fill(N.lineStrong).frame(height: 1).frame(maxWidth: 16)
                 Text(text).font(NekoFont.meta).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
         }

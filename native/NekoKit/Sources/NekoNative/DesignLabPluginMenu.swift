@@ -12,12 +12,12 @@ struct DesignLabPluginMenu: View {
             ForEach(DesignLabModel.Plugin.allCases) { plugin in
                 Toggle(isOn: Binding(get: { preview.plugins.contains(plugin) }, set: { _ in preview.toggle(plugin) })) {
                     Label(plugin.rawValue, systemImage: plugin.symbol)
-                        .font(.system(size: 14)).padding(.vertical, 4)
+                        .font(NekoFont.of(.callout)).padding(.vertical, 4)
                 }
             }
             Divider()
             Button("Explore sample plugins…") { close(); preview.showingLibrary = true }
-                .buttonStyle(.borderless)
+                .nekoButton(.quiet)
         }.padding(22).frame(width: 300)
     }
 }

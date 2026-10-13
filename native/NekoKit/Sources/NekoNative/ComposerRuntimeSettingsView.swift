@@ -15,7 +15,7 @@ struct ComposerRuntimeSettingsView: View {
                     Image(systemName: "chevron.right").font(.caption)
                 }.contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
+            .nekoButton(.quiet)
             .help("Neko decides chooses a compatible model while keeping your effort and speed pins.")
             if page == .speed {
                 ComposerRuntimeSpeedControl(selection: selection)
@@ -30,7 +30,7 @@ struct ComposerRuntimeSettingsView: View {
             Toggle("Allow automatic paid speed", isOn: $selection.draft.allowPaidSpeed)
                 .toggleStyle(.switch).controlSize(.small)
                 .help("Off by default. When speed is Auto, allow Neko to choose a tier that may use more allowance.")
-            Button("Reset to Neko decides", action: selection.reset).buttonStyle(.borderless)
+            Button("Reset to Neko decides", action: selection.reset).nekoButton(.quiet)
                 .help("Clear all manual pins and turn automatic paid speed off.")
             if let history {
                 ComposerRuntimeHistoryView(history: history, preferences: selection.saved, catalog: selection.catalog)

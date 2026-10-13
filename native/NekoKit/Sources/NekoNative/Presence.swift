@@ -169,7 +169,7 @@ private struct PresenceCapsule: View {
             }
             .buttonStyle(.plain)
             .background(AlwaysHover { inside in
-                withAnimation(reduceMotion ? nil : .snappy(duration: 0.28, extraBounce: 0.05)) { hovering = inside }
+                withNekoAnimation(.select) { hovering = inside }
             })
             .help(state.label)
             .accessibilityLabel(state.label)

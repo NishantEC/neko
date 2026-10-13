@@ -32,13 +32,13 @@ struct OnboardingView: View {
                 .frame(maxWidth: NekoLayout.readingWidth).padding(.vertical, 24).frame(maxWidth: .infinity)
             }
             HStack {
-                if step > 0 { Button("Back") { step -= 1 }.buttonStyle(.bordered) }
+                if step > 0 { Button("Back") { step -= 1 }.nekoButton(.secondary) }
                 Spacer()
                 Text("Step \(step + 1) of 3").font(NekoFont.meta).foregroundStyle(.secondary)
                 Spacer()
                 if step > 0 {
                     if step < 2 { Button("Skip") { finish() }.buttonStyle(.plain).foregroundStyle(N.text3) }
-                    Button(step == 2 ? "Open Neko" : "Continue") { if step == 2 { finish() } else { step += 1 } }.buttonStyle(.borderedProminent)
+                    Button(step == 2 ? "Open Neko" : "Continue") { if step == 2 { finish() } else { step += 1 } }.nekoButton(.primary)
                 } else { Color.clear.frame(width: 60, height: 1) }
             }
             .disabled(pending)
@@ -50,7 +50,7 @@ struct OnboardingView: View {
         .background(N.canvas)
         .hiddenWindowToolbarBackground()
         .navigationTitle("")
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: step)
+            .nekoAnimation(.reveal, value: step)
             .sheet(isPresented: $workspaceSheet) { WorkspaceEditor(model: model) }
             .sheet(isPresented: $registrySheet) { MCPRegistryBrowser(model: model) }
             .task {
@@ -64,7 +64,7 @@ struct OnboardingView: View {
     }
     private var welcomeStep: some View {
         VStack(spacing: NekoLayout.sectionGap) {
-            BrandMark(size: 76).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            BrandMark(size: 76).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
             VStack(spacing: 10) {
                 Text("A little more off your mind.").font(NekoFont.display).multilineTextAlignment(.center).foregroundStyle(N.text)
                     .accessibilityAddTraits(.isHeader)
@@ -72,7 +72,7 @@ struct OnboardingView: View {
                     .font(NekoFont.body).foregroundStyle(N.text3).multilineTextAlignment(.center).frame(maxWidth: 480)
             }
             Button("Get started", systemImage: "arrow.right") { step = 1 }
-                .buttonStyle(.borderedProminent).controlSize(.large).padding(.top, 8)
+                .nekoButton(.primary).controlSize(.large).padding(.top, 8)
         }
     }
     private var permissionsStep: some View {
@@ -81,7 +81,7 @@ struct OnboardingView: View {
                 Button(trusted ? "Enabled" : "Allow…") {
                     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
                     trusted = AXIsProcessTrustedWithOptions(options)
-                }.disabled(trusted).buttonStyle(.bordered)
+                }.disabled(trusted).nekoButton(.secondary)
             }
             Divider()
             settingRow(symbol: "doc.on.clipboard.fill", tint: Gem.emerald, title: "Clipboard history", detail: "Saved only on this Mac. Off by default.") {
@@ -141,7 +141,7 @@ struct OnboardingView: View {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint)
                     }.padding(.vertical, 12)
                 }
-                Button("Add another workspace…") { model.selectedWorkspace = nil; workspaceSheet = true }.buttonStyle(.bordered)
+                Button("Add another workspace…") { model.selectedWorkspace = nil; workspaceSheet = true }.nekoButton(.secondary)
             }
         }
         Button { registrySheet = true } label: {
@@ -175,9 +175,9 @@ struct OnboardingView: View {
         }.padding(.vertical, NekoLayout.rowInset)
     }
     private func setupIcon(_ symbol: String, tint: Color) -> some View {
-        Image(systemName: symbol).font(.system(size: 20, weight: .regular))
+        Image(systemName: symbol).font(NekoFont.of(.title, weight: .regular))
             .foregroundStyle(tint).frame(width: 40, height: 40)
-            .background(N.selected, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(N.selected, in: RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous))
             .accessibilityHidden(true)
     }
     private func finish() { pending = true; Task { await model.completeSetup(); pending = false } }

@@ -78,8 +78,7 @@ struct ToolsView: View {
     }
 
     var body: some View {
-        ManagementScroll {
-            PageIntro(title: "Tools & skills", message: "Connections provide access. Skills provide instructions.") {
+        NekoPage(title: "Tools & skills", message: "Connections provide access. Skills provide instructions.") {
                 if tab == 0 {
                     Menu("Add connection", systemImage: "plus") {
                         Button("Browse MCP servers", systemImage: "square.grid.2x2") { showRegistrySheet = true }
@@ -88,7 +87,7 @@ struct ToolsView: View {
                     }
                     .menuStyle(.button).controlSize(.regular).disabled(busy || model.busy)
                 }
-            }
+            } content: {
             HStack {
                 Picker("Tools section", selection: $tab) {
                     Text("Connections").tag(0)
@@ -101,7 +100,7 @@ struct ToolsView: View {
             operationFeedback
             if tab == 0 { connectionsBody }
             else if workspace.isEmpty {
-                EmptyRow(text: "Choose a workspace in the sidebar to see its skills.")
+                NekoEmptyState("Choose a workspace in the sidebar to see its skills.")
             } else { skillsBody.disabled(busy || model.busy) }
         }
         .font(NekoFont.body)
@@ -249,7 +248,7 @@ struct ToolsView: View {
                 HStack {
                     Button("Browse hosted MCP servers") { showManualSheet = false; showRegistrySheet = true }
                     Spacer()
-                    Button("Add connection", action: addServer).buttonStyle(.borderedProminent)
+                    Button("Add connection", action: addServer).nekoButton(.primary)
                         .disabled(busy || model.busy || label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || target.isEmpty || (local && !trust))
                 }
             }
@@ -288,7 +287,7 @@ struct ToolsView: View {
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: localProcess ? "terminal" : "link")
-                        .font(.system(size: 16, weight: .regular))
+                        .font(NekoFont.of(.body, weight: .regular))
                         .foregroundStyle(N.text3)
                         .frame(width: 24)
                     VStack(alignment: .leading, spacing: 3) {
@@ -306,7 +305,7 @@ struct ToolsView: View {
                         Text(localProcess ? "Local" : "Remote").font(NekoFont.meta).foregroundStyle(N.text4)
                     }
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .semibold)).foregroundStyle(N.text4)
+                        .font(NekoFont.of(.micro, weight: .semibold)).foregroundStyle(N.text4)
                 }
                 .padding(.vertical, NekoLayout.rowInset)
                 .contentShape(Rectangle())
@@ -357,7 +356,7 @@ struct ToolsView: View {
                     Text(status).foregroundStyle(status == "Needs attention" || status == "Sign in needed" ? NekoStyle.amber : N.text3)
                     if summary != status { Text(summary).foregroundStyle(N.text3).monospacedDigit() }
                 }.font(NekoFont.meta).fixedSize()
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(N.text3).accessibilityHidden(true)
+                Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold)).foregroundStyle(N.text3).accessibilityHidden(true)
             }
             .padding(.vertical, NekoLayout.rowInset)
             .contentShape(Rectangle())
@@ -556,7 +555,7 @@ struct ToolsView: View {
                 }
             }
             ForEach(SkillPresentation.unavailable(enabled: model.snapshot["skills"]["enabled"].array, available: model.snapshot["skills"]["available"].array, workspace: workspace), id: \.self) { record in
-                WorkspaceSection(name: "Unavailable enabled skill", color: NekoStyle.amber, grouped: true) { EmptyView() } content: {
+                NekoSection(title: "Unavailable enabled skill", marker: NekoStyle.amber, grouped: true) { EmptyView() } content: {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(record["path"].string).textSelection(.enabled)
                         Text("Runs stop until these instructions are restored or disabled.").foregroundStyle(.secondary)
@@ -582,7 +581,7 @@ struct ToolsView: View {
                     .font(NekoFont.heading)
             }
             .padding(NekoLayout.rowInset)
-            .background(N.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(N.card, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
             ForEach(model.snapshot["skills"]["proposals"].array.filter { $0["workspace_id"].string == workspace }, id: \.recordID) { proposal in
                 proposalCard(proposal)
             }
@@ -662,7 +661,7 @@ struct ToolsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                 }
                 .frame(height: 240)
-                .background(N.canvas, in: RoundedRectangle(cornerRadius: 10))
+                .background(N.canvas, in: RoundedRectangle(cornerRadius: NekoRadius.md))
                 .accessibilityLabel("Proposed skill instructions")
                 Text("Accept saves these exact instructions. Enable separately after installation.").font(NekoFont.meta).foregroundStyle(N.text3)
                 HStack {
@@ -677,7 +676,7 @@ struct ToolsView: View {
             }
         }
         .padding(NekoLayout.rowInset)
-        .background(N.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(N.card, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
     }
 
     private func decide(_ proposal: JSONValue, accept: Bool) {

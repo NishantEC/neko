@@ -14,7 +14,7 @@ struct DesignLabAgentMenu: View {
                     HStack(spacing: 12) {
                         DesignLabOrb(color: agent.color, size: 28)
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(agent.title).font(.system(size: 14, weight: .semibold))
+                            Text(agent.title).font(NekoFont.of(.callout, weight: .semibold))
                             Text("\(agent.role) · \(agent.status)").font(.caption).foregroundStyle(.secondary)
                             Text(agent.activity).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }

@@ -37,7 +37,7 @@ extension View {
     func replyGroup(padding: CGFloat = NekoLayout.rowInset) -> some View {
         self.padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
     }
 }
 
@@ -47,7 +47,6 @@ struct ChatUserMessage: View {
     let text: String
     var timestamp: Int = 0
     var queued = false
-    @Environment(\.ink) private var ink
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -61,7 +60,7 @@ struct ChatUserMessage: View {
                 .font(NekoFont.chat).lineSpacing(4)
                 .multilineTextAlignment(.leading)
                 .padding(NekoLayout.messageInset)
-                .background(ink.raised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .background(N.card, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
                 if queued { Label("Queued", systemImage: "clock").font(NekoFont.meta).foregroundStyle(.secondary) }
             }.frame(maxWidth: 640, alignment: .trailing)
         }.frame(maxWidth: .infinity, alignment: .trailing)
@@ -115,7 +114,7 @@ struct ReplyChart: View {
                     Text(bar.label).font(ReplyStyle.caption).foregroundStyle(.secondary)
                         .frame(width: 110, alignment: .trailing).lineLimit(1)
                     GeometryReader { geometry in
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        RoundedRectangle(cornerRadius: NekoRadius.micro, style: .continuous)
                             .fill(bar.highlight ? ReplyStyle.orange : NekoStyle.accent.opacity(0.85))
                             .frame(width: max(2, geometry.size.width * bar.value / peak))
                     }.frame(height: 12)
@@ -166,7 +165,7 @@ struct ReplyChoices: View {
                     sent = true
                     actions.send(options[selected]["label"].string)
                 }
-                .buttonStyle(.borderedProminent)
+                .nekoButton(.primary)
                 .keyboardShortcut(.defaultAction)
                 .disabled(selected == nil || sent)
             }.controlSize(.small)
@@ -199,7 +198,7 @@ struct ReplyForm: View {
             HStack {
                 Spacer()
                 Button(sent ? "Sent" : (value["submit"].string.isEmpty ? "Send" : value["submit"].string)) { submit() }
-                    .buttonStyle(.borderedProminent).disabled(sent)
+                    .nekoButton(.primary).disabled(sent)
             }.controlSize(.small)
         }
         .disabled(sent)
@@ -262,7 +261,7 @@ struct ReplyPlan: View {
                 Spacer()
                 Button("Change Plan…") { actions.draft("Change the plan: ") }.disabled(sent)
                 Button(sent ? "Sent" : "Go Ahead") { sent = true; actions.send("Go ahead with this plan.") }
-                    .buttonStyle(.borderedProminent).disabled(sent)
+                    .nekoButton(.primary).disabled(sent)
             }.controlSize(.small)
         }
     }
@@ -295,10 +294,10 @@ struct ReplyFiles: View {
                         }
                         Spacer(minLength: 8)
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)]) }
-                            .buttonStyle(.borderless).font(ReplyStyle.caption).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) : .secondary)
+                            .nekoButton(.quiet).font(ReplyStyle.caption).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) : .secondary)
                     }
                     .padding(.horizontal, 10).padding(.vertical, 12)
-                    .background(selected ? Color(nsColor: .selectedContentBackgroundColor) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(selected ? Color(nsColor: .selectedContentBackgroundColor) : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous))
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) { NSWorkspace.shared.open(URL(fileURLWithPath: file.path)) }
                     .onTapGesture { selection = file.path }
@@ -365,7 +364,7 @@ struct NativeTableBlock: View {
                     let csv = ([headers] + rows).map { $0.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: ",") }.joined(separator: "\n")
                     NSPasteboard.general.clearContents()
                     copied = NSPasteboard.general.setString(csv, forType: .string)
-                }.buttonStyle(.borderless).font(ReplyStyle.caption)
+                }.nekoButton(.quiet).font(ReplyStyle.caption)
             }
             ScrollView(.horizontal) {
             VStack(spacing: 0) {
@@ -376,7 +375,7 @@ struct NativeTableBlock: View {
                         } label: {
                             HStack(spacing: 3) {
                                 Text(header).font(NekoFont.heading).foregroundStyle(.secondary)
-                                if sortColumn == index { Image(systemName: ascending ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary) }
+                                if sortColumn == index { Image(systemName: ascending ? "chevron.up" : "chevron.down").font(NekoFont.of(.micro, weight: .bold)).foregroundStyle(.secondary) }
                             }.padding(.horizontal, 6).frame(width: columnWidth, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                             .accessibilityLabel("Sort by \(header)")
@@ -399,8 +398,8 @@ struct NativeTableBlock: View {
                 }
             }
             }
-            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
             .textSelection(.enabled)
         }
         .background(GeometryReader { geometry in
@@ -451,7 +450,7 @@ struct NativeDiffBlock: View {
                 Button(copied ? "Copied" : "Copy full diff") {
                     NSPasteboard.general.clearContents()
                     copied = NSPasteboard.general.setString(code, forType: .string)
-                }.buttonStyle(.borderless).font(ReplyStyle.caption)
+                }.nekoButton(.quiet).font(ReplyStyle.caption)
             }.padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 12)
             ForEach(Array(all.enumerated()), id: \.offset) { index, file in
                 if index > 0 { Divider().opacity(0.6) }
@@ -459,7 +458,7 @@ struct NativeDiffBlock: View {
                     if expanded.contains(index) { expanded.remove(index) } else { expanded.insert(index) }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: expanded.contains(index) ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).frame(width: 10)
+                        Image(systemName: expanded.contains(index) ? "chevron.down" : "chevron.right").font(NekoFont.of(.micro, weight: .semibold)).foregroundStyle(.secondary).frame(width: 10)
                         Text((file.name as NSString).lastPathComponent).font(ReplyStyle.small)
                         Text((file.name as NSString).deletingLastPathComponent).font(ReplyStyle.caption).foregroundStyle(.tertiary).lineLimit(1)
                         Spacer()
@@ -486,14 +485,14 @@ struct NativeDiffBlock: View {
                             Text("Showing \(shown) of \(file.lines.count) lines").foregroundStyle(.secondary)
                             Spacer()
                             Button("Show next \(min(400, file.lines.count - shown)) lines") { lineLimits[index] = shown + 400 }
-                                .buttonStyle(.borderless)
+                                .nekoButton(.quiet)
                         }.font(ReplyStyle.caption).padding(NekoLayout.rowInset)
                     }
                 }
             }
         }
-        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
     }
 }
 
@@ -520,7 +519,7 @@ struct NativeTerminalBlock: View {
                 Button(copied ? "Copied" : "Copy") {
                     NSPasteboard.general.clearContents()
                     copied = NSPasteboard.general.setString(code, forType: .string)
-                }.buttonStyle(.borderless).font(ReplyStyle.caption)
+                }.nekoButton(.quiet).font(ReplyStyle.caption)
             }.padding(.horizontal, NekoLayout.rowInset).frame(minHeight: 44)
             Divider().opacity(0.6)
             ScrollView(.horizontal) {
@@ -535,13 +534,13 @@ struct NativeTerminalBlock: View {
                     Text("Showing \(lineLimit) of \(output.count) lines").foregroundStyle(.secondary)
                     Spacer()
                     Button("Show next \(min(300, output.count - lineLimit)) lines") { lineLimit += 300 }
-                        .buttonStyle(.borderless)
+                        .nekoButton(.quiet)
                 }.font(ReplyStyle.caption).padding(NekoLayout.rowInset)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
     }
     private func color(_ line: String) -> Color {
         let text = line.trimmingCharacters(in: .whitespaces)
@@ -573,12 +572,12 @@ struct ReplySteps: View {
         if !items.isEmpty {
             let failed = items.filter { ["failed", "denied"].contains($0.status) }.count
             VStack(alignment: .leading, spacing: 6) {
-                Button { withAnimation(.snappy(duration: 0.2)) { expanded.toggle() } } label: {
+                Button { withNekoAnimation(.select) { expanded.toggle() } } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                        Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold))
                             .rotationEffect(.degrees(expanded ? 90 : 0)).frame(width: 10)
                         Text([workedFor, "\(items.count) \(items.count == 1 ? "step" : "steps")", failed > 0 ? "\(failed) failed" : nil].compactMap { $0 }.joined(separator: " · "))
-                            .font(.system(size: 12, weight: .medium))
+                            .font(NekoFont.of(.caption, weight: .medium))
                     }.foregroundStyle(failed > 0 ? ReplyStyle.orange : .secondary).contentShape(Rectangle())
                 }.buttonStyle(.plain)
                 if expanded {
@@ -586,7 +585,7 @@ struct ReplySteps: View {
                         ForEach(items) { row in
                             HStack(spacing: 8) {
                                 Image(systemName: symbol(row.status)).symbolRenderingMode(.hierarchical)
-                                    .foregroundStyle(color(row.status)).font(.system(size: 12)).frame(width: 14)
+                                    .foregroundStyle(color(row.status)).font(NekoFont.caption).frame(width: 14)
                                 Text(verb(row.status)).font(ReplyStyle.small).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
                                 Text(row.tool).font(ReplyStyle.small).lineLimit(1)
                                 if !row.detail.isEmpty { Text("· " + row.detail).font(ReplyStyle.small).foregroundStyle(.tertiary).lineLimit(1) }
@@ -614,16 +613,16 @@ struct ReplyErrorCallout: View {
     let retry: (() -> Void)?
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "exclamationmark.circle").foregroundStyle(ReplyStyle.red).font(.system(size: 18))
+            Image(systemName: "exclamationmark.circle").foregroundStyle(ReplyStyle.red).font(NekoFont.of(.subtitle))
             VStack(alignment: .leading, spacing: 10) {
                 Text("This reply didn’t finish").font(NekoFont.heading)
                 if !message.isEmpty { Text(message).font(ReplyStyle.small).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                if let retry { Button("Try Again", action: retry).buttonStyle(.borderedProminent).controlSize(.small) }
+                if let retry { Button("Try Again", action: retry).nekoButton(.primary).controlSize(.small) }
             }
             Spacer(minLength: 0)
         }
         .padding(NekoLayout.rowInset)
-        .background(ReplyStyle.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(ReplyStyle.red.opacity(0.08), in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
     }
 }
 
@@ -631,7 +630,7 @@ struct ReplyMemoryNote: View {
     let text: String
     var body: some View {
         Label { Text("Remembered: \(text)").font(ReplyStyle.small).foregroundStyle(.secondary) } icon: {
-            Image(systemName: "brain").font(.system(size: 11)).foregroundStyle(NekoStyle.accent)
+            Image(systemName: "brain").font(NekoFont.of(.small)).foregroundStyle(NekoStyle.accent)
         }
     }
 }
@@ -642,7 +641,6 @@ struct ReplyTicketRow: View {
     let workspace: String
     let open: () -> Void
     @State private var hover = false
-    @Environment(\.ink) private var ink
     var body: some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 12) {
@@ -652,11 +650,11 @@ struct ReplyTicketRow: View {
                     Text([workspace, friendlyTaskStatus(status)].filter { !$0.isEmpty }.joined(separator: " · ")).font(ReplyStyle.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold)).foregroundStyle(.tertiary)
             }
             .multilineTextAlignment(.leading)
             .padding(.horizontal, 12).padding(.vertical, 16)
-            .background(hover ? ink.raisedHover : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(hover ? N.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
             .overlay(alignment: .top) { Hairline() }
             .contentShape(Rectangle())
         }

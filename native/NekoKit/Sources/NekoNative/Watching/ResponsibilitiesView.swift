@@ -28,12 +28,11 @@ struct ResponsibilitiesView: View {
     }
 
     var body: some View {
-        ManagementScroll {
-            PageIntro(title: "Watching", message: "Keep up with the sources that matter. Neko checks every 10 minutes while it’s running and brings relevant work to Home.") {
+        NekoPage(title: "Watching", message: "Keep up with the sources that matter. Neko checks every 10 minutes while it’s running and brings relevant work to Home.") {
                 Button("New watch", systemImage: "plus") {
                     draft = ManagementDraft(value: .object([:]), workspace: workspaceID)
                 }.disabled(model.workspaces.isEmpty || model.busy)
-            }
+            } content: {
             if let error = model.error {
                 DisclosureGroup {
                     Text(error).font(NekoFont.meta).textSelection(.enabled)
@@ -42,7 +41,7 @@ struct ResponsibilitiesView: View {
                 }.foregroundStyle(NekoStyle.amber)
             }
             if model.workspaces.isEmpty {
-                EmptyRow(text: model.connected ? "Add a workspace to create a watch." : "Waiting for your workspaces…")
+                NekoEmptyState(model.connected ? "Add a workspace to create a watch." : "Waiting for your workspaces…")
             } else {
                 watchingSection
                 if !paused.isEmpty {
@@ -121,8 +120,8 @@ struct ResponsibilitiesView: View {
             TextField("What should Neko keep an eye on?", text: $ask, axis: .vertical)
                 .textFieldStyle(.plain).font(NekoFont.body).lineLimit(3...6).onSubmit { send(ask) }
                 .padding(NekoLayout.rowInset)
-                .background(N.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(N.line))
+                .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous).strokeBorder(N.line))
                 .accessibilityLabel("What should Neko keep an eye on?")
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) { workspacePicker; Spacer(minLength: 8); askActions(tools) }
@@ -151,7 +150,7 @@ struct ResponsibilitiesView: View {
             if sending { ProgressView().controlSize(.small).accessibilityLabel("Asking Neko") }
             Button("Suggest from tools", systemImage: "sparkles") { send(Watching.suggestPrompt) }
                 .disabled(sending || model.busy || tools.isEmpty)
-            Button("Ask Neko") { send(ask) }.buttonStyle(.borderedProminent)
+            Button("Ask Neko") { send(ask) }.nekoButton(.primary)
                 .disabled(sending || model.busy || ask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .keyboardShortcut(.return, modifiers: .command)
         }.controlSize(.regular).fixedSize()

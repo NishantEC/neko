@@ -22,7 +22,7 @@ struct NekoSearchField: View {
                 .foregroundStyle(.secondary).accessibilityHidden(true)
             TextField(title, text: $text)
                 .textFieldStyle(.plain)
-                .font(.system(size: size == .small ? 12 : 13))
+                .font(NekoFont.scaled(size == .small ? 12 : 13))
                 .controlSize(size)
                 .focused($focused)
                 .accessibilityLabel(title)
@@ -35,9 +35,9 @@ struct NekoSearchField: View {
         }
         .padding(.horizontal, 10)
         .frame(height: NekoControlMetrics.height(for: size))
-        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: NekoRadius.md))
         .overlay {
-            RoundedRectangle(cornerRadius: 8).strokeBorder(
+            RoundedRectangle(cornerRadius: NekoRadius.md).strokeBorder(
                 focused ? Color.accentColor : Color.primary.opacity(0.12),
                 lineWidth: focused ? 2 : 1
             ).allowsHitTesting(false)

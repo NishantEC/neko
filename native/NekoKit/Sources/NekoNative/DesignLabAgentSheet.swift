@@ -16,7 +16,7 @@ struct DesignLabAgentSheet: View {
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             Divider()
-            Text(agent.activity).font(.system(size: 18)).lineSpacing(5)
+            Text(agent.activity).font(NekoFont.of(.subtitle)).lineSpacing(5)
             Text("This is the agent detail interaction in the native design study. The working app’s agents are unchanged.")
                 .font(.body).foregroundStyle(.secondary)
         }.padding(30).frame(width: 460)

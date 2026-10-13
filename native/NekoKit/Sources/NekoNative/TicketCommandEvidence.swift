@@ -60,7 +60,6 @@ struct TicketCommandReceiptView: View {
     let receipt: TicketCommandReceipt
     var role: String? = nil
     @State private var copied = false
-    @Environment(\.ink) private var ink
 
     var body: some View {
         DisclosureGroup {
@@ -83,14 +82,14 @@ struct TicketCommandReceiptView: View {
                             Text(output).font(NekoFont.mono).textSelection(.enabled)
                                 .fixedSize(horizontal: true, vertical: false).padding(10)
                         }.frame(maxHeight: 220)
-                            .background(ink.raised, in: RoundedRectangle(cornerRadius: 8))
+                            .background(N.card, in: RoundedRectangle(cornerRadius: NekoRadius.md))
                     }
                 }
                 HStack {
                     Button(copied ? "Copied" : "Copy saved record", systemImage: copied ? "checkmark" : "doc.on.doc") {
                         NSPasteboard.general.clearContents()
                         copied = NSPasteboard.general.setString(receipt.rawRecord, forType: .string)
-                    }.buttonStyle(.borderless).controlSize(.small).font(NekoFont.meta)
+                    }.nekoButton(.quiet).controlSize(.small).font(NekoFont.meta)
                         .help("Copy only the record retained by Neko, including its truncation flags")
                     Spacer()
                 }
@@ -120,7 +119,6 @@ struct TicketCommandReceiptView: View {
 /// attempts and is not a complete journal of the current review.
 struct TicketCommandEvidenceView: View {
     let events: [JSONValue]
-    @Environment(\.ink) private var ink
     var body: some View {
         let records = events.compactMap { event -> (role: String, receipt: TicketCommandReceipt)? in
             guard let receipt = TicketCommandReceipt.from(event: event) else { return nil }
@@ -150,7 +148,7 @@ struct TicketCommandEvidenceView: View {
                 }
             }
             .padding(.vertical, 10)
-            .overlay(alignment: .top) { ink.line.frame(height: 1) }
+            .overlay(alignment: .top) { N.line.frame(height: 1) }
         }
     }
 }

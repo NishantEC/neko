@@ -15,7 +15,7 @@ struct SuggestedResponsibilityCard: View {
         VStack(alignment: .leading, spacing: 18) {
             DisclosureGroup(isExpanded: $expanded) {
                 VStack(alignment: .leading, spacing: 14) {
-                    ManagementSavedText(text: item["instruction"].string)
+                    NekoSavedText(text: item["instruction"].string)
                     Text("Sources: \(tools.isEmpty ? "None selected" : tools.joined(separator: ", "))")
                     Text(!model.snapshot["plan_first"].bool ? "Tickets start working right away; reviewed results are delivered." : item["prepare_low_risk"].bool ? "May prepare low-risk fixes; reviewed results are delivered." : "Local work waits for approval.")
                     if !missing.isEmpty {
