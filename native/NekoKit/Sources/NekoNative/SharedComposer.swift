@@ -113,7 +113,7 @@ struct SharedComposer<Controls: View>: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: NekoSpace.lg) {
             if !attachments.isEmpty { ComposerAttachmentStrip(attachments: attachments, remove: onRemove) }
             ComposerView(
                 text: $text,
@@ -127,7 +127,7 @@ struct SharedComposer<Controls: View>: View {
             if let validationError {
                 Text(validationError).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).fixedSize(horizontal: false, vertical: true)
             }
-            HStack(alignment: .bottom, spacing: 12) {
+            HStack(alignment: .bottom, spacing: NekoSpace.md) {
                 Button("Attach files", systemImage: "paperclip", action: onChooseAttachments)
                     .labelStyle(.iconOnly).font(NekoFont.body)
                     .frame(width: 32, height: 32).contentShape(Rectangle())
@@ -136,7 +136,7 @@ struct SharedComposer<Controls: View>: View {
                     .accessibilityLabel("Attach images or files")
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { controls() }
-                    VStack(alignment: .leading, spacing: 6) { controls() }
+                    VStack(alignment: .leading, spacing: NekoSpace.xs) { controls() }
                 }.layoutPriority(1)
                 Spacer(minLength: 4)
                 ViewThatFits(in: .horizontal) {
@@ -162,7 +162,7 @@ struct ComposerAttachmentStrip: View {
     let remove: (ComposerAttachment) -> Void
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 8) {
+            HStack(spacing: NekoSpace.sm) {
                 ForEach(attachments) { attachment in
                     ComposerAttachmentChip(name: attachment.name, isImage: attachment.isImage) { remove(attachment) }
                 }
@@ -171,25 +171,12 @@ struct ComposerAttachmentStrip: View {
     }
 }
 
-/// One native sampling surface behind the editor. Accessibility changes replace
-/// the background only, preserving the live NSTextView and its selection.
+/// One native sampling surface behind the editor: the shared glass surface.
+/// Accessibility changes replace the background only, preserving the live
+/// NSTextView and its selection.
 struct ComposerSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var opaque
-    @Environment(\.colorSchemeContrast) private var contrast
-
     func body(content: Content) -> some View {
-        content.background {
-            let shape = RoundedRectangle(cornerRadius: NekoRadius.hero)
-            if opaque || contrast == .increased {
-                shape.fill(N.card)
-                    .overlay(shape.strokeBorder(N.lineStrong, lineWidth: contrast == .increased ? 2 : 1))
-            } else if #available(macOS 26, *) {
-                Color.clear.glassEffect(.regular, in: .rect(cornerRadius: NekoRadius.hero))
-            } else {
-                shape.fill(.regularMaterial)
-                    .overlay(shape.strokeBorder(N.line))
-            }
-        }
+        content.modifier(NekoGlassSurface(shape: RoundedRectangle(cornerRadius: NekoRadius.hero)))
     }
 }
 
@@ -227,7 +214,7 @@ struct ComposerAttachmentChip: View {
         HStack(spacing: 10) {
             Image(systemName: isImage ? "photo" : "doc")
                 .font(NekoFont.of(.subtitle)).foregroundStyle(N.text3).frame(width: 24)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: NekoSpace.hair) {
                 Text(name).font(NekoFont.meta.weight(.medium)).foregroundStyle(.primary)
                     .lineLimit(1).truncationMode(.middle)
                 Text(detail ?? (isImage ? "Image" : "File"))
@@ -280,7 +267,7 @@ struct ChatAuthorLine: View {
     let author: String
     var timestamp: Int = 0
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: NekoSpace.sm) {
             Text(author).font(NekoFont.heading).foregroundStyle(.primary)
             if timestamp > 0 {
                 let date = Date(timeIntervalSince1970: Double(timestamp) / 1000)

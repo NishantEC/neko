@@ -41,7 +41,7 @@ struct DecisionCard: View {
             Text(DecisionPresentation.title(record["action"].string))
                 .font(NekoFont.heading).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
             if let observed = record["observed_outcome"].string.nonEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: NekoSpace.xxs) {
                     Text("Observed outcome").font(NekoFont.meta).foregroundStyle(N.text3)
                     NekoReadMore(text: observed, disclosure: "Full observed outcome")
                 }
@@ -52,13 +52,13 @@ struct DecisionCard: View {
                 Label("Accepted locally", systemImage: "checkmark.circle").font(NekoFont.meta).foregroundStyle(NekoStyle.mint)
             }
             if let text = record["correction"]["text"].string.nonEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: NekoSpace.xxs) {
                     Text("Your correction").font(NekoFont.heading)
                     NekoReadMore(text: text, disclosure: "Full correction")
                 }
             }
             DisclosureGroup("Reasoning, expectations & scope") {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: NekoSpace.md) {
                     if !record["rationale"].string.isEmpty {
                         Text("Reasoning").font(NekoFont.heading)
                         NekoSavedText(text: record["rationale"].string)
@@ -81,15 +81,15 @@ struct DecisionCard: View {
                         }
                     }
                     ForEach(record["source"]["declared_evidence"].array, id: \.self) { note in
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: NekoSpace.xxs) {
                             Text("Evidence note").font(NekoFont.heading)
                             NekoSavedText(text: note.string)
                         }
                     }
                     Text("Scope is recorded at the time of the decision. Current permissions govern every action.").font(NekoFont.meta).foregroundStyle(N.text3)
-                }.font(NekoFont.body).textSelection(.enabled).padding(.top, 8)
+                }.font(NekoFont.body).textSelection(.enabled).padding(.top, NekoSpace.sm)
             }.font(NekoFont.meta)
-            HStack(spacing: 8) {
+            HStack(spacing: NekoSpace.sm) {
                 Button("Correct this decision") { correcting = true }
                 if let taskID = record["task_id"].string.nonEmpty, model.agentID != taskID {
                     Button("Open agent") { model.openAgent(taskID, from: originPage) }
@@ -100,12 +100,11 @@ struct DecisionCard: View {
         .background(N.card, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
         .accessibilityElement(children: .contain)
         .sheet(isPresented: $correcting) {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Correct this decision").font(NekoFont.title).accessibilityAddTraits(.isHeader)
+            NekoSheet(title: "Correct this decision", error: model.error, onCancel: { correcting = false }) {
                 Form {
                     Section {
                         TextEditor(text: $correction).font(NekoFont.body)
-                            .scrollContentBackground(.hidden).padding(12).frame(height: 160)
+                            .scrollContentBackground(.hidden).padding(NekoSpace.md).frame(height: 160)
                             .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.md))
                             .overlay(RoundedRectangle(cornerRadius: NekoRadius.md).strokeBorder(N.line))
                             .accessibilityLabel("What should Neko do differently?")
@@ -113,17 +112,13 @@ struct DecisionCard: View {
                         Text("The original observation stays in history. This correction applies to this decision; broader guidance needs your confirmation in Working style.")
                     }
                 }.formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 310)
-                if let error = model.error { Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.coral).textSelection(.enabled) }
-                HStack {
-                    Button("Cancel") { correcting = false }.keyboardShortcut(.cancelAction)
-                    Spacer()
-                    Button("Save correction") {
-                        Task {
-                            if await model.workbench(nested("DecisionContext", "CorrectDecision", ["workspace_id": record["workspace_id"], "record_id": record["id"], "expected_version": record["version"], "correction": .string(correction)])) { correcting = false; correction = "" }
-                        }
-                    }.nekoButton(.primary).keyboardShortcut(.defaultAction).disabled(correction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy)
+            } actions: {
+                NekoPrimaryAction(title: "Save correction", disabled: correction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy) {
+                    Task {
+                        if await model.workbench(nested("DecisionContext", "CorrectDecision", ["workspace_id": record["workspace_id"], "record_id": record["id"], "expected_version": record["version"], "correction": .string(correction)])) { correcting = false; correction = "" }
+                    }
                 }
-            }.font(NekoFont.body).controlSize(.regular).padding(NekoLayout.pageInset).frame(width: 620).background(N.canvas)
+            }
         }
     }
 }
@@ -156,10 +151,7 @@ struct WorkingStyleView: View {
                 let items = preferences.filter { $0["state"].string == state }
                 if !items.isEmpty {
                     NekoSection(title: state == "proposed" ? "Needs your confirmation" : "Confirmed guidance", marker: state == "proposed" ? NekoStyle.amber : N.text4, detail: "\(items.count)") { EmptyView() } content: {
-                        ForEach(items, id: \.recordID) { item in
-                            preferenceRow(item)
-                            if item != items.last { Divider() }
-                        }
+                        NekoDividedList(items, id: \.recordID) { preferenceRow($0) }
                     }
                 }
             }
@@ -167,10 +159,7 @@ struct WorkingStyleView: View {
             if !dismissed.isEmpty {
                 DisclosureGroup("Dismissed guidance · \(dismissed.count)") {
                     VStack(alignment: .leading, spacing: 18) {
-                        ForEach(dismissed, id: \.recordID) { item in
-                            preferenceRow(item)
-                            if item != dismissed.last { Divider() }
-                        }
+                        NekoDividedList(dismissed, id: \.recordID) { preferenceRow($0) }
                     }.padding(.top, 10)
                 }.font(NekoFont.heading)
             }
@@ -197,19 +186,19 @@ struct WorkingStyleView: View {
                 .font(NekoFont.meta).foregroundStyle(N.text3)
             if !item["supporting_record_ids"].array.isEmpty {
                 DisclosureGroup("Supporting decisions · \(item["supporting_record_ids"].array.count)") {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: NekoSpace.md) {
                         ForEach(item["supporting_record_ids"].array, id: \.self) { reference in
                             if let record = model.snapshot["decision_records"].array.first(where: { $0["id"] == reference }) {
-                                VStack(alignment: .leading, spacing: 8) {
+                                VStack(alignment: .leading, spacing: NekoSpace.sm) {
                                     NekoSavedText(text: record["correction"]["text"].string.isEmpty ? record["rationale"].string : record["correction"]["text"].string)
                                     if !record["task_id"].string.isEmpty { Button("Open agent") { model.openAgent(record["task_id"].string, from: "Memory") } }
                                 }
                             } else { Text("This decision is outside the retained history.").foregroundStyle(N.text3) }
                         }
-                    }.font(NekoFont.body).padding(.top, 8)
+                    }.font(NekoFont.body).padding(.top, NekoSpace.sm)
                 }.font(NekoFont.meta)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: NekoSpace.sm) {
                 if item["state"].string != "confirmed" { Button("Keep guidance") { submit(model, DecisionPresentation.preferenceCommand("KeepPreference", item)) } }
                 Button("Edit") { editor = ManagementDraft(value: item) }
                 if item["state"].string != "dismissed" { Button("Dismiss") { submit(model, DecisionPresentation.preferenceCommand("DismissPreference", item)) } }
@@ -218,7 +207,7 @@ struct WorkingStyleView: View {
                     Button("Forget guidance", role: .destructive) { submit(model, DecisionPresentation.preferenceCommand("ForgetPreference", item)) }
                 }.labelStyle(.iconOnly).fixedSize()
             }.controlSize(.regular).disabled(model.busy)
-        }.font(NekoFont.body).padding(.vertical, 12)
+        }.font(NekoFont.body)
     }
 }
 
@@ -237,13 +226,8 @@ struct WorkingPreferenceEditor: View {
     }
     private func phrases(_ text: String) -> JSONValue { .array(text.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespacesAndNewlines)) }.filter { !$0.string.isEmpty }) }
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(original.recordID.isEmpty ? "Add working guidance" : "Edit working guidance")
-                    .font(NekoFont.title).accessibilityAddTraits(.isHeader)
-                Text("Describe a recurring situation and how you want Neko to approach it.")
-                    .font(NekoFont.body).foregroundStyle(N.text3)
-            }
+        NekoSheet(title: original.recordID.isEmpty ? "Add working guidance" : "Edit working guidance",
+                  message: "Describe a recurring situation and how you want Neko to approach it.", error: model.error) {
             Form {
                 Section("Guidance") {
                     TextField("Instruction", text: $instruction, axis: .vertical).lineLimit(3...6)
@@ -257,17 +241,14 @@ struct WorkingPreferenceEditor: View {
             }.formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 330)
             Text("Saved guidance returns to Suggested until you keep it. It does not grant new permissions.")
                 .font(NekoFont.meta).foregroundStyle(N.text3)
-            if let error = model.error { Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.coral).textSelection(.enabled) }
-            HStack {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer()
-                Button("Save suggestion") {
-                    Task {
-                        let workspace = original["workspace_id"].string.nonEmpty ?? model.selectedWorkspace ?? ""
-                        if await model.workbench(nested("DecisionContext", "SavePreference", ["workspace_id": .string(workspace), "id": .string(original.recordID), "expected_version": original["version"], "applicability": .object(["terms": phrases(terms), "task_ids": original["applicability"]["task_ids"] == .null ? .array([]) : original["applicability"]["task_ids"]]), "instruction": .string(instruction), "supporting_record_ids": original["supporting_record_ids"] == .null ? .array([]) : original["supporting_record_ids"], "exceptions": phrases(exceptions)])) { dismiss() }
-                    }
-                }.nekoButton(.primary).keyboardShortcut(.defaultAction).disabled(instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (phrases(terms).array.isEmpty && original["applicability"]["task_ids"].array.isEmpty) || model.busy)
+        } actions: {
+            NekoPrimaryAction(title: "Save suggestion", disabled: instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (phrases(terms).array.isEmpty && original["applicability"]["task_ids"].array.isEmpty) || model.busy) {
+                Task {
+                    let workspace = original["workspace_id"].string.nonEmpty ?? model.selectedWorkspace ?? ""
+                    if await model.workbench(nested("DecisionContext", "SavePreference", ["workspace_id": .string(workspace), "id": .string(original.recordID), "expected_version": original["version"], "applicability": .object(["terms": phrases(terms), "task_ids": original["applicability"]["task_ids"] == .null ? .array([]) : original["applicability"]["task_ids"]]), "instruction": .string(instruction), "supporting_record_ids": original["supporting_record_ids"] == .null ? .array([]) : original["supporting_record_ids"], "exceptions": phrases(exceptions)])) { dismiss() }
+                }
             }
-        }.font(NekoFont.body).controlSize(.regular).textFieldStyle(.roundedBorder).padding(NekoLayout.pageInset).frame(width: 620).background(N.canvas)
+        }.textFieldStyle(.roundedBorder)
     }
 }
 

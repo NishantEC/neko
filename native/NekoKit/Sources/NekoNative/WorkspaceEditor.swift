@@ -10,20 +10,15 @@ struct WorkspaceEditor: View {
     @State private var original: JSONValue = .null
     @State private var saving = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(original == .null ? "Create workspace" : "Workspace settings")
-                    .font(NekoFont.title).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
-                Text("Give this work a name, a home, and its own instructions.")
-                    .font(NekoFont.body).foregroundStyle(N.text3)
-            }
+        NekoSheet(title: original == .null ? "Create workspace" : "Workspace settings",
+                  message: "Give this work a name, a home, and its own instructions.", error: model.error) {
             Form {
                 Section("Workspace") {
                     TextField("Name", text: $name).textFieldStyle(.roundedBorder)
                 }
                 Section {
                     if folders.isEmpty {
-                        NekoEmptyState("Choose at least one folder where this work lives.")
+                        NekoEmptyState("Choose at least one folder where this work lives.", reason: .nothingYet)
                     }
                     ForEach(folders, id: \.self) { path in
                         HStack(alignment: .top, spacing: 10) {
@@ -35,7 +30,7 @@ struct WorkspaceEditor: View {
                             Button("Remove folder", systemImage: "minus.circle") { folders.removeAll { $0 == path } }
                                 .labelStyle(.iconOnly).nekoButton(.quiet)
                                 .accessibilityLabel("Remove \(path)").help("Remove \(path)")
-                        }.padding(.vertical, 6)
+                        }.padding(.vertical, NekoSpace.xs)
                     }
                     Button("Add folders…", systemImage: "folder.badge.plus") { chooseFolders() }
                 } header: { Text("Source folders") } footer: {
@@ -49,24 +44,16 @@ struct WorkspaceEditor: View {
                 } header: { Text("Instructions · optional") }
             }
             .formStyle(.grouped).scrollContentBackground(.hidden).frame(height: 420)
-            if let error = model.error {
-                Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.coral).textSelection(.enabled)
+        } actions: {
+            NekoPrimaryAction(title: saving ? "Saving…" : "Save workspace",
+                              disabled: saving || name.trimmingCharacters(in: .whitespaces).isEmpty || folders.isEmpty) { Task { await save() } }
+        }.onAppear {
+            if let selected = model.selectedWorkspace, let workspace = model.workspaces.first(where: { $0.recordID == selected }) {
+                original = workspace; name = workspace["name"].string; instructions = workspace["instructions"].string
+                folders = model.snapshot["workspace_folders"][selected].array.map(\.string)
+                if folders.isEmpty { folders = [workspace["repository"].string] }
             }
-            HStack {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Spacer()
-                Button(saving ? "Saving…" : "Save workspace") { Task { await save() } }
-                    .nekoButton(.primary).keyboardShortcut(.defaultAction)
-                    .disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || folders.isEmpty)
-            }
-        }.font(NekoFont.body).controlSize(.regular).padding(NekoLayout.pageInset).frame(width: 620).background(N.canvas)
-            .onAppear {
-                if let selected = model.selectedWorkspace, let workspace = model.workspaces.first(where: { $0.recordID == selected }) {
-                    original = workspace; name = workspace["name"].string; instructions = workspace["instructions"].string
-                    folders = model.snapshot["workspace_folders"][selected].array.map(\.string)
-                    if folders.isEmpty { folders = [workspace["repository"].string] }
-                }
-            }
+        }
     }
     private func chooseFolders() {
         FolderPicker.choose(multiple: true, prompt: "Add folders") { selected in

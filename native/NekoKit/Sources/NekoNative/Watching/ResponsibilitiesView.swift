@@ -57,7 +57,7 @@ struct ResponsibilitiesView: View {
                                     draft = ManagementDraft(value: item, workspace: item["workspace_id"].string)
                                 }
                             }
-                        }.padding(.top, 16)
+                        }.padding(.top, NekoSpace.lg)
                     } label: {
                         sectionTitle("Suggestions", detail: "\(suggested.count) to review")
                     }
@@ -74,14 +74,10 @@ struct ResponsibilitiesView: View {
     }
 
     private var watchingSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: NekoSpace.lg) {
             sectionTitle("Active watches", detail: "\(active.count)")
             if active.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("No active watches").font(NekoFont.heading).foregroundStyle(N.text2)
-                    Text(paused.isEmpty ? "Describe a watch below, or review a suggestion." : "Resume a paused watch or describe a new one below.")
-                        .font(NekoFont.body).foregroundStyle(N.text3)
-                }.padding(.vertical, NekoLayout.rowInset)
+                NekoEmptyState("No active watches. " + (paused.isEmpty ? "Describe a watch below, or review a suggestion." : "Resume a paused watch or describe a new one below."))
             } else { watchRows(active) }
         }
     }
@@ -97,7 +93,7 @@ struct ResponsibilitiesView: View {
     }
 
     private func sectionTitle(_ title: String, detail: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: NekoSpace.sm) {
             Text(title).font(NekoFont.heading).foregroundStyle(N.text)
             Text(detail).font(NekoFont.meta).foregroundStyle(N.text3).monospacedDigit()
         }.accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
@@ -124,13 +120,13 @@ struct ResponsibilitiesView: View {
                 .overlay(RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous).strokeBorder(N.line))
                 .accessibilityLabel("What should Neko keep an eye on?")
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { workspacePicker; Spacer(minLength: 8); askActions(tools) }
+                HStack(spacing: NekoSpace.md) { workspacePicker; Spacer(minLength: 8); askActions(tools) }
                 VStack(alignment: .leading, spacing: 10) { workspacePicker; askActions(tools) }
             }
             Text(tools.isEmpty ? "Connect a source in Tools & skills to start." : "\(tools.count) connected \(tools.count == 1 ? "source" : "sources") available. Review access before turning on a suggestion.")
                 .font(NekoFont.meta).foregroundStyle(N.text3)
         }
-        .padding(.top, 8)
+        .padding(.top, NekoSpace.sm)
         .accessibilityElement(children: .contain)
     }
 
@@ -146,7 +142,7 @@ struct ResponsibilitiesView: View {
     }
 
     private func askActions(_ tools: [JSONValue]) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: NekoSpace.sm) {
             if sending { ProgressView().controlSize(.small).accessibilityLabel("Asking Neko") }
             Button("Suggest from tools", systemImage: "sparkles") { send(Watching.suggestPrompt) }
                 .disabled(sending || model.busy || tools.isEmpty)
@@ -157,7 +153,7 @@ struct ResponsibilitiesView: View {
     }
 
     private func replyView(_ message: JSONValue) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: NekoSpace.lg) {
             HStack {
                 Text(message["pending"].bool ? "Looking through your tools…" : "Neko’s reply").font(NekoFont.heading)
                 Spacer()
@@ -171,7 +167,7 @@ struct ResponsibilitiesView: View {
             } else {
                 if !showReply { Text(message["text"].string).font(NekoFont.body).foregroundStyle(N.text2).lineLimit(3) }
                 DisclosureGroup("Full reply", isExpanded: $showReply) {
-                    ReadableText(text: message["text"].string).padding(.top, 8)
+                    ReadableText(text: message["text"].string).padding(.top, NekoSpace.sm)
                 }.font(NekoFont.meta)
             }
         }

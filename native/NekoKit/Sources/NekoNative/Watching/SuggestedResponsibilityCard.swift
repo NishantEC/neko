@@ -23,12 +23,12 @@ struct SuggestedResponsibilityCard: View {
                     }
                 }.font(NekoFont.meta).foregroundStyle(N.text3).padding(.top, 14)
             } label: {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: NekoSpace.sm) {
                     Text(verbatim: item["instruction"].string).font(NekoFont.heading).foregroundStyle(N.text).lineLimit(3)
                     Text(missing.isEmpty ? "Ready to review" : "Connection access needed").font(NekoFont.meta).foregroundStyle(missing.isEmpty ? N.text3 : NekoStyle.amber)
                 }
             }
-            HStack(spacing: 8) {
+            HStack(spacing: NekoSpace.sm) {
                 if live {
                     Label("Watching", systemImage: "checkmark").font(NekoFont.meta).foregroundStyle(N.text2)
                 } else {

@@ -456,7 +456,7 @@ private struct PaletteView: View {
             }.padding(12)
         }.frame(width: 760, height: 500).foregroundStyle(state.theme.text)
             .background(state.theme.surface.opacity(state.theme.alpha))
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: NekoRadius.xl)).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl))
+            .liquidGlass(radius: NekoRadius.xl).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
             .preferredColorScheme(state.theme.light ? .light : .dark)
             .onAppear { searchFocused = true }
             .onChange(of: state.focusGeneration) { _, _ in searchFocused = true }
@@ -472,7 +472,7 @@ private struct PaletteView: View {
                             }
                             Divider()
                             Button("Close actions") { state.showActions = false }.keyboardShortcut(.escape, modifiers: [])
-                        }.padding(12).frame(width: 210).background(.regularMaterial, in: RoundedRectangle(cornerRadius: NekoRadius.lg)).shadow(radius: 12).padding(.trailing, 12).padding(.bottom, 50)
+                        }.padding(NekoSpace.md).frame(width: 210).liquidGlass(radius: NekoRadius.lg).shadow(radius: 12).padding(.trailing, NekoSpace.md).padding(.bottom, 50)
                     }
                 }
             }

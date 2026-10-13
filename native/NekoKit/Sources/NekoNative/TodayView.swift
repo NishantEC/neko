@@ -104,7 +104,7 @@ struct TodayView: View {
     var body: some View {
         GeometryReader { outer in
         VStack(spacing: 0) {
-        FullDiskAccessBanner().padding(.bottom, 4)
+        FullDiskAccessBanner().padding(.bottom, NekoSpace.xxs)
         HStack(spacing: 0) {
             ZStack(alignment: .bottom) {
                 GeometryReader { viewport in
@@ -123,7 +123,7 @@ struct TodayView: View {
                             }
                             Color.clear.frame(height: ChatComposerClearance.bottomSpace(for: composerHeight)).id("bottom")
                         }.frame(maxWidth: NekoLayout.readingWidth, alignment: .leading)
-                            .padding(.horizontal, NekoLayout.pageInset).padding(.top, NekoLayout.sectionGap).padding(.bottom, 16)
+                            .padding(.horizontal, NekoLayout.pageInset).padding(.top, NekoLayout.sectionGap).padding(.bottom, NekoSpace.lg)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .background(GeometryReader { geometry in
                                 Color.clear.preference(key: ChatScrollMetricsKey.self, value: ChatScrollMetrics(contentHeight: geometry.size.height, originY: geometry.frame(in: .named("chatTranscript")).minY, viewportHeight: viewport.size.height))
@@ -206,9 +206,9 @@ struct TodayView: View {
     private func composer(availableWidth: CGFloat) -> some View {
         let width = min(NekoLayout.readingWidth, max(280, availableWidth - NekoLayout.pageInset * 2))
         let targetScope = scope
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: NekoSpace.sm) {
             if let notice = toolAccessNotice {
-                HStack(spacing: 8) {
+                HStack(spacing: NekoSpace.sm) {
                     Image(systemName: "wrench.and.screwdriver").foregroundStyle(ReplyStyle.orange)
                     Text(notice).font(NekoFont.caption).foregroundStyle(.secondary)
                     Spacer()
@@ -216,7 +216,7 @@ struct TodayView: View {
                         if model.selectedWorkspace == nil, model.workspaces.count == 1 { model.selectedWorkspace = model.workspaces[0].recordID }
                         NotificationCenter.default.post(name: .nekoNavigate, object: "Tools & skills")
                     }.controlSize(.small)
-                }.padding(.horizontal, 12).padding(.vertical, 7)
+                }.padding(.horizontal, NekoSpace.md).padding(.vertical, 7)
                     .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.md))
             }
             let items = menuItems
@@ -248,7 +248,7 @@ struct TodayView: View {
             }.id(targetScope)
         }
         .frame(width: width)
-        .padding(.bottom, 14).padding(.top, 16)
+        .padding(.bottom, 14).padding(.top, NekoSpace.lg)
         .frame(maxWidth: .infinity, alignment: .center)
         .background(alignment: .bottom) {
             LinearGradient(colors: [N.canvas.opacity(0), N.canvas.opacity(0.92)], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.45))
@@ -309,7 +309,7 @@ struct TodayView: View {
                     HStack(spacing: 10) {
                         ProgressView().controlSize(.small)
                         Text(now.label).font(NekoFont.meta).foregroundStyle(.secondary)
-                    }.padding(.vertical, 4)
+                    }.padding(.vertical, NekoSpace.xxs)
                 }
                 let receipts = model.snapshot["mcp"]["receipts"].array.filter { $0["run_id"].string == "chat:\(message.recordID)" }
                 let activity = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: receipts)
@@ -375,15 +375,15 @@ struct TodayView: View {
     private func approvalCard(symbol: String, title: String, detail: String,
                               secondary: (String, KeyboardShortcut?, () -> Void),
                               primary: (String, KeyboardShortcut?, () -> Void)) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: NekoSpace.md) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: symbol).font(NekoFont.body).foregroundStyle(ReplyStyle.orange).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: NekoSpace.xxs) {
                     Text(title).font(NekoFont.heading).fixedSize(horizontal: false, vertical: true)
                     if !detail.isEmpty { Text(detail).font(NekoFont.meta).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                 }
             }
-            HStack(spacing: 8) {
+            HStack(spacing: NekoSpace.sm) {
                 Spacer(minLength: 0)
                 Button(secondary.0, action: secondary.2).keyboardShortcut(secondary.1)
                 Button(primary.0, action: primary.2).nekoButton(.primary).keyboardShortcut(primary.1)
@@ -478,7 +478,7 @@ struct TodayView: View {
                         Spacer(minLength: 8)
                         if !item.shortcut.isEmpty { Text(item.shortcut).font(NekoFont.meta).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor).opacity(0.8) : .secondary) }
                     }
-                    .padding(.horizontal, 12).frame(minHeight: 34)
+                    .padding(.horizontal, NekoSpace.md).frame(minHeight: 34)
                     .background(selected ? Color(nsColor: .selectedContentBackgroundColor) : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous))
                     .contentShape(Rectangle())
                 }
@@ -486,9 +486,8 @@ struct TodayView: View {
                 .onHover { if $0 { menuIndex = index } }
             }
         }
-        .padding(8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous).strokeBorder(N.line))
+        .padding(NekoSpace.sm)
+        .liquidGlass(radius: NekoRadius.xl)
         .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
     }
     private func handleMenuKey(_ key: ComposerMenuKey) -> Bool {
@@ -593,10 +592,10 @@ struct TodayView: View {
         let h = Calendar.current.component(.hour, from: Date())
         let part = h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
         let waiting = model.tasks.filter { ["AwaitingApproval", "ReadyForReview", "Failed"].contains($0["status"].string) }.count
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: NekoSpace.sm) {
             if look == .mascot {
                 BrandMark(size: 84).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-                    .shadow(color: NekoStyle.accent.opacity(0.35), radius: 24, y: 10).padding(.bottom, 12)
+                    .shadow(color: NekoStyle.accent.opacity(0.35), radius: 24, y: 10).padding(.bottom, NekoSpace.md)
             }
             Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(NekoFont.caption).foregroundStyle(N.text4)
             Text("\(part).").font(NekoFont.scaled(look == .mascot ? 34 : look == .dense ? 20 : 26, weight: .semibold)).tracking(-0.5).foregroundStyle(N.text)
@@ -619,13 +618,13 @@ struct TodayView: View {
             Text(model.workspaces.isEmpty ? "Add a workspace to give Neko somewhere to start." : "Ask about your work, or let Neko watch for changes. You'll review anything it wants to do.")
                 .font(NekoFont.body).lineSpacing(4).foregroundStyle(N.text3)
                 .fixedSize(horizontal: false, vertical: true)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: NekoSpace.sm) {
                 Label("\(workSummary.needsYou.count) needs you", systemImage: "hand.raised")
                 Label("\(workSummary.working.count) in progress", systemImage: "circle.dotted")
                 Label("\(watched.count) watching", systemImage: "eye")
             }
             .font(NekoFont.meta).foregroundStyle(N.text3)
-            .padding(.vertical, 4)
+            .padding(.vertical, NekoSpace.xxs)
             Button(watched.isEmpty ? "Start watching" : "Check now") {
                 if watched.isEmpty {
                     if model.workspaces.isEmpty { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
@@ -641,7 +640,7 @@ struct TodayView: View {
     private var howNekoWorks: some View {
         let watching = model.snapshot["mcp"]["responsibilities"].array.contains { $0["enabled"].bool }
         return VStack(alignment: .leading, spacing: 0) {
-            Text("How Neko works").font(NekoFont.heading).foregroundStyle(N.text2).padding(.bottom, 12).accessibilityAddTraits(.isHeader)
+            Text("How Neko works").font(NekoFont.heading).foregroundStyle(N.text2).padding(.bottom, NekoSpace.md).accessibilityAddTraits(.isHeader)
             LoopStep(number: 1, title: "Watch", detail: "Add a folder you work in, then the sources to keep an eye on: Linear, Sentry, GitHub, Slack.", done: !model.workspaces.isEmpty && watching,
                      action: model.workspaces.isEmpty ? "Add a workspace" : "Choose what to watch") {
                 if model.workspaces.isEmpty { addingWorkspace = true } else { NotificationCenter.default.post(name: .nekoNavigate, object: "Responsibilities") }
@@ -657,7 +656,7 @@ struct TodayView: View {
     @ViewBuilder private var brief: some View {
         let recent = Array((workSummary.needsYou + workSummary.working).prefix(5))
         VStack(alignment: .leading, spacing: 0) {
-            Text(recent.isEmpty ? "Try asking" : "While you were away").font(NekoFont.heading).foregroundStyle(N.text2).padding(.bottom, 12).accessibilityAddTraits(.isHeader)
+            Text(recent.isEmpty ? "Try asking" : "While you were away").font(NekoFont.heading).foregroundStyle(N.text2).padding(.bottom, NekoSpace.md).accessibilityAddTraits(.isHeader)
             if recent.isEmpty {
                 BriefRow(dot: N.text4, title: "Plan my next step", meta: "Decide the next small, useful move · read only", action: "Ask") { draft = "Help me decide the next small, useful step in this workspace. Read only and explain your reasoning." }
                 BriefRow(dot: N.text4, title: "Review a change", meta: "Risks and missing tests · no edits", action: "Ask") { draft = "Review the current changes in this workspace. Do not modify files; explain risks and missing tests." }
@@ -671,7 +670,7 @@ struct TodayView: View {
         }
     }
     private func toolActivity(_ activity: ChatToolActivitySummary, turn: String, pending: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: NekoSpace.sm) {
             if activity.showsReceiptsSeparately || activity.calls.contains(where: { $0["status"].string != "awaiting_approval" }) {
                 DisclosureGroup {
                 VStack(alignment: .leading, spacing: 0) {
@@ -693,7 +692,7 @@ struct TodayView: View {
                             toolCall(call, turn: turn, pending: pending)
                         }
                     }
-                }.padding(.top, 8)
+                }.padding(.top, NekoSpace.sm)
             } label: {
                 Label(activity.title, systemImage: activity.failed > 0 ? "exclamationmark.circle" : pending ? "circle.dotted" : "checkmark.circle")
                     .font(NekoFont.meta)
@@ -707,7 +706,7 @@ struct TodayView: View {
                 toolCall(call, turn: turn, pending: pending)
             }
         }
-        .padding(.top, 4)
+        .padding(.top, NekoSpace.xxs)
     }
     private var awaitingApprovals: Int {
         messages.filter { $0["pending"].bool }.flatMap { $0["tool_calls"].array }.filter { $0["status"].string == "awaiting_approval" }.count
@@ -716,8 +715,8 @@ struct TodayView: View {
         func decide(_ approve: Bool) { Task { await model.workbench(.command("DecideChatTool", ["turn_id": .string(turn), "call_id": call["id"], "approve": .bool(approve)])) } }
         let status = call["status"].string
         let connection = model.snapshot["mcp"]["connections"].array.first { $0.recordID == call["connection_id"].string }?["label"].string ?? "Removed connection"
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        return VStack(alignment: .leading, spacing: NekoSpace.xs) {
+            HStack(spacing: NekoSpace.sm) {
                 Image(systemName: status == "failed" || status == "denied" ? "exclamationmark.circle" : status == "awaiting_approval" ? "hand.raised" : "checkmark")
                     .foregroundStyle(status == "failed" || status == "denied" || status == "awaiting_approval" ? NekoStyle.amber : N.text4)
                     .frame(width: 14)
@@ -824,7 +823,7 @@ struct SuggestionRow: View {
                 Text(detail).font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 Image(systemName: "arrow.right").font(NekoFont.of(.small)).foregroundStyle(.tertiary).offset(x: hover ? 2 : 0).opacity(hover ? 1 : 0)
-            }.padding(.horizontal, 10).padding(.vertical, 8)
+            }.padding(.horizontal, 10).padding(.vertical, NekoSpace.sm)
             .background(hover ? N.card : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.sm, style: .continuous))
             .contentShape(Rectangle())
         }.buttonStyle(.plain).onHover { h in withNekoAnimation(.hover) { hover = h } }
@@ -842,12 +841,12 @@ struct BriefRow: View {
     @State private var hover = false
     var body: some View {
         Button(action: perform) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: NekoSpace.md) {
                 Group {
                     if let status { StatusGlyph(status: status, size: 14) }
                     else { Image(systemName: "arrow.up.right").font(NekoFont.meta).foregroundStyle(dot) }
                 }.frame(width: 16, height: 20).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: NekoSpace.xs) {
                     Text(title).font(NekoFont.body).foregroundStyle(N.text).lineLimit(2)
                     Text(meta).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2)
                 }
@@ -855,12 +854,12 @@ struct BriefRow: View {
                 .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 12)
                 Text(action).font(NekoFont.meta).foregroundStyle(hover ? N.text : N.text2)
-                    .padding(.horizontal, 6).frame(height: 26)
+                    .padding(.horizontal, NekoSpace.xs).frame(height: 26)
                     .fixedSize()
             }
-            .padding(.vertical, NekoLayout.rowInset).padding(.horizontal, 8)
+            .padding(.vertical, NekoLayout.rowInset).padding(.horizontal, NekoSpace.sm)
             .background(hover ? N.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
-            .overlay(alignment: .top) { N.line.frame(height: 1).padding(.horizontal, 8) }
+            .overlay(alignment: .top) { N.line.frame(height: 1).padding(.horizontal, NekoSpace.sm) }
             .padding(.horizontal, -8)
             .contentShape(Rectangle())
         }.buttonStyle(.plain).onHover { h in withNekoAnimation(.hover) { hover = h } }
@@ -877,13 +876,13 @@ struct RailRow: View {
         Button(action: open) {
             HStack(spacing: 10) {
                 StatusGlyph(status: status, size: 14)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: NekoSpace.hair) {
                     Text(title).font(NekoFont.meta).foregroundStyle(N.text).lineLimit(1)
                     Text(meta).font(NekoFont.caption).foregroundStyle(N.text3).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 20).frame(height: 52)
+            .padding(.horizontal, NekoSpace.xl).frame(height: 52)
             .background(hover ? N.selected : .clear)
             .overlay(alignment: .bottom) { N.line.frame(height: 1) }
             .contentShape(Rectangle())
@@ -907,12 +906,12 @@ struct LoopStep: View {
                 if done { Image(systemName: "checkmark").font(NekoFont.of(.micro, weight: .bold)).foregroundStyle(NekoStyle.mint) }
                 else { Text("\(number)").font(NekoFont.of(.small, weight: .semibold).monospacedDigit()).foregroundStyle(N.text3) }
             }.frame(width: 22, height: 22).padding(.top, 1)
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: NekoSpace.xs) {
                 Text(title).font(NekoFont.heading).foregroundStyle(N.text)
                 Text(detail).font(NekoFont.body).lineSpacing(3).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 16)
-            Button(action, action: perform).nekoButton(.secondary).controlSize(.small).padding(.top, 2)
+            Button(action, action: perform).nekoButton(.secondary).controlSize(.small).padding(.top, NekoSpace.hair)
         }
         .padding(.vertical, NekoLayout.rowInset)
         .overlay(alignment: .top) { N.line.frame(height: 1) }
