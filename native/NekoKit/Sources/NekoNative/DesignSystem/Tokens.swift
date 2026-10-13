@@ -51,15 +51,6 @@ enum PearlTint {
     static let aqua = Color(red: 0.78, green: 0.93, blue: 0.94)
 }
 
-/// Jewel tints used by onboarding's setting tiles.
-enum Gem {
-    static let ruby = Color.oklch(0.58, 0.19, 18)
-    static let amethyst = Color.oklch(0.55, 0.17, 300)
-    static let sapphire = Color.oklch(0.55, 0.16, 262)
-    static let emerald = Color.oklch(0.62, 0.14, 160)
-    static let topaz = Color.oklch(0.74, 0.14, 70)
-}
-
 // MARK: - Type
 
 /// Text steps. Pick the role (`body`, `meta`, `heading`) where one fits; use

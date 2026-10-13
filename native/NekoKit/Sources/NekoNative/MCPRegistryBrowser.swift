@@ -61,12 +61,7 @@ struct MCPRegistryBrowser: View {
     private var visibleResults: [RegistryServer] { results.filter { $0.url != RegistryCatalog.sentry.url } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack {
-                Text("Browse MCP servers").font(NekoFont.title)
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
+        NekoSheet(title: "Browse MCP servers", width: .wide, height: 660, cancelTitle: "Done") {
             HStack(spacing: 14) {
                 NekoSearchField(title: "Search the public registry", text: $query)
                 Picker("Available in", selection: $scope) {
@@ -81,7 +76,7 @@ struct MCPRegistryBrowser: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Featured").font(NekoFont.heading).foregroundStyle(N.text3).padding(.bottom, 8)
+                    Text("Featured").font(NekoFont.heading).foregroundStyle(N.text3).padding(.bottom, NekoSpace.sm)
                     serverRow(RegistryCatalog.sentry, subtitle: "Official Sentry server")
                     if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         HStack {
@@ -90,12 +85,17 @@ struct MCPRegistryBrowser: View {
                             if loading { ProgressView().controlSize(.small).accessibilityLabel("Searching registry") }
                             else { Text("\(visibleResults.count)").font(NekoFont.meta).monospacedDigit() }
                         }
-                        .foregroundStyle(N.text3).padding(.top, 20).padding(.bottom, 8)
+                        .foregroundStyle(N.text3).padding(.top, NekoSpace.xl).padding(.bottom, NekoSpace.sm)
                         if loading {
-                            Text("Searching hosted servers…").font(NekoFont.meta).foregroundStyle(N.text3).padding(.vertical, 12)
+                            Text("Searching hosted servers…").font(NekoFont.meta).foregroundStyle(N.text3).padding(.vertical, NekoSpace.md)
                         } else if visibleResults.isEmpty, searchError == nil {
-                            Text(results.isEmpty ? "No hosted servers found. Try another name, or add a URL manually from Tools & skills." : "Sentry is shown in Featured above.")
-                                .font(NekoFont.body).foregroundStyle(N.text3).padding(.vertical, 12)
+                            if results.isEmpty {
+                                NekoEmptyState("No hosted servers found. Try another name, or add a URL manually from Tools & skills.", reason: .noMatches(query))
+                                    .padding(.vertical, NekoSpace.sm)
+                            } else {
+                                Text("Sentry is shown in Featured above.")
+                                    .font(NekoFont.body).foregroundStyle(N.text3).padding(.vertical, NekoSpace.md)
+                            }
                         }
                         ForEach(visibleResults) { server in serverRow(server, subtitle: "Community listing · verify publisher") }
                     }
@@ -104,8 +104,6 @@ struct MCPRegistryBrowser: View {
             Divider()
             connectionReview
         }
-        .font(NekoFont.body).controlSize(.regular)
-        .padding(NekoLayout.pageInset).frame(width: 720, height: 660)
         .onAppear { scope = model.selectedWorkspace ?? "" }
         .onChange(of: scope) { _, _ in addedID = nil }
         .task(id: query) { await searchRegistry() }
@@ -129,7 +127,7 @@ struct MCPRegistryBrowser: View {
                         Text(connection["error"].string).font(NekoFont.meta).textSelection(.enabled)
                     }.foregroundStyle(NekoStyle.amber)
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: NekoSpace.sm) {
                     Button("Sign in") { Task { await run("Authenticate", id: addedID) } }
                     Button("Refresh tools") { Task { await run("Discover", id: addedID) } }
                     if connecting { ProgressView().controlSize(.small) }
@@ -141,13 +139,13 @@ struct MCPRegistryBrowser: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(selected.name).font(NekoFont.heading).lineLimit(2)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: NekoSpace.sm) {
                         Text(selected.url.absoluteString).font(NekoFont.mono).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         Text("Connect only a provider you trust. Its tools may read or change data in the selected workspace. Read-only work sources can start a watch; manage these in Watching.")
                             .font(NekoFont.meta).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(height: 88)
-                HStack(spacing: 8) {
+                HStack(spacing: NekoSpace.sm) {
                     Text(scope.isEmpty ? "All workspaces" : (model.workspaces.first { $0.recordID == scope }?["name"].string ?? "Workspace"))
                         .font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1)
                     Spacer()
@@ -168,9 +166,9 @@ struct MCPRegistryBrowser: View {
             addedID = nil
             error = nil
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: NekoSpace.md) {
                 Image(systemName: "network").font(NekoFont.body).foregroundStyle(N.text3).frame(width: 18).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: NekoSpace.xs) {
                     Text(server.shortName).font(NekoFont.heading).foregroundStyle(N.text).lineLimit(1)
                     Text(subtitle).font(NekoFont.meta).foregroundStyle(N.text3)
                     if !server.description.isEmpty { Text(server.description).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1) }

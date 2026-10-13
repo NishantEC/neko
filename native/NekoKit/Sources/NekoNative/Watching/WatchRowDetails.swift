@@ -14,9 +14,9 @@ struct WatchRowDetails: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: NekoSpace.lg) {
             NekoSavedText(text: item["instruction"].string)
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: NekoSpace.md) {
                 LabeledContent("Status", value: item["enabled"].bool ? "Watching" : "Paused")
                 LabeledContent("Last checked", value: item["last_attempt_ms"] == .null ? "Not checked yet" : relativeTime(item["last_attempt_ms"].int))
                 if item["failures"].int > 0 {
@@ -39,6 +39,6 @@ struct WatchRowDetails: View {
                 Button("Edit watch", action: onEdit).disabled(model.busy)
             }.controlSize(.regular)
         }
-        .font(NekoFont.body).foregroundStyle(N.text2).padding(.leading, 24)
+        .font(NekoFont.body).foregroundStyle(N.text2).padding(.leading, NekoSpace.xxl)
     }
 }

@@ -26,10 +26,10 @@ struct OnboardingView: View {
                     .id(step)
                     if let error = model.error {
                         Text(error).font(NekoFont.body).foregroundStyle(NekoStyle.coral)
-                            .textSelection(.enabled).padding(.top, 12)
+                            .textSelection(.enabled).padding(.top, NekoSpace.md)
                     }
                 }
-                .frame(maxWidth: NekoLayout.readingWidth).padding(.vertical, 24).frame(maxWidth: .infinity)
+                .frame(maxWidth: NekoLayout.readingWidth).padding(.vertical, NekoSpace.xxl).frame(maxWidth: .infinity)
             }
             HStack {
                 if step > 0 { Button("Back") { step -= 1 }.nekoButton(.secondary) }
@@ -72,19 +72,19 @@ struct OnboardingView: View {
                     .font(NekoFont.body).foregroundStyle(N.text3).multilineTextAlignment(.center).frame(maxWidth: 480)
             }
             Button("Get started", systemImage: "arrow.right") { step = 1 }
-                .nekoButton(.primary).controlSize(.large).padding(.top, 8)
+                .nekoButton(.primary).controlSize(.large).padding(.top, NekoSpace.sm)
         }
     }
     private var permissionsStep: some View {
         stepCard(title: "Let Neko work on your Mac", subtitle: "Each of these is optional. You can change them later in Settings.") {
-            settingRow(symbol: "hand.point.up.left.fill", tint: Gem.sapphire, title: "Accessibility", detail: "Lets Neko paste for you. macOS asks you to confirm.") {
+            settingRow(symbol: "hand.point.up.left.fill", title: "Accessibility", detail: "Lets Neko paste for you. macOS asks you to confirm.") {
                 Button(trusted ? "Enabled" : "Allow…") {
                     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
                     trusted = AXIsProcessTrustedWithOptions(options)
                 }.disabled(trusted).nekoButton(.secondary)
             }
             Divider()
-            settingRow(symbol: "doc.on.clipboard.fill", tint: Gem.emerald, title: "Clipboard history", detail: "Saved only on this Mac. Off by default.") {
+            settingRow(symbol: "doc.on.clipboard.fill", title: "Clipboard history", detail: "Saved only on this Mac. Off by default.") {
                 Toggle("Clipboard history", isOn: Binding(get: { clipboard ?? false }, set: { value in
         pending = true
         Task {
@@ -99,7 +99,7 @@ struct OnboardingView: View {
                 .toggleStyle(.switch).labelsHidden()
             }
             Divider()
-            settingRow(symbol: "keyboard.fill", tint: Gem.amethyst, title: "Quick panel shortcut", detail: "Summon Neko from anywhere.") {
+            settingRow(symbol: "keyboard.fill", title: "Quick panel shortcut", detail: "Summon Neko from anywhere.") {
                 HotkeySettingsView(model: model)
             }
         }
@@ -109,26 +109,14 @@ struct OnboardingView: View {
         stepCard(title: "Where do you work?", subtitle: "Choose your folders. Each workspace keeps its own tools and instructions.") {
             if model.homeWorkspaceID == nil {
                 Button { Task { await model.addHomeWorkspace() } } label: {
-                    HStack(spacing: 14) {
-                        setupIcon("house", tint: NekoStyle.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Use my home folder").font(NekoFont.heading).foregroundStyle(N.text)
-                            Text("Recommended · one default workspace for everything in ~").font(NekoFont.meta).foregroundStyle(N.text3)
-                        }
-                        Spacer()
+                    NekoRow(symbol: "house", title: "Use my home folder", detail: "Recommended · one default workspace for everything in ~") {
                         Image(systemName: "chevron.right").foregroundStyle(N.text3)
                     }.padding(.vertical, NekoLayout.rowInset).contentShape(Rectangle())
                 }.buttonStyle(.plain)
             }
             if model.workspaces.isEmpty {
                 Button { model.selectedWorkspace = nil; workspaceSheet = true } label: {
-                    HStack(spacing: 14) {
-                        setupIcon("folder.badge.plus", tint: NekoStyle.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Choose specific folders").font(NekoFont.heading).foregroundStyle(N.text)
-                            Text("A project with its own tools and instructions").font(NekoFont.body).foregroundStyle(N.text3)
-                        }
-                        Spacer()
+                    NekoRow(symbol: "folder.badge.plus", title: "Choose specific folders", detail: "A project with its own tools and instructions") {
                         Image(systemName: "chevron.right").foregroundStyle(N.text3)
                     }.padding(.vertical, NekoLayout.rowInset).contentShape(Rectangle())
                 }.buttonStyle(.plain)
@@ -139,7 +127,7 @@ struct OnboardingView: View {
                         Text(item["name"].string).font(NekoFont.heading).foregroundStyle(N.text)
                         Spacer()
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(NekoStyle.mint)
-                    }.padding(.vertical, 12)
+                    }.padding(.vertical, NekoSpace.md)
                 }
                 Button("Add another workspace…") { model.selectedWorkspace = nil; workspaceSheet = true }.nekoButton(.secondary)
             }
@@ -162,23 +150,8 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 0, content: content)
         }.frame(maxWidth: NekoLayout.readingWidth, alignment: .leading)
     }
-    private func settingRow<Trailing: View>(symbol: String, tint: Color, title: String, detail: String, @ViewBuilder trailing: () -> Trailing) -> some View {
-        HStack(spacing: 18) {
-            setupIcon(symbol, tint: NekoStyle.accent)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(NekoFont.heading).foregroundStyle(N.text)
-                Text(detail).font(NekoFont.meta).foregroundStyle(N.text3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 12)
-            trailing()
-        }.padding(.vertical, NekoLayout.rowInset)
-    }
-    private func setupIcon(_ symbol: String, tint: Color) -> some View {
-        Image(systemName: symbol).font(NekoFont.of(.title, weight: .regular))
-            .foregroundStyle(tint).frame(width: 40, height: 40)
-            .background(N.selected, in: RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous))
-            .accessibilityHidden(true)
+    private func settingRow<Trailing: View>(symbol: String, title: String, detail: String, @ViewBuilder trailing: @escaping () -> Trailing) -> some View {
+        NekoRow(symbol: symbol, title: title, detail: detail, control: trailing).padding(.vertical, NekoLayout.rowInset)
     }
     private func finish() { pending = true; Task { await model.completeSetup(); pending = false } }
 }

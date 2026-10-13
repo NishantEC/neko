@@ -8,11 +8,11 @@ struct WatchRowHeader: View {
 
     var body: some View {
         Button { expanded.toggle() } label: {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: NekoSpace.md) {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
                     .font(NekoFont.label).foregroundStyle(N.text3)
                     .frame(width: 12, height: 20).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: NekoSpace.sm) {
                     Text(verbatim: instruction).font(NekoFont.heading).foregroundStyle(N.text)
                         .lineLimit(3).multilineTextAlignment(.leading)
                     Text(status).font(NekoFont.meta).foregroundStyle(needsAttention ? NekoStyle.amber : N.text3)

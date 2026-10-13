@@ -182,10 +182,12 @@ struct NekoToggleRow: View {
 
 /// Every modal: a header, the body, an error line when there is one, and a
 /// footer with Cancel on the left and the sheet's own actions on the right.
+/// `height` fixes the sheet's height for bodies that scroll or hold a form.
 struct NekoSheet<Content: View, Actions: View>: View {
     let title: String
     var message: String? = nil
     var width: NekoSheetWidth = .standard
+    var height: CGFloat? = nil
     var error: String? = nil
     var cancelTitle = "Cancel"
     var onCancel: (() -> Void)? = nil
@@ -211,7 +213,16 @@ struct NekoSheet<Content: View, Actions: View>: View {
             }
         }
         .font(NekoFont.body).controlSize(.regular)
-        .padding(NekoLayout.pageInset).frame(width: width.points).background(N.canvas)
+        .padding(NekoLayout.pageInset).frame(width: width.points, height: height, alignment: .top).background(N.canvas)
+    }
+}
+
+extension NekoSheet where Actions == EmptyView {
+    /// A sheet whose only action is closing it (`cancelTitle`, usually "Done").
+    init(title: String, message: String? = nil, width: NekoSheetWidth = .standard, height: CGFloat? = nil, error: String? = nil,
+         cancelTitle: String = "Cancel", onCancel: (() -> Void)? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.init(title: title, message: message, width: width, height: height, error: error, cancelTitle: cancelTitle, onCancel: onCancel,
+                  content: content, actions: { EmptyView() })
     }
 }
 
