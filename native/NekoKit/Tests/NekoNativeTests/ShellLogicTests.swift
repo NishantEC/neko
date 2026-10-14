@@ -71,6 +71,13 @@ final class ShellLogicTests: XCTestCase {
         XCTAssertEqual(MenuBarState.needsYou(1).accessibilityLabel, "Neko, 1 ticket needs you")
     }
 
+    func testCommandsDropTheWorktreeCdButKeepAnyOtherDirectory() {
+        let wt = "/Users/x/Library/Application Support/neko/task-worktrees/abc"
+        XCTAssertEqual(TicketThread.shortCommand("cd \"\(wt)\" && yarn test src"), "yarn test src")
+        XCTAssertEqual(TicketThread.shortCommand("cd /tmp/other && yarn test"), "cd /tmp/other && yarn test")
+        XCTAssertEqual(TicketThread.shortCommand("/bin/zsh -lc 'cd \(wt) && git diff'"), "git diff")
+    }
+
     @MainActor func testMenuBarIconIsATemplate() {
         let image = MenuBarIcon.image(for: .needsYou(3))
         XCTAssertTrue(image.isTemplate)

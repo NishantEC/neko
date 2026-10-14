@@ -73,6 +73,12 @@ enum TicketThread {
             if let first = text.first, first == "'" || first == "\"", text.last == first { text = String(text.dropFirst().dropLast()) }
         }
         text = text.replacingOccurrences(of: "/Library/Developer/CommandLineTools/usr/bin/", with: "")
+        // A leading cd into the task's own worktree says nothing; the command after it does.
+        while text.hasPrefix("cd "), let range = text.range(of: " && ") {
+            let target = text[text.index(text.startIndex, offsetBy: 3)..<range.lowerBound].trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+            guard target.contains("/neko/task-worktrees/") || target == "." else { break }
+            text = String(text[range.upperBound...])
+        }
         return String(text.split(separator: "\n").first ?? "").prefix(140).description
     }
 }
@@ -99,11 +105,7 @@ struct TicketThreadView: View {
     @ViewBuilder private func row(_ item: TicketThread.Item) -> some View {
         switch item {
         case .brief(let text):
-            VStack(alignment: .leading, spacing: NekoLayout.authorGap) {
-                ChatAuthorLine(author: "Task brief", timestamp: ticket["created_at_ms"].int)
-                ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            TicketRequestBlock(text: text, createdAt: ticket["created_at_ms"].int)
         case .you(let text):
             ChatUserMessage(text: text)
         case .agent(let role, let text):
@@ -112,24 +114,7 @@ struct TicketThreadView: View {
                 ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
             }
         case .steps(let role, let commands):
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(Array(commands.enumerated()), id: \.offset) { _, receipt in
-                        TicketCommandReceiptView(receipt: receipt)
-                    }
-                }.padding(.top, 14)
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("\(TicketThread.agentName(role)) · \(commands.count) saved \(commands.count == 1 ? "command" : "commands")", systemImage: "terminal")
-                        .font(NekoFont.meta).foregroundStyle(.secondary)
-                    let failed = commands.filter(\.failed).count
-                    let incomplete = commands.filter(\.isIncomplete).count
-                    if failed > 0 || incomplete > 0 {
-                        Text([failed > 0 ? "\(failed) failed" : nil, incomplete > 0 ? "\(incomplete) incomplete" : nil].compactMap { $0 }.joined(separator: " · "))
-                            .font(NekoFont.meta).foregroundStyle(NekoStyle.amber)
-                    }
-                }
-            }
+            TicketWorkLog(author: TicketThread.agentName(role), commands: commands)
         case .status(let text):
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Rectangle().fill(N.lineStrong).frame(height: 1).frame(maxWidth: 16)
