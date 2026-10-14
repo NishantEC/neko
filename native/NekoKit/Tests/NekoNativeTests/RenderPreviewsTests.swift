@@ -24,6 +24,26 @@ import NekoKit
         }
     }
 
+    /// A real ticket page, when NEKO_RENDER_SNAPSHOT names a saved workbench
+    /// snapshot and NEKO_RENDER_TICKET a ticket in it. NEKO_RENDER_PATCH may
+    /// name a diff to serve as its changes. Nothing reaches the daemon.
+    func testRenderTicketPage() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let directory = env["NEKO_RENDER_DIR"], let snapshotPath = env["NEKO_RENDER_SNAPSHOT"], let ticket = env["NEKO_RENDER_TICKET"] else {
+            throw XCTSkip("Set NEKO_RENDER_DIR, NEKO_RENDER_SNAPSHOT and NEKO_RENDER_TICKET to render a ticket page")
+        }
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let snapshot = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: URL(fileURLWithPath: snapshotPath)))
+        let patch = env["NEKO_RENDER_PATCH"].flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? ""
+        let files = patch.components(separatedBy: "\n").filter { $0.hasPrefix("+++ b/") }.map { JSONValue.string(String($0.dropFirst(6))) }
+        let model = AppModel(transport: { _ in .object(["TaskChanges": .object(["files": .array(files), "patch": .string(patch), "truncated": .bool(false)])]) })
+        model.snapshot = snapshot
+        for scheme in [ColorScheme.dark, .light] {
+            try render(TicketDetail(model: model, id: ticket), size: CGSize(width: 900, height: Double(env["NEKO_RENDER_HEIGHT"] ?? "") ?? 3200), scheme: scheme,
+                       to: URL(fileURLWithPath: directory).appendingPathComponent("ticket-\(scheme == .dark ? "dark" : "light").png"))
+        }
+    }
+
     private func render<V: View>(_ view: V, size: CGSize, scheme: ColorScheme, to url: URL) throws {
         let host = NSHostingView(rootView: view.environment(\.colorScheme, scheme).frame(width: size.width, height: size.height).background(N.canvas))
         host.frame = CGRect(origin: .zero, size: size)
@@ -33,7 +53,7 @@ import NekoKit
         window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         window.contentView = host
         host.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        RunLoop.main.run(until: Date().addingTimeInterval(1.0))
         guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return XCTFail("No bitmap for \(url.lastPathComponent)") }
         host.cacheDisplay(in: host.bounds, to: bitmap)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { return XCTFail("No PNG for \(url.lastPathComponent)") }

@@ -89,7 +89,12 @@ struct NativeTableBlock: View {
 
 struct NativeDiffBlock: View {
     let code: String
-    @State private var expanded: Set<Int> = [0]
+    @State private var expanded: Set<Int>
+    /// How many files start open; the rest open on click.
+    init(code: String, openFiles: Int = 1) {
+        self.code = code
+        _expanded = State(initialValue: Set(0..<max(openFiles, 0)))
+    }
     @State private var lineLimits: [Int: Int] = [:]
     @State private var copied = false
     private struct FileDiff { var name: String; var lines: [String]; var added: Int; var removed: Int }
