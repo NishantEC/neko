@@ -10,18 +10,22 @@ struct TicketsView: View {
     @State private var confirmCancel: JSONValue?
     @AppStorage("neko.work.layout") private var layout = "board"
     struct Column { let id: String; let title: String; let color: Color; let statuses: [String] }
+    /// Columns follow TaskStage, so the board, sidebar and counts agree.
     static let columns: [Column] = [
-        Column(id: "approval", title: "Needs you", color: NekoStyle.amber, statuses: ["AwaitingApproval", "Failed"]),
-        Column(id: "working", title: "Working", color: NekoStyle.accent, statuses: ["Queued", "Planning", "Building", "Reviewing"]),
-        Column(id: "review", title: "Ready to review", color: NekoStyle.sky, statuses: ["ReadyForReview"]),
-        Column(id: "done", title: "Done", color: NekoStyle.mint, statuses: ["Completed", "Cancelled"])
+        Column(id: "approval", title: TaskStage.needsYou.title, color: TaskStage.needsYou.color, statuses: ["AwaitingApproval", "Failed"]),
+        Column(id: "review", title: TaskStage.review.title, color: TaskStage.review.color, statuses: ["ReadyForReview"]),
+        Column(id: "working", title: TaskStage.running.title, color: TaskStage.running.color, statuses: ["Planning", "Building", "Reviewing"]),
+        Column(id: "upnext", title: TaskStage.upNext.title, color: TaskStage.upNext.color, statuses: ["Queued"]),
+        Column(id: "done", title: TaskStage.done.title, color: TaskStage.done.color, statuses: ["Completed", "Cancelled"])
     ]
+    /// The stage a sidebar group filter names, or nil for all tasks.
+    private var stageFilter: TaskStage? { TaskStage(rawValue: model.agentFilter) }
     private func tasks(in column: Column) -> [JSONValue] {
         model.tasks.filter { task in
-            AgentSidebarGroup.matches(model.agentFilter, task: task)
+            (stageFilter.map { TaskStage(status: task["status"].string) == $0 } ?? true)
             && column.statuses.contains(task["status"].string)
             && (includeStopped || !["Failed", "Cancelled"].contains(task["status"].string))
-            && (search.isEmpty || task["title"].string.localizedCaseInsensitiveContains(search))
+            && (search.isEmpty || TaskText(task: task, snapshot: model.snapshot).title.localizedCaseInsensitiveContains(search) || task["title"].string.localizedCaseInsensitiveContains(search))
         }.sorted { $0["updated_at_ms"].int > $1["updated_at_ms"].int }
     }
     private var workspaceLabel: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
@@ -35,13 +39,13 @@ struct TicketsView: View {
             else if hasVisibleTasks { board }
             else { emptyState.frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
-        .navigationTitle(model.agentFilter == "all" ? "All agents" : (AgentSidebarGroup(rawValue: model.agentFilter)?.title ?? "All agents"))
-        .navigationSubtitle("\(workspaceLabel) · \(model.tasks.count) \(model.tasks.count == 1 ? "ticket" : "tickets")\(startsWithoutAsking ? " · starts without asking" : "")")
+        .navigationTitle(stageFilter?.title ?? "All tasks")
+        .navigationSubtitle("\(workspaceLabel) · \(model.tasks.count) \(model.tasks.count == 1 ? "task" : "tasks")")
         .toolbar { listToolbar }
         .onChange(of: model.selectedWorkspace) { _, _ in selected = nil }
         .confirmationDialog("Cancel “\(confirmCancel?["title"].string ?? "")”?", isPresented: Binding(get: { confirmCancel != nil }, set: { if !$0 { confirmCancel = nil } })) {
-            Button("Cancel Ticket", role: .destructive) {
-                if let task = confirmCancel { run("CancelTask", task, to: Self.columns[3]) }
+            Button("Cancel task", role: .destructive) {
+                if let task = confirmCancel, let done = Self.columns.first(where: { $0.id == "done" }) { run("CancelTask", task, to: done) }
                 confirmCancel = nil
             }
             Button("Keep Working", role: .cancel) { confirmCancel = nil }
@@ -54,12 +58,12 @@ struct TicketsView: View {
 
     @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            NekoSearchField(title: "Search tickets", text: $model.agentSearch).frame(width: 180)
+            NekoSearchField(title: "Search tasks", text: $model.agentSearch).frame(width: 180)
         }.withoutSharedBackground()
         ToolbarItem(placement: .primaryAction) {
             GlassSegmented(selection: $layout, options: [
-                .init(value: "list", title: "List", symbol: "list.bullet", help: "Show tickets as a list"),
-                .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tickets as a board")
+                .init(value: "list", title: "List", symbol: "list.bullet", help: "Show tasks as a list"),
+                .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tasks as a board")
             ], iconOnly: true)
         }.withoutSharedBackground()
         ToolbarItem(placement: .primaryAction) {
@@ -67,16 +71,16 @@ struct TicketsView: View {
                 Toggle("Plan before working", isOn: Binding(get: { plansFirst }, set: { value in
                     Task { await model.workbench(.command("SetPlanFirst", ["enabled": .bool(value)])) }
                 }))
-                Text(plansFirst ? "Every ticket first writes a read-only plan for you to approve." : "Tickets start working right away. The agent stops for your approval only on critical work.")
+                Text(plansFirst ? "Every task first writes a read-only plan for you to approve." : "Tasks start working right away. The agent stops for your approval only on critical work.")
                 if plansFirst {
-                    Toggle("Start tickets without asking", isOn: Binding(get: { startsWithoutAsking }, set: { value in
+                    Toggle("Start tasks without asking", isOn: Binding(get: { startsWithoutAsking }, set: { value in
                         Task { await model.workbench(.command("SetStartWithoutApproval", ["enabled": .bool(value)])) }
                     }))
-                    Text("Planned chat and manual tickets begin working without waiting for approval.")
+                    Text("Planned chat and manual tasks begin working without waiting for approval.")
                 }
                 Divider()
                 Toggle("Show failed and cancelled", isOn: $model.includeStoppedAgents)
-                Button("Clear finished tickets") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
+                Button("Clear finished tasks") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
                     .disabled(!model.tasks.contains { ["Completed", "Cancelled"].contains($0["status"].string) })
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -122,9 +126,9 @@ struct TicketsView: View {
     }
     private var emptyState: some View {
         ContentUnavailableView {
-            Label(search.isEmpty ? "No agents here yet" : "No matching agents", systemImage: "bubble.left.and.bubble.right")
+            Label(search.isEmpty ? "No tasks here yet" : "No matching tasks", systemImage: "bubble.left.and.bubble.right")
         } description: {
-            Text(search.isEmpty ? "Ask Neko for work in Home. Agents matching this view will appear here." : "No ticket matches “\(search)”.")
+            Text(search.isEmpty ? "Ask Neko for work in Home. Tasks that match will appear here." : "No task matches “\(search)”.")
         } actions: {
             if search.isEmpty {
                 Button("Open Home") { model.requestedPage = .home }
@@ -202,12 +206,13 @@ struct TicketsView: View {
     private func card(_ task: JSONValue) -> some View {
         let status = task["status"].string
         return Button { selected = task.recordID } label: {
-            TicketCard(id: "NEK-" + String(task.recordID.prefix(4)).uppercased(), title: task["title"].string, workspace: workspaceName(task), status: status, updated: relative(task["updated_at_ms"].int), highlighted: selected == task.recordID, note: status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task))
+            let text = TaskText(task: task, snapshot: model.snapshot)
+            TicketCard(id: text.sourceTitle ?? text.title, title: text.title, detail: text.detail, status: status, updated: relative(task["updated_at_ms"].int), highlighted: selected == task.recordID, note: status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task))
         }
         .buttonStyle(.plain)
         .contextMenu { moveMenu(task) }
         .accessibilityLabel("\(task["title"].string), \(workspaceName(task)), \(friendlyTaskStatus(status))")
-        .accessibilityHint("Open the ticket. Drag to another column to move it.")
+        .accessibilityHint("Open the task. Drag to another column to move it.")
     }
 
     // MARK: Moving tickets
@@ -215,14 +220,15 @@ struct TicketsView: View {
     /// The command a move asks for, or why the move can't happen.
     static func moveCommand(from status: String, to column: String) -> (command: String?, reason: String?) {
         switch (column, status) {
-        case ("working", "AwaitingApproval"), ("working", "Failed"), ("working", "Cancelled"): return ("StartTask", nil)
+        case ("working", "AwaitingApproval"), ("working", "Failed"), ("working", "Cancelled"),
+             ("upnext", "AwaitingApproval"), ("upnext", "Failed"), ("upnext", "Cancelled"): return ("StartTask", nil)
         case ("done", "ReadyForReview"): return ("CompleteTask", nil)
         case ("done", "AwaitingApproval"), ("done", "Queued"), ("done", "Planning"), ("done", "Building"), ("done", "Reviewing"):
             return ("CancelTask", nil)
         case ("approval", "Queued"), ("approval", "Planning"), ("approval", "Building"), ("approval", "Reviewing"):
             return (nil, "Work that has started can’t go back to waiting. Cancel it, or let it finish.")
-        case ("review", _): return (nil, "Neko moves a ticket to review once its work and checks are done.")
-        case ("working", "ReadyForReview"): return (nil, "Add a note on the ticket to send it back with changes.")
+        case ("review", _): return (nil, "Neko moves a task to review once its work and checks are done.")
+        case ("working", "ReadyForReview"): return (nil, "Add a note on the task to send it back with changes.")
         default: return (nil, nil)
         }
     }
@@ -276,7 +282,7 @@ struct TicketsView: View {
             let status = task["status"].string
             let plan = Self.moveCommand(from: status, to: column.id)
             if !column.statuses.contains(status), plan.command != nil {
-                Button(column.id == "done" && plan.command == "CancelTask" ? "Cancel Ticket" : "Move to \(column.title)") { move(task.recordID, to: column) }
+                Button(column.id == "done" && plan.command == "CancelTask" ? "Cancel task" : "Move to \(column.title)") { move(task.recordID, to: column) }
             }
         }
     }

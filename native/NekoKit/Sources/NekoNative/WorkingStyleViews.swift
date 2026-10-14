@@ -18,7 +18,7 @@ enum DecisionPresentation {
         case "skip": "Defer this work"
         case "approve_local_build": "You approved a local build"
         case "accept_local_result": "You accepted the local result"
-        case "cancel_task": "You stopped this agent"
+        case "cancel_task": "You stopped this task"
         case "report_failure": "Work stopped"
         case "review_local_result": "Local work is ready to review"
         case "add_note": "Your direction was recorded"
@@ -92,7 +92,7 @@ struct DecisionCard: View {
             HStack(spacing: NekoSpace.sm) {
                 Button("Correct this decision") { correcting = true }
                 if let taskID = record["task_id"].string.nonEmpty, model.agentID != taskID {
-                    Button("Open agent") { model.openAgent(taskID, from: originPage) }
+                    Button("Open task") { model.openAgent(taskID, from: originPage) }
                 }
             }.controlSize(.regular)
         }
@@ -191,7 +191,7 @@ struct WorkingStyleView: View {
                             if let record = model.snapshot["decision_records"].array.first(where: { $0["id"] == reference }) {
                                 VStack(alignment: .leading, spacing: NekoSpace.sm) {
                                     NekoSavedText(text: record["correction"]["text"].string.isEmpty ? record["rationale"].string : record["correction"]["text"].string)
-                                    if !record["task_id"].string.isEmpty { Button("Open agent") { model.openAgent(record["task_id"].string, from: .memory) } }
+                                    if !record["task_id"].string.isEmpty { Button("Open task") { model.openAgent(record["task_id"].string, from: .memory) } }
                                 }
                             } else { Text("This decision is outside the retained history.").foregroundStyle(N.text3) }
                         }

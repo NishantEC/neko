@@ -26,6 +26,21 @@ enum ToolsPresentation {
         }
         return "Available"
     }
+    /// The line under a connection's name: what is wrong in plain words, or
+    /// where it runs, so two connections with one name can be told apart.
+    static func connectionDetail(_ connection: JSONValue) -> String {
+        let error = connection["error"].string
+        let lower = error.lowercased()
+        if lower.contains("definition changed") { return "Changed since you approved it. Open to review." }
+        if lower.contains("auth") || lower.contains("401") || lower.contains("sign-in") { return "Signed out. Open to sign in again." }
+        if !error.isEmpty { return error.split(whereSeparator: { ".\n".contains($0) }).first.map(String.init) ?? error }
+        let config = connection["config"]
+        if config["transport"].string == "http" {
+            return URL(string: config["url"].string)?.host.map { $0 == "127.0.0.1" || $0 == "localhost" ? "A server on this Mac" : $0 } ?? "Remote server"
+        }
+        let program = (config["args"].array.last?.string).flatMap { $0.isEmpty ? nil : $0 } ?? config["command"].string
+        return "Runs on this Mac · " + URL(fileURLWithPath: program).lastPathComponent
+    }
     static func toolSummary(_ connection: JSONValue) -> String {
         let count = connection["tools"].array.count
         if count > 0 { return "\(count) \(count == 1 ? "tool" : "tools")" }

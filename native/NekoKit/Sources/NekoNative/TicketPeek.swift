@@ -37,15 +37,15 @@ struct TicketPeek: View {
                 iconButton("arrow.up.left.and.arrow.down.right", help: "Open as full page") { mode = "full" }
             }
             Menu {
-                Picker("Open tickets as", selection: $mode) {
+                Picker("Open tasks as", selection: $mode) {
                     ForEach(Self.modes, id: \.value) { option in Label(option.title, systemImage: option.symbol).tag(option.value) }
                 }.pickerStyle(.inline)
             } label: { Image(systemName: current.symbol) }
                 .menuStyle(.borderlessButton).menuIndicator(.visible).fixedSize()
-                .help("Open tickets as: \(current.title)")
+                .help("Open tasks as: \(current.title)")
             Text(shortID).font(NekoFont.of(.small, weight: .medium, design: .monospaced)).foregroundStyle(.secondary).padding(.leading, 6)
             Spacer(minLength: 8)
-            iconButton(copied ? "checkmark" : "link", help: "Copy ticket ID") {
+            iconButton(copied ? "checkmark" : "link", help: "Copy task ID") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString("\(shortID) \(ticket["title"].string)", forType: .string)
                 copied = true

@@ -11,7 +11,7 @@ final class ShellLogicTests: XCTestCase {
         XCTAssertEqual(Page(key: "Responsibilities"), .watching)
         XCTAssertNil(Page(key: "Nowhere"))
         XCTAssertEqual(Page.watching.title, "Watching")
-        XCTAssertEqual(Page.tickets.title, "All agents")
+        XCTAssertEqual(Page.tickets.title, "All tasks")
         XCTAssertEqual(Page.settings.symbol, "gearshape")
     }
 
@@ -19,11 +19,13 @@ final class ShellLogicTests: XCTestCase {
         XCTAssertEqual(Page.allCases.filter(\.ownsToolbarRow), [.home, .tickets])
     }
 
-    func testEverySidebarPageIsListedOnceAndGalleriesAreHidden() {
-        let listed = Page.sidebarGroups.flatMap(\.pages)
-        XCTAssertEqual(listed.count, Set(listed).count)
-        XCTAssertFalse(listed.contains(.activity) || listed.contains(.replyViews) || listed.contains(.home) || listed.contains(.tickets))
-        XCTAssertEqual(Set(listed + [.home, .tickets, .activity, .replyViews]), Set(Page.allCases))
+    func testEverySetupPageOpensItsSettingsSection() {
+        XCTAssertEqual(SettingsSection(page: .watching), .watches)
+        XCTAssertEqual(SettingsSection(page: .tools), .tools)
+        XCTAssertNil(SettingsSection(page: .home))
+        let listed = SettingsSection.groups.flatMap(\.sections)
+        XCTAssertEqual(Set(listed), Set(SettingsSection.allCases), "every section appears once in the list")
+        XCTAssertEqual(listed.count, SettingsSection.allCases.count)
     }
 
     func testStartPageReadsTheEnvironment() {
@@ -68,7 +70,7 @@ final class ShellLogicTests: XCTestCase {
         XCTAssertEqual(MenuBarState(summary([])), .idle)
         XCTAssertEqual(MenuBarState(summary(["Building"])), .working)
         XCTAssertEqual(MenuBarState(summary(["Building", "AwaitingApproval", "Failed"])), .needsYou(2))
-        XCTAssertEqual(MenuBarState.needsYou(1).accessibilityLabel, "Neko, 1 ticket needs you")
+        XCTAssertEqual(MenuBarState.needsYou(1).accessibilityLabel, "Neko, 1 task needs you")
     }
 
     func testCommandsDropTheWorktreeCdButKeepAnyOtherDirectory() {
@@ -81,6 +83,65 @@ final class ShellLogicTests: XCTestCase {
     @MainActor func testMenuBarIconIsATemplate() {
         let image = MenuBarIcon.image(for: .needsYou(3))
         XCTAssertTrue(image.isTemplate)
-        XCTAssertEqual(image.accessibilityDescription, "Neko, 3 tickets need you")
+        XCTAssertEqual(image.accessibilityDescription, "Neko, 3 tasks need you")
+    }
+}
+
+/// The single status model and how tasks read.
+final class TaskStageTests: XCTestCase {
+    private func task(_ status: String, id: String = "t", title: String = "TypeError: x is undefined", display: String? = nil) -> JSONValue {
+        var fields: [String: JSONValue] = ["id": .string(id), "status": .string(status), "title": .string(title)]
+        if let display { fields["display_title"] = .string(display) }
+        return .object(fields)
+    }
+
+    func testEveryStatusHasExactlyOneStageAndQueuedIsNotRunning() {
+        XCTAssertEqual(TaskStage(status: "Queued"), .upNext)
+        XCTAssertEqual(TaskStage(status: "Building"), .running)
+        XCTAssertEqual(TaskStage(status: "AwaitingApproval"), .needsYou)
+        XCTAssertEqual(TaskStage(status: "Failed"), .needsYou)
+        XCTAssertEqual(TaskStage(status: "ReadyForReview"), .review)
+        XCTAssertEqual(TaskStage(status: "Completed"), .done)
+    }
+
+    func testCountsComeFromOnePlace() {
+        let counts = TaskCounts(tasks: ["Queued", "Queued", "Building", "Failed", "ReadyForReview", "Completed"].map { task($0) })
+        XCTAssertEqual(counts[.upNext], 2)
+        XCTAssertEqual(counts[.running], 1)
+        XCTAssertEqual(counts.waitingOnYou, 2)
+    }
+
+    func testATaskReadsByItsHumanTitleWithSourceRepoAndPullRequest() {
+        let t: JSONValue = .object(["id": .string("t1"), "status": .string("ReadyForReview"), "title": .string("TypeError: x"), "display_title": .string("Fix crash when saving basic info"),
+                                    "pull_request": .object(["url": .string("https://github.com/acme/athena/pull/4616")])])
+        let snapshot: JSONValue = .object([
+            "task_roots": .object(["t1": .string("/Users/x/hme/athena")]),
+            "mcp": .object([
+                "connections": .array([.object(["id": .string("c"), "label": .string("sentry")])]),
+                "sources": .array([.object(["task_id": .string("t1"), "connection_id": .string("c"), "external_id": .string("CONNECT-PROD-P5E")])]),
+            ]),
+        ])
+        let text = TaskText(task: t, snapshot: snapshot)
+        XCTAssertEqual(text.title, "Fix crash when saving basic info")
+        XCTAssertEqual(text.sourceTitle, "TypeError: x")
+        XCTAssertEqual(text.detail, "athena · #4616 · Sentry", "a long machine id is left out")
+        let linear: JSONValue = .object(["mcp": .object([
+            "connections": .array([.object(["id": .string("c"), "label": .string("linear-personal")])]),
+            "sources": .array([.object(["task_id": .string("t1"), "connection_id": .string("c"), "external_id": .string("HEA-1427")])]),
+        ])])
+        XCTAssertEqual(TaskText(task: t, snapshot: linear).source, "Linear · HEA-1427", "a short id a person quotes is kept")
+        XCTAssertEqual(TaskText(task: task("Queued"), snapshot: .object([:])).title, "TypeError: x is undefined", "falls back to the source title")
+        XCTAssertEqual(TaskText.sourceName("linear-personal"), "Linear")
+    }
+
+    func testAConnectionSaysWhereItRunsOrWhatIsWrong() {
+        func connection(_ config: [String: JSONValue], error: String = "") -> JSONValue {
+            .object(["config": .object(config), "error": .string(error)])
+        }
+        XCTAssertEqual(ToolsPresentation.connectionDetail(connection(["transport": .string("http"), "url": .string("https://mcp.linear.app/mcp")])), "mcp.linear.app")
+        XCTAssertEqual(ToolsPresentation.connectionDetail(connection(["transport": .string("http"), "url": .string("http://127.0.0.1:29979/mcp")])), "A server on this Mac")
+        XCTAssertEqual(ToolsPresentation.connectionDetail(connection(["transport": .string("stdio"), "command": .string("/usr/bin/python3"), "args": .array([.string("/x/admin_mcp_shim.py")])])), "Runs on this Mac · admin_mcp_shim.py")
+        XCTAssertEqual(ToolsPresentation.connectionDetail(connection([:], error: "Source MCP definition changed; review it again before using tools")), "Changed since you approved it. Open to review.")
+        XCTAssertEqual(ToolsPresentation.connectionDetail(connection([:], error: "MCP authentication failed. Check the server.")), "Signed out. Open to sign in again.")
     }
 }

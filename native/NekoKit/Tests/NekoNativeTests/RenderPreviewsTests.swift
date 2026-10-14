@@ -44,6 +44,44 @@ import NekoKit
         }
     }
 
+    /// Every page of the real window, when NEKO_RENDER_SNAPSHOT names a saved
+    /// workbench snapshot. NEKO_RENDER_TICKET also renders that ticket as an
+    /// open agent. Nothing reaches the daemon; requests get an empty answer.
+    func testRenderEveryPage() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let directory = env["NEKO_RENDER_DIR"], let snapshotPath = env["NEKO_RENDER_SNAPSHOT"], env["NEKO_RENDER_PAGES"] != nil else {
+            throw XCTSkip("Set NEKO_RENDER_DIR, NEKO_RENDER_SNAPSHOT and NEKO_RENDER_PAGES=1 to render every page")
+        }
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let snapshot = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: URL(fileURLWithPath: snapshotPath)))
+        let height = Double(env["NEKO_RENDER_HEIGHT"] ?? "") ?? 820
+        let pages: [Page] = [.home, .tickets, .workspaces, .watching, .schedules, .tools, .memory, .profiles, .settings]
+        for page in pages {
+            let model = AppModel(transport: { _ in .object([:]) })
+            model.snapshot = snapshot
+            model.loadingSetup = false
+            model.onboarding = false
+            try render(WorkspaceView(model: model, page: page), size: CGSize(width: 1280, height: height), scheme: .dark,
+                       to: URL(fileURLWithPath: directory).appendingPathComponent("page-\(page.rawValue.replacingOccurrences(of: " ", with: "-").replacingOccurrences(of: "&", with: "and")).png"))
+        }
+        // The split view's sidebar column is a vibrancy material that
+        // cacheDisplay cannot capture, so the sidebar is also drawn alone.
+        let sidebarModel = AppModel(transport: { _ in .object([:]) })
+        sidebarModel.snapshot = snapshot
+        try render(NativeSidebar(model: sidebarModel, page: .constant(.tickets), addingWorkspace: .constant(false)),
+                   size: CGSize(width: 280, height: 820), scheme: .dark,
+                   to: URL(fileURLWithPath: directory).appendingPathComponent("page-sidebar.png"))
+        if let ticket = env["NEKO_RENDER_TICKET"] {
+            let model = AppModel(transport: { _ in .object([:]) })
+            model.snapshot = snapshot
+            model.loadingSetup = false
+            model.onboarding = false
+            model.agentID = ticket
+            try render(WorkspaceView(model: model, page: .tickets), size: CGSize(width: 1280, height: 820), scheme: .dark,
+                       to: URL(fileURLWithPath: directory).appendingPathComponent("page-ticket-open.png"))
+        }
+    }
+
     private func render<V: View>(_ view: V, size: CGSize, scheme: ColorScheme, to url: URL) throws {
         let host = NSHostingView(rootView: view.environment(\.colorScheme, scheme).frame(width: size.width, height: size.height).background(N.canvas))
         host.frame = CGRect(origin: .zero, size: size)

@@ -10,6 +10,7 @@ struct TicketDetail: View {
     var fullPage = false
     @State private var confirmDelete = false
     @State private var showLog = false
+    @State private var renaming = false
     @Environment(\.dismiss) private var dismiss
     private var ticket: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == id } ?? .null }
     private var conversation: TicketPresentation.Conversation { TicketPresentation.conversation(ticket) }
@@ -22,7 +23,7 @@ struct TicketDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: NekoLayout.sectionGap + 8) {
                 if !fullPage { HStack(alignment: .top) {
-                    Text(ticket["title"].string).font(NekoFont.title).textSelection(.enabled)
+                    Text(TaskText(task: ticket, snapshot: model.snapshot).title).font(NekoFont.title).textSelection(.enabled)
                     Spacer()
                     Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
                 }
@@ -71,12 +72,15 @@ struct TicketDetail: View {
             .padding(.horizontal, NekoLayout.pageInset).padding(.top, 12).padding(.bottom, 20)
         }.frame(maxWidth: .infinity)
                 .toolbar { if fullPage { agentToolbar } }
-                .confirmationDialog("Delete this ticket?", isPresented: $confirmDelete) {
-                    Button("Delete ticket", role: .destructive) {
+                .renameAlert("Rename task", isPresented: $renaming, current: ticket["display_title"].string) { title in
+                    Task { await model.workbench(.command("RenameTask", ["task_id": .string(id), "title": .string(title)])) }
+                }
+                .confirmationDialog("Delete this task?", isPresented: $confirmDelete) {
+                    Button("Delete task", role: .destructive) {
                         Task { if await model.workbench(.command("DeleteTask", ["task_id": .string(id)])) { if let close { close() } else { dismiss() } } }
                     }
                 } message: {
-                    Text("Removes the ticket, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.")
+                    Text("Removes the task, its subtasks and their history from Neko. Your files and the task’s worktree on disk stay as they are.")
                 }
     }
     @ToolbarContentBuilder private var agentToolbar: some ToolbarContent {
@@ -101,10 +105,11 @@ struct TicketDetail: View {
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 if TicketPresentation.waitingReason(ticket) == nil && TicketPresentation.canProposeSplit(ticket, splits: model.snapshot["splits"].array) { action("Propose parallel work", "ProposeSplit") }
+                Button("Rename…") { renaming = true }
                 if !ticket["worktree"].string.isEmpty { Button("Reveal working folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
                 if ["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { Button("Delete…", role: .destructive) { confirmDelete = true } }
             } label: {
-                Label("Agent actions", systemImage: "ellipsis")
+                Label("Task actions", systemImage: "ellipsis")
             }
             .disabled(model.busy)
         }
@@ -128,7 +133,7 @@ struct TicketDetail: View {
         ForEach(model.snapshot["splits"].array.filter { $0["parent_id"].string == id }, id: \.self) { split in
             VStack(alignment: .leading, spacing: NekoSpace.md) {
                 Text(split["approved"].bool ? "Parallel work" : "Parallel proposal · approval required").font(NekoFont.heading)
-                if split["approved"].bool { Text(split["integrated"].bool ? "Child changes integrated into this ticket's worktree." : "Child changes are not yet integrated.").foregroundStyle(N.text3) }
+                if split["approved"].bool { Text(split["integrated"].bool ? "Child changes integrated into this task's worktree." : "Child changes are not yet integrated.").foregroundStyle(N.text3) }
                 ForEach(Array(split["subtasks"].array.enumerated()), id: \.offset) { index, child in
                     VStack(alignment: .leading, spacing: NekoSpace.xs) {
                         Text("\(index + 1). \(child["title"].string)").bold()
@@ -167,7 +172,7 @@ struct TicketDetail: View {
             Text(TicketPresentation.stopReason(ticket)).lineSpacing(4).textSelection(.enabled)
             HStack {
                 Button("Choose folder…") { chooseFolder() }
-                Text(model.snapshot["task_roots"][id].string.isEmpty ? "Pick the repository this ticket is about, then Neko starts it." : "Working in \(URL(fileURLWithPath: model.snapshot["task_roots"][id].string).lastPathComponent). Pick another repository to start over there.")
+                Text(model.snapshot["task_roots"][id].string.isEmpty ? "Pick the repository this task is about, then Neko starts it." : "Working in \(URL(fileURLWithPath: model.snapshot["task_roots"][id].string).lastPathComponent). Pick another repository to start over there.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -237,7 +242,7 @@ private struct TicketOutcomeReadback: View {
                 .help("Copy the full saved result, including the reviewer response")
             }
             if review.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("No result text was saved for this ticket.").foregroundStyle(N.text2)
+                Text("No result text was saved for this task.").foregroundStyle(N.text2)
             } else {
                 ReadableText(text: review.body).font(NekoFont.chat).lineSpacing(4)
             }

@@ -31,7 +31,7 @@ enum Page: String, CaseIterable, Identifiable, Sendable {
     /// What the sidebar and window title call it.
     var title: String {
         switch self {
-        case .tickets: "All agents"
+        case .tickets: "All tasks"
         case .watching: "Watching"
         default: rawValue
         }
@@ -57,13 +57,6 @@ enum Page: String, CaseIterable, Identifiable, Sendable {
     /// Home and All agents place their own content in the toolbar row; every
     /// other page shares the permission banner above its content.
     var ownsToolbarRow: Bool { self == .home || self == .tickets }
-
-    /// Sidebar sections after the pinned Home and All agents rows.
-    static let sidebarGroups: [(title: String, pages: [Page])] = [
-        ("What Neko watches", [.workspaces, .watching, .schedules]),
-        ("Teach Neko", [.tools, .memory, .profiles]),
-        ("Neko", [.designLab, .settings])
-    ]
 
     /// The page to open at launch: `NEKO_START_PAGE` when it names one, else Home.
     static func start(environment: [String: String] = ProcessInfo.processInfo.environment) -> Page {

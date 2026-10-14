@@ -5,7 +5,7 @@ import NekoKit
 @MainActor final class AgentNavigationTests: XCTestCase {
     func testAgentSwitchKeepsDraftAndReturnFilter() {
         let model = AppModel { _ in .null }
-        model.agentFilter = "needs_you"
+        model.agentFilter = TaskStage.needsYou.rawValue
         model.agentSearch = "login"
         model.includeStoppedAgents = false
         model.ticketDrafts["a"] = "Use the staging environment"
@@ -15,28 +15,27 @@ import NekoKit
         model.closeAgent()
         XCTAssertNil(model.agentID)
         XCTAssertEqual(model.requestedPage, .tickets)
-        XCTAssertEqual(model.agentFilter, "needs_you")
+        XCTAssertEqual(model.agentFilter, TaskStage.needsYou.rawValue)
         XCTAssertEqual(model.agentSearch, "login")
         XCTAssertFalse(model.includeStoppedAgents)
         XCTAssertEqual(model.ticketDrafts["a"], "Use the staging environment")
     }
     func testExplicitAllAgentsClearsGroupWhileMemoryReturnStaysInMemory() {
         let model = AppModel { _ in .null }
-        model.agentFilter = "needs_you"
+        model.agentFilter = TaskStage.needsYou.rawValue
         model.showAgents()
         XCTAssertEqual(model.agentFilter, "all")
         model.openAgent("a", from: .memory)
         model.closeAgent()
         XCTAssertEqual(model.requestedPage, .memory)
     }
-    func testSidebarGroupsAreDisjointAndNewestFirst() {
-        let rows: [JSONValue] = ["AwaitingApproval", "ReadyForReview", "Failed", "Queued", "Planning", "Building", "Reviewing", "Completed", "Cancelled"].enumerated().map {
-            .object(["id": .string("\($0.offset)"), "status": .string($0.element), "updated_at_ms": .number(Double($0.offset))])
-        }
-        let groups = AgentSidebarGroup.allCases.map { $0.tasks(in: rows) }
-        XCTAssertEqual(groups.map(\.count), [3, 4, 2])
-        XCTAssertEqual(Set(groups.flatMap { $0.map(\.recordID) }).count, rows.count)
-        XCTAssertEqual(groups[0].map(\.recordID), ["2", "1", "0"])
+    func testEveryTaskLandsInExactlyOneStage() {
+        let statuses = ["AwaitingApproval", "ReadyForReview", "Failed", "Queued", "Planning", "Building", "Reviewing", "Completed", "Cancelled"]
+        let stages = statuses.map(TaskStage.init(status:))
+        XCTAssertEqual(stages.filter { $0 == .needsYou }.count, 2)
+        XCTAssertEqual(stages.filter { $0 == .running }.count, 3)
+        XCTAssertEqual(stages.filter { $0 == .upNext }.count, 1)
+        XCTAssertEqual(stages.count, statuses.count)
     }
     func testDecisionCorrectionRevisionReplacesOnlyItsEpisode() {
         func record(_ id: String, _ episode: String, _ version: Int) -> JSONValue {

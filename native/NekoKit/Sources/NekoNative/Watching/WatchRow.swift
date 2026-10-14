@@ -7,6 +7,7 @@ struct WatchRow: View {
     let onEdit: () -> Void
     @State private var expanded = false
     @State private var confirmingActivation = false
+    @State private var renaming = false
 
     private var status: String {
         if !item["enabled"].bool { return item["failures"].int > 0 ? "Paused · last check failed" : "Paused" }
@@ -17,10 +18,11 @@ struct WatchRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 18) {
-                WatchRowHeader(instruction: item["instruction"].string, status: status,
+                let title = Watching.title(item)
+                WatchRowHeader(title: title, instruction: title == item["instruction"].string ? nil : item["instruction"].string, status: status,
                                needsAttention: item["enabled"].bool && item["failures"].int > 0,
                                expanded: $expanded)
-                Toggle("Watch \(item["instruction"].string)", isOn: Binding(
+                Toggle("Watch \(Watching.title(item))", isOn: Binding(
                     get: { item["enabled"].bool },
                     set: { enabled in setEnabled(enabled) }
                 ))
@@ -33,12 +35,16 @@ struct WatchRow: View {
         .overlay(alignment: .top) { N.line.frame(height: 1) }
         .accessibilityElement(children: .contain)
         .modifier(WatchActivationConfirmation(model: model, item: item, isPresented: $confirmingActivation))
+        .renameAlert("Rename watch", isPresented: $renaming, current: item["name"].string) { name in
+            submit(model, nested("Mcp", "RenameResponsibility", ["responsibility_id": item["id"], "name": .string(name)]))
+        }
     }
 
     private var actions: some View {
         Menu("Watch actions", systemImage: "ellipsis") {
             Button("Check now") { submit(model, nested("Mcp", "Wake", ["responsibility_id": item["id"]])) }
                 .disabled(!item["enabled"].bool)
+            Button("Rename…") { renaming = true }
             Button("Edit", action: onEdit)
             Button("Delete", role: .destructive) { Watching.remove(model, item) }
         }

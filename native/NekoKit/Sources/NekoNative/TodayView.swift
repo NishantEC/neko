@@ -191,7 +191,7 @@ struct TodayView: View {
                 ) {
                     GlassSegmented(selection: $mode, options: [
                         .init(value: "ask", title: "Ask", help: "Ask: Neko answers now"),
-                        .init(value: "plan", title: "Plan", help: "Plan: Neko proposes a ticket with a plan for your approval, without changing anything")
+                        .init(value: "plan", title: "Plan", help: "Plan: Neko proposes a task with a plan for your approval, without changing anything")
                     ], size: .small)
                     ComposerRuntimePicker(model: model, selection: selection)
                 }
@@ -269,8 +269,8 @@ struct TodayView: View {
                     ChatToolActivity(model: model, activity: activity, turn: message.recordID, pending: message["pending"].bool, awaitingApprovals: awaitingApprovals)
                 }
                 if message["ticket_ids"].array.isEmpty &&
-                    (message["text"].string.contains("I could not open every ticket") || message["text"].string.contains("No ticket was created")) {
-                    Label("No ticket was created from this reply", systemImage: "exclamationmark.triangle.fill")
+                    (message["text"].string.contains("I could not open every task") || message["text"].string.contains("No task was created")) {
+                    Label("No task was created from this reply", systemImage: "exclamationmark.triangle.fill")
                         .font(NekoFont.caption).foregroundStyle(ReplyStyle.orange)
                 }
                 if !message["text"].string.isEmpty {
@@ -287,7 +287,7 @@ struct TodayView: View {
                 }
                 ForEach(message["ticket_ids"].array, id: \.self) { id in
                     let task = model.snapshot["tasks"].array.first { $0.recordID == id.string } ?? .null
-                    ReplyTicketRow(title: task["title"].string.isEmpty ? "Ticket" : task["title"].string,
+                    ReplyTicketRow(title: task["title"].string.isEmpty ? "Task" : task["title"].string,
                                    status: task["status"].string,
                                    workspace: model.workspaces.first { $0.recordID == task["workspace_id"].string }?["name"].string ?? "") {
                         model.openAgent(id.string, from: .home)
@@ -317,14 +317,14 @@ struct TodayView: View {
             ChatApprovalCard(symbol: "exclamationmark.triangle.fill",
                          title: "Approve the plan for “\(task["title"].string)”?",
                          detail: "Work starts in its own copy of the folder. Nothing is pushed.",
-                         secondary: ("Show Ticket", nil, { inspect(task.recordID) }),
+                         secondary: ("Show task", nil, { inspect(task.recordID) }),
                          primary: ("Approve Plan", KeyboardShortcut("1", modifiers: .command), { ticketCommand("ApproveTask", task.recordID) }),
                          busy: model.busy)
         } else if let task = conversationTickets.last(where: { $0["status"].string == "ReadyForReview" }) {
             ChatApprovalCard(symbol: "checkmark.seal.fill",
                          title: "“\(task["title"].string)” is ready for review",
                          detail: "Its changes and checks are in the agent chat.",
-                         secondary: ("Show Ticket", nil, { inspect(task.recordID) }),
+                         secondary: ("Show task", nil, { inspect(task.recordID) }),
                          primary: ("Accept locally", KeyboardShortcut("1", modifiers: .command), { ticketCommand("CompleteTask", task.recordID) }),
                          busy: model.busy)
         }
@@ -441,7 +441,7 @@ struct TodayView: View {
                 let before = model.snapshot["tasks"].array.count
                 if await model.workbench(.command("ClearFinishedTasks", ["workspace_id": scope.workspaceID.map(JSONValue.string) ?? .null])) {
                     let removed = before - model.snapshot["tasks"].array.count
-                    model.notice = removed == 0 ? "No finished tickets to clear." : "Cleared \(removed) finished \(removed == 1 ? "ticket" : "tickets"). Files and worktrees are untouched."
+                    model.notice = removed == 0 ? "No finished tasks to clear." : "Cleared \(removed) finished \(removed == 1 ? "task" : "tasks"). Files and worktrees are untouched."
                 }
             }
         case .memory: open(.memory)

@@ -27,7 +27,7 @@ import NekoKit
 
 final class PaletteAndComposerTests: XCTestCase {
     func testSettingsIsAvailableAsMainWorkspacePage() {
-        XCTAssertTrue(Page.sidebarGroups.contains { $0.pages.contains(.settings) })
+        XCTAssertEqual(SettingsSection(page: .settings), .general)
         XCTAssertEqual(Page.settings.symbol, "gearshape")
     }
     @MainActor func testComposerTextContainerUsesAvailableWidth() throws {

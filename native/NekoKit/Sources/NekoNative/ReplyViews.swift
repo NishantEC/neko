@@ -443,7 +443,7 @@ struct ReplyTicketRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help("Open this agent’s conversation")
+        .help("Open this task")
     }
 }
 

@@ -63,4 +63,6 @@ struct DaemonRecoveryBackoff {
 extension Notification.Name {
     static let nekoOpenWorkspace = Notification.Name("neko.openWorkspace")
     static let nekoOpenPreferences = Notification.Name("neko.openPreferences")
+    /// Put the cursor in Home's composer (New task).
+    static let nekoFocusComposer = Notification.Name("neko.focusComposer")
 }

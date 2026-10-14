@@ -69,7 +69,7 @@ enum ComposerPayload {
         let command = SlashCommand.parse(raw)
         let text = command?.chatText ?? raw
         return planOnly && command == nil
-            ? "Plan only, and change nothing yet: propose a ticket with a short step-by-step plan for my approval.\n\n" + text
+            ? "Plan only, and change nothing yet: propose a task with a short step-by-step plan for my approval.\n\n" + text
             : text
     }
 }

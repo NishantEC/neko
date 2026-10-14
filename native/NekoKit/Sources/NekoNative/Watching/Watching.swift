@@ -5,6 +5,11 @@ import NekoKit
 /// suggest from your connected tools); Neko writes it up as a responsibility.
 /// Readable connected sources are activated by the daemon; explicit pauses stick.
 enum Watching {
+    /// A watch's short name, or its instruction until Neko has named it.
+    static func title(_ item: JSONValue) -> String {
+        let name = item["name"].string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? item["instruction"].string : name
+    }
     static let suggestPrompt = "Look at the tools connected to this workspace and suggest up to three things you should keep an eye on for me. Only suggest what those tools can actually check."
 
     /// Responsibilities Neko proposed in chat that the user has not acted on yet.

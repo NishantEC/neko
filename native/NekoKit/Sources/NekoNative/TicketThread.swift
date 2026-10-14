@@ -94,7 +94,7 @@ struct TicketThreadView: View {
 
     private var workingLine: String? {
         switch ticket["status"].string {
-        case "Queued": "Preparing this agent…"
+        case "Queued": "Getting this task ready…"
         case "Planning": "Planner is reading the code…"
         case "Building": "Builder is making the change in its own copy…"
         case "Reviewing": "Reviewer is checking the change…"
@@ -160,7 +160,7 @@ struct TicketComposer: View {
                 text: Binding(get: { model.ticketDrafts.text(for: targetID) }, set: { model.ticketDrafts.set($0, for: targetID) }),
                 attachments: model.ticketDrafts.attachments(for: targetID),
                 placeholder: placeholder,
-                accessibilityLabel: "Message to ticket agent",
+                accessibilityLabel: "Message to this task’s agent",
                 accessibilityHelp: "Return sends a reply to this agent. Shift Return adds a line. Command Return also sends a reply. New direction pauses active work and the agent reassesses it. Paste or drop images and files to attach them.",
                 state: composerState, validationError: payloadError,
                 onSend: send,
