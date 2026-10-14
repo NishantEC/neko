@@ -189,6 +189,8 @@ pub fn seed_source_watches(state: &mut Snapshot, now: i64) -> bool {
                 last_attempt_ms: None,
                 last_result: String::new(),
                 failures: 0,
+                name: None,
+                name_by_user: false,
             });
         } else {
             for index in existing {
@@ -304,6 +306,12 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
         McpCommand::SaveResponsibility { mut responsibility } => {
             validate_responsibility(state, &responsibility)?;
             if responsibility.id.is_empty() {
+                // A name supplied at creation is the user's own.
+                responsibility.name = match responsibility.name.as_deref() {
+                    Some(name) => crate::display_names::user_name(name)?,
+                    None => None,
+                };
+                responsibility.name_by_user = responsibility.name.is_some();
                 responsibility.id = crate::workbench::new_id();
                 responsibility.last_attempt_ms = None;
                 responsibility.last_result.clear();
@@ -331,7 +339,12 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
                         source.eligible = false;
                     }
                     old.next_due_ms = now;
+                    // A generated name described the old watch; name it again.
+                    if !old.name_by_user {
+                        old.name = None;
+                    }
                 }
+                // Names change only through RenameResponsibility.
                 // Client may edit instructions/grants, never synthesize progress.
                 old.instruction = responsibility.instruction;
                 old.connection_ids = responsibility.connection_ids;
@@ -350,6 +363,18 @@ pub fn apply_command(state: &mut Snapshot, command: McpCommand, now: i64) -> Res
             // Asking for a check means a real look, not a replay of the last
             // reads; the full wake records a fresh probe.
             state.mcp.probes.remove(&responsibility_id);
+        }
+        McpCommand::RenameResponsibility { responsibility_id, name } => {
+            let name = crate::display_names::user_name(&name)?;
+            let r = state
+                .mcp
+                .responsibilities
+                .iter_mut()
+                .find(|r| r.id == responsibility_id)
+                .ok_or("Responsibility is already gone")?;
+            // A user's name is never regenerated; clearing it hands it back.
+            r.name_by_user = name.is_some();
+            r.name = name;
         }
         McpCommand::RemoveResponsibility { responsibility_id } => {
             let before = state.mcp.responsibilities.len();
@@ -620,6 +645,8 @@ mod tests {
             instruction: "Watch Linear".into(), connection_ids: vec!["c".into()],
             enabled: false, prepare_low_risk: false, next_due_ms: 0,
             last_attempt_ms: None, last_result: String::new(), failures: 0,
+            name: None,
+            name_by_user: false,
         });
         state.conversation.push(serde_json::from_value(serde_json::json!({
             "id":"message", "at_ms":1, "role":"neko", "text":"suggestion",
@@ -668,6 +695,8 @@ mod tests {
             connection_ids: vec!["c".into()], enabled: true,
             prepare_low_risk: false, next_due_ms: 100,
             last_attempt_ms: Some(100), last_result: String::new(), failures: 0,
+            name: None,
+            name_by_user: false,
         });
         assert!(seed_source_watches(&mut state, 200));
         assert!(!state.mcp.responsibilities[0].enabled);
@@ -687,6 +716,8 @@ mod tests {
             last_attempt_ms: None,
             last_result: String::new(),
             failures: 0,
+            name: None,
+            name_by_user: false,
         });
         assert!(state.mcp.grants.is_empty());
         assert!(migrate(&mut state).unwrap());
@@ -758,6 +789,54 @@ mod tests {
         assert!(authorize(&state, "a", "c", "lookup").is_ok());
     }
     #[test]
+    fn watch_names_follow_the_user_and_regenerate_after_an_edit() {
+        let mut state = state();
+        let watch = Responsibility {
+            id: String::new(),
+            workspace_id: "a".into(),
+            instruction: "Watch my assigned bugs".into(),
+            connection_ids: vec!["c".into()],
+            enabled: true,
+            prepare_low_risk: false,
+            next_due_ms: 0,
+            last_attempt_ms: None,
+            last_result: String::new(),
+            failures: 0,
+            name: None,
+            name_by_user: false,
+        };
+        apply_command(&mut state, McpCommand::SaveResponsibility { responsibility: watch }, 1).unwrap();
+        let id = state.mcp.responsibilities[0].id.clone();
+        let save = |state: &mut Snapshot, instruction: &str, name: Option<&str>| {
+            let mut edit = state.mcp.responsibilities[0].clone();
+            edit.instruction = instruction.into();
+            // A client round-tripping a name cannot set it this way.
+            edit.name = name.map(Into::into);
+            edit.name_by_user = name.is_some();
+            apply_command(state, McpCommand::SaveResponsibility { responsibility: edit }, 2).unwrap();
+        };
+        // A generated name survives an unrelated edit, and is cleared by an
+        // instruction edit so the background pass names the watch again.
+        state.mcp.responsibilities[0].name = Some("Generated".into());
+        save(&mut state, "Watch my assigned bugs", Some("Sneaky"));
+        assert_eq!(state.mcp.responsibilities[0].name.as_deref(), Some("Generated"));
+        assert!(!state.mcp.responsibilities[0].name_by_user);
+        save(&mut state, "Watch my assigned crashes", None);
+        assert_eq!(state.mcp.responsibilities[0].name, None);
+        // The user's name is kept through instruction edits.
+        apply_command(&mut state, McpCommand::RenameResponsibility { responsibility_id: id.clone(), name: " Linear: my bugs ".into() }, 3).unwrap();
+        save(&mut state, "Watch my assigned regressions", None);
+        assert_eq!(state.mcp.responsibilities[0].name.as_deref(), Some("Linear: my bugs"));
+        assert!(state.mcp.responsibilities[0].name_by_user);
+        assert!(apply_command(&mut state, McpCommand::RenameResponsibility { responsibility_id: id.clone(), name: "a\nb".into() }, 4).is_err());
+        assert!(apply_command(&mut state, McpCommand::RenameResponsibility { responsibility_id: "gone".into(), name: "x".into() }, 4).is_err());
+        // Clearing hands it back to Neko.
+        apply_command(&mut state, McpCommand::RenameResponsibility { responsibility_id: id, name: String::new() }, 5).unwrap();
+        assert_eq!(state.mcp.responsibilities[0].name, None);
+        assert!(!state.mcp.responsibilities[0].name_by_user);
+    }
+
+    #[test]
     fn responsibilities_cannot_select_another_workspaces_connections() {
         let mut state = state();
         let responsibility = Responsibility {
@@ -771,6 +850,8 @@ mod tests {
             last_attempt_ms: None,
             last_result: String::new(),
             failures: 0,
+            name: None,
+            name_by_user: false,
         };
         assert!(
             apply_command(

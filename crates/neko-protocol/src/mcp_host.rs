@@ -96,6 +96,14 @@ pub struct Responsibility {
     pub last_attempt_ms: Option<i64>,
     pub last_result: String,
     pub failures: u32,
+    /// A short human name for the watch ("Sentry: connect-prod errors").
+    /// Generated in the background while `None`; editing the instruction or
+    /// connections clears a generated name so it is named again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The user chose `name` (`RenameResponsibility`); never regenerate it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub name_by_user: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -232,6 +240,12 @@ pub enum McpCommand {
     /// unlinked source observations go with it; ones behind tickets stay.
     RemoveResponsibility {
         responsibility_id: String,
+    },
+    /// Give a watch its own short name. An empty name clears it, so Neko
+    /// names it again. A name set here is never overwritten.
+    RenameResponsibility {
+        responsibility_id: String,
+        name: String,
     },
 }
 

@@ -19,6 +19,7 @@ pub mod conversation;
 pub mod db;
 pub mod decision_context;
 pub mod decomposition;
+pub mod display_names;
 pub mod files;
 pub mod hotkey;
 pub mod icons;

@@ -586,6 +586,8 @@ mod tests {
             last_attempt_ms: None,
             last_result: String::new(),
             failures: 0,
+            name: None,
+            name_by_user: false,
         });
         store::save(&db, &state).unwrap();
         drop(db);

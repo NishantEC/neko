@@ -249,6 +249,7 @@ mod tests {
                 pull_request: None,
                 landed_commit: None,
                 supervision: Some(decision),
+                display_title: None,
             }],
             ..Default::default()
         }

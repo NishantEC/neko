@@ -713,6 +713,12 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 "Acknowledged the result and marked this task complete. Nothing merged or published.",
             );
         }
+        Command::RenameTask { task_id, title } => {
+            let title = crate::display_names::user_name(&title)?;
+            let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).ok_or("Task no longer exists")?;
+            // `Some` is never regenerated; clearing it lets Neko name it again.
+            task.display_title = title;
+        }
         Command::DeleteTask { task_id } => {
             let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("Task no longer exists")?;
             if !deletable(task.status) {
@@ -1392,6 +1398,7 @@ pub fn create_task(
         pull_request: None,
         landed_commit: None,
         supervision: None,
+        display_title: None,
     };
     append_event(&mut task, "system", "Queued for planning.");
     Ok(task)
