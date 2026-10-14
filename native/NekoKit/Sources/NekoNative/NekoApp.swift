@@ -152,22 +152,15 @@ struct NativeSidebar: View {
     private static let stages: [TaskStage] = [.needsYou, .review, .running, .upNext]
     var body: some View {
         let counts = TaskCounts(tasks: model.tasks)
-        List(selection: $selection) {
-            Section {
-                row(.home, title: "Home", symbol: "house", badge: 0)
-                row(.tickets, title: "All tasks", symbol: "checklist", badge: counts.waitingOnYou)
-            }
-            ForEach(Self.stages) { stage in stageSection(stage) }
-        }
-        .listStyle(.sidebar)
-        .font(NekoFont.of(.callout))
-        .environment(\.defaultMinListRowHeight, 30)
-        .safeAreaInset(edge: .top, spacing: 0) {
+        // Header, list and footer are stacked rather than inset over the list:
+        // a sidebar List ignores safe-area insets, which drew rows underneath
+        // the header and let them take its clicks.
+        VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: NekoSpace.sm) {
                 WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace)
                     .menuStyle(.button).nekoButton(.quiet)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button { model.agentID = nil; page = .home; DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { NotificationCenter.default.post(name: .nekoFocusComposer, object: nil) } } label: {
+                Button { newTask() } label: {
                     Label("New task", systemImage: "square.and.pencil").frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .nekoButton(.secondary).controlSize(.large)
@@ -176,8 +169,17 @@ struct NativeSidebar: View {
                 NekoSearchField(title: "Find a task", text: $filter, size: .small)
             }
             .padding(.horizontal, NekoSpace.lg).padding(.vertical, NekoSpace.md)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            List(selection: $selection) {
+                Section {
+                    row(.home, title: "Home", symbol: "house", badge: 0)
+                    row(.tickets, title: "All tasks", symbol: "checklist", badge: counts.waitingOnYou)
+                }
+                ForEach(Self.stages) { stage in stageSection(stage) }
+            }
+            .listStyle(.sidebar)
+            .font(NekoFont.of(.callout))
+            .environment(\.defaultMinListRowHeight, 30)
+            Divider()
             HStack(spacing: NekoSpace.md) {
                 WatchingStatus(connected: model.connected, snapshot: model.snapshot)
                 Spacer()
@@ -202,6 +204,12 @@ struct NativeSidebar: View {
         .onChange(of: model.agentID) { _, id in selection = id.map { "agent:" + $0 } ?? page.rawValue }
         .onChange(of: page) { _, value in if model.agentID == nil { selection = value.rawValue } }
         .onChange(of: model.selectedWorkspace) { _, _ in model.agentID = nil }
+    }
+    /// New task: go to Home and put the cursor in its composer.
+    private func newTask() {
+        model.agentID = nil
+        page = .home
+        ComposerFocus.request()
     }
     private func matches(_ task: JSONValue) -> Bool {
         let query = filter.trimmingCharacters(in: .whitespaces)

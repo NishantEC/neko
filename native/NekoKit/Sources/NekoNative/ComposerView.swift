@@ -181,6 +181,15 @@ struct ComposerView: NSViewRepresentable {
     }
 }
 
+/// A request for the composer to take the cursor, kept until one does.
+@MainActor enum ComposerFocus {
+    static var pending = false
+    static func request() {
+        pending = true
+        NotificationCenter.default.post(name: .nekoFocusComposer, object: nil)
+    }
+}
+
 @MainActor private final class ComposerTextView: NSTextView {
     var placeholder = ""
     var submit: (() -> Void)?
@@ -191,14 +200,24 @@ struct ComposerView: NSViewRepresentable {
     var reportError: ((String) -> Void)?
     private var focusObserver: NSObjectProtocol?
 
-    /// "New task" asks the visible composer for the cursor.
+    /// "New task" asks the visible composer for the cursor. A composer that
+    /// is only now appearing (New task from another page) takes the pending
+    /// request when it lands in the window; one already on screen hears the
+    /// notification.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let focusObserver { NotificationCenter.default.removeObserver(focusObserver); self.focusObserver = nil }
         guard window != nil else { return }
         focusObserver = NotificationCenter.default.addObserver(forName: .nekoFocusComposer, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { guard let self, let window = self.window, window.isVisible else { return }; window.makeFirstResponder(self) }
+            MainActor.assumeIsolated { self?.takeFocus() }
         }
+        if ComposerFocus.pending { DispatchQueue.main.async { [weak self] in self?.takeFocus() } }
+    }
+
+    private func takeFocus() {
+        guard let window, window.isVisible else { return }
+        ComposerFocus.pending = false
+        window.makeFirstResponder(self)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
