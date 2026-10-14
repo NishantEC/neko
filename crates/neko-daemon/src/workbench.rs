@@ -1059,7 +1059,11 @@ impl Controller {
                 })?;
             } else {
                 if first_direct_run {
-                    match direct_stop(&result) {
+                    // With nothing changed on disk, a stop marker anywhere in the
+                    // answer counts; once files changed, only the closing line does.
+                    let untouched = native_runner::changed_files(&directory, split.and_then(|s| s.base.as_deref()).unwrap_or(&base), cancel)
+                        .is_ok_and(|changed| changed.is_empty());
+                    match direct_stop(&result, untouched) {
                         Some(DirectStop::Question(question)) => {
                             // As with any directly authorized work, try to
                             // resolve the question before handing it to the user.
@@ -1954,20 +1958,30 @@ enum DirectStop {
 }
 
 /// The agent's own decision to stop instead of finishing the work.
-fn direct_stop(result: &str) -> Option<DirectStop> {
-    let line = result.lines().rev().map(str::trim).find(|l| !l.is_empty())?;
-    let line = line.trim_start_matches(['*', '_', '#', '`', ' ']);
-    let (kind, rest) = line.split_once(':')?;
-    let detail: String = rest.trim().trim_matches(['*', '_', '`', ' ']).chars().take(1000).collect();
-    if detail.is_empty() {
-        return None;
-    }
-    match kind.trim_matches(['*', '_', '`', ' ']) {
-        "NEEDS_APPROVAL" => Some(DirectStop::NeedsApproval(detail)),
-        "NO_CHANGE" => Some(DirectStop::NoChange(detail)),
-        "QUESTION" => Some(DirectStop::Question(detail)),
-        _ => None,
-    }
+/// The agent's stop marker. Normally only the closing line counts, so a
+/// marker quoted earlier in a report of real work never stops it. When the
+/// agent changed nothing (`untouched`), any line that begins with a marker
+/// counts: agents often lead with "NO_CHANGE: …" and explain after, and a
+/// missed NO_CHANGE sends an empty diff through review and recovery, which
+/// then rebuilds a fix that already exists (ticket #4616 duplicated #4615).
+/// A marker mentioned inside a sentence never counts.
+fn direct_stop(result: &str, untouched: bool) -> Option<DirectStop> {
+    let lines: Vec<&str> = result.lines().filter(|l| !l.trim().is_empty()).collect();
+    let candidates: Vec<&str> = if untouched { lines } else { lines.last().copied().into_iter().collect() };
+    candidates.into_iter().rev().find_map(|line| {
+        let line = line.trim().trim_start_matches(['*', '_', '#', '`', ' ', '-', '>']);
+        let (kind, rest) = line.split_once(':')?;
+        let detail: String = rest.trim().trim_matches(['*', '_', '`', ' ']).chars().take(1000).collect();
+        if detail.is_empty() {
+            return None;
+        }
+        match kind.trim_matches(['*', '_', '`', ' ']) {
+            "NEEDS_APPROVAL" => Some(DirectStop::NeedsApproval(detail)),
+            "NO_CHANGE" => Some(DirectStop::NoChange(detail)),
+            "QUESTION" => Some(DirectStop::Question(detail)),
+            _ => None,
+        }
+    })
 }
 
 fn plan_question(plan: &str) -> Option<String> {
@@ -3002,11 +3016,16 @@ mod direct_stop_tests {
 
     #[test]
     fn reads_only_the_agents_final_stop_line() {
-        assert!(matches!(direct_stop("Plan...\n\n**NEEDS_APPROVAL:** drops a production table"), Some(DirectStop::NeedsApproval(w)) if w == "drops a production table"));
-        assert!(matches!(direct_stop("Checked.\nNO_CHANGE: already fixed in 4f2a"), Some(DirectStop::NoChange(w)) if w == "already fixed in 4f2a"));
-        assert!(matches!(direct_stop("QUESTION: which tenant?\n"), Some(DirectStop::Question(_))));
-        assert!(direct_stop("Fixed it.\nNO_CHANGE: was mentioned earlier\nAll tests pass.").is_none(), "only the last line counts");
-        assert!(direct_stop("NEEDS_APPROVAL:").is_none());
-        assert!(direct_stop("Implemented the fix and ran cargo test.").is_none());
+        assert!(matches!(direct_stop("Plan...\n\n**NEEDS_APPROVAL:** drops a production table", false), Some(DirectStop::NeedsApproval(w)) if w == "drops a production table"));
+        assert!(matches!(direct_stop("Checked.\nNO_CHANGE: already fixed in 4f2a", false), Some(DirectStop::NoChange(w)) if w == "already fixed in 4f2a"));
+        assert!(matches!(direct_stop("QUESTION: which tenant?\n", false), Some(DirectStop::Question(_))));
+        // The marker near the top, with the explanation after it (as ticket #4616's builder wrote it).
+        let top = "A fix for this exact crash is already open, so I made no changes.\n\nNO_CHANGE: PR #4615 already fixes this crash.\n\n- **Cause:** reads selected.id\n\nNext action: review and merge #4615.";
+        assert!(matches!(direct_stop(top, true), Some(DirectStop::NoChange(w)) if w == "PR #4615 already fixes this crash."));
+        assert!(direct_stop(top, false).is_none(), "with files changed, only the closing line can stop the work");
+        assert!(direct_stop("I considered whether NO_CHANGE: applies, but it does not.\nFixed the bug.", true).is_none(), "a mention inside a sentence is not a stop");
+        assert!(direct_stop("Fixed it.\nNO_CHANGE: was mentioned earlier\nAll tests pass.", false).is_none(), "only the last line counts");
+        assert!(direct_stop("NEEDS_APPROVAL:", false).is_none());
+        assert!(direct_stop("Implemented the fix and ran cargo test.", false).is_none());
     }
 }
