@@ -445,6 +445,8 @@ mod tests {
             last_attempt_ms: Some(100),
             last_result: String::new(),
             failures: 0,
+            name: None,
+            name_by_user: false,
         });
         state.mcp.receipts.push(ToolReceipt {
             id: "receipt".into(),

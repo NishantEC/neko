@@ -26,6 +26,8 @@ mod publish;
 mod admission;
 #[path = "workbench/runtime_settings.rs"]
 mod runtime_settings;
+#[path = "workbench/display_names.rs"]
+mod display_names;
 
 struct TaskClaim {
     task: Task,
@@ -511,6 +513,9 @@ impl Controller {
         };
         if let Some(turn) = queued { self.spawn_chat_worker(turn); }
         self.start_learning();
+        // Short names for tickets and watches; its own thread so a slow model
+        // never delays admission.
+        self.start_naming();
         let mcp = self.mcp.clone();
         std::thread::spawn(move || {
             loop {
@@ -1854,6 +1859,8 @@ fn save_suggested_responsibilities(
             last_attempt_ms: None,
             last_result: String::new(),
             failures: 0,
+            name: None,
+            name_by_user: false,
         };
         match store::apply(
             db,
@@ -2755,6 +2762,7 @@ mod tests {
                 pull_request: None,
                 landed_commit: None,
                 supervision: None,
+                display_title: None,
             }],
             ..Default::default()
         };

@@ -34,6 +34,7 @@ fn fixture(db: &Db) -> Snapshot {
             pull_request: None,
             landed_commit: None,
             supervision: None,
+            display_title: None,
         });
     }
     workbench::save(db, &s).unwrap();
@@ -983,6 +984,8 @@ fn source_fixture(db: &Db) -> Snapshot {
         last_attempt_ms: None,
         last_result: String::new(),
         failures: 0,
+        name: None,
+        name_by_user: false,
     });
     s.mcp.grants.push(ToolGrant {
         connection_id: "connection".into(),

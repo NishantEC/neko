@@ -148,6 +148,12 @@ pub struct Task {
     /// repositories set to land on main instead of opening pull requests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub landed_commit: Option<String>,
+    /// A short human name for the ticket ("Fix crash when saving a client's
+    /// basic info"). Generated in the background by a tool-free model call
+    /// only while `None`; `Command::RenameTask` sets it and it is then never
+    /// regenerated. `title` stays the source's own wording.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_title: Option<String>,
 }
 
 /// A reviewed result Neko pushed and opened for review. Never merged by Neko.
@@ -537,6 +543,12 @@ pub enum Command {
     CompleteTask {
         task_id: String,
     },
+    /// Give a ticket its own short name. An empty title clears it, so Neko
+    /// names it again. A name set here is never overwritten.
+    RenameTask {
+        task_id: String,
+        title: String,
+    },
     /// Commit, push and open a pull request for a reviewed result. Neko also
     /// does this on its own once an independent review passes; this retries
     /// or asks for it explicitly. Never merges.
@@ -655,6 +667,48 @@ mod tests {
         let saved = serde_json::to_value(snapshot).unwrap();
         assert_eq!(saved["workspace_folders"]["w"][1], "/repo/b");
         assert_eq!(saved["task_roots"]["t"], "/repo/b");
+    }
+    #[test]
+    fn display_names_are_optional_in_old_snapshots_and_round_trip() {
+        let task = serde_json::json!({
+            "id": "t", "workspace_id": "w", "issue_id": null, "title": "TypeError", "goal": "g",
+            "status": "Queued", "plan": "", "result": "", "worktree": null, "events": [],
+            "created_at_ms": 1, "updated_at_ms": 1
+        });
+        let watch = serde_json::json!({
+            "id": "r", "workspace_id": "w", "instruction": "Check Sentry", "connection_ids": ["c"],
+            "enabled": true, "prepare_low_risk": false, "next_due_ms": 0, "last_attempt_ms": null,
+            "last_result": "", "failures": 0
+        });
+        let mut value = serde_json::to_value(Snapshot::default()).unwrap();
+        value["tasks"] = serde_json::json!([task]);
+        value["mcp"]["responsibilities"] = serde_json::json!([watch]);
+        let mut snapshot: Snapshot = serde_json::from_value(value).unwrap();
+        assert_eq!(snapshot.tasks[0].display_title, None);
+        assert_eq!(snapshot.mcp.responsibilities[0].name, None);
+        assert!(!snapshot.mcp.responsibilities[0].name_by_user);
+        // Unset fields stay out of the JSON, so older readers see no change.
+        let saved = serde_json::to_value(&snapshot).unwrap();
+        assert!(saved["tasks"][0].get("display_title").is_none());
+        assert!(saved["mcp"]["responsibilities"][0].get("name").is_none());
+        assert!(saved["mcp"]["responsibilities"][0].get("name_by_user").is_none());
+        snapshot.tasks[0].display_title = Some("Fix crash when saving".into());
+        snapshot.mcp.responsibilities[0].name = Some("Sentry: errors".into());
+        snapshot.mcp.responsibilities[0].name_by_user = true;
+        let saved = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(saved["tasks"][0]["display_title"], "Fix crash when saving");
+        assert_eq!(saved["mcp"]["responsibilities"][0]["name"], "Sentry: errors");
+        assert_eq!(saved["mcp"]["responsibilities"][0]["name_by_user"], true);
+        assert_eq!(serde_json::from_value::<Snapshot>(saved).unwrap().tasks, snapshot.tasks);
+    }
+    #[test]
+    fn rename_commands_have_stable_json() {
+        let rename = serde_json::json!({"RenameTask": {"task_id": "t", "title": "Fix login"}});
+        let parsed: Command = serde_json::from_value(rename.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), rename);
+        let rename = serde_json::json!({"Mcp": {"RenameResponsibility": {"responsibility_id": "r", "name": "Sentry: errors"}}});
+        let parsed: Command = serde_json::from_value(rename.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), rename);
     }
     #[test]
     fn credential_debug_does_not_expose_key() {

@@ -287,6 +287,7 @@ mod tests {
             goal: "SECRET source text".into(), status: TaskStatus::ReadyForReview, plan: String::new(),
             result: result.into(), worktree: None, events: vec![], created_at_ms: 0, updated_at_ms: 0,
             source_revision: None, supervision: None, base_commit: None, pull_request: None, landed_commit: None,
+            display_title: None,
         }
     }
 

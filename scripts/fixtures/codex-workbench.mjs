@@ -25,7 +25,7 @@ assert.equal(args.includes('default_permissions="neko"'), !fullAccess, 'Full acc
 let prompt = '';
 for await (const chunk of process.stdin) prompt += chunk;
 // Tool-free classifiers are isolated from the user's setup; agents get all of it.
-const classifier = ['Select runtime settings for this Neko conversation.', 'This is a connection check.', "Classify the user's latest ticket message.", 'Extract bounded memory proposals'].some(start => prompt.startsWith(start));
+const classifier = ['Select runtime settings for this Neko conversation.', 'This is a connection check.', "Classify the user's latest ticket message.", 'Extract bounded memory proposals', 'Write a short name for this'].some(start => prompt.startsWith(start));
 const ambient = ['apps','browser_use','computer_use','plugins','remote_plugin','multi_agent','hooks','workspace_dependencies','skill_mcp_dependency_install'];
 if (classifier) {
   assert.ok(args.includes('--ignore-user-config') && args.includes('--ignore-rules'), 'Classifiers must not load the user config');
@@ -55,6 +55,15 @@ if (prompt.startsWith("Classify the user's latest ticket message.")) {
   const intent = message === 'Investigate the cause and fix it locally.' ? 'work'
     : message === 'Explain the cause only. Do not change anything.' ? 'read_only' : 'context';
   process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'agent_message',text:JSON.stringify({intent})}})}\n${JSON.stringify({type:'turn.completed'})}\n`);
+  process.exit(0);
+}
+if (prompt.startsWith('Write a short name for this')) {
+  // Background naming: tool-free, in an empty scratch folder, one line back.
+  for (const feature of ['shell_tool', 'unified_exec', 'view_image']) assert.ok(args.includes(`features.${feature}=false`), `Naming must disable ${feature}`);
+  assert.ok(!args.some(arg => arg.startsWith('mcp_servers.')), 'Naming has no tools');
+  assert.deepEqual(fs.readdirSync(process.cwd()), [], 'Naming uses an empty scratch folder');
+  const text = prompt.includes('<<<WATCH') ? 'Fixture: assigned bugs' : 'Fix the fixture ticket';
+  process.stdout.write(`${JSON.stringify({type:'item.completed',item:{type:'agent_message',text}})}\n${JSON.stringify({type:'turn.completed'})}\n`);
   process.exit(0);
 }
 if (prompt.startsWith('Extract bounded memory proposals')) {

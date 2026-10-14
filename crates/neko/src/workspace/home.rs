@@ -2799,6 +2799,7 @@ mod tests {
             pull_request: None,
             landed_commit: None,
             supervision: None,
+            display_title: None,
         }
     }
 
