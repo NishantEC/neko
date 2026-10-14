@@ -82,7 +82,7 @@ struct ToolsConnectionDetail: View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 10) {
                 if !tool["description"].string.isEmpty { Text(tool["description"].string).textSelection(.enabled) }
-                Text(tool["read_only"].bool ? "The server declares this tool read-only. Chat lookups can run without another prompt." : "Chat asks before each call. Enabled responsibilities may use their selected connections unattended.")
+                Text(tool["read_only"].bool ? "The server declares this tool read-only. Chat lookups can run without another prompt." : "Chat asks before each call. Turned-on watches may use their selected connections unattended.")
                 Text("Input schema").font(NekoFont.heading)
                 Text(tool["input_schema"].string.isEmpty ? String(data: (try? JSONEncoder().encode(tool["input_schema"])) ?? Data(), encoding: .utf8) ?? "Unavailable" : tool["input_schema"].string)
                     .font(NekoFont.mono).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

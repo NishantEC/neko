@@ -119,6 +119,8 @@ enum HotkeyFallbacks {
 
 struct PreferencesView: View {
     @AppStorage("neko.settings.tab") private var settingsTab: SettingsTab = .general
+    /// Inside the Settings hub, which lists the sections itself.
+    var inHub = false
     @State private var query = ""
     @State private var highlighted: SettingsTarget?
     @State private var searchFocus = 0
@@ -173,16 +175,20 @@ struct PreferencesView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
             HStack(spacing: NekoSpace.md) {
-                ViewThatFits(in: .horizontal) {
-                    sectionPicker.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
-                    sectionPicker.pickerStyle(.menu).fixedSize()
+                if !inHub {
+                    ViewThatFits(in: .horizontal) {
+                        sectionPicker.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
+                        sectionPicker.pickerStyle(.menu).fixedSize()
+                    }
                 }
                 Spacer(minLength: NekoSpace.md)
                 NekoSearchField(title: "Find a setting", text: $query, focusRequest: searchFocus).frame(width: 220)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .nekoAlignedWithGroupedForm()
             NekoPageIntro(title: query.isEmpty ? settingsTab.title : "Results", message: query.isEmpty ? settingsTab.summary : "Choose a setting to jump to it.")
                 .accessibilityElement(children: .combine)
+                .nekoAlignedWithGroupedForm()
             ScrollViewReader { proxy in
             Group {
                 if !query.isEmpty {
@@ -228,7 +234,7 @@ struct PreferencesView: View {
                         .disabled(clipboard.enabled == nil)
                         if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
                     }
-                }.formStyle(.grouped)
+                }.nekoGroupedForm()
                 case .ai:
 
                 Form {
@@ -296,7 +302,7 @@ struct PreferencesView: View {
                             .font(NekoFont.meta).foregroundStyle(.secondary)
                     }
                     Section("Budget") {
-                        LabeledContent("Stop a ticket after") {
+                        LabeledContent("Stop a task after") {
                             HStack {
                                 TextField("Budget", text: $budget, prompt: Text("No limit")).labelsHidden().frame(width: 90).textFieldStyle(.roundedBorder)
                                 Text("US$").foregroundStyle(.secondary)
@@ -305,28 +311,28 @@ struct PreferencesView: View {
                             }
                         }.settingsTarget(.budget)
                         if budgetCents == .invalid { Text("Enter an amount between 0.01 and 1000, or leave it empty.").font(NekoFont.meta).foregroundStyle(NekoStyle.amber) }
-                        Text("Counts the cost Claude Code and OpenCode report for each ticket and stops the ticket when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.")
+                        Text("Counts the cost Claude Code and OpenCode report for each task and stops it when it passes this amount. Codex subscriptions don’t report a price, so they aren’t limited here. Leave empty for no limit.")
                             .font(NekoFont.meta).foregroundStyle(.secondary)
-                        Picker("Tickets at once", selection: Binding(get: { model.snapshot["max_running_tickets"].int }, set: { setTicketLimit($0) })) {
+                        Picker("Tasks at once", selection: Binding(get: { model.snapshot["max_running_tickets"].int }, set: { setTicketLimit($0) })) {
                             Text("No limit").tag(0)
                             ForEach([1, 2, 3, 5], id: \.self) { Text("\($0)").tag($0) }
                         }.settingsTarget(.ticketsAtOnce)
-                        Text("Other tickets wait their turn and start as running ones finish. Work already running is not stopped.")
+                        Text("Other tasks wait their turn and start as running ones finish. Work already running is not stopped.")
                             .font(NekoFont.meta).foregroundStyle(.secondary)
                     }
                     Section {
                         LabeledContent("Start over") {
                             Button("Start over…", role: .destructive) { confirmingStartOver = true }.nekoButton(.destructive)
                         }.settingsTarget(.startOver)
-                        Text("Removes every ticket except those with a pull request, and lets your watches file their issues again from scratch. Memory, settings, workspaces, tools and watches stay.")
+                        Text("Removes every task except those with a pull request, and lets your watches file their issues again from scratch. Memory, settings, workspaces, tools and watches stay.")
                             .font(NekoFont.meta).foregroundStyle(.secondary)
                     }
                     .confirmationDialog("Start over?", isPresented: $confirmingStartOver, titleVisibility: .visible) {
-                        Button("Remove tickets and start over", role: .destructive) { startOver() }
+                        Button("Remove tasks and start over", role: .destructive) { startOver() }
                     } message: {
-                        Text("Tickets without a pull request are removed, along with their worktrees and unpublished changes. Tickets with a pull request stay. This can’t be undone.")
+                        Text("Tasks without a pull request are removed, along with their worktrees and unpublished changes. Tasks with a pull request stay. This can’t be undone.")
                     }
-                }.formStyle(.grouped)
+                }.nekoGroupedForm()
                 case .search:
 
                 Form {
@@ -356,7 +362,7 @@ struct PreferencesView: View {
                                 .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
                     }
-                }.formStyle(.grouped)
+                }.nekoGroupedForm()
                 case .permissions:
 
                 PermissionsView(model: model)
@@ -372,7 +378,7 @@ struct PreferencesView: View {
                     preferenceToggle("Include idle agents", "agents-include-idle")
                     Text("Legacy agent providers are opt-in. These settings do not enable a provider.").font(NekoFont.meta).foregroundStyle(.secondary)
                     } header: { Text("Legacy providers").settingsTarget(.legacyAgents) }
-                }.formStyle(.grouped)
+                }.nekoGroupedForm()
                 case .about:
 
                 VStack(spacing: 16) {

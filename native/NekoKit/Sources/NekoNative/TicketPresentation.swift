@@ -21,7 +21,7 @@ enum TicketPresentation {
         let message = task["events"].array.reversed().first { !["user", "note"].contains($0["role"].string) }?["message"].string ?? ""
         let line = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if line.contains("not a git repository") {
-            return "This ticket isn’t linked to a Git repository yet, so Neko couldn’t make its working copy."
+            return "This task isn’t linked to a Git repository yet, so Neko couldn’t make its working copy."
         }
         if line.contains("daemon restart") { return "Stopped when Neko restarted. Start it again to continue." }
         if line.hasPrefix("Independent verification failed:") {
@@ -89,7 +89,7 @@ enum TicketPresentation {
         var note: String {
             switch self {
             case .ready: "Ready for your review"
-            case .completed: "Ticket completed"
+            case .completed: "Task completed"
             case .reviewing: "Independent review is in progress. This output has not cleared the current review."
             case .stopped: "Work stopped. This saved output may be from an earlier attempt."
             case .previous: "Saved from earlier work; it does not describe the current attempt."

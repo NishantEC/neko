@@ -189,6 +189,17 @@ struct ComposerView: NSViewRepresentable {
     var menuKey: ((ComposerMenuKey) -> Bool)?
     var attach: ((ComposerAttachment) -> Void)?
     var reportError: ((String) -> Void)?
+    private var focusObserver: NSObjectProtocol?
+
+    /// "New task" asks the visible composer for the cursor.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let focusObserver { NotificationCenter.default.removeObserver(focusObserver); self.focusObserver = nil }
+        guard window != nil else { return }
+        focusObserver = NotificationCenter.default.addObserver(forName: .nekoFocusComposer, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { guard let self, let window = self.window, window.isVisible else { return }; window.makeFirstResponder(self) }
+        }
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.type == .keyDown, [36, 76].contains(event.keyCode),

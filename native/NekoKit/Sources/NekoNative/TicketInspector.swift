@@ -17,19 +17,19 @@ struct TicketInspector: View {
             if ticket == .null {
                 VStack(spacing: 8) {
                     Image(systemName: "tray").font(NekoFont.of(.headline)).foregroundStyle(.tertiary)
-                    Text("No ticket yet").font(NekoFont.heading)
-                    Text("When Neko proposes work in this chat, its ticket shows here.").font(NekoFont.meta).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Text("No task yet").font(NekoFont.heading)
+                    Text("When Neko proposes work in this chat, its task shows here.").font(NekoFont.meta).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        header("Ticket")
+                        header("Task")
                         Text(ticket["title"].string).font(NekoFont.heading).fixedSize(horizontal: false, vertical: true).padding(.bottom, 12)
                         row("Status") { Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(ticketStatusColor(ticket["status"].string)) }
                         row("Workspace") { Text(workspaceName) }
                         if !folder.isEmpty { row("Folder") { Text((folder as NSString).lastPathComponent).help(folder) } }
                         row("Agent") { Text(AgentModelCatalog.label(provider: model.snapshot["agent_runtime"]["provider"].string, model: model.snapshot["agent_runtime"]["model"].string, catalog: ModelCatalog())) }
-                        if let cents = budgetCents { row("Budget") { Text(String(format: "$%.2f per ticket", Double(cents) / 100)) } }
+                        if let cents = budgetCents { row("Budget") { Text(String(format: "$%.2f per task", Double(cents) / 100)) } }
                         if !ticket["plan"].string.isEmpty {
                             header("Plan")
                             Text(planSummary).font(NekoFont.meta).foregroundStyle(.secondary).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
@@ -83,13 +83,13 @@ struct TicketInspector: View {
             default: EmptyView()
             }
             HStack(spacing: 8) {
-                Button { if let id { openFull(id) } } label: { Text("Open Ticket").frame(maxWidth: .infinity) }
+                Button { if let id { openFull(id) } } label: { Text("Open task").frame(maxWidth: .infinity) }
                 if !folder.isEmpty {
                     Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: folder)]) } label: { Text("Show in Finder").frame(maxWidth: .infinity) }
                 }
             }
             if !["Completed", "Cancelled", "Failed"].contains(status) {
-                Button(role: .destructive) { run("CancelTask") } label: { Text("Cancel Ticket").frame(maxWidth: .infinity) }.nekoButton(.quiet).foregroundStyle(.red)
+                Button(role: .destructive) { run("CancelTask") } label: { Text("Cancel task").frame(maxWidth: .infinity) }.nekoButton(.quiet).foregroundStyle(.red)
             }
         }.controlSize(.regular).disabled(model.busy)
     }
@@ -123,7 +123,7 @@ struct TicketInspector: View {
                     Task { await model.workbench(.command("SetLandOnMain", ["repository": .string(repository), "enabled": .bool(enabled)])) }
                 }))
                 .toggleStyle(.switch).controlSize(.mini).disabled(model.busy)
-                .help("On: reviewed tickets in \((repository as NSString).lastPathComponent) fast-forward your local main, nothing pushed. Off: Neko opens a pull request.")
+                .help("On: reviewed tasks in \((repository as NSString).lastPathComponent) fast-forward your local main, nothing pushed. Off: Neko opens a pull request.")
             }
         }
     }

@@ -3,7 +3,8 @@ import SwiftUI
 struct TicketCard: View {
     let id: String
     let title: String
-    let workspace: String
+    /// Source, repository and pull request on one line.
+    let detail: String
     let status: String
     let updated: String
     let highlighted: Bool
@@ -22,10 +23,13 @@ struct TicketCard: View {
                 Text(note).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text(friendlyTaskStatus(status)).font(NekoFont.meta).foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    Text(workspace).lineLimit(1)
-                    Spacer(minLength: 4)
+                // Only where it says more than the column header does.
+                if [.needsYou, .running].contains(TaskStage(status: status)) {
+                    Text(friendlyTaskStatus(status)).font(NekoFont.meta).foregroundStyle(.secondary)
+                }
+                HStack(spacing: NekoSpace.sm) {
+                    Text(detail).lineLimit(1)
+                    Spacer(minLength: NekoSpace.xxs)
                     Text(updated).monospacedDigit().lineLimit(1)
                 }.font(NekoFont.meta).foregroundStyle(.secondary)
             }

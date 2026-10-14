@@ -67,7 +67,7 @@ struct ToolsConnectionsList: View {
                     .font(NekoFont.body).foregroundStyle(N.text3).frame(width: 26).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: NekoSpace.xs) {
                     Text(connection["label"].string).font(NekoFont.heading).foregroundStyle(N.text).lineLimit(2)
-                    Text(scope).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2)
+                    Text(ToolsPresentation.connectionDetail(connection)).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .trailing, spacing: 3) {
                     Text(status).foregroundStyle(status == "Needs attention" || status == "Sign in needed" ? NekoStyle.amber : N.text3)

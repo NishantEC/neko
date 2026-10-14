@@ -51,7 +51,11 @@ struct StatusMenu: View {
 
 struct WorkspaceView: View {
     @ObservedObject var model: AppModel
-    @State private var page = Page.start()
+    @State private var page: Page
+    init(model: AppModel, page: Page = Page.start()) {
+        self.model = model
+        _page = State(initialValue: page)
+    }
     @State private var columns: NavigationSplitViewVisibility = ProcessInfo.processInfo.environment["NEKO_SIDEBAR"] == "hidden" ? .detailOnly : .all
     @AppStorage("neko.look") private var look = ProcessInfo.processInfo.environment["NEKO_LOOK"] ?? NekoLook.ambient.rawValue
     @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
@@ -76,8 +80,8 @@ struct WorkspaceView: View {
                         if let agentID = model.agentID {
                             let ticket = model.tasks.first { $0.recordID == agentID } ?? .null
                             TicketDetail(model: model, id: agentID, close: { model.closeAgent() }, fullPage: true)
-                                .navigationTitle("NEK-" + String(agentID.prefix(4)).uppercased() + "  " + ticket["title"].string)
-                                .navigationSubtitle(friendlyTaskStatus(ticket["status"].string))
+                                .navigationTitle(TaskText(task: ticket, snapshot: model.snapshot).title)
+                                .navigationSubtitle(([friendlyTaskStatus(ticket["status"].string)] + [TaskText(task: ticket, snapshot: model.snapshot).detail]).filter { !$0.isEmpty }.joined(separator: " · "))
                                 .id(agentID)
                         } else { content(for: page) }
                     }
@@ -124,13 +128,9 @@ struct WorkspaceView: View {
         switch page {
         case .home: TodayView(model: model)
         case .tickets: TicketsView(model: model)
-        case .workspaces: WorkspacesView(model: model)
-        case .watching: ResponsibilitiesView(model: model)
-        case .tools: ToolsView(model: model)
-        case .memory: MemoryView(model: model)
-        case .profiles: ProfilesView(model: model)
-        case .schedules: SchedulesView(model: model)
-        case .settings: PreferencesView(model: model)
+        case .workspaces, .watching, .tools, .memory, .profiles, .schedules, .settings:
+            // Setup pages are sections of Settings; old links land on the right one.
+            SettingsHub(model: model, section: SettingsSection(page: page) ?? .general).id(page)
         case .activity: ActivityGallery()
         case .replyViews: ReplyGallery()
         case .designLab: DesignLabView()
@@ -138,116 +138,115 @@ struct WorkspaceView: View {
     }
 }
 
-/// Native source-list sidebar: on macOS 26 this is the system's floating Liquid Glass sidebar.
+/// The sidebar is your work: tasks grouped by what they need, newest first.
+/// Setup lives in Settings (the gear in the footer, or ⌘,).
 struct NativeSidebar: View {
     @ObservedObject var model: AppModel
     @Binding var page: Page
-    /// Row tags: a page's raw value, "agent:<id>" or "group:<filter>".
+    /// Row tags: a page's raw value, "agent:<id>" or "stage:<stage>".
     @State private var selection: String?
+    @State private var filter = ""
     @Binding var addingWorkspace: Bool
     @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
+    private let shown = 5
+    private static let stages: [TaskStage] = [.needsYou, .review, .running, .upNext]
     var body: some View {
+        let counts = TaskCounts(tasks: model.tasks)
         List(selection: $selection) {
             Section {
-                row(.home)
-                row(.tickets)
+                row(.home, title: "Home", symbol: "house", badge: 0)
+                row(.tickets, title: "All tasks", symbol: "checklist", badge: counts.waitingOnYou)
             }
-            ForEach(AgentSidebarGroup.allCases) { group in agentSection(group) }
-            ForEach(Page.sidebarGroups, id: \.title) { group in
-                Section(group.title) {
-                    ForEach(group.pages) { item in row(item) }
-                }
-            }
+            ForEach(Self.stages) { stage in stageSection(stage) }
         }
         .listStyle(.sidebar)
         .font(NekoFont.of(.callout))
-        .environment(\.defaultMinListRowHeight, 32)
-        // Where Neko works sits at the top, like a Codex or Xcode project picker.
+        .environment(\.defaultMinListRowHeight, 30)
         .safeAreaInset(edge: .top, spacing: 0) {
-            WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace)
-                .menuStyle(.button).nekoButton(.quiet)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16).padding(.vertical, 12)
+            VStack(alignment: .leading, spacing: NekoSpace.sm) {
+                WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace)
+                    .menuStyle(.button).nekoButton(.quiet)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button { model.agentID = nil; page = .home; DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { NotificationCenter.default.post(name: .nekoFocusComposer, object: nil) } } label: {
+                    Label("New task", systemImage: "square.and.pencil").frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .nekoButton(.secondary).controlSize(.large)
+                .keyboardShortcut("n", modifiers: .command)
+                .help("Describe what you want done (⌘N)")
+                NekoSearchField(title: "Find a task", text: $filter, size: .small)
+            }
+            .padding(.horizontal, NekoSpace.lg).padding(.vertical, NekoSpace.md)
         }
-        // Status and app controls live in the sidebar footer.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: NekoSpace.md) {
                 WatchingStatus(connected: model.connected, snapshot: model.snapshot)
                 Spacer()
                 Menu {
                     Picker("Appearance", selection: $appearance) { ForEach(NekoAppearance.allCases) { Text($0.title).tag($0.rawValue) } }.pickerStyle(.inline)
                 } label: { Image(systemName: "paintpalette") }
                 .menuStyle(.button).nekoButton(.quiet).menuIndicator(.hidden).fixedSize()
-                .help("Choose light, dark, or system appearance").accessibilityLabel("Appearance")
-                Button { PaletteController.shared.toggle(model: model) } label: { Image(systemName: "command") }
-                    .nekoButton(.quiet).help("Quick panel (⌘K)").accessibilityLabel("Quick panel")
+                .help("Light, dark or match your Mac").accessibilityLabel("Appearance")
+                Button { model.agentID = nil; page = .settings } label: { Image(systemName: "gearshape") }
+                    .nekoButton(.quiet).help("Settings (⌘,)").accessibilityLabel("Settings")
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 16).padding(.vertical, 14)
+            .padding(.horizontal, NekoSpace.lg).padding(.vertical, NekoSpace.md)
         }
         .onAppear { selection = page.rawValue }
         .onChange(of: selection) { _, value in
             guard let value else { return }
             if value.hasPrefix("agent:") { model.openAgent(String(value.dropFirst(6)), from: page) }
-            else if value.hasPrefix("group:") { model.showAgents(String(value.dropFirst(6))); page = .tickets }
+            else if value.hasPrefix("stage:") { model.showAgents(String(value.dropFirst(6))); page = .tickets }
             else if let chosen = Page(rawValue: value) { guard chosen != page || model.agentID != nil else { return }; model.agentID = nil; if chosen == .tickets { model.agentFilter = "all" }; page = chosen }
         }
         .onChange(of: model.agentID) { _, id in selection = id.map { "agent:" + $0 } ?? page.rawValue }
         .onChange(of: page) { _, value in if model.agentID == nil { selection = value.rawValue } }
         .onChange(of: model.selectedWorkspace) { _, _ in model.agentID = nil }
     }
-    @ViewBuilder private func agentSection(_ group: AgentSidebarGroup) -> some View {
-        let tasks = group.tasks(in: model.tasks)
+    private func matches(_ task: JSONValue) -> Bool {
+        let query = filter.trimmingCharacters(in: .whitespaces)
+        if query.isEmpty { return true }
+        let text = TaskText(task: task, snapshot: model.snapshot)
+        return text.title.localizedCaseInsensitiveContains(query) || text.detail.localizedCaseInsensitiveContains(query) || task["title"].string.localizedCaseInsensitiveContains(query)
+    }
+    @ViewBuilder private func stageSection(_ stage: TaskStage) -> some View {
+        let tasks = model.tasks.filter { TaskStage(status: $0["status"].string) == stage && matches($0) }
+            .sorted { stage == .upNext ? $0["created_at_ms"].int < $1["created_at_ms"].int : $0["updated_at_ms"].int > $1["updated_at_ms"].int }
+        // The queue only needs to say what starts next; the rest is a click away.
+        let limit = stage == .upNext && filter.isEmpty ? 1 : shown
         if !tasks.isEmpty {
             Section {
-                ForEach(tasks.prefix(5), id: \.recordID) { task in
-                    agentRow(task)
-                }
-                if tasks.count > 5 {
-                    Text("Show all \(tasks.count)").foregroundStyle(.secondary).tag("group:" + group.rawValue)
+                ForEach(tasks.prefix(limit), id: \.recordID) { task in taskRow(task, stage: stage) }
+                if tasks.count > limit {
+                    Text("Show all \(tasks.count)").foregroundStyle(.secondary).tag("stage:" + stage.rawValue)
                 }
             } header: {
                 HStack {
-                    Text(group.title)
+                    Text(stage.title)
                     Spacer()
                     Text(tasks.count, format: .number).monospacedDigit()
                 }.accessibilityElement(children: .combine)
             }
         }
     }
-    private func agentRow(_ task: JSONValue) -> some View {
-        let title = task["title"].string
-        let status = task["status"].string
-        let ticketCode = String(task.recordID.prefix(4)).uppercased()
-        let tooltip = "\(title)\nNEK-\(ticketCode) · \(friendlyTaskStatus(status))"
-        return HStack(spacing: 8) {
-            Circle().fill(ticketStatusColor(status))
-                .frame(width: 6, height: 6).frame(width: 18).accessibilityHidden(true)
-            Text(title).lineLimit(1)
+    private func taskRow(_ task: JSONValue, stage: TaskStage) -> some View {
+        let text = TaskText(task: task, snapshot: model.snapshot)
+        return HStack(spacing: NekoSpace.sm) {
+            Circle().fill(stage.color).frame(width: 7, height: 7).frame(width: 16).accessibilityHidden(true)
+            Text(text.title).lineLimit(1)
         }
         .tag("agent:" + task.recordID)
-        .help(tooltip)
+        .help([text.title, text.detail, text.sourceTitle].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: "\n"))
+        .accessibilityLabel("\(text.title), \(stage.title)")
     }
-    private func row(_ item: Page) -> some View {
-        let attention = item == .tickets ? AgentSidebarGroup.needsYou.tasks(in: model.tasks).count : 0
-        return Button {
+    private func row(_ item: Page, title: String, symbol: String, badge: Int) -> some View {
+        Button {
             model.agentID = nil
             if item == .tickets { model.showAgents() }
             page = item
         } label: {
-            Label(item.title, systemImage: item.symbol).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-        }.buttonStyle(.plain).badge(attention).tag(item.rawValue)
-    }
-    private func workspaceRow(_ id: String?, name: String, color: Color) -> some View {
-        let selected = model.selectedWorkspace == id
-        return Button { model.selectedWorkspace = id } label: {
-            HStack(spacing: 8) {
-                RoundedRectangle(cornerRadius: NekoRadius.micro, style: .continuous).fill(color).frame(width: 10, height: 10).frame(width: 18)
-                Text(name).lineLimit(1)
-                Spacer()
-                if selected { Image(systemName: "checkmark").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
-            }.contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+            Label(title, systemImage: symbol).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }.buttonStyle(.plain).badge(badge).tag(item.rawValue)
     }
 }
 

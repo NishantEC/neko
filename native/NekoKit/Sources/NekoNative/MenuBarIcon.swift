@@ -16,7 +16,7 @@ enum MenuBarState: Equatable {
         switch self {
         case .idle: "Neko"
         case .working: "Neko, working"
-        case .needsYou(let count): "Neko, \(count) \(count == 1 ? "ticket needs" : "tickets need") you"
+        case .needsYou(let count): "Neko, \(count) \(count == 1 ? "task needs" : "tasks need") you"
         }
     }
 }

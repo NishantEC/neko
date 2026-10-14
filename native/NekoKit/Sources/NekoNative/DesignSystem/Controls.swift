@@ -108,7 +108,7 @@ func friendlyTaskStatus(_ status: String) -> String {
     case "Reviewing": "Checking the result"
     case "Completed": "Completed"
     case "Cancelled": "Cancelled"
-    case "Failed": "Needs attention"
+    case "Failed": "Stopped"
     default: status
     }
 }

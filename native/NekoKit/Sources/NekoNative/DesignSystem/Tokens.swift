@@ -115,6 +115,8 @@ enum NekoLayout {
     static let messageGap: CGFloat = 24
     static let authorGap: CGFloat = 8
     static let messageInset: CGFloat = 16
+    /// The side margin macOS draws inside a grouped Form.
+    static let groupedFormInset: CGFloat = 20
 }
 
 /// How wide a page's content column may grow.

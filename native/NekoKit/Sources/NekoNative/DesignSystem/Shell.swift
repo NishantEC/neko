@@ -370,3 +370,14 @@ struct NekoReadMore: View {
         }.font(NekoFont.body).textSelection(.enabled)
     }
 }
+
+// MARK: - Forms
+
+extension View {
+    /// A grouped settings form. macOS insets its boxes by
+    /// `NekoLayout.groupedFormInset` and offers no way to remove it, so a
+    /// page header above one is indented by `nekoAlignedWithGroupedForm()`.
+    func nekoGroupedForm() -> some View { formStyle(.grouped) }
+    /// Lines a header up with the boxes of a grouped form below it.
+    func nekoAlignedWithGroupedForm() -> some View { padding(.horizontal, NekoLayout.groupedFormInset) }
+}

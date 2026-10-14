@@ -236,7 +236,9 @@ private actor ControlledTransport {
         let tasks = ["AwaitingApproval", "ReadyForReview", "Failed", "Building", "Queued", "Completed", "Cancelled"].map { JSONValue.object(["status": .string($0)]) }
         let summary = StatusSummary(snapshot: .object(["tasks": .array(tasks)]))
         XCTAssertEqual(summary.needsAttention, 3)
-        XCTAssertEqual(summary.working, 2)
+        XCTAssertEqual(summary.working, 1)
+        XCTAssertEqual(summary.upNext, 1)
+        XCTAssertEqual(summary.workingLabel, "1 running · 1 up next")
         XCTAssertEqual(summary.badge, "3")
         XCTAssertNil(StatusSummary(snapshot: .null).badge)
     }

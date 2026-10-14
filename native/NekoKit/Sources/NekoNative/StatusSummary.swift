@@ -1,16 +1,22 @@
+import Foundation
 import NekoKit
 
-/// Counts daemon-owned task state for the native menu. Includes all workspaces
-/// so a selected workspace cannot conceal an approval needed elsewhere.
+/// The one-line answer to "is anything waiting on me?", built from the same
+/// stages as the sidebar and the board so every surface gives the same count.
 struct StatusSummary: Equatable {
     let needsAttention: Int
     let working: Int
+    let upNext: Int
     init(snapshot: JSONValue) {
-        let tasks = snapshot["tasks"].array
-        needsAttention = tasks.filter { ["AwaitingApproval", "ReadyForReview", "Failed"].contains($0["status"].string) }.count
-        working = tasks.filter { ["Queued", "Planning", "Building", "Reviewing"].contains($0["status"].string) }.count
+        let counts = TaskCounts(tasks: snapshot["tasks"].array)
+        needsAttention = counts.waitingOnYou
+        working = counts[.running]
+        upNext = counts[.upNext]
     }
-    var attentionLabel: String { needsAttention == 0 ? "Nothing needs your attention" : "\(needsAttention) \(needsAttention == 1 ? "ticket needs" : "tickets need") your attention" }
-    var workingLabel: String { working == 0 ? "No tasks running" : "\(working) \(working == 1 ? "task" : "tasks") in progress" }
+    var attentionLabel: String { needsAttention == 0 ? "Nothing is waiting on you" : "\(needsAttention) \(needsAttention == 1 ? "task is" : "tasks are") waiting on you" }
+    var workingLabel: String {
+        let running = working == 0 ? "Nothing running" : "\(working) running"
+        return upNext == 0 ? running : "\(running) · \(upNext) up next"
+    }
     var badge: String? { needsAttention > 0 ? String(needsAttention) : nil }
 }

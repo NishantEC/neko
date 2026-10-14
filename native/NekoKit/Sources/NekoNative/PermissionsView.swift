@@ -84,7 +84,7 @@ struct PermissionsView: View {
                     .font(.callout).foregroundStyle(.secondary)
             } header: { Text("Agent access") }
         }
-        .formStyle(.grouped)
+        .nekoGroupedForm()
         .scrollContentBackground(.hidden)
         .task {
             if let reply = try? await model.request(.string("GetClipboardHistoryEnabled")) { try? clipboard.load(reply) }

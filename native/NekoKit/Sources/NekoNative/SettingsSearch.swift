@@ -52,8 +52,8 @@ enum SettingsTarget: String, CaseIterable, Identifiable, Sendable {
         case .runtime: "Agent runtime"
         case .model: "Model"
         case .customModel: "Exact model ID"
-        case .budget: "Ticket budget"
-        case .ticketsAtOnce: "Tickets at once"
+        case .budget: "Task budget"
+        case .ticketsAtOnce: "Tasks at once"
         case .startOver: "Start over"
         case .includedFolders: "Included folders"
         case .addFolder: "Add a folder"
@@ -76,7 +76,7 @@ enum SettingsTarget: String, CaseIterable, Identifiable, Sendable {
         case .customModel: ["id", "custom", "manual"]
         case .budget: ["cost", "money", "limit", "spend", "dollars", "price"]
         case .ticketsAtOnce: ["concurrency", "parallel", "one at a time", "queue", "limit", "workers"]
-        case .startOver: ["reset", "clear", "delete tickets", "fresh", "wipe"]
+        case .startOver: ["reset", "clear", "delete tasks", "delete tickets", "fresh", "wipe"]
         case .includedFolders: ["files", "quick panel", "scope", "directories"]
         case .addFolder: ["folder", "directory", "path"]
         case .permissions: ["full disk access", "accessibility", "privacy", "access"]

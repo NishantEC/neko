@@ -49,7 +49,7 @@ struct DiagnosticsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .nekoGroupedForm()
         .scrollContentBackground(.hidden)
     }
     private func run() {

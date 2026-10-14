@@ -34,7 +34,7 @@ import NekoKit
         let alert = NSAlert()
         alert.messageText = "Uninstall Neko?"
         alert.informativeText = "Neko stops all work, removes its login item and shortcut, and moves the app to the Trash. Your repositories are not touched. You can restore anything from the Trash."
-        let keepData = NSButton(checkboxWithTitle: "Also move Neko’s data to the Trash (memory, tickets, settings and task worktrees)", target: nil, action: nil)
+        let keepData = NSButton(checkboxWithTitle: "Also move Neko’s data to the Trash (memory, tasks, settings and task worktrees)", target: nil, action: nil)
         keepData.state = .off
         alert.accessoryView = keepData
         alert.addButton(withTitle: "Uninstall")
