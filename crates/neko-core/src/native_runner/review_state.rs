@@ -26,6 +26,19 @@ pub struct ReviewState {
     config: [u8; 32],
     metadata: BTreeMap<PathBuf, Option<FileState>>,
     sources: BTreeMap<PathBuf, Option<FileState>>,
+    submodules: BTreeMap<PathBuf, Submodule>,
+}
+
+/// What sits at a submodule (gitlink) path. The pinned commit is already in
+/// the HEAD and index manifests; this is the working copy behind it, which
+/// the parent's own file listing never sees.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Submodule {
+    /// Checked out: captured exactly like the parent, recursively.
+    CheckedOut(Box<ReviewState>),
+    /// Never initialized (the usual state in a task worktree): whatever files
+    /// are in the folder, normally none.
+    Unpopulated(BTreeMap<PathBuf, Option<FileState>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +100,10 @@ impl Budget<'_> {
 /// plus nonignored untracked files are hashed. Ignored caches/dependencies
 /// are omitted; changes to ignore rules and Git control metadata are not.
 ///
-/// Two complete observations must agree. Unsupported submodules, special
+/// Submodules are captured too: a checked-out one recursively, an empty one
+/// by whatever files appear in its folder.
+///
+/// Two complete observations must agree. Sparse directory entries, special
 /// files, unsafe metadata paths, races, cancellation and oversized evidence
 /// fail closed. This is before/after integrity evidence, not a transactional
 /// filesystem monitor or a security boundary against a full-access process.
@@ -243,14 +259,26 @@ fn capture_once(directory: &Path, budget: &mut Budget<'_>) -> Result<ReviewState
         }
     }
     let mut paths = BTreeSet::new();
+    let mut gitlinks = BTreeSet::new();
     for listing in [&head_tree, &index] {
         for record in listing.split('\0').filter(|s| !s.is_empty()) {
             let (header, file) = record.split_once('\t').ok_or("Invalid Git file manifest")?;
-            if header.starts_with("160000 ") || header.starts_with("040000 ") {
-                return Err("Review snapshots require expanded source files; submodules and sparse directory entries are unsupported".into());
+            if header.starts_with("040000 ") {
+                return Err("Review snapshots require expanded source files; sparse directory entries are unsupported".into());
             }
-            paths.insert(PathBuf::from(file));
+            if header.starts_with("160000 ") {
+                gitlinks.insert(PathBuf::from(file));
+            } else {
+                paths.insert(PathBuf::from(file));
+            }
         }
+    }
+    let mut submodules = BTreeMap::new();
+    for path in gitlinks {
+        validate_relative(&path)?;
+        let folder = repository.join(&path);
+        check_ancestors(&folder)?;
+        submodules.insert(path, submodule(&folder, budget)?);
     }
     let untracked = git_output(
         &repository,
@@ -284,7 +312,50 @@ fn capture_once(directory: &Path, budget: &mut Budget<'_>) -> Result<ReviewState
         config: Sha256::digest(config.as_bytes()).into(),
         metadata,
         sources,
+        submodules,
     })
+}
+
+fn submodule(folder: &Path, budget: &mut Budget<'_>) -> Result<Submodule, String> {
+    match fs::symlink_metadata(folder) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Submodule::Unpopulated(BTreeMap::new())),
+        Err(e) => return Err(format!("Cannot inspect submodule {}: {e}", folder.display())),
+        Ok(m) if !m.is_dir() => {
+            return Err(format!("Unsupported or redirected submodule: {}", folder.display()));
+        }
+        Ok(_) => {}
+    }
+    if fs::symlink_metadata(folder.join(".git")).is_ok() {
+        let state = capture_once(folder, budget)?;
+        // A broken submodule link would resolve to the parent instead.
+        if state.repository != folder.canonicalize().map_err(|e| e.to_string())? {
+            return Err(format!("Submodule {} does not resolve to its own repository", folder.display()));
+        }
+        return Ok(Submodule::CheckedOut(Box::new(state)));
+    }
+    let mut files = BTreeMap::new();
+    unpopulated_files(folder, folder, budget, &mut files)?;
+    Ok(Submodule::Unpopulated(files))
+}
+
+fn unpopulated_files(
+    root: &Path,
+    folder: &Path,
+    budget: &mut Budget<'_>,
+    out: &mut BTreeMap<PathBuf, Option<FileState>>,
+) -> Result<(), String> {
+    budget.check()?;
+    for entry in fs::read_dir(folder).map_err(|e| e.to_string())? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        if meta.is_dir() {
+            unpopulated_files(root, &path, budget, out)?;
+        } else {
+            let relative = path.strip_prefix(root).map_err(|e| e.to_string())?.to_owned();
+            out.insert(relative, fingerprint(&path, budget, true)?);
+        }
+    }
+    Ok(())
 }
 
 fn validate_relative(path: &Path) -> Result<(), String> {
@@ -708,5 +779,44 @@ mod tests {
                 .unwrap_err()
                 .contains("cancelled")
         );
+    }
+
+    /// A gitlink at `path` pinned to `commit`, the way an embedded repository
+    /// or an uninitialized submodule appears in a task worktree.
+    fn add_gitlink(repo: &Path, path: &str, pinned: &str) {
+        git(repo, &["update-index", "--add", "--cacheinfo", &format!("160000,{pinned},{path}")]);
+        commit(repo);
+    }
+
+    #[test]
+    fn review_state_accepts_an_empty_submodule_and_sees_files_written_into_it() {
+        let dir = repository();
+        let repo = dir.path();
+        let head = git_output(repo, &["rev-parse", "HEAD"], &AtomicBool::new(false)).unwrap();
+        add_gitlink(repo, "vendor/lib", head.trim());
+        fs::create_dir_all(repo.join("vendor/lib")).unwrap();
+        let before = capture(repo);
+        assert_eq!(before, capture(repo));
+        fs::write(repo.join("vendor/lib/sneaky.rs"), "changed\n").unwrap();
+        assert_ne!(before, capture(repo), "a write inside the submodule folder is a change");
+    }
+
+    #[test]
+    fn review_state_captures_a_checked_out_submodule_recursively() {
+        let dir = repository();
+        let repo = dir.path();
+        let inner = repo.join("inner");
+        fs::create_dir(&inner).unwrap();
+        git(&inner, &["init", "-q"]);
+        fs::write(inner.join("lib.rs"), "original\n").unwrap();
+        git(&inner, &["add", "."]);
+        commit(&inner);
+        git(repo, &["add", "inner"]);
+        commit(repo);
+        let before = capture(repo);
+        assert!(matches!(before.submodules.get(Path::new("inner")), Some(Submodule::CheckedOut(_))));
+        assert_eq!(before, capture(repo));
+        fs::write(inner.join("lib.rs"), "edited by the reviewer\n").unwrap();
+        assert_ne!(before, capture(repo), "an edit inside a checked-out submodule is a change");
     }
 }
