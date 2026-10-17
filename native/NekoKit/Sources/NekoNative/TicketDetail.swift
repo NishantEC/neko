@@ -106,7 +106,7 @@ struct TicketDetail: View {
             Menu {
                 if TicketPresentation.waitingReason(ticket) == nil && TicketPresentation.canProposeSplit(ticket, splits: model.snapshot["splits"].array) { action("Propose parallel work", "ProposeSplit") }
                 Button("Rename…") { renaming = true }
-                if !ticket["worktree"].string.isEmpty { Button("Reveal working folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
+                if !ticket["worktree"].string.isEmpty && ticket["parked"] == .null { Button("Reveal working folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
                 if ["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { Button("Delete…", role: .destructive) { confirmDelete = true } }
             } label: {
                 Label("Task actions", systemImage: "ellipsis")
@@ -156,7 +156,13 @@ struct TicketDetail: View {
             }
         }
         HStack(spacing: NekoSpace.md) {
-            if !ticket["worktree"].string.isEmpty { Button("Reveal working folder", systemImage: "folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) }.nekoButton(.quiet) }
+            if ticket["parked"] != .null {
+                // No folder while nothing runs: the work lives on its branch.
+                Label("Saved on branch \(ticket["parked"]["branch"].string). Its folder comes back when the task runs again.", systemImage: "arrow.triangle.branch")
+                    .font(NekoFont.meta).foregroundStyle(N.text3).textSelection(.enabled)
+            } else if !ticket["worktree"].string.isEmpty {
+                Button("Reveal working folder", systemImage: "folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) }.nekoButton(.quiet)
+            }
             Button(showLog ? "Hide activity log" : "Show activity log · \(ticket["events"].array.count)", systemImage: "list.bullet") { withNekoAnimation(.reveal) { showLog.toggle() } }.nekoButton(.quiet)
         }.font(NekoFont.meta)
         if showLog {

@@ -180,6 +180,7 @@ mod tests {
             pull_request: None,
             landed_commit: None,
             display_title: display_title.map(Into::into),
+            parked: None,
         }
     }
 

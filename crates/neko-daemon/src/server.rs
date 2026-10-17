@@ -304,13 +304,23 @@ fn task_changes(state: &AppState, task_id: &str) -> Result<(Vec<String>, String,
     const LIMIT: usize = 512 * 1024;
     let snapshot = neko_core::workbench::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("That ticket no longer exists")?;
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    // A parked ticket's work is read from its branch, without restoring it.
+    if let (Some(parked), Some(base)) = (&task.parked, &task.base_commit) {
+        let (files, patch) = neko_core::native_runner::parking::parked_changes(std::path::Path::new(&parked.repository), base, &parked.branch, &cancel)?;
+        let truncated = patch.len() > LIMIT;
+        let mut text = String::from_utf8_lossy(&patch[..patch.len().min(LIMIT)]).into_owned();
+        if truncated {
+            text.push_str("\n… (patch shortened)");
+        }
+        return Ok((files, text, truncated));
+    }
     let worktree = task.worktree.as_deref().ok_or("This ticket has no worktree yet")?;
     let root = neko_protocol::support_dir().join("task-worktrees");
     let directory = std::path::Path::new(worktree).canonicalize().map_err(|_| "The ticket’s worktree is missing")?;
     if !root.canonicalize().is_ok_and(|r| directory.starts_with(r)) {
         return Err("Only Neko’s own task worktrees can be shown".into());
     }
-    let cancel = std::sync::atomic::AtomicBool::new(false);
     let base = match &task.base_commit {
         Some(base) => base.clone(),
         None => neko_core::native_runner::head(&directory, &cancel)?,

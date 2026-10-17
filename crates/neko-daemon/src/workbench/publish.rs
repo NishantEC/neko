@@ -27,7 +27,11 @@ pub(super) fn publish_task(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBo
     if !in_flight().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(task_id.to_owned()) {
         return Ok(());
     }
-    let outcome = publish_unlocked(db, task_id, cancel);
+    // The folder must exist, and stay, for the length of the publish.
+    let _held = super::parking::InUse::take(task_id);
+    let outcome = super::parking::ensure_restored(db, task_id, cancel)
+        .map_err(Failure::from)
+        .and_then(|()| publish_unlocked(db, task_id, cancel));
     in_flight().lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(task_id);
     let main = native_runner::publish::LANDING_BRANCH;
     let message = match &outcome {
@@ -287,7 +291,7 @@ mod tests {
             goal: "SECRET source text".into(), status: TaskStatus::ReadyForReview, plan: String::new(),
             result: result.into(), worktree: None, events: vec![], created_at_ms: 0, updated_at_ms: 0,
             source_revision: None, supervision: None, base_commit: None, pull_request: None, landed_commit: None,
-            display_title: None,
+            display_title: None, parked: None,
         }
     }
 

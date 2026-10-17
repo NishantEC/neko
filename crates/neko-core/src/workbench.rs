@@ -850,7 +850,9 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             snapshot.task_sessions.remove(&task_id);
             snapshot.task_roots.insert(task_id.clone(), folder.clone());
             let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).unwrap();
+            let parked = task.parked.take();
             match task.worktree.take() {
+                Some(_) if let Some(parked) = parked => append_event(task, "user", &format!("Chose {folder} for this ticket. The previous work stays on branch {} in {}.", parked.branch, parked.repository)),
                 Some(old) => append_event(task, "user", &format!("Chose {folder} for this ticket. The previous working copy stays at {old}.")),
                 None => append_event(task, "user", &format!("Chose {folder} for this ticket.")),
             }
@@ -1398,7 +1400,7 @@ pub fn create_task(
         pull_request: None,
         landed_commit: None,
         supervision: None,
-        display_title: None,
+        display_title: None, parked: None,
     };
     append_event(&mut task, "system", "Queued for planning.");
     Ok(task)
