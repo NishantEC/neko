@@ -277,6 +277,9 @@ struct TicketsView: View {
     }
     @ViewBuilder private func moveMenu(_ task: JSONValue) -> some View {
         Button("Open") { selected = task.recordID }
+        if task["status"].string == "Queued" {
+            Button("Run next") { Task { await model.workbench(.command("PrioritizeTask", ["task_id": .string(task.recordID)])) } }
+        }
         Divider()
         ForEach(Self.columns, id: \.id) { column in
             let status = task["status"].string

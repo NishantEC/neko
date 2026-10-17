@@ -143,6 +143,25 @@ impl Controller {
                 });
                 Ok(snapshot)
             }
+            Command::DecideChatAction { message_id, action_id, accept } => {
+                let action = {
+                    let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
+                    neko_chat::proposed_action(&db, &message_id, &action_id)?
+                };
+                // Runs exactly as the app's own button for it would, so every
+                // existing check (claims, approvals, scope) still applies.
+                let (status, note) = if !accept {
+                    (ChatActionStatus::Declined, String::new())
+                } else {
+                    match neko_core::chief_of_staff::command(&action).and_then(|command| self.command(command)) {
+                        Ok(_) => (ChatActionStatus::Done, String::new()),
+                        Err(error) => (ChatActionStatus::Failed, error),
+                    }
+                };
+                let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
+                neko_chat::settle_action(&db, &message_id, &action_id, status, &note)?;
+                store::load(&db)
+            }
             Command::CompleteTask { task_id } => {
                 let snapshot = store::apply(&*self.db.lock().map_err(|_| "Task storage unavailable")?, Command::CompleteTask { task_id: task_id.clone() })?;
                 Ok(snapshot)
@@ -615,8 +634,10 @@ impl Controller {
                 })
                 .collect();
             // No fixed cap, but new agents are paced and held back while the
-            // machine is overloaded; running work is never touched.
+            // machine is overloaded; running work is never touched. Tasks the
+            // user asked to run next go first; everything else keeps its order.
             let mut positions = positions;
+            positions.sort_by_key(|&index| snapshot.run_next.iter().position(|id| *id == snapshot.tasks[index].id).unwrap_or(usize::MAX));
             // Scheduler tests share one process and the machine's real load,
             // so pacing would make them order- and load-dependent; it has its
             // own tests in `admission`.
@@ -872,6 +893,7 @@ impl Controller {
             };
             store::append_event(t, role, "Agent started in an isolated task worktree");
         })?;
+        let rules = neko_core::rulebook::text(&snapshot);
         let mut memory = neko_core::agent_profiles::context_about(&snapshot, Some(&workspace.id), Some(&format!("{} {}", task.title, task.goal)));
         memory.push_str(&decision_context::context_about(&snapshot, &workspace.id, Some(&task.id), &format!("{} {}", task.title, task.goal)));
         memory.push_str(&neko_core::skills::instructions(
@@ -924,6 +946,7 @@ impl Controller {
                             role
                         },
                         &memory,
+                        &rules,
                     ), repairs.instruction()),
                     writable: !planning,
                     timeout: Duration::from_secs(if planning { 600 } else { 1800 }),
@@ -985,7 +1008,7 @@ impl Controller {
                         let evidence = review_repair::feedback(task, &error);
                         if !self.recover_task(review_repair::Recovery {
                             workspace, task: &evidence, directory: &directory,
-                            runtime: &snapshot.agent_runtime, memory: &memory, planning, failure: &error,
+                            runtime: &snapshot.agent_runtime, memory: &memory, rules: &rules, planning, failure: &error,
                         }, &mut repairs, authority, cancel)? { return Ok(()); }
                         attempt_task = evidence;
                         continue;
@@ -1001,7 +1024,7 @@ impl Controller {
                     let evidence = review_repair::feedback(task, &result);
                     if !self.recover_task(review_repair::Recovery {
                         workspace, task: &evidence, directory: &directory,
-                        runtime: &snapshot.agent_runtime, memory: &memory, planning: true,
+                        runtime: &snapshot.agent_runtime, memory: &memory, rules: &rules, planning: true,
                         failure: "The scout stopped with a question. Determine whether available investigation can resolve it within the user's request.",
                     }, &mut repairs, authority, cancel)? { return Ok(()); }
                     attempt_task = evidence;
@@ -1082,7 +1105,7 @@ impl Controller {
                             let evidence = review_repair::feedback(task, &result);
                             if !self.recover_task(review_repair::Recovery {
                                 workspace, task: &evidence, directory: &directory,
-                                runtime: &snapshot.agent_runtime, memory: &memory, planning: false,
+                                runtime: &snapshot.agent_runtime, memory: &memory, rules: &rules, planning: false,
                                 failure: &format!("The agent stopped with a question: {question}. Determine whether available investigation can resolve it within the user's request."),
                             }, &mut repairs, authority, cancel)? { return Ok(()); }
                             attempt_task = evidence;
@@ -1153,7 +1176,7 @@ impl Controller {
                 let review_run = self.run_native(
                     &native_runner::RunSpec {
                         directory: directory.clone(),
-                        prompt: format!("{}\nHost-observed diff base: {}\nHost-observed changed files (verify every file, including committed edits and untracked additions): {}\nInherited dependency files: {:?}\nRequired approved checks (execute every command exactly and report it in tests; if blocked, fail): {:?}{}", prompt(workspace, &review_task, "reviewer", &memory), split.and_then(|s| s.base.as_deref()).unwrap_or(&base), changed.join(", "), inherited, required_checks,
+                        prompt: format!("{}\nHost-observed diff base: {}\nHost-observed changed files (verify every file, including committed edits and untracked additions): {}\nInherited dependency files: {:?}\nRequired approved checks (execute every command exactly and report it in tests; if blocked, fail): {:?}{}", prompt(workspace, &review_task, "reviewer", &memory, &rules), split.and_then(|s| s.base.as_deref()).unwrap_or(&base), changed.join(", "), inherited, required_checks,
                             match repairs.earlier_failures() {
                                 earlier if earlier.is_empty() => String::new(),
                                 earlier => format!("\nEarlier blockers on this ticket, already sent back for repair. Verify each is now resolved. Do not re-raise one that is fixed or contradict what was asked before; if one is still unresolved, say so plainly in findings:\n{earlier}"),
@@ -1209,7 +1232,7 @@ impl Controller {
                     let evidence = review_repair::feedback(task, &review);
                     if !self.recover_task(review_repair::Recovery {
                         workspace, task: &evidence, directory: &directory,
-                        runtime: &snapshot.agent_runtime, memory: &memory, planning: false, failure: &error,
+                        runtime: &snapshot.agent_runtime, memory: &memory, rules: &rules, planning: false, failure: &error,
                     }, &mut repairs, authority, cancel)? { return Ok(()); }
                     // Keep the complete verdict in the bounded repair prompt.
                     attempt_task = evidence;
@@ -1633,7 +1656,7 @@ fn complete_chat_reply(
     pending: &str,
     message: &str,
     chosen: Option<&str>,
-    reply: neko_chat::Reply,
+    mut reply: neko_chat::Reply,
 ) -> Result<(), String> {
     let db = db.lock().map_err(|_| "Chat storage unavailable")?;
     let mut snapshot = store::load(&db)?;
@@ -1661,6 +1684,14 @@ fn complete_chat_reply(
         );
     }
     snapshot.agent_profiles.active_profile_id = turn.agent_profile_id.clone();
+    // Actions on existing tasks wait for one-click confirmation; only ones on
+    // real tasks this conversation may see survive.
+    let actions = {
+        let profile = turn.agent_profile_id.clone();
+        neko_core::chief_of_staff::validate(&snapshot, std::mem::take(&mut reply.actions), |w| {
+            snapshot.agent_profiles.owner(w) == profile && chosen.is_none_or(|c| c == w)
+        })
+    };
     let reply_text = reply.text.clone();
     let cited: Vec<String> = neko_memory::resolve_tags(&snapshot.memory, &reply.used_memory)
         .into_iter()
@@ -1791,6 +1822,7 @@ fn complete_chat_reply(
         neko_chat::finish_turn_suggesting(
             &db, pending, &text, opened, remembered, suggested, false,
         )?;
+        neko_chat::attach_actions(&db, pending, actions)?;
         if learning_ready {
             neko_core::memory_learning::enqueue(
                 &db,
@@ -2005,7 +2037,7 @@ fn plan_question(plan: &str) -> Option<String> {
     (!question.is_empty()).then(|| question.chars().take(1000).collect())
 }
 
-fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str) -> String {
+fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str, rules: &str) -> String {
     let mut result_end = task.result.len().min(64 * 1024);
     while !task.result.is_char_boundary(result_end) {
         result_end -= 1;
@@ -2032,12 +2064,11 @@ fn prompt(workspace: &Workspace, task: &Task, role: &str, memory: &str) -> Strin
             "Independently inspect the actual worktree diff and untracked files. Review correctness, security and approved scope. Execute the relevant checks yourself with full local filesystem access. Install missing test dependencies and use normal caches and temporary directories as needed. Preserve repository source, HEAD and index exactly; the host compares them before and after review. Ignored dependency and cache output is allowed. Do not fix code or change lockfiles; return findings for the builder. Never claim a check you cannot execute. Return ONLY strict JSON: {\"passed\":true,\"findings\":[],\"files\":[\"exact/changed/path\"],\"tests\":[\"exact command as executed by your shell tool\"],\"summary\":\"evidence and limitations\"}. Set passed false for ANY actionable finding, failed test, missing evidence or blocked check. Every listed test must have a real successful command_execution receipt with output in this run. A review is not authorization to merge."
         }
     };
-    // Builders and planners work to the engineering standard; reviewers fail
-    // work that misses it, and also get the receipt rule their verdict is checked against.
+    // Every agent works to the rulebook; reviewers fail work that misses it,
+    // and also get the receipt rule their verdict is checked against.
     let checks = match role {
-        "reviewer" => format!("\n{REVIEW_STANDARD}\n{ENGINEERING_STANDARD} {}", neko_core::verification::STANDALONE_CHECKS),
-        "builder" | "scout" => format!("\n{ENGINEERING_STANDARD}"),
-        _ => String::new(),
+        "reviewer" => format!("\nNeko's rulebook (fail work that breaks it):\n{rules}\n{}", neko_core::verification::STANDALONE_CHECKS),
+        _ => format!("\nNeko's rulebook (work to it):\n{rules}"),
     };
     let knowledge = match role {
         "builder" | "scout" | "reviewer" => project_knowledge(task, workspace, &std::env::var("HOME").unwrap_or_default()),
@@ -2118,24 +2149,6 @@ fn knowledge_paths(repository: &std::path::Path, home: &std::path::Path) -> Vec<
     }
     found
 }
-
-/// How Neko's agents engineer a change, learned from comparing its pull
-/// requests with an experienced reviewer's: the gaps were an unverified
-/// cause, sibling bugs left in place, silenced errors, raw error text shown
-/// to users, logging lost on the way, tests that passed without the fix,
-/// and ordering against other open pull requests.
-pub(crate) const ENGINEERING_STANDARD: &str = "Engineering standard, the way an experienced engineer on this codebase works:
-1. Prove the cause before fixing it. Read the real evidence through the user's tools (the error's actual events, stack traces, error codes and counts in Sentry; logs; the issue and its comments) and confirm the ticket's stated cause matches it. If the evidence points elsewhere, fix the real cause and say so.
-2. Fix the class, not the instance. Search the codebase for the same pattern: other callers, sibling code paths, the same call without the guard. Handle the ones in scope and name the rest.
-3. Weigh the approaches. When more than one fix is plausible, compare at least two, and check every contract the change touches: callers and what they do with return values, server routes and payload formats, backend APIs and types. Prefer the one that leaves unaffected paths exactly as they were; use an existing library helper only if its behaviour matches the contract.
-4. Never hide a failure. An error you catch must still be reported as a handled error through the codebase's own logger or Sentry, and the person using the product must see a clear, human message, never raw error text or a spinner that never ends.
-5. Lose nothing. Data, logging, analytics and behaviour that worked before must still work.
-6. Prove the fix. Add a regression test that fails without the change and passes with it, asserting outcomes, with clean test hygiene (mocks restored in afterEach, no leaked state). Run the relevant tests, typecheck and lint.
-7. Look around. Check open pull requests and recent commits touching the same code, and state any ordering or conflict.
-Report the cause the evidence supports, the alternatives you weighed and why you chose this one.";
-
-/// What turns a review into findings rather than a rubber stamp.
-pub(crate) const REVIEW_STANDARD: &str = "Review as an adversarial senior engineer, not a checker of the builder's claims: re-establish the cause from the evidence yourself, search for sibling occurrences, and check the contracts the change touches. Each of these is a finding (passed=false), with the fix you recommend: a cause the evidence does not support, an in-scope sibling left unfixed, a caught error that is no longer reported, raw error text or an endless wait shown to users, lost data or logging, a regression test that would pass without the fix, or leaking test state.";
 
 #[cfg(test)]
 mod tests {
@@ -2397,6 +2410,7 @@ mod tests {
             &snapshot.tasks[0],
             "splitter",
             "SCOPED_MEMORY\nSCOPED_SKILL",
+            &neko_core::rulebook::default_text(),
         );
         assert!(text.contains("SCOPED_MEMORY"));
         assert!(text.contains("SCOPED_SKILL"));
@@ -2405,7 +2419,7 @@ mod tests {
     }
 
     fn reply_with_ticket_and_memory() -> neko_chat::Reply {
-        neko_chat::Reply { used_memory: vec![],
+        neko_chat::Reply { used_memory: vec![], actions: vec![],
             text: "Opened a ticket and remembered your preference.".into(),
             tickets: vec![neko_chat::ProposedTicket {
                 title: "New ticket".into(),
@@ -2460,7 +2474,7 @@ mod tests {
         let turn = neko_chat::begin_turn(&db.lock().unwrap(), "Plan my next step").unwrap();
         complete_chat_reply(&db, &AtomicBool::new(false), &turn,
             "Plan my next step", None,
-            neko_chat::Reply { used_memory: vec![], text: format!("The active repo is `{}`.", repo.display()),
+            neko_chat::Reply { used_memory: vec![], actions: vec![], text: format!("The active repo is `{}`.", repo.display()),
                 tickets: vec![neko_chat::ProposedTicket { title: "Repair repo".into(),
                     goal: "Make branch reproducible".into(), workspace_id: Some(workspace.clone()),
                     folder: None }], memories: vec![], responsibilities: vec![] }).unwrap();
@@ -2508,7 +2522,7 @@ mod tests {
             &turn,
             "What could you watch?",
             None,
-            neko_chat::Reply { used_memory: vec![],
+            neko_chat::Reply { used_memory: vec![], actions: vec![],
                 text: "Here are two ideas, paused until you turn them on.".into(),
                 tickets: vec![],
                 memories: vec![],
@@ -2853,7 +2867,7 @@ mod tests {
             plan: "Fix the boundary".into(),
         });
         for role in ["builder", "reviewer"] {
-            let text = prompt(&snapshot.workspaces[0], task, role, "");
+            let text = prompt(&snapshot.workspaces[0], task, role, "", &neko_core::rulebook::default_text());
             assert!(text.contains("src/display.rs"));
             assert!(text.contains("cargo test unique_boundary_regression"));
         }
@@ -2875,18 +2889,46 @@ mod tests {
         assert!(knowledge_paths(std::path::Path::new("/tmp/elsewhere"), home.path()).is_empty());
     }
     #[test]
-    fn builders_work_to_the_engineering_standard_and_reviewers_fail_work_that_misses_it() {
+    fn a_confirmed_chat_action_runs_as_the_app_s_own_command_and_a_declined_one_does_nothing() {
+        let controller = controller_with_task(TaskStatus::Queued);
+        {
+            let db = controller.db.lock().unwrap();
+            let mut snapshot = store::load(&db).unwrap();
+            let mut other = snapshot.tasks[0].clone();
+            other.id = "u".into();
+            snapshot.tasks.insert(0, other);
+            store::save(&db, &snapshot).unwrap();
+            let id = neko_chat::begin_turn(&db, "move the task up").unwrap();
+            neko_chat::finish_turn(&db, &id, "Proposed.", vec![], false).unwrap();
+            let action = |aid: &str, kind: &str| ChatAction { id: aid.into(), task_id: "t".into(), kind: kind.into(), text: String::new(), status: ChatActionStatus::Proposed, note: String::new() };
+            neko_chat::attach_actions(&db, &id, vec![action("a1", "run_next"), action("a2", "stop")]).unwrap();
+        }
+        let message_id = store::load(&controller.db.lock().unwrap()).unwrap().conversation.last().unwrap().id.clone();
+        let after = controller.command(Command::DecideChatAction { message_id: message_id.clone(), action_id: "a1".into(), accept: true }).unwrap();
+        assert_eq!(after.run_next, vec!["t".to_owned()]);
+        let after = controller.command(Command::DecideChatAction { message_id: message_id.clone(), action_id: "a2".into(), accept: false }).unwrap();
+        assert_eq!(after.tasks.iter().find(|t| t.id == "t").unwrap().status, TaskStatus::Queued, "declined: nothing happened");
+        let actions = &after.conversation.last().unwrap().actions;
+        assert_eq!((actions[0].status, actions[1].status), (ChatActionStatus::Done, ChatActionStatus::Declined));
+        assert!(controller.command(Command::DecideChatAction { message_id, action_id: "a1".into(), accept: true }).is_err(), "decided once only");
+    }
+    #[test]
+    fn every_agent_works_to_the_rulebook_and_reviewers_fail_work_that_breaks_it() {
+        use neko_core::rulebook::{default_text, ENGINEERING_STANDARD, MACHINE, REVIEW_STANDARD};
         let controller = controller_with_task(TaskStatus::Queued);
         let snapshot = store::load(&controller.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)).unwrap();
         let (workspace, task) = (&snapshot.workspaces[0], &snapshot.tasks[0]);
-        for role in ["builder", "scout"] {
-            let text = prompt(workspace, task, role, "");
-            assert!(text.contains(ENGINEERING_STANDARD) && !text.contains(REVIEW_STANDARD), "{role}");
+        for role in ["builder", "scout", "reviewer", "coordinator", "supervisor"] {
+            let text = prompt(workspace, task, role, "", &default_text());
+            for part in [ENGINEERING_STANDARD, REVIEW_STANDARD, MACHINE] {
+                assert!(text.contains(part), "{role}");
+            }
         }
-        let review = prompt(workspace, task, "reviewer", "");
-        assert!(review.contains(REVIEW_STANDARD) && review.contains(ENGINEERING_STANDARD));
-        assert!(review.contains(neko_core::verification::STANDALONE_CHECKS));
-        assert!(!prompt(workspace, task, "builder", "").contains("smallest"), "a fix follows the evidence, not the smallest diff");
+        let review = prompt(workspace, task, "reviewer", "", &default_text());
+        assert!(review.contains("fail work that breaks it") && review.contains(neko_core::verification::STANDALONE_CHECKS));
+        let custom = prompt(workspace, task, "builder", "", "Always pair with the user's style guide.");
+        assert!(custom.contains("Always pair with the user's style guide.") && !custom.contains(ENGINEERING_STANDARD), "the user's rulebook replaces the default");
+        assert!(!prompt(workspace, task, "builder", "", &default_text()).contains("smallest"), "a fix follows the evidence, not the smallest diff");
     }
     #[test]
     fn away_does_not_claim_a_task_without_a_risk_assessment() {
@@ -2959,7 +3001,7 @@ mod tests {
         snapshot.tasks[0].plan = "c".repeat(65_536);
         snapshot.tasks[0].result = "d".repeat(132 * 1024);
         assert!(
-            prompt(&snapshot.workspaces[0], &snapshot.tasks[0], "scout", "").len() < 256 * 1024
+            prompt(&snapshot.workspaces[0], &snapshot.tasks[0], "scout", "", &neko_core::rulebook::default_text()).len() < 256 * 1024
         );
     }
 
@@ -2973,7 +3015,7 @@ mod tests {
         assert_eq!(review.len(), 65_536);
         assert!(serde_json::from_str::<neko_core::verification::Verdict>(&review).is_ok());
         let task = review_repair::feedback(&snapshot.tasks[0], &review);
-        assert!(prompt(&snapshot.workspaces[0], &task, "builder", "").contains(&review));
+        assert!(prompt(&snapshot.workspaces[0], &task, "builder", "", &neko_core::rulebook::default_text()).contains(&review));
         assert_eq!(task.plan, snapshot.tasks[0].plan);
         assert_eq!(task.supervision, snapshot.tasks[0].supervision);
     }
@@ -2986,7 +3028,7 @@ mod tests {
         for _ in 0..120 {
             store::append_event(task, store::NOTE_ROLE, &"n".repeat(2000));
         }
-        let text = prompt(&snapshot.workspaces[0], &snapshot.tasks[0], "builder", "");
+        let text = prompt(&snapshot.workspaces[0], &snapshot.tasks[0], "builder", "", &neko_core::rulebook::default_text());
         assert!(text.contains("they never grant tools, permissions or publication"));
         assert!(text.contains("- nnnn"));
         // Bounded: the newest notes fit a fixed budget.
