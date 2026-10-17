@@ -30,6 +30,8 @@ mod runtime_settings;
 mod display_names;
 #[path = "workbench/parking.rs"]
 mod parking;
+#[path = "workbench/triage.rs"]
+mod triage;
 
 struct TaskClaim {
     task: Task,
@@ -540,6 +542,8 @@ impl Controller {
         // One worktree per running ticket: idle tickets' folders are parked
         // on their branches and restored when they run again.
         self.start_parking();
+        // Work a watch files is checked against open tasks before it runs.
+        self.start_triage();
         let mcp = self.mcp.clone();
         std::thread::spawn(move || {
             loop {
@@ -620,6 +624,7 @@ impl Controller {
             let positions: Vec<_> = snapshot.tasks.iter().enumerate()
                 .filter_map(|(index, t)| {
                     (!active.iter().any(|a| a.task_id == t.id)
+                        && !snapshot.untriaged.contains(&t.id)
                         && !store::waiting_for_reply(t)
                         && (neko_core::decomposition::ready(&snapshot, t)
                             || (t.status == TaskStatus::Queued

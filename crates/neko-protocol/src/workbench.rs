@@ -278,6 +278,10 @@ pub struct Snapshot {
     /// waiting tasks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub run_next: Vec<String>,
+    /// Tasks a watch filed that Neko has not triaged yet. No agent starts
+    /// them until it has (or the check times out and releases them).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub untriaged: Vec<String>,
     /// When on, a planned chat or manual ticket starts building without
     /// waiting for approval. Off by default. Nothing is ever published.
     #[serde(default)]
