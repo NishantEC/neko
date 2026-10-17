@@ -112,7 +112,7 @@ struct TicketFilesChanged: View {
             }.font(NekoFont.meta.monospacedDigit())
             if let error { Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.amber) }
             if let changes {
-                if changes.truncated { Label("The diff is too long to show in full. Reveal the working folder to see all of it.", systemImage: "exclamationmark.triangle").font(NekoFont.meta).foregroundStyle(NekoStyle.amber) }
+                if changes.truncated { Label("The diff is too long to show in full here.", systemImage: "exclamationmark.triangle").font(NekoFont.meta).foregroundStyle(NekoStyle.amber) }
                 if changes.files.isEmpty { NekoEmptyState("No changes in the worktree yet.") }
                 else { NativeDiffBlock(code: changes.patch, openFiles: changes.files.count <= 3 ? changes.files.count : 1).id(changes.patch) }
             } else if loading {

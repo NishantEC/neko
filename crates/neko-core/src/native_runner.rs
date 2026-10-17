@@ -31,6 +31,7 @@ const MAX_PROMPT: usize = 256 * 1024;
 
 pub(crate) mod cli_workers;
 pub mod publish;
+pub mod parking;
 mod review_state;
 pub use review_state::{ReviewState, capture_review_state};
 /// One event line kept for parsing. A longer line (a tool returned a very
@@ -633,45 +634,7 @@ fn create_worktree_in_cancellable(
         &["rev-parse", "--verify", "HEAD^{commit}"],
         cancel,
     )?;
-    // Smudge/process filters are arbitrary repository-configured executables.
-    // Disable every configured filter as well as hooks and fsmonitor before
-    // materializing any files. Never run repository code outside the sandbox.
-    let mut config_command = git_command(&repository);
-    config_command.args([
-        "config",
-        "--name-only",
-        "--get-regexp",
-        "^filter\\..*\\.(clean|smudge|process|required)$",
-    ]);
-    let mut config = Vec::new();
-    let output = execute(
-        config_command,
-        &[],
-        cancel,
-        Duration::from_secs(15),
-        |chunk| {
-            config.extend_from_slice(chunk);
-            Ok(())
-        },
-    )?;
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(format!(
-            "Cannot inspect Git filters: {}",
-            bounded_text(&output.stderr, MAX_EVENT)
-        ));
-    }
-    let config = String::from_utf8(config).map_err(|_| "Git filter names are not UTF-8")?;
-    let mut add = git_command(&repository);
-    for key in config.lines() {
-        add.arg("-c").arg(format!(
-            "{key}={}",
-            if key.ends_with(".required") {
-                "false"
-            } else {
-                ""
-            }
-        ));
-    }
+    let mut add = filterless_checkout(&repository, cancel)?;
     if cancel.load(Ordering::Acquire) {
         return Err("Task cancelled".into());
     }
@@ -701,6 +664,46 @@ fn create_worktree_in_cancellable(
     drop(checkout_guard);
     seed_dependency_folders(&repository, &path, cancel);
     Ok(path)
+}
+
+/// A Git command for materializing files with every configured smudge,
+/// clean and process filter disabled. Filters are arbitrary
+/// repository-configured executables; hooks and fsmonitor are already off in
+/// `git_command`. Never run repository code outside the sandbox.
+fn filterless_checkout(repository: &Path, cancel: &AtomicBool) -> Result<Command, String> {
+    let mut config_command = git_command(repository);
+    config_command.args([
+        "config",
+        "--name-only",
+        "--get-regexp",
+        "^filter\\..*\\.(clean|smudge|process|required)$",
+    ]);
+    let mut config = Vec::new();
+    let output = execute(
+        config_command,
+        &[],
+        cancel,
+        Duration::from_secs(15),
+        |chunk| {
+            config.extend_from_slice(chunk);
+            Ok(())
+        },
+    )?;
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(format!(
+            "Cannot inspect Git filters: {}",
+            bounded_text(&output.stderr, MAX_EVENT)
+        ));
+    }
+    let config = String::from_utf8(config).map_err(|_| "Git filter names are not UTF-8")?;
+    let mut add = git_command(repository);
+    for key in config.lines() {
+        add.arg("-c").arg(format!(
+            "{key}={}",
+            if key.ends_with(".required") { "false" } else { "" }
+        ));
+    }
+    Ok(add)
 }
 
 /// Deepest directory level searched for dependency folders: the root plus

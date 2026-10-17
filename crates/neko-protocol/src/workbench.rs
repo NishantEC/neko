@@ -154,6 +154,21 @@ pub struct Task {
     /// regenerated. `title` stays the source's own wording.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_title: Option<String>,
+    /// Set while the ticket is parked: no agent is working on it, so its
+    /// folder (`worktree`, path kept) is removed and its work lives on
+    /// `branch` in `repository`. Running it again restores the folder first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked: Option<ParkedWork>,
+}
+
+/// Where a parked ticket's work lives while its folder is removed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ParkedWork {
+    pub branch: String,
+    /// The source checkout the branch belongs to.
+    pub repository: String,
+    /// Uncommitted work was saved as one marked commit that restoring removes.
+    pub wip: bool,
 }
 
 /// A reviewed result Neko pushed and opened for review. Never merged by Neko.
