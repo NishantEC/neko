@@ -238,6 +238,7 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     let waiting: std::collections::HashSet<&str> = snapshot.tasks.iter()
         .filter(|t| t.status == TaskStatus::Queued).map(|t| t.id.as_str()).collect();
     compacted.run_next.retain(|id| waiting.contains(id.as_str()));
+    compacted.untriaged.retain(|id| waiting.contains(id.as_str()));
     compacted.memory.clear();
     compacted.memory_proposals.clear();
     compacted.decision_records.clear();

@@ -101,6 +101,8 @@ pub fn apply_result(
                 crate::workbench::create_task(r.workspace_id.clone(), None, o.title.clone(), goal)?;
             task.source_revision = Some(o.revision.clone());
             task_id = Some(task.id.clone());
+            // Neko triages it against open work before any agent starts.
+            state.untriaged.push(task.id.clone());
             state.tasks.push(task);
         }
         let source = SourceEvidence {
