@@ -133,7 +133,16 @@ The original diff base, captured authority, budget and dependency scope survive
 the loop; split parents do not gain a builder that could rewrite child work.
 Read-only human requests, planning, chat, background source checks and tool-free
 extraction remain restricted. Publication and scoped MCP authority do not expand.
-Cancellation/restart preserve task worktrees, including failed work. Full-access
+Cancellation/restart preserve task work, including failed work. **A worktree
+exists only while an agent works in it (2026-10-17)**: a sweep
+(`workbench/parking.rs`, every 60s, tickets idle 2+ min, never with a live
+worker, an in-flight publish or a split) commits unfinished work to the
+ticket's own branch as one `neko: parked work in progress` commit, removes the
+folder and records `Task::parked`; running or publishing it again calls
+`ensure_restored`, which recreates the folder at the same path (so saved agent
+sessions still resume), takes the parked commit back off and re-seeds
+dependencies. Ignored output (deps, caches) is not carried. Changes for a
+parked ticket are read from its branch. Full-access
 workers are trusted local processes; do not describe worktrees or scoped prompts
 as filesystem security boundaries. See `docs/evidence/full-access-supervision.md`.
 
