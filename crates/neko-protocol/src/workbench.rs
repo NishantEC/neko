@@ -266,6 +266,18 @@ pub struct Snapshot {
     /// turn. `None` is no limit beyond the machine-load pacing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_running_tickets: Option<u32>,
+    /// The user's own rulebook for Neko and every agent it delegates to.
+    /// `None` uses the built-in default (`rulebook_default`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rulebook: Option<String>,
+    /// The built-in rulebook, attached for readers so the app can show and
+    /// restore it. Never stored.
+    #[serde(default)]
+    pub rulebook_default: String,
+    /// Tasks the user asked to run next, in order; they start before other
+    /// waiting tasks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub run_next: Vec<String>,
     /// When on, a planned chat or manual ticket starts building without
     /// waiting for approval. Off by default. Nothing is ever published.
     #[serde(default)]
@@ -447,6 +459,41 @@ pub struct ChatMessage {
     /// untried suggestion when its selected source has readable tools.
     #[serde(default)]
     pub responsibility_ids: Vec<String>,
+    /// Actions Neko proposed on existing tasks in this turn. Each waits for
+    /// the user's one-click confirmation before anything happens.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ChatAction>,
+}
+
+/// Something Neko, as chief of staff, proposes doing to an existing task.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatAction {
+    pub id: String,
+    pub task_id: String,
+    /// One of `chat_action_kinds()`.
+    pub kind: String,
+    /// The message for `message`, the name for `rename`; empty otherwise.
+    #[serde(default)]
+    pub text: String,
+    pub status: ChatActionStatus,
+    /// Why it failed, in plain words, when it did.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ChatActionStatus {
+    Proposed,
+    Done,
+    Declined,
+    Failed,
+}
+
+/// What Neko may propose doing to a task: tell its agent something, start
+/// it, stop it, run it next, approve its plan, accept its result, retry it
+/// or rename it.
+pub fn chat_action_kinds() -> &'static [&'static str] {
+    &["message", "start", "stop", "run_next", "approve", "accept", "retry", "rename"]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -628,6 +675,20 @@ pub enum Command {
     },
     SetMaxRunningTickets {
         limit: Option<u32>,
+    },
+    /// Replace the rulebook every agent works to. Empty restores the default.
+    SetRulebook {
+        text: String,
+    },
+    /// Move a waiting task to the front of the queue.
+    PrioritizeTask {
+        task_id: String,
+    },
+    /// Confirm or decline an action Neko proposed in chat.
+    DecideChatAction {
+        message_id: String,
+        action_id: String,
+        accept: bool,
     },
     /// Remove every ticket (keeping ones with a pull request or landed commit
     /// when `keep_published`) and forget which watched issues were filed, so

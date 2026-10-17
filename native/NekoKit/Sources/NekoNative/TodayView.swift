@@ -285,6 +285,9 @@ struct TodayView: View {
                         SuggestedResponsibilityCard(model: model, item: item)
                     }
                 }
+                ForEach(message["actions"].array, id: \.recordID) { action in
+                    ChatActionCard(model: model, messageID: message.recordID, action: action)
+                }
                 ForEach(message["ticket_ids"].array, id: \.self) { id in
                     let task = model.snapshot["tasks"].array.first { $0.recordID == id.string } ?? .null
                     ReplyTicketRow(title: task["title"].string.isEmpty ? "Task" : task["title"].string,

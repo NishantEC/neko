@@ -157,6 +157,7 @@ pub(super) struct Recovery<'a> {
     pub directory: &'a std::path::Path,
     pub runtime: &'a neko_protocol::workbench::AgentRuntime,
     pub memory: &'a str,
+    pub rules: &'a str,
     pub planning: bool,
     pub failure: &'a str,
 }
@@ -183,7 +184,7 @@ impl super::Controller {
         let spec = native_runner::RunSpec {
             directory: request.directory.to_owned(),
             prompt: format!("{}\nHost-reported blocker: {}\nPrevious supervisor directions (already attempted):\n{}\nPhase: {}. Recovery attempt {}/{}.",
-                super::prompt(request.workspace, request.task, "coordinator", request.memory),
+                super::prompt(request.workspace, request.task, "coordinator", request.memory, request.rules),
                 request.failure.chars().take(8192).collect::<String>(), budget.history(),
                 if request.planning { "read-only planning" } else { "authorized local execution" },
                 budget.attempts() + 1, RepairBudget::LIMIT),

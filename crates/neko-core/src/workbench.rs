@@ -213,6 +213,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     // Attached for readers only; save() never writes it into this setting.
     snapshot.conversation = crate::neko_chat::load(db)?;
     snapshot.memory = crate::neko_memory::load(db)?;
+    snapshot.rulebook_default = crate::rulebook::default_text();
     snapshot.memory_options = crate::neko_memory::options(db)?;
     snapshot.memory_proposals = crate::memory_learning::proposals(db, &snapshot)?;
     snapshot.skills = crate::skills::load(db)?;
@@ -232,6 +233,11 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     let mut compacted = snapshot.clone();
     crate::scheduled_plans::refresh_results(&mut compacted);
     compacted.conversation.clear();
+    compacted.rulebook_default.clear();
+    // "Run next" only means something until the task starts.
+    let waiting: std::collections::HashSet<&str> = snapshot.tasks.iter()
+        .filter(|t| t.status == TaskStatus::Queued).map(|t| t.id.as_str()).collect();
+    compacted.run_next.retain(|id| waiting.contains(id.as_str()));
     compacted.memory.clear();
     compacted.memory_proposals.clear();
     compacted.decision_records.clear();
@@ -877,8 +883,17 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         Command::SendMessage { .. }
         | Command::InterruptAndSendMessage { .. }
         | Command::DecideChatTool { .. }
+        | Command::DecideChatAction { .. }
         | Command::CancelChat { .. } => {
             return Err("Talking to Neko requires the daemon".into());
+        }
+        Command::PrioritizeTask { task_id } => {
+            let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("That task no longer exists")?;
+            if terminal(task.status) || task.status == TaskStatus::AwaitingApproval {
+                return Err("Only a waiting task can be moved up; this one isn't waiting to start".into());
+            }
+            snapshot.run_next.retain(|id| id != &task_id);
+            snapshot.run_next.insert(0, task_id);
         }
         Command::AddTicketNote { task_id, text } => {
             let text = text.trim().to_owned();
@@ -919,6 +934,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             }
             snapshot.max_running_tickets = limit;
         }
+        Command::SetRulebook { text } => crate::rulebook::set(&mut snapshot, &text)?,
         Command::StartOver { keep_published } => {
             if snapshot.tasks.iter().any(|t| !terminal(t.status) && t.status != TaskStatus::AwaitingApproval) {
                 return Err("Work is still running. Stop all work first, then start over.".into());
@@ -2404,7 +2420,8 @@ mod tests {
         let path = dir.path().join("neko.db");
         let expected = {
             let db = Db::open(&path).unwrap();
-            assert_eq!(load(&db).unwrap(), Snapshot::default());
+            let empty = Snapshot { rulebook_default: crate::rulebook::default_text(), ..Snapshot::default() };
+            assert_eq!(load(&db).unwrap(), empty);
             let ws = workspace(&db, repo.path());
             assert!(!ws.id.is_empty());
             task(&db, &ws);

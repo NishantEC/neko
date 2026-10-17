@@ -205,6 +205,16 @@ struct NativeSidebar: View {
         .onChange(of: page) { _, value in if model.agentID == nil { selection = value.rawValue } }
         .onChange(of: model.selectedWorkspace) { _, _ in model.agentID = nil }
     }
+    /// Queue order: tasks you asked to run next first, then oldest first.
+    static func queueKey(_ task: JSONValue, _ snapshot: JSONValue) -> QueueKey {
+        let order = snapshot["run_next"].array.map(\.string)
+        return QueueKey(position: order.firstIndex(of: task.recordID) ?? Int.max, created: task["created_at_ms"].int)
+    }
+    struct QueueKey: Comparable {
+        let position: Int
+        let created: Int
+        static func < (a: Self, b: Self) -> Bool { (a.position, a.created) < (b.position, b.created) }
+    }
     /// New task: go to Home and put the cursor in its composer.
     private func newTask() {
         model.agentID = nil
@@ -219,7 +229,7 @@ struct NativeSidebar: View {
     }
     @ViewBuilder private func stageSection(_ stage: TaskStage) -> some View {
         let tasks = model.tasks.filter { TaskStage(status: $0["status"].string) == stage && matches($0) }
-            .sorted { stage == .upNext ? $0["created_at_ms"].int < $1["created_at_ms"].int : $0["updated_at_ms"].int > $1["updated_at_ms"].int }
+            .sorted { stage == .upNext ? Self.queueKey($0, model.snapshot) < Self.queueKey($1, model.snapshot) : $0["updated_at_ms"].int > $1["updated_at_ms"].int }
         // The queue only needs to say what starts next; the rest is a click away.
         let limit = stage == .upNext && filter.isEmpty ? 1 : shown
         if !tasks.isEmpty {

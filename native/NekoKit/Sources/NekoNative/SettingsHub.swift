@@ -4,12 +4,13 @@ import SwiftUI
 /// Settings: sections on the left, the section on the right. Daily work
 /// (tasks) stays in the main sidebar; setup lives here.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, ai, workspaces, watches, schedules, tools, memory, profiles, search, permissions, diagnostics, about
+    case general, ai, rulebook, workspaces, watches, schedules, tools, memory, profiles, search, permissions, diagnostics, about
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: "General"
         case .ai: "AI & agents"
+        case .rulebook: "Rulebook"
         case .workspaces: "Workspaces"
         case .watches: "Watches"
         case .schedules: "Schedules"
@@ -26,6 +27,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gearshape"
         case .ai: "sparkles"
+        case .rulebook: "book.closed"
         case .workspaces: "square.stack.3d.up"
         case .watches: "eye"
         case .schedules: "clock"
@@ -40,7 +42,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
     /// Groups shown as headings in the section list.
     static let groups: [(title: String, sections: [SettingsSection])] = [
-        ("", [.general, .ai]),
+        ("", [.general, .ai, .rulebook]),
         ("What Neko watches and works on", [.workspaces, .watches, .schedules]),
         ("What Neko knows and can use", [.tools, .memory, .profiles]),
         ("This Mac", [.search, .permissions, .diagnostics, .about]),
@@ -92,6 +94,7 @@ struct SettingsHub: View {
             Divider()
             Group {
                 switch section {
+                case .rulebook: RulebookView(model: model)
                 case .workspaces: WorkspacesView(model: model)
                 case .watches: ResponsibilitiesView(model: model)
                 case .schedules: SchedulesView(model: model)
