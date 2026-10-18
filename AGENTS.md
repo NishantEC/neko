@@ -337,6 +337,14 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   quiet-stall check (they emit no command-start events); the wall-clock
   `RunSpec::timeout` (30 min builders, 10 min planning/review) bounds them.
 
+**Machine steward** (`neko_core::machine`): a thread reads load, memory
+pressure, compressed memory, swap, free disk, kernel_task and RAM per kind of
+agent every 15 s. `apply_policy` turns that into `holding` (disk under 15 GB,
+memory critical, load 20+, or night load over 12; nothing new starts) or `cap`
+(01:00–06:00 or memory warning: one agent at a time). Admission obeys it; the
+sidebar strip shows it. `neko-daemon --machine-check [--hook]` gives agents
+outside Neko the same answer (exit 1 / a PreToolUse deny while held).
+
 ## Native design system and the check gate (2026-10-14)
 
 `native/NekoKit/Sources/NekoNative/DesignSystem/` owns every visual value

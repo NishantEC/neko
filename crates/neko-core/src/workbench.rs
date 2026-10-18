@@ -215,6 +215,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     snapshot.conversation = crate::neko_chat::load(db)?;
     snapshot.memory = crate::neko_memory::load(db)?;
     snapshot.rulebook_default = crate::rulebook::default_text();
+    snapshot.machine = crate::machine::latest();
     snapshot.memory_options = crate::neko_memory::options(db)?;
     snapshot.memory_proposals = crate::memory_learning::proposals(db, &snapshot)?;
     snapshot.skills = crate::skills::load(db)?;
@@ -261,6 +262,7 @@ fn encode(snapshot: &Snapshot) -> Result<String, String> {
     crate::scheduled_plans::refresh_results(&mut compacted);
     compacted.conversation.clear();
     compacted.rulebook_default.clear();
+    compacted.machine = None;
     // "Run next" only means something until the task starts.
     let waiting: std::collections::HashSet<&str> = snapshot.tasks.iter()
         .filter(|t| t.status == TaskStatus::Queued).map(|t| t.id.as_str()).collect();

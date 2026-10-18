@@ -31,10 +31,11 @@ pub const REVIEW_STANDARD: &str = "Review as an adversarial senior engineer, not
 
 pub const MACHINE: &str = "This machine is shared with the user's own work and other agents, and it has overheated and restarted under load before:
 1. One heavy job at a time: no parallel dependency installs, full test suites, Xcode or Docker builds. If the one-minute load average is above 20, wait.
-2. Keep build output inside your task folder (Xcode -derivedDataPath, caches, bundles), never in /tmp or a shared location. Your task folder is removed when you stop, and everything inside it goes with it.
-3. Never create extra Git worktrees or clones; work in the folder you were given.
-4. For a browser, use the shared one (~/.agents/bin/shared-chrome acquire, connect over CDP, release); never launch your own.
-5. Stop anything you started (servers, simulators, watchers) before you finish.";
+2. 01:00–06:00 is one thing at a time: while the load is above 12, queue full test suites, production builds and Xcode builds, and say so in your reply. Run `neko-daemon --machine-check` to see what the Mac can take right now.
+3. Keep build output inside your task folder (Xcode -derivedDataPath, caches, bundles), never in /tmp or a shared location. Your task folder is removed when you stop, and everything inside it goes with it.
+4. Never create extra Git worktrees or clones; work in the folder you were given.
+5. For a browser, use the shared one (~/.agents/bin/shared-chrome acquire, connect over CDP, release); never launch your own.
+6. Stop anything you started (dev servers, watchers, test runners, simulators) before you finish.";
 
 pub const REPOSITORIES: &str = "Repositories:
 1. Neko alone commits, pushes and opens pull requests, and only after an independent review passes. Nothing is ever merged by an agent.

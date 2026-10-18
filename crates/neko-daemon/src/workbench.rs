@@ -572,6 +572,15 @@ impl Controller {
         self.start_parking();
         // Work a watch files is checked against open tasks before it runs.
         self.start_triage();
+        // Reads the Mac every 15 s; admission and the app use the reading.
+        std::thread::Builder::new().name("neko-machine".into()).spawn(|| {
+            let mut tick = 0u32;
+            loop {
+                neko_core::machine::record(neko_core::machine::sense(tick % 4 == 0));
+                tick = tick.wrapping_add(1);
+                std::thread::sleep(Duration::from_secs(15));
+            }
+        }).expect("spawn machine thread");
         let mcp = self.mcp.clone();
         std::thread::spawn(move || {
             loop {
@@ -680,6 +689,15 @@ impl Controller {
             // own tests in `admission`.
             if !positions.is_empty() && !cfg!(test) {
                 positions.truncate(admission::admit(positions.len(), admission::load_average(), std::time::Instant::now()));
+            }
+            // The Mac's own limits: hold everything (disk, memory, load, night
+            // load) or cap how many run at once (night, memory warning).
+            if let Some(health) = neko_core::machine::latest() {
+                if health.holding.is_some() {
+                    positions.clear();
+                } else if let Some(cap) = health.cap {
+                    positions.truncate((cap as usize).saturating_sub(active.len()));
+                }
             }
             // An optional cap the user sets ("one ticket at a time"); waiting
             // tickets keep their place and start as running ones finish.

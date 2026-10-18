@@ -8,6 +8,7 @@ public enum JSONValue: Codable, Sendable, Hashable {
     public var bool: Bool { if case .bool(let value) = self { value } else { false } }
     public var array: [JSONValue] { if case .array(let value) = self { value } else { [] } }
     public var object: [String: JSONValue] { if case .object(let value) = self { value } else { [:] } }
+    public var double: Double { if case .number(let value) = self, value.isFinite { value } else { 0 } }
     public var int: Int {
         guard case .number(let value) = self, value.isFinite,
               value >= Double(Int.min), value < Double(Int.max) else { return 0 }

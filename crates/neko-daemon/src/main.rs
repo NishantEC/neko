@@ -15,6 +15,9 @@ fn main() {
     if neko_core::native_runner::run_guard_if_requested() {
         return;
     }
+    if let Some(code) = neko_core::machine::check_if_requested() {
+        std::process::exit(code);
+    }
     let socket_path = neko_protocol::socket_path();
     let db_path = neko_protocol::database_path();
 

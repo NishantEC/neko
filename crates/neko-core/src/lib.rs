@@ -9,6 +9,7 @@ pub mod agent_profiles;
 pub mod rulebook;
 pub mod chief_of_staff;
 pub mod triage;
+pub mod machine;
 pub mod agent_catalog;
 pub mod answers;
 pub mod agents;

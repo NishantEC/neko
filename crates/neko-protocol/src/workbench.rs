@@ -284,6 +284,10 @@ pub struct Snapshot {
     /// restore it. Never stored.
     #[serde(default)]
     pub rulebook_default: String,
+    /// The Mac's health as Neko last read it, and what that means for new
+    /// work. Attached for readers; never stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<MachineHealth>,
     /// Tasks the user asked to run next, in order; they start before other
     /// waiting tasks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -482,6 +486,44 @@ pub struct ChatMessage {
     /// the user's one-click confirmation before anything happens.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ChatAction>,
+}
+
+/// One reading of the Mac, and the limit it puts on new agent work.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct MachineHealth {
+    pub at_ms: i64,
+    pub load: f64,
+    pub cores: u32,
+    pub free_disk_gb: f64,
+    pub compressed_gb: f64,
+    pub swap_used_gb: f64,
+    pub swap_total_gb: f64,
+    /// "normal", "warning" or "critical", as macOS reports memory pressure.
+    pub pressure: String,
+    /// kernel_task CPU: high when macOS is throttling to cool down.
+    pub kernel_task_cpu: f64,
+    /// 01:00–06:00 local: one heavy job at a time.
+    pub night: bool,
+    /// Why no new agent work starts right now, in plain words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holding: Option<String>,
+    /// At most this many agents run at once right now, if the machine limits it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap: Option<u32>,
+    /// Memory held by each kind of agent process, largest first.
+    #[serde(default)]
+    pub agents: Vec<AgentMemory>,
+}
+
+// Readings are finite by construction (`neko_core::machine` never stores a
+// NaN), so equality is reflexive and the snapshot can stay `Eq`.
+impl Eq for MachineHealth {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentMemory {
+    pub name: String,
+    pub processes: u32,
+    pub mb: u64,
 }
 
 /// Something Neko, as chief of staff, proposes doing to an existing task.
