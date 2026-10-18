@@ -927,6 +927,7 @@ impl Controller {
             if checkout_source == task_root {
                 let mut keys = neko_core::duplicates::issue_keys(&task.title);
                 keys.extend(snapshot.mcp.sources.iter().filter(|s| s.task_id.as_deref() == Some(task.id.as_str())).map(|s| s.external_id.clone()));
+                keys.sort();
                 keys.dedup();
                 let own = format!("codex/neko-{}", directory.file_name().and_then(|n| n.to_str()).unwrap_or_default());
                 let gh = if cfg!(test) { None } else { native_runner::publish::resolve_gh().ok() };
