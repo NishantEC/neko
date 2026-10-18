@@ -24,6 +24,13 @@ pub(super) struct RunAuthority {
     automatic_task: Option<Task>,
     reply_revision: Option<String>,
 }
+/// Every tool granted on `connection` in `workspace` can be called now.
+fn usable_connection(state: &Snapshot, workspace: &str, connection: &str) -> bool {
+    state.mcp.connections.iter().any(|c| c.id == connection && c.available_in(workspace) && c.enabled && c.trusted && c.error.is_none())
+        && state.mcp.grants.iter()
+            .filter(|g| g.workspace_id == workspace && g.connection_id == connection)
+            .all(|g| policy::authorize(state, workspace, connection, &g.tool_name).is_ok_and(|t| t.schema_hash == g.schema_hash))
+}
 fn same_responsibility(a: &Responsibility, b: &Responsibility) -> bool {
     a.id == b.id
         && a.workspace_id == b.workspace_id
@@ -39,6 +46,20 @@ impl RunAuthority {
         Self::new(state, workspace, vec![], None)
     }
     fn new(
+        state: &Snapshot,
+        workspace: &str,
+        connections: Vec<String>,
+        responsibility: Option<Responsibility>,
+    ) -> Result<Self, String> {
+        let authority = Self::scoped(state, workspace, connections, responsibility)?;
+        if authority.responsibility.is_some() && authority.grants.is_empty() {
+            return Err(
+                "Grant at least one MCP tool to this responsibility's selected connections".into(),
+            );
+        }
+        Ok(authority)
+    }
+    fn scoped(
         state: &Snapshot,
         workspace: &str,
         connections: Vec<String>,
@@ -65,11 +86,6 @@ impl RunAuthority {
         if !authority.valid(state) {
             return Err("Run tool scope is paused, unavailable, or changed".into());
         }
-        if authority.responsibility.is_some() && authority.grants.is_empty() {
-            return Err(
-                "Grant at least one MCP tool to this responsibility's selected connections".into(),
-            );
-        }
         Ok(authority)
     }
     pub(super) fn for_task(state: &Snapshot, task: &Task) -> Result<Self, String> {
@@ -91,7 +107,7 @@ impl RunAuthority {
                     .ok_or("Source responsibility is missing")
             })
             .transpose()?;
-        let connections =
+        let mut connections =
             if let Some(r) = &responsibility {
                 r.connection_ids.clone()
             } else {
@@ -110,7 +126,15 @@ impl RunAuthority {
                     .map(|c| c.id.clone())
                     .collect()
             };
-        let mut authority = Self::new(state, &task.workspace_id, connections, responsibility)?;
+        // A ticket's work is code; MCP tools are extra. A connection that
+        // cannot be used right now (authentication failed, definition
+        // changed, a granted tool gone or re-shaped) is left out of this run
+        // instead of refusing the ticket. One such connection used to fail
+        // every new ticket in the workspace before it started (12 of 18
+        // Failed tickets on 2026-10-14). Its tools stay unavailable to the
+        // run; nothing is granted that was not.
+        connections.retain(|id| usable_connection(state, &task.workspace_id, id));
+        let mut authority = Self::scoped(state, &task.workspace_id, connections, responsibility)?;
         authority.task = Some(task.id.clone());
         authority.reply_revision = state.task_replies.get(&task.id).map(|r| r.revision.clone());
         authority.source = source.cloned();
@@ -592,6 +616,40 @@ mod tests {
         store::save(&db, &state).unwrap();
         drop(db);
         controller
+    }
+    #[test]
+    fn a_broken_connection_does_not_stop_tickets_from_starting() {
+        // 2026-10-14: an MCP connection whose authentication had failed
+        // (35 grants) made every new ticket fail before it started with
+        // "Run tool scope is paused, unavailable, or changed".
+        let controller = configured();
+        let state = {
+            let db = controller.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            state.tasks[0].status = TaskStatus::Queued;
+            let mut broken = state.mcp.connections[0].clone();
+            broken.id = "broken".into();
+            broken.error = Some("MCP authentication failed. Check the server configuration and authenticate again".into());
+            state.mcp.connections.push(broken);
+            state.mcp.grants.push(ToolGrant { workspace_id: "w".into(), connection_id: "broken".into(), tool_name: "lookup".into(), schema_hash: "hash".into() });
+            store::save(&db, &state).unwrap();
+            state
+        };
+        let authority = RunAuthority::for_task(&state, &state.tasks[0]).expect("the ticket starts");
+        assert_eq!(authority.connections, vec!["c".to_owned()], "only the working connection's tools come along");
+        assert!(authority.valid(&state));
+        // A watch-filed ticket whose own watch connection is broken still starts, without its tools.
+        let mut state = state;
+        state.mcp.sources.push(SourceEvidence {
+            task_id: Some("t".into()), id: "s".into(), responsibility_id: "r".into(), connection_id: "c".into(),
+            external_id: "BUG-1".into(), revision: "1".into(), title: "Bug".into(), description: String::new(),
+            retrieved_ms: 0, receipt_ids: vec![], eligible: true,
+        });
+        state.mcp.connections[0].error = Some("Source MCP definition changed; review it again before using tools".into());
+        let authority = RunAuthority::for_task(&state, &state.tasks[0]).expect("the watch-filed ticket starts");
+        assert!(authority.connections.is_empty() && authority.grants.is_empty());
+        // The watch itself still refuses to run without a usable tool.
+        assert!(RunAuthority::new(&state, "w", vec!["c".into()], Some(state.mcp.responsibilities[0].clone())).is_err());
     }
     #[test]
     fn claim_is_persisted_before_run_and_survives_restart_without_catchup() {
