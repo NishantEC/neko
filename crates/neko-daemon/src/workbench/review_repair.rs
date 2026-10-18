@@ -194,9 +194,7 @@ impl super::Controller {
         };
         let answer = self.run_native(&spec, &store::new_id(), authority, cancel, |event| {
             let usage = event.starts_with("USAGE ");
-            let _ = self.update_task_authorized(&request.task.id, authority, |t| {
-                store::append_event(t, "coordinator", &event);
-            });
+            let _ = self.record_progress_event(&request.task.id, authority, "coordinator", &event);
             if usage { self.stop_if_over_budget(&request.task.id, cancel); }
         });
         if native_runner::capture_review_state(request.directory, cancel)? != before {

@@ -264,6 +264,24 @@ decides work (normal or run next) or duplicate of an open task (merged, the
 open task gets a note). There is no "skip"; failure or 10 minutes releases
 the task as work.
 
+## Resource limits (2026-10-18)
+
+Measured on the owner's machine: the daemon wrote 43 GB in 12 hours (15
+macOS disk-write violations in 8 days), 84 tickets made 72 worktrees, all 17
+Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
+
+- **Snapshot writes.** The workbench is one multi-megabyte JSON row
+  (`workbench_snapshot_v1`). `Db::set_setting` skips a value identical to
+  what it last wrote (the cache is cleared on rollback), `heartbeat_ms` is
+  kept in memory and never persisted (it changed every 2-second tick, so
+  every tick rewrote the whole row), and agent tool events go through
+  `store::save_deferred` / `Db::set_setting_deferred`: readers see them at
+  once, disk gets them at most every 5s (`DEFERRED_WRITE_DELAY`), folded
+  into the next immediate save, a transaction, the tick's `flush_due` or
+  `Db` drop. A crash may lose ≤5s of tool events, never a user action,
+  status change or `USAGE` (budget) event: those still write immediately.
+  Do not persist per-tick values in the snapshot.
+
 ## Native design system and the check gate (2026-10-14)
 
 `native/NekoKit/Sources/NekoNative/DesignSystem/` owns every visual value

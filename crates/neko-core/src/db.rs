@@ -8,6 +8,31 @@ use rusqlite::Connection;
 pub struct Db {
     conn: Connection,
     clipboard_revision: std::cell::Cell<u64>,
+    /// Settings writes cost a whole value: the workbench snapshot is one
+    /// multi-megabyte JSON row, and SQLite rewrites every page of it (plus
+    /// the WAL copy) even when the new value is identical. Measured
+    /// 2026-10-18: neko-daemon wrote 43 GB in 12 hours, almost all of it a
+    /// 2-second scheduler tick re-saving an unchanged 4.7 MB snapshot.
+    /// `written` remembers what each key holds on disk so an identical
+    /// write is skipped; `pending` holds coalesced writes (agent progress
+    /// events) that reach disk at most once per `DEFERRED_WRITE_DELAY`.
+    written: std::cell::RefCell<std::collections::HashMap<String, String>>,
+    pending: std::cell::RefCell<std::collections::HashMap<String, (String, std::time::Instant)>>,
+    in_transaction: std::cell::Cell<bool>,
+    setting_writes: std::cell::Cell<u64>,
+}
+
+/// How long a deferred settings write may wait before it reaches disk.
+/// Only progress that a crash may lose goes through this path (agent tool
+/// events); user actions and status changes write immediately.
+pub const DEFERRED_WRITE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl Drop for Db {
+    fn drop(&mut self) {
+        if let Err(error) = self.flush_deferred() {
+            eprintln!("neko: could not save deferred settings on close: {error}");
+        }
+    }
 }
 
 impl Db {
@@ -18,9 +43,87 @@ impl Db {
             .conn
             .unchecked_transaction()
             .map_err(|e| e.to_string())?;
-        let value = operation()?;
-        transaction.commit().map_err(|e| e.to_string())?;
-        Ok(value)
+        // A write in this transaction supersedes deferred progress; if it
+        // rolls back, that progress must still be waiting to be written.
+        let deferred = self.pending.borrow().clone();
+        self.in_transaction.set(true);
+        let result = operation().and_then(|value| {
+            transaction.commit().map_err(|e| e.to_string())?;
+            Ok(value)
+        });
+        self.in_transaction.set(false);
+        if result.is_err() {
+            // Rolled back: what was remembered as written may not be on disk.
+            self.written.borrow_mut().clear();
+            *self.pending.borrow_mut() = deferred;
+        }
+        result
+    }
+
+    fn with_conn(conn: Connection) -> Self {
+        Self {
+            conn,
+            clipboard_revision: std::cell::Cell::new(0),
+            written: Default::default(),
+            pending: Default::default(),
+            in_transaction: std::cell::Cell::new(false),
+            setting_writes: std::cell::Cell::new(0),
+        }
+    }
+
+    /// Settings rows actually written to SQLite (identical and coalesced
+    /// writes are not counted). For tests and diagnostics.
+    pub fn setting_writes(&self) -> u64 {
+        self.setting_writes.get()
+    }
+
+    /// Store `value` for `key`, reaching disk within `DEFERRED_WRITE_DELAY`
+    /// (or sooner, with the next immediate write of the same key, any
+    /// transaction, `flush_deferred` or closing the database). Reads see it
+    /// at once. A crash may lose it, so use this only for progress.
+    pub fn set_setting_deferred(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        if self.in_transaction.get() {
+            return self.set_setting(key, value);
+        }
+        if self.written.borrow().get(key).is_some_and(|v| v == value) {
+            self.pending.borrow_mut().remove(key);
+            return Ok(());
+        }
+        let since = self
+            .pending
+            .borrow()
+            .get(key)
+            .map_or_else(std::time::Instant::now, |(_, since)| *since);
+        self.pending
+            .borrow_mut()
+            .insert(key.to_owned(), (value.to_owned(), since));
+        self.flush_due(DEFERRED_WRITE_DELAY)
+    }
+
+    /// Write deferred values that have waited at least `delay`.
+    pub fn flush_due(&self, delay: std::time::Duration) -> rusqlite::Result<()> {
+        let due: Vec<String> = self
+            .pending
+            .borrow()
+            .iter()
+            .filter(|(_, (_, since))| since.elapsed() >= delay)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in due {
+            let pending = self.pending.borrow_mut().remove(&key);
+            if let Some((value, since)) = pending
+                && let Err(error) = self.set_setting(&key, &value)
+            {
+                self.pending.borrow_mut().insert(key, (value, since));
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    /// Write every deferred value now.
+    pub fn flush_deferred(&self) -> rusqlite::Result<()> {
+        self.flush_due(std::time::Duration::ZERO)
     }
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         if let Some(parent) = path.parent() {
@@ -29,19 +132,13 @@ impl Db {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", true)?;
-        let db = Self {
-            conn,
-            clipboard_revision: std::cell::Cell::new(0),
-        };
+        let db = Self::with_conn(conn);
         db.migrate()?;
         Ok(db)
     }
 
     pub fn open_in_memory() -> rusqlite::Result<Self> {
-        let db = Self {
-            conn: Connection::open_in_memory()?,
-            clipboard_revision: std::cell::Cell::new(0),
-        };
+        let db = Self::with_conn(Connection::open_in_memory()?);
         db.migrate()?;
         Ok(db)
     }
@@ -71,6 +168,9 @@ impl Db {
     }
 
     pub fn get_setting(&self, key: &str) -> rusqlite::Result<Option<String>> {
+        if let Some((value, _)) = self.pending.borrow().get(key) {
+            return Ok(Some(value.clone()));
+        }
         self.conn
             .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
                 row.get(0)
@@ -82,12 +182,32 @@ impl Db {
             })
     }
 
+    /// Writes now, unless the stored value is already identical. A deferred
+    /// value for the same key is superseded by this one; if it equals this
+    /// one, the caller changed nothing on top of it and it stays deferred.
     pub fn set_setting(&self, key: &str, value: &str) -> rusqlite::Result<()> {
-        self.conn.execute(
+        if self.pending.borrow().get(key).is_some_and(|(v, _)| v == value) {
+            return Ok(());
+        }
+        let superseded = self.pending.borrow_mut().remove(key);
+        if self.written.borrow().get(key).is_some_and(|v| v == value) {
+            return Ok(());
+        }
+        if let Err(error) = self.conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
-        )?;
+        ) {
+            if let Some(pending) = superseded {
+                self.pending.borrow_mut().insert(key.to_owned(), pending);
+            }
+            self.written.borrow_mut().remove(key);
+            return Err(error);
+        }
+        self.setting_writes.set(self.setting_writes.get() + 1);
+        self.written
+            .borrow_mut()
+            .insert(key.to_owned(), value.to_owned());
         Ok(())
     }
 
@@ -252,6 +372,62 @@ mod tests {
             db.get_setting("hotkey").unwrap().as_deref(),
             Some("cmd+shift+space")
         );
+    }
+
+    #[test]
+    fn identical_settings_are_not_rewritten_and_deferred_ones_coalesce() {
+        let db = Db::open_in_memory().unwrap();
+        db.set_setting("blob", "a").unwrap();
+        for _ in 0..100 {
+            db.set_setting("blob", "a").unwrap();
+        }
+        assert_eq!(db.setting_writes(), 1, "an unchanged value is never rewritten");
+        for n in 0..100 {
+            db.set_setting_deferred("blob", &format!("progress {n}")).unwrap();
+            // A no-op save on top of deferred progress keeps it deferred.
+            db.set_setting("blob", &format!("progress {n}")).unwrap();
+        }
+        assert_eq!(db.setting_writes(), 1, "progress waits for its delay");
+        assert_eq!(db.get_setting("blob").unwrap().as_deref(), Some("progress 99"));
+        db.flush_due(std::time::Duration::ZERO).unwrap();
+        assert_eq!(db.setting_writes(), 2);
+        // An immediate change writes now and supersedes pending progress.
+        db.set_setting_deferred("blob", "later").unwrap();
+        db.set_setting("blob", "decision").unwrap();
+        db.flush_deferred().unwrap();
+        assert_eq!(db.setting_writes(), 3);
+        assert_eq!(db.get_setting("blob").unwrap().as_deref(), Some("decision"));
+    }
+
+    #[test]
+    fn a_rolled_back_write_is_not_remembered_and_progress_survives_it() {
+        let db = Db::open_in_memory().unwrap();
+        db.set_setting("blob", "before").unwrap();
+        db.set_setting_deferred("blob", "progress").unwrap();
+        let failed: Result<(), String> = db.atomic(|| {
+            db.set_setting("blob", "rolled back").unwrap();
+            Err("boom".into())
+        });
+        assert!(failed.is_err());
+        // The deferred progress is still waiting, and still reaches disk.
+        assert_eq!(db.get_setting("blob").unwrap().as_deref(), Some("progress"));
+        db.flush_deferred().unwrap();
+        assert_eq!(db.get_setting("blob").unwrap().as_deref(), Some("progress"));
+        db.set_setting("blob", "rolled back").unwrap();
+        assert_eq!(db.get_setting("blob").unwrap().as_deref(), Some("rolled back"));
+    }
+
+    #[test]
+    fn deferred_settings_reach_disk_when_the_database_closes() {
+        let dir = std::env::temp_dir().join(format!("neko-db-defer-{}", std::process::id()));
+        let path = dir.join("neko.db");
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let db = Db::open(&path).unwrap();
+            db.set_setting_deferred("blob", "progress").unwrap();
+        }
+        assert_eq!(Db::open(&path).unwrap().get_setting("blob").unwrap().as_deref(), Some("progress"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
