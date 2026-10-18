@@ -246,6 +246,10 @@ pub struct RuntimeSelection {
     pub catalog_read_at_ms: i64,
 }
 
+/// Default per-repository cap on tickets holding a writable run. 84 tickets
+/// once made 72 worktrees in one repository, 48 of them in a day.
+pub const DEFAULT_WRITABLE_PER_REPOSITORY: u32 = 4;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
     #[serde(default)]
@@ -266,6 +270,12 @@ pub struct Snapshot {
     /// turn. `None` is no limit beyond the machine-load pacing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_running_tickets: Option<u32>,
+    /// At most this many tickets per repository hold a writable run (their
+    /// own worktree being changed) at once; the rest wait their turn.
+    /// Read-only phases are not counted. `None` uses
+    /// `DEFAULT_WRITABLE_PER_REPOSITORY`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_writable_per_repository: Option<u32>,
     /// The user's own rulebook for Neko and every agent it delegates to.
     /// `None` uses the built-in default (`rulebook_default`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -377,6 +387,11 @@ impl Snapshot {
             .filter(|folders| !folders.is_empty())
             .cloned()
             .unwrap_or_else(|| vec![workspace.repository.clone()])
+    }
+
+    /// The per-repository cap on tickets holding a writable run.
+    pub fn writable_per_repository(&self) -> usize {
+        self.max_writable_per_repository.unwrap_or(DEFAULT_WRITABLE_PER_REPOSITORY) as usize
     }
 
     pub fn root_for(&self, task: &Task, workspace: &Workspace) -> String {
@@ -678,6 +693,10 @@ pub enum Command {
         cents: Option<u32>,
     },
     SetMaxRunningTickets {
+        limit: Option<u32>,
+    },
+    /// Cap tickets writing at once in one repository; `None` is the default (4).
+    SetMaxWritablePerRepository {
         limit: Option<u32>,
     },
     /// Replace the rulebook every agent works to. Empty restores the default.

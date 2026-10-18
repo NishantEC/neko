@@ -666,11 +666,15 @@ impl Controller {
                         .then_some(index)
                 })
                 .collect();
-            // No fixed cap, but new agents are paced and held back while the
+            // No fixed global cap, but new agents are paced and held back while the
             // machine is overloaded; running work is never touched. Tasks the
             // user asked to run next go first; everything else keeps its order.
             let mut positions = positions;
             positions.sort_by_key(|&index| snapshot.run_next.iter().position(|id| *id == snapshot.tasks[index].id).unwrap_or(usize::MAX));
+            // At most a few tickets per repository write at once (each holds
+            // a worktree with its own installs and builds); the rest wait.
+            let running: Vec<&str> = active.iter().map(|a| a.task_id.as_str()).collect();
+            let mut positions = admission::cap_writable_per_repository(&snapshot, &running, positions);
             // Scheduler tests share one process and the machine's real load,
             // so pacing would make them order- and load-dependent; it has its
             // own tests in `admission`.
@@ -2826,6 +2830,52 @@ mod tests {
         let persisted: Snapshot = serde_json::from_str(&db.get_setting("workbench_snapshot_v1").unwrap().unwrap()).unwrap();
         assert_eq!(persisted.tasks[0].events.len(), events);
         assert_eq!(persisted.tasks[0].result, "done");
+    }
+
+    #[test]
+    fn a_tick_starts_at_most_four_writing_tickets_in_one_repository() {
+        let controller = Arc::new(controller_with_task(TaskStatus::Queued));
+        {
+            let db = controller.db.lock().unwrap();
+            let mut state = store::load(&db).unwrap();
+            for n in 0..5 {
+                let mut task = state.tasks[0].clone();
+                task.id = format!("more-{n}");
+                state.tasks.push(task);
+            }
+            store::save(&db, &state).unwrap();
+        }
+        let released = Arc::new(AtomicBool::new(false));
+        let (started, receiver) = std::sync::mpsc::channel();
+        for _ in 0..2 {
+            let started = started.clone();
+            let released = released.clone();
+            controller.tick_with(move |_, claim, _| {
+                started.send(claim.task.id.clone()).unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_secs(3);
+                while !released.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(())
+            }).unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(receiver.try_iter().count(), 4, "six writing tickets, four start, two wait");
+        released.store(true, Ordering::Release);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !controller.active.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    pub(crate) fn controller_task() -> Task {
+        Task {
+            id: "t".into(), workspace_id: "w".into(), issue_id: None, title: "Task".into(),
+            goal: "Fix one thing".into(), status: TaskStatus::Queued, plan: String::new(),
+            result: String::new(), worktree: None, events: vec![], created_at_ms: 0,
+            updated_at_ms: 0, source_revision: None, base_commit: None, pull_request: None,
+            landed_commit: None, supervision: None, display_title: None, parked: None,
+        }
     }
 
     pub(super) fn controller_with_task(status: TaskStatus) -> Controller {
