@@ -110,6 +110,58 @@ pub fn restore_worktree(repository: &Path, path: &Path, parked: &Parked, cancel:
     Ok(())
 }
 
+/// How `recreate_missing_worktree` brought a folder back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Recreated {
+    /// Checked out from the task's own branch: every commit (and parked
+    /// work) on it is back.
+    FromBranch(String),
+    /// The branch was gone, so a new one was started from this commit.
+    FromBase { branch: String, start: String },
+}
+
+/// Recreates a task folder that disappeared without being parked (deleted by
+/// hand, by an older Neko, or by a cleanup tool), at the same path so a saved
+/// agent session still resumes. Uses the task's own `codex/neko-<folder>`
+/// branch when it exists, otherwise starts that branch from `base` (the
+/// commit the task began at) or the repository's HEAD. Never touches an
+/// existing folder.
+pub fn recreate_missing_worktree(repository: &Path, path: &Path, base: Option<&str>, cancel: &AtomicBool) -> Result<Recreated, String> {
+    if path.exists() {
+        return Err(format!("Cannot recreate: {} already exists", path.display()));
+    }
+    let name = path.file_name().and_then(|n| n.to_str()).ok_or("Unnamed worktree")?;
+    let branch = format!("codex/neko-{name}");
+    let repository = repository.canonicalize().map_err(|e| format!("Repository unavailable: {e}"))?;
+    let checkout = checkout_lock(&repository, cancel)?;
+    let guard = wait_for_checkout(&checkout, cancel)?;
+    // Forget the missing folder's registration so its branch can be checked out again.
+    let _ = git_output(&repository, &["worktree", "prune"], cancel);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Cannot create task worktree directory: {e}"))?;
+    }
+    let has_branch = git_output(&repository, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}^{{commit}}")], cancel).is_ok();
+    let mut add = filterless_checkout(&repository, cancel)?;
+    let recreated = if has_branch {
+        add.args(["worktree", "add"]).arg(path).arg(&branch);
+        Recreated::FromBranch(branch.clone())
+    } else {
+        let start = base
+            .filter(|base| git_output(&repository, &["rev-parse", "--verify", "--quiet", &format!("{base}^{{commit}}")], cancel).is_ok())
+            .unwrap_or("HEAD")
+            .to_owned();
+        add.args(["worktree", "add", "-b", &branch]).arg(path).arg(&start);
+        Recreated::FromBase { branch: branch.clone(), start }
+    };
+    let output = execute(add, &[], cancel, Duration::from_secs(120), |_| Ok(()))?;
+    if !output.status.success() {
+        return Err(format!("Recreating the missing worktree failed: {}", bounded_text(&output.stderr, MAX_EVENT)));
+    }
+    drop(guard);
+    seed_dependency_folders(&repository, path, cancel);
+    Ok(recreated)
+}
+
 /// What a parked task changed since `base`, read from its branch in the
 /// source checkout without restoring the folder.
 pub fn parked_changes(repository: &Path, base: &str, branch: &str, cancel: &AtomicBool) -> Result<(Vec<String>, Vec<u8>), String> {
@@ -179,6 +231,28 @@ mod tests {
         assert!(!parked.wip);
         restore_worktree(&repo, &worktree, &parked, &cancel).unwrap();
         assert_eq!(head(&worktree, &cancel).unwrap(), tip, "a real commit is never taken off");
+    }
+
+    #[test]
+    fn a_missing_worktree_comes_back_from_its_branch_or_else_its_base() {
+        let (_dir, repo, worktree) = fixture();
+        let cancel = AtomicBool::new(false);
+        let base = head(&worktree, &cancel).unwrap();
+        fs::write(worktree.join("a.txt"), "committed work\n").unwrap();
+        git(&worktree, &["commit", "-qam", "real work"]);
+        let tip = head(&worktree, &cancel).unwrap();
+        // Deleted behind Git's back: the registration is stale.
+        fs::remove_dir_all(&worktree).unwrap();
+        assert_eq!(recreate_missing_worktree(&repo, &worktree, Some(&base), &cancel).unwrap(), Recreated::FromBranch("codex/neko-t1".into()));
+        assert_eq!(head(&worktree, &cancel).unwrap(), tip, "every commit on the branch is back");
+        assert!(recreate_missing_worktree(&repo, &worktree, Some(&base), &cancel).is_err(), "an existing folder is never touched");
+
+        // Branch gone too: start again from where the task began.
+        fs::remove_dir_all(&worktree).unwrap();
+        git(&repo, &["worktree", "prune"]);
+        git(&repo, &["branch", "-D", "codex/neko-t1"]);
+        assert_eq!(recreate_missing_worktree(&repo, &worktree, Some(&base), &cancel).unwrap(), Recreated::FromBase { branch: "codex/neko-t1".into(), start: base.clone() });
+        assert_eq!(head(&worktree, &cancel).unwrap(), base);
     }
 
     #[test]

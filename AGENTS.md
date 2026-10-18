@@ -144,7 +144,8 @@ folder and records `Task::parked`; running or publishing it again calls
 `ensure_restored`, which recreates the folder at the same path (so saved agent
 sessions still resume), takes the parked commit back off and re-seeds
 dependencies. Ignored output (deps, caches) is not carried. Changes for a
-parked ticket are read from its branch. Full-access
+parked ticket are read from its branch. A recorded folder that vanished
+without parking is recreated from the branch too (see "Resource limits"). Full-access
 workers are trusted local processes; do not describe worktrees or scoped prompts
 as filesystem security boundaries. See `docs/evidence/full-access-supervision.md`.
 
@@ -291,6 +292,17 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   candidates stay queued; read-only candidates (planning, read-only asks,
   pending splits) always pass. Keep `writes()` in step with
   `execute_with_worktree`'s `work_directly`.
+- **Worktree lifecycle.** Removal of Completed/merged/idle folders is the
+  existing parking sweep (work saved to the branch first, so uncommitted or
+  unpushed work is never lost). Added: at ReadyForReview the folder's
+  Git-ignored `node_modules`/`.venv` are deleted
+  (`native_runner::prune_dependency_folders`; this also covers split tickets,
+  which are never parked), and resuming in an existing folder re-seeds
+  `node_modules` (`reseed_dependency_folders`; `.venv` is never seeded, it
+  holds absolute paths). `parking::ensure_restored` now also recreates a
+  recorded folder that is missing without being parked, at the same path,
+  from `codex/neko-<folder>` or, if that branch is gone, from `base_commit`
+  (`native_runner::parking::recreate_missing_worktree`), with a ticket event.
 
 ## Native design system and the check gate (2026-10-14)
 

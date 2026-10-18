@@ -66,12 +66,30 @@ fn record(db: &Mutex<Db>, id: &str, parked: Option<ParkedWork>, message: &str) -
     store::save(&db, &snapshot)
 }
 
-/// Brings a parked ticket's folder back before anything uses it. A ticket
-/// that is not parked is left exactly as it is.
+/// Brings a parked ticket's folder back before anything uses it. A recorded
+/// folder that is missing without being parked (removed by hand, by an older
+/// Neko or a cleanup tool) is recreated at the same path from the ticket's
+/// branch, or from its base commit if the branch is gone. A ticket whose
+/// folder is present is left exactly as it is.
 pub(super) fn ensure_restored(db: &Mutex<Db>, task_id: &str, cancel: &AtomicBool) -> Result<(), String> {
     let _lock = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let snapshot = store::load(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let Some(task) = snapshot.tasks.iter().find(|t| t.id == task_id) else { return Ok(()) };
+    if task.parked.is_none()
+        && let Some(path) = task.worktree.as_deref().map(std::path::Path::new)
+        && !path.exists()
+    {
+        let workspace = snapshot.workspaces.iter().find(|w| w.id == task.workspace_id).ok_or("Workspace missing")?;
+        let repository = snapshot.root_for(task, workspace);
+        let message = match parking::recreate_missing_worktree(std::path::Path::new(&repository), path, task.base_commit.as_deref(), cancel)? {
+            parking::Recreated::FromBranch(branch) => format!("Its working folder was missing, so it was recreated from branch {branch}"),
+            parking::Recreated::FromBase { branch, start } => format!(
+                "Its working folder and branch were missing, so {branch} was started again from {}; earlier unsaved work could not be recovered",
+                start.chars().take(12).collect::<String>()
+            ),
+        };
+        return record(db, task_id, None, &message);
+    }
     let (Some(parked), Some(path)) = (&task.parked, &task.worktree) else { return Ok(()) };
     let path = std::path::Path::new(path);
     parking::restore_worktree(
@@ -186,6 +204,7 @@ mod tests {
             let db = controller.db.lock().unwrap();
             let mut snapshot = store::load(&db).unwrap();
             snapshot.tasks[0].worktree = Some(worktree.to_string_lossy().into_owned());
+            snapshot.workspaces[0].repository = repo.to_string_lossy().into_owned();
             store::save(&db, &snapshot).unwrap();
         }
 
@@ -207,5 +226,12 @@ mod tests {
         assert_eq!(std::fs::read_to_string(worktree.join("a.txt")).unwrap(), "unfinished\n");
         assert!(store::load(&controller.db.lock().unwrap()).unwrap().tasks[0].parked.is_none());
         ensure_restored(&controller.db, "t", &AtomicBool::new(false)).unwrap();
+
+        // Removed behind Neko's back (not parked): a reply still has a folder to work in.
+        std::fs::remove_dir_all(&worktree).unwrap();
+        ensure_restored(&controller.db, "t", &AtomicBool::new(false)).unwrap();
+        assert!(worktree.join("a.txt").is_file(), "recreated at the same path");
+        let snapshot = store::load(&controller.db.lock().unwrap()).unwrap();
+        assert!(snapshot.tasks[0].events.last().unwrap().message.contains("recreated from branch codex/neko-t"));
     }
 }

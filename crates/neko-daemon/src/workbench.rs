@@ -874,7 +874,12 @@ impl Controller {
         // A parked ticket gets its folder back, at the same path, first.
         parking::ensure_restored(&self.db, &task.id, cancel)?;
         let directory = match &task.worktree {
-            Some(path) => path.into(),
+            Some(path) => {
+                // Dependency folders are pruned when a ticket stops for
+                // review; give them back (as copy-on-write clones) first.
+                native_runner::reseed_dependency_folders(std::path::Path::new(checkout_source), std::path::Path::new(path), cancel);
+                path.into()
+            }
             None => {
                 // A ticket moved to another repository keeps its old copy on
                 // disk, so its new checkout takes the next free name.
@@ -1274,6 +1279,10 @@ impl Controller {
                     attempt_task = evidence;
                     continue;
                 }
+                // Nothing runs in the folder while it waits for review: drop
+                // its ignored dependency folders (often gigabytes). Publishing
+                // only needs Git; a reply re-seeds them before work resumes.
+                native_runner::prune_dependency_folders(&directory, cancel);
                 self.commit_phase_authorized(authority, Some(&snapshot), |state| {
                     let t = state.tasks.iter_mut().find(|t| t.id == task.id).ok_or("Task no longer exists")?;
                     t.status = TaskStatus::ReadyForReview;
