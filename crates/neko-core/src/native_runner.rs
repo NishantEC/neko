@@ -755,6 +755,59 @@ fn seed_dependency_folders(source: &Path, worktree: &Path, cancel: &AtomicBool) 
     seeded
 }
 
+/// Re-seeds a task worktree that is about to be worked in again, after its
+/// dependency folders were pruned. Only folders it lacks are copied.
+pub fn reseed_dependency_folders(source: &Path, worktree: &Path, cancel: &AtomicBool) -> usize {
+    seed_dependency_folders(source, worktree, cancel)
+}
+
+/// Deletes a stopped task worktree's Git-ignored dependency folders
+/// (`node_modules`, `.venv`): they are the bulk of its disk and are
+/// regenerated (`node_modules` re-seeded by `reseed_dependency_folders`) when
+/// work resumes. A folder Git does not ignore is task content and is kept;
+/// any Git failure deletes nothing. Returns how many folders were removed.
+pub fn prune_dependency_folders(worktree: &Path, cancel: &AtomicBool) -> usize {
+    let mut candidates = Vec::new();
+    collect_dependency_folders(worktree, worktree, 0, &mut candidates);
+    collect_virtualenvs(worktree, worktree, 0, &mut candidates);
+    if candidates.is_empty() {
+        return 0;
+    }
+    let ignored = ignored_paths(worktree, &candidates, cancel);
+    candidates
+        .iter()
+        .filter(|relative| ignored.contains(relative))
+        .filter(|relative| {
+            let path = worktree.join(relative);
+            // Never follow a symlink out of the worktree.
+            path.symlink_metadata().is_ok_and(|m| m.is_dir()) && fs::remove_dir_all(&path).is_ok()
+        })
+        .count()
+}
+
+/// Relative paths of `.venv` folders under `root`, at the same depths as
+/// `collect_dependency_folders`. Never seeded: a virtualenv records absolute
+/// paths to the checkout it was made in.
+fn collect_virtualenvs(root: &Path, directory: &Path, depth: usize, found: &mut Vec<PathBuf>) {
+    if depth > DEPENDENCY_SEARCH_DEPTH || found.len() >= MAX_SEEDED_DEPENDENCY_FOLDERS {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(directory) else { return };
+    for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let name = entry.file_name();
+        if name == ".venv" {
+            if let Ok(relative) = entry.path().strip_prefix(root) {
+                found.push(relative.to_path_buf());
+            }
+        } else if !name.as_encoded_bytes().starts_with(b".") && name != "target" && name != "node_modules" {
+            collect_virtualenvs(root, &entry.path(), depth + 1, found);
+        }
+    }
+}
+
 /// Relative paths of `node_modules` folders under `root`. Hidden folders
 /// (`.git`, nested worktrees) and existing dependency folders are never
 /// walked, and symlinked folders are neither walked nor returned.
@@ -2964,6 +3017,27 @@ printf '%s\n' '{"type":"turn.completed"}'
         assert!(!path.join("scratch").exists());
         assert_eq!(git(&path, &["status", "--porcelain"]), "", "seeded folders must stay invisible to snapshots and review");
         assert!(repo.join("node_modules/left-pad/index.js").is_file(), "the source checkout is untouched");
+    }
+
+    #[test]
+    fn a_stopped_worktree_loses_only_its_ignored_dependency_folders_and_gets_them_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        committed_fixture(&repo, &[(".gitignore", "/node_modules/\npackages/*/node_modules/\n.venv/\n"), ("packages/ui/package.json", "{}\n"), ("vendor/node_modules/kept.js", "tracked\n")]);
+        install(&repo, "node_modules/left-pad");
+        let path = create_worktree_in(&repo, "t9", &dir.path().join("wt")).unwrap();
+        assert!(path.join("node_modules/left-pad/index.js").is_file(), "seeded on creation");
+        fs::create_dir_all(path.join("packages/ui/node_modules/tiny")).unwrap();
+        fs::create_dir_all(path.join(".venv/bin")).unwrap();
+        fs::write(path.join("work.txt"), "uncommitted task work\n").unwrap();
+        let cancel = AtomicBool::new(false);
+        assert_eq!(prune_dependency_folders(&path, &cancel), 3);
+        assert!(!path.join("node_modules").exists() && !path.join(".venv").exists());
+        assert!(!path.join("packages/ui/node_modules").exists());
+        assert!(path.join("vendor/node_modules/kept.js").is_file(), "a tracked folder is task content");
+        assert!(path.join("work.txt").is_file(), "uncommitted work is untouched");
+        assert_eq!(reseed_dependency_folders(&repo, &path, &cancel), 1);
+        assert!(path.join("node_modules/left-pad/index.js").is_file(), "re-seeded when work resumes");
     }
 
     #[test]
