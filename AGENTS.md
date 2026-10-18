@@ -125,7 +125,8 @@ question. The same failure (compared case-, spacing- and number-insensitively)
 coming back after an attempt stops recovery early, and each reviewer sees the
 earlier blockers. Codex/Claude/OpenCode runs stop when one command fails with
 identical output four times; Codex runs also stop after ten silent minutes with
-no command running (`native_runner::StallGuard`); quiet long commands are allowed. Unchanged patches may still represent dependency/test setup progress.
+no command running (`native_runner::StallGuard`); quiet long commands are allowed.
+Processes a run started in other process groups are killed when it ends. Unchanged patches may still represent dependency/test setup progress.
 Every repaired result receives a fresh independent review. HEAD, index, Git
 control metadata, tracked content (including preexisting dirty files) and
 nonignored untracked files are captured before/after reviewers and recovery
@@ -327,6 +328,14 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   and runs without their tools; responsibility wakes (`RunAuthority::new`)
   stay strict. Mid-run invalidation is unchanged: a connection that breaks
   during a run still discards it ("Task authority changed…").
+- **Processes an agent leaves behind.** Claude Code runs each shell command
+  in its own process group, so killing the agent's group missed them (a
+  `jest` from a Neko task ran 7 days). `execute_with_guard` records the
+  run's descendants every 250ms (`Descendants`, libproc) and, when the run
+  ends for any reason, SIGKILLs those still alive (pid + start time match,
+  so reused pids are safe) and their groups. Claude/OpenCode still have no
+  quiet-stall check (they emit no command-start events); the wall-clock
+  `RunSpec::timeout` (30 min builders, 10 min planning/review) bounds them.
 
 ## Native design system and the check gate (2026-10-14)
 

@@ -1483,6 +1483,93 @@ impl Drop for ProcessGroup {
     }
 }
 
+/// Every process an agent started, wherever it went. Claude Code (and other
+/// CLIs) run each shell command in its own process group, so killing the
+/// agent's group never reached them: when an agent stopped or timed out, its
+/// test runner kept going (a `jest` from a Neko task ran for 7 days). The
+/// descendants of a run are recorded while their ancestry is still intact
+/// and, when the run ends for any reason, the ones still alive (same pid and
+/// start time, so a reused pid is never touched) are killed with their
+/// process groups.
+struct Descendants {
+    root: libc::pid_t,
+    seen: std::collections::HashMap<libc::pid_t, (libc::pid_t, u64, u64)>,
+    checked: Option<Instant>,
+}
+
+const DESCENDANT_CHECK_EVERY: Duration = Duration::from_millis(250);
+const MAX_DESCENDANTS: usize = 4096;
+
+/// `(pgid, start seconds, start microseconds)` of a live process.
+fn process_identity(pid: libc::pid_t) -> Option<(libc::pid_t, u64, u64)> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: the buffer is a zeroed proc_bsdinfo of exactly `size` bytes.
+    let filled = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&mut info as *mut libc::proc_bsdinfo).cast(), size) };
+    (filled == size).then_some((info.pbi_pgid as libc::pid_t, info.pbi_start_tvsec, info.pbi_start_tvusec))
+}
+
+fn child_pids(parent: libc::pid_t) -> Vec<libc::pid_t> {
+    let mut buffer = vec![0 as libc::pid_t; 256];
+    let bytes = (buffer.len() * std::mem::size_of::<libc::pid_t>()) as libc::c_int;
+    // SAFETY: the buffer holds `bytes` bytes; entries left zero are unused.
+    let result = unsafe { libc::proc_listchildpids(parent, buffer.as_mut_ptr().cast(), bytes) };
+    if result <= 0 {
+        return Vec::new();
+    }
+    buffer.into_iter().filter(|pid| *pid > 0).collect()
+}
+
+impl Descendants {
+    fn new(root: u32) -> Self {
+        Self { root: root as libc::pid_t, seen: Default::default(), checked: None }
+    }
+
+    /// Records the current descendants, at most every `DESCENDANT_CHECK_EVERY`.
+    fn watch(&mut self) {
+        if self.checked.is_some_and(|at| at.elapsed() < DESCENDANT_CHECK_EVERY) {
+            return;
+        }
+        self.checked = Some(Instant::now());
+        let mut queue = vec![self.root];
+        while let Some(parent) = queue.pop() {
+            for pid in child_pids(parent) {
+                if self.seen.len() >= MAX_DESCENDANTS {
+                    return;
+                }
+                if let Some(identity) = process_identity(pid) {
+                    self.seen.insert(pid, identity);
+                    queue.push(pid);
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Descendants {
+    fn drop(&mut self) {
+        self.checked = None;
+        self.watch();
+        // SAFETY: getpgrp has no preconditions.
+        let own_group = unsafe { libc::getpgrp() };
+        let ours: std::collections::HashSet<libc::pid_t> = self.seen.keys().copied().collect();
+        for (&pid, &identity) in &self.seen {
+            if process_identity(pid) != Some(identity) {
+                continue; // Exited, or the pid now belongs to someone else.
+            }
+            let (group, ..) = identity;
+            // SAFETY: plain signals to a process verified just above, and to
+            // a group whose leader was one of this run's own descendants.
+            unsafe {
+                if group != own_group && group != self.root && ours.contains(&group) {
+                    libc::kill(-group, libc::SIGKILL);
+                }
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+    }
+}
+
 const GUARD_ARGUMENT: &str = "--neko-native-runner-guard";
 const GUARD_FD: RawFd = 3;
 
@@ -1702,6 +1789,8 @@ fn execute_with_guard(
         guardian_control: sockets.map(|(_reader, writer)| writer),
         terminated: false,
     };
+    // Declared after `process`, so it is dropped (and sweeps) first.
+    let mut descendants = Descendants::new(process.child.id());
     let mut stdin = process.child.stdin.take();
     let mut stdout = process.child.stdout.take().expect("piped stdout");
     let mut stderr = process.child.stderr.take().expect("piped stderr");
@@ -1717,6 +1806,7 @@ fn execute_with_guard(
     let mut buffer = [0; 8192];
     let mut last_output = Instant::now();
     loop {
+        descendants.watch();
         if cancel.load(Ordering::Acquire) {
             return Err("Task cancelled".into());
         }
@@ -1850,6 +1940,34 @@ mod stall_tests {
         }
         let error = guard.command_finished(Some("cargo test"), Some(101), Some("error[E0425]")).unwrap_err();
         assert!(error.contains("`cargo test` 4 times"), "{error}");
+    }
+
+    fn alive(pid: libc::pid_t) -> bool {
+        // A zombie is not running; only a live process has a start identity.
+        process_identity(pid).is_some()
+    }
+
+    /// Starts `sleep` in its own process group, as Claude Code runs each
+    /// shell command, and prints its pid.
+    fn escaped_sleeper(then: &str) -> Command {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", &format!("perl -e 'setpgrp(0,0); exec \"sleep\", \"60\"' </dev/null >/dev/null 2>&1 & echo $!; {then}")]);
+        command
+    }
+
+    #[test]
+    fn processes_an_agent_left_behind_in_other_groups_are_ended_with_it() {
+        let cancel = AtomicBool::new(false);
+        for (then, timeout) in [("sleep 1", Duration::from_secs(20)), ("sleep 30", Duration::from_secs(2))] {
+            let mut out = Vec::new();
+            let result = execute(escaped_sleeper(then), b"", &cancel, timeout, |chunk| { out.extend_from_slice(chunk); Ok(()) });
+            let pid: libc::pid_t = String::from_utf8_lossy(&out).trim().parse().expect("sleeper pid");
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while alive(pid) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(!alive(pid), "the escaped command outlived its run ({then}, {:?})", result.err());
+        }
     }
 
     #[test]
