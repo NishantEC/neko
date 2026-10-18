@@ -303,6 +303,21 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   recorded folder that is missing without being parked, at the same path,
   from `codex/neko-<folder>` or, if that branch is gone, from `base_commit`
   (`native_runner::parking::recreate_missing_worktree`), with a ticket event.
+- **Duplicates.** `neko_core::duplicates::duplicate_of` matches an *open*
+  ticket in the workspace by source key (a watched source's `external_id`,
+  or a title's leading `HEA-3006:`-style key) or, within one repository, by
+  normalized title (key prefix, case, punctuation dropped; ≥12 chars). Used
+  when a watch files a source (`responsibility::apply_result`; the old
+  lookup was per watch, so two watches on one Linear connection filed every
+  issue twice) and when chat opens a ticket; a match gets a "Filed again"
+  note and the source/chat links it. A ticket the user creates by hand is
+  always made. Same-problem-different-words stays with model triage.
+- **Existing work before the first run.** When a ticket gets its first
+  checkout, `native_runner::prior_work::find` looks for its issue keys in
+  local branch names and in commits on local branches the base lacks, and
+  for open PRs by key or title (`gh pr list --search`, 20s, skipped in
+  tests); findings become a ticket event and part of the run's direction
+  (check it first; `NO_CHANGE: covered by …` if it already fixes it).
 
 ## Native design system and the check gate (2026-10-14)
 

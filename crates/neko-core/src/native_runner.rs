@@ -32,6 +32,7 @@ const MAX_PROMPT: usize = 256 * 1024;
 pub(crate) mod cli_workers;
 pub mod publish;
 pub mod parking;
+pub mod prior_work;
 mod review_state;
 pub use review_state::{ReviewState, capture_review_state};
 /// One event line kept for parsing. A longer line (a tool returned a very

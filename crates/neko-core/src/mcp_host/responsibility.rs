@@ -91,6 +91,14 @@ pub fn apply_result(
                     })
                 })
         });
+        // The same source (or the same title) already open in this workspace,
+        // say from a second watch on the same connection: attach, don't twin.
+        if o.eligible && task_id.is_none()
+            && let Some(existing) = crate::duplicates::duplicate_of(state, &r.workspace_id, None, &o.title, Some(&o.external_id))
+        {
+            crate::duplicates::note_refiled(state, &existing, &o.title, &r.name.as_deref().map_or_else(|| "by a watch".to_owned(), |name| format!("by the watch “{name}”")));
+            task_id = Some(existing);
+        }
         if o.eligible && (task_id.is_none() || finished_old_revision) {
             let goal = if o.description.trim().is_empty() {
                 o.title.clone()
@@ -474,6 +482,29 @@ mod tests {
         apply_result(&mut state, "r", "run", response(), 102).unwrap();
         assert_eq!(state.tasks.len(), 1);
         assert_eq!(state.mcp.sources[0].retrieved_ms, 102);
+    }
+    #[test]
+    fn a_second_watch_reporting_the_same_issue_attaches_to_its_open_ticket() {
+        // 2026-10-16: two watches on one Linear connection filed HEA-3006
+        // twice, once titled with its key and once without.
+        let mut state = state();
+        apply_result(&mut state, "r", "run", response(), 101).unwrap();
+        let mut second = state.mcp.responsibilities[0].clone();
+        second.id = "r2".into();
+        state.mcp.responsibilities.push(second);
+        let again = response().replace(r#""title":"Label bug""#, r#""title":"ITEM-1: Label bug""#).replace(r#""revision":"v1""#, r#""revision":"v2""#);
+        apply_result(&mut state, "r2", "run", &again, 102).unwrap();
+        assert_eq!(state.tasks.len(), 1, "no twin ticket");
+        assert_eq!(state.mcp.sources.len(), 2);
+        assert!(state.mcp.sources.iter().all(|s| s.task_id.as_deref() == Some(state.tasks[0].id.as_str())));
+        assert!(state.tasks[0].events.last().unwrap().message.contains("Filed again"));
+        // Once that ticket is finished, a new report is new work again.
+        state.tasks[0].status = TaskStatus::Completed;
+        let mut third = state.mcp.responsibilities[0].clone();
+        third.id = "r3".into();
+        state.mcp.responsibilities.push(third);
+        apply_result(&mut state, "r3", "run", response(), 103).unwrap();
+        assert_eq!(state.tasks.len(), 2);
     }
     #[test]
     fn one_bad_observation_is_skipped_with_its_reason_and_the_rest_are_kept() {

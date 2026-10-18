@@ -915,11 +915,27 @@ impl Controller {
         if cancel.load(Ordering::SeqCst) {
             return Err("Cancelled".into());
         }
+        let mut prior_work = None;
         if task.worktree.is_none() {
             // Everything this ticket changes, including commits made when
             // publishing, is measured from the commit its checkout started at.
             let base = native_runner::head(&directory, cancel)?;
             self.update_task(&task.id, |t| t.base_commit = Some(base))?;
+            // Before the first run, look for work that may already cover it
+            // (an unpushed branch, an open pull request) instead of starting
+            // blind from the base. Split children are scoped by their parent.
+            if checkout_source == task_root {
+                let mut keys = neko_core::duplicates::issue_keys(&task.title);
+                keys.extend(snapshot.mcp.sources.iter().filter(|s| s.task_id.as_deref() == Some(task.id.as_str())).map(|s| s.external_id.clone()));
+                keys.dedup();
+                let own = format!("codex/neko-{}", directory.file_name().and_then(|n| n.to_str()).unwrap_or_default());
+                let gh = if cfg!(test) { None } else { native_runner::publish::resolve_gh().ok() };
+                let found = native_runner::prior_work::find(&directory, &own, &keys, &task.title, gh.as_deref(), cancel);
+                if let Some(context) = found.context() {
+                    self.update_task(&task.id, |t| store::append_event(t, "neko", &context))?;
+                    prior_work = Some(context);
+                }
+            }
         }
         let planning = task.status == TaskStatus::Queued && !work_directly;
         let role = if planning && supervised {
@@ -972,6 +988,10 @@ impl Controller {
                 } else if claim.read_only_reply {
                     "The user's latest request is read-only. Answer their question or give the requested plan. No local changes are authorized by this message."
                 } else { "" };
+                let direction = match &prior_work {
+                    Some(context) => format!("{direction}\n{context}"),
+                    None => direction.to_owned(),
+                };
                 let direction = if first_direct_run {
                     format!("{direction}\n{DIRECT_WORK}")
                 } else if work_directly && !task.plan.trim().is_empty() {
@@ -1779,6 +1799,24 @@ fn complete_chat_reply(
                 continue;
             }
         };
+        // The same problem already open in this repository gets a note,
+        // not a second ticket. (A ticket you create by hand is always made.)
+        let current = store::load(&db);
+        let (title, folder) = match &command {
+            Command::CreateTaskInFolder { title, folder, .. } => (title.clone(), Some(folder.clone())),
+            Command::CreateTask { title, .. } => (title.clone(), (folders.len() == 1).then(|| folders[0].clone())),
+            _ => (String::new(), None),
+        };
+        if let Ok(mut current) = current
+            && let Some(existing) = neko_core::duplicates::duplicate_of(&current, &workspace.id, folder.as_deref(), &title, None)
+        {
+            neko_core::duplicates::note_refiled(&mut current, &existing, &title, "from your chat with Neko");
+            match store::save(&db, &current) {
+                Ok(()) => opened.push(existing),
+                Err(error) => { skipped = true; eprintln!("neko chat: could not note a repeated ticket: {error}"); }
+            }
+            continue;
+        }
         let created = store::apply(&db, command);
         match created {
             Ok(after) => opened.extend(after.tasks.last().map(|t| t.id.clone())),
@@ -2529,6 +2567,32 @@ mod tests {
         assert_eq!(state.tasks[0].workspace_id, workspace);
         assert_eq!(state.task_roots[&reply.ticket_ids[0]],
             repo.canonicalize().unwrap().to_string_lossy());
+    }
+
+    #[test]
+    fn a_chat_ticket_for_work_already_open_is_noted_on_that_ticket() {
+        let repo = tempfile::tempdir().unwrap();
+        assert!(std::process::Command::new("git").args(["init", "--quiet"]).arg(repo.path()).status().unwrap().success());
+        let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
+        let workspace = {
+            let db = db.lock().unwrap();
+            store::apply(&db, Command::SaveWorkspaceWithFolders {
+                workspace: Workspace { id: String::new(), name: "Repo".into(), repository: repo.path().to_string_lossy().into(), instructions: String::new(), away_enabled: false },
+                folders: vec![repo.path().to_string_lossy().into()],
+            }).unwrap().workspaces[0].id.clone()
+        };
+        let ticket = |title: &str| neko_chat::Reply { used_memory: vec![], actions: vec![], text: "Opened.".into(),
+            tickets: vec![neko_chat::ProposedTicket { title: title.into(), goal: "Fix it".into(), workspace_id: Some(workspace.clone()), folder: None }],
+            memories: vec![], responsibilities: vec![] };
+        for (message, title) in [("first", "HEA-3006: Coaches see only the shared reports"), ("again", "Coaches see only the shared reports")] {
+            let turn = neko_chat::begin_turn(&db.lock().unwrap(), message).unwrap();
+            complete_chat_reply(&db, &AtomicBool::new(false), &turn, message, None, ticket(title)).unwrap();
+        }
+        let state = store::load(&db.lock().unwrap()).unwrap();
+        assert_eq!(state.tasks.len(), 1, "the repeat is not a second ticket");
+        assert!(state.tasks[0].events.last().unwrap().message.contains("Filed again from your chat"));
+        let last = state.conversation.iter().rev().find(|m| !m.ticket_ids.is_empty()).unwrap();
+        assert_eq!(last.ticket_ids, vec![state.tasks[0].id.clone()], "the chat links the open ticket");
     }
 
     #[test]
