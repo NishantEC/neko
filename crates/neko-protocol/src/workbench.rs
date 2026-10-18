@@ -509,10 +509,10 @@ pub enum ChatActionStatus {
 }
 
 /// What Neko may propose doing to a task: tell its agent something, start
-/// it, stop it, run it next, approve its plan, accept its result, retry it
-/// or rename it.
+/// it, stop it, close it, merge it into another task as a duplicate, run it
+/// next, approve its plan, accept its result, retry it or rename it.
 pub fn chat_action_kinds() -> &'static [&'static str] {
-    &["message", "start", "stop", "run_next", "approve", "accept", "retry", "rename"]
+    &["message", "start", "stop", "close", "merge", "run_next", "approve", "accept", "retry", "rename"]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -706,6 +706,11 @@ pub enum Command {
     /// Move a waiting task to the front of the queue.
     PrioritizeTask {
         task_id: String,
+    },
+    /// Close a task as the same problem as another one, leaving that task a note.
+    MergeTask {
+        task_id: String,
+        into: String,
     },
     /// Confirm or decline an action Neko proposed in chat.
     DecideChatAction {

@@ -127,8 +127,13 @@ pub fn validate(snapshot: &Snapshot, proposed: Vec<ProposedAction>, in_scope: im
         let task = snapshot.tasks.iter().find(|t| t.id == a.task_id && in_scope(&t.workspace_id))?;
         if !chat_action_kinds().contains(&a.kind.as_str()) { return None; }
         let text = a.text.trim();
-        let needs_text = matches!(a.kind.as_str(), "message" | "rename");
+        let needs_text = matches!(a.kind.as_str(), "message" | "rename" | "merge");
         if needs_text && (text.is_empty() || text.len() > 4000) { return None; }
+        // Merging names the task it goes into: a real, different, open one.
+        if a.kind == "merge" && !snapshot.tasks.iter().any(|t| t.id == text && t.id != task.id && in_scope(&t.workspace_id)
+            && !matches!(t.status, TaskStatus::Completed | TaskStatus::Cancelled)) {
+            return None;
+        }
         Some(ChatAction {
             id: crate::workbench::new_id(),
             task_id: task.id.clone(),
@@ -146,7 +151,8 @@ pub fn command(action: &ChatAction) -> Result<Command, String> {
     Ok(match action.kind.as_str() {
         "message" => Command::ReplyToTask { task_id, text: action.text.clone() },
         "start" => Command::StartTask { task_id },
-        "stop" => Command::CancelTask { task_id },
+        "stop" | "close" => Command::CancelTask { task_id },
+        "merge" => Command::MergeTask { task_id, into: action.text.clone() },
         "run_next" => Command::PrioritizeTask { task_id },
         "approve" => Command::ApproveTask { task_id },
         "accept" => Command::CompleteTask { task_id },
@@ -157,7 +163,7 @@ pub fn command(action: &ChatAction) -> Result<Command, String> {
 }
 
 /// What Neko is, for the chat prompt.
-pub const ROLE: &str = "You are Neko, the user's chief of staff for their engineering agents. Every piece of work goes through you: you hand tasks to task agents (scouts, builders, independent reviewers), keep track of what each one is doing, and answer for all of it. The task record below is your view of every task: its repository, branch, pull request, stage, what is blocking it, its place in the queue and its latest activity. When the user asks what is going on, answer from the record: lead with what needs them, then what is running, then what is waiting; name tasks by title and say where each one is. Never invent progress the record does not show. When the user wants something done to an existing task, propose an action instead of a new ticket: message (pass the user's instruction to that task's agent, in their words, plus any context the agent needs), start, stop, run_next (move it to the front of the queue), approve (approve a plan that is waiting), accept (accept a reviewed result), retry (try a failed task again) or rename. Actions wait for the user's one-click confirmation; say what you proposed, never claim it happened. Hold every agent to Neko's rulebook below, and when a task's activity shows it breaking the rulebook, say so and propose the message that corrects it.";
+pub const ROLE: &str = "You are Neko, the user's chief of staff for their engineering agents. Every piece of work goes through you: you hand tasks to task agents (scouts, builders, independent reviewers), keep track of what each one is doing, and answer for all of it. The task record below is your view of every task: its repository, branch, pull request, stage, what is blocking it, its place in the queue and its latest activity. When the user asks what is going on, answer from the record: lead with what needs them, then what is running, then what is waiting; name tasks by title and say where each one is. Never invent progress the record does not show. When the user wants something done to an existing task, propose an action instead of a new ticket: message (pass the user's instruction to that task's agent, in their words, plus any context the agent needs), start, stop (end its current work), close (close a task nobody needs), merge (close a task as the same problem as another open task; text is that task's id), run_next (move it to the front of the queue), approve (approve a plan that is waiting), accept (accept a reviewed result), retry (try a failed task again) or rename. Actions wait for the user's one-click confirmation; say what you proposed, never claim it happened. Hold every agent to Neko's rulebook below, and when a task's activity shows it breaking the rulebook, say so and propose the message that corrects it.";
 
 #[cfg(test)]
 mod tests {
@@ -208,5 +214,26 @@ mod tests {
         assert!(matches!(command(&actions[1]).unwrap(), Command::ApproveTask { task_id } if task_id == "t"));
         assert!(actions[1].text.is_empty());
         assert!(validate(&snapshot, vec![ProposedAction { task_id: "t".into(), kind: "stop".into(), text: String::new() }], |w| w != "w").is_empty(), "out of scope");
+    }
+
+    #[test]
+    fn merging_needs_a_real_open_target_and_closes_the_duplicate_with_a_note() {
+        let db = crate::Db::open_in_memory().unwrap();
+        let mut snapshot = Snapshot::default();
+        snapshot.tasks = vec![task("dup", TaskStatus::AwaitingApproval, 0), task("main", TaskStatus::ReadyForReview, 0), task("done", TaskStatus::Completed, 0)];
+        snapshot.workspaces = vec![neko_protocol::workbench::Workspace { id: "w".into(), name: "W".into(), repository: "/tmp".into(), instructions: String::new(), away_enabled: false }];
+        crate::workbench::save(&db, &snapshot).unwrap();
+        let kept = validate(&snapshot, vec![
+            ProposedAction { task_id: "dup".into(), kind: "merge".into(), text: "main".into() },
+            ProposedAction { task_id: "dup".into(), kind: "merge".into(), text: "done".into() },
+            ProposedAction { task_id: "dup".into(), kind: "merge".into(), text: "dup".into() },
+        ], |_| true);
+        assert_eq!(kept.len(), 1, "only a different, open, real target");
+        let after = crate::workbench::apply(&db, command(&kept[0]).unwrap()).unwrap();
+        let dup = after.tasks.iter().find(|t| t.id == "dup").unwrap();
+        assert_eq!(dup.status, TaskStatus::Completed);
+        assert!(dup.result.contains("Merged into “Task main”"));
+        assert!(after.tasks.iter().find(|t| t.id == "main").unwrap().events.last().unwrap().message.contains("“Task dup” was merged into this task"));
+        assert!(crate::workbench::apply(&db, Command::MergeTask { task_id: "main".into(), into: "done".into() }).is_err());
     }
 }

@@ -64,6 +64,30 @@ import NekoKit
             try render(WorkspaceView(model: model, page: page), size: CGSize(width: 1280, height: height), scheme: .dark,
                        to: URL(fileURLWithPath: directory).appendingPathComponent("page-\(page.rawValue.replacingOccurrences(of: " ", with: "-").replacingOccurrences(of: "&", with: "and")).png"))
         }
+        // Surfaces no page reaches on its own: the Rulebook settings page and
+        // the chief of staff's action cards in each state.
+        let extra = AppModel(transport: { _ in .object([:]) })
+        extra.snapshot = snapshot
+        extra.loadingSetup = false
+        extra.onboarding = false
+        try render(SettingsHub(model: extra, section: .rulebook), size: CGSize(width: 1100, height: 820), scheme: .dark,
+                   to: URL(fileURLWithPath: directory).appendingPathComponent("page-rulebook.png"))
+        if let first = snapshot["tasks"].array.first {
+            func action(_ kind: String, _ status: String, _ text: String = "", note: String = "") -> JSONValue {
+                .object(["id": .string(kind + status), "task_id": first["id"], "kind": .string(kind), "text": .string(text), "status": .string(status), "note": .string(note)])
+            }
+            let cards = VStack(alignment: .leading, spacing: NekoSpace.md) {
+                ChatActionCard(model: extra, messageID: "m", action: action("message", "Proposed", "Use the 375px designs from HEA-2621 and keep the existing breakpoints."))
+                ChatActionCard(model: extra, messageID: "m", action: action("run_next", "Done"))
+                ChatActionCard(model: extra, messageID: "m", action: action("merge", "Proposed", snapshot["tasks"].array.last?["id"].string ?? ""))
+                ChatActionCard(model: extra, messageID: "m", action: action("stop", "Declined"))
+                ChatActionCard(model: extra, messageID: "m", action: action("approve", "Failed", note: "This ticket is already working"))
+            }.padding(NekoLayout.pageInset)
+            for scheme in [ColorScheme.dark, .light] {
+                try render(cards, size: CGSize(width: 760, height: 780), scheme: scheme,
+                           to: URL(fileURLWithPath: directory).appendingPathComponent("chat-actions-\(scheme == .dark ? "dark" : "light").png"))
+            }
+        }
         // The split view's sidebar column is a vibrancy material that
         // cacheDisplay cannot capture, so the sidebar is also drawn alone.
         let sidebarModel = AppModel(transport: { _ in .object([:]) })

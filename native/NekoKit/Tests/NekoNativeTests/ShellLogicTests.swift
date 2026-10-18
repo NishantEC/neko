@@ -145,3 +145,13 @@ final class TaskStageTests: XCTestCase {
         XCTAssertEqual(ToolsPresentation.connectionDetail(connection([:], error: "MCP authentication failed. Check the server.")), "Signed out. Open to sign in again.")
     }
 }
+
+final class StopReasonTests: XCTestCase {
+    func testParkingAndTriageNotesAreNeverTheStopReason() {
+        let task: JSONValue = .object(["status": .string("Failed"), "events": .array([
+            .object(["role": .string("supervisor"), "message": .string("Run tool scope is paused, unavailable, or changed")]),
+            .object(["role": .string("host"), "message": .string("Parked: its unfinished work is saved on branch codex/neko-x")]),
+        ])])
+        XCTAssertEqual(TicketPresentation.stopReason(task), "A tool connection it relied on was paused or changed while it worked. Start it again to retry.")
+    }
+}

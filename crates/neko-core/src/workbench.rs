@@ -913,6 +913,31 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         | Command::CancelChat { .. } => {
             return Err("Talking to Neko requires the daemon".into());
         }
+        Command::MergeTask { task_id, into } => {
+            if task_id == into {
+                return Err("A task can't be merged into itself".into());
+            }
+            let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("That task no longer exists")?;
+            if matches!(task.status, TaskStatus::Planning | TaskStatus::Building | TaskStatus::Reviewing) {
+                return Err("This task is still working. Stop it first, then merge it".into());
+            }
+            let title = |t: &Task| t.display_title.clone().unwrap_or_else(|| t.title.clone());
+            let (from_title, into_title) = (title(task), {
+                let target = snapshot.tasks.iter().find(|t| t.id == into).ok_or("The task to merge into no longer exists")?;
+                if matches!(target.status, TaskStatus::Completed | TaskStatus::Cancelled) {
+                    return Err("The task to merge into is already closed".into());
+                }
+                title(target)
+            });
+            let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).unwrap();
+            task.status = TaskStatus::Completed;
+            task.result = format!("Merged into “{into_title}”: the same problem.");
+            append_event(task, "user", &format!("Merged into “{into_title}”: the same problem, tracked there."));
+            let target = snapshot.tasks.iter_mut().find(|t| t.id == into).unwrap();
+            append_event(target, "user", &format!("“{from_title}” was merged into this task: the same problem."));
+            snapshot.run_next.retain(|id| id != &task_id);
+            snapshot.untriaged.retain(|id| id != &task_id);
+        }
         Command::PrioritizeTask { task_id } => {
             let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or("That task no longer exists")?;
             if terminal(task.status) || task.status == TaskStatus::AwaitingApproval {

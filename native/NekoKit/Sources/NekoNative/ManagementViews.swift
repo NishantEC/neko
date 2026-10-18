@@ -265,7 +265,9 @@ struct WorkspacesView: View {
             }
         } content: {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 24, verticalSpacing: 12) {
-                fact("Watching", responsibilities.isEmpty ? "Nothing yet. Add a watch in Tools & skills." : "\(responsibilities.count) \(responsibilities.count == 1 ? "item" : "items")")
+                let active = responsibilities.filter { $0["enabled"].bool }.count
+                let other = responsibilities.count - active
+                fact("Watching", responsibilities.isEmpty ? "Nothing yet. Add a watch in Settings → Watches." : "\(active) active" + (other > 0 ? " · \(other) paused or suggested" : ""))
                 if !responsibilities.isEmpty {
                     fact("Last sync", relativeTime(lastChecked) + (failing ? " · needs attention" : ""), warn: failing)
                 }
