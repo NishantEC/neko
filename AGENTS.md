@@ -281,8 +281,8 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   every tick rewrote the whole row), and agent tool events go through
   `store::save_deferred` / `Db::set_setting_deferred`: readers see them at
   once, disk gets them at most every 5s (`DEFERRED_WRITE_DELAY`), folded
-  into the next immediate save, a transaction, the tick's `flush_due` or
-  `Db` drop. A crash may lose ≤5s of tool events, never a user action,
+  into the next immediate save that changes something, the tick's
+  `flush_due` or `Db` drop (a rolled-back transaction restores them). A crash may lose ≤5s of tool events, never a user action,
   status change or `USAGE` (budget) event: those still write immediately.
   Do not persist per-tick values in the snapshot.
 - **Writable runs per repository.** `admission::cap_writable_per_repository`

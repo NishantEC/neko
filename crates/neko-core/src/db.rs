@@ -78,9 +78,9 @@ impl Db {
     }
 
     /// Store `value` for `key`, reaching disk within `DEFERRED_WRITE_DELAY`
-    /// (or sooner, with the next immediate write of the same key, any
-    /// transaction, `flush_deferred` or closing the database). Reads see it
-    /// at once. A crash may lose it, so use this only for progress.
+    /// (or sooner, with the next immediate write of a changed value for the
+    /// same key, `flush_deferred` or closing the database). Reads see it at
+    /// once. A crash may lose it, so use this only for progress.
     pub fn set_setting_deferred(&self, key: &str, value: &str) -> rusqlite::Result<()> {
         if self.in_transaction.get() {
             return self.set_setting(key, value);
