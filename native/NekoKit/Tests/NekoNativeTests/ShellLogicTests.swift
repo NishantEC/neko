@@ -155,3 +155,14 @@ final class StopReasonTests: XCTestCase {
         XCTAssertEqual(TicketPresentation.stopReason(task), "A tool connection it relied on was paused or changed while it worked. Start it again to retry.")
     }
 }
+
+final class MachineStatusTests: XCTestCase {
+    func testTheStripSaysWhyWorkIsHeldOrLimited() {
+        XCTAssertEqual(MachineStatus(health: .null).title, "Reading the Mac…")
+        XCTAssertEqual(MachineStatus(health: .object(["load": .number(6.4)])).title, "Mac OK · load 6")
+        XCTAssertEqual(MachineStatus(health: .object(["cap": .number(1), "night": .bool(true)])).title, "Night: one task at a time")
+        let held = MachineStatus(health: .object(["holding": .string("Only 9 GB of disk is free."), "cap": .number(1)]))
+        XCTAssertEqual(held.level, .holding)
+        XCTAssertEqual(held.title, "New work is on hold")
+    }
+}
