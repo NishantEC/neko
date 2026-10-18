@@ -318,6 +318,15 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   for open PRs by key or title (`gh pr list --search`, 20s, skipped in
   tests); findings become a ticket event and part of the run's direction
   (check it first; `NO_CHANGE: covered by …` if it already fixes it).
+- **A broken MCP connection no longer blocks tickets.** 12 of 18 Failed
+  tickets died at claim with "Run tool scope is paused, unavailable, or
+  changed": `RunAuthority::for_task` took every granted connection in the
+  workspace and `valid()` requires each grant to authorize, so one
+  connection with an auth error refused every new ticket. `for_task` now
+  drops connections that are not usable right now (`usable_connection`)
+  and runs without their tools; responsibility wakes (`RunAuthority::new`)
+  stay strict. Mid-run invalidation is unchanged: a connection that breaks
+  during a run still discards it ("Task authority changed…").
 
 ## Native design system and the check gate (2026-10-14)
 
