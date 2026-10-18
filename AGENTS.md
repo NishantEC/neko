@@ -95,8 +95,10 @@ PR, and landing on main uses the same subject. If the agent fails, the evidence 
 Repositories listed in `Snapshot::land_on_main` (per checkout, toggled in the ticket inspector) instead
 fast-forward local `main` with nothing pushed: a moved `main` is rebased onto, a conflict or an overwrite of
 local edits is refused, and the ticket records `landed_commit`. The `neko` repo itself is set to land on main.
-Every eligible ticket starts its own worker without a fixed global or
-workspace cap, but new workers are paced (`workbench/admission.rs`): a burst of
+Every eligible ticket starts its own worker without a fixed global cap, but at
+most 4 tickets per repository hold a writable run at once
+(`Snapshot::max_writable_per_repository`, read-only phases uncounted; see
+"Resource limits"), and new workers are paced (`workbench/admission.rs`): a burst of
 six, then one every ten seconds, and none while the one-minute load average is
 20 or more (this machine restarted at load 240 on 2026-10-11). Running work is
 never touched. Active claims prevent duplicate
@@ -281,6 +283,14 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   `Db` drop. A crash may lose ≤5s of tool events, never a user action,
   status change or `USAGE` (budget) event: those still write immediately.
   Do not persist per-tick values in the snapshot.
+- **Writable runs per repository.** `admission::cap_writable_per_repository`
+  runs before load pacing: per repository (`root_for`), active workers whose
+  ticket `writes()` (Building/Reviewing/AwaitingApproval, or Queued that will
+  build directly) count against `Snapshot::writable_per_repository()`
+  (default 4, `SetMaxWritablePerRepository`, Settings → Budget). Over-cap
+  candidates stay queued; read-only candidates (planning, read-only asks,
+  pending splits) always pass. Keep `writes()` in step with
+  `execute_with_worktree`'s `work_directly`.
 
 ## Native design system and the check gate (2026-10-14)
 

@@ -106,6 +106,7 @@ pub fn overview(snapshot: &Snapshot) -> Value {
         "ready_to_review": count("ready to review"),
         "up_next": count("up next"),
         "tasks_at_once": snapshot.max_running_tickets,
+        "writing_per_repository": snapshot.writable_per_repository(),
         "folders_on_disk": snapshot.tasks.iter().filter(|t| t.worktree.is_some() && t.parked.is_none()).count(),
     })
 }

@@ -960,6 +960,12 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             }
             snapshot.max_running_tickets = limit;
         }
+        Command::SetMaxWritablePerRepository { limit } => {
+            if limit.is_some_and(|n| n == 0 || n > 50) {
+                return Err("Choose between 1 and 50 writing tickets per repository".into());
+            }
+            snapshot.max_writable_per_repository = limit;
+        }
         Command::SetRulebook { text } => crate::rulebook::set(&mut snapshot, &text)?,
         Command::StartOver { keep_published } => {
             if snapshot.tasks.iter().any(|t| !terminal(t.status) && t.status != TaskStatus::AwaitingApproval) {
@@ -1784,6 +1790,9 @@ mod tests {
         assert_eq!(apply(&db, Command::SetMaxRunningTickets { limit: Some(1) }).unwrap().max_running_tickets, Some(1));
         assert!(apply(&db, Command::SetMaxRunningTickets { limit: Some(0) }).is_err());
         assert_eq!(apply(&db, Command::SetMaxRunningTickets { limit: None }).unwrap().max_running_tickets, None);
+        assert_eq!(apply(&db, Command::SetMaxWritablePerRepository { limit: None }).unwrap().writable_per_repository(), 4, "four writing tickets per repository by default");
+        assert_eq!(apply(&db, Command::SetMaxWritablePerRepository { limit: Some(2) }).unwrap().writable_per_repository(), 2);
+        assert!(apply(&db, Command::SetMaxWritablePerRepository { limit: Some(0) }).is_err());
         assert!(!state.start_without_approval, "tickets wait for approval unless you opt in");
         assert!(apply(&db, Command::SetStartWithoutApproval { enabled: true }).unwrap().start_without_approval);
         assert!(!apply(&db, Command::SetStartWithoutApproval { enabled: false }).unwrap().start_without_approval);

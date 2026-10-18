@@ -4,6 +4,11 @@
 //! machine before (a load average above 240 restarted it). So new agents are
 //! released from a small bucket that refills slowly, and none start while the
 //! machine is already busy. Agents that are running are never affected.
+//! Separately, at most `Snapshot::writable_per_repository` tickets (default
+//! 4) per repository hold a writable run at once; read-only phases are not
+//! counted.
+use neko_protocol::workbench::{Snapshot, Task, TaskStatus};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -43,6 +48,51 @@ fn admit_from(slot: &mut Option<Bucket>, waiting: usize, load: Option<f64>, now:
     admitted
 }
 
+/// Whether `task`'s next (or current) run changes its worktree. Mirrors
+/// `execute_with_worktree`: a Queued ticket builds directly unless planning
+/// is on, the user asked read-only, or a split proposal is pending; Planning
+/// is a read-only scout or supervisor.
+pub(super) fn writes(snapshot: &Snapshot, task: &Task) -> bool {
+    match task.status {
+        TaskStatus::Building | TaskStatus::Reviewing | TaskStatus::AwaitingApproval => true,
+        TaskStatus::Queued => {
+            !snapshot.plan_first
+                && !snapshot.task_read_only.contains(&task.id)
+                && !snapshot.splits.iter().any(|s| s.parent_id == task.id && !s.approved)
+        }
+        _ => false,
+    }
+}
+
+fn repository(snapshot: &Snapshot, task: &Task) -> String {
+    snapshot.workspaces.iter().find(|w| w.id == task.workspace_id)
+        .map_or_else(|| task.workspace_id.clone(), |w| snapshot.root_for(task, w))
+}
+
+/// Keep, in order, the candidates (indexes into `snapshot.tasks`) that fit
+/// under the per-repository cap on writable runs, counting the active
+/// workers that already hold one. Read-only candidates always pass; held
+/// back ones simply stay queued for a later tick.
+pub(super) fn cap_writable_per_repository(snapshot: &Snapshot, active: &[&str], candidates: Vec<usize>) -> Vec<usize> {
+    let limit = snapshot.writable_per_repository();
+    let mut holding: HashMap<String, usize> = HashMap::new();
+    for task in snapshot.tasks.iter().filter(|t| active.contains(&t.id.as_str()) && writes(snapshot, t)) {
+        *holding.entry(repository(snapshot, task)).or_default() += 1;
+    }
+    candidates.into_iter().filter(|&index| {
+        let task = &snapshot.tasks[index];
+        if !writes(snapshot, task) {
+            return true;
+        }
+        let count = holding.entry(repository(snapshot, task)).or_default();
+        if *count >= limit {
+            return false;
+        }
+        *count += 1;
+        true
+    }).collect()
+}
+
 /// The one-minute load average, or `None` if the system will not say.
 pub(super) fn load_average() -> Option<f64> {
     unsafe extern "C" {
@@ -67,6 +117,30 @@ mod tests {
         assert_eq!(admit_from(&mut slot, 20, Some(25.0), start + Duration::from_secs(60)), 0, "nothing new while overloaded");
         assert_eq!(admit_from(&mut slot, 20, Some(4.0), start + Duration::from_secs(60)), 5, "credit earned while waiting is kept");
         assert_eq!(admit_from(&mut slot, 2, None, start + Duration::from_secs(600)), 2, "an unknown load does not block work");
+    }
+
+    #[test]
+    fn at_most_the_limit_of_writing_tickets_per_repository_and_read_only_work_is_not_capped() {
+        use neko_protocol::workbench::Workspace;
+        let workspace = |id: &str, repository: &str| Workspace { id: id.into(), name: id.into(), repository: repository.into(), instructions: String::new(), away_enabled: false };
+        let task = |id: &str, workspace: &str, status: TaskStatus| Task { id: id.into(), workspace_id: workspace.into(), status, ..crate::workbench::tests::controller_task() };
+        let mut snapshot = Snapshot { workspaces: vec![workspace("a", "/athena"), workspace("b", "/navi")], ..Default::default() };
+        // Two already writing in athena, one planning (read-only) there.
+        snapshot.tasks.push(task("running-1", "a", TaskStatus::Building));
+        snapshot.tasks.push(task("running-2", "a", TaskStatus::Reviewing));
+        snapshot.tasks.push(task("scouting", "a", TaskStatus::Planning));
+        for n in 0..5 { snapshot.tasks.push(task(&format!("athena-{n}"), "a", TaskStatus::Queued)); }
+        snapshot.tasks.push(task("navi-0", "b", TaskStatus::Queued));
+        snapshot.task_read_only.insert("athena-4".into());
+        let active = ["running-1", "running-2", "scouting"];
+        let candidates: Vec<usize> = (3..snapshot.tasks.len()).collect();
+        let admitted: Vec<&str> = cap_writable_per_repository(&snapshot, &active, candidates.clone())
+            .into_iter().map(|i| snapshot.tasks[i].id.as_str()).collect();
+        assert_eq!(admitted, ["athena-0", "athena-1", "athena-4", "navi-0"], "two more writers fit in athena; a read-only ask and another repository are not held back");
+        snapshot.max_writable_per_repository = Some(1);
+        let admitted: Vec<&str> = cap_writable_per_repository(&snapshot, &active, candidates)
+            .into_iter().map(|i| snapshot.tasks[i].id.as_str()).collect();
+        assert_eq!(admitted, ["athena-4", "navi-0"]);
     }
 
     #[test]

@@ -319,6 +319,12 @@ struct PreferencesView: View {
                         }.settingsTarget(.ticketsAtOnce)
                         Text("Other tasks wait their turn and start as running ones finish. Work already running is not stopped.")
                             .font(NekoFont.meta).foregroundStyle(.secondary)
+                        Picker("Writing per repository", selection: Binding(get: { model.snapshot["max_writable_per_repository"].int }, set: { setWritableLimit($0) })) {
+                            Text("4 (default)").tag(0)
+                            ForEach([1, 2, 3, 6, 8], id: \.self) { Text("\($0)").tag($0) }
+                        }
+                        Text("Each writing task has its own copy of the repository with its own installs and builds. Extra tasks in the same repository wait; planning and questions are not limited.")
+                            .font(NekoFont.meta).foregroundStyle(.secondary)
                     }
                     Section {
                         LabeledContent("Start over") {
@@ -426,6 +432,9 @@ struct PreferencesView: View {
             await load()
             catalog = await AgentModelCatalog.load(model)
         }
+    }
+    private func setWritableLimit(_ limit: Int) {
+        Task { _ = await model.workbench(.command("SetMaxWritablePerRepository", ["limit": limit > 0 ? .number(Double(limit)) : .null])) }
     }
     private func setTicketLimit(_ limit: Int) {
         Task { _ = await model.workbench(.command("SetMaxRunningTickets", ["limit": limit > 0 ? .number(Double(limit)) : .null])) }
