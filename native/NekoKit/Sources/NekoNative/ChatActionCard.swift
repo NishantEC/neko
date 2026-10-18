@@ -11,6 +11,10 @@ struct ChatActionCard: View {
     @State private var deciding = false
 
     private var task: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == action["task_id"].string } ?? .null }
+    private var mergeTarget: String {
+        let target = model.snapshot["tasks"].array.first { $0.recordID == action["text"].string } ?? .null
+        return target == .null ? "a task that no longer exists" : TaskText(task: target, snapshot: model.snapshot).title
+    }
     private var taskTitle: String { task == .null ? "A task that no longer exists" : TaskText(task: task, snapshot: model.snapshot).title }
 
     /// What the action does, in the person's words.
@@ -19,6 +23,8 @@ struct ChatActionCard: View {
         case "message": "Tell its agent"
         case "start": "Start"
         case "stop": "Stop"
+        case "close": "Close"
+        case "merge": "Merge as a duplicate"
         case "run_next": "Run next"
         case "approve": "Approve the plan for"
         case "accept": "Accept the result of"
@@ -35,7 +41,9 @@ struct ChatActionCard: View {
                 Image(systemName: symbol(status)).foregroundStyle(tint(status)).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: NekoSpace.xxs) {
                     Text("\(Self.verb(action["kind"].string)) · \(taskTitle)").font(NekoFont.heading).lineLimit(2)
-                    if !action["text"].string.isEmpty {
+                    if action["kind"].string == "merge" {
+                        Text("Into: \(mergeTarget)").font(NekoFont.body).foregroundStyle(N.text2)
+                    } else if !action["text"].string.isEmpty {
                         Text(action["kind"].string == "rename" ? "New name: \(action["text"].string)" : "“\(action["text"].string)”")
                             .font(NekoFont.body).foregroundStyle(N.text2).textSelection(.enabled)
                     }

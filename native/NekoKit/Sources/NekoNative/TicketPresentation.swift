@@ -17,13 +17,17 @@ enum TicketPresentation {
         return nil
     }
     /// The newest daemon message on a stopped ticket, in one readable line.
+    /// Housekeeping (parking a folder, triage notes) is never the reason.
     static func stopReason(_ task: JSONValue) -> String {
-        let message = task["events"].array.reversed().first { !["user", "note"].contains($0["role"].string) }?["message"].string ?? ""
+        let message = task["events"].array.reversed().first { !["user", "note", "host", "neko"].contains($0["role"].string) }?["message"].string ?? ""
         let line = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if line.contains("not a git repository") {
             return "This task isn’t linked to a Git repository yet, so Neko couldn’t make its working copy."
         }
         if line.contains("daemon restart") { return "Stopped when Neko restarted. Start it again to continue." }
+        if line.hasPrefix("Run tool scope is paused, unavailable, or changed") {
+            return "A tool connection it relied on was paused or changed while it worked. Start it again to retry."
+        }
         if line.hasPrefix("Independent verification failed:") {
             return "Review found problems: " + line.dropFirst("Independent verification failed:".count).trimmingCharacters(in: .whitespaces).prefix(380)
         }
