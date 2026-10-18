@@ -451,6 +451,34 @@ impl Controller {
         })
     }
 
+    /// An agent's tool events are progress, not decisions: they are checked
+    /// against the run's authority like any result, but reach disk at most
+    /// once per `DEFERRED_WRITE_DELAY` (folded into the next immediate save).
+    /// Writing the whole snapshot per tool call was a large share of the
+    /// daemon's disk writes. A crash may lose the last few seconds of them.
+    fn record_progress_event(
+        &self,
+        id: &str,
+        authority: &responsibilities::RunAuthority,
+        role: &str,
+        event: &str,
+    ) -> Result<(), String> {
+        let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
+        let mut snapshot = store::load(&db)?;
+        if !authority.valid(&snapshot) {
+            return Err("Task authority changed before result commit; stale output discarded".into());
+        }
+        let task = snapshot.tasks.iter_mut().find(|t| t.id == id).ok_or("Task no longer exists")?;
+        store::append_event(task, role, event);
+        task.updated_at_ms = store::now_ms();
+        // Spend counts toward the ticket budget, so it is never deferred.
+        if event.starts_with("USAGE ") {
+            store::save(&db, &snapshot)
+        } else {
+            store::save_deferred(&db, &snapshot)
+        }
+    }
+
     /// A revoked worker must still leave a retryable task, but its returned
     /// error is no longer accepted as agent output. Persist only a host-owned
     /// revocation notice after checking authority in this same transaction.
@@ -677,6 +705,8 @@ impl Controller {
                 })
                 .collect();
             save_with_failure_records(&db, &snapshot, &already_failed)?;
+            // Coalesced agent progress reaches disk here once it is due.
+            db.flush_due(neko_core::db::DEFERRED_WRITE_DELAY).map_err(|e| e.to_string())?;
             claims
         };
         // Every eligible ticket owns its worker; there is no fixed agent pool.
@@ -984,9 +1014,7 @@ impl Controller {
                         return;
                     }
                     let usage = event.starts_with("USAGE ");
-                    let _ = self.update_task_authorized(&task.id, authority, |t| {
-                        store::append_event(t, role, &event)
-                    });
+                    let _ = self.record_progress_event(&task.id, authority, role, &event);
                     if usage { self.stop_if_over_budget(&task.id, cancel); }
                 };
                 let run = match self.run_native_session(&spec, &session, &store::new_id(), authority, cancel, &on_event) {
@@ -1196,8 +1224,7 @@ impl Controller {
                     |event| {
                         if event.starts_with("VERIFICATION_COMMAND ") { receipts.push(event.clone()); }
                         let usage = event.starts_with("USAGE ");
-                        let _ =
-                            self.update_task_authorized(&task.id, authority, |t| store::append_event(t, "reviewer", &event));
+                        let _ = self.record_progress_event(&task.id, authority, "reviewer", &event);
                         if usage { self.stop_if_over_budget(&task.id, cancel); }
                     },
                 );
@@ -2759,6 +2786,46 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(controller.active.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn idle_ticks_and_bursts_of_agent_events_barely_touch_the_disk() {
+        // Before 2026-10-18 every 2-second tick rewrote the whole snapshot
+        // (4.7 MB on the owner's machine) for its heartbeat, and every
+        // agent tool event rewrote it again: this test's 300 ticks and 200
+        // events were 500 full writes. Now an idle tick writes nothing and
+        // progress is coalesced.
+        let controller = Arc::new(controller_with_task(TaskStatus::Completed));
+        let writes = || controller.db.lock().unwrap().setting_writes();
+        let start = writes();
+        for _ in 0..100 {
+            controller.tick_with(|_, _, _| Ok(())).unwrap();
+        }
+        assert_eq!(writes() - start, 0, "an idle tick must not rewrite the snapshot");
+        assert!(controller.command(Command::Snapshot).unwrap().heartbeat_ms > 0, "the heartbeat is still reported");
+        // A running ticket: its worker is already active, so ticks only watch it.
+        controller.update_task("t", |t| t.status = TaskStatus::Building).unwrap();
+        controller.active.lock().unwrap().push(Active { task_id: "t".into(), cancelled: Arc::new(AtomicBool::new(false)) });
+        let authority = {
+            let db = controller.db.lock().unwrap();
+            let state = store::load(&db).unwrap();
+            responsibilities::RunAuthority::for_task(&state, &state.tasks[0]).unwrap()
+        };
+        let start = writes();
+        for n in 0..200 {
+            controller.record_progress_event("t", &authority, "builder", &format!("ran command {n}")).unwrap();
+            controller.tick_with(|_, _, _| Ok(())).unwrap();
+        }
+        assert!(writes() - start <= 2, "a burst of progress is coalesced, wrote {}", writes() - start);
+        // Readers see every event at once, and a decision writes them all.
+        let events = controller.command(Command::Snapshot).unwrap().tasks[0].events.len();
+        assert_eq!(events, store::MAX_EVENTS.min(200));
+        controller.update_task("t", |t| t.result = "done".into()).unwrap();
+        let db = controller.db.lock().unwrap();
+        db.flush_deferred().unwrap();
+        let persisted: Snapshot = serde_json::from_str(&db.get_setting("workbench_snapshot_v1").unwrap().unwrap()).unwrap();
+        assert_eq!(persisted.tasks[0].events.len(), events);
+        assert_eq!(persisted.tasks[0].result, "done");
     }
 
     pub(super) fn controller_with_task(status: TaskStatus) -> Controller {

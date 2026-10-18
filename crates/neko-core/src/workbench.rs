@@ -210,6 +210,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
         db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
         bump_revision();
     }
+    snapshot.heartbeat_ms = snapshot.heartbeat_ms.max(HEARTBEAT_MS.load(std::sync::atomic::Ordering::Acquire));
     // Attached for readers only; save() never writes it into this setting.
     snapshot.conversation = crate::neko_chat::load(db)?;
     snapshot.memory = crate::neko_memory::load(db)?;
@@ -222,15 +223,41 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     Ok(snapshot)
 }
 
-/// One SQLite upsert commits the whole snapshot; validation failures write nothing.
+/// One SQLite upsert commits the whole snapshot; validation failures write nothing,
+/// and a snapshot identical to the stored one is not rewritten (`Db::set_setting`).
 /// Callers must hold the daemon's database lock across load/modify/save.
 /// Old event messages are shortened and oldest events are evicted under pressure.
 /// Plans, results and task identities are never evicted. Reload after saving when
 /// a caller needs the exact persisted event history.
 /// Capacity is based on actual persisted bytes, never hypothetical future output.
 pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
+    let json = encode(snapshot)?;
+    db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
+    bump_revision();
+    Ok(())
+}
+
+/// `save` for progress a crash may lose (an agent's tool events): readers
+/// see it at once, but it reaches disk at most once per
+/// `db::DEFERRED_WRITE_DELAY`, folded into the next immediate save of the
+/// snapshot. Never use it for a user action or a status change.
+pub fn save_deferred(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
+    let json = encode(snapshot)?;
+    db.set_setting_deferred(SETTING, &json).map_err(|e| e.to_string())?;
+    bump_revision();
+    Ok(())
+}
+
+/// The scheduler's liveness time. It changes every tick, so it lives in
+/// memory: persisting it rewrote the whole multi-megabyte snapshot every
+/// two seconds even when nothing else changed.
+static HEARTBEAT_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+fn encode(snapshot: &Snapshot) -> Result<String, String> {
     validate(snapshot)?;
+    HEARTBEAT_MS.fetch_max(snapshot.heartbeat_ms, std::sync::atomic::Ordering::AcqRel);
     let mut compacted = snapshot.clone();
+    compacted.heartbeat_ms = 0;
     crate::scheduled_plans::refresh_results(&mut compacted);
     compacted.conversation.clear();
     compacted.rulebook_default.clear();
@@ -289,9 +316,7 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
             );
         }
     }
-    db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
-    bump_revision();
-    Ok(())
+    Ok(json)
 }
 
 pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
