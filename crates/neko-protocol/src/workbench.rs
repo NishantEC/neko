@@ -510,6 +510,9 @@ pub struct MachineHealth {
     /// At most this many agents run at once right now, if the machine limits it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap: Option<u32>,
+    /// Build and test processes slowed (reniced) on the last reading.
+    #[serde(default)]
+    pub slowed: u32,
     /// Memory held by each kind of agent process, largest first.
     #[serde(default)]
     pub agents: Vec<AgentMemory>,

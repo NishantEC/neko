@@ -64,6 +64,10 @@ struct MachineStrip: View {
             } else if status.health["night"].bool {
                 Text("01:00–06:00: Neko runs one task at a time, and new work waits while the load is above 12.").foregroundStyle(N.text2).fixedSize(horizontal: false, vertical: true)
             }
+            if status.health["slowed"].int > 0 {
+                Text("Slowed \(status.health["slowed"].int) build and test \(status.health["slowed"].int == 1 ? "process" : "processes") so the Mac keeps up. Nothing was stopped.")
+                    .font(NekoFont.meta).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
+            }
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: NekoSpace.lg, verticalSpacing: NekoSpace.sm) {
                 ForEach(status.facts, id: \.0) { fact in
                     GridRow { Text(fact.0).foregroundStyle(N.text3); Text(fact.1) }
