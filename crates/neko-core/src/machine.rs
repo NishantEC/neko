@@ -185,6 +185,198 @@ pub fn heavy_command(command: &str) -> bool {
     ].iter().any(|p| command.contains(p)) || command.trim_end().ends_with("pnpm i")
 }
 
+/// The "This machine" part of a rulebook, for agents outside Neko.
+pub fn machine_rules(rulebook: &str) -> String {
+    let start = rulebook.find("## This machine").map(|i| i + "## This machine".len());
+    let section = start.map(|i| {
+        let rest = &rulebook[i..];
+        rest[..rest.find("\n## ").unwrap_or(rest.len())].trim().to_owned()
+    });
+    let mut text = section.unwrap_or_else(|| rulebook.trim().to_owned());
+    text.push_str(&format!("\nTest runners use at most {TEST_WORKERS} workers (jest --maxWorkers={TEST_WORKERS}, vitest --maxWorkers={TEST_WORKERS}, pytest -n {TEST_WORKERS}, turbo --concurrency={TEST_WORKERS})."));
+    text
+}
+
+/// Environment that caps test runners in any process Neko starts, for the
+/// runners that read one (Vitest's pools, pytest-xdist's `-n auto`). Jest and
+/// Turbo read none, so the hook and the rulebook cap those instead.
+pub const TEST_WORKER_ENV: [(&str, &str); 3] = [
+    ("VITEST_MAX_THREADS", "2"),
+    ("VITEST_MAX_FORKS", "2"),
+    ("PYTEST_XDIST_AUTO_NUM_WORKERS", "2"),
+];
+
+/// Processes that build or test, by their command line.
+fn heavy_process(args: &str) -> bool {
+    let program = args.split_whitespace().next().unwrap_or("").rsplit('/').next().unwrap_or("");
+    matches!(program, "esbuild" | "tsc" | "xcodebuild" | "swift-frontend" | "rustc" | "clang" | "webpack")
+        || (program == "node" && ["jest", "vitest", "tsc", "esbuild", "turbo", "webpack", "eslint", "next build"].iter().any(|k| args.contains(k)))
+}
+
+/// At night with the load over the night ceiling, lowers the priority of
+/// build and test processes so the Mac keeps up. Nothing is stopped; the
+/// work just yields to everything else. Returns how many were slowed.
+pub fn slow_heavy_jobs(health: &MachineHealth) -> u32 {
+    if !(health.night && health.load > NIGHT_LOAD_CEILING) { return 0; }
+    let user = run("/usr/bin/id", &["-un"]).trim().to_owned();
+    let pids: Vec<String> = run("/bin/ps", &["-axo", "pid=,nice=,user=,args="]).lines().filter_map(|line| {
+        let mut parts = line.split_whitespace();
+        let (pid, nice, owner) = (parts.next()?, parts.next()?.parse::<i32>().ok()?, parts.next()?);
+        let args: String = parts.collect::<Vec<_>>().join(" ");
+        (owner == user && nice < 10 && heavy_process(&args)).then(|| pid.to_owned())
+    }).collect();
+    if pids.is_empty() { return 0; }
+    let mut command = vec!["-n", "10", "-p"];
+    command.extend(pids.iter().map(String::as_str));
+    run("/usr/bin/renice", &command);
+    pids.len() as u32
+}
+
+/// Rule 11: test runners use at most this many workers.
+pub const TEST_WORKERS: u32 = 2;
+
+fn split_segments(command: &str) -> Vec<(String, String)> {
+    // (segment, separator that follows it)
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = command.chars().collect();
+    let mut i = 0;
+    let (mut single, mut double) = (false, false);
+    while i < chars.len() {
+        let c = chars[i];
+        match c {
+            '\'' if !double => single = !single,
+            '"' if !single => double = !double,
+            _ => {}
+        }
+        if !single && !double {
+            let two: String = chars[i..chars.len().min(i + 2)].iter().collect();
+            if two == "&&" || two == "||" {
+                out.push((std::mem::take(&mut current), two));
+                i += 2;
+                continue;
+            }
+            if c == ';' || c == '|' || c == '\n' {
+                out.push((std::mem::take(&mut current), c.to_string()));
+                i += 1;
+                continue;
+            }
+        }
+        current.push(c);
+        i += 1;
+    }
+    out.push((current, String::new()));
+    out
+}
+
+fn has_flag(words: &[&str], flags: &[&str]) -> bool {
+    words.iter().any(|w| flags.iter().any(|f| w == f || w.starts_with(&format!("{f}="))))
+}
+
+/// The same command with its test runners capped at `TEST_WORKERS`, or None
+/// when nothing needed capping. `script` returns a package's `test` script
+/// for a directory (relative to the command's working directory), so
+/// `yarn test` is capped according to what it actually runs.
+pub fn cap_test_workers(command: &str, script: &dyn Fn(Option<&str>) -> Option<String>) -> Option<String> {
+    let n = TEST_WORKERS;
+    let mut changed = false;
+    let mut directory: Option<String> = None;
+    let mut rebuilt = String::new();
+    for (segment, separator) in split_segments(command) {
+        let words: Vec<&str> = segment.split_whitespace().collect();
+        let mut extra = String::new();
+        let mut replaced = segment.clone();
+        let is = |name: &str| words.iter().any(|w| *w == name || w.ends_with(&format!("/{name}")));
+        if words.first() == Some(&"cd") {
+            directory = words.get(1).map(|d| d.trim_matches(|c| c == '"' || c == '\'').to_owned());
+        } else if is("jest") && !has_flag(&words, &["--maxWorkers", "-w", "--runInBand", "-i"]) {
+            extra = format!(" --maxWorkers={n}");
+        } else if is("vitest") && !has_flag(&words, &["--maxWorkers", "--no-file-parallelism", "--poolOptions.threads.maxThreads"]) {
+            extra = format!(" --maxWorkers={n}");
+        } else if is("turbo") && words.contains(&"run") && !has_flag(&words, &["--concurrency"]) {
+            extra = format!(" --concurrency={n}");
+        } else if is("pytest") {
+            // Only an explicit or automatic -n above the cap is changed.
+            let mut out = Vec::new();
+            let mut iter = words.iter().peekable();
+            while let Some(w) = iter.next() {
+                if (*w == "-n" || *w == "--numprocesses") && iter.peek().is_some_and(|v| v.parse::<u32>().map_or(**v == "auto" || **v == "logical", |k| k > n)) {
+                    iter.next();
+                    out.push(format!("{w} {n}"));
+                    changed = true;
+                } else {
+                    out.push(w.to_string());
+                }
+            }
+            if changed { replaced = format!("{}{}", if segment.starts_with(' ') { " " } else { "" }, out.join(" ")) + if segment.ends_with(' ') { " " } else { "" }; }
+        } else if let [tool, rest @ ..] = words.as_slice() {
+            let runs_test = matches!(*tool, "yarn" | "pnpm") && rest.first() == Some(&"test")
+                || *tool == "npm" && (rest.first() == Some(&"test") || rest.starts_with(&["run", "test"]));
+            if runs_test && !has_flag(&words, &["--maxWorkers", "--concurrency"]) {
+                if let Some(test) = script(directory.as_deref()) {
+                    let pass = if *tool == "npm" { " --" } else { "" };
+                    if test.contains("jest") || test.contains("vitest") {
+                        extra = format!("{pass} --maxWorkers={n}");
+                    } else if test.contains("turbo") {
+                        extra = format!("{pass} --concurrency={n}");
+                    }
+                }
+            }
+        }
+        if !extra.is_empty() {
+            changed = true;
+            let trimmed = replaced.trim_end();
+            let tail = &replaced[trimmed.len()..];
+            replaced = format!("{trimmed}{extra}{tail}");
+        }
+        rebuilt.push_str(&replaced);
+        rebuilt.push_str(&separator);
+    }
+    changed.then_some(rebuilt)
+}
+
+/// Where Neko publishes the machine rules agents outside it should follow.
+pub fn rules_path() -> std::path::PathBuf {
+    neko_protocol::support_dir().join("agent-rules.md")
+}
+
+/// Writes the rules agents outside Neko get, when they changed.
+pub fn publish_rules(text: &str) {
+    let path = rules_path();
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(text) {
+        let temporary = path.with_extension("tmp");
+        if std::fs::write(&temporary, text).is_ok() {
+            let _ = std::fs::rename(&temporary, &path);
+        }
+    }
+}
+
+/// The text to hand a session once per rules change: Neko's machine rules,
+/// plus a pointer when ~/.agents/RESOURCES.md changed. Records that this
+/// session has now seen this version. None when it already had.
+fn rules_notice(session: &str) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    if session.is_empty() { return None; }
+    let rules = std::fs::read_to_string(rules_path()).unwrap_or_default();
+    let resources = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".agents/RESOURCES.md"))
+        .and_then(|p| std::fs::read(p).ok()).unwrap_or_default();
+    let digest = format!("{:x}", Sha256::new().chain_update(rules.as_bytes()).chain_update(&resources).finalize());
+    let state_path = neko_protocol::support_dir().join("hook-sessions.json");
+    let mut seen: std::collections::BTreeMap<String, (String, i64)> = std::fs::read_to_string(&state_path).ok()
+        .and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    if seen.get(session).is_some_and(|(d, _)| *d == digest) { return None; }
+    let now = crate::now_unix_ms();
+    seen.retain(|_, (_, at)| now - *at < 7 * 24 * 3600 * 1000);
+    seen.insert(session.to_owned(), (digest, now));
+    let temporary = state_path.with_extension(format!("tmp{}", std::process::id()));
+    if std::fs::write(&temporary, serde_json::to_string(&seen).unwrap_or_default()).is_ok() {
+        let _ = std::fs::rename(&temporary, &state_path);
+    }
+    (!rules.trim().is_empty()).then(|| format!(
+        "Neko's machine rules apply to this session now, even though it started earlier. Follow them from your next command on:\n{rules}\nIf ~/.agents/RESOURCES.md changed since you last read it, read it again."
+    ))
+}
+
 /// `neko-daemon --machine-check`: one line about the Mac, exit 1 while new
 /// work is held. `--machine-check --hook`: Claude Code PreToolUse mode; reads
 /// the hook JSON on stdin and denies work-starting shell commands while held.
@@ -199,14 +391,8 @@ pub fn check_if_requested() -> Option<i32> {
         let mut input = String::new();
         let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
         let payload: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
-        let command = payload["tool_input"]["command"].as_str().unwrap_or("");
-        if payload["tool_name"] == "Bash" && heavy_command(command) {
-            if let Some(reason) = &health.holding {
-                println!("{}", serde_json::json!({
-                    "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny"},
-                    "systemMessage": format!("[Neko] {reason} Queue this and say so in your reply."),
-                }));
-            }
+        if let Some(output) = hook_decision(&payload, &health) {
+            println!("{output}");
         }
         return Some(0);
     }
@@ -215,6 +401,48 @@ pub fn check_if_requested() -> Option<i32> {
         Some(reason) => { eprintln!("{reason}"); Some(1) }
         None => Some(0),
     }
+}
+
+/// What the PreToolUse hook says about one tool call, if anything: refuse
+/// heavy work while the Mac is held, cap test runners (rewriting the command
+/// where the session skips permission prompts anyway, otherwise refusing with
+/// the capped command to run), and hand over rule changes once per session.
+pub fn hook_decision(payload: &serde_json::Value, health: &MachineHealth) -> Option<serde_json::Value> {
+    let notice = rules_notice(payload["session_id"].as_str().unwrap_or(""));
+    let mut output = serde_json::json!({"hookEventName": "PreToolUse"});
+    if let Some(text) = &notice {
+        output["additionalContext"] = serde_json::json!(text);
+    }
+    if payload["tool_name"] == "Bash" {
+        let command = payload["tool_input"]["command"].as_str().unwrap_or("");
+        let cwd = std::path::PathBuf::from(payload["cwd"].as_str().unwrap_or("."));
+        if heavy_command(command) {
+            if let Some(reason) = &health.holding {
+                output["permissionDecision"] = serde_json::json!("deny");
+                output["permissionDecisionReason"] = serde_json::json!(format!("[Neko] {reason} Queue this and say so in your reply."));
+                return Some(serde_json::json!({"hookSpecificOutput": output}));
+            }
+        }
+        let script = |dir: Option<&str>| -> Option<String> {
+            let base = dir.map(|d| cwd.join(d)).unwrap_or_else(|| cwd.clone());
+            let manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(base.join("package.json")).ok()?).ok()?;
+            manifest["scripts"]["test"].as_str().map(str::to_owned)
+        };
+        if let Some(capped) = cap_test_workers(command, &script) {
+            if payload["permission_mode"] == "bypassPermissions" {
+                let mut input = payload["tool_input"].clone();
+                input["command"] = serde_json::json!(capped);
+                output["permissionDecision"] = serde_json::json!("allow");
+                output["permissionDecisionReason"] = serde_json::json!(format!("[Neko] Test runners use at most {TEST_WORKERS} workers on this Mac."));
+                output["updatedInput"] = input;
+            } else {
+                output["permissionDecision"] = serde_json::json!("deny");
+                output["permissionDecisionReason"] = serde_json::json!(format!("[Neko] Test runners use at most {TEST_WORKERS} workers on this Mac. Run this instead: {capped}"));
+            }
+            return Some(serde_json::json!({"hookSpecificOutput": output}));
+        }
+    }
+    notice.map(|_| serde_json::json!({"hookSpecificOutput": output}))
 }
 
 /// One line: load, disk, memory, and the night limit when it applies.
@@ -272,6 +500,34 @@ mod tests {
         let mut h = health(5.0, 100.0, "warning");
         apply_policy(&mut h, 14);
         assert_eq!(h.cap, Some(1), "memory warning: one at a time");
+    }
+
+    #[test]
+    fn test_runners_are_capped_at_two_workers_wherever_they_sit_in_a_command() {
+        let none = |_: Option<&str>| None;
+        assert_eq!(cap_test_workers("npx jest src/a.test.ts", &none).as_deref(), Some("npx jest src/a.test.ts --maxWorkers=2"));
+        assert_eq!(cap_test_workers("cd app && npx jest && echo done", &none).as_deref(), Some("cd app && npx jest --maxWorkers=2 && echo done"));
+        assert_eq!(cap_test_workers("npx jest --maxWorkers=4", &none), None, "an explicit choice is left alone");
+        assert_eq!(cap_test_workers("npx vitest run", &none).as_deref(), Some("npx vitest run --maxWorkers=2"));
+        assert_eq!(cap_test_workers("turbo run test lint:tsc", &none).as_deref(), Some("turbo run test lint:tsc --concurrency=2"));
+        assert_eq!(cap_test_workers("pytest -n auto tests", &none).as_deref(), Some("pytest -n 2 tests"));
+        assert_eq!(cap_test_workers("pytest -n 2 tests", &none), None);
+        assert_eq!(cap_test_workers("git status | head", &none), None);
+        assert_eq!(cap_test_workers("echo 'npx jest' > notes", &none), None, "quoted text is not a command");
+        let jest = |_: Option<&str>| Some("jest --coverage".to_owned());
+        assert_eq!(cap_test_workers("yarn test src", &jest).as_deref(), Some("yarn test src --maxWorkers=2"));
+        assert_eq!(cap_test_workers("npm test", &jest).as_deref(), Some("npm test -- --maxWorkers=2"));
+        let turbo = |dir: Option<&str>| (dir == Some("apps/web")).then(|| "turbo run test".to_owned());
+        assert_eq!(cap_test_workers("cd apps/web && pnpm test", &turbo).as_deref(), Some("cd apps/web && pnpm test --concurrency=2"));
+    }
+
+    #[test]
+    fn agents_outside_neko_get_the_machine_section_plus_the_worker_cap() {
+        let rules = machine_rules("# Rules\n\n## Engineering\nTest first.\n\n## This machine\n1. One heavy job.\n\n## Repositories\nPRs only.");
+        assert!(rules.starts_with("1. One heavy job.") && rules.contains("--maxWorkers=2") && !rules.contains("PRs only"));
+        assert!(heavy_process("/opt/homebrew/bin/node /repo/node_modules/.bin/jest --watch"));
+        assert!(heavy_process("/usr/bin/xcodebuild -scheme App"));
+        assert!(!heavy_process("/opt/homebrew/bin/node /repo/node_modules/.bin/vite dev"), "a dev server is not a build");
     }
 
     #[test]

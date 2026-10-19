@@ -573,10 +573,17 @@ impl Controller {
         // Work a watch files is checked against open tasks before it runs.
         self.start_triage();
         // Reads the Mac every 15 s; admission and the app use the reading.
-        std::thread::Builder::new().name("neko-machine".into()).spawn(|| {
+        let db = self.db.clone();
+        std::thread::Builder::new().name("neko-machine".into()).spawn(move || {
             let mut tick = 0u32;
             loop {
-                neko_core::machine::record(neko_core::machine::sense(tick % 4 == 0));
+                let mut health = neko_core::machine::sense(tick % 4 == 0);
+                health.slowed = neko_core::machine::slow_heavy_jobs(&health);
+                neko_core::machine::record(health);
+                // Agents outside Neko read these rules through the hook.
+                if let Ok(snapshot) = store::load(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
+                    neko_core::machine::publish_rules(&neko_core::machine::machine_rules(&neko_core::rulebook::text(&snapshot)));
+                }
                 tick = tick.wrapping_add(1);
                 std::thread::sleep(Duration::from_secs(15));
             }

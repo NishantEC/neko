@@ -35,7 +35,8 @@ pub const MACHINE: &str = "This machine is shared with the user's own work and o
 3. Keep build output inside your task folder (Xcode -derivedDataPath, caches, bundles), never in /tmp or a shared location. Your task folder is removed when you stop, and everything inside it goes with it.
 4. Never create extra Git worktrees or clones; work in the folder you were given.
 5. For a browser, use the shared one (~/.agents/bin/shared-chrome acquire, connect over CDP, release); never launch your own.
-6. Stop anything you started (dev servers, watchers, test runners, simulators) before you finish.";
+6. Stop anything you started (dev servers, watchers, test runners, simulators) before you finish.
+7. Test runners use at most 2 workers: jest --maxWorkers=2, vitest --maxWorkers=2, pytest -n 2, turbo --concurrency=2.";
 
 pub const REPOSITORIES: &str = "Repositories:
 1. Neko alone commits, pushes and opens pull requests, and only after an independent review passes. Nothing is ever merged by an agent.

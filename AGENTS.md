@@ -343,7 +343,15 @@ agent every 15 s. `apply_policy` turns that into `holding` (disk under 15 GB,
 memory critical, load 20+, or night load over 12; nothing new starts) or `cap`
 (01:00–06:00 or memory warning: one agent at a time). Admission obeys it; the
 sidebar strip shows it. `neko-daemon --machine-check [--hook]` gives agents
-outside Neko the same answer (exit 1 / a PreToolUse deny while held).
+outside Neko the same answer (exit 1 / a PreToolUse deny while held). The
+hook also caps test runners at 2 workers (rewrites the command in
+`bypassPermissions` sessions, otherwise refuses with the capped command, never
+auto-approving), and hands each session Neko's machine rules once per change
+(`additionalContext`, tracked per `session_id`), so agents that started days
+ago follow rules written today. The daemon publishes those rules to
+`agent-rules.md` in the data dir; Neko's own runs also get Vitest/pytest
+worker-cap env, and at night over load 12 the steward renices build and test
+processes to 10 (nothing is stopped).
 
 ## Native design system and the check gate (2026-10-14)
 

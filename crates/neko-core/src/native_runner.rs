@@ -364,6 +364,10 @@ fn run_configured_session(
     if let Ok(path) = std::env::join_paths(paths) {
         command.env("PATH", path);
     }
+    // Rule 11: test runners an agent starts use at most two workers.
+    for (name, value) in crate::machine::TEST_WORKER_ENV {
+        command.env(name, value);
+    }
     for name in [
         "CODEX_THREAD_ID",
         "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
