@@ -95,6 +95,14 @@ import NekoKit
         try render(NativeSidebar(model: sidebarModel, page: .constant(.tickets), addingWorkspace: .constant(false)),
                    size: CGSize(width: 280, height: 820), scheme: .dark,
                    to: URL(fileURLWithPath: directory).appendingPathComponent("page-sidebar.png"))
+        // All tasks as a tree of who started whom.
+        let tree = AgentTree.build(snapshot: snapshot, tasks: snapshot["tasks"].array, workspace: nil,
+                                   now: Int(Date().timeIntervalSince1970 * 1000))
+        for scheme in [ColorScheme.dark, .light] {
+            try render(AgentTreeView(tree: tree, open: { _ in }, openHome: {}, openWatching: {}),
+                       size: CGSize(width: 1280, height: height), scheme: scheme,
+                       to: URL(fileURLWithPath: directory).appendingPathComponent("agent-tree-\(scheme == .dark ? "dark" : "light").png"))
+        }
         if let ticket = env["NEKO_RENDER_TICKET"] {
             let model = AppModel(transport: { _ in .object([:]) })
             model.snapshot = snapshot

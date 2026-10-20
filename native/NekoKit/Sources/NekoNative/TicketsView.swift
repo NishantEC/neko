@@ -36,6 +36,7 @@ struct TicketsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if layout == "list" { list }
+            else if layout == "tree" { tree }
             else if hasVisibleTasks { board }
             else { emptyState.frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
@@ -63,7 +64,8 @@ struct TicketsView: View {
         ToolbarItem(placement: .primaryAction) {
             GlassSegmented(selection: $layout, options: [
                 .init(value: "list", title: "List", symbol: "list.bullet", help: "Show tasks as a list"),
-                .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tasks as a board")
+                .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tasks as a board"),
+                .init(value: "tree", title: "Tree", symbol: "point.3.connected.trianglepath.dotted", help: "Show who started whom")
             ], iconOnly: true)
         }.withoutSharedBackground()
         ToolbarItem(placement: .primaryAction) {
@@ -90,6 +92,22 @@ struct TicketsView: View {
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .help("Work options")
         }
+    }
+
+    // MARK: Tree
+
+    /// Every task the filters let through, whatever its column.
+    private var visibleTasks: [JSONValue] { Self.columns.flatMap { tasks(in: $0) } }
+    private var tree: some View {
+        // Watches with no tasks would only add noise to a search or a stage filter.
+        let filtered = !search.isEmpty || stageFilter != nil
+        let built = AgentTree.build(snapshot: model.snapshot, tasks: visibleTasks, workspace: model.selectedWorkspace,
+                                    showIdleWatches: !filtered, now: Int(Date().timeIntervalSince1970 * 1000))
+        return AgentTreeView(tree: built,
+                             open: { model.openAgent($0, from: .tickets) },
+                             openHome: { model.requestedPage = .home },
+                             openWatching: { model.requestedPage = .watching })
+            .overlay { if built.root.children.isEmpty { emptyState } }
     }
 
     // MARK: List
