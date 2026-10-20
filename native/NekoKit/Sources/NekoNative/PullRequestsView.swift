@@ -49,6 +49,9 @@ struct PullRequestRow: Identifiable, Equatable {
     let checks: String?
     let review: String?
     let conflicts: Bool
+    /// Branch protection wants it up to date with its base first.
+    let behind: Bool
+    let draft: Bool
     let updated: Int
 
     init(task: JSONValue, snapshot: JSONValue) {
@@ -61,14 +64,17 @@ struct PullRequestRow: Identifiable, Equatable {
         number = text.pullRequest ?? ""
         repository = text.repository
         updated = task["updated_at_ms"].int
-        conflicts = status["mergeable"].string == "CONFLICTING"
+        conflicts = status["merge_state"].string == "DIRTY" || status["mergeable"].string == "CONFLICTING"
+        let alsoOnBase = status["base_failing"].bool ? " (also failing on \(status["base"].string.isEmpty ? "main" : status["base"].string))" : ""
         checks = switch status["checks"].string {
         case "passing": "Checks passing"
-        case "failing": "Checks failing" + (status["failing"].array.isEmpty ? "" : ": " + status["failing"].array.map(\.string).joined(separator: ", "))
+        case "failing": "Checks failing" + (status["failing"].array.isEmpty ? "" : ": " + status["failing"].array.map(\.string).joined(separator: ", ")) + alsoOnBase
         case "pending": "Checks running"
         case "none": "No checks"
         default: nil
         }
+        behind = status["merge_state"].string == "BEHIND"
+        draft = status["draft"].bool
         review = switch status["review"].string {
         case "APPROVED": "Approved"
         case "CHANGES_REQUESTED": "Changes requested"
@@ -84,7 +90,10 @@ struct PullRequestRow: Identifiable, Equatable {
         case ["Queued", "Planning", "Building", "Reviewing"].contains(taskStatus): verdict = .working; reason = nil
         // Until Neko has read it, it may already be merged or closed: no verdict.
         case state.isEmpty: verdict = .unchecked; reason = "Neko reads it on GitHub within a few minutes."
-        case pr["merge_when_ready"].bool: verdict = .merging; reason = nil
+        case pr["merge_when_ready"].bool:
+            verdict = .merging
+            let waiting = pr["follow_up"]["merge_note"].string
+            reason = waiting.isEmpty ? nil : "Waiting: " + waiting
         case !suggestion.isEmpty: verdict = .close; reason = suggestion
         case taskStatus == "Cancelled": verdict = .close; reason = "Its task was cancelled here, but the pull request is still open."
         case ["AwaitingApproval", "Failed"].contains(taskStatus):
@@ -224,7 +233,7 @@ struct PullRequestsView: View {
         HStack(alignment: .top, spacing: NekoSpace.lg) {
             VStack(alignment: .leading, spacing: NekoSpace.xs) {
                 Text(row.title).font(NekoFont.heading).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                Text([row.number, row.repository, row.checks, row.review, row.conflicts ? "Conflicts with main" : nil].compactMap { $0 }.joined(separator: " · "))
+                Text([row.number, row.repository, row.draft ? "Draft" : nil, row.checks, row.review, row.conflicts ? "Conflicts with its base branch" : nil, row.behind ? "Behind its base branch" : nil].compactMap { $0 }.joined(separator: " · "))
                     .font(NekoFont.meta).foregroundStyle(row.conflicts || row.checks?.hasPrefix("Checks failing") == true ? NekoStyle.amber : .secondary)
                     .lineLimit(2)
                 if let reason = row.reason, !reason.isEmpty {

@@ -65,24 +65,24 @@ impl Controller {
     }
 
     fn watch_one(&self, task_id: &str, url: &str, cancel: &AtomicBool) -> Result<(), String> {
-        let mut observed = prs::parse_view(&native_runner::publish::gh(&["pr", "view", url, "--json", prs::FIELDS], cancel, GH_TIMEOUT)?)?;
-        if observed.reviewed {
-            if let Some((repo, number)) = prs::locate(url) {
-                let inline = native_runner::publish::gh(&["api", &format!("repos/{repo}/pulls/{number}/comments?per_page=100")], cancel, GH_TIMEOUT)?;
-                let author = observed.author.clone();
-                observed.comments.extend(prs::parse_inline_comments(&inline, &author));
-            }
-        }
+        let (owner, name, number) = prs::locate(url).ok_or("Not a GitHub pull request URL")?;
+        let observed = prs::parse(&native_runner::publish::gh(&[
+            "api", "graphql", "-F", &format!("owner={owner}"), "-F", &format!("name={name}"),
+            "-F", &format!("number={number}"), "-f", &format!("query={}", prs::QUERY),
+        ], cancel, GH_TIMEOUT)?)?;
         let working = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|a| a.task_id == task_id)
             || publish::in_flight_now(task_id);
         let next = {
             let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
             let mut snapshot = store::load(&db)?;
+            let admin = snapshot.task_roots.get(task_id)
+                .and_then(|root| std::path::Path::new(root).canonicalize().ok())
+                .is_some_and(|root| snapshot.merge_without_review.contains(&*root.to_string_lossy()));
             let Some(task) = snapshot.tasks.iter_mut().find(|t| t.id == task_id) else { return Ok(()) };
             if task.pull_request.as_ref().map(|p| p.url.as_str()) != Some(url) { return Ok(()) }
-            let status_before = task.status;
-            let next = prs::reconcile(task, &observed, working);
-            let decided = task.status != status_before || !matches!(next, Next::Nothing);
+            let (status_before, events_before) = (task.status, task.events.len());
+            let next = prs::reconcile(task, &observed, working, admin);
+            let decided = task.status != status_before || task.events.len() != events_before || !matches!(next, Next::Nothing);
             match &next {
                 Next::HandBack(note) => {
                     store::append_event(task, prs::ROLE, "Handed the pull request back to its agent (see the note below).");
@@ -91,7 +91,7 @@ impl Controller {
                 Next::MergeBlocked(why) => {
                     store::append_event(task, prs::ROLE, &format!("Not merged: {why} The merge request is cancelled; ask again once it is fixed."));
                 }
-                Next::Merge | Next::Nothing => {}
+                Next::Merge { .. } | Next::UpdateBranch { .. } | Next::Nothing => {}
             }
             if decided {
                 task_touch(&mut snapshot, task_id);
@@ -104,42 +104,53 @@ impl Controller {
             }
             next
         };
-        if next == Next::Merge {
-            self.merge(task_id, url, cancel)?;
+        match next {
+            Next::Merge { head, admin } => self.merge(task_id, url, &head, admin, cancel),
+            Next::UpdateBranch { head } => {
+                // GitHub merges the base into the branch itself (no force push),
+                // only if the head is still the one judged.
+                let outcome = native_runner::publish::gh(&["api", "-X", "PUT", &format!("repos/{owner}/{name}/pulls/{number}/update-branch"),
+                    "-f", &format!("expected_head_sha={head}")], cancel, GH_TIMEOUT);
+                if let Err(error) = outcome {
+                    self.note(task_id, &format!("Couldn't bring the pull request up to date: {error}"))?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
-        Ok(())
     }
 
-    /// Squash-merges with an empty body, as you asked, skipping GitHub's
-    /// required review only where you allowed it for that repository.
-    fn merge(&self, task_id: &str, url: &str, cancel: &AtomicBool) -> Result<(), String> {
-        let admin = {
-            let snapshot = store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)?;
-            snapshot.task_roots.get(task_id)
-                .and_then(|root| std::path::Path::new(root).canonicalize().ok())
-                .is_some_and(|root| snapshot.merge_without_review.contains(&*root.to_string_lossy()))
-        };
-        let mut args = vec!["pr", "merge", url, "--squash", "--body", ""];
+    fn note(&self, task_id: &str, message: &str) -> Result<(), String> {
+        let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
+        let mut snapshot = store::load(&db)?;
+        if let Some(task) = snapshot.tasks.iter_mut().find(|t| t.id == task_id) {
+            store::append_event(task, prs::ROLE, message);
+            task.updated_at_ms = store::now_ms();
+        }
+        store::save(&db, &snapshot)
+    }
+
+    /// Squash-merges exactly the head commit it judged (`--match-head-commit`,
+    /// so a push in between can't slip in unchecked) with an empty body, as
+    /// you asked, and deletes the branch. Skips GitHub's required review
+    /// only where you allowed it for that repository.
+    fn merge(&self, task_id: &str, url: &str, head: &str, admin: bool, cancel: &AtomicBool) -> Result<(), String> {
+        let mut args = vec!["pr", "merge", url, "--squash", "--body", "", "--match-head-commit", head, "--delete-branch"];
         if admin { args.push("--admin"); }
         let outcome = native_runner::publish::gh(&args, cancel, MERGE_TIMEOUT);
         let db = self.db.lock().map_err(|_| "Task storage unavailable")?;
         let mut snapshot = store::load(&db)?;
         let Some(task) = snapshot.tasks.iter_mut().find(|t| t.id == task_id) else { return Ok(()) };
-        if let Some(pr) = task.pull_request.as_mut() { pr.merge_when_ready = false; }
+        if let Some(pr) = task.pull_request.as_mut() { pr.merge_when_ready = false; pr.follow_up.merge_note = None; }
         match outcome {
             Ok(_) => {
                 if let Some(status) = task.pull_request.as_mut().and_then(|p| p.status.as_mut()) { status.state = "MERGED".into(); }
                 task.status = TaskStatus::Completed;
                 store::append_event(task, prs::ROLE, if admin {
-                    "Merged the pull request (squashed, empty body), without waiting for an approving review as this repository allows."
-                } else { "Merged the pull request (squashed, empty body)." });
+                    "Merged the pull request (squashed, empty body) and deleted its branch, without waiting for an approving review as this repository allows."
+                } else { "Merged the pull request (squashed, empty body) and deleted its branch." });
             }
-            Err(error) => {
-                let hint = if !admin && error.to_lowercase().contains("review") {
-                    " GitHub wants an approving review first: get one, or allow merging without review for this repository."
-                } else { "" };
-                store::append_event(task, prs::ROLE, &format!("Couldn't merge the pull request: {error}.{hint}"));
-            }
+            Err(error) => store::append_event(task, prs::ROLE, &format!("Couldn't merge the pull request: {error}")),
         }
         task.updated_at_ms = store::now_ms();
         store::save(&db, &snapshot)

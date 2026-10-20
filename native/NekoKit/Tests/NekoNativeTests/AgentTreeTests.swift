@@ -146,7 +146,7 @@ final class AgentTreeTests: XCTestCase {
             pr("5", "ReadyForReview", #","merge_when_ready":true,"status":{"state":"OPEN","checks":"pending","mergeable":"MERGEABLE"}"#),
             pr("9", "ReadyForReview", ""),
             pr("6", "Completed", #","status":{"state":"MERGED","checks":"passing","mergeable":"UNKNOWN"}"#),
-            pr("7", "ReadyForReview", #","status":{"state":"OPEN","checks":"failing","failing":["Test and Lint"],"mergeable":"CONFLICTING"}"#),
+            pr("7", "ReadyForReview", #","status":{"state":"OPEN","checks":"failing","failing":["Test and Lint"],"mergeable":"CONFLICTING","merge_state":"DIRTY","base_failing":true,"base":"master"}"#),
             task("8", "Queued"),
         ])
         let rows = PullRequestRow.rows(snapshot: snap, tasks: snap["tasks"].array)
@@ -156,7 +156,7 @@ final class AgentTreeTests: XCTestCase {
         XCTAssertEqual(rows[0].checks, "Checks passing")
         XCTAssertEqual(rows[0].review, "Review required")
         XCTAssertEqual(rows[0].number, "#1")
-        XCTAssertEqual(rows[1].checks, "Checks failing: Test and Lint")
+        XCTAssertEqual(rows[1].checks, "Checks failing: Test and Lint (also failing on master)")
         XCTAssertTrue(rows[1].conflicts)
         XCTAssertEqual(rows[2].reason, "#4607 already ignores it")
         XCTAssertEqual(rows.filter(\.verdict.isDecision).count, 4)

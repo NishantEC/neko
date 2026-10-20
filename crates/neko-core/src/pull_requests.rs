@@ -4,20 +4,32 @@
 //! failed CI, fell into conflict or got a reviewer's comment changed nothing
 //! on the task, so tasks sat at "Ready to review" while GitHub had moved on
 //! (20 of 42 when first measured). The daemon's watch
-//! (`workbench/pull_requests.rs`) reads each open PR with `gh` and calls
-//! [`reconcile`], which is pure and decides what that means:
+//! (`workbench/pull_requests.rs`) reads each open PR with one GraphQL query
+//! ([`QUERY`]) and calls [`reconcile`], which is pure and decides what that
+//! means. The rules follow established tools, read from their source
+//! (2026-10-21), rather than first principles:
 //!
-//! - merged: the task is done; closed: the task is cancelled;
-//! - a new failing check, a merge conflict, or a comment from a person
-//!   (not a bot, not the PR's own author, which is also how Neko and other
-//!   agents post) goes back to the task's agent as a note, and the task runs
-//!   again in its own folder; review and publishing then work as always and
-//!   push to the same PR;
-//! - each is handed back once, and after [`MAX_FOLLOW_UPS`] the task waits
-//!   for you instead, so a check that can't be fixed never loops.
-//!
-//! Merging is yours: `SetMergeWhenReady` marks a PR, and the watch merges it
-//! once checks pass and nothing conflicts. Closing is yours too.
+//! - **State comes from `mergeStateStatus`** (Kodiak): `DIRTY` is a
+//!   conflict, `BEHIND` is out of date, `BLOCKED` is a missing review or
+//!   check, `UNKNOWN` means GitHub is still computing and nothing is decided.
+//!   Plain `mergeable` is UNKNOWN right after a push, which once made a first
+//!   read miss two existing conflicts and later treat them as new.
+//! - **Only required checks count** when the branch has any (Kodiak); a run
+//!   that was cancelled, timed out or never started is interrupted, not a
+//!   failure (Renovate, Mergify).
+//! - **A failure the base branch shares is not the PR's** (Sweep): when the
+//!   base branch's own checks are red, nothing is handed back.
+//! - **Reviewers' feedback is unresolved, current review threads** plus
+//!   top-level comments and review summaries, from people with a role in the
+//!   repository, never bots or the PR's own author (OpenHands resolver,
+//!   claude-code-action). `gh pr view --json reviews` carries no inline text.
+//! - **Each signal is acted on once per head and base commit** and at most
+//!   [`MAX_FOLLOW_UPS`] times per PR (Sweep stops at 2); the first read of a
+//!   PR is a baseline, so turning the watch on starts nothing.
+//! - **Merging is yours, and checked at the last moment**: it merges the head
+//!   it judged (`--match-head-commit`), updates a branch that branch
+//!   protection requires to be current through GitHub's own update-branch
+//!   (Kodiak, Renovate), and skips the approving review only where you allow.
 
 use neko_protocol::workbench::{PrStatus, PullRequest, Snapshot, Task, TaskStatus};
 
@@ -30,105 +42,124 @@ const REVIEWER_ASSOCIATIONS: &[&str] = &["OWNER", "MEMBER", "COLLABORATOR", "CON
 /// The role the watch's own events use on a task.
 pub const ROLE: &str = "github";
 
-/// One comment or review from a person.
+/// Everything the watch needs about one pull request, in one GraphQL call:
+/// `gh api graphql -F owner=… -F name=… -F number=… -f query=QUERY`.
+pub const QUERY: &str = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
+ state mergeable mergeStateStatus isDraft headRefOid baseRefName reviewDecision author{login}
+ baseRef{target{oid ... on Commit{statusCheckRollup{state}}}}
+ commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename
+   ... on CheckRun{name status conclusion detailsUrl isRequired(pullRequestNumber:$number)}
+   ... on StatusContext{context state targetUrl isRequired(pullRequestNumber:$number)}}}}}}}
+ comments(last:50){nodes{id author{__typename login} authorAssociation body}}
+ reviews(last:30){nodes{id author{__typename login} authorAssociation body}}
+ reviewThreads(first:100){nodes{isResolved isOutdated path line comments(last:10){nodes{id author{__typename login} authorAssociation body}}}}
+}}}";
+
+/// One comment, review summary or review-thread comment from a person.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Comment {
     pub id: String,
     pub author: String,
     pub body: String,
-    /// "file.ts:12" for an inline comment.
+    /// "file.ts:12" for a comment in a review thread.
     pub place: Option<String>,
 }
 
-/// A pull request read from `gh pr view --json` (`FIELDS`).
+/// A pull request as the watch read it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observed {
     pub status: PrStatus,
     /// Failing checks with a link to their logs.
     pub failures: Vec<(String, String)>,
     pub comments: Vec<Comment>,
-    /// A person left a review, so inline comments are worth fetching.
-    pub reviewed: bool,
-    /// Who opened it: the signed-in account, which Neko and other agents
-    /// also comment as, so its comments are never treated as a review.
-    pub author: String,
 }
 
-/// The fields the watch asks `gh pr view` for.
-pub const FIELDS: &str = "state,mergeable,headRefOid,baseRefName,reviewDecision,author,statusCheckRollup,reviews,comments";
-
-/// Reads `gh pr view --json FIELDS` output.
-pub fn parse_view(json: &str) -> Result<Observed, String> {
+/// Reads the answer to [`QUERY`].
+pub fn parse(json: &str) -> Result<Observed, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("Unreadable pull request status: {e}"))?;
+    if let Some(message) = v["errors"][0]["message"].as_str() {
+        return Err(format!("GitHub: {message}"));
+    }
+    let pr = &v["data"]["repository"]["pullRequest"];
+    if pr.is_null() {
+        return Err("GitHub did not return the pull request".into());
+    }
     let text = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_owned();
-    let pr_author = text(&v["author"]["login"]);
+    let nodes = |v: &serde_json::Value| v["nodes"].as_array().cloned().unwrap_or_default();
+    let author = text(&pr["author"]["login"]);
+
+    let contexts = pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"].clone();
+    let contexts = nodes(&contexts);
+    let any_required = contexts.iter().any(|c| c["isRequired"].as_bool() == Some(true));
     let mut failures = Vec::new();
-    let (mut pending, mut any) = (false, false);
-    for check in v["statusCheckRollup"].as_array().into_iter().flatten() {
-        any = true;
+    let (mut pending, mut counted) = (false, false);
+    for check in contexts.iter().filter(|c| !any_required || c["isRequired"].as_bool() == Some(true)) {
+        counted = true;
         let name = [&check["name"], &check["context"]].into_iter().map(text).find(|n| !n.is_empty()).unwrap_or_else(|| "check".into());
         let link = [&check["detailsUrl"], &check["targetUrl"]].into_iter().map(text).find(|n| !n.is_empty()).unwrap_or_default();
         let (conclusion, state, status) = (text(&check["conclusion"]), text(&check["state"]), text(&check["status"]));
-        if matches!(conclusion.as_str(), "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE") || matches!(state.as_str(), "FAILURE" | "ERROR") {
+        if conclusion == "FAILURE" || matches!(state.as_str(), "FAILURE" | "ERROR") {
             failures.push((name, link));
-        } else if (!status.is_empty() && status != "COMPLETED") || matches!(state.as_str(), "PENDING" | "EXPECTED") {
+        } else if !matches!(conclusion.as_str(), "SUCCESS" | "NEUTRAL" | "SKIPPED") && state != "SUCCESS" {
+            // Running, queued, or interrupted (cancelled, timed out, stale):
+            // none of these says the change is wrong.
             pending = true;
         }
     }
-    let checks = if !failures.is_empty() { "failing" } else if pending { "pending" } else if any { "passing" } else { "none" };
+    let checks = if !failures.is_empty() { "failing" } else if pending { "pending" } else if counted { "passing" } else { "none" };
+
     let person = |c: &serde_json::Value| {
         let login = text(&c["author"]["login"]);
-        !login.is_empty() && login != pr_author && !login.ends_with("[bot]")
+        // GraphQL names bots without "[bot]" ("github-actions"); their type says it.
+        !login.is_empty() && login != author && !login.ends_with("[bot]") && c["author"]["__typename"].as_str() != Some("Bot")
             && REVIEWER_ASSOCIATIONS.contains(&c["authorAssociation"].as_str().unwrap_or_default())
     };
-    let reviewed = v["reviews"].as_array().into_iter().flatten().any(|c| person(c));
     let mut comments = Vec::new();
-    for c in v["comments"].as_array().into_iter().flatten().chain(v["reviews"].as_array().into_iter().flatten()) {
+    for c in nodes(&pr["comments"]).iter().chain(nodes(&pr["reviews"]).iter()) {
         let body = text(&c["body"]).trim().to_owned();
         if person(c) && !body.is_empty() {
             comments.push(Comment { id: text(&c["id"]), author: text(&c["author"]["login"]), body, place: None });
         }
     }
+    for thread in nodes(&pr["reviewThreads"]) {
+        if thread["isResolved"].as_bool() == Some(true) || thread["isOutdated"].as_bool() == Some(true) {
+            continue;
+        }
+        let place = thread["path"].as_str().map(|p| match thread["line"].as_u64() { Some(l) => format!("{p}:{l}"), None => p.to_owned() });
+        for c in nodes(&thread["comments"]) {
+            let body = text(&c["body"]).trim().to_owned();
+            if person(&c) && !body.is_empty() {
+                comments.push(Comment { id: text(&c["id"]), author: text(&c["author"]["login"]), body, place: place.clone() });
+            }
+        }
+    }
+    let base_rollup = text(&pr["baseRef"]["target"]["statusCheckRollup"]["state"]);
     Ok(Observed {
         status: PrStatus {
-            state: text(&v["state"]),
+            state: text(&pr["state"]),
             checks: checks.into(),
             failing: failures.iter().map(|(n, _)| n.clone()).collect(),
-            mergeable: text(&v["mergeable"]),
-            review: text(&v["reviewDecision"]),
-            head: text(&v["headRefOid"]),
-            base: text(&v["baseRefName"]),
+            mergeable: text(&pr["mergeable"]),
+            review: text(&pr["reviewDecision"]),
+            head: text(&pr["headRefOid"]),
+            base: text(&pr["baseRefName"]),
+            merge_state: text(&pr["mergeStateStatus"]),
+            base_head: text(&pr["baseRef"]["target"]["oid"]),
+            base_failing: matches!(base_rollup.as_str(), "FAILURE" | "ERROR"),
+            draft: pr["isDraft"].as_bool() == Some(true),
         },
         failures,
         comments,
-        reviewed,
-        author: pr_author,
     })
 }
 
-/// Reads `gh api repos/{repo}/pulls/{n}/comments` (inline review comments).
-/// Bots are left out by GitHub's own account type.
-pub fn parse_inline_comments(json: &str, pr_author: &str) -> Vec<Comment> {
-    let Ok(serde_json::Value::Array(items)) = serde_json::from_str(json) else { return Vec::new() };
-    items.iter().filter_map(|c| {
-        let login = c["user"]["login"].as_str()?;
-        let body = c["body"].as_str()?.trim();
-        if login == pr_author || c["user"]["type"].as_str() == Some("Bot") || body.is_empty()
-            || !REVIEWER_ASSOCIATIONS.contains(&c["author_association"].as_str().unwrap_or_default()) {
-            return None;
-        }
-        let place = c["path"].as_str().map(|p| match c["line"].as_u64() { Some(l) => format!("{p}:{l}"), None => p.to_owned() });
-        Some(Comment { id: c["id"].to_string(), author: login.to_owned(), body: body.to_owned(), place })
-    }).collect()
-}
-
-/// `owner/repo` and the number, from a pull request URL.
-pub fn locate(url: &str) -> Option<(String, u64)> {
+/// `owner`, `repo` and the number, from a pull request URL.
+pub fn locate(url: &str) -> Option<(String, String, u64)> {
     let rest = url.split("github.com/").nth(1)?;
     let mut parts = rest.split('/');
     let (owner, repo, kind, number) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
     (kind == "pull").then_some(())?;
-    Some((format!("{owner}/{repo}"), number.split(['#', '?']).next()?.parse().ok()?))
+    Some((owner.to_owned(), repo.to_owned(), number.split(['#', '?']).next()?.parse().ok()?))
 }
 
 /// What the watch should do about one task's pull request.
@@ -137,15 +168,19 @@ pub enum Next {
     Nothing,
     /// Hand the task back to its agent with this note.
     HandBack(String),
-    /// Merge it now (`--admin` when the repository allows merging without review).
-    Merge,
+    /// Merge exactly this head commit, skipping the required review if `admin`.
+    Merge { head: String, admin: bool },
+    /// Ask GitHub to merge the base into it (branch protection requires it
+    /// to be up to date before merging).
+    UpdateBranch { head: String },
     /// It was asked to merge, but can't be: say why and stop trying.
     MergeBlocked(String),
 }
 
 /// Records what GitHub says on `task` and returns what to do next. Pure:
 /// the caller saves the snapshot and performs any merge or hand-back.
-pub fn reconcile(task: &mut Task, observed: &Observed, working: bool) -> Next {
+/// `admin` is whether you allow merging without review in its repository.
+pub fn reconcile(task: &mut Task, observed: &Observed, working: bool, admin: bool) -> Next {
     let Some(pr) = task.pull_request.as_mut() else { return Next::Nothing };
     let first_look = pr.status.is_none();
     pr.status = Some(observed.status.clone());
@@ -170,42 +205,49 @@ pub fn reconcile(task: &mut Task, observed: &Observed, working: bool) -> Next {
         }
         _ => {}
     }
+    // Keys say which head and base a signal was seen on: the same conflict
+    // or failure is acted on once, and a base branch that moves can create
+    // a genuinely new conflict on an unchanged head.
+    let conflict_key = format!("{}:{}", status.head, status.base_head);
+    let failure_key = format!("{}:{}", status.head, status.failing.join(","));
+    // The first read is a baseline, not news: otherwise turning the watch on
+    // would start an agent for every old failure and comment at once. They
+    // show in the Pull requests table; "Re-check all" acts on them.
+    if first_look {
+        pr.follow_up.seen_comments.extend(observed.comments.iter().map(|c| c.id.clone()));
+        pr.follow_up.handled_conflict = Some(conflict_key.clone());
+        pr.follow_up.handled_failure = Some(failure_key.clone());
+    }
     // Only a finished task is handed back or merged; work in progress pushes
     // to the same pull request when it is reviewed.
     if working || task.status != TaskStatus::ReadyForReview {
         return Next::Nothing;
     }
-    // The first time Neko reads a pull request, what is already there is a
-    // baseline, not news: otherwise turning the watch on would start an
-    // agent for every old failure and comment at once. Those show in the
-    // Pull requests table, and "Re-check all" acts on them deliberately.
-    if first_look {
-        pr.follow_up.seen_comments.extend(observed.comments.iter().map(|c| c.id.clone()));
-        if status.mergeable == "CONFLICTING" { pr.follow_up.handled_conflict = Some(status.head.clone()); }
-        if status.checks == "failing" { pr.follow_up.handled_failure = Some(format!("{}:{}", status.head, status.failing.join(","))); }
-    }
     let new: Vec<&Comment> = observed.comments.iter().filter(|c| !pr.follow_up.seen_comments.contains(&c.id)).collect();
-    let conflict = status.mergeable == "CONFLICTING" && pr.follow_up.handled_conflict.as_deref() != Some(&status.head);
-    let failure_key = format!("{}:{}", status.head, status.failing.join(","));
-    let failure = status.checks == "failing" && pr.follow_up.handled_failure.as_deref() != Some(&failure_key);
+    let conflict = status.merge_state == "DIRTY" && pr.follow_up.handled_conflict.as_deref() != Some(&conflict_key);
+    let failure = status.checks == "failing" && !status.base_failing
+        && pr.follow_up.handled_failure.as_deref() != Some(&failure_key);
 
     if pr.merge_when_ready && new.is_empty() {
-        if status.mergeable == "CONFLICTING" {
+        let (next, waiting) = merge_step(status, admin);
+        // Say why it is waiting once, not every pass.
+        let announce = waiting.filter(|why| pr.follow_up.merge_note.as_deref() != Some(why.as_str()));
+        if let Some(why) = &announce { pr.follow_up.merge_note = Some(why.clone()); }
+        if matches!(next, Next::MergeBlocked(_)) {
             pr.merge_when_ready = false;
-            return Next::MergeBlocked("It conflicts with the branch it merges into.".into());
+            pr.follow_up.merge_note = None;
         }
-        if status.checks == "failing" {
-            pr.merge_when_ready = false;
-            return Next::MergeBlocked(format!("Checks failed: {}.", status.failing.join(", ")));
+        if let Some(why) = announce {
+            crate::workbench::append_event(task, ROLE, &format!("Merge is waiting: {why}"));
         }
-        if matches!(status.checks.as_str(), "passing" | "none") && status.mergeable == "MERGEABLE" {
-            return Next::Merge;
+        if !matches!(next, Next::Nothing) || !conflict && !failure {
+            return next;
         }
-        return Next::Nothing; // checks still running, or GitHub still computing mergeability
     }
     if new.is_empty() && !conflict && !failure {
         return Next::Nothing;
     }
+    let Some(pr) = task.pull_request.as_mut() else { return Next::Nothing };
     // Everything seen now counts as handled, even past the limit, so the
     // same item is never sent twice.
     for c in &new {
@@ -213,7 +255,7 @@ pub fn reconcile(task: &mut Task, observed: &Observed, working: bool) -> Next {
     }
     let excess = pr.follow_up.seen_comments.len().saturating_sub(SEEN_LIMIT);
     pr.follow_up.seen_comments.drain(..excess);
-    if conflict { pr.follow_up.handled_conflict = Some(status.head.clone()); }
+    if conflict { pr.follow_up.handled_conflict = Some(conflict_key); }
     if failure { pr.follow_up.handled_failure = Some(failure_key); }
     if pr.follow_up.count >= MAX_FOLLOW_UPS {
         crate::workbench::append_event(task, ROLE, &format!(
@@ -224,7 +266,34 @@ pub fn reconcile(task: &mut Task, observed: &Observed, working: bool) -> Next {
         return Next::Nothing;
     }
     pr.follow_up.count += 1;
-    Next::HandBack(hand_back_note(pr, status, &observed.failures, &new, conflict, failure))
+    let note = hand_back_note(pr, status, &observed.failures, &new, conflict, failure);
+    Next::HandBack(note)
+}
+
+/// What a requested merge does now, and why it waits when it does (Kodiak's
+/// reading of `mergeStateStatus`).
+fn merge_step(status: &PrStatus, admin: bool) -> (Next, Option<String>) {
+    let head = status.head.clone();
+    if status.draft {
+        return (Next::MergeBlocked("It is a draft.".into()), None);
+    }
+    if status.checks == "failing" {
+        return (Next::MergeBlocked(format!("Required checks failed: {}.", status.failing.join(", "))), None);
+    }
+    match status.merge_state.as_str() {
+        "DIRTY" => (Next::MergeBlocked("It conflicts with the branch it merges into.".into()), None),
+        // UNSTABLE: only checks that are not required are failing.
+        "CLEAN" | "HAS_HOOKS" | "UNSTABLE" => (Next::Merge { head, admin: false }, None),
+        "BEHIND" => (Next::UpdateBranch { head }, Some("bringing it up to date with its base branch first, as branch protection requires.".into())),
+        "BLOCKED" if status.checks == "pending" => (Next::Nothing, Some("required checks are still running.".into())),
+        "BLOCKED" if admin => (Next::Merge { head, admin: true }, None),
+        "BLOCKED" => (Next::Nothing, Some(match status.review.as_str() {
+            "CHANGES_REQUESTED" => "a reviewer requested changes.".into(),
+            "REVIEW_REQUIRED" => "it needs an approving review (or allow merging without review for this repository).".into(),
+            _ => "GitHub's branch protection is blocking it (a required check or conversation).".into(),
+        })),
+        _ => (Next::Nothing, None), // UNKNOWN: GitHub is still computing
+    }
 }
 
 fn reasons(comments: bool, conflict: bool, failure: bool) -> String {
@@ -247,14 +316,14 @@ fn hand_back_note(pr: &PullRequest, status: &PrStatus, failures: &[(String, Stri
         ));
     }
     if failure {
-        note.push_str("\n\nThese checks failed:");
+        note.push_str("\n\nThese required checks failed (the same checks pass on the base branch):");
         for (name, link) in failures {
             note.push_str(&format!("\n- {name}{}", if link.is_empty() { String::new() } else { format!(": {link}") }));
         }
-        note.push_str("\nRead the failure itself (`gh run view <run id> --log-failed`, or the link) and find its cause. If this change caused it, fix it. If it fails the same way without this change (on the base branch, a flaky test, infrastructure, a policy scanner), change nothing and end with `NO_CHANGE: <the evidence that it is unrelated>`.");
+        note.push_str("\nRead only the failed part of the log (`gh run view <run id> --log-failed`, or the link) and find its cause. If this change caused it, fix it. If it is flaky or unrelated to this change (infrastructure, a policy scanner), change nothing and end with `NO_CHANGE: <the evidence that it is unrelated>`.");
     }
     if !comments.is_empty() {
-        note.push_str("\n\nReviewers commented:");
+        note.push_str("\n\nReviewers commented (unresolved threads and comments):");
         for c in comments {
             let body: String = c.body.chars().take(2000).collect();
             note.push_str(&format!("\n- @{}{}: {}", c.author, c.place.as_deref().map(|p| format!(" on {p}")).unwrap_or_default(), body));
@@ -271,7 +340,7 @@ pub fn review_note(pr: &PullRequest, others: &[String]) -> String {
     let base = pr.status.as_ref().map(|s| s.base.as_str()).filter(|b| !b.is_empty()).unwrap_or("main");
     let mut note = format!(
         "Neko: re-check your pull request {url} before it is merged. Work in this folder; Neko reviews the result and pushes it to the same pull request.\n\
-         1. Bring it up to date: `git fetch origin {branch} {base} && git merge --ff-only origin/{branch}`, then `git merge origin/{base}`, resolving any conflict.\n\
+         1. Bring this folder up to date with the pull request: `git fetch origin {branch} {base} && git merge --ff-only origin/{branch}`. Merge `origin/{base}` only if the pull request conflicts with it ({conflict}); otherwise leave it, since updating re-runs CI for nothing.\n\
          2. Check the cause again against the real evidence (the error's events and stack traces, logs, the issue). If the stated cause is wrong, fix the real one and correct the description.\n\
          3. Check whether work already merged into `{base}` covers it, and whether one of the other open pull requests below does the same thing.\n\
          4. Cut the change to what the cause needs: keep the cause and its in-scope siblings covered, drop polish, refactors and anything else, and prefer fewer lines and a shallower change. Keep a test that fails without it.\n\
@@ -280,6 +349,7 @@ pub fn review_note(pr: &PullRequest, others: &[String]) -> String {
          - `QUESTION: <the decision>` when merging it changes what users see or do in a way only the user can decide;\n\
          - nothing special when it is ready to merge.",
         url = pr.url, branch = pr.branch,
+        conflict = if pr.status.as_ref().is_some_and(|s| s.merge_state == "DIRTY") { "it does now" } else { "GitHub last saw no conflict" },
     );
     if !others.is_empty() {
         note.push_str("\n\nOther open pull requests:");
@@ -423,13 +493,22 @@ mod tests {
     use super::*;
     use neko_protocol::workbench::PrFollowUp;
 
-    fn view(state: &str, mergeable: &str, checks: &str, comments: &str) -> String {
-        format!(r#"{{"state":"{state}","mergeable":"{mergeable}","headRefOid":"abc","baseRefName":"main","reviewDecision":"REVIEW_REQUIRED",
-            "author":{{"login":"me"}},"statusCheckRollup":[{checks}],"reviews":[],"comments":[{comments}]}}"#)
+    /// A [`QUERY`] answer. `checks` are context nodes; `threads` review threads.
+    fn gql(state: &str, merge_state: &str, checks: &str, comments: &str, threads: &str, base_rollup: &str) -> Observed {
+        parse(&format!(r#"{{"data":{{"repository":{{"pullRequest":{{"state":"{state}","mergeable":"MERGEABLE","mergeStateStatus":"{merge_state}",
+            "isDraft":false,"headRefOid":"abc","baseRefName":"main","reviewDecision":"REVIEW_REQUIRED","author":{{"login":"me"}},
+            "baseRef":{{"target":{{"oid":"base1","statusCheckRollup":{{"state":"{base_rollup}"}}}}}},
+            "commits":{{"nodes":[{{"commit":{{"statusCheckRollup":{{"contexts":{{"nodes":[{checks}]}}}}}}}}]}},
+            "comments":{{"nodes":[{comments}]}},"reviews":{{"nodes":[]}},"reviewThreads":{{"nodes":[{threads}]}}}}}}}}}}"#)).unwrap()
     }
-    const PASS: &str = r#"{"__typename":"CheckRun","name":"Test and Lint","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"u1"}"#;
-    const FAIL: &str = r#"{"__typename":"CheckRun","name":"Test and Lint","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://ci/1"}"#;
-    const RUNNING: &str = r#"{"__typename":"CheckRun","name":"Test and Lint","status":"IN_PROGRESS","conclusion":""}"#;
+    fn view(merge_state: &str, checks: &str, comments: &str) -> Observed {
+        gql("OPEN", merge_state, checks, comments, "", "SUCCESS")
+    }
+    const PASS: &str = r#"{"__typename":"CheckRun","name":"Test and Lint","status":"COMPLETED","conclusion":"SUCCESS","isRequired":true}"#;
+    const FAIL: &str = r#"{"__typename":"CheckRun","name":"Test and Lint","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://ci/1","isRequired":true}"#;
+    const RUNNING: &str = r#"{"__typename":"CheckRun","name":"Test and Lint","status":"IN_PROGRESS","conclusion":null,"isRequired":true}"#;
+    const OPTIONAL_FAIL: &str = r#"{"__typename":"CheckRun","name":"terraform","status":"COMPLETED","conclusion":"FAILURE","isRequired":false}"#;
+    const CANCELLED: &str = r#"{"__typename":"CheckRun","name":"Test and Lint","status":"COMPLETED","conclusion":"CANCELLED","isRequired":true}"#;
     const BOT: &str = r#"{"id":"c1","author":{"login":"coderabbitai"},"authorAssociation":"NONE","body":"summary"}"#;
     const SELF: &str = r#"{"id":"c2","author":{"login":"me"},"authorAssociation":"OWNER","body":"On hold"}"#;
     const PERSON: &str = r#"{"id":"c3","author":{"login":"aakar"},"authorAssociation":"MEMBER","body":"Use the shared helper here"}"#;
@@ -445,23 +524,46 @@ mod tests {
         }
     }
 
+    /// `NEKO_PR_JSON=<file>` holding a real [`QUERY`] answer.
     #[test]
-    fn checks_read_as_one_word_and_only_people_count_as_reviewers() {
-        let o = parse_view(&view("OPEN", "MERGEABLE", &[PASS, r#"{"__typename":"StatusContext","context":"CodeRabbit","state":"SUCCESS"}"#].join(","), &[BOT, SELF, PERSON].join(","))).unwrap();
-        assert_eq!(o.status.checks, "passing");
-        assert_eq!(o.comments.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["c3"], "bots and the PR's own author are not reviewers");
-        assert_eq!(parse_view(&view("OPEN", "MERGEABLE", &[PASS, FAIL].join(","), "")).unwrap().failures, [("Test and Lint".to_string(), "https://ci/1".to_string())]);
-        assert_eq!(parse_view(&view("OPEN", "MERGEABLE", RUNNING, "")).unwrap().status.checks, "pending");
-        assert_eq!(parse_view(&view("OPEN", "MERGEABLE", "", "")).unwrap().status.checks, "none");
+    #[ignore = "reads a saved GitHub answer"]
+    fn live_answer_parses() {
+        let json = std::fs::read_to_string(std::env::var("NEKO_PR_JSON").unwrap()).unwrap();
+        let o = parse(&json).unwrap();
+        eprintln!("LIVE {:?} comments={} {:?}", o.status, o.comments.len(), o.comments.iter().map(|c| (&c.author, &c.place)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn only_required_checks_count_and_an_interrupted_run_is_not_a_failure() {
+        assert_eq!(view("CLEAN", &[PASS, OPTIONAL_FAIL].join(","), "").status.checks, "passing", "an optional check failing does not block (Kodiak)");
+        assert_eq!(view("CLEAN", CANCELLED, "").status.checks, "pending", "cancelled is interrupted, not failed (Renovate, Mergify)");
+        assert_eq!(view("CLEAN", RUNNING, "").status.checks, "pending");
+        assert_eq!(view("CLEAN", "", "").status.checks, "none");
+        assert_eq!(view("CLEAN", FAIL, "").failures, [("Test and Lint".to_string(), "https://ci/1".to_string())]);
+        let unmarked = r#"{"__typename":"StatusContext","context":"ci","state":"FAILURE","isRequired":false}"#;
+        assert_eq!(view("CLEAN", unmarked, "").status.checks, "failing", "with no required checks, every check counts");
+    }
+
+    #[test]
+    fn reviewers_are_people_and_only_unresolved_current_threads_count() {
+        let thread = |resolved: bool, outdated: bool, id: &str| format!(r#"{{"isResolved":{resolved},"isOutdated":{outdated},"path":"a.ts","line":3,
+            "comments":{{"nodes":[{{"id":"{id}","author":{{"login":"aakar"}},"authorAssociation":"MEMBER","body":"nit {id}"}}]}}}}"#);
+        let actions = r#"{"id":"c4","author":{"__typename":"Bot","login":"github-actions"},"authorAssociation":"MEMBER","body":"Artifacts"}"#;
+        let o = gql("OPEN", "CLEAN", PASS, &[BOT, SELF, PERSON, actions].join(","),
+                    &[thread(false, false, "t1"), thread(true, false, "t2"), thread(false, true, "t3")].join(","), "SUCCESS");
+        let ids: Vec<&str> = o.comments.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["c3", "t1"], "no bots, not the PR's own author, no resolved or outdated threads");
+        assert_eq!(o.comments[1].place.as_deref(), Some("a.ts:3"));
+        assert!(parse(r#"{"errors":[{"message":"Could not resolve to a PullRequest"}]}"#).unwrap_err().contains("Could not resolve"));
     }
 
     #[test]
     fn merged_and_closed_finish_the_task() {
         let mut t = task();
-        assert_eq!(reconcile(&mut t, &parse_view(&view("MERGED", "UNKNOWN", PASS, "")).unwrap(), false), Next::Nothing);
+        assert_eq!(reconcile(&mut t, &gql("MERGED", "UNKNOWN", PASS, "", "", "SUCCESS"), false, false), Next::Nothing);
         assert_eq!(t.status, TaskStatus::Completed);
         let mut t = task();
-        reconcile(&mut t, &parse_view(&view("CLOSED", "UNKNOWN", PASS, "")).unwrap(), false);
+        reconcile(&mut t, &gql("CLOSED", "UNKNOWN", PASS, "", "", "SUCCESS"), false, false);
         assert_eq!(t.status, TaskStatus::Cancelled);
         assert!(t.events.iter().any(|e| e.role == ROLE && e.message.contains("Closed on GitHub")));
     }
@@ -469,54 +571,79 @@ mod tests {
     #[test]
     fn a_failure_a_conflict_or_a_comment_is_handed_back_once() {
         let mut t = task();
-        let failing = parse_view(&view("OPEN", "MERGEABLE", FAIL, "")).unwrap();
-        let Next::HandBack(note) = reconcile(&mut t, &failing, false) else { panic!("expected a hand-back") };
-        assert!(note.contains("Test and Lint: https://ci/1") && note.contains("NO_CHANGE"));
+        let failing = view("CLEAN", FAIL, "");
+        let Next::HandBack(note) = reconcile(&mut t, &failing, false, false) else { panic!("expected a hand-back") };
+        assert!(note.contains("Test and Lint: https://ci/1") && note.contains("NO_CHANGE") && note.contains("--log-failed"));
         assert!(note.contains("git merge --ff-only origin/codex/neko-t"));
-        assert_eq!(reconcile(&mut t, &failing, false), Next::Nothing, "the same failure is sent once");
+        assert_eq!(reconcile(&mut t, &failing, false, false), Next::Nothing, "the same failure is sent once");
 
-        let both = parse_view(&view("OPEN", "CONFLICTING", PASS, PERSON)).unwrap();
-        let Next::HandBack(note) = reconcile(&mut t, &both, false) else { panic!() };
+        let both = view("DIRTY", PASS, PERSON);
+        let Next::HandBack(note) = reconcile(&mut t, &both, false, false) else { panic!() };
         assert!(note.contains("git merge origin/main") && note.contains("@aakar: Use the shared helper"));
-        assert_eq!(reconcile(&mut t, &both, false), Next::Nothing);
+        assert_eq!(reconcile(&mut t, &both, false, false), Next::Nothing);
         assert_eq!(t.pull_request.as_ref().unwrap().follow_up.count, 2);
+    }
+
+    #[test]
+    fn a_failure_the_base_branch_shares_is_not_handed_back() {
+        let mut t = task();
+        assert_eq!(reconcile(&mut t, &gql("OPEN", "CLEAN", FAIL, "", "", "FAILURE"), false, false), Next::Nothing, "Sweep: base is red too");
+    }
+
+    #[test]
+    fn an_unknown_merge_state_decides_nothing_and_a_moved_base_is_a_new_conflict() {
+        let mut t = task();
+        t.pull_request.as_mut().unwrap().status = None;
+        assert_eq!(reconcile(&mut t, &view("UNKNOWN", PASS, ""), false, false), Next::Nothing, "first read: baseline");
+        assert_eq!(reconcile(&mut t, &view("DIRTY", PASS, ""), false, false), Next::Nothing,
+                   "GitHub finishing its computation is not news: same head and base as the baseline");
+        let mut moved = view("DIRTY", PASS, "");
+        moved.status.base_head = "base2".into();
+        assert!(matches!(reconcile(&mut t, &moved, false, false), Next::HandBack(_)), "main moved and now conflicts");
     }
 
     #[test]
     fn the_first_look_is_a_baseline_and_only_later_changes_are_handed_back() {
         let mut t = task();
         t.pull_request.as_mut().unwrap().status = None;
-        let old = parse_view(&view("OPEN", "CONFLICTING", FAIL, PERSON)).unwrap();
-        assert_eq!(reconcile(&mut t, &old, false), Next::Nothing, "turning the watch on starts nothing");
+        assert_eq!(reconcile(&mut t, &view("DIRTY", FAIL, PERSON), false, false), Next::Nothing, "turning the watch on starts nothing");
         assert_eq!(t.status, TaskStatus::ReadyForReview);
-        let newer = view("OPEN", "CONFLICTING", FAIL, &[PERSON, r#"{"id":"c9","author":{"login":"aakar"},"authorAssociation":"MEMBER","body":"One more thing"}"#].join(","));
-        let Next::HandBack(note) = reconcile(&mut t, &parse_view(&newer).unwrap(), false) else { panic!() };
+        let newer = view("DIRTY", FAIL, &[PERSON, r#"{"id":"c9","author":{"login":"aakar"},"authorAssociation":"MEMBER","body":"One more thing"}"#].join(","));
+        let Next::HandBack(note) = reconcile(&mut t, &newer, false, false) else { panic!() };
         assert!(note.contains("One more thing") && !note.contains("Use the shared helper"), "only the new comment");
     }
 
     #[test]
     fn work_in_progress_is_left_alone_and_the_limit_hands_it_to_you() {
         let mut t = task();
-        let failing = parse_view(&view("OPEN", "MERGEABLE", FAIL, "")).unwrap();
-        assert_eq!(reconcile(&mut t, &failing, true), Next::Nothing, "a running agent pushes to the PR itself");
+        let failing = view("CLEAN", FAIL, "");
+        assert_eq!(reconcile(&mut t, &failing, true, false), Next::Nothing, "a running agent pushes to the PR itself");
         t.pull_request.as_mut().unwrap().follow_up = PrFollowUp { count: MAX_FOLLOW_UPS, ..Default::default() };
-        assert_eq!(reconcile(&mut t, &failing, false), Next::Nothing);
+        assert_eq!(reconcile(&mut t, &failing, false, false), Next::Nothing);
         assert_eq!(t.status, TaskStatus::AwaitingApproval);
-        assert_eq!(reconcile(&mut t, &failing, false), Next::Nothing, "and is not repeated");
+        assert_eq!(reconcile(&mut t, &failing, false, false), Next::Nothing, "and is not repeated");
     }
 
     #[test]
-    fn merging_waits_for_checks_and_stops_on_a_failure_or_conflict() {
-        let mut t = task();
-        t.pull_request.as_mut().unwrap().merge_when_ready = true;
-        assert_eq!(reconcile(&mut t, &parse_view(&view("OPEN", "MERGEABLE", RUNNING, "")).unwrap(), false), Next::Nothing);
-        assert_eq!(reconcile(&mut t, &parse_view(&view("OPEN", "UNKNOWN", PASS, "")).unwrap(), false), Next::Nothing, "GitHub still computing");
-        assert_eq!(reconcile(&mut t, &parse_view(&view("OPEN", "MERGEABLE", PASS, "")).unwrap(), false), Next::Merge);
-        assert!(matches!(reconcile(&mut t, &parse_view(&view("OPEN", "MERGEABLE", FAIL, "")).unwrap(), false), Next::MergeBlocked(_)));
+    fn merging_follows_the_merge_state_and_merges_the_head_it_judged() {
+        let asked = || { let mut t = task(); t.pull_request.as_mut().unwrap().merge_when_ready = true; t };
+        let mut t = asked();
+        assert_eq!(reconcile(&mut t, &view("BLOCKED", RUNNING, ""), false, false), Next::Nothing);
+        assert!(t.events.last().unwrap().message.contains("still running"));
+        let said = t.events.len();
+        reconcile(&mut t, &view("BLOCKED", RUNNING, ""), false, false);
+        assert_eq!(t.events.len(), said, "the reason is said once");
+        assert_eq!(reconcile(&mut t, &view("UNKNOWN", PASS, ""), false, false), Next::Nothing, "GitHub still computing");
+        assert_eq!(reconcile(&mut t, &view("CLEAN", PASS, ""), false, false), Next::Merge { head: "abc".into(), admin: false });
+        assert_eq!(reconcile(&mut t, &view("UNSTABLE", &[PASS, OPTIONAL_FAIL].join(","), ""), false, false), Next::Merge { head: "abc".into(), admin: false });
+        assert_eq!(reconcile(&mut t, &view("BEHIND", PASS, ""), false, false), Next::UpdateBranch { head: "abc".into() });
+        assert_eq!(reconcile(&mut t, &view("BLOCKED", PASS, ""), false, false), Next::Nothing, "needs a review");
+        assert!(t.events.last().unwrap().message.contains("approving review"));
+        assert_eq!(reconcile(&mut t, &view("BLOCKED", PASS, ""), false, true), Next::Merge { head: "abc".into(), admin: true }, "only where you allow");
+        assert!(matches!(reconcile(&mut t, &view("CLEAN", FAIL, ""), false, false), Next::MergeBlocked(_)));
         assert!(!t.pull_request.as_ref().unwrap().merge_when_ready);
-        let mut t = task();
-        t.pull_request.as_mut().unwrap().merge_when_ready = true;
-        assert!(matches!(reconcile(&mut t, &parse_view(&view("OPEN", "MERGEABLE", PASS, PERSON)).unwrap(), false), Next::HandBack(_)),
+        let mut t = asked();
+        assert!(matches!(reconcile(&mut t, &view("CLEAN", PASS, PERSON), false, false), Next::HandBack(_)),
                 "a reviewer's new comment comes before merging");
     }
 
@@ -571,10 +698,7 @@ mod tests {
     fn follow_ups_and_urls_parse() {
         let found = follow_ups("Fixed the client.\n- FOLLOW_UP: streaming_service | Close web streams on the JSON stop chunk | The endpoint only stops on '#$T0P'\nFOLLOW_UP: | missing repo");
         assert_eq!(found, [FollowUp { repository: "streaming_service".into(), title: "Close web streams on the JSON stop chunk".into(), detail: "The endpoint only stops on '#$T0P'".into() }]);
-        assert_eq!(locate("https://github.com/HealthifyMe/athena/pull/4618"), Some(("HealthifyMe/athena".into(), 4618)));
+        assert_eq!(locate("https://github.com/HealthifyMe/athena/pull/4618"), Some(("HealthifyMe".into(), "athena".into(), 4618)));
         assert_eq!(locate("https://github.com/a/b/issues/3"), None);
-        let inline = parse_inline_comments(r#"[{"id":5,"user":{"login":"aakar","type":"User"},"author_association":"MEMBER","body":"nit","path":"a.ts","line":3},
-            {"id":6,"user":{"login":"coderabbitai[bot]","type":"Bot"},"author_association":"NONE","body":"x","path":"a.ts"}]"#, "me");
-        assert_eq!(inline, [Comment { id: "5".into(), author: "aakar".into(), body: "nit".into(), place: Some("a.ts:3".into()) }]);
     }
 }

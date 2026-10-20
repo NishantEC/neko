@@ -283,35 +283,47 @@ partial and per-run tools are not known; watches show their connections.
 Learned from a Paseo agent that walked Neko's PRs to merge by hand
 (Oct 13–19): Neko stopped at "Opened a pull request", so 20 of 42 tasks still
 said Ready to review while GitHub showed them merged (12) or closed (8).
-`neko_core::pull_requests` decides; `workbench/pull_requests.rs` runs `gh`
-every 3 minutes (`CheckPullRequests` wakes it) outside the storage lock.
-Merged → Completed, closed → Cancelled. On a ReadyForReview task with no
-live worker or publish, a new failing check, a merge conflict or a comment
-from a person (authorAssociation MEMBER/OWNER/COLLABORATOR/CONTRIBUTOR, not
-the PR's author, which is also the account Neko and other agents comment as;
-inline comments only fetched once a person reviewed) is **handed back**:
-`hand_back` adds a note and queues the task to run directly in its own
-folder (reply already handled, so no intent model), and review + publish
-then push to the same PR. Each is handed back once (`PrFollowUp`), at most
-`MAX_FOLLOW_UPS` (4) times before the task waits for you. **The first read of
-a PR is a baseline**: what is already failing or commented starts nothing, so
-turning the watch on cannot start an agent per old PR; "Re-check all" acts
-on them deliberately. Neko still never force-pushes; the note tells the agent
-to fast-forward from the PR branch first, since others push to it.
-**Merging and closing are yours, by click**: `SetMergeWhenReady` (merges
-once checks pass and it is MERGEABLE, `gh pr merge --squash --body ""`;
-`--admin` only in `Snapshot::merge_without_review` repositories), and
-`ClosePullRequest` (comment required). `ReviewPullRequests` hands every open
-PR back with `review_note` (update with main, re-verify the cause, check for
-duplicates against the other open PRs listed, cut to what the cause needs — "fewer lines, shallower" never means fewer sibling fixes, which is why the word "smallest" stays out of prompts);
-agents end with `SCRAP:` (sets `close_suggestion`), `QUESTION:`, or nothing
-(ready). `NO_CHANGE:`/`SCRAP:` on a task with an open PR return it to
-ReadyForReview instead of Completed. Cross-repo fixes: a
-`FOLLOW_UP: <repo> | <title> | <detail>` line in a result becomes a task in
-that repo (matched by folder, remote or package name), AwaitingApproval,
-recorded in `Snapshot::follow_up_of` and drawn under its parent in the tree.
-The app's Pull requests page is the table; chat can propose `merge_pr` and
-`close_pr`.
+`neko_core::pull_requests` decides; `workbench/pull_requests.rs` runs one
+GraphQL query per open PR every 3 minutes (`CheckPullRequests` wakes it).
+**The rules are taken from established tools' source, not invented** — the
+first home-grown version misfired twice on its first night (below). Read the
+module doc before changing them:
+
+- `mergeStateStatus`, not `mergeable` (Kodiak): DIRTY = conflict, BEHIND,
+  BLOCKED, UNSTABLE, UNKNOWN = decide nothing. `mergeable` is UNKNOWN right
+  after a push; the first version's baseline missed two existing navihealth
+  conflicts that way and then started agents on them as "new".
+- Only `isRequired` checks count when a branch has any (Kodiak); cancelled,
+  timed-out or stale runs are pending, not failures (Renovate, Mergify).
+- A failure the base branch shares is not handed back (Sweep).
+- Feedback = unresolved, non-outdated `reviewThreads` + top-level comments
+  + review bodies, from people with a repo role, not bots (GraphQL types
+  them `Bot`, with no `[bot]` suffix) and not the PR's author (Neko and other
+  agents comment as that account) — OpenHands resolver, claude-code-action.
+  `gh pr view --json reviews` has no inline text; the first version missed it.
+- Each signal once per (head, base) commit, at most `MAX_FOLLOW_UPS` (4) per
+  PR (Sweep stops at 2); the first read is a baseline (keyed by head and
+  base, so GitHub finishing a computation is not news).
+- Hand-back: a note plus `start_when_planned`, reply marked handled (no
+  intent model); the task runs in its own folder, review + publish push to
+  the same PR. Neko never force-pushes; the note fast-forwards from the PR
+  branch first, since others push to it.
+- Merge is by click (`SetMergeWhenReady`): `gh pr merge --squash --body ""
+  --match-head-commit <judged head> --delete-branch` (Kodiak; the empty body
+  is the user's own choice from the Paseo session), `--admin` only for
+  repositories in `Snapshot::merge_without_review`; BEHIND uses GitHub's
+  update-branch API with `expected_head_sha`; a waiting reason is said once.
+- `ReviewPullRequests` (Re-check all) merges the base only when DIRTY
+  (Renovate `rebaseWhen=auto`: updating otherwise re-runs CI for nothing);
+  agents end with `SCRAP:` (sets `close_suggestion`), `QUESTION:` or nothing.
+  `NO_CHANGE:`/`SCRAP:` on a task with an open PR return it to
+  ReadyForReview. `ClosePullRequest` needs your click and a comment.
+- `FOLLOW_UP: <repo> | <title> | <detail>` in a result proposes a task in
+  that repository (folder, remote or package name), AwaitingApproval,
+  recorded in `Snapshot::follow_up_of` and drawn under its parent in the tree.
+- Not adopted yet: in-thread replies/resolution after a fix (OpenHands), one
+  batched query per repository and idle backoff, Renovate's "edited by
+  someone else, stop pushing" block, and duplicate-title suffixes.
 
 ## Resource limits (2026-10-18)
 
