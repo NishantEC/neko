@@ -270,6 +270,26 @@ fn run(step: &str, command: Command, input: &[u8], cancel: &AtomicBool, timeout:
     capture(step, command, input, cancel, timeout).map(|_| ())
 }
 
+/// Runs the GitHub CLI with `args` and returns its output (at most 4 MiB:
+/// a pull request's comments can be long). Used by Neko's pull request watch.
+pub fn gh(args: &[&str], cancel: &AtomicBool, timeout: Duration) -> Result<String, String> {
+    let mut command = Command::new(resolve_gh()?);
+    command.args(args).env("GH_PROMPT_DISABLED", "1").env("NO_COLOR", "1");
+    let mut stdout = Vec::new();
+    let output = execute(command, b"", cancel, timeout, |chunk| {
+        if stdout.len() + chunk.len() > 4 * 1024 * 1024 {
+            return Err("GitHub's answer was larger than expected".into());
+        }
+        stdout.extend_from_slice(chunk);
+        Ok(())
+    })?;
+    if !output.status.success() {
+        let reason = bounded_text(output.stderr.trim(), MAX_EVENT);
+        return Err(if reason.is_empty() { "gh failed with no details".into() } else { reason });
+    }
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
 fn capture(step: &str, command: Command, input: &[u8], cancel: &AtomicBool, timeout: Duration) -> Result<String, String> {
     let mut stdout = Vec::new();
     let output = execute(command, input, cancel, timeout, |chunk| {

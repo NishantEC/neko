@@ -1020,6 +1020,31 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         // Pushing and opening a pull request needs the network; the daemon
         // runs it outside the storage lock and records the outcome itself.
         Command::PublishTask { .. } => return Err("Publishing is handled by the Neko daemon".into()),
+        Command::ClosePullRequest { .. } | Command::CheckPullRequests => return Err("Pull requests are handled by the Neko daemon".into()),
+        Command::SetMergeWhenReady { task_id, enabled } => {
+            let task = snapshot.tasks.iter_mut().find(|t| t.id == task_id).ok_or("Task no longer exists")?;
+            let pr = task.pull_request.as_mut().filter(|p| p.is_open()).ok_or("This task has no open pull request")?;
+            pr.merge_when_ready = enabled;
+            let message = if enabled {
+                "You asked Neko to merge the pull request. It merges once checks pass and nothing conflicts, squashed with an empty body."
+            } else { "You cancelled the merge." };
+            append_event(task, crate::pull_requests::ROLE, message);
+        }
+        Command::SetMergeWithoutReview { repository, enabled } => {
+            let path = std::path::Path::new(repository.trim())
+                .canonicalize()
+                .map_err(|_| "That repository folder no longer exists")?;
+            if !path.join(".git").exists() {
+                return Err("Choose the repository's own checkout folder".into());
+            }
+            let path = path.to_string_lossy().into_owned();
+            if enabled { snapshot.merge_without_review.insert(path); } else { snapshot.merge_without_review.remove(&path); }
+        }
+        Command::ReviewPullRequests { workspace_id } => {
+            if crate::pull_requests::review_all(&mut snapshot, workspace_id.as_deref())? == 0 {
+                return Err("No open pull request is waiting for review right now".into());
+            }
+        }
         Command::SetLandOnMain { repository, enabled } => {
             let path = std::path::Path::new(repository.trim())
                 .canonicalize()
@@ -1765,6 +1790,29 @@ fn validate(snapshot: &Snapshot) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn merging_and_reviewing_pull_requests_need_an_open_one() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let (with_pr, without) = (task(&db, &ws).id, task(&db, &ws).id);
+        let mut state = load(&db).unwrap();
+        for t in state.tasks.iter_mut().filter(|t| t.id == with_pr) {
+            t.status = TaskStatus::ReadyForReview;
+            t.pull_request = Some(neko_protocol::workbench::PullRequest { url: "https://github.com/a/b/pull/1".into(), branch: "codex/neko-x".into(), ..Default::default() });
+        }
+        save(&db, &state).unwrap();
+        assert!(apply(&db, Command::SetMergeWhenReady { task_id: without.clone(), enabled: true }).is_err());
+        let state = apply(&db, Command::SetMergeWhenReady { task_id: with_pr.clone(), enabled: true }).unwrap();
+        assert!(state.tasks.iter().find(|t| t.id == with_pr).unwrap().pull_request.as_ref().unwrap().merge_when_ready);
+        let state = apply(&db, Command::ReviewPullRequests { workspace_id: None }).unwrap();
+        let t = state.tasks.iter().find(|t| t.id == with_pr).unwrap();
+        assert_eq!(t.status, TaskStatus::Queued, "handed back to its agent");
+        assert!(state.start_when_planned.contains(&with_pr));
+        assert!(apply(&db, Command::ReviewPullRequests { workspace_id: None }).is_err(), "nothing left waiting");
+        assert!(apply(&db, Command::ClosePullRequest { task_id: with_pr, comment: "dup".into() }).is_err(), "closing is the daemon's");
+    }
+
+    #[test]
     fn start_over_keeps_published_tickets_and_forgets_the_rest_of_the_filed_issues() {
         use neko_protocol::mcp_host::SourceEvidence;
         let db = Db::open_in_memory().unwrap();
@@ -1777,7 +1825,7 @@ mod tests {
             external_id: id.into(), revision: "1".into(), title: id.into(), description: String::new(), retrieved_ms: 0, receipt_ids: vec![], eligible: true,
         };
         for t in &mut state.tasks {
-            if t.id == published.id { t.status = TaskStatus::ReadyForReview; t.pull_request = Some(neko_protocol::workbench::PullRequest { url: "https://github.com/a/b/pull/1".into(), branch: "codex/neko-x".into() }); }
+            if t.id == published.id { t.status = TaskStatus::ReadyForReview; t.pull_request = Some(neko_protocol::workbench::PullRequest { url: "https://github.com/a/b/pull/1".into(), branch: "codex/neko-x".into(), ..Default::default() }); }
             if t.id == failed.id { t.status = TaskStatus::Failed; }
             if t.id == waiting.id { t.status = TaskStatus::Building; }
         }

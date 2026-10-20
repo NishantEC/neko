@@ -9,6 +9,7 @@ import Foundation
 enum Page: String, CaseIterable, Identifiable, Sendable {
     case home = "Home"
     case tickets = "Tickets"
+    case pullRequests = "Pull requests"
     case workspaces = "Workspaces"
     case watching = "Responsibilities"
     case schedules = "Schedules"
@@ -41,6 +42,7 @@ enum Page: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .home: "house"
         case .tickets: "checklist"
+        case .pullRequests: "arrow.triangle.pull"
         case .workspaces: "square.stack.3d.up"
         case .watching: "eye"
         case .schedules: "clock"

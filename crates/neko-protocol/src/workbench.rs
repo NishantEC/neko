@@ -171,11 +171,82 @@ pub struct ParkedWork {
     pub wip: bool,
 }
 
-/// A reviewed result Neko pushed and opened for review. Never merged by Neko.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// A reviewed result Neko pushed and opened for review. Neko merges it only
+/// when you ask (`SetMergeWhenReady`), and never closes it on its own.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PullRequest {
     pub url: String,
     pub branch: String,
+    /// What GitHub last said about it. Read by Neko's pull request watch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<PrStatus>,
+    /// What the watch has already handed back to the task's agent, so one
+    /// failure or comment is acted on once.
+    #[serde(default, skip_serializing_if = "PrFollowUp::is_empty")]
+    pub follow_up: PrFollowUp,
+    /// You asked Neko to merge it: it does once CI passes and nothing conflicts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub merge_when_ready: bool,
+    /// The task's agent found nothing in it worth merging (a duplicate,
+    /// already fixed elsewhere), and why. Closing still waits for you.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub close_suggestion: Option<String>,
+}
+
+impl PullRequest {
+    pub fn is_open(&self) -> bool {
+        self.status.as_ref().is_none_or(|s| s.state == "OPEN")
+    }
+}
+
+/// A pull request as GitHub last reported it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PrStatus {
+    /// "OPEN", "MERGED" or "CLOSED".
+    pub state: String,
+    /// "passing", "failing", "pending" or "none" (no checks configured).
+    pub checks: String,
+    /// Names of the checks that failed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failing: Vec<String>,
+    /// "MERGEABLE", "CONFLICTING" or "UNKNOWN".
+    pub mergeable: String,
+    /// "APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED" or empty.
+    #[serde(default)]
+    pub review: String,
+    /// The branch tip on GitHub.
+    #[serde(default)]
+    pub head: String,
+    /// The branch it merges into ("main", "master").
+    #[serde(default)]
+    pub base: String,
+}
+
+/// What Neko's pull request watch has already acted on.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PrFollowUp {
+    /// Review comments already handed to the agent (GitHub ids, newest kept).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seen_comments: Vec<String>,
+    /// The head and failing checks last handed back, so a failure is sent once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handled_failure: Option<String>,
+    /// The head whose merge conflict was last handed back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handled_conflict: Option<String>,
+    /// Automatic hand-backs so far; past the limit the task waits for you.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub count: u32,
+}
+
+impl PrFollowUp {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -292,6 +363,15 @@ pub struct Snapshot {
     /// waiting tasks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub run_next: Vec<String>,
+    /// Repositories (canonical checkout paths) where Neko may merge your
+    /// pull requests without the approving review GitHub requires
+    /// (`gh pr merge --admin`). Off everywhere unless you switch it on.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub merge_without_review: BTreeSet<String>,
+    /// A task an agent proposed in another repository, keyed by the new
+    /// task's id, naming the task whose work found it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub follow_up_of: BTreeMap<String, String>,
     /// Tasks a watch filed that Neko has not triaged yet. No agent starts
     /// them until it has (or the check times out and releases them).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -555,9 +635,11 @@ pub enum ChatActionStatus {
 
 /// What Neko may propose doing to a task: tell its agent something, start
 /// it, stop it, close it, merge it into another task as a duplicate, run it
-/// next, approve its plan, accept its result, retry it or rename it.
+/// next, approve its plan, accept its result, retry it or rename it, and for
+/// a task with an open pull request, merge it (`merge_pr`, once CI passes) or
+/// close it (`close_pr`, `text` is the comment saying why).
 pub fn chat_action_kinds() -> &'static [&'static str] {
-    &["message", "start", "stop", "close", "merge", "run_next", "approve", "accept", "retry", "rename"]
+    &["message", "start", "stop", "close", "merge", "run_next", "approve", "accept", "retry", "rename", "merge_pr", "close_pr"]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -773,6 +855,32 @@ pub enum Command {
     SetStartWithoutApproval {
         enabled: bool,
     },
+    /// Merge a task's pull request once its checks pass and nothing
+    /// conflicts (squashed, with an empty body). `false` cancels the request.
+    SetMergeWhenReady {
+        task_id: String,
+        enabled: bool,
+    },
+    /// Close a task's pull request on GitHub with a comment saying why, and
+    /// cancel the task. Never done without you.
+    ClosePullRequest {
+        task_id: String,
+        comment: String,
+    },
+    /// Whether Neko may merge without GitHub's required approving review in
+    /// one repository (see `Snapshot::merge_without_review`).
+    SetMergeWithoutReview {
+        repository: String,
+        enabled: bool,
+    },
+    /// Hand every open pull request (optionally in one workspace) back to
+    /// its agent to re-check against main, cut to the smallest fix, and say
+    /// whether it is ready, a duplicate to close, or needs your decision.
+    ReviewPullRequests {
+        workspace_id: Option<String>,
+    },
+    /// Check every open pull request on GitHub now instead of on the timer.
+    CheckPullRequests,
 }
 
 #[cfg(test)]

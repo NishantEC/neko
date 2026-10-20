@@ -6,7 +6,9 @@ import NekoKit
 ///
 /// Built entirely from the snapshot the app already has, so every existing
 /// task has a place in the tree and the daemon records nothing new:
-/// - a split's child tasks sit under the task that split them (`splits`);
+/// - a split's child tasks sit under the task that split them (`splits`),
+///   and a fix proposed in another repository under the task that found it
+///   (`follow_up_of`);
 /// - a task a watch filed sits under that watch (`mcp.sources`);
 /// - a task Neko's chat opened says so (`conversation[].ticket_ids`);
 /// - everything else was started by you, and still answers to Neko.
@@ -108,6 +110,10 @@ extension AgentTree {
                 parentOf[sub["task_id"].string] = parent
             }
         }
+        // A fix an agent proposed in another repository sits under the task
+        // that found it (`follow_up_of`).
+        var followUpOf: [String: String] = [:]
+        for (child, parent) in snapshot["follow_up_of"].object { followUpOf[child] = parent.string; parentOf[child] = parent.string }
         var watchOf: [String: String] = [:]
         for source in snapshot["mcp"]["sources"].array where !source["task_id"].string.isEmpty {
             watchOf[source["task_id"].string] = source["responsibility_id"].string
@@ -131,7 +137,8 @@ extension AgentTree {
             let ended = TaskStage(status: status) == .running ? now : task["updated_at_ms"].int
             let origin: String
             if let parent = parentOf[id], let parentTask = byID[parent] {
-                origin = "Split from “\(TaskText(task: parentTask, snapshot: snapshot).title)”"
+                let parentTitle = TaskText(task: parentTask, snapshot: snapshot).title
+                origin = followUpOf[id] != nil ? "Proposed by “\(parentTitle)”" : "Split from “\(parentTitle)”"
             } else if watchOf[id] != nil {
                 origin = TaskText(task: task, snapshot: snapshot).source.map { "Filed from \($0)" } ?? "Filed by a watch"
             } else if fromChat.contains(id) {

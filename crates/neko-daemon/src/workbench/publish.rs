@@ -16,6 +16,11 @@ fn in_flight() -> &'static Mutex<HashSet<String>> {
     IN_FLIGHT.get_or_init(Default::default)
 }
 
+/// Whether a push for this task is happening right now.
+pub(super) fn in_flight_now(task_id: &str) -> bool {
+    in_flight().lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(task_id)
+}
+
 fn publishable(status: TaskStatus) -> bool {
     matches!(status, TaskStatus::ReadyForReview | TaskStatus::Completed)
 }
@@ -51,7 +56,15 @@ pub(super) fn publish_task(db: &Arc<Mutex<Db>>, task_id: &str, cancel: &AtomicBo
     let Some(task) = snapshot.tasks.iter_mut().find(|t| t.id == task_id) else { return Ok(()) };
     match &outcome {
         Ok(Some(Delivered::PullRequest(published))) => {
-            task.pull_request = Some(PullRequest { url: published.url.clone(), branch: published.branch.clone() });
+            match &mut task.pull_request {
+                // The same pull request, updated: keep what the watch knows about it.
+                Some(existing) if existing.url == published.url => {
+                    existing.branch = published.branch.clone();
+                    // New work on it outdates any "close it" verdict.
+                    existing.close_suggestion = None;
+                }
+                slot => *slot = Some(PullRequest { url: published.url.clone(), branch: published.branch.clone(), ..Default::default() }),
+            }
         }
         Ok(Some(Delivered::Landed(landed))) => {
             task.landed_commit = Some(landed.commit.clone());
