@@ -32,6 +32,8 @@ mod display_names;
 mod parking;
 #[path = "workbench/triage.rs"]
 mod triage;
+#[path = "workbench/pull_requests.rs"]
+mod pull_requests;
 
 struct TaskClaim {
     task: Task,
@@ -144,6 +146,11 @@ impl Controller {
                     }
                 });
                 Ok(snapshot)
+            }
+            Command::ClosePullRequest { task_id, comment } => self.close_pull_request(task_id, comment),
+            Command::CheckPullRequests => {
+                pull_requests::wake();
+                store::load(&*self.db.lock().map_err(|_| "Task storage unavailable")?)
             }
             Command::DecideChatAction { message_id, action_id, accept } => {
                 let action = {
@@ -572,6 +579,8 @@ impl Controller {
         self.start_parking();
         // Work a watch files is checked against open tasks before it runs.
         self.start_triage();
+        // Pull requests Neko opened are followed until they merge or close.
+        self.start_pull_requests();
         // Reads the Mac every 15 s; admission and the app use the reading.
         let db = self.db.clone();
         std::thread::Builder::new().name("neko-machine".into()).spawn(move || {
@@ -1210,7 +1219,19 @@ impl Controller {
                                         t.status = TaskStatus::AwaitingApproval;
                                         store::append_event(t, "supervisor", &format!("Needs your approval before changing anything: {why}"));
                                     }
-                                    DirectStop::NoChange(why) => {
+                                    // A task with an open pull request goes back to
+                                    // ready: the pull request is still yours to merge
+                                    // or close, and nothing new needs pushing.
+                                    DirectStop::NoChange(why) if t.pull_request.as_ref().is_some_and(|p| p.is_open()) => {
+                                        t.status = TaskStatus::ReadyForReview;
+                                        store::append_event(t, "supervisor", &format!("Nothing to change on the pull request: {why}"));
+                                    }
+                                    DirectStop::Scrap(why) if t.pull_request.as_ref().is_some_and(|p| p.is_open()) => {
+                                        if let Some(pr) = t.pull_request.as_mut() { pr.close_suggestion = Some(why.clone()); }
+                                        t.status = TaskStatus::ReadyForReview;
+                                        store::append_event(t, "supervisor", &format!("Suggests closing the pull request instead of merging it: {why}. Close it from Pull requests, or reply to keep it."));
+                                    }
+                                    DirectStop::NoChange(why) | DirectStop::Scrap(why) => {
                                         t.status = TaskStatus::Completed;
                                         store::append_event(t, "supervisor", &format!("Nothing to change: {why}. Reply to reopen it."));
                                     }
@@ -2111,6 +2132,9 @@ enum DirectStop {
     NeedsApproval(String),
     NoChange(String),
     Question(String),
+    /// The task's pull request should be closed rather than merged, and why
+    /// (asked for when Neko has an agent re-check its open pull request).
+    Scrap(String),
 }
 
 /// The agent's own decision to stop instead of finishing the work.
@@ -2135,6 +2159,7 @@ fn direct_stop(result: &str, untouched: bool) -> Option<DirectStop> {
             "NEEDS_APPROVAL" => Some(DirectStop::NeedsApproval(detail)),
             "NO_CHANGE" => Some(DirectStop::NoChange(detail)),
             "QUESTION" => Some(DirectStop::Question(detail)),
+            "SCRAP" => Some(DirectStop::Scrap(detail)),
             _ => None,
         }
     })
@@ -3298,6 +3323,7 @@ mod direct_stop_tests {
         assert!(matches!(direct_stop("Plan...\n\n**NEEDS_APPROVAL:** drops a production table", false), Some(DirectStop::NeedsApproval(w)) if w == "drops a production table"));
         assert!(matches!(direct_stop("Checked.\nNO_CHANGE: already fixed in 4f2a", false), Some(DirectStop::NoChange(w)) if w == "already fixed in 4f2a"));
         assert!(matches!(direct_stop("QUESTION: which tenant?\n", false), Some(DirectStop::Question(_))));
+        assert!(matches!(direct_stop("Checked main.\nSCRAP: #4607 already ignores this error", false), Some(DirectStop::Scrap(w)) if w == "#4607 already ignores this error"));
         // The marker near the top, with the explanation after it (as ticket #4616's builder wrote it).
         let top = "A fix for this exact crash is already open, so I made no changes.\n\nNO_CHANGE: PR #4615 already fixes this crash.\n\n- **Cause:** reads selected.id\n\nNext action: review and merge #4615.";
         assert!(matches!(direct_stop(top, true), Some(DirectStop::NoChange(w)) if w == "PR #4615 already fixes this crash."));

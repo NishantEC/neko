@@ -88,7 +88,17 @@ pub fn record(snapshot: &Snapshot, in_scope: impl Fn(&str) -> bool, now_ms: i64)
         if t.display_title.is_some() { fields.insert("source_title".into(), json!(short(&t.title, 160))); }
         if let Some(r) = repository { fields.insert("repository".into(), json!(r)); }
         if let Some(b) = branch { fields.insert("branch".into(), json!(b)); }
-        if let Some(pr) = &t.pull_request { fields.insert("pull_request".into(), json!(pr.url)); }
+        if let Some(pr) = &t.pull_request {
+            fields.insert("pull_request".into(), json!(pr.url));
+            if let Some(status) = &pr.status {
+                fields.insert("pull_request_state".into(), json!({
+                    "state": status.state, "checks": status.checks, "failing": status.failing,
+                    "mergeable": status.mergeable, "review": status.review,
+                }));
+            }
+            if pr.merge_when_ready { fields.insert("merging_when_checks_pass".into(), json!(true)); }
+            if let Some(why) = &pr.close_suggestion { fields.insert("agent_suggests_closing".into(), json!(short(why, 400))); }
+        }
         if let Some(c) = &t.landed_commit { fields.insert("landed_on_main".into(), json!(short(c, 10))); }
         if let Some(s) = source { fields.insert("filed_from".into(), json!(s)); }
         if let Some(b) = blocker(t) { fields.insert("blocked_on".into(), json!(b)); }
@@ -127,7 +137,11 @@ pub fn validate(snapshot: &Snapshot, proposed: Vec<ProposedAction>, in_scope: im
         let task = snapshot.tasks.iter().find(|t| t.id == a.task_id && in_scope(&t.workspace_id))?;
         if !chat_action_kinds().contains(&a.kind.as_str()) { return None; }
         let text = a.text.trim();
-        let needs_text = matches!(a.kind.as_str(), "message" | "rename" | "merge");
+        let needs_text = matches!(a.kind.as_str(), "message" | "rename" | "merge" | "close_pr");
+        // Pull request actions need one that is still open.
+        if matches!(a.kind.as_str(), "merge_pr" | "close_pr") && !task.pull_request.as_ref().is_some_and(|p| p.is_open()) {
+            return None;
+        }
         if needs_text && (text.is_empty() || text.len() > 4000) { return None; }
         // Merging names the task it goes into: a real, different, open one.
         if a.kind == "merge" && !snapshot.tasks.iter().any(|t| t.id == text && t.id != task.id && in_scope(&t.workspace_id)
@@ -158,12 +172,14 @@ pub fn command(action: &ChatAction) -> Result<Command, String> {
         "accept" => Command::CompleteTask { task_id },
         "retry" => Command::RetryTask { task_id },
         "rename" => Command::RenameTask { task_id, title: action.text.clone() },
+        "merge_pr" => Command::SetMergeWhenReady { task_id, enabled: true },
+        "close_pr" => Command::ClosePullRequest { task_id, comment: action.text.clone() },
         other => return Err(format!("Unknown action: {other}")),
     })
 }
 
 /// What Neko is, for the chat prompt.
-pub const ROLE: &str = "You are Neko, the user's chief of staff for their engineering agents. Every piece of work goes through you: you hand tasks to task agents (scouts, builders, independent reviewers), keep track of what each one is doing, and answer for all of it. The task record below is your view of every task: its repository, branch, pull request, stage, what is blocking it, its place in the queue and its latest activity. When the user asks what is going on, answer from the record: lead with what needs them, then what is running, then what is waiting; name tasks by title and say where each one is. Never invent progress the record does not show. When the user wants something done to an existing task, propose an action instead of a new ticket: message (pass the user's instruction to that task's agent, in their words, plus any context the agent needs), start, stop (end its current work), close (close a task nobody needs), merge (close a task as the same problem as another open task; text is that task's id), run_next (move it to the front of the queue), approve (approve a plan that is waiting), accept (accept a reviewed result), retry (try a failed task again) or rename. Actions wait for the user's one-click confirmation; say what you proposed, never claim it happened. Hold every agent to Neko's rulebook below, and when a task's activity shows it breaking the rulebook, say so and propose the message that corrects it.";
+pub const ROLE: &str = "You are Neko, the user's chief of staff for their engineering agents. Every piece of work goes through you: you hand tasks to task agents (scouts, builders, independent reviewers), keep track of what each one is doing, and answer for all of it. The task record below is your view of every task: its repository, branch, pull request, stage, what is blocking it, its place in the queue and its latest activity. When the user asks what is going on, answer from the record: lead with what needs them, then what is running, then what is waiting; name tasks by title and say where each one is. Never invent progress the record does not show. When the user wants something done to an existing task, propose an action instead of a new ticket: message (pass the user's instruction to that task's agent, in their words, plus any context the agent needs), start, stop (end its current work), close (close a task nobody needs), merge (close a task as the same problem as another open task; text is that task's id), run_next (move it to the front of the queue), approve (approve a plan that is waiting), accept (accept a reviewed result), retry (try a failed task again), rename, merge_pr (merge the task's open pull request once its checks pass) or close_pr (close the task's open pull request on GitHub; text is the comment saying why, naming what covers it). The record shows each pull request's checks, conflicts, review and whether its agent suggests closing it; when asked about pull requests, answer as a table of each one's verdict: ready to merge, close (and why), needs the user's decision, or still being worked on. Actions wait for the user's one-click confirmation; say what you proposed, never claim it happened. Hold every agent to Neko's rulebook below, and when a task's activity shows it breaking the rulebook, say so and propose the message that corrects it.";
 
 #[cfg(test)]
 mod tests {
@@ -185,7 +201,7 @@ mod tests {
         let mut blocked = task("b", TaskStatus::AwaitingApproval, 10);
         blocked.events.push(TaskEvent { at_ms: 1, role: "scout".into(), message: "Should I use the 375px designs?".into() });
         let mut review = task("r", TaskStatus::ReadyForReview, 50);
-        review.pull_request = Some(PullRequest { url: "https://github.com/acme/athena/pull/7".into(), branch: "codex/neko-r".into() });
+        review.pull_request = Some(PullRequest { url: "https://github.com/acme/athena/pull/7".into(), branch: "codex/neko-r".into(), ..Default::default() });
         snapshot.tasks = vec![task("q1", TaskStatus::Queued, 90), review, task("q2", TaskStatus::Queued, 80), blocked];
         snapshot.task_roots.insert("r".into(), "/Users/x/hme/athena".into());
         snapshot.run_next = vec!["q2".into()];

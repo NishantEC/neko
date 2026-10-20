@@ -87,7 +87,8 @@ explicit approval or a direct human work request allows an isolated-worktree bui
 independent reviewer returns a result for human review. Authorized builders and
 reviewers have full local filesystem access for dependency setup, caches and tests. Workers never push;
 once an independent review passes, the daemon commits the reviewed worktree, pushes its task branch and opens
-(or reuses) a GitHub pull request via `gh` (`native_runner::publish`, `workbench/publish.rs`). Nothing merges.
+(or reuses) a GitHub pull request via `gh` (`native_runner::publish`, `workbench/publish.rs`). Nothing merges
+unless you click Merge (see "Pull requests after they open").
 Before committing, a read-only agent reads the staged diff and ticket evidence and writes a Conventional Commits
 subject (the commit and PR title; repo conventions for scope) plus the description (Issue, Impact, Root cause, Fix,
 Options considered, Verification, Risks; signed `` `=^.^=` neko ``). Both are rewritten on every push to an open
@@ -276,6 +277,41 @@ children under their parent (`splits`), watch-filed tasks under the watch
 run started (the last 200 dispatches only). Codex reports no cost, and agents
 use the user's own CLI tools without bridge receipts, so per-run cost is
 partial and per-run tools are not known; watches show their connections.
+
+## Pull requests after they open (2026-10-21)
+
+Learned from a Paseo agent that walked Neko's PRs to merge by hand
+(Oct 13–19): Neko stopped at "Opened a pull request", so 20 of 42 tasks still
+said Ready to review while GitHub showed them merged (12) or closed (8).
+`neko_core::pull_requests` decides; `workbench/pull_requests.rs` runs `gh`
+every 3 minutes (`CheckPullRequests` wakes it) outside the storage lock.
+Merged → Completed, closed → Cancelled. On a ReadyForReview task with no
+live worker or publish, a new failing check, a merge conflict or a comment
+from a person (authorAssociation MEMBER/OWNER/COLLABORATOR/CONTRIBUTOR, not
+the PR's author, which is also the account Neko and other agents comment as;
+inline comments only fetched once a person reviewed) is **handed back**:
+`hand_back` adds a note and queues the task to run directly in its own
+folder (reply already handled, so no intent model), and review + publish
+then push to the same PR. Each is handed back once (`PrFollowUp`), at most
+`MAX_FOLLOW_UPS` (4) times before the task waits for you. **The first read of
+a PR is a baseline**: what is already failing or commented starts nothing, so
+turning the watch on cannot start an agent per old PR; "Re-check all" acts
+on them deliberately. Neko still never force-pushes; the note tells the agent
+to fast-forward from the PR branch first, since others push to it.
+**Merging and closing are yours, by click**: `SetMergeWhenReady` (merges
+once checks pass and it is MERGEABLE, `gh pr merge --squash --body ""`;
+`--admin` only in `Snapshot::merge_without_review` repositories), and
+`ClosePullRequest` (comment required). `ReviewPullRequests` hands every open
+PR back with `review_note` (update with main, re-verify the cause, check for
+duplicates against the other open PRs listed, cut to what the cause needs — "fewer lines, shallower" never means fewer sibling fixes, which is why the word "smallest" stays out of prompts);
+agents end with `SCRAP:` (sets `close_suggestion`), `QUESTION:`, or nothing
+(ready). `NO_CHANGE:`/`SCRAP:` on a task with an open PR return it to
+ReadyForReview instead of Completed. Cross-repo fixes: a
+`FOLLOW_UP: <repo> | <title> | <detail>` line in a result becomes a task in
+that repo (matched by folder, remote or package name), AwaitingApproval,
+recorded in `Snapshot::follow_up_of` and drawn under its parent in the tree.
+The app's Pull requests page is the table; chat can propose `merge_pr` and
+`close_pr`.
 
 ## Resource limits (2026-10-18)
 

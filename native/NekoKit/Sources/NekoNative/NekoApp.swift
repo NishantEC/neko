@@ -128,6 +128,7 @@ struct WorkspaceView: View {
         switch page {
         case .home: TodayView(model: model)
         case .tickets: TicketsView(model: model)
+        case .pullRequests: PullRequestsView(model: model)
         case .workspaces, .watching, .tools, .memory, .profiles, .schedules, .settings:
             // Setup pages are sections of Settings; old links land on the right one.
             SettingsHub(model: model, section: SettingsSection(page: page) ?? .general).id(page)
@@ -173,6 +174,8 @@ struct NativeSidebar: View {
                 Section {
                     row(.home, title: "Home", symbol: "house", badge: 0)
                     row(.tickets, title: "All tasks", symbol: "checklist", badge: counts.waitingOnYou)
+                    row(.pullRequests, title: "Pull requests", symbol: "arrow.triangle.pull",
+                        badge: PullRequestRow.rows(snapshot: model.snapshot, tasks: model.tasks).filter(\.verdict.isDecision).count)
                 }
                 ForEach(Self.stages) { stage in stageSection(stage) }
             }

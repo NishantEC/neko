@@ -55,7 +55,7 @@ import NekoKit
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         let snapshot = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: URL(fileURLWithPath: snapshotPath)))
         let height = Double(env["NEKO_RENDER_HEIGHT"] ?? "") ?? 820
-        let pages: [Page] = [.home, .tickets, .workspaces, .watching, .schedules, .tools, .memory, .profiles, .settings]
+        let pages: [Page] = [.home, .tickets, .pullRequests, .workspaces, .watching, .schedules, .tools, .memory, .profiles, .settings]
         for page in pages {
             let model = AppModel(transport: { _ in .object([:]) })
             model.snapshot = snapshot

@@ -126,6 +126,42 @@ final class AgentTreeTests: XCTestCase {
         XCTAssertNil(tree.root.costUSD, "nothing reported a cost, so none is claimed")
     }
 
+    func testAFixProposedInAnotherRepositorySitsUnderTheTaskThatFoundIt() throws {
+        let snap = try snapshot(tasks: [task("client", "ReadyForReview"), task("backend", "AwaitingApproval")],
+                                extra: #""follow_up_of":{"backend":"client"}"#)
+        let tree = AgentTree.build(snapshot: snap, tasks: snap["tasks"].array, workspace: nil, now: 0)
+        XCTAssertEqual(tree.root.children.map(\.id), ["client"])
+        XCTAssertEqual(tree.root.children[0].children.first?.origin, "Proposed by “Task client”")
+    }
+
+    func testPullRequestsReadAsOneTableOfDecisions() throws {
+        func pr(_ id: String, _ status: String, _ extra: String) -> String {
+            #"{"id":"\#(id)","workspace_id":"w","title":"PR \#(id)","status":"\#(status)","updated_at_ms":1,"events":[],"pull_request":{"url":"https://github.com/a/athena/pull/\#(id)","branch":"b"\#(extra)}}"#
+        }
+        let snap = try snapshot(tasks: [
+            pr("1", "ReadyForReview", #","status":{"state":"OPEN","checks":"passing","mergeable":"MERGEABLE","review":"REVIEW_REQUIRED"}"#),
+            pr("2", "ReadyForReview", ##","close_suggestion":"#4607 already ignores it","status":{"state":"OPEN","checks":"none","mergeable":"MERGEABLE"}"##),
+            pr("3", "AwaitingApproval", #","status":{"state":"OPEN","checks":"none","mergeable":"MERGEABLE"}"#),
+            pr("4", "Building", ""),
+            pr("5", "ReadyForReview", #","merge_when_ready":true,"status":{"state":"OPEN","checks":"pending","mergeable":"MERGEABLE"}"#),
+            pr("9", "ReadyForReview", ""),
+            pr("6", "Completed", #","status":{"state":"MERGED","checks":"passing","mergeable":"UNKNOWN"}"#),
+            pr("7", "ReadyForReview", #","status":{"state":"OPEN","checks":"failing","failing":["Test and Lint"],"mergeable":"CONFLICTING"}"#),
+            task("8", "Queued"),
+        ])
+        let rows = PullRequestRow.rows(snapshot: snap, tasks: snap["tasks"].array)
+        XCTAssertEqual(rows.map(\.id), ["1", "7", "2", "3", "5", "4", "9", "6"], "decisions first; a task without a PR is not a row")
+        XCTAssertEqual(rows.map(\.verdict), [.ready, .ready, .close, .needsYou, .merging, .working, .unchecked, .merged],
+                       "a PR Neko has not read yet is never offered for merging")
+        XCTAssertEqual(rows[0].checks, "Checks passing")
+        XCTAssertEqual(rows[0].review, "Review required")
+        XCTAssertEqual(rows[0].number, "#1")
+        XCTAssertEqual(rows[1].checks, "Checks failing: Test and Lint")
+        XCTAssertTrue(rows[1].conflicts)
+        XCTAssertEqual(rows[2].reason, "#4607 already ignores it")
+        XCTAssertEqual(rows.filter(\.verdict.isDecision).count, 4)
+    }
+
     func testOnlyLiveWorkIsOpenByDefault() throws {
         let snap = try snapshot(tasks: [
             task("live", "Building", events: [event(1, "builder", "Command running")]),
