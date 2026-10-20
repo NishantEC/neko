@@ -220,6 +220,19 @@ pub struct PrStatus {
     /// The branch it merges into ("main", "master").
     #[serde(default)]
     pub base: String,
+    /// GitHub's `mergeStateStatus`: "CLEAN", "DIRTY" (conflicts), "BEHIND",
+    /// "BLOCKED" (a review or required check), "UNSTABLE" (only optional
+    /// checks failing), "DRAFT" or "UNKNOWN" (still computing).
+    #[serde(default)]
+    pub merge_state: String,
+    /// The base branch's tip.
+    #[serde(default)]
+    pub base_head: String,
+    /// The base branch's own checks are failing, so a failure here may not be this PR's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub base_failing: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub draft: bool,
 }
 
 /// What Neko's pull request watch has already acted on.
@@ -234,6 +247,9 @@ pub struct PrFollowUp {
     /// The head whose merge conflict was last handed back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handled_conflict: Option<String>,
+    /// Why a requested merge is waiting, last said on the task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_note: Option<String>,
     /// Automatic hand-backs so far; past the limit the task waits for you.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub count: u32,
