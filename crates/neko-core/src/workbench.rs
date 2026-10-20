@@ -7,6 +7,12 @@ use neko_protocol::workbench::{
 use std::collections::HashSet;
 
 const SETTING: &str = "workbench_snapshot_v1";
+/// MCP tool receipts live in their own row, written deferred. Inside the
+/// snapshot, every tool call an agent made through Neko's bridge rewrote the
+/// whole multi-megabyte row (about 10 MB of disk with the WAL), several times
+/// a second during a watch and every few minutes from probe replays: the
+/// daemon's remaining idle disk writes after the 2026-10-18 fixes.
+const RECEIPTS: &str = "workbench_mcp_receipts_v1";
 const RESUMED: &str = "Resumed after a daemon restart";
 const MAX_RESTART_RESUMES: usize = 2;
 pub const MAX_CONTENT_BYTES: usize = 32_768;
@@ -196,6 +202,9 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     } else {
         Snapshot::default()
     };
+    if let Some(json) = db.get_setting(RECEIPTS).map_err(|e| e.to_string())? {
+        snapshot.mcp.receipts = serde_json::from_str(&json).map_err(|e| format!("Cannot read tool receipts: {e}"))?;
+    }
     let migrated = crate::mcp_host::store::migrate(&mut snapshot)?;
     validate(&snapshot)?;
     if migrated {
@@ -233,6 +242,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
 /// Capacity is based on actual persisted bytes, never hypothetical future output.
 pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     let json = encode(snapshot)?;
+    save_receipts(db, snapshot)?;
     db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
     bump_revision();
     Ok(())
@@ -244,9 +254,19 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
 /// snapshot. Never use it for a user action or a status change.
 pub fn save_deferred(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     let json = encode(snapshot)?;
+    save_receipts(db, snapshot)?;
     db.set_setting_deferred(SETTING, &json).map_err(|e| e.to_string())?;
     bump_revision();
     Ok(())
+}
+
+/// Receipts are evidence for a watch's observations, not decisions: readers
+/// see a new one at once, and disk gets them at most every
+/// `db::DEFERRED_WRITE_DELAY`. A crash may lose the last few seconds of
+/// them, which only makes those observations unproven, as pruning already can.
+fn save_receipts(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
+    let json = serde_json::to_string(&snapshot.mcp.receipts).map_err(|e| e.to_string())?;
+    db.set_setting_deferred(RECEIPTS, &json).map_err(|e| e.to_string())
 }
 
 /// The scheduler's liveness time. It changes every tick, so it lives in
@@ -274,6 +294,7 @@ fn encode(snapshot: &Snapshot) -> Result<String, String> {
     compacted.working_preferences.clear();
     compacted.skills = Default::default();
     compacted.import_preview = Default::default();
+    compacted.mcp.receipts.clear();
     for task in &mut compacted.tasks {
         for event in &mut task.events {
             event.message = bounded_event_message(&event.role, &event.message);
@@ -1789,6 +1810,29 @@ fn validate(snapshot: &Snapshot) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tool_receipt_never_rewrites_the_task_store() {
+        use neko_protocol::mcp_host::ToolReceipt;
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let _ = task(&db, &ws);
+        let mut state = load(&db).unwrap();
+        let before = db.setting_writes();
+        let stored = db.get_setting(SETTING).unwrap();
+        state.mcp.receipts.push(ToolReceipt {
+            id: "r1".into(), run_id: "watch:1".into(), workspace_id: ws.id.clone(), connection_id: "c".into(),
+            tool_name: "list".into(), schema_hash: "h".into(), at_ms: 1, success: true,
+        });
+        save(&db, &state).unwrap();
+        assert_eq!(db.get_setting(SETTING).unwrap(), stored, "the snapshot row is untouched");
+        assert_eq!(db.setting_writes(), before, "and the receipt waits to reach disk");
+        assert_eq!(load(&db).unwrap().mcp.receipts.len(), 1, "but readers see it at once");
+        db.flush_deferred().unwrap();
+        assert_eq!(db.setting_writes(), before + 1, "one small row, written once");
+        assert!(!db.get_setting(SETTING).unwrap().unwrap().contains("watch:1"));
+    }
+
     #[test]
     fn merging_and_reviewing_pull_requests_need_an_open_one() {
         let db = Db::open_in_memory().unwrap();
