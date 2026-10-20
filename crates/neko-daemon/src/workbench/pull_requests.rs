@@ -80,7 +80,9 @@ impl Controller {
             let mut snapshot = store::load(&db)?;
             let Some(task) = snapshot.tasks.iter_mut().find(|t| t.id == task_id) else { return Ok(()) };
             if task.pull_request.as_ref().map(|p| p.url.as_str()) != Some(url) { return Ok(()) }
+            let status_before = task.status;
             let next = prs::reconcile(task, &observed, working);
+            let decided = task.status != status_before || !matches!(next, Next::Nothing);
             match &next {
                 Next::HandBack(note) => {
                     store::append_event(task, prs::ROLE, "Handed the pull request back to its agent (see the note below).");
@@ -91,10 +93,15 @@ impl Controller {
                 }
                 Next::Merge | Next::Nothing => {}
             }
-            if !matches!(next, Next::Nothing) {
+            if decided {
                 task_touch(&mut snapshot, task_id);
+                store::save(&db, &snapshot)?;
+            } else {
+                // Only what GitHub reports changed (checks moving from running
+                // to passing): progress, not a decision, so it is deferred
+                // rather than rewriting the multi-megabyte task store.
+                store::save_deferred(&db, &snapshot)?;
             }
-            store::save(&db, &snapshot)?;
             next
         };
         if next == Next::Merge {
