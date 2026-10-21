@@ -25,21 +25,25 @@ struct OnboardingView: View {
                     .transition(.opacity)
                     .id(step)
                     if let error = model.error {
-                        Text(error).font(NekoFont.body).foregroundStyle(NekoStyle.coral)
+                        Label(error, systemImage: "exclamationmark.triangle.fill").font(NekoFont.body).foregroundStyle(NekoStyle.coral)
                             .textSelection(.enabled).padding(.top, NekoSpace.md)
                     }
                 }
                 .frame(maxWidth: NekoLayout.readingWidth).padding(.vertical, NekoSpace.xxl).frame(maxWidth: .infinity)
             }
-            HStack {
-                if step > 0 { Button("Back") { step -= 1 }.nekoButton(.secondary) }
-                Spacer()
-                Text("Step \(step + 1) of 3").font(NekoFont.meta).foregroundStyle(.secondary)
-                Spacer()
-                if step > 0 {
-                    if step < 2 { Button("Skip") { finish() }.buttonStyle(.plain).foregroundStyle(N.text3) }
-                    Button(step == 2 ? "Open Neko" : "Continue") { if step == 2 { finish() } else { step += 1 } }.nekoButton(.primary)
-                } else { Color.clear.frame(width: 60, height: 1) }
+            // Back always takes its place (hidden on the first step), so the
+            // indicator stays centred without a spacer of a guessed width.
+            ZStack {
+                NekoStepIndicator(current: step + 1, total: 3)
+                HStack {
+                    Button("Back") { step -= 1 }.nekoButton(.secondary)
+                        .opacity(step == 0 ? 0 : 1).disabled(step == 0).accessibilityHidden(step == 0)
+                    Spacer()
+                    if step > 0 {
+                        if step < 2 { Button("Skip setup") { finish() }.nekoButton(.quiet) }
+                        Button(step == 2 ? "Open Neko" : "Continue") { if step == 2 { finish() } else { step += 1 } }.nekoButton(.primary)
+                    }
+                }
             }
             .disabled(pending)
             .frame(maxWidth: NekoLayout.readingWidth)
@@ -65,11 +69,11 @@ struct OnboardingView: View {
     private var welcomeStep: some View {
         VStack(spacing: NekoLayout.sectionGap) {
             BrandMark(size: 76).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-            VStack(spacing: 10) {
+            VStack(spacing: NekoSpace.sm + NekoSpace.hair) {
                 Text("A little more off your mind.").font(NekoFont.display).multilineTextAlignment(.center).foregroundStyle(N.text)
                     .accessibilityAddTraits(.isHeader)
                 Text("Connect your projects and tools, hand off work, and see what needs your attention.")
-                    .font(NekoFont.body).foregroundStyle(N.text3).multilineTextAlignment(.center).frame(maxWidth: 480)
+                    .font(NekoFont.body).foregroundStyle(N.text3).multilineTextAlignment(.center).frame(maxWidth: NekoLayout.introWidth)
             }
             Button("Get started", systemImage: "arrow.right") { step = 1 }
                 .nekoButton(.primary).controlSize(.large).padding(.top, NekoSpace.sm)
@@ -132,18 +136,14 @@ struct OnboardingView: View {
                 Button("Add another workspace…") { model.selectedWorkspace = nil; workspaceSheet = true }.nekoButton(.secondary)
             }
         }
-        Button { registrySheet = true } label: {
-            Label("Find Sentry and other MCP servers", systemImage: "network")
-                .font(NekoFont.body)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(NekoStyle.accent)
+        Button("Browse MCP servers…", systemImage: "square.grid.2x2") { registrySheet = true }
+        .nekoButton(.secondary)
         .accessibilityHint("Browse hosted connections in the public MCP Registry")
         }
     }
     private func stepCard<Content: View>(title: String, subtitle: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: NekoSpace.sm + NekoSpace.hair) {
                 Text(title).font(NekoFont.display).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
                 Text(subtitle).font(NekoFont.body).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
             }
