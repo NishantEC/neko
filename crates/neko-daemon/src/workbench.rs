@@ -1264,6 +1264,21 @@ impl Controller {
                     &skill_workspaces,
                     Some(&workspace.id),
                 )?);
+                // A pull request whose run merged newer base-branch work is
+                // reviewed (and later described) from where it now branches,
+                // not from where the run began.
+                let pr_base_branch = task.pull_request.as_ref().and_then(|p| p.status.as_ref()).map(|s| s.base.clone()).unwrap_or_default();
+                let review_base = if split.is_none() && !pr_base_branch.is_empty() {
+                    native_runner::pull_request_base(&directory, &base, &pr_base_branch, cancel)
+                } else { base.clone() };
+                if review_base != base {
+                    let moved = review_base.clone();
+                    self.update_task_authorized(&task.id, authority, |t| {
+                        t.base_commit = Some(moved.clone());
+                        store::append_event(t, "supervisor", &format!("It brought in newer work from {pr_base_branch}, so its change is now measured from {}.", &moved[..moved.len().min(10)]));
+                    })?;
+                }
+                let base = review_base;
                 let changed = native_runner::changed_files(
                     &directory,
                     split.and_then(|s| s.base.as_deref()).unwrap_or(&base),

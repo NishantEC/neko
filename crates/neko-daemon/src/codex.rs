@@ -329,12 +329,12 @@ fn start_session(
     control: Arc<ControlHandle>,
     state: Arc<AppState>,
 ) -> (Duration, io::Result<()>) {
-    let child = Command::new(resolved_codex())
-        .args(["app-server", "--stdio"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn();
+    // Guarded: the app-server ends with the daemon, however the daemon ends.
+    let mut command = Command::new(resolved_codex());
+    command.args(["app-server", "--stdio"]);
+    let child = neko_core::native_runner::spawn_guarded(command, |c| {
+        c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit());
+    });
     let mut child = match child {
         Ok(child) => child,
         Err(error) => return (Duration::ZERO, Err(error)),

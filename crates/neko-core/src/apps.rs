@@ -584,13 +584,15 @@ fn run_live_watch(on_change: &impl Fn(Vec<AppEntry>)) -> std::io::Result<()> {
     // (confirmed live by a concurrent one-shot `mdfind` call finding the
     // change within 3 seconds while `-live`'s own pipe stayed silent) —
     // "live" from Spotlight's side, silently stalled from this daemon's.
-    let mut child = Command::new("mdfind")
-        .arg("-live")
-        .arg(APP_BUNDLE_PREDICATE)
-        .env("NSUnbufferedIO", "YES")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
+    // Guarded: it ends with the daemon. Spawned plainly, every daemon
+    // restart left one behind, alive until the next app install (ten were
+    // found, up to seven days old).
+    let mut command = Command::new("mdfind");
+    command.arg("-live").arg(APP_BUNDLE_PREDICATE).env("NSUnbufferedIO", "YES");
+    let mut guarded = crate::native_runner::spawn_guarded(command, |c| {
+        c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    })?;
+    let child = &mut guarded.child;
     let stdout = child
         .stdout
         .take()
@@ -617,7 +619,7 @@ fn run_live_watch(on_change: &impl Fn(Vec<AppEntry>)) -> std::io::Result<()> {
         on_change(scan_applications());
     }
 
-    let _ = child.kill();
+    drop(guarded);
     let _ = reader.join();
     Ok(())
 }
