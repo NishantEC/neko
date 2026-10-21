@@ -216,8 +216,10 @@ struct TodayView: View {
         if message["role"].string == "user" {
             ChatUserMessage(text: message["text"].string, timestamp: message["at_ms"].int, queued: message["queued"].bool)
         } else {
-            VStack(alignment: .leading, spacing: NekoSpace.sm) {
-                if showsSpeaker { ChatSpeaker(name: "Neko", timestamp: message["at_ms"].int) }
+            VStack(alignment: .leading, spacing: NekoSpace.md) {
+                // What the reply did leads it, as in T3 Code: its header and
+                // summary first, then the answer, then the footer.
+                workLog(message, related, pending: message["pending"].bool, hasText: !message["text"].string.isEmpty)
                 if message["ticket_ids"].array.isEmpty &&
                     (message["text"].string.contains("I could not open every task") || message["text"].string.contains("No task was created")) {
                     Label {
@@ -236,7 +238,6 @@ struct TodayView: View {
                     }
                     .font(NekoFont.chat).lineSpacing(NekoLeading.reading)
                 }
-                workLog(message, related, pending: pending, hasText: !text.isEmpty)
                 if message["failed"].bool {
                     ReplyErrorCallout(message: "", retry: retry.map { text in { [model] in Self.post(text, model: model) } })
                 }
@@ -262,6 +263,9 @@ struct TodayView: View {
                         model.openAgent(id.string, from: .home)
                     }
                 }
+                if !pending, !text.isEmpty {
+                    ChatMessageFooter(text: text, timestamp: message["at_ms"].int)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .contain)
@@ -282,7 +286,7 @@ struct TodayView: View {
                         startMs: message["started_ms"].int > 0 ? message["started_ms"].int : message["at_ms"].int,
                         completedMs: message["started_ms"].int > 0 && !pending ? message["at_ms"].int
                             : ChatDuration.completion(of: message) ?? finishedAt[message.recordID],
-                        live: (now.activity, label), ledger: workLedger)
+                        at: message["at_ms"].int, live: (now.activity, label), ledger: workLedger)
         } else if !hasText, !message["failed"].bool, message["ticket_ids"].array.isEmpty, message["actions"].array.isEmpty,
                   message["remembered"].array.isEmpty, message["responsibility_ids"].array.isEmpty, message["tool_calls"].array.isEmpty {
             Text("No reply came back.").font(NekoFont.meta).foregroundStyle(N.text3)
@@ -485,14 +489,13 @@ struct TodayView: View {
     }
 }
 
-/// Seconds since Neko started on this reply, so a long turn visibly moves.
-struct ChatElapsed: View {
+/// "Working for 4s": seconds since Neko started on this reply, so a long turn visibly moves.
+struct ChatWorkingFor: View {
     let since: Int
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let seconds = max(0, Int(context.date.timeIntervalSince1970) - since / 1000)
-            Text(ChatDuration.text(seconds: seconds))
-                .font(NekoFont.meta).monospacedDigit().foregroundStyle(N.text4)
+            Text("Working for \(ChatDuration.text(seconds: seconds))").monospacedDigit()
         }
         .accessibilityHidden(true)
     }

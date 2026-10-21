@@ -89,7 +89,8 @@ enum NekoFont {
     /// Row titles.
     static let heading = Font.system(size: NekoTextStep.body.rawValue, weight: .semibold)
     static let body = Font.system(size: NekoTextStep.body.rawValue)
-    static let chat = body
+    /// Chat prose: 14pt with `NekoLeading.reading`, a 1.6 line.
+    static let chat = Font.system(size: NekoTextStep.callout.rawValue)
     static let meta = Font.system(size: NekoTextStep.meta.rawValue)
     static let caption = Font.system(size: NekoTextStep.caption.rawValue)
     static let label = Font.system(size: NekoTextStep.small.rawValue, weight: .medium)

@@ -115,8 +115,21 @@ struct SharedComposer<Controls: View>: View {
         }
     }
     var body: some View {
+        // One container: a decision, when there is one, is its top row under a
+        // full-width rule; then the editor and the controls row.
+        VStack(alignment: .leading, spacing: .zero) {
+            if let tray {
+                tray.padding(.horizontal, NekoSpace.lg).padding(.vertical, NekoSpace.sm)
+                Hairline()
+            }
+            editorAndControls
+                .padding(NekoSpace.md)
+        }
+        .modifier(ComposerSurface())
+    }
+
+    private var editorAndControls: some View {
         VStack(alignment: .leading, spacing: NekoSpace.sm) {
-            if let tray { tray }
             if !attachments.isEmpty { ComposerAttachmentStrip(attachments: attachments, remove: onRemove) }
             ComposerView(
                 text: $text,
@@ -151,8 +164,6 @@ struct SharedComposer<Controls: View>: View {
                 }
             }
         }
-        .padding(NekoSpace.md)
-        .modifier(ComposerSurface())
     }
 }
 
@@ -170,12 +181,18 @@ struct ComposerAttachmentStrip: View {
     }
 }
 
-/// One native sampling surface behind the editor: the shared glass surface.
-/// Accessibility changes replace the background only, preserving the live
-/// NSTextView and its selection.
+/// One native sampling surface behind the editor: the shared glass surface,
+/// with a hairline edge so the container reads as one bordered shape holding
+/// the tray, the editor and the controls. Accessibility changes replace the
+/// background only, preserving the live NSTextView and its selection.
 struct ComposerSurface: ViewModifier {
+    @Environment(\.colorSchemeContrast) private var contrast
     func body(content: Content) -> some View {
-        content.modifier(NekoGlassSurface(shape: RoundedRectangle(cornerRadius: NekoRadius.hero)))
+        let shape = RoundedRectangle(cornerRadius: NekoRadius.hero, style: .continuous)
+        content
+            .modifier(NekoGlassSurface(shape: shape))
+            .clipShape(shape)
+            .overlay { if contrast != .increased { shape.strokeBorder(N.line) } }
     }
 }
 

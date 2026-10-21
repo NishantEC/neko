@@ -3,16 +3,16 @@ import AppKit
 
 // MARK: - Tables, diffs, terminal output
 
+/// A reply's table, drawn like T3 Code's: no card, 12pt cells on a 19.5pt line,
+/// a semibold muted header, hairlines between rows. Columns are sized from
+/// their content (`ChatTableLayout`), so a short column keeps its width and
+/// only the long ones wrap.
 struct NativeTableBlock: View {
     let headers: [String]
     let rows: [[String]]
     @State private var sortColumn: Int?
     @State private var ascending = true
     @State private var copied = false
-    /// Narrowest a column may get before the table scrolls sideways instead.
-    static let minimumColumn: CGFloat = 120
-    /// Each column's width once the table scrolls sideways.
-    static let scrollingColumn: CGFloat = 160
     private var sorted: [[String]] {
         guard let column = sortColumn else { return rows }
         return rows.sorted { a, b in
@@ -24,60 +24,43 @@ struct NativeTableBlock: View {
             return ascending ? order == .orderedAscending : order == .orderedDescending
         }
     }
-    /// Laid out once, at the width it is given: flexible columns when they fit,
-    /// otherwise fixed columns that scroll sideways. No measured width is
-    /// stored, so the table never re-wraps (and jumps) after its first frame.
-    var body: some View {
-        ChatBlock(label: "Table") {
-            Button(copied ? "Copied" : "Copy as CSV") {
-                let csv = ([headers] + rows).map { $0.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: ",") }.joined(separator: "\n")
-                NSPasteboard.general.clearContents()
-                copied = NSPasteboard.general.setString(csv, forType: .string)
-            }.nekoButton(.quiet).font(NekoFont.caption)
-        } content: {
-            ViewThatFits(in: .horizontal) {
-                grid(columnWidth: nil)
-                ScrollView(.horizontal) { grid(columnWidth: Self.scrollingColumn) }
-            }
-            .textSelection(.enabled)
-        }
+    private var csv: String {
+        ([headers] + rows).map { $0.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: ",") }.joined(separator: "\n")
     }
 
-    private func grid(columnWidth: CGFloat?) -> some View {
-        Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
-            GridRow {
-                ForEach(Array(headers.enumerated()), id: \.offset) { index, header in
-                    Button {
-                        if sortColumn == index { ascending.toggle() } else { sortColumn = index; ascending = true }
-                    } label: {
-                        HStack(spacing: NekoSpace.xxs) {
-                            Text(header).font(NekoFont.of(.caption, weight: .semibold)).foregroundStyle(N.text3)
-                            if sortColumn == index { Image(systemName: ascending ? "chevron.up" : "chevron.down").font(NekoFont.of(.micro, weight: .bold)).foregroundStyle(N.text3) }
-                        }
-                        .cell(columnWidth).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                        .accessibilityLabel("Sort by \(header)")
-                        .accessibilityValue(sortColumn == index ? (ascending ? "Ascending" : "Descending") : "Not sorted")
-                }
-            }
-            Divider().gridCellUnsizedAxes(.horizontal)
-            ForEach(Array(sorted.enumerated()), id: \.offset) { index, row in
-                GridRow {
-                    ForEach(Array(headers.indices), id: \.self) { column in
-                        let cell = row.indices.contains(column) ? row[column] : ""
-                        Text(inline(cell)).font(NekoFont.meta.monospacedDigit())
-                            .foregroundStyle(tone(cell, column: column))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .cell(columnWidth)
+    var body: some View {
+        let body = sorted
+        ChatTableLayout(columns: max(headers.count, 1)) {
+            ForEach(Array(headers.enumerated()), id: \.offset) { index, header in
+                Button {
+                    if sortColumn == index { ascending.toggle() } else { sortColumn = index; ascending = true }
+                } label: {
+                    HStack(spacing: NekoSpace.xxs) {
+                        Text(header).font(NekoFont.of(.caption, weight: .semibold)).foregroundStyle(N.text3)
+                        if sortColumn == index { Image(systemName: ascending ? "chevron.up" : "chevron.down").font(NekoFont.of(.micro, weight: .bold)).foregroundStyle(N.text3) }
                     }
+                    .cell(rule: true)
+                }.buttonStyle(.plain)
+                    .accessibilityLabel("Sort by \(header)")
+                    .accessibilityValue(sortColumn == index ? (ascending ? "Ascending" : "Descending") : "Not sorted")
+            }
+            ForEach(Array(body.enumerated()), id: \.offset) { index, row in
+                ForEach(Array(headers.indices), id: \.self) { column in
+                    let cell = row.indices.contains(column) ? row[column] : ""
+                    Text(MarkdownCache.tableCell(cell)).font(NekoFont.caption.monospacedDigit())
+                        .lineSpacing(NekoChat.tableLeading)
+                        .foregroundStyle(tone(cell, column: column))
+                        .cell(rule: index < body.count - 1)
                 }
-                if index < rows.count - 1 { Divider().opacity(0.5).gridCellUnsizedAxes(.horizontal) }
             }
         }
-        .padding(.horizontal, NekoSpace.xs)
-    }
-    private func inline(_ value: String) -> AttributedString {
-        (try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value)
+        .textSelection(.enabled)
+        .contextMenu {
+            Button(copied ? "Copied" : "Copy table as CSV") {
+                NSPasteboard.general.clearContents()
+                copied = NSPasteboard.general.setString(csv, forType: .string)
+            }
+        }
     }
     private func tone(_ cell: String, column: Int) -> Color {
         guard column > 0 else { return .primary }
@@ -88,13 +71,89 @@ struct NativeTableBlock: View {
     }
 }
 
+/// Lays out `columns` columns of cells row by row. A column's natural width is
+/// its widest cell on one line. When everything fits, columns grow in
+/// proportion to fill the width; when it does not, columns that already fit
+/// their fair share keep their natural width and the long ones share what is
+/// left in proportion, so five columns never become five tall slivers.
+struct ChatTableLayout: Layout {
+    let columns: Int
+    /// No column is squeezed below this.
+    static let minimumColumn: CGFloat = 56
+
+    private func naturalWidths(_ subviews: Subviews) -> [CGFloat] {
+        var widths = Array(repeating: CGFloat.zero, count: columns)
+        for (index, view) in subviews.enumerated() {
+            let column = index % columns
+            widths[column] = max(widths[column], view.sizeThatFits(.unspecified).width)
+        }
+        return widths
+    }
+
+    static func columnWidths(natural: [CGFloat], available: CGFloat) -> [CGFloat] {
+        let total = natural.reduce(0, +)
+        guard total > 0, available.isFinite else { return natural }
+        if total <= available { return natural.map { $0 * available / total } }
+        var result = natural
+        var open = Set(natural.indices)
+        var remaining = available
+        var settled = false
+        while !settled, !open.isEmpty {
+            settled = true
+            let share = remaining / CGFloat(open.count)
+            for index in open where natural[index] <= share {
+                remaining -= natural[index]
+                open.remove(index)
+                settled = false
+            }
+        }
+        let weight = open.reduce(0) { $0 + natural[$1] }
+        for index in open { result[index] = max(minimumColumn, remaining * natural[index] / max(weight, 1)) }
+        return result
+    }
+
+    private func rowHeights(_ subviews: Subviews, widths: [CGFloat]) -> [CGFloat] {
+        let rows = (subviews.count + columns - 1) / columns
+        return (0..<rows).map { row in
+            (0..<columns).compactMap { column -> CGFloat? in
+                let index = row * columns + column
+                guard index < subviews.count else { return nil }
+                return subviews[index].sizeThatFits(ProposedViewSize(width: widths[column], height: nil)).height
+            }.max() ?? 0
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let natural = naturalWidths(subviews)
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? natural.reduce(0, +)
+        let widths = Self.columnWidths(natural: natural, available: width)
+        return CGSize(width: width, height: rowHeights(subviews, widths: widths).reduce(0, +))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let widths = Self.columnWidths(natural: naturalWidths(subviews), available: bounds.width)
+        let heights = rowHeights(subviews, widths: widths)
+        var y = bounds.minY
+        for (row, height) in heights.enumerated() {
+            var x = bounds.minX
+            for column in 0..<columns {
+                let index = row * columns + column
+                if index < subviews.count {
+                    subviews[index].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: widths[column], height: height))
+                }
+                x += widths[column]
+            }
+            y += height
+        }
+    }
+}
+
 private extension View {
-    /// A table cell: flexible from `minimumColumn` up when `width` is nil, else fixed.
-    func cell(_ width: CGFloat?) -> some View {
-        padding(.horizontal, NekoSpace.xs).padding(.vertical, NekoSpace.sm)
-            .frame(minWidth: width ?? NativeTableBlock.minimumColumn,
-                   idealWidth: width ?? NativeTableBlock.minimumColumn,
-                   maxWidth: width ?? .infinity, alignment: .leading)
+    /// A table cell: padded, as wide as its column, with a hairline under it when `rule` is set.
+    func cell(rule: Bool) -> some View {
+        padding(.horizontal, NekoChat.tableCellX).padding(.vertical, NekoChat.tableCellY)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .overlay(alignment: .bottom) { if rule { Hairline() } }
     }
 }
 
