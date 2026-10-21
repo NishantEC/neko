@@ -18,6 +18,21 @@ const RECEIPTS: &str = "workbench_mcp_receipts_v1";
 /// branch's tip, which moves whenever main does, and inside the snapshot
 /// every pass rewrote the whole row (about 1 MB/s while it ran).
 const PR_STATUS: &str = "workbench_pull_request_status_v1";
+/// Each watch's schedule (when it last ran, what it found, when it is due),
+/// by watch id, in its own row: every check and every three-minute probe
+/// updates it, and inside the snapshot each update rewrote the whole row.
+/// Written immediately, not deferred: due times are durable claims that keep
+/// a watch from running twice after a restart.
+const WATCH_SCHEDULE: &str = "workbench_watch_schedule_v1";
+
+/// The parts of a watch that change on every run.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct WatchSchedule {
+    next_due_ms: i64,
+    last_attempt_ms: Option<i64>,
+    last_result: String,
+    failures: u32,
+}
 const RESUMED: &str = "Resumed after a daemon restart";
 const MAX_RESTART_RESUMES: usize = 2;
 pub const MAX_CONTENT_BYTES: usize = 32_768;
@@ -210,6 +225,18 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     if let Some(json) = db.get_setting(RECEIPTS).map_err(|e| e.to_string())? {
         snapshot.mcp.receipts = serde_json::from_str(&json).map_err(|e| format!("Cannot read tool receipts: {e}"))?;
     }
+    if let Some(json) = db.get_setting(WATCH_SCHEDULE).map_err(|e| e.to_string())? {
+        let mut schedules: std::collections::HashMap<String, WatchSchedule> =
+            serde_json::from_str(&json).map_err(|e| format!("Cannot read watch schedules: {e}"))?;
+        for watch in &mut snapshot.mcp.responsibilities {
+            if let Some(s) = schedules.remove(&watch.id) {
+                watch.next_due_ms = s.next_due_ms;
+                watch.last_attempt_ms = s.last_attempt_ms;
+                watch.last_result = s.last_result;
+                watch.failures = s.failures;
+            }
+        }
+    }
     if let Some(json) = db.get_setting(PR_STATUS).map_err(|e| e.to_string())? {
         let mut statuses: std::collections::HashMap<String, neko_protocol::workbench::PrStatus> =
             serde_json::from_str(&json).map_err(|e| format!("Cannot read pull request status: {e}"))?;
@@ -257,6 +284,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
 pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     let json = encode(snapshot)?;
     save_receipts(db, snapshot)?;
+    save_watch_schedules(db, snapshot, false)?;
     db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
     bump_revision();
     Ok(())
@@ -269,6 +297,7 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
 pub fn save_deferred(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     let json = encode(snapshot)?;
     save_receipts(db, snapshot)?;
+    save_watch_schedules(db, snapshot, true)?;
     db.set_setting_deferred(SETTING, &json).map_err(|e| e.to_string())?;
     bump_revision();
     Ok(())
@@ -288,6 +317,18 @@ fn save_receipts(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
         .collect();
     let json = serde_json::to_string(&statuses).map_err(|e| e.to_string())?;
     db.set_setting_deferred(PR_STATUS, &json).map_err(|e| e.to_string())
+}
+
+fn save_watch_schedules(db: &Db, snapshot: &Snapshot, deferred: bool) -> Result<(), String> {
+    let schedules: std::collections::BTreeMap<&str, WatchSchedule> = snapshot.mcp.responsibilities.iter()
+        .map(|w| (w.id.as_str(), WatchSchedule {
+            next_due_ms: w.next_due_ms, last_attempt_ms: w.last_attempt_ms,
+            last_result: w.last_result.clone(), failures: w.failures,
+        }))
+        .collect();
+    let json = serde_json::to_string(&schedules).map_err(|e| e.to_string())?;
+    if deferred { db.set_setting_deferred(WATCH_SCHEDULE, &json) } else { db.set_setting(WATCH_SCHEDULE, &json) }
+        .map_err(|e| e.to_string())
 }
 
 /// The scheduler's liveness time. It changes every tick, so it lives in
@@ -316,6 +357,12 @@ fn encode(snapshot: &Snapshot) -> Result<String, String> {
     compacted.skills = Default::default();
     compacted.import_preview = Default::default();
     compacted.mcp.receipts.clear();
+    for watch in &mut compacted.mcp.responsibilities {
+        watch.next_due_ms = 0;
+        watch.last_attempt_ms = None;
+        watch.last_result.clear();
+        watch.failures = 0;
+    }
     for task in &mut compacted.tasks {
         if let Some(pr) = task.pull_request.as_mut() { pr.status = None; }
     }
@@ -1855,6 +1902,37 @@ mod tests {
         db.flush_deferred().unwrap();
         assert_eq!(db.setting_writes(), before + 1, "one small row, written once");
         assert!(!db.get_setting(SETTING).unwrap().unwrap().contains("watch:1"));
+    }
+
+    #[test]
+    fn a_watch_checking_in_never_rewrites_the_task_store() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let mut state = load(&db).unwrap();
+        state.mcp.connections.push(serde_json::from_value(serde_json::json!({
+            "id": "c1", "workspace_id": ws.id, "label": "sentry", "config": {"transport": "http", "url": "https://example.com/mcp"},
+            "enabled": true, "trusted": true, "has_credentials": false, "tools": [], "discovered_ms": null, "error": null,
+        })).unwrap());
+        state.mcp.responsibilities.push(neko_protocol::mcp_host::Responsibility {
+            id: "r1".into(), workspace_id: ws.id.clone(), instruction: "Watch errors".into(), connection_ids: vec!["c1".into()],
+            enabled: true, prepare_low_risk: false, next_due_ms: 1, last_attempt_ms: None, last_result: String::new(),
+            failures: 0, name: None, name_by_user: false,
+        });
+        save(&db, &state).unwrap();
+        let stored = db.get_setting(SETTING).unwrap();
+        let mut state = load(&db).unwrap();
+        let watch = state.mcp.responsibilities.iter_mut().find(|r| r.id == "r1").unwrap();
+        watch.next_due_ms = 600_000;
+        watch.last_attempt_ms = Some(5);
+        watch.last_result = "Nothing new".into();
+        watch.failures = 2;
+        save(&db, &state).unwrap();
+        assert_eq!(db.get_setting(SETTING).unwrap(), stored, "the snapshot row is untouched");
+        let back = load(&db).unwrap();
+        let watch = back.mcp.responsibilities.iter().find(|r| r.id == "r1").unwrap();
+        assert_eq!((watch.next_due_ms, watch.last_attempt_ms, watch.last_result.as_str(), watch.failures), (600_000, Some(5), "Nothing new", 2),
+                   "and the schedule is durable without a flush");
     }
 
     #[test]

@@ -346,7 +346,15 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   into the next immediate save that changes something, the tick's
   `flush_due` or `Db` drop (a rolled-back transaction restores them). A crash may lose ≤5s of tool events, never a user action,
   status change or `USAGE` (budget) event: those still write immediately.
-  Do not persist per-tick values in the snapshot.
+  Do not persist per-tick values in the snapshot. **Anything that changes on
+  a timer gets its own small row** (2026-10-21, measured 4.4 MB/s → see below):
+  MCP tool receipts (`workbench_mcp_receipts_v1`, deferred), what GitHub reports
+  per PR (`workbench_pull_request_status_v1`, deferred) and each watch's
+  schedule (`workbench_watch_schedule_v1`, immediate: due times are durable
+  claims). `encode` strips them from the snapshot and `load` attaches them, so
+  the 4.6 MB row is rewritten only by real decisions. Measure with the
+  kernel's per-process counter (`proc_pid_rusage`, `ri_diskio_byteswritten`)
+  and diff the stored row to name the field before guessing.
 - **Writable runs per repository.** `admission::cap_writable_per_repository`
   runs before load pacing: per repository (`root_for`), active workers whose
   ticket `writes()` (Building/Reviewing/AwaitingApproval, or Queued that will
