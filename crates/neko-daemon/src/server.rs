@@ -70,6 +70,9 @@ pub struct AppState {
     /// connection, whether a request's own response or a broadcast `Event`,
     /// has to go through the *same* lock.
     broadcast: Mutex<Vec<Arc<Mutex<UnixStream>>>>,
+    /// Web clients (`web.rs`) listening for the same `Event`s the sockets get.
+    /// A sender whose page went away fails its next send and is dropped.
+    web_events: Mutex<Vec<std::sync::mpsc::Sender<Event>>>,
     attention: Mutex<AttentionCounts>,
     native_attention: AtomicUsize,
 }
@@ -253,6 +256,7 @@ impl AppState {
             providers,
             mode_providers,
             broadcast: Mutex::new(Vec::new()),
+            web_events: Mutex::new(Vec::new()),
             attention: Mutex::new(AttentionCounts::default()),
             native_attention: AtomicUsize::new(0),
         }
@@ -1010,6 +1014,11 @@ fn error_response(e: impl std::fmt::Display) -> Response {
 }
 
 fn broadcast(state: &AppState, event: &Event) {
+    state
+        .web_events
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .retain(|sender| sender.send(event.clone()).is_ok());
     // Write outside the list lock: one slow client must never stall new
     // connections from registering. Failed writers are removed afterwards.
     let writers: Vec<_> = state
@@ -1041,6 +1050,63 @@ fn broadcast(state: &AppState, event: &Event) {
 /// doc comment for why this push exists at all.
 pub fn notify_icons_updated(state: &AppState) {
     broadcast(state, &Event::IconsUpdated);
+}
+
+/// The web bridge's door into the daemon (`web.rs`). It calls the very same
+/// `handle_request` the socket does, so an HTTP request can do exactly what a
+/// socket request can and nothing else. A search normally answers twice (fast
+/// providers, then all); over HTTP the partial frame is dropped and the
+/// complete answer is returned, which is what a plain `request()` does on the
+/// socket client too.
+struct WebBackend(Arc<AppState>);
+
+impl crate::web::Backend for WebBackend {
+    fn request(&self, request: Request) -> Response {
+        let ctx = RequestContext::new(Cancel::never(), |_| {});
+        handle_request(&self.0, request, &ctx)
+    }
+
+    fn subscribe(&self) -> std::sync::mpsc::Receiver<Event> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.0
+            .web_events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(sender);
+        receiver
+    }
+}
+
+/// Starts the loopback web bridge on its own thread. Failing to start it (the
+/// port is taken, the token cannot be written) is logged and never stops the
+/// daemon: the socket is the product, this is an additional door.
+pub fn spawn_web_bridge(state: Arc<AppState>) {
+    let Some(port) = crate::web::configured_port() else {
+        eprintln!("neko-daemon: web bridge off (NEKO_WEB_PORT=0)");
+        return;
+    };
+    let dir = neko_protocol::support_dir();
+    let token = match crate::web::load_or_create_token(&dir) {
+        Ok(token) => token,
+        Err(e) => {
+            eprintln!("neko-daemon: web bridge not started, cannot prepare {}: {e}", dir.join("web-token").display());
+            return;
+        }
+    };
+    let listener = match crate::web::bind(port) {
+        Ok(listener) => listener,
+        Err(e) => {
+            eprintln!("neko-daemon: web bridge not started, cannot listen on 127.0.0.1:{port}: {e}");
+            return;
+        }
+    };
+    let config = crate::web::Config {
+        token,
+        web_root: crate::web::default_web_root(),
+        plugins_dir: dir.join("plugins"),
+    };
+    eprintln!("neko-daemon: web UI on http://127.0.0.1:{port}/ (token in {})", dir.join("web-token").display());
+    std::thread::spawn(move || crate::web::serve(listener, config, Arc::new(WebBackend(state))));
 }
 
 /// How often the daemon asks Paseo who is blocked.

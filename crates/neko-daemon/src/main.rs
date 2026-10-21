@@ -1,6 +1,7 @@
 mod codex;
 mod mcp_host;
 mod server;
+mod web;
 mod workbench;
 
 use std::sync::Arc;
@@ -152,6 +153,8 @@ fn main() {
             std::thread::spawn(move || server::run_quota_poll(state));
         }
     }
+
+    server::spawn_web_bridge(state.clone());
 
     eprintln!("neko-daemon: listening on {}", socket_path.display());
     for stream in listener.incoming() {
