@@ -9,6 +9,8 @@ struct TicketsView: View {
     private var search: String { model.agentSearch }
     @State private var confirmCancel: JSONValue?
     @AppStorage("neko.work.layout") private var layout = "board"
+    /// Done starts as a narrow rail, so the columns that need you fit without scrolling.
+    @AppStorage("neko.board.doneExpanded") private var doneExpanded = false
     struct Column { let id: String; let title: String; let color: Color; let statuses: [String] }
     /// Columns follow TaskStage, so the board, sidebar and counts agree.
     static let columns: [Column] = [
@@ -41,7 +43,7 @@ struct TicketsView: View {
             else { emptyState.frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .navigationTitle(stageFilter?.title ?? "All tasks")
-        .navigationSubtitle("\(workspaceLabel) · \(model.tasks.count) \(model.tasks.count == 1 ? "task" : "tasks")")
+        .navigationSubtitle(Self.subtitle(workspace: workspaceLabel, visible: visibleTasks.count, total: model.tasks.count))
         .toolbar { listToolbar }
         .onChange(of: model.selectedWorkspace) { _, _ in selected = nil }
         .confirmationDialog("Cancel “\(confirmCancel?["title"].string ?? "")”?", isPresented: Binding(get: { confirmCancel != nil }, set: { if !$0 { confirmCancel = nil } })) {
@@ -49,7 +51,7 @@ struct TicketsView: View {
                 if let task = confirmCancel, let done = Self.columns.first(where: { $0.id == "done" }) { run("CancelTask", task, to: done) }
                 confirmCancel = nil
             }
-            Button("Keep Working", role: .cancel) { confirmCancel = nil }
+            Button("Keep working", role: .cancel) { confirmCancel = nil }
         } message: {
             Text("It hasn’t been reviewed yet, so moving it to Done stops the work. Its files and worktree stay on disk.")
         }
@@ -65,7 +67,7 @@ struct TicketsView: View {
             GlassSegmented(selection: $layout, options: [
                 .init(value: "list", title: "List", symbol: "list.bullet", help: "Show tasks as a list"),
                 .init(value: "board", title: "Board", symbol: "rectangle.split.3x1", help: "Show tasks as a board"),
-                .init(value: "tree", title: "Tree", symbol: "point.3.connected.trianglepath.dotted", help: "Show who started whom")
+                .init(value: "tree", title: "Tree", symbol: "point.3.connected.trianglepath.dotted", help: "Show which agent started each task")
             ], iconOnly: true)
         }.withoutSharedBackground()
         ToolbarItem(placement: .primaryAction) {
@@ -112,124 +114,160 @@ struct TicketsView: View {
 
     // MARK: List
 
+    /// "athena · 4 of 12 tasks" while filters hide some, "athena · 12 tasks" otherwise.
+    static func subtitle(workspace: String, visible: Int, total: Int) -> String {
+        visible == total ? "\(workspace) · \(taskCount(total))" : "\(workspace) · \(visible) of \(taskCount(total))"
+    }
+    /// "1 task", "3 tasks", inflected by Foundation rather than `== 1 ?`.
+    static func taskCount(_ count: Int) -> String {
+        String(AttributedString(localized: "^[\(count) task](inflect: true)").characters)
+    }
+
     private var list: some View {
-        List(selection: Binding(get: { selected }, set: { selected = $0 })) {
-            ForEach(Self.columns, id: \.id) { column in
+        let shown = Self.columns.filter { !tasks(in: $0).isEmpty }
+        return List(selection: Binding(get: { selected }, set: { selected = $0 })) {
+            ForEach(shown, id: \.id) { column in
                 let items = tasks(in: column)
-                if !items.isEmpty {
-                    Section {
-                        ForEach(items, id: \.recordID) { task in
-                            listRow(task).tag(task.recordID)
-                                .listRowInsets(EdgeInsets(top: 14, leading: NekoLayout.rowInset, bottom: 14, trailing: NekoLayout.rowInset))
-                                .listRowSeparator(.hidden)
-                        }
-                    } header: {
-                        HStack(spacing: 8) {
-                            Text(column.title).font(NekoFont.heading)
-                            Text(String(items.count)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
-                        }
-                        .padding(.top, 16).padding(.bottom, 8)
-                        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
+                Section {
+                    ForEach(items, id: \.recordID) { task in
+                        listRow(task).tag(task.recordID)
+                            .listRowInsets(EdgeInsets(top: 0, leading: NekoSpace.xs, bottom: 0, trailing: NekoSpace.xs))
+                            .listRowSeparator(.hidden)
                     }
+                } header: {
+                    NekoListHeader(title: column.title, tone: NekoTone(stage: stage(column)), count: items.count,
+                                   spaced: column.id != shown.first?.id)
                 }
             }
         }
         .listStyle(.inset)
+        .environment(\.defaultMinListRowHeight, NekoLayout.listRowHeight)
         .scrollContentBackground(.hidden)
         .contentMargins(.horizontal, NekoLayout.pageInset, for: .scrollContent)
-        .contentMargins(.vertical, 12, for: .scrollContent)
+        .contentMargins(.vertical, NekoSpace.md, for: .scrollContent)
         .frame(maxWidth: NekoLayout.pageWidth)
         .frame(maxWidth: .infinity)
         .overlay { if !hasVisibleTasks { emptyState } }
     }
-    private var emptyState: some View {
-        ContentUnavailableView {
-            Label(search.isEmpty ? "No tasks here yet" : "No matching tasks", systemImage: "bubble.left.and.bubble.right")
-        } description: {
-            Text(search.isEmpty ? "Ask Neko for work in Home. Tasks that match will appear here." : "No task matches “\(search)”.")
-        } actions: {
-            if search.isEmpty {
-                Button("Open Home") { model.requestedPage = .home }
-            } else {
+    @ViewBuilder private var emptyState: some View {
+        if search.isEmpty {
+            NekoEmptyState(reason: .nothingYet, title: "No tasks yet", message: "Describe what you want done in Home and Neko files it here.", block: true) {
+                Button("New task") { model.agentID = nil; model.requestedPage = .home; ComposerFocus.request() }.nekoButton(.primary)
+                    .help("New task (⌘N)")
+            }
+        } else {
+            NekoEmptyState(reason: .noMatches(search), block: true) {
                 Button("Clear search") { model.agentSearch = "" }
             }
         }
-        .padding(NekoLayout.pageInset)
+    }
+    private func stage(_ column: Column) -> TaskStage {
+        TaskStage(status: column.statuses.first ?? "")
+    }
+    /// The line under a row's title: only for tasks blocked on you.
+    private func note(_ task: JSONValue) -> String? {
+        let status = task["status"].string
+        guard TaskStage(status: status) == .needsYou else { return nil }
+        return status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task)
     }
     private func listRow(_ task: JSONValue) -> some View {
         let status = task["status"].string
-        let note = status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task)
-        return HStack(alignment: .top, spacing: 16) {
-            StatusGlyph(status: status, size: 16).padding(.top, 2).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 8) {
-                Text(task["title"].string).font(NekoFont.heading).lineSpacing(3).lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("\(workspaceName(task)) · \(friendlyTaskStatus(status))").font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1)
-                if let note {
-                    Text(note).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: 16)
-            Text(relative(task["updated_at_ms"].int)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
-                .fixedSize().padding(.top, 2)
+        let text = TaskText(task: task, snapshot: model.snapshot)
+        return NekoListRow(title: text.title, detail: text.detail, note: note(task), meta: relative(task["updated_at_ms"].int)) {
+            StatusGlyph(status: status, size: 14)
+        } trailing: {
+            // Which workspace is only news when every workspace is showing.
+            if model.selectedWorkspace == nil { NekoTag(workspaceName(task)) }
         }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
         .contextMenu { moveMenu(task) }
     }
 
     // MARK: Board
 
+    /// Columns drawn at full width; Done folds to a rail until opened.
+    private var expandedColumns: [Column] { Self.columns.filter { $0.id != "done" || doneExpanded } }
+
+    /// Shares the width between expanded columns, within the column limits.
+    static func columnWidth(available: CGFloat, columns: Int, rail: Bool) -> CGFloat {
+        let count = CGFloat(max(columns, 1))
+        let used = 2 * NekoLayout.pageInset + (count - 1) * NekoSpace.lg + (rail ? NekoLayout.boardRail + NekoSpace.lg : 0)
+        return min(max((available - used) / count, NekoLayout.boardColumnMin), NekoLayout.boardColumnMax)
+    }
+
     private var board: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: NekoLayout.sectionGap) {
-                ForEach(Self.columns, id: \.id) { column in
-                    let items = tasks(in: column)
-                    VStack(alignment: .leading, spacing: 18) {
-                        HStack(spacing: 8) {
-                            Circle().fill(column.color).frame(width: 6, height: 6).accessibilityHidden(true)
-                            Text(column.title).font(NekoFont.heading)
-                            Text(String(items.count)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
-                            Spacer(minLength: 0)
-                        }.padding(.horizontal, 6).frame(minHeight: 32)
-                        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
-                        ScrollView(.vertical) {
-                            LazyVStack(spacing: 14) {
-                                ForEach(items, id: \.recordID) { task in
-                                    card(task)
-                                        .draggable(task.recordID) { card(task).frame(width: 300).opacity(0.9) }
-                                }
-                                if items.isEmpty {
-                                    Text(dropTarget == column.id ? "Drop to move here" : "Nothing here")
-                                        .font(NekoFont.meta).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 112)
-                                }
-                            }.padding(.horizontal, 2).padding(.bottom, 12)
-                        }.scrollIndicators(.never)
+        GeometryReader { geometry in
+            let width = Self.columnWidth(available: geometry.size.width, columns: expandedColumns.count, rail: !doneExpanded)
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: NekoSpace.lg) {
+                    ForEach(expandedColumns, id: \.id) { column in
+                        boardColumn(column, width: width)
                     }
-                    .frame(width: 300).frame(maxHeight: .infinity, alignment: .top)
-                    // Columns are plain; only the one under a dragged card lights up.
-                    .background(dropTarget == column.id ? column.color.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous).strokeBorder(dropTarget == column.id ? column.color.opacity(0.5) : .clear))
-                    .dropDestination(for: String.self) { ids, _ in
-                        guard let id = ids.first else { return false }
-                        return move(id, to: column)
-                    } isTargeted: { inside in
-                        withNekoAnimation(.press) { dropTarget = inside ? column.id : (dropTarget == column.id ? nil : dropTarget) }
-                    }
+                    if !doneExpanded, let done = Self.columns.first(where: { $0.id == "done" }) { doneRail(done) }
                 }
-            }.padding(.horizontal, NekoLayout.pageInset).padding(.vertical, NekoLayout.sectionGap)
-        }.scrollIndicators(.never)
+                .padding(.horizontal, NekoLayout.pageInset).padding(.vertical, NekoLayout.sectionGap)
+                .frame(minHeight: geometry.size.height, alignment: .top)
+            }
+            .scrollIndicators(.automatic)
+        }
+    }
+    private func boardColumn(_ column: Column, width: CGFloat) -> some View {
+        let items = tasks(in: column)
+        return VStack(alignment: .leading, spacing: NekoSpace.sm) {
+            NekoListHeader(title: column.title, tone: NekoTone(stage: stage(column)), count: items.count) {
+                if column.id == "done" {
+                    Button { withNekoAnimation(.reveal) { doneExpanded = false } } label: {
+                        Image(systemName: "chevron.right").frame(minWidth: NekoLayout.minimumTarget, minHeight: NekoLayout.minimumTarget)
+                            .contentShape(Rectangle())
+                    }
+                    .nekoButton(.quiet).help("Fold Done into a rail").accessibilityLabel("Hide Done column")
+                }
+            }
+            .padding(.horizontal, NekoSpace.xs)
+            ScrollView(.vertical) {
+                LazyVStack(spacing: NekoSpace.sm) {
+                    ForEach(items, id: \.recordID) { task in
+                        card(task)
+                            .draggable(task.recordID) { card(task).frame(width: width).opacity(0.9) }
+                    }
+                    if items.isEmpty {
+                        Text(dropTarget == column.id ? "Drop to move here" : stage(column).emptyLine)
+                            .font(NekoFont.meta).foregroundStyle(N.text3).multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity, minHeight: NekoLayout.listRowTallHeight * 2)
+                    }
+                }.padding(.horizontal, NekoSpace.hair).padding(.bottom, NekoSpace.md)
+            }.scrollIndicators(.automatic)
+        }
+        .frame(width: width).frame(maxHeight: .infinity, alignment: .top)
+        .modifier(BoardDropTarget(column: column, dropTarget: $dropTarget, move: move))
+    }
+    /// Done, folded: its count and a way to open it. Still a drop target.
+    private func doneRail(_ column: Column) -> some View {
+        let count = tasks(in: column).count
+        return Button { withNekoAnimation(.reveal) { doneExpanded = true } } label: {
+            VStack(spacing: NekoSpace.sm) {
+                Image(systemName: "chevron.left").font(NekoFont.of(.small, weight: .semibold)).foregroundStyle(N.text3)
+                StatusGlyph(status: "Completed", size: 14).accessibilityHidden(true)
+                Text(String(count)).font(NekoFont.caption.monospacedDigit()).foregroundStyle(N.text3)
+            }
+            .padding(.vertical, NekoSpace.sm)
+            .frame(width: NekoLayout.boardRail).frame(maxHeight: .infinity, alignment: .top)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show Done")
+        .accessibilityLabel("Done, \(Self.taskCount(count)). Show column")
+        .modifier(BoardDropTarget(column: column, dropTarget: $dropTarget, move: move))
     }
     private func card(_ task: JSONValue) -> some View {
         let status = task["status"].string
+        let text = TaskText(task: task, snapshot: model.snapshot)
         return Button { selected = task.recordID } label: {
-            let text = TaskText(task: task, snapshot: model.snapshot)
             TicketCard(id: text.sourceTitle ?? text.title, title: text.title, detail: text.detail, status: status, updated: relative(task["updated_at_ms"].int), highlighted: selected == task.recordID, note: status == "Failed" ? TicketPresentation.stopReason(task) : TicketPresentation.waitingReason(task))
         }
         .buttonStyle(.plain)
         .contextMenu { moveMenu(task) }
-        .accessibilityLabel("\(task["title"].string), \(workspaceName(task)), \(friendlyTaskStatus(status))")
+        // Starts with the visible title, so Voice Control can say what it sees.
+        .accessibilityLabel("\(text.title), \(workspaceName(task)), \(friendlyTaskStatus(status))")
         .accessibilityHint("Open the task. Drag to another column to move it.")
     }
 
@@ -312,5 +350,25 @@ struct TicketsView: View {
     private func relative(_ ms: Int) -> String {
         guard ms > 0 else { return "" }
         return Date(timeIntervalSince1970: Double(ms) / 1000).formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
+    }
+}
+
+/// A board column (or the folded Done rail) that accepts a dragged task.
+/// Plain at rest; only the one under a dragged card lights up.
+private struct BoardDropTarget: ViewModifier {
+    let column: TicketsView.Column
+    @Binding var dropTarget: String?
+    let move: (String, TicketsView.Column) -> Bool
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous)
+        content
+            .background(dropTarget == column.id ? column.color.opacity(0.08) : .clear, in: shape)
+            .overlay(shape.strokeBorder(dropTarget == column.id ? column.color.opacity(0.5) : .clear))
+            .dropDestination(for: String.self) { ids, _ in
+                guard let id = ids.first else { return false }
+                return move(id, column)
+            } isTargeted: { inside in
+                withNekoAnimation(.press) { dropTarget = inside ? column.id : (dropTarget == column.id ? nil : dropTarget) }
+            }
     }
 }

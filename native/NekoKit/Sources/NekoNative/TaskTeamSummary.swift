@@ -17,15 +17,19 @@ struct TaskTeamSummary {
             }
     }
 
+    // The same buckets as `TaskStage`, so a team never disagrees with the board.
     var working: Int { count(["Planning", "Building", "Reviewing"]) }
     var waiting: Int { count(["Queued"]) }
-    var needsYou: Int { count(["AwaitingApproval", "ReadyForReview"]) }
+    /// A decision only you can make: an approval, an answer, or a failure.
+    var needsYou: Int { count(["AwaitingApproval", "Failed"]) }
+    /// Finished and checked, waiting for you to look.
+    var toReview: Int { count(["ReadyForReview"]) }
     var completed: Int { count(["Completed"]) }
-    var stopped: Int { count(["Failed", "Cancelled"]) }
+    var stopped: Int { count(["Cancelled"]) }
     var label: String { children.isEmpty ? "Neko" : "\(children.count) \(children.count == 1 ? "subtask" : "subtasks")" }
     var activity: String {
-        [(working, "working"), (waiting, "waiting"), (needsYou, "need you"),
-         (completed, "done"), (stopped, "stopped")]
+        [(working, "working"), (waiting, "waiting"), (needsYou, "need you"), (toReview, "to review"),
+         (completed, "done"), (stopped, "cancelled")]
             .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
     }
 
