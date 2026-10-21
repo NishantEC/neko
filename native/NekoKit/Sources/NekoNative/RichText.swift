@@ -158,10 +158,24 @@ enum NativeAttachmentPath {
     }
 }
 
-struct ReadableText: View {
+/// Parsed markdown, remembered by text. A chat re-renders far more often
+/// than its messages change, and parsing a long reply on every pass was
+/// visible as stutter.
+@MainActor enum MarkdownCache {
+    private static var blocks: [String: [NativeMarkdownBlock]] = [:]
+    static func parsed(_ text: String) -> [NativeMarkdownBlock] {
+        if let cached = blocks[text] { return cached }
+        let parsed = NativeMarkdown.parse(text)
+        if blocks.count >= 256 { blocks.removeAll(keepingCapacity: true) }
+        blocks[text] = parsed
+        return parsed
+    }
+}
+
+struct ReadableText: View, Equatable {
     let text: String
     var body: some View {
-        let blocks = NativeMarkdown.parse(text)
+        let blocks = MarkdownCache.parsed(text)
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 Group {
