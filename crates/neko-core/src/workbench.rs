@@ -13,6 +13,11 @@ const SETTING: &str = "workbench_snapshot_v1";
 /// a second during a watch and every few minutes from probe replays: the
 /// daemon's remaining idle disk writes after the 2026-10-18 fixes.
 const RECEIPTS: &str = "workbench_mcp_receipts_v1";
+/// What GitHub last reported for each task's pull request, by task id, in
+/// its own deferred row for the same reason: the watch records the base
+/// branch's tip, which moves whenever main does, and inside the snapshot
+/// every pass rewrote the whole row (about 1 MB/s while it ran).
+const PR_STATUS: &str = "workbench_pull_request_status_v1";
 const RESUMED: &str = "Resumed after a daemon restart";
 const MAX_RESTART_RESUMES: usize = 2;
 pub const MAX_CONTENT_BYTES: usize = 32_768;
@@ -205,6 +210,15 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     if let Some(json) = db.get_setting(RECEIPTS).map_err(|e| e.to_string())? {
         snapshot.mcp.receipts = serde_json::from_str(&json).map_err(|e| format!("Cannot read tool receipts: {e}"))?;
     }
+    if let Some(json) = db.get_setting(PR_STATUS).map_err(|e| e.to_string())? {
+        let mut statuses: std::collections::HashMap<String, neko_protocol::workbench::PrStatus> =
+            serde_json::from_str(&json).map_err(|e| format!("Cannot read pull request status: {e}"))?;
+        for task in &mut snapshot.tasks {
+            if let (Some(pr), Some(status)) = (task.pull_request.as_mut(), statuses.remove(&task.id)) {
+                pr.status = Some(status);
+            }
+        }
+    }
     let migrated = crate::mcp_host::store::migrate(&mut snapshot)?;
     validate(&snapshot)?;
     if migrated {
@@ -266,7 +280,14 @@ pub fn save_deferred(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
 /// them, which only makes those observations unproven, as pruning already can.
 fn save_receipts(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
     let json = serde_json::to_string(&snapshot.mcp.receipts).map_err(|e| e.to_string())?;
-    db.set_setting_deferred(RECEIPTS, &json).map_err(|e| e.to_string())
+    db.set_setting_deferred(RECEIPTS, &json).map_err(|e| e.to_string())?;
+    // Ordered by task id so an unchanged set serializes identically and
+    // `Db` skips the write.
+    let statuses: std::collections::BTreeMap<&str, &neko_protocol::workbench::PrStatus> = snapshot.tasks.iter()
+        .filter_map(|t| t.pull_request.as_ref()?.status.as_ref().map(|s| (t.id.as_str(), s)))
+        .collect();
+    let json = serde_json::to_string(&statuses).map_err(|e| e.to_string())?;
+    db.set_setting_deferred(PR_STATUS, &json).map_err(|e| e.to_string())
 }
 
 /// The scheduler's liveness time. It changes every tick, so it lives in
@@ -295,6 +316,9 @@ fn encode(snapshot: &Snapshot) -> Result<String, String> {
     compacted.skills = Default::default();
     compacted.import_preview = Default::default();
     compacted.mcp.receipts.clear();
+    for task in &mut compacted.tasks {
+        if let Some(pr) = task.pull_request.as_mut() { pr.status = None; }
+    }
     for task in &mut compacted.tasks {
         for event in &mut task.events {
             event.message = bounded_event_message(&event.role, &event.message);
@@ -1831,6 +1855,29 @@ mod tests {
         db.flush_deferred().unwrap();
         assert_eq!(db.setting_writes(), before + 1, "one small row, written once");
         assert!(!db.get_setting(SETTING).unwrap().unwrap().contains("watch:1"));
+    }
+
+    #[test]
+    fn what_github_reports_never_rewrites_the_task_store() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let id = task(&db, &ws).id;
+        let mut state = load(&db).unwrap();
+        state.tasks.iter_mut().find(|t| t.id == id).unwrap().pull_request = Some(neko_protocol::workbench::PullRequest {
+            url: "https://github.com/a/b/pull/1".into(), branch: "b".into(), ..Default::default() });
+        save(&db, &state).unwrap();
+        db.flush_deferred().unwrap();
+        let stored = db.get_setting(SETTING).unwrap();
+        let mut state = load(&db).unwrap();
+        state.tasks.iter_mut().find(|t| t.id == id).unwrap().pull_request.as_mut().unwrap().status =
+            Some(neko_protocol::workbench::PrStatus { state: "OPEN".into(), base_head: "main-moved".into(), ..Default::default() });
+        save_deferred(&db, &state).unwrap();
+        db.flush_deferred().unwrap();
+        assert_eq!(db.get_setting(SETTING).unwrap(), stored, "the snapshot row is untouched");
+        let back = load(&db).unwrap();
+        let status = back.tasks.iter().find(|t| t.id == id).unwrap().pull_request.as_ref().unwrap().status.clone().unwrap();
+        assert_eq!(status.base_head, "main-moved", "and it survives a reload");
     }
 
     #[test]
