@@ -170,6 +170,36 @@ pub fn run_with_bridge(
     run_configured(&resolve_codex()?, spec, Some(bridge), cancel, on_event)
 }
 
+/// Event that empties the text a streaming run has shown so far: a new
+/// assistant message is starting. The prefix is a control character, so no
+/// agent prose can collide with it (same idea as `SESSION_EVENT`).
+pub const TEXT_RESET_EVENT: &str = "\u{1}reset";
+/// Prefix of an event carrying the next piece of the assistant's reply text.
+pub const TEXT_DELTA_EVENT: &str = "\u{1}delta ";
+
+/// `run_with_bridge` that also reports the reply as it is written, as
+/// `TEXT_RESET_EVENT` / `TEXT_DELTA_EVENT` events. Claude Code reports tokens;
+/// Codex `exec` reports each completed message. The returned answer is the
+/// same as without streaming and stays authoritative.
+pub fn run_with_bridge_streaming(
+    spec: &RunSpec,
+    bridge: &BridgeConfig,
+    cancel: &AtomicBool,
+    on_event: impl FnMut(String),
+) -> Result<String, String> {
+    run_configured_streaming(&resolve_codex()?, spec, Some(bridge), &Session::Ephemeral, cancel, on_event, false, true)
+}
+
+/// `run` that also reports the reply as it is written; see
+/// `run_with_bridge_streaming`.
+pub fn run_streaming(
+    spec: &RunSpec,
+    cancel: &AtomicBool,
+    on_event: impl FnMut(String),
+) -> Result<String, String> {
+    run_configured_streaming(&resolve_codex()?, spec, None, &Session::Ephemeral, cancel, on_event, false, true)
+}
+
 /// How a run relates to a ticket's saved agent session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Session {
@@ -258,9 +288,25 @@ fn run_configured_session(
     bridge: Option<&BridgeConfig>,
     session: &Session,
     cancel: &AtomicBool,
-    mut on_event: impl FnMut(String),
+    on_event: impl FnMut(String),
     extraction: bool,
 ) -> Result<String, String> {
+    run_configured_streaming(executable, spec, bridge, session, cancel, on_event, extraction, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_configured_streaming(
+    executable: &Path,
+    spec: &RunSpec,
+    bridge: Option<&BridgeConfig>,
+    session: &Session,
+    cancel: &AtomicBool,
+    mut on_event: impl FnMut(String),
+    extraction: bool,
+    stream_text: bool,
+) -> Result<String, String> {
+    // Extraction never streams: it has no reader for a partial answer.
+    let stream_text = stream_text && !extraction;
     crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
     if spec.prompt.trim().is_empty() || spec.prompt.len() > MAX_PROMPT {
         return Err(format!(
@@ -278,7 +324,7 @@ fn run_configured_session(
         if extraction && (spec.writable || bridge.is_some()) {
             return Err("Extraction cannot receive write or tool authority".into());
         }
-        return cli_workers::run(agent, spec, &directory, bridge, cancel, &mut on_event, extraction);
+        return cli_workers::run(agent, spec, &directory, bridge, cancel, &mut on_event, extraction, stream_text);
     }
     let mut command = Command::new(executable);
     command.arg("exec");
@@ -421,6 +467,12 @@ fn run_configured_session(
                         return Err("Codex answer exceeded the output limit".into());
                     }
                     answer = Some(text.to_owned());
+                    if stream_text {
+                        // `exec --json` has no token deltas: show each
+                        // finished message whole, replacing the last one.
+                        on_event(TEXT_RESET_EVENT.into());
+                        on_event(format!("{TEXT_DELTA_EVENT}{text}"));
+                    }
                     on_event(bounded_prose_event(text));
                 }
             }
@@ -3437,6 +3489,26 @@ printf '%s\n' '{"type":"turn.completed"}'
         assert!(args.contains("extends=\":read-only\""));
         assert!(!args.contains("--dangerously-bypass-approvals-and-sandbox"));
         assert!(run_configured_session(&executable, &spec, None, &Session::Resume("bad id;rm".into()), &AtomicBool::new(false), |_| {}, false).is_err());
+    }
+
+    #[test]
+    fn codex_streams_each_finished_message_whole_only_when_asked() {
+        let (_temp, executable, spec) = fixture(
+            r#"
+cat > /dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"Looking."}}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"All done."}}'
+printf '%s\n' '{"type":"turn.completed"}'
+"#,
+        );
+        let mut events = Vec::new();
+        let answer = run_configured_streaming(&executable, &spec, None, &Session::Ephemeral, &AtomicBool::new(false), |e| events.push(e), false, true).unwrap();
+        assert_eq!(answer, "All done.");
+        let streamed: Vec<&str> = events.iter().filter(|e| e.starts_with('\u{1}')).map(String::as_str).collect();
+        assert_eq!(streamed, [TEXT_RESET_EVENT, "\u{1}delta Looking.", TEXT_RESET_EVENT, "\u{1}delta All done."]);
+        let mut quiet = Vec::new();
+        run_configured_streaming(&executable, &spec, None, &Session::Ephemeral, &AtomicBool::new(false), |e| quiet.push(e), false, false).unwrap();
+        assert!(!quiet.iter().any(|e| e.starts_with('\u{1}')));
     }
 
     #[test]

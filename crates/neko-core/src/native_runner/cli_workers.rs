@@ -121,7 +121,7 @@ pub(crate) fn sandbox_profile(agent: Agent, home: &Path, temp: &Path) -> Result<
 }
 
 
-pub(crate) fn claude_args(spec: &RunSpec, bridge: Option<&BridgeConfig>, extraction: bool) -> Result<Vec<String>, String> {
+pub(crate) fn claude_args(spec: &RunSpec, bridge: Option<&BridgeConfig>, extraction: bool, stream_text: bool) -> Result<Vec<String>, String> {
     crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
     let mut args: Vec<String> = ["-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--permission-mode"]
         .iter()
@@ -134,6 +134,10 @@ pub(crate) fn claude_args(spec: &RunSpec, bridge: Option<&BridgeConfig>, extract
     args.push(if extraction { "dontAsk" } else { "bypassPermissions" }.into());
     if !spec.runtime.model.is_empty() && spec.runtime.model != "default" {
         args.extend(["--model".into(), spec.runtime.model.clone()]);
+    }
+    // One extra line per token: only a run whose reply is shown live pays it.
+    if stream_text && !extraction {
+        args.push("--include-partial-messages".into());
     }
     if extraction {
         args.extend(["--setting-sources".into(), String::new(), "--strict-mcp-config".into(), "--disable-slash-commands".into()]);
@@ -189,11 +193,19 @@ pub(crate) struct Parser {
     pub completed: bool,
     last_text: Option<String>,
     stall: super::StallGuard,
+    /// Report the reply as `TEXT_RESET_EVENT` / `TEXT_DELTA_EVENT` events.
+    stream_text: bool,
 }
 
 impl Parser {
     pub(crate) fn new(agent: Agent, extraction: bool) -> Self {
-        Self { agent, extraction, commands: Default::default(), answer: None, failure: None, completed: false, last_text: None, stall: super::StallGuard::new() }
+        Self { agent, extraction, commands: Default::default(), answer: None, failure: None, completed: false, last_text: None, stall: super::StallGuard::new(), stream_text: false }
+    }
+
+    /// Also report the reply text as it is written (never for extraction).
+    pub(crate) fn streaming(mut self, stream_text: bool) -> Self {
+        self.stream_text = stream_text && !self.extraction;
+        self
     }
 
     pub(crate) fn line(&mut self, line: &[u8], on_event: &mut dyn FnMut(String)) -> Result<(), String> {
@@ -262,6 +274,20 @@ impl Parser {
                         (Some(code), Some(body))
                     }).unwrap_or((is_error.then_some(1), None));
                     self.receipt(command.as_deref(), exit_code, body, on_event)?;
+                }
+            }
+            Some("stream_event") if self.stream_text && value["parent_tool_use_id"].is_null() => {
+                // Raw API events of the main session only. Each assistant
+                // message replaces the last, matching what `result` carries.
+                let event = &value["event"];
+                match event["type"].as_str() {
+                    Some("message_start") => on_event(super::TEXT_RESET_EVENT.into()),
+                    Some("content_block_delta") if event["delta"]["type"] == "text_delta" => {
+                        if let Some(text) = event["delta"]["text"].as_str().filter(|t| !t.is_empty()) {
+                            on_event(format!("{}{text}", super::TEXT_DELTA_EVENT));
+                        }
+                    }
+                    _ => {}
                 }
             }
             Some("result") => {
@@ -366,6 +392,7 @@ fn worker_command(agent: Agent, executable: &Path, writable: bool, home: &Path, 
     Ok(command)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run(
     agent: Agent,
     spec: &RunSpec,
@@ -374,6 +401,7 @@ pub(crate) fn run(
     cancel: &AtomicBool,
     on_event: &mut dyn FnMut(String),
     extraction: bool,
+    stream_text: bool,
 ) -> Result<String, String> {
     crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
     if extraction && (spec.writable || bridge.is_some()) {
@@ -396,7 +424,7 @@ pub(crate) fn run(
     let mut command = worker_command(agent, &executable, spec.writable, &home, &scratch)?;
     match agent {
         Agent::Claude => {
-            command.args(claude_args(spec, bridge, extraction)?);
+            command.args(claude_args(spec, bridge, extraction, stream_text)?);
         }
         Agent::OpenCode => {
             let config = scratch.join("opencode.json");
@@ -429,7 +457,7 @@ pub(crate) fn run(
         command.env_remove(name);
     }
     let prompt = if extraction { spec.prompt.clone() } else { prompt_with_git(&spec.prompt) };
-    let mut parser = Parser::new(agent, extraction);
+    let mut parser = Parser::new(agent, extraction).streaming(stream_text);
     let mut pending: Vec<u8> = Vec::new();
     let mut oversized = false;
     let output = execute(command, prompt.as_bytes(), cancel, spec.timeout, |bytes| {
@@ -483,7 +511,7 @@ mod tests {
     #[test]
     fn agents_get_the_users_whole_claude_code_and_extraction_gets_nothing() {
         for writable in [false, true] {
-            let args = claude_args(&spec(writable), None, false).unwrap();
+            let args = claude_args(&spec(writable), None, false, false).unwrap();
             assert!(args.windows(2).any(|w| w == ["--model", "sonnet"]));
             assert!(args.windows(2).any(|w| w == ["--permission-mode", "bypassPermissions"]));
             // No tool list, no settings isolation: their settings, CLAUDE.md,
@@ -492,18 +520,18 @@ mod tests {
                 assert!(!args.iter().any(|a| a == isolating), "{isolating} must not limit an agent");
             }
         }
-        let extract = claude_args(&spec(false), None, true).unwrap();
+        let extract = claude_args(&spec(false), None, true, false).unwrap();
         assert!(extract.windows(2).any(|w| w[0] == "--tools" && w[1].is_empty()));
         assert!(extract.windows(2).any(|w| w[0] == "--setting-sources" && w[1].is_empty()));
         assert!(extract.contains(&"--strict-mcp-config".to_string()));
         assert!(extract.windows(2).any(|w| w == ["--permission-mode", "dontAsk"]));
         let bridge = BridgeConfig { executable: "/bin/neko-daemon".into(), socket: "/s".into(), token: "secret".into(), sources_through_bridge: false };
-        let bridged = claude_args(&spec(false), Some(&bridge), false).unwrap();
+        let bridged = claude_args(&spec(false), Some(&bridge), false, false).unwrap();
         assert!(bridged.iter().any(|a| a.contains("--mcp-bridge")), "Neko's tools are added alongside the user's");
         assert!(!bridged.iter().any(|a| a.contains("secret")), "the token never appears in argv");
         assert!(!bridged.contains(&"--strict-mcp-config".to_string()), "agents keep the user's own servers");
         let watch = BridgeConfig { sources_through_bridge: true, ..bridge };
-        assert!(claude_args(&spec(false), Some(&watch), false).unwrap().contains(&"--strict-mcp-config".to_string()), "a watch reads sources only through Neko");
+        assert!(claude_args(&spec(false), Some(&watch), false, false).unwrap().contains(&"--strict-mcp-config".to_string()), "a watch reads sources only through Neko");
     }
 
     #[test]
@@ -625,6 +653,48 @@ mod tests {
     }
 
     #[test]
+    fn claude_partial_messages_become_text_events_and_the_result_stays_authoritative() {
+        let lines = [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Let me "}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"look."}}}"#,
+            r#"{"type":"stream_event","parent_tool_use_id":"sub1","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"subagent"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"a\""}}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Let me look."}]}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m2"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Final."}}}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"result":"Final."}"#,
+        ];
+        let mut events = Vec::new();
+        let mut p = Parser::new(Agent::Claude, false).streaming(true);
+        for l in lines { p.line(l.as_bytes(), &mut |e| events.push(e)).unwrap(); }
+        let streamed: Vec<&String> = events.iter().filter(|e| e.starts_with('\u{1}')).collect();
+        assert_eq!(streamed, [
+            &crate::native_runner::TEXT_RESET_EVENT.to_string(),
+            &format!("{}Let me ", crate::native_runner::TEXT_DELTA_EVENT),
+            &format!("{}look.", crate::native_runner::TEXT_DELTA_EVENT),
+            &crate::native_runner::TEXT_RESET_EVENT.to_string(),
+            &format!("{}Final.", crate::native_runner::TEXT_DELTA_EVENT),
+        ]);
+        assert_eq!(p.finish().unwrap(), "Final.");
+        // Without streaming, or for extraction, the same lines produce no text events.
+        for (extraction, streaming) in [(false, false), (true, true)] {
+            let mut events = Vec::new();
+            let mut p = Parser::new(Agent::Claude, extraction).streaming(streaming);
+            for l in lines { p.line(l.as_bytes(), &mut |e| events.push(e)).unwrap(); }
+            assert!(!events.iter().any(|e| e.starts_with('\u{1}')));
+        }
+    }
+
+    #[test]
+    fn partial_messages_are_requested_only_when_streaming_and_never_for_extraction() {
+        assert!(!claude_args(&spec(false), None, false, false).unwrap().contains(&"--include-partial-messages".to_string()));
+        assert!(claude_args(&spec(false), None, false, true).unwrap().contains(&"--include-partial-messages".to_string()));
+        assert!(!claude_args(&spec(false), None, true, true).unwrap().contains(&"--include-partial-messages".to_string()));
+    }
+
+    #[test]
     fn opencode_events_become_receipts_and_an_answer() {
         let mut events = Vec::new();
         let mut p = Parser::new(Agent::OpenCode, false);
@@ -663,7 +733,7 @@ mod tests {
         };
         let mut events = Vec::new();
         let agent = Agent::for_provider(provider).unwrap();
-        let answer = run(agent, &spec, &repo, None, &AtomicBool::new(false), &mut |e| events.push(e), false);
+        let answer = run(agent, &spec, &repo, None, &AtomicBool::new(false), &mut |e| events.push(e), false, false);
         eprintln!("answer: {answer:?}");
         for e in events.iter().filter(|e| e.starts_with("VERIFICATION_COMMAND")) { eprintln!("{e}"); }
         assert_eq!(fs::read_to_string(repo.join("hello.txt")).unwrap().trim(), "hi");
