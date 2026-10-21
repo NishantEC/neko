@@ -3,8 +3,8 @@
 ## Current standalone workspace (2026-09-24)
 
 The native workspace now follows system appearance, with Light / Dark overrides
-in Settings and the sidebar. Shared typography uses 28pt page introductions and
-15pt body text, with 32pt page insets and bounded 880pt management / 760pt chat
+in Settings and the sidebar. Shared typography uses 32pt rounded page introductions and
+15pt body text, with 40pt page insets and bounded 880pt management / 760pt chat
 content. Native sidebar and toolbar keep platform materials; the floating chat
 composer uses Liquid Glass on macOS 26 and a material fallback below 26. Content
 and evidence stay opaque. Preserve `stableSplitPane`, the native top safe area,
