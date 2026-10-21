@@ -44,6 +44,25 @@ import NekoKit
         }
     }
 
+    /// Home with a finished turn (work log folded, "Worked for") and a reply
+    /// still streaming (partial Markdown, live status line). Needs NEKO_RENDER_SNAPSHOT.
+    func testRenderChat() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let directory = env["NEKO_RENDER_DIR"], let snapshotPath = env["NEKO_RENDER_SNAPSHOT"] else {
+            throw XCTSkip("Set NEKO_RENDER_DIR and NEKO_RENDER_SNAPSHOT to render the chat")
+        }
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let snapshot = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: URL(fileURLWithPath: snapshotPath)))
+        for scheme in [ColorScheme.dark, .light] {
+            let model = AppModel(transport: { _ in .object([:]) })
+            model.snapshot = snapshot
+            model.loadingSetup = false
+            model.onboarding = false
+            try render(WorkspaceView(model: model, page: .home), size: CGSize(width: 1100, height: 900), scheme: scheme,
+                       to: URL(fileURLWithPath: directory).appendingPathComponent("chat-\(scheme == .dark ? "dark" : "light").png"))
+        }
+    }
+
     /// A real ticket page, when NEKO_RENDER_SNAPSHOT names a saved workbench
     /// snapshot and NEKO_RENDER_TICKET a ticket in it. NEKO_RENDER_PATCH may
     /// name a diff to serve as its changes. Nothing reaches the daemon.
