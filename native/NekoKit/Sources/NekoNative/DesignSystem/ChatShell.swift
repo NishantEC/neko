@@ -9,18 +9,19 @@ import SwiftUI
 /// without touching every page.
 enum NekoChat {
     /// The column: messages, rich blocks and the composer dock.
-    static let chatWidth: CGFloat = 720
-    /// Paragraphs, lists, quotes and headings; about 85 characters at 15pt.
-    static let proseWidth: CGFloat = 640
+    static let chatWidth: CGFloat = 728
+    /// Paragraphs, lists, quotes and headings: the whole column, as 14pt text
+    /// at 728pt sets about 105 characters a line.
+    static let proseWidth: CGFloat = 728
     /// Before each of your turns: a new exchange.
-    static let turnGap: CGFloat = 32
+    static let turnGap: CGFloat = 48
     /// From your message to the reply, and between items inside one exchange.
-    static let replyGap: CGFloat = 12
+    static let replyGap: CGFloat = 24
     /// Between the parts of one reply (paragraph to code block, and so on).
     static let blockGap: CGFloat = 16
 
-    static let bubbleInsetX: CGFloat = 14
-    static let bubbleInsetY: CGFloat = 10
+    static let bubbleInsetX: CGFloat = 16
+    static let bubbleInsetY: CGFloat = 12
     /// Your bubble never takes more than this share of the column.
     static let bubbleFraction: CGFloat = 0.8
     /// A sent message rests this far below the top edge while the reply is written under it.
@@ -53,8 +54,19 @@ enum NekoChat {
     /// Inline images: never taller than this.
     static let imageHeight: CGFloat = 320
 
-    /// Code, terminal output and diffs: 12pt mono beside 15pt prose read as fine print.
-    static let code = Font.system(size: NekoTextStep.meta.rawValue, design: .monospaced)
+    /// Table cells: 12pt on a 19.5pt line, padded 12 × 8, hairlines between rows.
+    static let tableCellX: CGFloat = 12
+    static let tableCellY: CGFloat = 8
+    static let tableLeading: CGFloat = 4
+    /// The row under an answer: copy and time, 12pt muted.
+    static let footerHeight: CGFloat = 24
+    /// The work log's header row, and the indent of its summary under it.
+    static let workHeader: CGFloat = 32
+    static let workIndent: CGFloat = 28
+
+    /// Code, terminal output and diffs, and inline code in prose: 12pt mono.
+    static let code = Font.system(size: NekoTextStep.caption.rawValue, design: .monospaced)
+    static let inlineCode = code
     static let codeLineSpacing: CGFloat = 3
     /// The composer's NSTextView and its placeholder.
     static var editor: NSFont { NSFont.systemFont(ofSize: NekoTextStep.body.rawValue) }
@@ -88,7 +100,7 @@ struct ChatBubble<Content: View>: View {
         ChatBubbleLane {
             VStack(alignment: .trailing, spacing: NekoSpace.xxs) {
                 content()
-                    .font(NekoFont.chat).lineSpacing(NekoLeading.body)
+                    .font(NekoFont.chat).lineSpacing(NekoLeading.reading)
                     .multilineTextAlignment(.leading)
                     .padding(.horizontal, NekoChat.bubbleInsetX).padding(.vertical, NekoChat.bubbleInsetY)
                     .background {
@@ -261,9 +273,10 @@ struct ChatTrayButton {
     let action: () -> Void
 }
 
-/// A decision inside the composer glass: a tool request, a plan to approve,
-/// a question from the planner. It sits where your hands are and owns its
-/// keyboard shortcuts; nothing in the transcript repeats them.
+/// A decision inside the composer's own container, as its top row: a tool
+/// request, a plan to approve, a question from the planner. It sits where your
+/// hands are and owns its keyboard shortcuts; nothing in the transcript
+/// repeats them. The composer draws the hairline under it.
 struct ChatDockTray: View {
     let symbol: String
     var tint: Color = NekoStyle.amber
@@ -283,7 +296,7 @@ struct ChatDockTray: View {
             HStack(alignment: .firstTextBaseline, spacing: NekoSpace.sm) {
                 Image(systemName: symbol).font(NekoFont.body).foregroundStyle(tint).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: NekoSpace.hair) {
-                    title.font(NekoFont.heading).lineLimit(1).truncationMode(.tail).help(announcement)
+                    title.font(NekoFont.of(.callout, weight: .semibold)).lineLimit(1).truncationMode(.tail).help(announcement)
                     if !detail.isEmpty {
                         if let fullDetail, fullDetail != detail {
                             Button { withNekoAnimation(.reveal) { expanded.toggle() } } label: {
@@ -308,7 +321,6 @@ struct ChatDockTray: View {
             }
             .controlSize(.small)
             .disabled(busy)
-            Hairline().padding(.horizontal, -NekoSpace.md)
         }
         .accessibilityElement(children: .contain)
         .accessibilitySortPriority(1)
@@ -328,6 +340,42 @@ struct ChatDockTray: View {
             }
         }
         .keyboardShortcut(spec.shortcut)
+    }
+}
+
+// MARK: - Message footer
+
+/// Under a finished reply: copy and the time it arrived, 12pt and muted. The
+/// height is always reserved, so nothing moves when the reply settles.
+struct ChatMessageFooter: View {
+    let text: String
+    var timestamp: Int = 0
+    @State private var copied = false
+    var body: some View {
+        HStack(spacing: NekoSpace.sm) {
+            Button {
+                NSPasteboard.general.clearContents()
+                copied = NSPasteboard.general.setString(text, forType: .string)
+            } label: {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc").font(NekoFont.caption)
+                    .frame(width: NekoChat.footerHeight, height: NekoChat.footerHeight).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(copied ? "Copied" : "Copy the reply").accessibilityLabel(copied ? "Copied" : "Copy the reply")
+            .task(id: copied) {
+                guard copied else { return }
+                try? await Task.sleep(for: .seconds(1.5))
+                copied = false
+            }
+            if timestamp > 0 {
+                let date = Date(timeIntervalSince1970: Double(timestamp) / 1000)
+                Text(date, format: .dateTime.hour().minute()).monospacedDigit()
+                    .help(date.formatted(date: .abbreviated, time: .shortened))
+            }
+        }
+        .font(NekoFont.caption).foregroundStyle(N.text4)
+        .frame(height: NekoChat.footerHeight)
+        .padding(.leading, -NekoSpace.xxs)
     }
 }
 

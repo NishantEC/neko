@@ -174,9 +174,31 @@ enum NativeAttachmentPath {
     }
     static func inline(_ text: String) -> AttributedString {
         if let cached = runs[text] { return cached }
-        let parsed = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+        var parsed = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+        // Inline code is a 12pt mono chip with a faint fill. SwiftUI text has
+        // no per-run border or radius, so the fill is all that can be drawn.
+        let code = parsed.runs.filter { $0.inlinePresentationIntent?.contains(.code) == true }.map(\.range)
+        for range in code {
+            parsed[range].font = NekoChat.inlineCode
+            parsed[range].backgroundColor = N.selected
+        }
         if runs.count >= 1024 { runs.removeAll(keepingCapacity: true) }
         runs[text] = parsed
+        return parsed
+    }
+    /// A table cell's inline text: the same runs, but body cells are never bold.
+    static func tableCell(_ text: String) -> AttributedString {
+        let key = "cell:" + text
+        if let cached = runs[key] { return cached }
+        var parsed = inline(text)
+        let strong = parsed.runs.filter { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true }.map { ($0.range, $0.inlinePresentationIntent!) }
+        for (range, intent) in strong {
+            var plain = intent
+            plain.remove(.stronglyEmphasized)
+            parsed[range].inlinePresentationIntent = plain
+        }
+        if runs.count >= 1024 { runs.removeAll(keepingCapacity: true) }
+        runs[key] = parsed
         return parsed
     }
 }
@@ -226,12 +248,12 @@ struct ReadableText: View, Equatable {
                 ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") ? .systemAction : .discarded
             })
     }
-    /// Three distinct levels: 22, 17, then body-size semibold.
+    /// Three levels, all semibold: 17, 15, then the 14pt body size.
     static func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: NekoFont.title
-        case 2: NekoFont.of(.subtitle, weight: .semibold)
-        default: NekoFont.heading
+        case 1: NekoFont.of(.subtitle, weight: .semibold)
+        case 2: NekoFont.of(.body, weight: .semibold)
+        default: NekoFont.of(.callout, weight: .semibold)
         }
     }
     static func headingSpace(_ level: Int) -> CGFloat {

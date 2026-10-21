@@ -47,12 +47,12 @@ struct ChatActionCard: View {
             HStack(alignment: .firstTextBaseline, spacing: NekoSpace.sm) {
                 Image(systemName: symbol(status)).foregroundStyle(tint(status)).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: NekoSpace.xxs) {
-                    Text("\(Self.verb(action["kind"].string)) · \(taskTitle ?? "A task that no longer exists")").font(NekoFont.heading).lineLimit(2)
+                    Text("\(Self.verb(action["kind"].string)) · \(taskTitle ?? "A task that no longer exists")").font(NekoFont.of(.callout, weight: .semibold)).lineLimit(2)
                     if action["kind"].string == "merge" {
-                        Text("Into: \(mergeTarget ?? "a task that no longer exists")").font(NekoFont.body).foregroundStyle(N.text2)
+                        Text("Into: \(mergeTarget ?? "a task that no longer exists")").font(NekoFont.meta).foregroundStyle(N.text2)
                     } else if !action["text"].string.isEmpty {
                         Text(action["kind"].string == "rename" ? "New name: \(action["text"].string)" : "“\(action["text"].string)”")
-                            .font(NekoFont.body).foregroundStyle(N.text2).textSelection(.enabled)
+                            .font(NekoFont.meta).lineSpacing(NekoLeading.tight).foregroundStyle(N.text2).textSelection(.enabled)
                     }
                     if status == "Failed" && !action["note"].string.isEmpty {
                         Text(action["note"].string).font(NekoFont.meta).foregroundStyle(NekoStyle.amber)
@@ -74,7 +74,9 @@ struct ChatActionCard: View {
         }
         .padding(NekoChat.blockInset)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .nekoCard(padding: 0, radius: NekoRadius.lg)
+        // A hairline outline and no fill or shadow: the card is part of the
+        // conversation, not a surface lifted above it.
+        .overlay { RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous).strokeBorder(N.line) }
         .accessibilityElement(children: .contain)
     }
 
