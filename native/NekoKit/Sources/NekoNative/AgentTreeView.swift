@@ -3,47 +3,53 @@ import NekoKit
 
 /// All tasks as a tree: Neko on top, the watches and tasks it answers for,
 /// and the agent runs under each task. See `AgentTree` for where each link
-/// comes from.
+/// comes from. Drawn as an outline (Xcode's navigator, Linear's sub-issues):
+/// one dense row per node, reachable and driven from the keyboard.
 struct AgentTreeView: View {
     let tree: AgentTree
-    /// Opens a task (a task card, or the task a run belongs to).
+    /// Opens a task (a task row, or the task a run belongs to).
     let open: (String) -> Void
     let openHome: () -> Void
     let openWatching: () -> Void
     /// Expanded or collapsed by hand; everything else uses `expandsByDefault`.
     @State private var overrides: [String: Bool] = [:]
+    /// The row the keyboard is on. Arrows move it, Return opens it.
+    @FocusState private var focused: String?
 
     var body: some View {
-        ScrollView([.vertical, .horizontal]) {
-            VStack(alignment: .leading, spacing: NekoSpace.xl) {
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: NekoSpace.md) {
                 summary
-                AgentTreeBranch(node: tree.root, isExpanded: isExpanded, toggle: toggle, choose: choose)
+                AgentTreeBranch(node: tree.root, isExpanded: isExpanded, toggle: toggle, choose: choose,
+                                focused: $focused, move: move)
             }
+            .frame(maxWidth: NekoLayout.pageWidth, alignment: .topLeading)
             .padding(NekoLayout.pageInset)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
         .scrollIndicators(.automatic)
+        // Tab leaves the tree in one step; arrows move inside it.
+        .focusSection()
     }
 
     private var summary: some View {
-        HStack(spacing: NekoSpace.lg) {
-            Label("Agents", systemImage: "sparkles").font(NekoFont.heading)
-            Spacer(minLength: NekoSpace.lg)
-            Text("\(tree.tasks) \(tree.tasks == 1 ? "task" : "tasks")").foregroundStyle(.secondary)
-            Text("\(tree.running) running").foregroundStyle(tree.running > 0 ? NekoStyle.accent : .secondary)
-            Text(AgentTreeFormat.cost(tree.costUSD)).foregroundStyle(.primary)
-                .help("What runs reported spending. Codex runs report no cost, so they are not counted.")
-        }
-        .font(NekoFont.meta.monospacedDigit())
-        .frame(maxWidth: AgentTreeMetrics.summaryWidth, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        Text(Self.summaryLine(tree))
+            .font(NekoFont.meta.monospacedDigit()).foregroundStyle(N.text3)
+            .help("What runs reported spending. Codex runs report no cost, so they are not counted.")
+            .padding(.leading, AgentTreeMetrics.disclosure + NekoSpace.md)
+    }
+
+    /// "12 tasks · 2 running · $3.40 reported".
+    static func summaryLine(_ tree: AgentTree) -> String {
+        "\(tree.tasks) \(tree.tasks == 1 ? "task" : "tasks") · \(tree.running) running · \(AgentTreeFormat.cost(tree.costUSD)) reported"
     }
 
     private func isExpanded(_ node: AgentNode) -> Bool {
         overrides[node.id] ?? Self.expandsByDefault(node)
     }
     private func toggle(_ node: AgentNode) {
-        withNekoAnimation(.press) { overrides[node.id] = !isExpanded(node) }
+        guard !node.children.isEmpty else { return }
+        withNekoAnimation(.reveal) { overrides[node.id] = !isExpanded(node) }
     }
     private func choose(_ node: AgentNode) {
         switch node.kind {
@@ -52,9 +58,20 @@ struct AgentTreeView: View {
         case .task, .run: if let id = node.taskID { open(id) }
         }
     }
+    /// Moves the keyboard to the row above or below, in on-screen order.
+    private func move(from node: AgentNode, by step: Int) {
+        let order = Self.visibleOrder(tree.root, isExpanded: isExpanded)
+        guard let index = order.firstIndex(of: node.id) else { return }
+        if order.indices.contains(index + step) { focused = order[index + step] }
+    }
+
+    /// Node IDs top to bottom, skipping what is folded away.
+    static func visibleOrder(_ node: AgentNode, isExpanded: (AgentNode) -> Bool) -> [String] {
+        [node.id] + (isExpanded(node) ? node.children.flatMap { visibleOrder($0, isExpanded: isExpanded) } : [])
+    }
 
     /// Neko is always open; a watch or task opens only while an agent below
-    /// it is working, so live work is visible and the rest stays one card.
+    /// it is working, so live work is visible and the rest stays one row.
     static func expandsByDefault(_ node: AgentNode) -> Bool {
         switch node.kind {
         case .neko: true
@@ -62,19 +79,32 @@ struct AgentTreeView: View {
         case .run: false
         }
     }
+
+    /// The status colour a node's state wears.
+    static func tone(_ state: AgentNode.State) -> NekoTone {
+        switch state {
+        case .running: .running
+        case .needsYou, .changesAsked, .failing: .attention
+        case .review: .review
+        case .done, .passed, .watching: .done
+        case .failed: .failed
+        case .upNext, .stopped, .paused: .neutral
+        }
+    }
 }
 
 enum AgentTreeMetrics {
-    static let cardWidth: CGFloat = 360
-    static let summaryWidth: CGFloat = 760
-    static let icon: CGFloat = 28
     static let line: CGFloat = 1.5
-    /// Indent of a child level; the connector runs down its left edge.
-    static let indent: CGFloat = NekoSpace.xxl
-    /// Where the connector meets a child card: the middle of its first line.
-    static let elbow: CGFloat = NekoSpace.lg + icon / 2
-    /// The connector sits under the centre of the parent's icon.
-    static let lineInset: CGFloat = NekoSpace.lg + icon / 2 - line / 2
+    /// The disclosure column: a full pointer target.
+    static let disclosure: CGFloat = NekoLayout.minimumTarget
+    /// Indent of a child level, so a child's chevron sits under its parent's glyph.
+    static let indent: CGFloat = NekoSpace.xl
+    /// Where the connector meets a child row: the middle of its first line.
+    static let elbow: CGFloat = NekoLayout.listRowHeight / 2
+    /// The connector runs down the centre of the parent's disclosure column.
+    static let lineInset: CGFloat = disclosure / 2 - line / 2
+    /// Cost and duration columns, so numbers line up down the tree.
+    static let figure: CGFloat = 64
 }
 
 private struct AgentTreeBranch: View {
@@ -82,20 +112,22 @@ private struct AgentTreeBranch: View {
     let isExpanded: (AgentNode) -> Bool
     let toggle: (AgentNode) -> Void
     let choose: (AgentNode) -> Void
+    var focused: FocusState<String?>.Binding
+    let move: (AgentNode, Int) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            AgentNodeCard(node: node, expanded: isExpanded(node), toggle: { toggle(node) }, choose: { choose(node) })
+            AgentNodeRow(node: node, expanded: isExpanded(node), toggle: { toggle(node) }, choose: { choose(node) },
+                         focused: focused, move: { move(node, $0) })
             if isExpanded(node) && !node.children.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(node.children.enumerated()), id: \.element.id) { index, child in
                         HStack(alignment: .top, spacing: 0) {
                             Color.clear.frame(width: AgentTreeMetrics.indent)
-                            AgentTreeBranch(node: child, isExpanded: isExpanded, toggle: toggle, choose: choose)
-                                .padding(.top, NekoSpace.sm)
+                            AgentTreeBranch(node: child, isExpanded: isExpanded, toggle: toggle, choose: choose, focused: focused, move: move)
                         }
                         .background(alignment: .leading) {
-                            TreeConnector(last: index == node.children.count - 1, elbow: NekoSpace.sm + AgentTreeMetrics.elbow)
+                            TreeConnector(last: index == node.children.count - 1, elbow: AgentTreeMetrics.elbow)
                                 .stroke(N.lineStrong, style: StrokeStyle(lineWidth: AgentTreeMetrics.line, lineCap: .round, lineJoin: .round))
                                 .frame(width: AgentTreeMetrics.indent)
                                 .accessibilityHidden(true)
@@ -108,7 +140,7 @@ private struct AgentTreeBranch: View {
     }
 }
 
-/// A line down the left edge that turns right into one child card, and
+/// A line down the left edge that turns right into one child row, and
 /// carries on down unless this child is the last.
 private struct TreeConnector: Shape {
     let last: Bool
@@ -130,96 +162,101 @@ private struct TreeConnector: Shape {
     }
 }
 
-private struct AgentNodeCard: View {
+/// One node as an outline row: a disclosure button beside a focusable row.
+/// Right arrow opens a branch, left closes it, up and down move, Return
+/// opens it (the NSOutlineView conventions). The disclosure is a sibling of
+/// the row, so VoiceOver reaches both.
+private struct AgentNodeRow: View {
     let node: AgentNode
     let expanded: Bool
     let toggle: () -> Void
     let choose: () -> Void
-    @State private var hover = false
+    var focused: FocusState<String?>.Binding
+    let move: (Int) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoSpace.sm) {
-            HStack(alignment: .top, spacing: NekoSpace.sm) {
+        HStack(alignment: .top, spacing: 0) {
+            disclosure
+            NekoListRow(title: node.name, detail: node.subtitle.isEmpty ? node.origin : node.subtitle,
+                        note: node.state.isLive && !node.work.isEmpty ? node.work : nil, dimmed: dimmed) {
                 icon
-                VStack(alignment: .leading, spacing: NekoSpace.hair) {
-                    Text(node.name).font(NekoFont.heading).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    if !node.subtitle.isEmpty {
-                        Text(node.subtitle).font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                Spacer(minLength: NekoSpace.xs)
-                AgentStatePill(state: node.state)
+            } trailing: {
+                trailing
             }
-            if !node.tools.isEmpty || !node.work.isEmpty {
-                HStack(alignment: .firstTextBaseline, spacing: NekoSpace.xs) {
-                    ForEach(node.tools, id: \.self) { tool in
-                        Text(tool).font(NekoFont.label).foregroundStyle(N.text2)
-                            .padding(.horizontal, NekoSpace.xs).padding(.vertical, NekoSpace.hair)
-                            .background(N.attachment, in: RoundedRectangle(cornerRadius: NekoRadius.xs, style: .continuous))
-                    }
-                    if !node.work.isEmpty {
-                        Text(node.work).font(NekoFont.meta).foregroundStyle(N.text2).lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+            .focusable()
+            .focused(focused, equals: node.id)
+            .onTapGesture { focused.wrappedValue = node.id; choose() }
+            .onKeyPress(.return) { choose(); return .handled }
+            .onKeyPress(.space) { choose(); return .handled }
+            .onKeyPress(.rightArrow) {
+                if !node.children.isEmpty && !expanded { toggle() } else { move(1) }
+                return .handled
             }
-            if !footer.isEmpty || !node.children.isEmpty {
-            HStack(spacing: NekoSpace.xs) {
-                Text(footer).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: NekoSpace.xs)
-                if !node.children.isEmpty {
-                    Button(action: toggle) {
-                        HStack(spacing: NekoSpace.xxs) {
-                            Text(String(node.children.count)).monospacedDigit()
-                            Image(systemName: expanded ? "chevron.up" : "chevron.down").font(NekoFont.of(.micro, weight: .semibold))
-                        }
-                        .font(NekoFont.meta).foregroundStyle(.secondary)
-                        .padding(.horizontal, NekoSpace.xs).padding(.vertical, NekoSpace.hair)
-                        .contentShape(Rectangle())
-                    }
-                    .nekoButton(.quiet)
-                    .help(expanded ? "Hide what it started" : "Show what it started")
-                    .accessibilityLabel(expanded ? "Hide \(node.children.count) below" : "Show \(node.children.count) below")
-                }
+            .onKeyPress(.leftArrow) {
+                if expanded && !node.children.isEmpty { toggle() }
+                return .handled
             }
-            }
+            .onKeyPress(.downArrow) { move(1); return .handled }
+            .onKeyPress(.upArrow) { move(-1); return .handled }
+            .help(node.origin.map { "\($0). Return or click to open." } ?? "Return or click to open.")
+            .accessibilityLabel(accessibilityText)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(named: "Open", choose)
         }
-        .padding(NekoSpace.lg)
-        .frame(width: AgentTreeMetrics.cardWidth, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous).fill(N.panel)
-                .overlay(RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous).fill(hover ? N.selected : .clear))
-        }
-        .overlay(RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous).strokeBorder(N.line))
-        .opacity(dimmed ? 0.6 : 1)
-        .contentShape(RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
-        .onTapGesture(perform: choose)
-        .onHover { hover = $0 }
-        .nekoAnimation(.hover, value: hover)
-        .help(node.origin.map { "\($0). Click to open." } ?? "Click to open.")
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction(named: "Open", choose)
     }
 
     /// Finished runs step back so the live ones read first.
     private var dimmed: Bool { node.kind == .run && !node.state.isLive }
 
-    private var footer: String {
-        var parts: [String] = []
+    @ViewBuilder private var disclosure: some View {
+        if node.children.isEmpty {
+            Color.clear.frame(width: AgentTreeMetrics.disclosure, height: NekoLayout.listRowHeight).accessibilityHidden(true)
+        } else {
+            Button(action: toggle) {
+                Image(systemName: "chevron.right").font(NekoFont.of(.small, weight: .semibold)).foregroundStyle(N.text3)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .nekoAnimation(.reveal, value: expanded)
+                    .frame(width: AgentTreeMetrics.disclosure, height: NekoLayout.listRowHeight)
+                    .contentShape(Rectangle())
+            }
+            .nekoButton(.quiet)
+            .help(expanded ? "Hide what it started" : "Show what it started")
+            .accessibilityLabel(expanded ? "Hide \(node.children.count) below \(node.name)" : "Show \(node.children.count) below \(node.name)")
+        }
+    }
+
+    private var trailing: some View {
+        HStack(spacing: NekoSpace.sm) {
+            ForEach(Array(node.tools.prefix(2)), id: \.self) { NekoTag($0) }
+            if node.tools.count > 2 { NekoTag("+\(node.tools.count - 2)") }
+            NekoStatusLabel(tone: AgentTreeView.tone(node.state), symbol: node.state.symbol, text: node.state.title, live: node.state.isLive)
+            Text(node.costUSD.map(AgentTreeFormat.cost) ?? "")
+                .frame(width: AgentTreeMetrics.figure, alignment: .trailing)
+            Text(node.durationMs.map(AgentTreeFormat.duration) ?? "")
+                .frame(width: AgentTreeMetrics.figure, alignment: .trailing)
+        }
+        .font(NekoFont.caption.monospacedDigit()).foregroundStyle(N.text3).lineLimit(1)
+    }
+
+    private var accessibilityText: String {
+        var parts = [node.name]
+        if !node.subtitle.isEmpty { parts.append(node.subtitle) }
+        parts.append(node.state.title)
+        if !node.tools.isEmpty { parts.append(node.tools.joined(separator: ", ")) }
         if let cost = node.costUSD { parts.append(AgentTreeFormat.cost(cost)) }
         if let ms = node.durationMs { parts.append(AgentTreeFormat.duration(ms)) }
-        if let origin = node.origin { parts.append(origin) }
-        return parts.joined(separator: " · ")
+        if node.state.isLive && !node.work.isEmpty { parts.append(node.work) }
+        if !node.children.isEmpty { parts.append("\(node.children.count) below, \(expanded ? "shown" : "hidden")") }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder private var icon: some View {
         Group {
             if node.kind == .neko {
-                BrandMark(size: AgentTreeMetrics.icon)
+                BrandMark(size: NekoLayout.listGlyphSlot)
             } else {
-                Image(systemName: symbol).font(NekoFont.of(.callout, weight: .medium)).foregroundStyle(N.text2)
-                    .frame(width: AgentTreeMetrics.icon, height: AgentTreeMetrics.icon)
+                Image(systemName: symbol).font(NekoFont.of(.caption, weight: .medium))
+                    .frame(width: NekoLayout.listGlyphSlot, height: NekoLayout.listGlyphSlot)
                     .background(N.attachment, in: RoundedRectangle(cornerRadius: NekoRadius.sm, style: .continuous))
             }
         }
@@ -239,35 +276,6 @@ private struct AgentNodeCard: View {
             case "Recovery": "lifepreserver"
             default: "cpu"
             }
-        }
-    }
-}
-
-private struct AgentStatePill: View {
-    let state: AgentNode.State
-    var body: some View {
-        HStack(spacing: NekoSpace.xxs) {
-            if state.isLive {
-                ProgressView().controlSize(.mini)
-            } else {
-                Image(systemName: state.symbol).font(NekoFont.of(.micro, weight: .bold))
-            }
-            Text(state.title).lineLimit(1)
-        }
-        .font(NekoFont.label)
-        .foregroundStyle(color)
-        .padding(.horizontal, NekoSpace.xs).padding(.vertical, NekoSpace.xxs)
-        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: NekoRadius.sm, style: .continuous))
-        .fixedSize()
-    }
-    private var color: Color {
-        switch state {
-        case .running: NekoStyle.accent
-        case .needsYou, .changesAsked, .failing: NekoStyle.amber
-        case .review: NekoStyle.sky
-        case .done, .passed, .watching: NekoStyle.mint
-        case .failed: NekoStyle.coral
-        case .upNext, .stopped, .paused: .secondary
         }
     }
 }

@@ -39,8 +39,10 @@ final class TaskTeamSummaryTests: XCTestCase {
         let team = summary(tasks: states.map { task($0, $0) }, splits: [split(ids: states)])
         XCTAssertEqual(team.working, 3)
         XCTAssertEqual(team.waiting, 1)
-        XCTAssertEqual(team.needsYou, 2)
+        XCTAssertEqual(team.needsYou, 2, "approval and failure, as in TaskStage.needsYou")
+        XCTAssertEqual(team.toReview, 1, "a result to review is counted apart from a decision")
         XCTAssertEqual(team.completed, 1)
-        XCTAssertEqual(team.stopped, 2)
+        XCTAssertEqual(team.stopped, 1)
+        XCTAssertEqual(team.activity, "3 working · 1 waiting · 2 need you · 1 to review · 1 done · 1 cancelled")
     }
 }
