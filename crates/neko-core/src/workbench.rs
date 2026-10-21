@@ -13,6 +13,19 @@ const SETTING: &str = "workbench_snapshot_v1";
 /// a second during a watch and every few minutes from probe replays: the
 /// daemon's remaining idle disk writes after the 2026-10-18 fixes.
 const RECEIPTS: &str = "workbench_mcp_receipts_v1";
+/// The workbench is stored the way other agent orchestrators store theirs
+/// (vibe-kanban, Codex, Crystal, Terragon, read 2026-10-21): a row per task
+/// (`workbench_tasks`), its events append-only (`workbench_task_events`),
+/// and the big, slowly changing MCP collections in rows of their own. One
+/// 4.7 MB row holding everything was rewritten whole (plus its WAL copy) for
+/// any change; 3.6 MB of it was task events. The `SETTING` row keeps only
+/// the rest (about 100 KB). `load` assembles the same `Snapshot`.
+const TASK_ORDER: &str = "workbench_task_order_v1";
+const MCP_CONNECTIONS: &str = "workbench_mcp_connections_v1";
+const MCP_SOURCES: &str = "workbench_mcp_sources_v1";
+/// The single-row layout as it was when first split, kept for one release
+/// so the move can be undone, then deleted.
+const LEGACY_BACKUP: &str = "workbench_snapshot_v1_backup";
 /// What GitHub last reported for each task's pull request, by task id, in
 /// its own deferred row for the same reason: the watch records the base
 /// branch's tip, which moves whenever main does, and inside the snapshot
@@ -222,6 +235,17 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     } else {
         Snapshot::default()
     };
+    // A core row that still holds tasks is the layout before the split;
+    // it is read as it is, and the next save moves everything out.
+    if snapshot.tasks.is_empty() {
+        snapshot.tasks = load_tasks(db)?;
+    }
+    if let Some(json) = db.get_setting(MCP_CONNECTIONS).map_err(|e| e.to_string())? {
+        snapshot.mcp.connections = serde_json::from_str(&json).map_err(|e| format!("Cannot read MCP connections: {e}"))?;
+    }
+    if let Some(json) = db.get_setting(MCP_SOURCES).map_err(|e| e.to_string())? {
+        snapshot.mcp.sources = serde_json::from_str(&json).map_err(|e| format!("Cannot read watched sources: {e}"))?;
+    }
     if let Some(json) = db.get_setting(RECEIPTS).map_err(|e| e.to_string())? {
         snapshot.mcp.receipts = serde_json::from_str(&json).map_err(|e| format!("Cannot read tool receipts: {e}"))?;
     }
@@ -249,7 +273,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     let migrated = crate::mcp_host::store::migrate(&mut snapshot)?;
     validate(&snapshot)?;
     if migrated {
-        // One upsert atomically disables old authority without deleting evidence.
+        // One save atomically disables old authority without deleting evidence.
         let json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
         if json.len() > MAX_SNAPSHOT_BYTES {
             return Err(
@@ -257,8 +281,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
                     .into(),
             );
         }
-        db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
-        bump_revision();
+        save(db, &snapshot)?;
     }
     snapshot.heartbeat_ms = snapshot.heartbeat_ms.max(HEARTBEAT_MS.load(std::sync::atomic::Ordering::Acquire));
     // Attached for readers only; save() never writes it into this setting.
@@ -282,12 +305,7 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
 /// a caller needs the exact persisted event history.
 /// Capacity is based on actual persisted bytes, never hypothetical future output.
 pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
-    let json = encode(snapshot)?;
-    save_receipts(db, snapshot)?;
-    save_watch_schedules(db, snapshot, false)?;
-    db.set_setting(SETTING, &json).map_err(|e| e.to_string())?;
-    bump_revision();
-    Ok(())
+    persist(db, snapshot, false)
 }
 
 /// `save` for progress a crash may lose (an agent's tool events): readers
@@ -295,11 +313,78 @@ pub fn save(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
 /// `db::DEFERRED_WRITE_DELAY`, folded into the next immediate save of the
 /// snapshot. Never use it for a user action or a status change.
 pub fn save_deferred(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
-    let json = encode(snapshot)?;
+    persist(db, snapshot, true)
+}
+
+/// Writes only what changed: each task row, its new events, the order, the
+/// MCP rows and the small core row each skip an identical write (`Db`).
+/// Immediate saves run in one transaction and remove rows of deleted tasks;
+/// deferred ones are flushed together (`Db::flush_due`).
+fn persist(db: &Db, snapshot: &Snapshot, deferred: bool) -> Result<(), String> {
+    let compacted = encode(snapshot)?;
+    let write = |key: &str, value: &str| {
+        if deferred { db.set_setting_deferred(key, value) } else { db.set_setting(key, value) }.map_err(|e| e.to_string())
+    };
+    // Receipts and pull request statuses are always deferred; queued before
+    // the transaction opens, since a write inside one goes straight to disk.
     save_receipts(db, snapshot)?;
-    save_watch_schedules(db, snapshot, true)?;
-    db.set_setting_deferred(SETTING, &json).map_err(|e| e.to_string())?;
+    let run = || -> Result<(), String> {
+        keep_legacy_row_once(db)?;
+        save_watch_schedules(db, snapshot, deferred)?;
+        let order: Vec<&str> = compacted.tasks.iter().map(|t| t.id.as_str()).collect();
+        if !deferred {
+            for (id, _) in db.task_rows().map_err(|e| e.to_string())? {
+                if !order.contains(&id.as_str()) { db.delete_task_rows(&id).map_err(|e| e.to_string())?; }
+            }
+        }
+        for task in &compacted.tasks {
+            let events = task.events.iter().map(serde_json::to_string).collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+            let mut body = task.clone();
+            body.events.clear();
+            write(&format!("{}{}", crate::db::TASK_KEY, task.id), &serde_json::to_string(&body).map_err(|e| e.to_string())?)?;
+            write(&format!("{}{}", crate::db::EVENTS_KEY, task.id), &serde_json::to_string(&events).map_err(|e| e.to_string())?)?;
+        }
+        write(TASK_ORDER, &serde_json::to_string(&order).map_err(|e| e.to_string())?)?;
+        write(MCP_CONNECTIONS, &serde_json::to_string(&compacted.mcp.connections).map_err(|e| e.to_string())?)?;
+        write(MCP_SOURCES, &serde_json::to_string(&compacted.mcp.sources).map_err(|e| e.to_string())?)?;
+        let mut core = compacted.clone();
+        core.tasks.clear();
+        core.mcp.connections.clear();
+        core.mcp.sources.clear();
+        write(SETTING, &serde_json::to_string(&core).map_err(|e| e.to_string())?)
+    };
+    if deferred || db.in_transaction() { run()?; } else { db.atomic(run)?; }
     bump_revision();
+    Ok(())
+}
+
+/// Tasks in their stored order, each with its events.
+fn load_tasks(db: &Db) -> Result<Vec<Task>, String> {
+    let order: Vec<String> = match db.get_setting(TASK_ORDER).map_err(|e| e.to_string())? {
+        Some(json) => serde_json::from_str(&json).map_err(|e| format!("Cannot read task order: {e}"))?,
+        None => return Ok(Vec::new()),
+    };
+    let mut rows: std::collections::HashMap<String, String> = db.task_rows().map_err(|e| e.to_string())?.into_iter().collect();
+    let mut events = db.task_events().map_err(|e| e.to_string())?;
+    let mut tasks = Vec::with_capacity(order.len());
+    for id in order {
+        let Some(body) = rows.remove(&id) else { continue };
+        let mut task: Task = serde_json::from_str(&body).map_err(|e| format!("Cannot read task {id}: {e}"))?;
+        task.events = events.remove(&id).unwrap_or_default().iter()
+            .map(|e| serde_json::from_str(e)).collect::<Result<_, _>>()
+            .map_err(|e| format!("Cannot read events of task {id}: {e}"))?;
+        tasks.push(task);
+    }
+    Ok(tasks)
+}
+
+/// Before the first save in the split layout, the single row is copied
+/// aside once, so the move can be undone for one release.
+fn keep_legacy_row_once(db: &Db) -> Result<(), String> {
+    let Some(core) = db.get_setting(SETTING).map_err(|e| e.to_string())? else { return Ok(()) };
+    if core.contains("\"tasks\":[{") && db.get_setting(LEGACY_BACKUP).map_err(|e| e.to_string())?.is_none() {
+        db.set_setting(LEGACY_BACKUP, &core).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -336,7 +421,7 @@ fn save_watch_schedules(db: &Db, snapshot: &Snapshot, deferred: bool) -> Result<
 /// two seconds even when nothing else changed.
 static HEARTBEAT_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
-fn encode(snapshot: &Snapshot) -> Result<String, String> {
+fn encode(snapshot: &Snapshot) -> Result<Snapshot, String> {
     validate(snapshot)?;
     HEARTBEAT_MS.fetch_max(snapshot.heartbeat_ms, std::sync::atomic::Ordering::AcqRel);
     let mut compacted = snapshot.clone();
@@ -410,7 +495,7 @@ fn encode(snapshot: &Snapshot) -> Result<String, String> {
             );
         }
     }
-    Ok(json)
+    Ok(compacted)
 }
 
 pub fn apply(db: &Db, command: Command) -> Result<Snapshot, String> {
@@ -1902,6 +1987,106 @@ mod tests {
         db.flush_deferred().unwrap();
         assert_eq!(db.setting_writes(), before + 1, "one small row, written once");
         assert!(!db.get_setting(SETTING).unwrap().unwrap().contains("watch:1"));
+    }
+
+    /// `NEKO_DB_COPY=<path>`: migrate a copy of a real database and check
+    /// it reads back identically.
+    #[test]
+    #[ignore = "runs on a copy of a real database"]
+    fn a_real_database_migrates_and_reads_back_identically() {
+        let db = Db::open(std::path::Path::new(&std::env::var("NEKO_DB_COPY").unwrap())).unwrap();
+        let before = load(&db).unwrap();
+        save(&db, &before).unwrap();
+        db.flush_deferred().unwrap();
+        let after = load(&db).unwrap();
+        assert_eq!(after.tasks.len(), before.tasks.len());
+        for (a, b) in before.tasks.iter().zip(&after.tasks) {
+            assert_eq!(a, b, "task {}", a.id);
+        }
+        let mut x = before.clone(); let mut y = after.clone();
+        x.heartbeat_ms = 0; y.heartbeat_ms = 0; x.machine = None; y.machine = None;
+        assert_eq!(serde_json::to_value(&x).unwrap(), serde_json::to_value(&y).unwrap(), "the whole snapshot reads back the same");
+        let core = db.get_setting(SETTING).unwrap().unwrap().len();
+        eprintln!("MIGRATED tasks={} core_row={} bytes backup={}", after.tasks.len(), core, db.get_setting(LEGACY_BACKUP).unwrap().is_some());
+        // A second save with nothing changed writes nothing.
+        let writes = db.setting_writes();
+        save(&db, &after).unwrap();
+        db.flush_deferred().unwrap();
+        eprintln!("SECOND_SAVE_WRITES {}", db.setting_writes() - writes);
+    }
+
+    #[test]
+    fn a_task_event_writes_one_row_not_the_whole_store() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let (a, b) = (task(&db, &ws).id, task(&db, &ws).id);
+        let mut state = load(&db).unwrap();
+        save(&db, &state).unwrap();
+        let core = db.get_setting(SETTING).unwrap();
+        let rows_before = db.task_rows().unwrap();
+        let task = state.tasks.iter_mut().find(|t| t.id == a).unwrap();
+        append_event(task, "builder", "Command completed");
+        let before = db.setting_writes();
+        save(&db, &state).unwrap();
+        assert_eq!(db.setting_writes() - before, 2, "only task a's row (its updated time) and its events changed");
+        assert_eq!(db.get_setting(SETTING).unwrap(), core, "the core row is untouched");
+        assert_eq!(db.task_rows().unwrap().iter().find(|(id, _)| id == &b), rows_before.iter().find(|(id, _)| id == &b));
+        let back = load(&db).unwrap();
+        assert_eq!(back.tasks, state.tasks, "it reads back identically, in order");
+    }
+
+    #[test]
+    fn events_are_appended_and_the_oldest_dropped_without_rewriting_the_rest() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let id = task(&db, &ws).id;
+        let mut state = load(&db).unwrap();
+        for n in 0..(MAX_EVENTS + 5) {
+            append_event(state.tasks.iter_mut().find(|t| t.id == id).unwrap(), "builder", &format!("event {n}"));
+            save(&db, &state).unwrap();
+        }
+        let back = load(&db).unwrap();
+        let events = &back.tasks.iter().find(|t| t.id == id).unwrap().events;
+        assert_eq!(events.len(), MAX_EVENTS);
+        assert_eq!(events.last().unwrap().message, format!("event {}", MAX_EVENTS + 4));
+        assert_eq!(back.tasks, state.tasks);
+    }
+
+    #[test]
+    fn the_single_row_layout_is_read_moved_and_kept_once() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let id = task(&db, &ws).id;
+        let state = load(&db).unwrap();
+        // Recreate the old layout: everything in one row, no task rows.
+        let mut legacy = state.clone();
+        legacy.conversation.clear();
+        db.delete_task_rows(&id).unwrap();
+        db.set_setting(SETTING, &serde_json::to_string(&legacy).unwrap()).unwrap();
+        db.set_setting(TASK_ORDER, "[]").unwrap();
+        let read = load(&db).unwrap();
+        assert_eq!(read.tasks.len(), 1, "the old row is read as it is");
+        save(&db, &read).unwrap();
+        assert!(db.get_setting(LEGACY_BACKUP).unwrap().unwrap().contains(&id), "kept aside once");
+        assert!(db.get_setting(SETTING).unwrap().unwrap().contains("\"tasks\":[]"), "and moved out of the core row");
+        assert_eq!(load(&db).unwrap().tasks, read.tasks);
+    }
+
+    #[test]
+    fn a_deleted_task_leaves_no_rows() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let id = task(&db, &ws).id;
+        let mut state = load(&db).unwrap();
+        state.tasks.retain(|t| t.id != id);
+        state.task_roots.remove(&id);
+        save(&db, &state).unwrap();
+        assert!(db.task_rows().unwrap().is_empty());
+        assert!(db.task_events().unwrap().get(&id).is_none());
     }
 
     #[test]

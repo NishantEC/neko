@@ -338,7 +338,17 @@ Measured on the owner's machine: the daemon wrote 43 GB in 12 hours (15
 macOS disk-write violations in 8 days), 84 tickets made 72 worktrees, all 17
 Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
 
-- **Snapshot writes.** The workbench is one multi-megabyte JSON row
+- **Storage layout (2026-10-21).** The workbench is no longer one row: tasks
+  are rows in `workbench_tasks`, their events append-only in
+  `workbench_task_events` (only new events are inserted and dropped ones
+  deleted), MCP connections and sources have rows of their own, and
+  `workbench_snapshot_v1` keeps the rest (~110 KB, was 4.7 MB). `load`
+  assembles the same `Snapshot`; `save` writes only changed rows, in one
+  transaction. Modelled on vibe-kanban, Codex, Crystal and Terragon, all of
+  which store a row or file per entity. The old single row is kept once as
+  `workbench_snapshot_v1_backup` for one release, then delete it. SQLite runs
+  WAL with `synchronous=NORMAL` and an 8 MB `journal_size_limit`.
+- **Snapshot writes.** The workbench was one multi-megabyte JSON row
   (`workbench_snapshot_v1`). `Db::set_setting` skips a value identical to
   what it last wrote (the cache is cleared on rollback), `heartbeat_ms` is
   kept in memory and never persisted (it changed every 2-second tick, so
