@@ -106,6 +106,12 @@ struct TicketDetail: View {
             Menu {
                 if TicketPresentation.waitingReason(ticket) == nil && TicketPresentation.canProposeSplit(ticket, splits: model.snapshot["splits"].array) { action("Propose parallel work", "ProposeSplit") }
                 Button("Rename…") { renaming = true }
+                if !repository.isEmpty {
+                    Toggle("Land on main in \((repository as NSString).lastPathComponent)", isOn: Binding(get: { landsOnMain }, set: { enabled in
+                        Task { await model.workbench(.command("SetLandOnMain", ["repository": .string(repository), "enabled": .bool(enabled)])) }
+                    }))
+                    .help("On: reviewed tasks in this repository fast-forward your local main, nothing pushed. Off: Neko opens a pull request.")
+                }
                 if !ticket["worktree"].string.isEmpty && ticket["parked"] == .null { Button("Reveal working folder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ticket["worktree"].string) } }
                 if ["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { Button("Delete…", role: .destructive) { confirmDelete = true } }
             } label: {
@@ -113,6 +119,13 @@ struct TicketDetail: View {
             }
             .disabled(model.busy)
         }
+    }
+    /// The task's repository checkout, where delivery is configured per repository.
+    private var repository: String { model.snapshot["task_roots"][id].string }
+    private var landsOnMain: Bool {
+        guard !repository.isEmpty else { return false }
+        let resolved = URL(fileURLWithPath: repository).resolvingSymlinksInPath().path
+        return model.snapshot["land_on_main"].array.contains { $0.string == resolved || $0.string == repository }
     }
     /// Risk, parallel work, decisions and the raw log: shown when present, in
     /// that order, below the result. Only the raw event log opens on click.

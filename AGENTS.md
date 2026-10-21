@@ -93,7 +93,7 @@ Before committing, a read-only agent reads the staged diff and ticket evidence a
 subject (the commit and PR title; repo conventions for scope) plus the description (Issue, Impact, Root cause, Fix,
 Options considered, Verification, Risks; signed `` `=^.^=` neko ``). Both are rewritten on every push to an open
 PR, and landing on main uses the same subject. If the agent fails, the evidence is the body and the title is `fix: …`.
-Repositories listed in `Snapshot::land_on_main` (per checkout, toggled in the ticket inspector) instead
+Repositories listed in `Snapshot::land_on_main` (per checkout, toggled in a task page’s ⋯ menu) instead
 fast-forward local `main` with nothing pushed: a moved `main` is rebased onto, a conflict or an overwrite of
 local edits is refused, and the ticket records `landed_commit`. The `neko` repo itself is set to land on main.
 Every eligible ticket starts its own worker without a fixed global cap, but at
