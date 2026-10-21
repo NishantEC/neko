@@ -57,11 +57,14 @@ struct TicketDetail: View {
                     case "AwaitingApproval":
                         if TicketPresentation.waitingReason(ticket) == nil { action("Approve plan", "ApproveTask") }
                         if TicketPresentation.canProposeSplit(ticket, splits: model.snapshot["splits"].array) { action("Propose parallel work", "ProposeSplit") }
-                    case "ReadyForReview": action("Accept locally", "CompleteTask")
+                    case "ReadyForReview":
+                        if let url = TicketPresentation.openPullRequest(ticket) { Link("Open pull request", destination: url) }
+                        action("Mark done", "CompleteTask")
                     case "Failed", "Cancelled": action("Start again", "StartTask")
                     default: EmptyView()
                     }
-                    if !["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) { action("Cancel task", "CancelTask") }
+                    if TicketPresentation.isRunning(ticket) { action("Stop", "CancelTask") }
+                    else if ticket["status"].string == "AwaitingApproval" { action("Cancel task", "CancelTask") }
                     if ["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) {
                         Button("Delete…", role: .destructive) { confirmDelete = true }
                     }
@@ -94,17 +97,27 @@ struct TicketDetail: View {
             ToolbarItem(placement: .primaryAction) { action("Approve plan", "ApproveTask").nekoButton(.primary).disabled(model.busy) }
         }
         if ticket["status"].string == "ReadyForReview" {
-            ToolbarItem(placement: .primaryAction) { action("Accept locally", "CompleteTask").nekoButton(.primary).disabled(model.busy) }
+            // With an open pull request the agent is done and the rest happens
+            // there; marking it done stays in the menu.
+            if let url = TicketPresentation.openPullRequest(ticket) {
+                ToolbarItem(placement: .primaryAction) { Link("Open pull request", destination: url).nekoButton(.primary) }
+            } else {
+                ToolbarItem(placement: .primaryAction) { action("Mark done", "CompleteTask").nekoButton(.primary).disabled(model.busy) }
+            }
         }
         if ["Failed", "Cancelled"].contains(ticket["status"].string) {
             ToolbarItem(placement: .primaryAction) { action("Start again", "StartTask").disabled(model.busy) }
         }
-        if !["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) {
+        if TicketPresentation.isRunning(ticket) {
             ToolbarItem(placement: .primaryAction) { action("Stop", "CancelTask").disabled(model.busy) }
         }
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 if TicketPresentation.waitingReason(ticket) == nil && TicketPresentation.canProposeSplit(ticket, splits: model.snapshot["splits"].array) { action("Propose parallel work", "ProposeSplit") }
+                if ticket["status"].string == "ReadyForReview" && TicketPresentation.openPullRequest(ticket) != nil {
+                    action("Mark done", "CompleteTask")
+                }
+                if ["AwaitingApproval", "ReadyForReview"].contains(ticket["status"].string) { action("Cancel task", "CancelTask") }
                 Button("Rename…") { renaming = true }
                 if !repository.isEmpty {
                     Toggle("Land on main in \((repository as NSString).lastPathComponent)", isOn: Binding(get: { landsOnMain }, set: { enabled in
