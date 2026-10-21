@@ -180,6 +180,11 @@ impl Controller {
                 neko_chat::decide_call(&db, &turn_id, &call_id, approve)?;
                 store::load(&db)
             }
+            Command::DiscardQueuedMessage { message_id } => {
+                let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
+                neko_chat::discard_queued(&db, &message_id)?;
+                store::load(&db)
+            }
             Command::CancelChat { turn_id } => {
                 if let Some(active) = self.chat_active.lock().map_err(|_| "Chat state unavailable")?.as_ref().filter(|a| a.task_id == turn_id) {
                     active.cancelled.store(true, Ordering::Release);
@@ -342,6 +347,14 @@ impl Controller {
         drop(active);
         if let Some(turn) = launch { self.spawn_chat_worker(turn); }
         Ok(snapshot)
+    }
+
+    /// For `web_harness` only: marks a reply as in progress so that messages
+    /// sent from the web composer queue behind it and no model ever runs.
+    #[allow(dead_code)]
+    pub fn hold_chat_for_verification(&self) {
+        *self.chat_active.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(Active { task_id: "web-harness-hold".into(), cancelled: Arc::new(AtomicBool::new(false)) });
     }
 
     fn spawn_chat_worker(&self, first: (String, String, Option<String>)) {

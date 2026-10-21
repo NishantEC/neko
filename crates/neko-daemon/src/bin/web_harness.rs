@@ -38,7 +38,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use neko_core::Db;
-use neko_protocol::workbench::{ChatMessage, ChatRole, Snapshot, Task};
+use neko_protocol::workbench::{ChatAction, ChatActionStatus, ChatMessage, ChatRole, ChatToolCall, ChatToolStatus, Snapshot, Task};
 
 fn main() {
     let data = neko_protocol::support_dir();
@@ -71,6 +71,9 @@ fn main() {
     }
     // No app scan: the web UI does not search apps, and the scan is slow.
     let state = Arc::new(server::AppState::new(db, Vec::new()));
+    // A reply is "in progress" for the whole run, so a message sent from the
+    // web composer queues behind it and no model, `gh` or agent ever starts.
+    state.workbench.hold_chat_for_verification();
     server::spawn_web_bridge(state.clone());
     if let Some(id) = std::env::var_os("NEKO_WEB_STREAM").and_then(|_| pending_turn_id(&state)) {
         let state = state.clone();
@@ -111,7 +114,8 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
     snapshot.workspaces = source.workspaces.clone();
     snapshot.tasks = tasks;
     // Real workspaces point at real checkouts; nothing here may reach them.
-    for workspace in &mut snapshot.workspaces { workspace.repository = String::new(); }
+    let nowhere = neko_protocol::support_dir().join("no-checkout");
+    for workspace in &mut snapshot.workspaces { workspace.repository = nowhere.to_string_lossy().into_owned(); }
     neko_core::workbench::save(db, &snapshot)?;
 
     let mut conversation: Vec<ChatMessage> = source.conversation.iter().rev().take(8).rev().cloned().collect();
@@ -125,6 +129,7 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
             "Ran `git log --oneline -5` · failed".into(),
         ];
     }
+    let first_task = snapshot.tasks.first().map(|t| t.id.clone()).unwrap_or_default();
     let user_id = neko_core::workbench::new_id();
     conversation.push(ChatMessage {
         agent_profile_revision: 0,
@@ -149,7 +154,14 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
         agent_profile_revision: 0,
         agent_profile_id: "default".into(),
         workspace_id: None,
-        tool_calls: vec![],
+        tool_calls: vec![ChatToolCall {
+            id: "call-1".into(),
+            workspace_id: "w".into(),
+            connection_id: "linear".into(),
+            tool_name: "save_issue".into(),
+            arguments_json: r#"{"title":"Update athena #4641 branch","team":"HEA","description":"Rebase onto master and rerun checks"}"#.into(),
+            status: ChatToolStatus::AwaitingApproval,
+        }],
         id: neko_core::workbench::new_id(),
         at_ms: now - 24_000,
         role: ChatRole::Neko,
@@ -160,7 +172,14 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
         failed: false,
         remembered: vec![],
         responsibility_ids: vec![],
-        actions: vec![],
+        actions: vec![ChatAction {
+            id: "act-1".into(),
+            task_id: first_task.clone(),
+            kind: "message".into(),
+            text: "Bring the branch up to date with master, resolve any conflicts without changing the PR's scope, and rerun the checks. Do not merge.".into(),
+            status: ChatActionStatus::Proposed,
+            note: String::new(),
+        }],
         activity: vec![
             "Ran `gh pr list --state open`".into(),
             "Ran `gh pr checks 4628`".into(),
@@ -178,7 +197,7 @@ fn pending_turn_id(state: &server::AppState) -> Option<String> {
 
 /// Grows the pending turn's text word by word, as a streaming reply does.
 fn stream_text(state: &server::AppState, id: &str) {
-    let words = "Three of the five are waiting only for an approving review: **athena #4628**, **athena #4616** and **riavox #410**. Their checks pass and none has a conflict. The other two need work first.\n\n| PR | Blocker |\n|---|---|\n| athena #4641 | Branch is behind `master` |\n| athena #4623 | Reviewer asked for a change |\n\nI have not messaged any agent yet.";
+    let words = "Three of the five only need an approving review: **athena #4628**, **athena #4616** and **riavox #410**.\n\nTheir checks pass and none has a conflict. The other two need work first.\n\n| PR | Blocker |\n|---|---|\n| athena #4641 | Branch is behind `master` |\n| athena #4623 | Reviewer asked for a change |\n\nI have not messaged any agent yet.";
     let mut shown = String::from("Checking the five open pull requests against what GitHub reports now.\n\n");
     for word in words.split_inclusive(' ') {
         std::thread::sleep(std::time::Duration::from_millis(220));
