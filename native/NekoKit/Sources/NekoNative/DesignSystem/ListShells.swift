@@ -50,7 +50,8 @@ enum NekoTone: Equatable {
         switch self {
         case .attention: NekoStyle.amber
         case .review: NekoStyle.sky
-        case .running: NekoStyle.accent
+        // The text-legible accent: tones colour words as well as dots.
+        case .running: NekoStyle.accentText
         case .done: NekoStyle.mint
         case .failed: NekoStyle.coral
         case .neutral: N.text3
