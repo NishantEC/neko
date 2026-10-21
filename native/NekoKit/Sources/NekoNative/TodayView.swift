@@ -279,8 +279,9 @@ struct TodayView: View {
             let now = pending ? ChatActivity.describe(message, model: model) : (activity: NekoActivity.thinking, label: "")
             let label = ChatWorkLive.label(steps: steps, fallback: now.label, keepFallback: now.activity == .needsYou || now.activity == .reading)
             ChatWorkLog(id: message.recordID, summary: summary, tools: tools, running: pending,
-                        startMs: message["at_ms"].int,
-                        completedMs: ChatDuration.completion(of: message) ?? finishedAt[message.recordID],
+                        startMs: message["started_ms"].int > 0 ? message["started_ms"].int : message["at_ms"].int,
+                        completedMs: message["started_ms"].int > 0 && !pending ? message["at_ms"].int
+                            : ChatDuration.completion(of: message) ?? finishedAt[message.recordID],
                         live: (now.activity, label), ledger: workLedger)
         } else if !hasText, !message["failed"].bool, message["ticket_ids"].array.isEmpty, message["actions"].array.isEmpty,
                   message["remembered"].array.isEmpty, message["responsibility_ids"].array.isEmpty, message["tool_calls"].array.isEmpty {

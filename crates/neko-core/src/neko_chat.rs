@@ -325,6 +325,7 @@ pub fn finish_turn_suggesting(
     turn.pending = false;
     close_calls(turn);
     turn.failed = failed;
+    if turn.started_ms == 0 { turn.started_ms = turn.at_ms; }
     turn.at_ms = crate::now_unix_ms();
     save(db, &messages)
 }
@@ -395,6 +396,7 @@ fn message(role: ChatRole, text: String, at_ms: i64) -> ChatMessage {
         responsibility_ids: vec![],
         actions: vec![],
         activity: vec![],
+        started_ms: 0,
         tool_calls: vec![],
         workspace_id: None,
     }
