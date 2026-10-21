@@ -28,6 +28,10 @@ mod codex;
 mod mcp_host;
 #[path = "../server.rs"]
 mod server;
+// `server.rs` reaches the web bridge; this harness never starts it.
+#[allow(dead_code)]
+#[path = "../web.rs"]
+mod web;
 #[path = "../workbench.rs"]
 mod workbench;
 

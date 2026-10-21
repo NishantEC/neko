@@ -8,6 +8,14 @@ license.workspace = true
 name = "neko-daemon"
 path = "src/main.rs"
 
+# Hosts the real `server` module against a /tmp data dir for the web UI's
+# self-verification loop (scripts/web-verify.mjs). Its tests would only repeat
+# the daemon's own, so they are not built twice.
+[[bin]]
+name = "web_harness"
+path = "src/bin/web_harness.rs"
+test = false
+
 [dependencies]
 libc = "0.2"
 neko-protocol.workspace = true
