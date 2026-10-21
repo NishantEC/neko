@@ -6,10 +6,11 @@ import NekoKit
     func testSendButtonUsesFullComposerWidth() throws {
         let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/NekoNative/TodayView.swift"), encoding: .utf8)
-        let composer = try XCTUnwrap(source.components(separatedBy: "private func composer(availableWidth: CGFloat)").dropFirst().first?
-            .components(separatedBy: "private var canSend").first)
-        XCTAssertTrue(composer.contains(".frame(width: width)"))
+            .appendingPathComponent("Sources/NekoNative/ChatScrollFollow.swift"), encoding: .utf8)
+        // The shared transcript gives its dock the whole column width.
+        let dock = try XCTUnwrap(source.components(separatedBy: "dock()").dropFirst().first?
+            .components(separatedBy: ".padding(.bottom").first)
+        XCTAssertTrue(dock.contains(".frame(width: dockWidth(outer.size.width))"))
     }
 
     @MainActor func testPreviousAppContextIsMarkedAsUntrustedAndBounded() {
@@ -110,7 +111,7 @@ import NekoKit
         let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/NekoNative/TodayView.swift"), encoding: .utf8)
-        let composer = try XCTUnwrap(source.components(separatedBy: "private func composer(availableWidth: CGFloat)").dropFirst().first?
+        let composer = try XCTUnwrap(source.components(separatedBy: "private func composer(").dropFirst().first?
             .components(separatedBy: ".id(targetScope)").first)
         XCTAssertFalse(composer.contains("WorkspaceMenu"))
         XCTAssertFalse(composer.contains("Read only"))
@@ -125,9 +126,9 @@ import NekoKit
     }
 
     func testComposerHeightGrowsAndStopsAtReadableLimit() {
-        XCTAssertEqual(ComposerLayout.height(forTextHeight: 16), 40)
+        XCTAssertEqual(ComposerLayout.height(forTextHeight: 16), 36)
         XCTAssertEqual(ComposerLayout.height(forTextHeight: 84), 96)
-        XCTAssertEqual(ComposerLayout.height(forTextHeight: 300), 160)
+        XCTAssertEqual(ComposerLayout.height(forTextHeight: 300), 240)
     }
 
     func testComposerWidthTracksAvailableSpace() {

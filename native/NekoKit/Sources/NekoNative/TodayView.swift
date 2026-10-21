@@ -3,28 +3,22 @@ import AppKit
 @preconcurrency import ApplicationServices
 import NekoKit
 
-private struct ChatComposerHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-}
-
-private struct ChatScrollMetricsKey: PreferenceKey {
-    static let defaultValue = ChatScrollMetrics()
-    static func reduce(value: inout ChatScrollMetrics, nextValue: () -> ChatScrollMetrics) { value = nextValue() }
-}
-
 struct TodayView: View {
     @ObservedObject var model: AppModel
-    @State private var scrollFollow = ChatScrollFollowState()
     @State private var escapeMonitor: Any?
     @State private var lastEscape: Date = .distantPast
-    @State private var transcriptHeight: CGFloat = 0
     @State private var addingWorkspace = false
-    @State private var composerHeight: CGFloat = 0
     @AppStorage("neko.composer.mode") private var mode = "ask"
     @State private var menu = ComposerMenuState()
+    /// Built once: fresh closures on every pass would redraw every reply view reading them.
+    @State private var replyActions = ReplyActions()
+    /// Turns newer than this arrived while the chat was open and fade in.
+    @State private var openedAt = Int(Date().timeIntervalSince1970 * 1000)
+    @State private var fades = ChatFadeLedger()
     private var workspaceName: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
-    private var scope: ChatDraftScope {
+    private var scope: ChatDraftScope { Self.scope(model) }
+    /// The draft scope for the model's current selection, also used outside a view pass.
+    @MainActor private static func scope(_ model: AppModel) -> ChatDraftScope {
         let profiles = model.snapshot["agent_profiles"]
         let profile: String
         if let scope = model.selectedWorkspace {
@@ -37,8 +31,6 @@ struct TodayView: View {
         nonmutating set { model.chatDrafts.set(newValue, for: scope) }
     }
     private var sending: Bool { model.sendingChatScopes.contains(scope) }
-    private var replying: Bool { pendingTurn != nil }
-    private var chatQueueOccupied: Bool { model.snapshot["conversation"].array.contains { $0["pending"].bool || $0["queued"].bool } }
     private var attachments: [ComposerAttachment] { model.chatDrafts.attachments(for: scope) }
     private var workSummary: TodayWorkSummary { TodayWorkSummary(tasks: model.tasks, workspaceID: model.selectedWorkspace) }
     private var messages: [JSONValue] {
@@ -47,105 +39,30 @@ struct TodayView: View {
             ($0["agent_profile_id"].string == scope.profileID)
         }
     }
+
     var body: some View {
-        GeometryReader { outer in
+        // Read once per pass; every row and tray below takes them as values.
+        let messages = self.messages
+        let related = ChatTurnRelated(snapshot: model.snapshot)
         VStack(spacing: 0) {
-        FullDiskAccessBanner().padding(.bottom, NekoSpace.xxs)
-        HStack(spacing: 0) {
-            ZStack(alignment: .bottom) {
-                GeometryReader { viewport in
-                ScrollViewReader { reader in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: NekoLayout.messageGap) {
-                            if messages.isEmpty {
-                                TodayHero(model: model, workSummary: workSummary, addingWorkspace: $addingWorkspace)
-                                if model.workspaces.isEmpty {
-                                    HowNekoWorks(model: model, addingWorkspace: $addingWorkspace) { draft = $0 }
-                                } else {
-                                    TodayBrief(model: model, workSummary: workSummary) { draft = $0 }
-                                }
-                            }
-                            ForEach(DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace }).prefix(3), id: \.recordID) { DecisionCard(model: model, record: $0) }
-                            let related = ChatTurnRelated(snapshot: model.snapshot)
-                            ForEach(messages, id: \.recordID) { message in
-                                ChatTurn(key: related.key(for: message, awaitingApprovals: message["pending"].bool ? awaitingApprovals : 0)) {
-                                    messageView(message)
-                                }
-                                .equatable()
-                                .id(message.recordID)
-                                .transition(.opacity)
-                            }
-                            Color.clear.frame(height: ChatComposerClearance.bottomSpace(for: composerHeight)).id("bottom")
-                        }.frame(maxWidth: NekoLayout.readingWidth, alignment: .leading)
-                            .padding(.horizontal, NekoLayout.pageInset).padding(.top, NekoLayout.sectionGap).padding(.bottom, NekoSpace.lg)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .background(GeometryReader { geometry in
-                                Color.clear.preference(key: ChatScrollMetricsKey.self, value: ChatScrollMetrics(contentHeight: geometry.size.height, originY: geometry.frame(in: .named("chatTranscript")).minY, viewportHeight: viewport.size.height))
-                            })
-                    }.coordinateSpace(name: "chatTranscript")
-                        .background(ChatScrollIntentObserver(
-                            bottomExclusion: CGSize(width: min(NekoLayout.readingWidth, max(280, outer.size.width - NekoLayout.pageInset * 2)), height: composerHeight),
-                            onInteraction: { scrollFollow.userInteracted() }
-                        ))
-                        .overlay(alignment: .bottom) {
-                            if !scrollFollow.followsLatest {
-                                Button("Jump to latest", systemImage: "arrow.down") {
-                                    scrollFollow.pin()
-                                    reader.scrollTo("bottom", anchor: .bottom)
-                                }.nekoButton(.secondary).controlSize(.small)
-                                    .padding(.bottom, composerHeight + 8)
-                            }
-                        }
-                        .onPreferenceChange(ChatScrollMetricsKey.self) { metrics in
-                            let resized = abs(metrics.contentHeight - transcriptHeight) > 1
-                            transcriptHeight = metrics.contentHeight
-                            scrollFollow.update(metrics)
-                            // Layout has now measured the completed reply, so
-                            // scroll to its new bottom rather than the old one.
-                            if resized, scrollFollow.followsLatest { DispatchQueue.main.async { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } } }
-                        }
-                        .onChange(of: messages.last) { _, _ in
-                            if messages.last?["role"].string == "user" { scrollFollow.pin() }
-                            guard scrollFollow.followsLatest else { return }
-                            reader.scrollTo("bottom", anchor: .bottom)
-                            DispatchQueue.main.async { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
-                        }
-                        .onChange(of: messages.count) { old, new in
-                            guard new > old else { return }
-                            guard messages.suffix(new - old).contains(where: { $0["role"].string == "user" }) else { return }
-                            scrollFollow.pin()
-                            DispatchQueue.main.async { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
-                        }
-                        .onChange(of: scope) { _, _ in
-                            scrollFollow = ChatScrollFollowState()
-                            reader.scrollTo("bottom", anchor: .bottom)
-                        }
-                        .onAppear {
-                            reader.scrollTo("bottom", anchor: .bottom)
-                            // The inspector and composer settle a moment later; follow them.
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { if scrollFollow.followsLatest { reader.scrollTo("bottom", anchor: .bottom) } }
-                        }
-                }
-                }
-                composer(availableWidth: outer.size.width)
+            FullDiskAccessBanner().padding(.bottom, NekoSpace.xxs)
+            ChatTranscript(identity: scope, signal: signal(messages)) {
+                transcript(messages, related)
+            } dock: {
+                composer(messages, related)
             }
-            // Keep scrolling transcript content below the page header.
-            .clipped()
-        }
-        }
         }
         .navigationTitle("Home")
-        .navigationSubtitle(headerSubtitle)
-        .toolbar { todayToolbar }
-        .environment(\.replyActions, ReplyActions(send: { text in post(text) }, draft: { text in draft = text }))
-        .nekoAnimation(.appear, value: messages.count)
+        .navigationSubtitle(headerSubtitle(messages))
+        .toolbar { todayToolbar(messages) }
+        .environment(\.replyActions, replyActions)
         .onAppear {
+            replyActions = ReplyActions(send: { [model] text in Self.post(text, model: model) },
+                                        draft: { [model] text in model.chatDrafts.set(text, for: Self.scope(model)) })
             guard escapeMonitor == nil else { return }
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == 53, !event.isARepeat else { return event }
-                guard pendingTurn != nil else { lastEscape = .distantPast; return event }
+                guard Self.pendingTurn(in: self.messages) != nil else { lastEscape = .distantPast; return event }
                 if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { lastEscape = .distantPast; return event }
                 if !menuItems.isEmpty { lastEscape = .distantPast; return event }
                 let now = Date()
@@ -157,64 +74,76 @@ struct TodayView: View {
         .onDisappear { if let monitor = escapeMonitor { NSEvent.removeMonitor(monitor) }; escapeMonitor = nil }
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
     }
-    private func composer(availableWidth: CGFloat) -> some View {
-        let width = min(NekoLayout.readingWidth, max(280, availableWidth - NekoLayout.pageInset * 2))
-        let targetScope = scope
-        return VStack(alignment: .leading, spacing: NekoSpace.sm) {
-            if let notice = toolAccessNotice {
-                HStack(spacing: NekoSpace.sm) {
-                    Image(systemName: "wrench.and.screwdriver").foregroundStyle(ReplyStyle.orange)
-                    Text(notice).font(NekoFont.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Set Up Tools") {
-                        if model.selectedWorkspace == nil, model.workspaces.count == 1 { model.selectedWorkspace = model.workspaces[0].recordID }
-                        model.requestedPage = .tools
-                    }.controlSize(.small)
-                }.padding(.horizontal, NekoSpace.md).padding(.vertical, 7)
-                    .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.md))
-            }
-            let items = menuItems
-            if !items.isEmpty { ComposerMenuList(items: items, index: $menu.index) }
-            approvalBar
-            ComposerRuntimeScope(model: model, conversationID: RuntimeSelectionScope.home(targetScope)) { selection in
-                SharedComposer(
-                    text: Binding(get: { model.chatDrafts.text(for: targetScope) }, set: { model.chatDrafts.set($0, for: targetScope) }),
-                    attachments: attachments,
-                    placeholder: "Ask Neko, type / for commands or @ to add context",
-                    accessibilityLabel: "Message to Neko",
-                    accessibilityHelp: "Return sends or queues. Shift Return adds a line. Command Return interrupts and sends. Option Return includes the previous app's selection. Paste or drop images and files to attach them.",
-                    state: composerState, validationError: payloadError,
-                    onSend: { send() }, onStop: stopReply,
-                    onAttach: { model.chatDrafts.add($0, for: targetScope) },
-                    onRemove: { model.chatDrafts.remove($0, for: targetScope) },
-                    onChooseAttachments: chooseAttachments,
-                    onError: { model.error = $0 },
-                    onInterrupt: { send(interrupt: true) },
-                    onContext: { send(withContext: true) },
-                    onMenuKey: handleMenuKey
-                ) {
-                    GlassSegmented(selection: $mode, options: [
-                        .init(value: "ask", title: "Ask", help: "Ask: Neko answers now"),
-                        .init(value: "plan", title: "Plan", help: "Plan: Neko proposes a task with a plan for your approval, without changing anything")
-                    ], size: .small)
-                    ComposerRuntimePicker(model: model, selection: selection)
+
+    private func signal(_ messages: [JSONValue]) -> ChatTranscriptSignal {
+        ChatTranscriptSignal(lastID: messages.last?.recordID,
+                             lastIsUser: messages.last?["role"].string == "user",
+                             pendingID: messages.last { $0["pending"].bool && $0["role"].string != "user" }?.recordID)
+    }
+
+    @ViewBuilder private func transcript(_ messages: [JSONValue], _ related: ChatTurnRelated) -> some View {
+        if messages.isEmpty {
+            VStack(alignment: .leading, spacing: NekoLayout.messageGap) {
+                TodayHero(model: model, workSummary: workSummary, addingWorkspace: $addingWorkspace)
+                if model.workspaces.isEmpty {
+                    HowNekoWorks(model: model, addingWorkspace: $addingWorkspace) { draft = $0 }
+                } else {
+                    TodayBrief(model: model, workSummary: workSummary) { draft = $0 }
                 }
-            }.id(targetScope)
-        }
-        .frame(width: width)
-        .padding(.bottom, 14).padding(.top, NekoSpace.lg)
-        .frame(maxWidth: .infinity, alignment: .center)
-        .background(alignment: .bottom) {
-            LinearGradient(colors: [N.canvas.opacity(0), N.canvas.opacity(0.92)], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.45))
-                .allowsHitTesting(false)
-        }
-        .background {
-            GeometryReader { geometry in
-                Color.clear.preference(key: ChatComposerHeightKey.self, value: geometry.size.height)
             }
         }
-        .onPreferenceChange(ChatComposerHeightKey.self) { height in
-            if abs(height - composerHeight) > 1 { composerHeight = height }
+        let awaiting = Self.awaitingApprovals(in: messages)
+        ForEach(Array(messages.enumerated()), id: \.element.recordID) { index, message in
+            let isUser = message["role"].string == "user"
+            let previous = index > 0 ? messages[index - 1]["role"].string : nil
+            let speaker = ChatRhythm.showsSpeaker(isUser ? "user" : "neko", previous: previous.map { $0 == "user" ? "user" : "neko" })
+            let extra: JSONValue = .array([.bool(speaker), .number(Double(message["pending"].bool ? awaiting : 0))])
+            ChatTurn(key: related.key(for: message, extra: extra)) {
+                messageView(message, related, showsSpeaker: speaker, retry: isUser ? nil : retryText(for: index, in: messages))
+            }
+            .equatable()
+            .padding(.top, ChatRhythm.gap(isUser: isUser, isFirst: index == 0))
+            .modifier(ChatTurnFade(id: message.recordID, fresh: message["at_ms"].int >= openedAt, ledger: fades))
+            .id(message.recordID)
+        }
+    }
+
+    private func composer(_ messages: [JSONValue], _ related: ChatTurnRelated) -> some View {
+        let targetScope = scope
+        let items = menuItems
+        return ComposerRuntimeScope(model: model, conversationID: RuntimeSelectionScope.home(targetScope)) { selection in
+            SharedComposer(
+                text: Binding(get: { model.chatDrafts.text(for: targetScope) }, set: { model.chatDrafts.set($0, for: targetScope) }),
+                attachments: attachments,
+                placeholder: "Ask Neko anything · / for commands · @ for context",
+                accessibilityLabel: "Message to Neko",
+                accessibilityHelp: "Return sends or queues. Shift Return adds a line. Command Return interrupts and sends. Option Return includes the previous app's selection. Paste or drop images and files to attach them.",
+                state: composerState(messages), validationError: payloadError,
+                onSend: { send() }, onStop: stopReply,
+                onAttach: { model.chatDrafts.add($0, for: targetScope) },
+                onRemove: { model.chatDrafts.remove($0, for: targetScope) },
+                onChooseAttachments: chooseAttachments,
+                onError: { model.error = $0 },
+                onInterrupt: { send(interrupt: true) },
+                onContext: { send(withContext: true) },
+                onMenuKey: handleMenuKey,
+                tray: tray(messages, related)
+            ) {
+                GlassSegmented(selection: $mode, options: [
+                    .init(value: "ask", title: "Ask", help: "Ask: Neko answers now"),
+                    .init(value: "plan", title: "Plan", help: "Plan: Neko proposes a task with a plan for your approval, without changing anything")
+                ], size: .small)
+                ComposerRuntimePicker(model: model, selection: selection)
+            }
+        }
+        .id(targetScope)
+        // The / and @ menu floats above the dock; it never changes the
+        // dock's measured height, so the transcript does not move.
+        .overlay(alignment: .top) {
+            if !items.isEmpty {
+                ComposerMenuList(items: items, index: $menu.index)
+                    .alignmentGuide(.top) { $0[.bottom] + NekoSpace.sm }
+            }
         }
         .task(id: menu.mentionQuery(in: draft)) {
             if let files = await ComposerMentionSearch.files(matching: menu.mentionQuery(in: draft), model: model) { menu.mentionFiles = files }
@@ -224,28 +153,26 @@ struct TodayView: View {
 
     // MARK: Header, messages, approvals
 
-    private var conversationTickets: [JSONValue] {
-        let ids = messages.flatMap { $0["ticket_ids"].array.map(\.string) }
-        return ids.compactMap { id in model.snapshot["tasks"].array.first { $0.recordID == id } }
+    private func conversationTickets(_ messages: [JSONValue], _ related: ChatTurnRelated) -> [JSONValue] {
+        messages.flatMap { $0["ticket_ids"].array.map(\.string) }.map(related.task).filter { $0 != .null }
     }
-    private var pendingApproval: (turn: String, call: JSONValue)? {
+    private static func pendingApproval(in messages: [JSONValue]) -> (turn: String, call: JSONValue)? {
         for message in messages where message["pending"].bool {
             if let call = message["tool_calls"].array.first(where: { $0["status"].string == "awaiting_approval" }) { return (message.recordID, call) }
         }
         return nil
     }
-    private var headerSubtitle: String {
-        let status = replying ? "Working…" : pendingApproval != nil || conversationTickets.contains { ["AwaitingApproval", "ReadyForReview"].contains($0["status"].string) } ? "Waiting for you" : model.connected ? "Watching" : "Reconnecting…"
+    private func headerSubtitle(_ messages: [JSONValue]) -> String {
+        let tickets = conversationTickets(messages, ChatTurnRelated(snapshot: model.snapshot))
+        let status = Self.pendingTurn(in: messages) != nil ? "Working…"
+            : Self.pendingApproval(in: messages) != nil || tickets.contains { ["AwaitingApproval", "ReadyForReview"].contains($0["status"].string) } ? "Waiting for you"
+            : model.connected ? "Watching" : "Reconnecting…"
         return "\(workspaceName) · \(status)"
     }
-    @ToolbarContentBuilder private var todayToolbar: some ToolbarContent {
-        if replying {
+    @ToolbarContentBuilder private func todayToolbar(_ messages: [JSONValue]) -> some ToolbarContent {
+        if Self.pendingTurn(in: messages) != nil {
             ToolbarItem(placement: .primaryAction) {
-                toolbarIcon("stop.fill", help: "Stop the current reply") {
-                    if let current = messages.last(where: { $0["pending"].bool }) {
-                        Task { await model.workbench(.command("CancelChat", ["turn_id": current["id"]])) }
-                    }
-                }
+                toolbarIcon("stop.fill", help: "Stop the current reply") { stopReply() }
             }
         }
     }
@@ -254,87 +181,128 @@ struct TodayView: View {
             Image(systemName: symbol).font(NekoFont.meta).foregroundStyle(.secondary).frame(width: 32, height: 28).contentShape(Rectangle())
         }.buttonStyle(.plain).help(help).accessibilityLabel(help)
     }
-    @ViewBuilder private func messageView(_ message: JSONValue) -> some View {
+
+    @ViewBuilder private func messageView(_ message: JSONValue, _ related: ChatTurnRelated, showsSpeaker: Bool, retry: String?) -> some View {
         if message["role"].string == "user" {
             ChatUserMessage(text: message["text"].string, timestamp: message["at_ms"].int, queued: message["queued"].bool)
         } else {
-            VStack(alignment: .leading, spacing: NekoLayout.authorGap) {
-                ChatAuthorLine(author: "Neko", timestamp: message["at_ms"].int)
+            VStack(alignment: .leading, spacing: NekoSpace.sm) {
+                if showsSpeaker { ChatSpeaker(name: "Neko", timestamp: message["at_ms"].int) }
                 if message["pending"].bool {
                     let now = ChatActivity.describe(message, model: model)
-                    HStack(spacing: 10) {
-                        ProgressView().controlSize(.small)
-                        Text(now.label).font(NekoFont.meta).foregroundStyle(.secondary)
-                    }.padding(.vertical, NekoSpace.xxs)
+                    ActivityCapsule(activity: now.activity, label: now.label, plain: true)
+                        .frame(minHeight: NekoSpace.xl + NekoSpace.hair, alignment: .leading)
                 }
-                let receipts = model.snapshot["mcp"]["receipts"].array.filter { $0["run_id"].string == "chat:\(message.recordID)" }
-                let activity = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: receipts)
+                let activity = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: related.receipts(for: message))
                 if activity.count > 0 {
-                    ChatToolActivity(model: model, activity: activity, turn: message.recordID, pending: message["pending"].bool, awaitingApprovals: awaitingApprovals)
+                    ChatToolActivity(activity: activity, connectionName: related.connectionName)
                 }
                 if message["ticket_ids"].array.isEmpty &&
                     (message["text"].string.contains("I could not open every task") || message["text"].string.contains("No task was created")) {
-                    Label("No task was created from this reply", systemImage: "exclamationmark.triangle.fill")
-                        .font(NekoFont.caption).foregroundStyle(ReplyStyle.orange)
+                    Label {
+                        Text("No task was created from this reply").foregroundStyle(N.text3)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(NekoStyle.amber)
+                    }
+                    .font(NekoFont.meta)
                 }
                 if !message["text"].string.isEmpty {
                     ReadableText(text: message["text"].string).font(NekoFont.chat).lineSpacing(4)
                 }
                 if message["failed"].bool {
-                    ReplyErrorCallout(message: "", retry: retryText(for: message).map { text in { post(text) } })
+                    ReplyErrorCallout(message: "", retry: retry.map { text in { [model] in Self.post(text, model: model) } })
                 }
                 ForEach(message["remembered"].array, id: \.self) { memory in ReplyMemoryNote(text: memory.string) }
                 ForEach(message["responsibility_ids"].array, id: \.self) { id in
-                    if let item = model.snapshot["mcp"]["responsibilities"].array.first(where: { $0.recordID == id.string }) {
+                    if let item = related.watch(id.string) {
                         SuggestedResponsibilityCard(model: model, item: item)
                     }
                 }
                 ForEach(message["actions"].array, id: \.recordID) { action in
-                    ChatActionCard(model: model, messageID: message.recordID, action: action)
+                    let titles = related.actionTitles(action)
+                    ChatActionCard(action: action, taskTitle: titles.task, mergeTarget: titles.merge,
+                                   decide: { [model] accept in
+                                       await model.workbench(.command("DecideChatAction", ["message_id": .string(message.recordID), "action_id": action["id"], "accept": .bool(accept)]))
+                                   },
+                                   open: { [model] in model.openAgent(action["task_id"].string, from: .home) })
                 }
                 ForEach(message["ticket_ids"].array, id: \.self) { id in
-                    let task = model.snapshot["tasks"].array.first { $0.recordID == id.string } ?? .null
+                    let task = related.task(id.string)
                     ReplyTicketRow(title: task["title"].string.isEmpty ? "Task" : task["title"].string,
                                    status: task["status"].string,
-                                   workspace: model.workspaces.first { $0.recordID == task["workspace_id"].string }?["name"].string ?? "") {
+                                   workspace: related.workspaceName(task["workspace_id"].string)) { [model] in
                         model.openAgent(id.string, from: .home)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .contain)
         }
     }
-    private func connectionName(_ id: String) -> String {
-        model.snapshot["mcp"]["connections"].array.first { $0.recordID == id }?["label"].string ?? ""
+    private func retryText(for index: Int, in messages: [JSONValue]) -> String? {
+        messages[..<index].last { $0["role"].string == "user" }?["text"].string
     }
-    private func retryText(for message: JSONValue) -> String? {
-        guard let index = messages.firstIndex(where: { $0.recordID == message.recordID }) else { return nil }
-        return messages[..<index].last { $0["role"].string == "user" }?["text"].string
-    }
-    @ViewBuilder private var approvalBar: some View {
-        if let pending = pendingApproval {
-            let connection = connectionName(pending.call["connection_id"].string)
-            ChatApprovalCard(symbol: "hand.raised.fill",
-                         title: "Allow \(pending.call["tool_name"].string)\(connection.isEmpty ? "" : " on \(connection)")?",
-                         detail: ChatApprovalCard.argumentSummary(pending.call["arguments_json"].string),
-                         secondary: ("Deny", KeyboardShortcut("2", modifiers: .command), { decide(pending, false) }),
-                         primary: ("Allow", KeyboardShortcut("1", modifiers: .command), { decide(pending, true) }),
-                         busy: model.busy)
-        } else if let task = conversationTickets.last(where: { $0["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason($0) == nil }) {
-            ChatApprovalCard(symbol: "exclamationmark.triangle.fill",
-                         title: "Approve the plan for “\(task["title"].string)”?",
-                         detail: "Work starts in its own copy of the folder. Nothing is pushed.",
-                         secondary: ("Show task", nil, { inspect(task.recordID) }),
-                         primary: ("Approve Plan", KeyboardShortcut("1", modifiers: .command), { ticketCommand("ApproveTask", task.recordID) }),
-                         busy: model.busy)
-        } else if let task = conversationTickets.last(where: { $0["status"].string == "ReadyForReview" }) {
-            ChatApprovalCard(symbol: "checkmark.seal.fill",
-                         title: "“\(task["title"].string)” is ready for review",
-                         detail: "Its changes and checks are in the agent chat.",
-                         secondary: ("Show task", nil, { inspect(task.recordID) }),
-                         primary: ("Accept locally", KeyboardShortcut("1", modifiers: .command), { ticketCommand("CompleteTask", task.recordID) }),
-                         busy: model.busy)
+
+    /// The one decision this conversation is waiting on, inside the dock. It
+    /// alone owns ⌘1 and ⌘2.
+    private func tray(_ messages: [JSONValue], _ related: ChatTurnRelated) -> AnyView? {
+        let tickets = conversationTickets(messages, related)
+        if let pending = Self.pendingApproval(in: messages) {
+            let tool = pending.call["tool_name"].string
+            let connection = related.connectionName(pending.call["connection_id"].string)
+            let on = connection.isEmpty ? "" : " on \(connection)"
+            return AnyView(ChatDockTray(
+                symbol: "hand.raised.fill",
+                title: Text("Allow ") + Text(tool).font(NekoChat.code) + Text("\(on)?"),
+                announcement: "Allow \(tool)\(on)?",
+                detail: ChatToolArguments.summary(pending.call["arguments_json"].string),
+                fullDetail: pending.call["arguments_json"].string,
+                secondary: ChatTrayButton(label: "Deny", shortcut: KeyboardShortcut("2", modifiers: .command), hint: "⌘2") { decide(pending, false) },
+                primary: ChatTrayButton(label: "Allow", shortcut: KeyboardShortcut("1", modifiers: .command), hint: "⌘1") { decide(pending, true) },
+                busy: model.busy))
         }
+        if let task = tickets.last(where: { $0["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason($0) == nil }) {
+            let title = "Approve the plan for “\(task["title"].string)”?"
+            return AnyView(ChatDockTray(
+                symbol: "exclamationmark.triangle.fill", title: Text(title), announcement: title,
+                detail: "Works in its own copy of the folder. Nothing is pushed.",
+                secondary: ChatTrayButton(label: "Show task") { inspect(task.recordID) },
+                primary: ChatTrayButton(label: "Approve plan", shortcut: KeyboardShortcut("1", modifiers: .command), hint: "⌘1") { ticketCommand("ApproveTask", task.recordID) },
+                busy: model.busy))
+        }
+        if let task = tickets.last(where: { $0["status"].string == "ReadyForReview" }) {
+            let title = "“\(task["title"].string)” is ready for review"
+            return AnyView(ChatDockTray(
+                symbol: "checkmark.seal.fill", tint: NekoStyle.sky, title: Text(title), announcement: title,
+                detail: "Its changes and checks are in the agent chat.",
+                secondary: ChatTrayButton(label: "Show task") { inspect(task.recordID) },
+                primary: ChatTrayButton(label: "Accept locally", shortcut: KeyboardShortcut("1", modifiers: .command), hint: "⌘1") { ticketCommand("CompleteTask", task.recordID) },
+                busy: model.busy))
+        }
+        if let decision = askingDecision {
+            let title = DecisionPresentation.title(decision["action"].string)
+            let reason = decision["reason"].string
+            return AnyView(ChatDockTray(
+                symbol: "questionmark.bubble", title: Text(title), announcement: title,
+                detail: reason.components(separatedBy: .newlines).first ?? "", fullDetail: reason,
+                primary: ChatTrayButton(label: "Review") { model.requestedPage = .memory }))
+        }
+        if let notice = toolAccessNotice {
+            return AnyView(ChatDockTray(
+                symbol: "wrench.and.screwdriver", title: Text("Tools aren’t ready"), announcement: notice,
+                detail: notice,
+                primary: ChatTrayButton(label: "Set up tools") {
+                    if model.selectedWorkspace == nil, model.workspaces.count == 1 { model.selectedWorkspace = model.workspaces[0].recordID }
+                    model.requestedPage = .tools
+                }))
+        }
+        return nil
+    }
+    /// A decision Neko recorded that asks for yours and has no outcome yet.
+    /// The rest live on Memory → Working style, not above the conversation.
+    private var askingDecision: JSONValue? {
+        DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace })
+            .first { $0["action"].string == "ask_user" && $0["observed_outcome"].string.isEmpty }
     }
     private func decide(_ pending: (turn: String, call: JSONValue), _ approve: Bool) {
         Task { await model.workbench(.command("DecideChatTool", ["turn_id": .string(pending.turn), "call_id": pending.call["id"], "approve": .bool(approve)])) }
@@ -364,17 +332,22 @@ struct TodayView: View {
         return true
     }
 
-
     private var payloadError: String? {
         ComposerPayload.validationError(ComposerPayload.homeText(model.chatDrafts.submission(for: scope).text, planOnly: mode == "plan"), limit: 4096)
     }
-    private var composerState: ComposerActionState {
-        ComposerActionState(running: chatQueueOccupied, hasContent: !model.chatDrafts.submission(for: scope).text.isEmpty,
-                            submitting: sending, blocked: model.busy || payloadError != nil, queues: true, canStop: replying)
+    private func composerState(_ messages: [JSONValue]) -> ComposerActionState {
+        // The daemon runs one chat at a time across scopes, so any pending or
+        // queued turn means this one queues.
+        let occupied = model.snapshot["conversation"].array.contains { $0["pending"].bool || $0["queued"].bool }
+        return ComposerActionState(running: occupied, hasContent: !model.chatDrafts.submission(for: scope).text.isEmpty,
+                                   submitting: sending, blocked: model.busy || payloadError != nil, queues: true,
+                                   canStop: Self.pendingTurn(in: messages) != nil)
     }
-    private var pendingTurn: JSONValue? { messages.last { $0["pending"].bool && $0["role"].string != "user" } ?? messages.last { $0["pending"].bool } }
+    private static func pendingTurn(in messages: [JSONValue]) -> JSONValue? {
+        messages.last { $0["pending"].bool && $0["role"].string != "user" } ?? messages.last { $0["pending"].bool }
+    }
     private func stopReply() {
-        guard let turn = pendingTurn else { return }
+        guard let turn = Self.pendingTurn(in: messages) else { return }
         Task { await model.workbench(.command("CancelChat", ["turn_id": turn["id"]])) }
     }
 
@@ -388,7 +361,7 @@ struct TodayView: View {
         let usable = connected.contains { !$0["tools"].array.isEmpty && $0["error"].string.isEmpty }
         return usable ? nil : "Connections are present, but no tools are available yet. Discover their tools in Tools & skills."
     }
-    private var awaitingApprovals: Int {
+    private static func awaitingApprovals(in messages: [JSONValue]) -> Int {
         messages.filter { $0["pending"].bool }.flatMap { $0["tool_calls"].array }.filter { $0["status"].string == "awaiting_approval" }.count
     }
     private func chooseAttachments() {
@@ -413,7 +386,7 @@ struct TodayView: View {
                 model.notice = AXIsProcessTrusted() ? "No previous app to read from. Sent without context." : "Allow Accessibility in Settings → Permissions to include the previous app. Sent without context."
             }
         }
-        guard validateHomePayload(text) else { return }
+        guard Self.validateHomePayload(text, model: model) else { return }
         model.sendingChatScopes.insert(submission.scope)
         Task {
             let saved = await model.workbench(.command(interrupt ? "InterruptAndSendMessage" : "SendMessage", ["text": .string(text), "workspace_id": submission.scope.workspaceID.map(JSONValue.string) ?? .null]))
@@ -422,10 +395,10 @@ struct TodayView: View {
         }
     }
 
-    /// Sends text that came from a reply view (a choice, a form, Try Again).
-    private func post(_ text: String) {
-        let target = scope
-        guard !text.isEmpty, !model.sendingChatScopes.contains(target), validateHomePayload(text) else { return }
+    /// Sends text that came from a reply view (a choice, a form, Try again).
+    @MainActor private static func post(_ text: String, model: AppModel) {
+        let target = scope(model)
+        guard !text.isEmpty, !model.sendingChatScopes.contains(target), validateHomePayload(text, model: model) else { return }
         model.sendingChatScopes.insert(target)
         Task {
             _ = await model.workbench(.command("SendMessage", ["text": .string(text), "workspace_id": target.workspaceID.map(JSONValue.string) ?? .null]))
@@ -433,7 +406,7 @@ struct TodayView: View {
         }
     }
 
-    private func validateHomePayload(_ text: String) -> Bool {
+    @MainActor private static func validateHomePayload(_ text: String, model: AppModel) -> Bool {
         guard let error = ComposerPayload.validationError(text, limit: 4096) else { return true }
         model.error = error
         return false
@@ -458,53 +431,5 @@ struct TodayView: View {
         case .help: draft = "/"
         case .remember, .forget, .recall: break
         }
-    }
-}
-
-/// One chat message, redrawn only when what it shows changes. The chat sits
-/// inside a view that observes the whole app state, which changes every few
-/// seconds while agents work; rebuilding every visible message on each change
-/// re-parsed its markdown and re-measured its height, and a one-pixel
-/// difference made the transcript scroll again.
-struct ChatTurn<Content: View>: View, Equatable {
-    /// Everything this message shows, and nothing else.
-    let key: JSONValue
-    @ViewBuilder let content: () -> Content
-    nonisolated static func == (a: Self, b: Self) -> Bool { a.key == b.key }
-    var body: some View { content() }
-}
-
-/// What a message shows besides its own text, gathered once per render
-/// rather than searched for by every message.
-struct ChatTurnRelated {
-    private let receipts: [String: [JSONValue]]
-    private let tasks: [String: JSONValue]
-    private let watches: [String: JSONValue]
-    private let workspaces: [String: String]
-    private let connections: JSONValue
-
-    init(snapshot: JSONValue) {
-        receipts = Dictionary(grouping: snapshot["mcp"]["receipts"].array, by: { $0["run_id"].string })
-        tasks = Dictionary(snapshot["tasks"].array.map { ($0.recordID, $0) }, uniquingKeysWith: { first, _ in first })
-        watches = Dictionary(snapshot["mcp"]["responsibilities"].array.map { ($0.recordID, $0) }, uniquingKeysWith: { first, _ in first })
-        workspaces = Dictionary(snapshot["workspaces"].array.map { ($0.recordID, $0["name"].string) }, uniquingKeysWith: { first, _ in first })
-        connections = .array(snapshot["mcp"]["connections"].array.map { .array([.string($0.recordID), $0["label"]]) })
-    }
-
-    func key(for message: JSONValue, awaitingApprovals: Int) -> JSONValue {
-        let linked = message["ticket_ids"].array.map { id -> JSONValue in
-            let task = tasks[id.string] ?? .null
-            return .array([task["title"], task["status"], .string(workspaces[task["workspace_id"].string] ?? "")])
-        }
-        let watched = message["responsibility_ids"].array.map { watches[$0.string] ?? .null }
-        return .object([
-            "message": message,
-            "receipts": .array(receipts["chat:\(message.recordID)"] ?? []),
-            "tasks": .array(linked),
-            "watches": .array(watched),
-            // A watch row names its connections, so their labels are part of what it shows.
-            "connections": watched.isEmpty ? .null : connections,
-            "awaiting": .number(Double(awaitingApprovals)),
-        ])
     }
 }

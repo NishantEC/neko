@@ -58,11 +58,11 @@ struct ReplyGallery: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Reply views").font(NekoFont.heading)
-                ReplySteps(calls: [
-                    .object(["id": .string("1"), "tool_name": .string("search_issues"), "status": .string("succeeded"), "connection_id": .string("")]),
-                    .object(["id": .string("2"), "tool_name": .string("list_events"), "status": .string("succeeded"), "connection_id": .string("")]),
-                    .object(["id": .string("3"), "tool_name": .string("run_query"), "status": .string("failed"), "connection_id": .string("")]),
-                ], receipts: [], connectionName: { _ in "" }, workedFor: "Worked for 3m 02s")
+                ChatToolActivity(activity: ChatToolActivitySummary(calls: [
+                    .object(["id": .string("1"), "tool_name": .string("search_issues"), "status": .string("succeeded"), "connection_id": .string("linear")]),
+                    .object(["id": .string("2"), "tool_name": .string("list_events"), "status": .string("succeeded"), "connection_id": .string("sentry")]),
+                    .object(["id": .string("3"), "tool_name": .string("run_query"), "status": .string("failed"), "connection_id": .string("sentry")]),
+                ], receipts: []), connectionName: { ["linear": "Linear", "sentry": "Sentry"][$0] ?? "" })
                 ReadableText(text: ReplyGallery.sample).font(NekoFont.meta).lineSpacing(3)
                 ReplyErrorCallout(message: "Codex went quiet for 5 minutes while reading 1,200 files.", retry: {})
                 ReplyMemoryNote(text: "test funnel fixes against CleverTap, not only unit tests.")

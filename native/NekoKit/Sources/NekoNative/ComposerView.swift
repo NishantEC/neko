@@ -4,8 +4,12 @@ import SwiftUI
 
 enum ComposerLayout {
     static func textWidth(for availableWidth: CGFloat) -> CGFloat { max(100, availableWidth) }
+    /// One 15pt line plus a 6pt inset above and below.
+    static let minHeight: CGFloat = 36
+    /// About eleven lines; longer drafts scroll inside the editor.
+    static let maxHeight: CGFloat = 240
     static func height(forTextHeight textHeight: CGFloat) -> CGFloat {
-        min(160, max(40, textHeight + 12))
+        min(maxHeight, max(minHeight, textHeight + 12))
     }
 }
 
@@ -53,7 +57,7 @@ struct ComposerView: NSViewRepresentable {
         editor.isEditable = true
         editor.isSelectable = true
         editor.drawsBackground = false
-        editor.font = .systemFont(ofSize: 15)
+        editor.font = NekoChat.editor
         editor.textColor = .labelColor
         editor.insertionPointColor = .labelColor
         editor.textContainerInset = NSSize(width: 0, height: 6)
@@ -63,7 +67,7 @@ struct ComposerView: NSViewRepresentable {
         editor.autoresizingMask = [.width]
         editor.textContainer?.widthTracksTextView = true
         editor.textContainer?.containerSize = NSSize(width: 100, height: CGFloat.greatestFiniteMagnitude)
-        editor.minSize = NSSize(width: 0, height: 40)
+        editor.minSize = NSSize(width: 0, height: ComposerLayout.minHeight)
         editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.setAccessibilityLabel(accessibilityLabel)
         editor.setAccessibilityHelp(accessibilityHelp)
@@ -147,7 +151,7 @@ struct ComposerView: NSViewRepresentable {
         }
         layout.ensureLayout(for: container)
         let textHeight = max(layout.usedRect(for: container).maxY, layout.extraLineFragmentRect.maxY)
-        let height = max(contentSize.height, 40, textHeight + editor.textContainerInset.height * 2)
+        let height = max(contentSize.height, ComposerLayout.minHeight, textHeight + editor.textContainerInset.height * 2)
         if editor.frame.height != height {
             editor.setFrameSize(NSSize(width: width, height: height))
         }
@@ -168,7 +172,7 @@ struct ComposerView: NSViewRepresentable {
     }
 
     func height(for editor: NSTextView, width: CGFloat) -> CGFloat {
-        let editorFont = editor.font ?? .systemFont(ofSize: 15)
+        let editorFont = editor.font ?? NekoChat.editor
         if storage.string != editor.string || font != editorFont {
             font = editorFont
             storage.setAttributedString(NSAttributedString(string: editor.string, attributes: [.font: editorFont]))
@@ -286,7 +290,7 @@ struct ComposerView: NSViewRepresentable {
         super.draw(dirtyRect)
         if string.isEmpty, !hasMarkedText() {
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: font ?? NSFont.systemFont(ofSize: 13),
+                .font: font ?? NekoChat.editor,
                 .foregroundColor: NSColor.placeholderTextColor
             ]
             (placeholder as NSString).draw(

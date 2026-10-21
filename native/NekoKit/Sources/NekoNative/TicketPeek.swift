@@ -51,9 +51,10 @@ struct TicketPeek: View {
                 copied = true
                 Task { try? await Task.sleep(for: .seconds(1.2)); copied = false }
             }
-            if !ticket["worktree_path"].string.isEmpty {
+            // The protocol names it `worktree`; a parked ticket has no folder on disk.
+            if !ticket["worktree"].string.isEmpty && ticket["parked"] == .null {
                 iconButton("folder", help: "Show worktree in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: ticket["worktree_path"].string)])
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: ticket["worktree"].string)])
                 }
             }
         }

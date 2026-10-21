@@ -10,6 +10,7 @@ struct TicketDetail: View {
     var fullPage = false
     @State private var confirmDelete = false
     @State private var showLog = false
+    @State private var showDetails = false
     @State private var renaming = false
     @Environment(\.dismiss) private var dismiss
     private var ticket: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == id } ?? .null }
@@ -18,36 +19,39 @@ struct TicketDetail: View {
         DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { $0["task_id"].string == id })
     }
     var body: some View {
+        let rows = TicketThread.rows(ticket)
         VStack(spacing: 0) {
         if fullPage { FullDiskAccessBanner() }
-        ScrollView {
-            VStack(alignment: .leading, spacing: NekoLayout.sectionGap + 8) {
-                if !fullPage { HStack(alignment: .top) {
-                    Text(TaskText(task: ticket, snapshot: model.snapshot).title).font(NekoFont.title).textSelection(.enabled)
-                    Spacer()
-                    Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
-                }
-                Text(friendlyTaskStatus(ticket["status"].string)).foregroundStyle(.secondary) }
-                TicketThreadView(ticket: ticket)
-                if !ticket["plan"].string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && conversation.outcome == .previous {
-                    section(conversation.showsPlan ? conversation.planTitle : "Plan", ticket["plan"].string)
-                }
-                if let question = TicketPresentation.waitingReason(ticket) {
-                    VStack(alignment: .leading, spacing: NekoSpace.md) {
-                        Label("Neko is waiting on you", systemImage: "questionmark.bubble").font(NekoFont.heading).foregroundStyle(NekoStyle.amber)
-                        Text(question).lineSpacing(4).textSelection(.enabled)
-                        Text("Reply below so the agent can reassess its plan.").font(NekoFont.meta).foregroundStyle(N.text3)
+        ChatTranscript(identity: id,
+                       signal: ChatTranscriptSignal(lastID: rows.last?.id, lastIsUser: rows.last?.isYours ?? false),
+                       topInset: fullPage ? NekoLayout.sectionGap : NekoSpace.lg) {
+                if !fullPage {
+                    VStack(alignment: .leading, spacing: NekoSpace.xxs) {
+                        HStack(alignment: .top) {
+                            Text(TaskText(task: ticket, snapshot: model.snapshot).title).font(NekoFont.title).textSelection(.enabled)
+                            Spacer()
+                            Button("Close") { if let close { close() } else { dismiss() } }.keyboardShortcut(.cancelAction).hidden().frame(width: 0)
+                        }
+                        Text(friendlyTaskStatus(ticket["status"].string)).font(NekoFont.meta).foregroundStyle(N.text3)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(NekoLayout.rowInset)
-                    .nekoFill(NekoStyle.amber.opacity(0.08), radius: NekoRadius.xl)
+                    .padding(.bottom, NekoChat.turnGap)
                 }
-                if ticket["status"].string == "Failed" { stoppedCallout }
-                if !ticket["result"].string.isEmpty {
-                    TicketOutcomeReadback(result: ticket["result"].string, outcome: conversation.outcome, events: ticket["events"].array)
+                TicketThreadView(ticket: ticket)
+                Group {
+                    if !ticket["plan"].string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && conversation.outcome == .previous {
+                        section(conversation.showsPlan ? conversation.planTitle : "Plan", ticket["plan"].string)
+                    }
+                    if !ticket["result"].string.isEmpty {
+                        TicketOutcomeReadback(result: ticket["result"].string, status: ticket["status"].string, outcome: conversation.outcome, events: ticket["events"].array)
+                    }
+                    if !ticket["worktree"].string.isEmpty { TicketFilesChanged(model: model, id: id) }
+                    TicketDeliveryCard(ticket: ticket)
+                    ChatWorkFold(label: "Details", open: $showDetails) {
+                        VStack(alignment: .leading, spacing: NekoLayout.sectionGap) { supporting }
+                            .padding(.top, NekoSpace.sm)
+                    }
                 }
-                if !ticket["worktree"].string.isEmpty { TicketFilesChanged(model: model, id: id) }
-                TicketDeliveryCard(ticket: ticket)
-                supporting
+                .padding(.top, NekoChat.turnGap)
                 if !fullPage { HStack {
                     switch ticket["status"].string {
                     case "AwaitingApproval":
@@ -61,15 +65,11 @@ struct TicketDetail: View {
                     if ["Completed", "Cancelled", "Failed"].contains(ticket["status"].string) {
                         Button("Delete…", role: .destructive) { confirmDelete = true }
                     }
-                }.disabled(model.busy) }
-            }.font(NekoFont.body)
-                .frame(maxWidth: NekoLayout.readingWidth, alignment: .leading)
-                .padding(NekoLayout.pageInset)
-                .frame(maxWidth: .infinity)
-        }.frame(maxWidth: .infinity).defaultScrollAnchor(.bottom)
-        TicketComposer(model: model, id: id, status: ticket["status"].string)
-            .frame(maxWidth: NekoLayout.readingWidth)
-            .padding(.horizontal, NekoLayout.pageInset).padding(.top, 12).padding(.bottom, 20)
+                }.disabled(model.busy).padding(.top, NekoChat.turnGap) }
+        } dock: {
+            TicketComposer(model: model, id: id, status: ticket["status"].string, tray: tray)
+        }
+        .font(NekoFont.body)
         }.frame(maxWidth: .infinity)
                 .toolbar { if fullPage { agentToolbar } }
                 .renameAlert("Rename task", isPresented: $renaming, current: ticket["display_title"].string) { title in
@@ -172,19 +172,23 @@ struct TicketDetail: View {
         }
     }
     private func action(_ label: String, _ command: String) -> some View { Button(label) { Task { await model.workbench(.command(command, ["task_id": .string(id)])) } } }
-    private var stoppedCallout: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Why it stopped", systemImage: "exclamationmark.triangle").font(NekoFont.heading).foregroundStyle(NekoStyle.amber)
-            Text(TicketPresentation.stopReason(ticket)).lineSpacing(4).textSelection(.enabled)
-            HStack {
-                Button("Choose folder…") { chooseFolder() }
-                Text(model.snapshot["task_roots"][id].string.isEmpty ? "Pick the repository this task is about, then Neko starts it." : "Working in \(URL(fileURLWithPath: model.snapshot["task_roots"][id].string).lastPathComponent). Pick another repository to start over there.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+    /// What the ticket is waiting on you for, inside the composer glass where
+    /// you answer it: the planner's question, or why the work stopped.
+    private var tray: AnyView? {
+        if let question = TicketPresentation.waitingReason(ticket) {
+            let title = "The planner has a question"
+            return AnyView(ChatDockTray(symbol: "questionmark.bubble", title: Text(title), announcement: "\(title): \(question)",
+                                        detail: question.components(separatedBy: .newlines).first ?? question, fullDetail: question))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(NekoLayout.rowInset)
-        .background(NekoStyle.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
+        if ticket["status"].string == "Failed" {
+            let reason = TicketPresentation.stopReason(ticket)
+            let root = model.snapshot["task_roots"][id].string
+            let help = root.isEmpty ? "Pick the repository this task is about, then Neko starts it." : "Working in \(URL(fileURLWithPath: root).lastPathComponent). Pick another repository to start over there."
+            return AnyView(ChatDockTray(symbol: "exclamationmark.triangle", title: Text("Why it stopped"), announcement: "Why it stopped: \(reason)",
+                                        detail: reason.components(separatedBy: .newlines).first ?? reason, fullDetail: reason,
+                                        primary: ChatTrayButton(label: "Choose folder…") { chooseFolder() }).help(help))
+        }
+        return nil
     }
     private func chooseFolder() {
         let panel = NSOpenPanel()
@@ -215,9 +219,9 @@ struct TicketDetail: View {
     }
     @ViewBuilder private func section(_ title: String, _ text: String) -> some View {
         if !text.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(title).font(NekoFont.heading).accessibilityAddTraits(.isHeader)
-                ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
+            VStack(alignment: .leading, spacing: NekoSpace.sm) {
+                ChatSpeaker(name: title, symbol: "map").accessibilityAddTraits(.isHeader)
+                ReadableText(text: text).font(NekoFont.chat).lineSpacing(NekoLeading.body)
             }
         }
     }
@@ -227,30 +231,30 @@ struct TicketDetail: View {
 /// the checks it ran. The full saved text, including the raw review, copies.
 private struct TicketOutcomeReadback: View {
     let result: String
+    let status: String
     let outcome: TicketPresentation.Outcome
     let events: [JSONValue]
-    @State private var copied = false
 
+    /// A Neko turn with the speaker "Result", not a page heading in the middle of a chat.
     var body: some View {
         let review = TicketPresentation.review(result)
-        VStack(alignment: .leading, spacing: NekoSpace.lg) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: NekoSpace.xxs) {
-                    Text(outcome.title).font(NekoFont.title).accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: NekoSpace.md) {
+            HStack(spacing: NekoSpace.sm) {
+                ChatSpeaker(name: "Result", symbol: "checkmark.seal")
+                Spacer()
+                ChatCopyButton(text: { result }, help: "Copy the full saved result, including the reviewer response")
+            }
+            HStack(alignment: .firstTextBaseline, spacing: NekoSpace.sm) {
+                StatusGlyph(status: status, size: NekoSpace.lg).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: NekoSpace.hair) {
+                    Text(outcome.title).font(NekoFont.heading).accessibilityAddTraits(.isHeader)
                     Text(outcome.note).font(NekoFont.meta).foregroundStyle(N.text3)
                 }
-                Spacer()
-                Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                    NSPasteboard.general.clearContents()
-                    copied = NSPasteboard.general.setString(result, forType: .string)
-                }
-                .nekoButton(.quiet).font(NekoFont.meta)
-                .help("Copy the full saved result, including the reviewer response")
             }
             if review.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("No result text was saved for this task.").foregroundStyle(N.text2)
             } else {
-                ReadableText(text: review.body).font(NekoFont.chat).lineSpacing(4)
+                ReadableText(text: review.body).font(NekoFont.chat).lineSpacing(NekoLeading.body)
             }
             if let verdict = review.verdict {
                 TicketReviewCard(verdict: verdict, current: outcome.reviewIsCurrent, receipts: events.compactMap(TicketCommandReceipt.from(event:)))
@@ -258,7 +262,5 @@ private struct TicketOutcomeReadback: View {
                 Label("The independent reviewer is checking this now.", systemImage: "hourglass").font(NekoFont.meta).foregroundStyle(N.text3)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: result) { _, _ in copied = false }
-    }
+        .frame(maxWidth: .infinity, alignment: .leading)    }
 }

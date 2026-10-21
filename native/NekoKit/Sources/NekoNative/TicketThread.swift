@@ -30,39 +30,90 @@ enum TicketThread {
             || message == "Agent started in an isolated task worktree"
     }
 
-    static func items(_ task: JSONValue) -> [Item] {
-        var items: [Item] = []
+    static func items(_ task: JSONValue) -> [Item] { rows(task).map(\.item) }
+
+    /// One thread item with a stable identity: the event that started it. An
+    /// item keeps its id when a plan or result arrives and filters out an
+    /// earlier echo, so per-row state (an opened command) stays on its row.
+    struct Row: Identifiable, Equatable {
+        let id: String
+        let item: Item
+        /// The speaker line shows only when the speaker changes.
+        let showsSpeaker: Bool
+        var isYours: Bool {
+            switch item { case .brief, .you: true; default: false }
+        }
+    }
+
+    static func rows(_ task: JSONValue) -> [Row] {
+        var entries: [(start: Int, item: Item)] = []
         let goal = task["goal"].string.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !goal.isEmpty { items.append(.brief(goal)) }
+        if !goal.isEmpty { entries.append((-1, .brief(goal))) }
         // The plan and result appear as their own cards; skip their echoes.
         let echoes = [task["plan"].string, task["result"].string].map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)) }.filter { !$0.isEmpty }
-        for event in task["events"].array {
+        for (index, event) in task["events"].array.enumerated() {
             let role = event["role"].string
             let message = event["message"].string.trimmingCharacters(in: .whitespacesAndNewlines)
             if message.isEmpty { continue }
             if let receipt = TicketCommandReceipt.from(event: event) {
-                if case .steps(let r, var commands)? = items.last, r == role {
+                if let last = entries.last, case .steps(let r, var commands) = last.item, r == role {
                     commands.append(receipt)
-                    items[items.count - 1] = .steps(role: role, commands: commands)
+                    entries[entries.count - 1] = (last.start, .steps(role: role, commands: commands))
                 } else {
-                    items.append(.steps(role: role, commands: [receipt]))
+                    entries.append((index, .steps(role: role, commands: [receipt])))
                 }
                 continue
             }
             if isPlumbing(message) { continue }
             switch role {
-            case "note": items.append(.you(message))
-            case "user", "system": items.append(.status(message))
+            case "note": entries.append((index, .you(message)))
+            case "user", "system": entries.append((index, .status(message)))
             default:
                 if echoes.contains(where: { message.hasPrefix($0) || $0.hasPrefix(String(message.prefix(160))) }) { continue }
                 if message.hasPrefix("Working in ") || message == "Plan ready." || message.hasPrefix("Investigation complete.") {
-                    items.append(.status(message))
+                    entries.append((index, .status(message)))
                 } else {
-                    items.append(.agent(role: role, text: message))
+                    entries.append((index, .agent(role: role, text: message)))
                 }
             }
         }
-        return items
+        var previous: String?
+        return entries.map { entry in
+            let speaker = speaker(entry.item)
+            let shows = speaker.map { ChatRhythm.showsSpeaker($0, previous: previous) } ?? false
+            if let speaker { previous = speaker }
+            return Row(id: "\(kind(entry.item))#\(entry.start)", item: entry.item, showsSpeaker: shows)
+        }
+    }
+
+    /// Who said an item; nil for a status line, which belongs to no one.
+    static func speaker(_ item: Item) -> String? {
+        switch item {
+        case .brief, .you: "you"
+        case .agent(let role, _), .steps(let role, _): agentName(role)
+        case .status: nil
+        }
+    }
+
+    /// The symbol that stands for an agent role in its speaker line.
+    static func symbol(_ role: String) -> String {
+        switch agentName(role) {
+        case "Planner": "map"
+        case "Builder": "hammer"
+        case "Reviewer": "checkmark.shield"
+        case "Memory": "brain"
+        default: "sparkle"
+        }
+    }
+
+    private static func kind(_ item: Item) -> String {
+        switch item {
+        case .brief: "brief"
+        case .you: "you"
+        case .agent: "agent"
+        case .steps: "steps"
+        case .status: "status"
+        }
     }
 
     /// "/bin/zsh -lc 'rg -n foo'" reads as "rg -n foo".
@@ -83,51 +134,55 @@ enum TicketThread {
     }
 }
 
+/// A ticket's conversation rows, for a `ChatTranscript`. Each row is keyed by
+/// the event that started it, never by its position.
 struct TicketThreadView: View {
     let ticket: JSONValue
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoLayout.messageGap) {
-            ForEach(Array(TicketThread.items(ticket).enumerated()), id: \.offset) { _, item in row(item) }
-            if let working = workingLine { workingRow(working) }
+        let rows = TicketThread.rows(ticket)
+        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+            self.row(row, isLast: index == rows.count - 1)
+                .padding(.top, ChatRhythm.gap(isUser: row.isYours, isFirst: index == 0))
+                .id(row.id)
+        }
+        if let working = Self.working(ticket["status"].string) {
+            ActivityCapsule(activity: working.activity, label: working.label, plain: true)
+                .frame(minHeight: NekoSpace.xl + NekoSpace.hair, alignment: .leading)
+                .padding(.top, NekoChat.replyGap)
         }
     }
 
-    private var workingLine: String? {
-        switch ticket["status"].string {
-        case "Queued": "Getting this task ready…"
-        case "Planning": "Planner is reading the code…"
-        case "Building": "Builder is making the change in its own copy…"
-        case "Reviewing": "Reviewer is checking the change…"
+    /// The live line under a running ticket, as the same indicator Home uses.
+    static func working(_ status: String) -> (activity: NekoActivity, label: String)? {
+        switch status {
+        case "Queued": (.thinking, "Getting this task ready…")
+        case "Planning": (.reading, "Planner is reading the code…")
+        case "Building": (.analyzing, "Builder is making the change in its own copy…")
+        case "Reviewing": (.analyzing, "Reviewer is checking the change…")
         default: nil
         }
     }
 
-    @ViewBuilder private func row(_ item: TicketThread.Item) -> some View {
-        switch item {
+    @ViewBuilder private func row(_ row: TicketThread.Row, isLast: Bool) -> some View {
+        switch row.item {
         case .brief(let text):
             TicketRequestBlock(text: text, createdAt: ticket["created_at_ms"].int)
         case .you(let text):
             ChatUserMessage(text: text)
         case .agent(let role, let text):
-            VStack(alignment: .leading, spacing: NekoLayout.authorGap) {
-                ChatAuthorLine(author: TicketThread.agentName(role))
-                ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
+            VStack(alignment: .leading, spacing: NekoSpace.sm) {
+                if row.showsSpeaker { ChatSpeaker(name: TicketThread.agentName(role), symbol: TicketThread.symbol(role)) }
+                ReadableText(text: text).font(NekoFont.chat).lineSpacing(NekoLeading.body)
             }
+            .accessibilityElement(children: .contain)
         case .steps(let role, let commands):
-            TicketWorkLog(author: TicketThread.agentName(role), commands: commands)
-        case .status(let text):
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Rectangle().fill(N.lineStrong).frame(height: 1).frame(maxWidth: 16)
-                Text(text).font(NekoFont.meta).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: NekoSpace.sm) {
+                if row.showsSpeaker { ChatSpeaker(name: TicketThread.agentName(role), symbol: TicketThread.symbol(role)) }
+                TicketWorkLog(author: TicketThread.agentName(role), commands: commands, startsOpen: isLast)
             }
+        case .status(let text):
+            ChatStatusDivider(text: text)
         }
-    }
-
-    private func workingRow(_ text: String) -> some View {
-        HStack(spacing: 10) {
-            ProgressView().controlSize(.small)
-            Text(text).font(NekoFont.meta).foregroundStyle(.secondary)
-        }.padding(.vertical, 4)
     }
 }
 
@@ -136,6 +191,8 @@ struct TicketComposer: View {
     @ObservedObject var model: AppModel
     let id: String
     let status: String
+    /// What the ticket is waiting on you for, inside the composer glass.
+    var tray: AnyView? = nil
     private var sending: Bool { model.sendingTicketIDs.contains(id) }
     private var running: Bool { ["Queued", "Planning", "Building", "Reviewing"].contains(status) }
     private var submission: ComposerDraftStore<String>.Submission { model.ticketDrafts.submission(for: id) }
@@ -150,7 +207,7 @@ struct TicketComposer: View {
         case "ReadyForReview": "Ask a question or request changes…"
         case "Failed", "Cancelled": "Tell the agent how to try again…"
         case "Completed": "Reopen with a follow-up…"
-        default: "Send new direction; the agent pauses and replans…"
+        default: "Redirect the agent. It pauses and replans…"
         }
     }
     var body: some View {
@@ -170,7 +227,8 @@ struct TicketComposer: View {
                 onChooseAttachments: {
                     ComposerAttachmentPicker.choose(attach: { model.ticketDrafts.add($0, for: targetID) }, onError: { model.error = $0 })
                 },
-                onError: { model.error = $0 }
+                onError: { model.error = $0 },
+                tray: tray
             ) {
                 ComposerRuntimePicker(model: model, selection: selection)
             }

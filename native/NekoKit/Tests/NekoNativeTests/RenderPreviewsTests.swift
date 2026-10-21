@@ -76,12 +76,16 @@ import NekoKit
             func action(_ kind: String, _ status: String, _ text: String = "", note: String = "") -> JSONValue {
                 .object(["id": .string(kind + status), "task_id": first["id"], "kind": .string(kind), "text": .string(text), "status": .string(status), "note": .string(note)])
             }
+            func card(_ action: JSONValue) -> ChatActionCard {
+                let titles = ChatActionCard.titles(for: action, snapshot: snapshot)
+                return ChatActionCard(action: action, taskTitle: titles.task, mergeTarget: titles.merge, decide: { _ in }, open: {})
+            }
             let cards = VStack(alignment: .leading, spacing: NekoSpace.md) {
-                ChatActionCard(model: extra, messageID: "m", action: action("message", "Proposed", "Use the 375px designs from HEA-2621 and keep the existing breakpoints."))
-                ChatActionCard(model: extra, messageID: "m", action: action("run_next", "Done"))
-                ChatActionCard(model: extra, messageID: "m", action: action("merge", "Proposed", snapshot["tasks"].array.last?["id"].string ?? ""))
-                ChatActionCard(model: extra, messageID: "m", action: action("stop", "Declined"))
-                ChatActionCard(model: extra, messageID: "m", action: action("approve", "Failed", note: "This ticket is already working"))
+                card(action("message", "Proposed", "Use the 375px designs from HEA-2621 and keep the existing breakpoints."))
+                card(action("run_next", "Done"))
+                card(action("merge", "Proposed", snapshot["tasks"].array.last?["id"].string ?? ""))
+                card(action("stop", "Declined"))
+                card(action("approve", "Failed", note: "This ticket is already working"))
             }.padding(NekoLayout.pageInset)
             for scheme in [ColorScheme.dark, .light] {
                 try render(cards, size: CGSize(width: 760, height: 780), scheme: scheme,

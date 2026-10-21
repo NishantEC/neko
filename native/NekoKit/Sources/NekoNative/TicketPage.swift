@@ -7,23 +7,35 @@ import NekoKit
 // reviewer concluded and where the work went. Everything a reviewer needs is
 // on the page; only a single command's output or a long request opens on click.
 
-/// The ticket's request: the issue it was filed from, clamped when long.
+/// The ticket's request: the issue it was filed from, as your opening turn.
+/// A long request is clamped by height, not by lines: a line limit applies to
+/// each paragraph separately, so many short paragraphs never clamped at all.
 struct TicketRequestBlock: View {
     let text: String
     let createdAt: Int
     @State private var full = false
     private var long: Bool { text.count > 600 || text.components(separatedBy: .newlines).count > 10 }
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoLayout.authorGap) {
-            ChatAuthorLine(author: "Request", timestamp: createdAt)
-            ReadableText(text: text).font(NekoFont.chat).lineSpacing(4)
-                .lineLimit(long && !full ? 10 : nil)
+        let clamped = long && !full
+        VStack(alignment: .trailing, spacing: NekoSpace.xxs) {
+            ChatBubble(timestamp: createdAt, label: "Request", spoken: text, note: "Request ·", noteSymbol: nil) {
+                ReadableText(text: text)
+                    .frame(maxHeight: clamped ? NekoChat.clampHeight : nil, alignment: .top)
+                    .clipped()
+                    .mask {
+                        VStack(spacing: 0) {
+                            Color.black
+                            LinearGradient(colors: [.black, .black.opacity(clamped ? 0 : 1)], startPoint: .top, endPoint: .bottom)
+                                .frame(height: NekoChat.clampFade)
+                        }
+                    }
+            }
             if long {
                 Button(full ? "Show less" : "Show full request") { withNekoAnimation(.reveal) { full.toggle() } }
                     .nekoButton(.quiet).font(NekoFont.meta)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
@@ -66,31 +78,42 @@ struct TicketCommandRow: View {
     }
 }
 
-/// What one agent ran during a stretch of work, newest last. Long runs show
-/// their latest commands with the earlier ones a click away.
+/// What one agent ran during a stretch of work, folded into one line. The
+/// newest stretch starts open on its latest commands; the rest are a click away.
 struct TicketWorkLog: View {
     let author: String
     let commands: [TicketCommandReceipt]
+    @State private var open: Bool
     @State private var all = false
-    private let recent = 6
+    private let recent = 3
+
+    init(author: String, commands: [TicketCommandReceipt], startsOpen: Bool = false) {
+        self.author = author
+        self.commands = commands
+        _open = State(initialValue: startsOpen)
+    }
+
+    static func label(author: String, commands: [TicketCommandReceipt]) -> String {
+        let failed = commands.filter(\.failed).count
+        return "\(author) ran \(commands.count) \(commands.count == 1 ? "command" : "commands")" + (failed > 0 ? " · \(failed) failed" : "")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoSpace.sm) {
-            HStack(spacing: NekoSpace.xs) {
-                Image(systemName: "terminal").foregroundStyle(N.text3).accessibilityHidden(true)
-                Text("\(author) ran \(commands.count) \(commands.count == 1 ? "command" : "commands")").foregroundStyle(N.text3)
-                let failed = commands.filter(\.failed).count
-                if failed > 0 { Text("· \(failed) failed").foregroundStyle(NekoStyle.coral) }
-            }.font(NekoFont.meta)
+        ChatWorkFold(label: Self.label(author: author, commands: commands), failed: commands.contains(where: \.failed), open: $open) {
             let hidden = all ? 0 : max(commands.count - recent, 0)
-            if hidden > 0 {
-                Button("Show \(hidden) earlier") { withNekoAnimation(.reveal) { all = true } }
-                    .nekoButton(.quiet).font(NekoFont.meta)
+            VStack(alignment: .leading, spacing: NekoSpace.xxs) {
+                if hidden > 0 {
+                    Button("Show \(hidden) earlier") { withNekoAnimation(.reveal) { all = true } }
+                        .nekoButton(.quiet).font(NekoFont.meta)
+                }
+                // Keyed by position inside this stretch, which has a stable id
+                // of its own: commands only append, so an opened row stays open.
+                ForEach(Array(commands.enumerated().dropFirst(hidden)), id: \.offset) { _, receipt in
+                    TicketCommandRow(receipt: receipt).frame(minHeight: NekoChat.commandRow)
+                }
             }
-            VStack(alignment: .leading, spacing: NekoSpace.xs + NekoSpace.hair) {
-                ForEach(Array(commands.enumerated().dropFirst(hidden)), id: \.offset) { _, receipt in TicketCommandRow(receipt: receipt) }
-            }
+            .padding(.leading, NekoSpace.lg)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -101,29 +124,43 @@ struct TicketFilesChanged: View {
     @State private var changes: (files: [String], patch: String, truncated: Bool)?
     @State private var error: String?
     @State private var loading = false
+    @State private var open = false
+    /// One fixed-height row while it loads and until clicked: the diff loads
+    /// after the page and must not push the conversation away from the reader.
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoSpace.md) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(heading).font(NekoFont.heading)
-                if let totals { Text(totals.added).foregroundStyle(NekoStyle.mint); Text(totals.removed).foregroundStyle(NekoStyle.coral) }
-                Spacer()
-                Button(loading ? "Loading…" : "Refresh", systemImage: "arrow.clockwise") { load() }
-                    .labelStyle(.iconOnly).nekoButton(.quiet).disabled(loading).help("Reload the changes")
-            }.font(NekoFont.meta.monospacedDigit())
+        VStack(alignment: .leading, spacing: NekoSpace.sm) {
+            HStack(spacing: NekoSpace.sm) {
+                Button { if changes?.files.isEmpty == false { withNekoAnimation(.reveal) { open.toggle() } } } label: {
+                    HStack(spacing: NekoSpace.xs) {
+                        Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold))
+                            .rotationEffect(.degrees(open ? 90 : 0)).frame(width: NekoSpace.md)
+                            .opacity(changes?.files.isEmpty == false ? 1 : 0)
+                        Text(heading).foregroundStyle(N.text2)
+                        if let totals { Text(totals.added).foregroundStyle(NekoStyle.mint); Text(totals.removed).foregroundStyle(NekoStyle.coral) }
+                        Spacer(minLength: 0)
+                    }.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(open ? "Expanded" : "Collapsed")
+                Button("Reload changes", systemImage: "arrow.clockwise") { load() }
+                    .labelStyle(.iconOnly).nekoButton(.quiet).disabled(loading).help("Reload changes")
+            }
+            .font(NekoFont.meta.monospacedDigit())
+            .frame(height: NekoSpace.xxl + NekoSpace.xl)
+            .padding(.horizontal, NekoChat.blockInset)
+            .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
             if let error { Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.amber) }
-            if let changes {
+            if open, let changes, !changes.files.isEmpty {
                 if changes.truncated { Label("The diff is too long to show in full here.", systemImage: "exclamationmark.triangle").font(NekoFont.meta).foregroundStyle(NekoStyle.amber) }
-                if changes.files.isEmpty { NekoEmptyState("No changes in the worktree yet.") }
-                else { NativeDiffBlock(code: changes.patch, openFiles: changes.files.count <= 3 ? changes.files.count : 1).id(changes.patch) }
-            } else if loading {
-                ProgressView().controlSize(.small)
+                NativeDiffBlock(code: changes.patch, openFiles: changes.files.count <= 3 ? changes.files.count : 1).id(changes.patch)
             }
         }
         .task(id: id) { load() }
     }
     private var heading: String {
-        guard let changes else { return "Files changed" }
-        return "\(changes.files.count) \(changes.files.count == 1 ? "file" : "files") changed"
+        guard let changes else { return loading ? "Files changed · loading" : "Files changed" }
+        if changes.files.isEmpty { return "No changes in the worktree yet" }
+        return "\(changes.files.count) \(changes.files.count == 1 ? "file" : "files") changed ·"
     }
     private var totals: (added: String, removed: String)? {
         guard let patch = changes?.patch, !patch.isEmpty else { return nil }
@@ -178,7 +215,7 @@ struct TicketReviewCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .nekoCard(padding: NekoLayout.rowInset, radius: NekoRadius.xl)
+        .padding(NekoChat.blockInset).nekoFill(N.panel, radius: NekoRadius.lg)
     }
     /// The latest saved run of a check the reviewer reported.
     static func receipt(for test: String, in receipts: [TicketCommandReceipt]) -> TicketCommandReceipt? {
@@ -208,7 +245,7 @@ struct TicketDeliveryCard: View {
                     Button("Open on GitHub", systemImage: "arrow.up.right") { NSWorkspace.shared.open(url) }.nekoButton(.secondary)
                 }
             }
-            .nekoCard(padding: NekoLayout.rowInset, radius: NekoRadius.xl)
+            .padding(NekoChat.blockInset).nekoFill(N.panel, radius: NekoRadius.lg)
         }
     }
     static func number(_ url: String) -> String { url.split(separator: "/").last.map { "#\($0)" } ?? "" }

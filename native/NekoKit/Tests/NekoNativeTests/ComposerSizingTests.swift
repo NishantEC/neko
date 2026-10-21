@@ -31,7 +31,7 @@ import XCTest
         text.font = .systemFont(ofSize: 15)
         text.string = String(repeating: "A multiline draft keeps its caret and scrolls normally.\n", count: 20)
         scroll.documentView = text
-        XCTAssertEqual(scroll.measuredSize(for: 720)?.height, 160)
+        XCTAssertEqual(scroll.measuredSize(for: 720)?.height, ComposerLayout.maxHeight)
         scroll.layout()
         XCTAssertEqual(text.frame.width, scroll.contentSize.width)
         XCTAssertEqual(text.textContainer?.containerSize.width, scroll.contentSize.width)

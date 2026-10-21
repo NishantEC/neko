@@ -9,8 +9,10 @@ struct NativeTableBlock: View {
     @State private var sortColumn: Int?
     @State private var ascending = true
     @State private var copied = false
-    @State private var availableWidth: CGFloat = 600
-    private var columnWidth: CGFloat { max(160, (availableWidth - 24) / CGFloat(max(1, headers.count))) }
+    /// Narrowest a column may get before the table scrolls sideways instead.
+    static let minimumColumn: CGFloat = 120
+    /// Each column's width once the table scrolls sideways.
+    static let scrollingColumn: CGFloat = 160
     private var sorted: [[String]] {
         guard let column = sortColumn else { return rows }
         return rows.sorted { a, b in
@@ -22,58 +24,57 @@ struct NativeTableBlock: View {
             return ascending ? order == .orderedAscending : order == .orderedDescending
         }
     }
+    /// Laid out once, at the width it is given: flexible columns when they fit,
+    /// otherwise fixed columns that scroll sideways. No measured width is
+    /// stored, so the table never re-wraps (and jumps) after its first frame.
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("\(rows.count) \(rows.count == 1 ? "row" : "rows") · \(headers.count) columns")
-                    .font(ReplyStyle.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button(copied ? "Copied" : "Copy as CSV") {
-                    let csv = ([headers] + rows).map { $0.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: ",") }.joined(separator: "\n")
-                    NSPasteboard.general.clearContents()
-                    copied = NSPasteboard.general.setString(csv, forType: .string)
-                }.nekoButton(.quiet).font(ReplyStyle.caption)
+        ChatBlock(label: "Table") {
+            Button(copied ? "Copied" : "Copy as CSV") {
+                let csv = ([headers] + rows).map { $0.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: ",") }.joined(separator: "\n")
+                NSPasteboard.general.clearContents()
+                copied = NSPasteboard.general.setString(csv, forType: .string)
+            }.nekoButton(.quiet).font(NekoFont.caption)
+        } content: {
+            ViewThatFits(in: .horizontal) {
+                grid(columnWidth: nil)
+                ScrollView(.horizontal) { grid(columnWidth: Self.scrollingColumn) }
             }
-            ScrollView(.horizontal) {
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    ForEach(Array(headers.enumerated()), id: \.offset) { index, header in
-                        Button {
-                            if sortColumn == index { ascending.toggle() } else { sortColumn = index; ascending = true }
-                        } label: {
-                            HStack(spacing: 3) {
-                                Text(header).font(NekoFont.heading).foregroundStyle(.secondary)
-                                if sortColumn == index { Image(systemName: ascending ? "chevron.up" : "chevron.down").font(NekoFont.of(.micro, weight: .bold)).foregroundStyle(.secondary) }
-                            }.padding(.horizontal, 6).frame(width: columnWidth, alignment: .leading).contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                            .accessibilityLabel("Sort by \(header)")
-                            .accessibilityValue(sortColumn == index ? (ascending ? "Ascending" : "Descending") : "Not sorted")
-                    }
-                }.padding(.horizontal, 12).padding(.vertical, 12)
-                Divider()
-                ForEach(Array(sorted.enumerated()), id: \.offset) { index, row in
-                    HStack(alignment: .top, spacing: 0) {
-                        ForEach(Array(headers.indices), id: \.self) { column in
-                            let cell = row.indices.contains(column) ? row[column] : ""
-                            Text(inline(cell)).font(ReplyStyle.body.monospacedDigit())
-                                .foregroundStyle(tone(cell, column: column))
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.horizontal, 6).frame(width: columnWidth, alignment: .leading)
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 12)
-                    .background(index % 2 == 1 ? Color.primary.opacity(0.025) : .clear)
-                }
-            }
-            }
-            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
             .textSelection(.enabled)
         }
-        .background(GeometryReader { geometry in
-            Color.clear.onAppear { availableWidth = geometry.size.width }
-                .onChange(of: geometry.size.width) { _, width in availableWidth = width }
-        })
+    }
+
+    private func grid(columnWidth: CGFloat?) -> some View {
+        Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+            GridRow {
+                ForEach(Array(headers.enumerated()), id: \.offset) { index, header in
+                    Button {
+                        if sortColumn == index { ascending.toggle() } else { sortColumn = index; ascending = true }
+                    } label: {
+                        HStack(spacing: NekoSpace.xxs) {
+                            Text(header).font(NekoFont.of(.caption, weight: .semibold)).foregroundStyle(N.text3)
+                            if sortColumn == index { Image(systemName: ascending ? "chevron.up" : "chevron.down").font(NekoFont.of(.micro, weight: .bold)).foregroundStyle(N.text3) }
+                        }
+                        .cell(columnWidth).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel("Sort by \(header)")
+                        .accessibilityValue(sortColumn == index ? (ascending ? "Ascending" : "Descending") : "Not sorted")
+                }
+            }
+            Divider().gridCellUnsizedAxes(.horizontal)
+            ForEach(Array(sorted.enumerated()), id: \.offset) { index, row in
+                GridRow {
+                    ForEach(Array(headers.indices), id: \.self) { column in
+                        let cell = row.indices.contains(column) ? row[column] : ""
+                        Text(inline(cell)).font(NekoFont.meta.monospacedDigit())
+                            .foregroundStyle(tone(cell, column: column))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .cell(columnWidth)
+                    }
+                }
+                if index < rows.count - 1 { Divider().opacity(0.5).gridCellUnsizedAxes(.horizontal) }
+            }
+        }
+        .padding(.horizontal, NekoSpace.xs)
     }
     private func inline(_ value: String) -> AttributedString {
         (try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value)
@@ -84,6 +85,16 @@ struct NativeTableBlock: View {
         if trimmed.hasPrefix("−") || (trimmed.hasPrefix("-") && trimmed.dropFirst().first?.isNumber == true) { return ReplyStyle.red }
         if trimmed.hasPrefix("+"), trimmed.dropFirst().first?.isNumber == true { return ReplyStyle.green }
         return .primary
+    }
+}
+
+private extension View {
+    /// A table cell: flexible from `minimumColumn` up when `width` is nil, else fixed.
+    func cell(_ width: CGFloat?) -> some View {
+        padding(.horizontal, NekoSpace.xs).padding(.vertical, NekoSpace.sm)
+            .frame(minWidth: width ?? NativeTableBlock.minimumColumn,
+                   idealWidth: width ?? NativeTableBlock.minimumColumn,
+                   maxWidth: width ?? .infinity, alignment: .leading)
     }
 }
 

@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 enum NativeMarkdownBlock: Equatable {
@@ -241,17 +242,74 @@ private struct NativeCodeBlock: View {
     }
 }
 
+/// Decoded chat images by path. Decoding happens off the main thread once;
+/// a lazy stack bringing a row back reads the cache instead of the disk.
+@MainActor enum ChatImageCache {
+    private static let images: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 48
+        return cache
+    }()
+
+    static func image(_ path: String) -> NSImage? { images.object(forKey: path as NSString) }
+
+    static func load(_ url: URL) async -> NSImage? {
+        let key = url.path
+        if let cached = image(key) { return cached }
+        let decoded = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                  values.isRegularFile == true, let bytes = values.fileSize, bytes <= 32 * 1024 * 1024 else { return nil }
+            return NSImage(contentsOf: url)
+        }.value
+        guard let decoded else { return nil }
+        images.setObject(decoded, forKey: key as NSString)
+        return decoded
+    }
+
+    /// Pixel size from the file header, known before the image decodes, so
+    /// its frame is reserved. Nothing is decoded.
+    nonisolated static func pixelSize(_ url: URL) -> CGSize? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+              let height = properties[kCGImagePropertyPixelHeight] as? CGFloat, width > 0, height > 0 else { return nil }
+        return CGSize(width: width, height: height)
+    }
+}
+
 private struct NativeAttachmentImage: View {
     let alt: String
     let reference: String
+    @State private var image: NSImage?
+    @State private var aspect: CGFloat?
+    @State private var failed = false
     var body: some View {
-        if let path = NativeAttachmentPath.resolve(reference),
-           let values = try? path.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-           values.isRegularFile == true, let size = values.fileSize, size <= 32 * 1024 * 1024,
-           let image = NSImage(contentsOf: path) {
-            Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 420).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous)).accessibilityLabel(alt.isEmpty ? "Attached image" : alt)
-        } else {
-            Label(alt.isEmpty ? "Image not loaded" : "\(alt) · image not loaded", systemImage: "photo").font(.callout).foregroundStyle(.secondary)
+        let path = NativeAttachmentPath.resolve(reference)
+        Group {
+            if failed || path == nil {
+                Label(alt.isEmpty ? "Image not loaded" : "\(alt) · image not loaded", systemImage: "photo").font(NekoFont.meta).foregroundStyle(N.text3)
+            } else if let shown = image ?? path.flatMap({ ChatImageCache.image($0.path) }) {
+                Image(nsImage: shown).resizable().scaledToFit()
+                    .frame(maxHeight: NekoChat.imageHeight, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
+                    .accessibilityLabel(alt.isEmpty ? "Attached image" : alt)
+            } else {
+                // The frame is reserved before the image decodes, so its
+                // arrival does not shift the conversation.
+                RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous).fill(N.sunken)
+                    .aspectRatio(aspect ?? 4 / 3, contentMode: .fit)
+                    .frame(maxHeight: NekoChat.imageHeight, alignment: .leading)
+                    .accessibilityLabel(alt.isEmpty ? "Loading image" : "Loading \(alt)")
+            }
+        }
+        .task(id: reference) {
+            guard let path else { return }
+            if aspect == nil {
+                let size = await Task.detached { ChatImageCache.pixelSize(path) }.value
+                if let size { aspect = size.width / size.height }
+            }
+            image = await ChatImageCache.load(path)
+            failed = image == nil
         }
     }
 }
