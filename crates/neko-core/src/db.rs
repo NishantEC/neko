@@ -257,6 +257,14 @@ impl Db {
         Ok(())
     }
 
+    /// Removes a settings row, and anything waiting to be written for it.
+    pub fn delete_setting(&self, key: &str) -> rusqlite::Result<()> {
+        self.pending.borrow_mut().remove(key);
+        self.written.borrow_mut().remove(key);
+        self.conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     /// Removes a task's row and events, and anything waiting to be written for them.
     pub fn delete_task_rows(&self, task_id: &str) -> rusqlite::Result<()> {
         for key in [format!("{TASK_KEY}{task_id}"), format!("{EVENTS_KEY}{task_id}")] {
@@ -285,6 +293,21 @@ impl Db {
             }
         }
         Ok(rows)
+    }
+
+    /// One task's events in order (with a waiting value applied), or `None`
+    /// when nothing was ever stored for it.
+    pub fn events_of(&self, task_id: &str) -> rusqlite::Result<Option<Vec<String>>> {
+        if let Some((value, _)) = self.pending.borrow().get(&format!("{EVENTS_KEY}{task_id}")) {
+            return serde_json::from_str(value).map(Some)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)));
+        }
+        let mut statement = self.conn.prepare_cached(
+            "SELECT body FROM workbench_task_events WHERE task_id = ?1 ORDER BY seq")?;
+        let events: Vec<String> = statement.query_map([task_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        if !events.is_empty() { return Ok(Some(events)); }
+        Ok(self.written.borrow().contains_key(&format!("{EVENTS_KEY}{task_id}")).then(Vec::new))
     }
 
     /// Every task's events in order, as event JSON strings, with values

@@ -23,6 +23,15 @@ const RECEIPTS: &str = "workbench_mcp_receipts_v1";
 const TASK_ORDER: &str = "workbench_task_order_v1";
 const MCP_CONNECTIONS: &str = "workbench_mcp_connections_v1";
 const MCP_SOURCES: &str = "workbench_mcp_sources_v1";
+/// Each watched source is its own row (`SOURCE_KEY` + id), listed in order
+/// by `SOURCE_ORDER`: a watch run updates a few sources, and rewriting all
+/// of them (180 KB on the owner's machine) was most of what a run wrote.
+const SOURCE_KEY: &str = "workbench_mcp_source_v1:";
+const SOURCE_ORDER: &str = "workbench_mcp_source_order_v1";
+/// Receipts are stored like task events, append-only under this pseudo
+/// task id: new ones are pushed at the end and the oldest dropped, so a
+/// save inserts and deletes only those rows instead of rewriting 360 KB.
+const RECEIPT_EVENTS: &str = "\u{0}receipts";
 /// The single-row layout as it was when first split, kept for one release
 /// so the move can be undone, then deleted.
 const LEGACY_BACKUP: &str = "workbench_snapshot_v1_backup";
@@ -245,9 +254,21 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
     }
     if let Some(json) = db.get_setting(MCP_SOURCES).map_err(|e| e.to_string())? {
         snapshot.mcp.sources = serde_json::from_str(&json).map_err(|e| format!("Cannot read watched sources: {e}"))?;
+    } else if let Some(json) = db.get_setting(SOURCE_ORDER).map_err(|e| e.to_string())? {
+        let order: Vec<String> = serde_json::from_str(&json).map_err(|e| format!("Cannot read watched sources: {e}"))?;
+        for id in order {
+            if let Some(json) = db.get_setting(&format!("{SOURCE_KEY}{id}")).map_err(|e| e.to_string())? {
+                snapshot.mcp.sources.push(serde_json::from_str(&json).map_err(|e| format!("Cannot read watched source {id}: {e}"))?);
+            }
+        }
     }
+    // The old single row is removed when its receipts move, so while it
+    // exists it is the whole truth.
     if let Some(json) = db.get_setting(RECEIPTS).map_err(|e| e.to_string())? {
         snapshot.mcp.receipts = serde_json::from_str(&json).map_err(|e| format!("Cannot read tool receipts: {e}"))?;
+    } else if let Some(receipts) = db.events_of(RECEIPT_EVENTS).map_err(|e| e.to_string())? {
+        snapshot.mcp.receipts = receipts.iter().map(|r| serde_json::from_str(r)).collect::<Result<_, _>>()
+            .map_err(|e| format!("Cannot read tool receipts: {e}"))?;
     }
     if let Some(json) = db.get_setting(WATCH_SCHEDULE).map_err(|e| e.to_string())? {
         let mut schedules: std::collections::HashMap<String, WatchSchedule> =
@@ -346,7 +367,7 @@ fn persist(db: &Db, snapshot: &Snapshot, deferred: bool) -> Result<(), String> {
         }
         write(TASK_ORDER, &serde_json::to_string(&order).map_err(|e| e.to_string())?)?;
         write(MCP_CONNECTIONS, &serde_json::to_string(&compacted.mcp.connections).map_err(|e| e.to_string())?)?;
-        write(MCP_SOURCES, &serde_json::to_string(&compacted.mcp.sources).map_err(|e| e.to_string())?)?;
+        save_sources(db, &compacted.mcp.sources, deferred, &write)?;
         let mut core = compacted.clone();
         core.tasks.clear();
         core.mcp.connections.clear();
@@ -355,6 +376,28 @@ fn persist(db: &Db, snapshot: &Snapshot, deferred: bool) -> Result<(), String> {
     };
     if deferred || db.in_transaction() { run()?; } else { db.atomic(run)?; }
     bump_revision();
+    Ok(())
+}
+
+/// One row per watched source plus their order; rows of sources that are
+/// gone are removed (immediate saves only, like deleted tasks), and the old
+/// single row goes once its contents have moved.
+fn save_sources(db: &Db, sources: &[neko_protocol::mcp_host::SourceEvidence], deferred: bool,
+                write: &dyn Fn(&str, &str) -> Result<(), String>) -> Result<(), String> {
+    let order: Vec<&str> = sources.iter().map(|s| s.id.as_str()).collect();
+    if !deferred && let Some(json) = db.get_setting(SOURCE_ORDER).map_err(|e| e.to_string())? {
+        let previous: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
+        for id in previous.iter().filter(|id| !order.contains(&id.as_str())) {
+            db.delete_setting(&format!("{SOURCE_KEY}{id}")).map_err(|e| e.to_string())?;
+        }
+    }
+    for source in sources {
+        write(&format!("{SOURCE_KEY}{}", source.id), &serde_json::to_string(source).map_err(|e| e.to_string())?)?;
+    }
+    write(SOURCE_ORDER, &serde_json::to_string(&order).map_err(|e| e.to_string())?)?;
+    if !deferred && db.get_setting(MCP_SOURCES).map_err(|e| e.to_string())?.is_some() {
+        db.delete_setting(MCP_SOURCES).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -393,8 +436,17 @@ fn keep_legacy_row_once(db: &Db) -> Result<(), String> {
 /// `db::DEFERRED_WRITE_DELAY`. A crash may lose the last few seconds of
 /// them, which only makes those observations unproven, as pruning already can.
 fn save_receipts(db: &Db, snapshot: &Snapshot) -> Result<(), String> {
-    let json = serde_json::to_string(&snapshot.mcp.receipts).map_err(|e| e.to_string())?;
-    db.set_setting_deferred(RECEIPTS, &json).map_err(|e| e.to_string())?;
+    let receipts = snapshot.mcp.receipts.iter().map(serde_json::to_string).collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&receipts).map_err(|e| e.to_string())?;
+    let key = format!("{}{RECEIPT_EVENTS}", crate::db::EVENTS_KEY);
+    if db.get_setting(RECEIPTS).map_err(|e| e.to_string())?.is_some() {
+        // Moving out of the old single row: written at once, so a crash in
+        // the deferral window cannot lose every receipt, then the row goes.
+        db.set_setting(&key, &json).map_err(|e| e.to_string())?;
+        db.delete_setting(RECEIPTS).map_err(|e| e.to_string())?;
+    } else {
+        db.set_setting_deferred(&key, &json).map_err(|e| e.to_string())?;
+    }
     // Ordered by task id so an unchanged set serializes identically and
     // `Db` skips the write.
     let statuses: std::collections::BTreeMap<&str, &neko_protocol::workbench::PrStatus> = snapshot.tasks.iter()
@@ -2074,6 +2126,61 @@ mod tests {
         assert!(db.get_setting(LEGACY_BACKUP).unwrap().unwrap().contains(&id), "kept aside once");
         assert!(db.get_setting(SETTING).unwrap().unwrap().contains("\"tasks\":[]"), "and moved out of the core row");
         assert_eq!(load(&db).unwrap().tasks, read.tasks);
+    }
+
+    #[test]
+    fn receipts_are_appended_and_the_oldest_dropped_like_events() {
+        use neko_protocol::mcp_host::ToolReceipt;
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let mut state = load(&db).unwrap();
+        let receipt = |n: i64| ToolReceipt {
+            id: format!("r{n}"), run_id: "watch:1".into(), workspace_id: ws.id.clone(), connection_id: "c".into(),
+            tool_name: "list".into(), schema_hash: "h".into(), at_ms: n, success: true,
+        };
+        // The old single row is moved out on the first save, at once.
+        db.set_setting(RECEIPTS, &serde_json::to_string(&vec![receipt(0)]).unwrap()).unwrap();
+        state.mcp.receipts = load(&db).unwrap().mcp.receipts;
+        assert_eq!(state.mcp.receipts.len(), 1, "the old row is read");
+        save(&db, &state).unwrap();
+        assert!(db.get_setting(RECEIPTS).unwrap().is_none(), "and removed once moved");
+        for n in 1..30 {
+            state.mcp.receipts.push(receipt(n));
+            if state.mcp.receipts.len() > 20 { state.mcp.receipts.remove(0); }
+            save(&db, &state).unwrap();
+        }
+        db.flush_deferred().unwrap();
+        assert_eq!(load(&db).unwrap().mcp.receipts, state.mcp.receipts, "on disk, in order");
+        assert_eq!(db.events_of(RECEIPT_EVENTS).unwrap().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn a_changed_source_rewrites_its_own_row_only() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let mut state = load(&db).unwrap();
+        let source = |id: &str| neko_protocol::mcp_host::SourceEvidence {
+            task_id: None, id: id.into(), responsibility_id: "w".into(), connection_id: "c".into(),
+            external_id: id.into(), revision: "1".into(), title: "t".into(), description: "d".repeat(500),
+            retrieved_ms: 1, receipt_ids: vec![], eligible: false,
+        };
+        let _ = &ws;
+        let sources = vec![source("a"), source("b"), source("c")];
+        let write = |key: &str, value: &str| db.set_setting(key, value).map_err(|e| e.to_string());
+        save_sources(&db, &sources, false, &write).unwrap();
+        state.mcp.sources = sources.clone();
+        assert_eq!(load(&db).unwrap().mcp.sources, sources);
+        let before = db.setting_writes();
+        let mut changed = sources.clone();
+        changed[1].revision = "2".into();
+        save_sources(&db, &changed, false, &write).unwrap();
+        assert_eq!(db.setting_writes() - before, 1, "one source changed, one row written");
+        changed.remove(0);
+        save_sources(&db, &changed, false, &write).unwrap();
+        assert!(db.get_setting(&format!("{SOURCE_KEY}a")).unwrap().is_none(), "a removed source leaves no row");
+        assert_eq!(load(&db).unwrap().mcp.sources, changed);
     }
 
     #[test]
