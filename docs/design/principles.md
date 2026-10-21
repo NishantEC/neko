@@ -54,10 +54,11 @@ does this itself, so no caller has to remember.
 
 ## 5. Colour means state
 
-Chrome is neutral. Colour appears only where it carries meaning: amber needs
-approval, sky is ready to review, mint is done, coral failed, the accent is
-the primary action. One meaning per colour, and never colour alone; every
-coloured state also has text or a symbol.
+Chrome is neutral grey. Colour appears only where it carries meaning: amber
+needs you (approval, the sidebar badge), sky is ready to review, mint is done,
+coral failed, and Iris (`NekoStyle.accent`) is the primary action, selection
+and focus. One meaning per colour, and never colour alone; every coloured
+state also has text or a symbol.
 
 Content text uses `N.text`, `N.text2` and `N.text3`. These are tuned to stay
 readable on the brightest surface. System `.secondary` is for native chrome
@@ -65,7 +66,8 @@ readable on the brightest surface. System `.secondary` is for native chrome
 
 ## 6. Motion confirms; it never decorates
 
-Animations are short (`NekoMotion.hover` 120ms, `select` 200ms), have a
+Animations are short (`NekoMotion.hover` 120ms, `select` a 240ms spring,
+`exit` 150ms), have a
 cause the user just made, and go through `.nekoAnimation(_:value:)` or
 `withNekoAnimation`. Both return no animation under **Reduce Motion**.
 Nothing scales on hover, since a layout that moves under the pointer is
@@ -116,9 +118,11 @@ untested.
 | `NekoToggleRow` | An on/off setting with its explanation |
 | `NekoDividedList`, `NekoItemFooter` | Items separated by dividers; an item's meta line and actions |
 | `NekoReadMore`, `NekoSavedText` | Saved text shown inert, folded when long |
-| `NekoBadge` | A count on a sidebar row or tab |
+| `NekoBadge` | How many things need you, on a sidebar row or tab (amber) |
 | `StatusGlyph` | Ticket status ring |
-| `NekoIconTile` | A tinted symbol tile in onboarding and empty states |
-| `.nekoCard(...)` | An opaque raised surface |
+| `NekoIconTile` | A neutral symbol tile for setting rows and empty states; tint it only to mean a state |
+| `.nekoCard(...)`, `NekoRaisedSurface` | An opaque raised surface: soft shadow in light, lit top edge in dark, strong border under Increased Contrast |
+| `.nekoElevation(.floating)` | The shadow for menus, popovers and previews over other content |
+| `.nekoEntrance()` | How a toast arrives and leaves; a cross-fade under Reduce Motion |
 | `.liquidGlass(...)` | A floating control surface, with accessibility fallbacks built in |
 | `.nekoButton(_:)` | `.primary`, `.secondary`, `.quiet`, `.destructive` |

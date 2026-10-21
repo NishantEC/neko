@@ -47,10 +47,10 @@ struct NekoPageIntro: View {
     let title: String
     var message: String? = nil
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoSpace.sm + NekoSpace.hair) {
-            Text(title).font(NekoFont.display).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: NekoLayout.introGap) {
+            Text(title).font(NekoFont.display).tracking(NekoTracking.display).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
             if let message {
-                Text(message).font(NekoFont.body).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
+                Text(message).font(NekoFont.body).foregroundStyle(N.text3).lineSpacing(NekoLeading.body).fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: NekoLayout.readingWidth, alignment: .leading)
@@ -61,7 +61,7 @@ struct NekoPageIntro: View {
 
 /// A titled group inside a page: an optional status dot and detail, trailing
 /// actions that wrap under the title when space is tight, and its content.
-/// `grouped` puts the content on an opaque card.
+/// `grouped` puts the content on the same raised surface as `.nekoCard`.
 struct NekoSection<Trailing: View, Content: View>: View {
     let title: String
     var marker: Color? = nil
@@ -70,7 +70,9 @@ struct NekoSection<Trailing: View, Content: View>: View {
     @ViewBuilder var trailing: () -> Trailing
     @ViewBuilder var content: () -> Content
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoSpace.lg) {
+        // The heading binds to its content (12) more tightly than items bind
+        // to each other (16), and sections sit 40 apart.
+        VStack(alignment: .leading, spacing: NekoSpace.md) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: NekoSpace.md) {
                     heading.fixedSize(horizontal: true, vertical: false)
@@ -85,15 +87,19 @@ struct NekoSection<Trailing: View, Content: View>: View {
             .controlSize(.regular)
             VStack(alignment: .leading, spacing: NekoSpace.lg, content: content)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(grouped ? NekoLayout.rowInset : 0)
-                .background { if grouped { RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous).fill(N.card) } }
+                .padding(grouped ? NekoSpace.xl : 0)
+                .background { if grouped { NekoRaisedSurface(radius: NekoRadius.xl) } }
         }
         .accessibilityElement(children: .contain)
     }
     private var heading: some View {
         HStack(alignment: .firstTextBaseline, spacing: NekoSpace.sm) {
-            if let marker { Circle().fill(marker).frame(width: 6, height: 6).accessibilityHidden(true) }
-            Text(title).font(NekoFont.heading).foregroundStyle(N.text)
+            if let marker {
+                // Sits on the x-height, not on the baseline.
+                Circle().fill(marker).frame(width: 8, height: 8)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }.accessibilityHidden(true)
+            }
+            Text(title).font(NekoFont.section).foregroundStyle(N.text)
             if let detail { Text(detail).font(NekoFont.meta).foregroundStyle(N.text3) }
         }
         .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
@@ -181,7 +187,8 @@ struct NekoToggleRow: View {
 // MARK: - Sheet
 
 /// Every modal: a header, the body, an error line when there is one, and a
-/// footer with Cancel on the left and the sheet's own actions on the right.
+/// footer under a hairline with every button trailing, macOS order: Cancel,
+/// then the sheet's own actions, the default one last.
 /// `height` fixes the sheet's height for bodies that scroll or hold a form.
 struct NekoSheet<Content: View, Actions: View>: View {
     let title: String
@@ -195,25 +202,32 @@ struct NekoSheet<Content: View, Actions: View>: View {
     @ViewBuilder var actions: () -> Actions
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoSpace.xl) {
-            VStack(alignment: .leading, spacing: NekoSpace.sm) {
-                Text(title).font(NekoFont.title).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
-                if let message {
-                    Text(message).font(NekoFont.body).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: NekoSpace.xl) {
+                VStack(alignment: .leading, spacing: NekoSpace.sm) {
+                    Text(title).font(NekoFont.title).tracking(NekoTracking.title).foregroundStyle(N.text).accessibilityAddTraits(.isHeader)
+                    if let message {
+                        Text(message).font(NekoFont.body).foregroundStyle(N.text3).lineSpacing(NekoLeading.body).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                content()
+                if let error, !error.isEmpty {
+                    Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.coral).textSelection(.enabled)
                 }
             }
-            content()
-            if let error, !error.isEmpty {
-                Text(error).font(NekoFont.meta).foregroundStyle(NekoStyle.coral).textSelection(.enabled)
-            }
-            HStack {
-                Button(cancelTitle) { if let onCancel { onCancel() } else { dismiss() } }.keyboardShortcut(.cancelAction)
+            .padding([.horizontal, .top], NekoSpace.page).padding(.bottom, NekoSpace.xl)
+            // A fixed-height sheet keeps its footer at the bottom edge.
+            if height != nil { Spacer(minLength: 0) }
+            Hairline()
+            HStack(spacing: NekoSpace.sm) {
                 Spacer()
+                Button(cancelTitle) { if let onCancel { onCancel() } else { dismiss() } }.keyboardShortcut(.cancelAction)
                 actions()
             }
+            .padding(.horizontal, NekoSpace.page).padding(.top, NekoSpace.lg).padding(.bottom, NekoSpace.xl)
         }
         .font(NekoFont.body).controlSize(.regular)
-        .padding(NekoLayout.pageInset).frame(width: width.points, height: height, alignment: .top).background(N.canvas)
+        .frame(width: width.points, height: height, alignment: .top).background(N.canvas)
     }
 }
 
@@ -262,8 +276,8 @@ struct NekoEmptyState<Action: View>: View {
             VStack(spacing: NekoSpace.md) {
                 Image(systemName: resolvedSymbol).font(NekoFont.of(.headline, weight: .light))
                     .foregroundStyle(N.text3).padding(.bottom, NekoSpace.xxs).accessibilityHidden(true)
-                if let title { Text(title).font(NekoFont.title) }
-                Text(resolvedMessage).font(NekoFont.body).foregroundStyle(N.text3).multilineTextAlignment(.center).lineSpacing(3).frame(maxWidth: 360)
+                if let title { Text(title).font(NekoFont.title).tracking(NekoTracking.title) }
+                Text(resolvedMessage).font(NekoFont.body).foregroundStyle(N.text3).multilineTextAlignment(.center).lineSpacing(NekoLeading.body).frame(maxWidth: 360)
                 action().padding(.top, NekoSpace.xxs)
             }.padding(NekoSpace.page).frame(maxWidth: .infinity)
         } else {
@@ -340,7 +354,7 @@ struct NekoSavedText: View {
     var body: some View {
         Text(verbatim: text)
             .font(NekoFont.body).foregroundStyle(N.text2).textSelection(.enabled).lineLimit(nil)
-            .lineSpacing(3)
+            .lineSpacing(NekoLeading.reading)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -359,7 +373,7 @@ struct NekoReadMore: View {
                     Text(verbatim: text.count > 240
                         ? String(text.prefix(240)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
                         : text)
-                        .lineLimit(3).lineSpacing(3).foregroundStyle(N.text2)
+                        .lineLimit(3).lineSpacing(NekoLeading.reading).foregroundStyle(N.text2)
                 }
                 DisclosureGroup(disclosure, isExpanded: $expanded) {
                     NekoSavedText(text: text).padding(.top, NekoSpace.xs)
