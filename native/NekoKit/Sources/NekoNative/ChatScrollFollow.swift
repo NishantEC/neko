@@ -193,7 +193,7 @@ private struct ChatExchangeHeightKey: PreferenceKey {
 struct ChatExchange<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) { content() }
+        VStack(alignment: .leading, spacing: .zero) { content() }
             .background {
                 GeometryReader { geometry in
                     Color.clear.preference(key: ChatExchangeHeightKey.self, value: geometry.size.height)
@@ -238,7 +238,7 @@ struct ChatTranscript<Rows: View, Dock: View>: View {
             ZStack(alignment: .bottom) {
                 ScrollViewReader { reader in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: .zero) {
                             rows()
                             Color.clear.frame(height: ChatComposerClearance.bottomSpace(for: dockHeight) + runway(outer.size.height)).id(bottomID)
                         }

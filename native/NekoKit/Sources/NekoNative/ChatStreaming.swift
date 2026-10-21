@@ -11,7 +11,7 @@ struct ChatStreamingText: View {
         // The same gap `ReadableText` leaves between two of its own blocks, so
         // the reply does not shift when it finishes and is drawn as one.
         let gap = MarkdownCache.parsed(parts.stable).last.map(ReadableText.blockSpacing) ?? 0
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: .zero) {
             if !parts.stable.isEmpty {
                 ReadableText(text: parts.stable).equatable()
                     .padding(.bottom, parts.tail.isEmpty ? 0 : gap)

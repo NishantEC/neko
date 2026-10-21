@@ -60,7 +60,7 @@ struct ChatWorkLog: View {
     }
 
     private var details: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: .zero) {
             ForEach(summary.steps) { step in
                 HStack(alignment: .firstTextBaseline, spacing: NekoSpace.xs) {
                     Image(systemName: step.failed ? "xmark.circle" : "checkmark")
