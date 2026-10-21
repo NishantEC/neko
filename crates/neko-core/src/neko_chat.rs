@@ -39,6 +39,42 @@ pub fn record_call(db: &Db, turn_id: &str, call: ChatToolCall) -> Result<(), Str
     save(db, &messages)
 }
 
+/// Steps a pending turn keeps; older ones are dropped.
+const MAX_ACTIVITY: usize = 8;
+/// Characters one step may take.
+const MAX_ACTIVITY_CHARS: usize = 140;
+
+/// One line for what a runner event shows Neko doing, or `None` when it is
+/// not worth showing (session ids, the final answer, diagnostics).
+pub fn activity_line(event: &str) -> Option<String> {
+    let (command, exit) = crate::workbench::command_of_event(event)?;
+    // Codex wraps each command in a login shell; show what it ran.
+    let shown = ["/bin/zsh -lc ", "/bin/bash -lc ", "bash -lc ", "zsh -lc "]
+        .iter()
+        .find_map(|shell| command.strip_prefix(shell))
+        .map(|inner| inner.trim_matches(|c| c == '\'' || c == '"'))
+        .unwrap_or(&command);
+    let shown: String = shown.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut line = format!("Ran `{shown}`");
+    if line.chars().count() > MAX_ACTIVITY_CHARS {
+        line = line.chars().take(MAX_ACTIVITY_CHARS - 2).collect::<String>() + "…`";
+    }
+    if exit.is_some_and(|code| code != 0) { line.push_str(" · failed"); }
+    Some(line)
+}
+
+/// Adds a step to a pending turn so the app can show it while Neko works.
+/// Deferred: progress a crash may lose, never the reply itself.
+pub fn record_activity(db: &Db, turn_id: &str, line: String) -> Result<(), String> {
+    let mut messages = load(db)?;
+    let Some(turn) = messages.iter_mut().find(|m| m.id == turn_id && m.pending) else { return Ok(()) };
+    turn.activity.push(line);
+    let extra = turn.activity.len().saturating_sub(MAX_ACTIVITY);
+    turn.activity.drain(..extra);
+    let json = serde_json::to_string(&messages).map_err(|e| e.to_string())?;
+    db.set_setting_deferred(SETTING, &json).map_err(|e| e.to_string())
+}
+
 pub fn call_status(db: &Db, turn_id: &str, call_id: &str) -> Result<ChatToolStatus, String> {
     let messages = load(db)?;
     let turn = messages
@@ -358,6 +394,7 @@ fn message(role: ChatRole, text: String, at_ms: i64) -> ChatMessage {
         remembered: vec![],
         responsibility_ids: vec![],
         actions: vec![],
+        activity: vec![],
         tool_calls: vec![],
         workspace_id: None,
     }
@@ -747,6 +784,26 @@ fn truncate(text: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_command_becomes_one_short_step_on_the_pending_reply() {
+        let event = crate::workbench::verification_command_event(Some("/bin/zsh -lc 'git status --short'"), Some(0), Some("M a.rs"));
+        assert_eq!(activity_line(&event).as_deref(), Some("Ran `git status --short`"));
+        let failed = crate::workbench::verification_command_event(Some("cargo test"), Some(101), Some(""));
+        assert_eq!(activity_line(&failed).as_deref(), Some("Ran `cargo test` · failed"));
+        assert_eq!(activity_line("SESSION abc"), None, "session ids and prose are not steps");
+        assert_eq!(activity_line("Command running"), None);
+        let long = crate::workbench::verification_command_event(Some(&"x".repeat(400)), Some(0), None);
+        assert!(activity_line(&long).unwrap().chars().count() <= MAX_ACTIVITY_CHARS);
+
+        let db = Db::open_in_memory().unwrap();
+        let turn = begin_turn(&db, "what changed?").unwrap();
+        for n in 0..12 { record_activity(&db, &turn, format!("Ran `step {n}`")).unwrap(); }
+        let steps = load(&db).unwrap().into_iter().find(|m| m.id == turn).unwrap().activity;
+        assert_eq!(steps.len(), MAX_ACTIVITY, "bounded");
+        assert_eq!(steps.last().unwrap(), "Ran `step 11`", "newest last");
+        record_activity(&db, "not-a-turn", "Ran `x`".into()).unwrap();
+    }
 
     #[test]
     fn capability_questions_are_answered_from_real_setup() {

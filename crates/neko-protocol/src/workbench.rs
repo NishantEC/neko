@@ -587,6 +587,10 @@ pub struct ChatMessage {
     /// the user's one-click confirmation before anything happens.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ChatAction>,
+    /// What Neko did while working on this turn, newest last ("Ran `git
+    /// status`"), shown live under a pending reply. Bounded and short.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub activity: Vec<String>,
 }
 
 /// One reading of the Mac, and the limit it puts on new agent work.

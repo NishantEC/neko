@@ -1619,6 +1619,15 @@ fn converse(
         timeout: Duration::from_secs(900),
         runtime: snapshot.agent_runtime.clone(),
     };
+    // Each command Neko runs shows under the pending reply as it finishes.
+    let mut progress = |event: String| {
+        if let Some(line) = neko_chat::activity_line(&event) {
+            let guard = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Err(error) = neko_chat::record_activity(&guard, pending, line) {
+                eprintln!("neko chat: could not record activity: {error}");
+            }
+        }
+    };
     let result = (|| {
         if cancel.load(Ordering::Acquire) {
             return Err("Cancelled".into());
@@ -1653,9 +1662,9 @@ fn converse(
                 sources_through_bridge: false,
             };
             // Lease drop also cancels any approval waiter and in-flight call.
-            native_runner::run_with_bridge(&spec, &bridge, cancel, |_| {})
+            native_runner::run_with_bridge(&spec, &bridge, cancel, &mut progress)
         } else {
-            native_runner::run(&spec, cancel, |_| {})
+            native_runner::run(&spec, cancel, &mut progress)
         }
     })();
     if let Some(dir) = &scratch {
