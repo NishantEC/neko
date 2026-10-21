@@ -21,6 +21,14 @@ cp scripts/Neko-Info.plist "$bundle/Contents/Info.plist"
 cp "native/NekoKit/.build/$configuration/NekoNative" "$bundle/Contents/MacOS/neko"
 cp "target/$configuration/neko-daemon" "$bundle/Contents/MacOS/neko-daemon"
 cp packaging/icon/neko.icns "$bundle/Contents/Resources/neko.icns"
+# The web UI the daemon serves (Contents/Resources/web). Built from web/
+# when its sources are present; an older build is replaced, never mixed.
+if [[ -f web/package.json ]]; then
+  [[ -d web/node_modules ]] || pnpm --dir web install --frozen-lockfile
+  pnpm --dir web build
+  rm -rf "$bundle/Contents/Resources/web"
+  cp -R web/dist "$bundle/Contents/Resources/web"
+fi
 shader_work="$(mktemp -d)"
 xcrun -sdk macosx metal -c native/Shaders/Gem.metal -o "$shader_work/Gem.air"
 xcrun -sdk macosx metallib "$shader_work/Gem.air" -o "$bundle/Contents/Resources/Neko.metallib"
