@@ -2966,7 +2966,8 @@ mod tests {
         controller.update_task("t", |t| t.result = "done".into()).unwrap();
         let db = controller.db.lock().unwrap();
         db.flush_deferred().unwrap();
-        let persisted: Snapshot = serde_json::from_str(&db.get_setting("workbench_snapshot_v1").unwrap().unwrap()).unwrap();
+        // Nothing is waiting any more, so this reads what is on disk.
+        let persisted = store::load(&db).unwrap();
         assert_eq!(persisted.tasks[0].events.len(), events);
         assert_eq!(persisted.tasks[0].result, "done");
     }

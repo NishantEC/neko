@@ -22,6 +22,11 @@ pub struct Db {
     setting_writes: std::cell::Cell<u64>,
 }
 
+/// Keys that `set_setting`/`set_setting_deferred` route to the task tables
+/// instead of the settings table (see `write_row`).
+pub const TASK_KEY: &str = "\u{0}task:";
+pub const EVENTS_KEY: &str = "\u{0}events:";
+
 /// How long a deferred settings write may wait before it reaches disk.
 /// Only progress that a crash may lose goes through this path (agent tool
 /// events); user actions and status changes write immediately.
@@ -109,6 +114,11 @@ impl Db {
             .filter(|(_, (_, since))| since.elapsed() >= delay)
             .map(|(key, _)| key.clone())
             .collect();
+        // Deferred values of one save (a task, its events, the order) reach
+        // disk together, so a crash never leaves them half written.
+        let transaction = if due.len() > 1 && !self.in_transaction.get() {
+            Some(self.conn.unchecked_transaction()?)
+        } else { None };
         for key in due {
             let pending = self.pending.borrow_mut().remove(&key);
             if let Some((value, since)) = pending
@@ -118,6 +128,7 @@ impl Db {
                 return Err(error);
             }
         }
+        if let Some(transaction) = transaction { transaction.commit()?; }
         Ok(())
     }
 
@@ -131,6 +142,14 @@ impl Db {
         }
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // With WAL, NORMAL cannot corrupt the database; a power loss can lose
+        // the last commits, which the deferred-write contract already allows.
+        // The default (FULL) forced a disk flush on every commit (Codex's
+        // state store uses NORMAL for the same reason).
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // Truncate the -wal file back to 8 MB after a checkpoint instead of
+        // leaving it at its high-water mark.
+        conn.pragma_update(None, "journal_size_limit", 8 * 1024 * 1024)?;
         conn.pragma_update(None, "foreign_keys", true)?;
         let db = Self::with_conn(conn);
         db.migrate()?;
@@ -163,8 +182,129 @@ impl Db {
             );
             CREATE INDEX IF NOT EXISTS idx_clipboard_entries_copied_at
                 ON clipboard_entries (copied_at_unix_ms);
+            CREATE TABLE IF NOT EXISTS workbench_tasks (
+                id   TEXT PRIMARY KEY,
+                body TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS workbench_task_events (
+                task_id TEXT NOT NULL,
+                seq     INTEGER NOT NULL,
+                body    TEXT NOT NULL,
+                PRIMARY KEY (task_id, seq)
+            ) WITHOUT ROWID;
             ",
         )
+    }
+
+    /// Whether a transaction (`atomic`) is open on this connection.
+    pub fn in_transaction(&self) -> bool {
+        self.in_transaction.get()
+    }
+
+    /// One stored value, wherever its key says it lives: a task row
+    /// (`TASK_KEY` + id), a task's event list (`EVENTS_KEY` + id, a JSON
+    /// array of event JSON strings) or a settings row. Going through the same
+    /// `written`/`pending` bookkeeping as settings gives tasks and events the
+    /// identical-write skip and the deferred path for free.
+    fn write_row(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        if let Some(id) = key.strip_prefix(TASK_KEY) {
+            self.conn.execute(
+                "INSERT INTO workbench_tasks (id, body) VALUES (?1, ?2)
+                 ON CONFLICT(id) DO UPDATE SET body = excluded.body",
+                (id, value),
+            )?;
+            return Ok(());
+        }
+        if let Some(id) = key.strip_prefix(EVENTS_KEY) {
+            return self.write_events(id, value);
+        }
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )?;
+        Ok(())
+    }
+
+    /// Events are append-only: when the new list is the stored one with
+    /// some of its oldest dropped and some new ones added (the usual case),
+    /// only those rows are deleted and inserted. Anything else (an event
+    /// shortened later) rewrites that task's events.
+    fn write_events(&self, task_id: &str, value: &str) -> rusqlite::Result<()> {
+        let new: Vec<String> = serde_json::from_str(value)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let mut statement = self.conn.prepare_cached(
+            "SELECT seq, body FROM workbench_task_events WHERE task_id = ?1 ORDER BY seq")?;
+        let old: Vec<(i64, String)> = statement
+            .query_map([task_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let shared = (0..=old.len()).find(|&dropped| {
+            let kept = &old[dropped..];
+            kept.len() <= new.len() && kept.iter().zip(&new).all(|((_, a), b)| a == b)
+        });
+        let next = old.last().map_or(0, |(seq, _)| seq + 1);
+        let (delete_below, appended, mut seq) = match shared {
+            Some(dropped) => (old.get(dropped).map_or(next, |(seq, _)| *seq), &new[old.len() - dropped..], next),
+            None => (next, &new[..], next),
+        };
+        self.conn.execute("DELETE FROM workbench_task_events WHERE task_id = ?1 AND seq < ?2", (task_id, delete_below))?;
+        let mut insert = self.conn.prepare_cached(
+            "INSERT INTO workbench_task_events (task_id, seq, body) VALUES (?1, ?2, ?3)")?;
+        for body in appended {
+            insert.execute((task_id, seq, body))?;
+            seq += 1;
+        }
+        Ok(())
+    }
+
+    /// Removes a task's row and events, and anything waiting to be written for them.
+    pub fn delete_task_rows(&self, task_id: &str) -> rusqlite::Result<()> {
+        for key in [format!("{TASK_KEY}{task_id}"), format!("{EVENTS_KEY}{task_id}")] {
+            self.pending.borrow_mut().remove(&key);
+            self.written.borrow_mut().remove(&key);
+        }
+        self.conn.execute("DELETE FROM workbench_task_events WHERE task_id = ?1", [task_id])?;
+        self.conn.execute("DELETE FROM workbench_tasks WHERE id = ?1", [task_id])?;
+        Ok(())
+    }
+
+    /// Every stored task (id, body), with values waiting to be written applied.
+    pub fn task_rows(&self) -> rusqlite::Result<Vec<(String, String)>> {
+        let mut statement = self.conn.prepare_cached("SELECT id, body FROM workbench_tasks")?;
+        let mut rows: Vec<(String, String)> = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let pending = self.pending.borrow();
+        for (id, body) in &mut rows {
+            if let Some((value, _)) = pending.get(&format!("{TASK_KEY}{id}")) { *body = value.clone(); }
+        }
+        for (key, (value, _)) in pending.iter() {
+            if let Some(id) = key.strip_prefix(TASK_KEY)
+                && !rows.iter().any(|(r, _)| r == id) {
+                rows.push((id.to_owned(), value.clone()));
+            }
+        }
+        Ok(rows)
+    }
+
+    /// Every task's events in order, as event JSON strings, with values
+    /// waiting to be written applied.
+    pub fn task_events(&self) -> rusqlite::Result<std::collections::HashMap<String, Vec<String>>> {
+        let mut statement = self.conn.prepare_cached(
+            "SELECT task_id, body FROM workbench_task_events ORDER BY task_id, seq")?;
+        let mut events: std::collections::HashMap<String, Vec<String>> = Default::default();
+        for row in statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))? {
+            let (id, body) = row?;
+            events.entry(id).or_default().push(body);
+        }
+        for (key, (value, _)) in self.pending.borrow().iter() {
+            if let Some(id) = key.strip_prefix(EVENTS_KEY) {
+                let list: Vec<String> = serde_json::from_str(value)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                events.insert(id.to_owned(), list);
+            }
+        }
+        Ok(events)
     }
 
     pub fn get_setting(&self, key: &str) -> rusqlite::Result<Option<String>> {
@@ -193,11 +333,7 @@ impl Db {
         if self.written.borrow().get(key).is_some_and(|v| v == value) {
             return Ok(());
         }
-        if let Err(error) = self.conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, value),
-        ) {
+        if let Err(error) = self.write_row(key, value) {
             if let Some(pending) = superseded {
                 self.pending.borrow_mut().insert(key.to_owned(), pending);
             }
