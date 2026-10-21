@@ -24,6 +24,26 @@ import NekoKit
         }
     }
 
+    /// Home with "/" typed, so the command menu is open: it must sit above
+    /// the composer, opaque, at its own height. Needs NEKO_RENDER_SNAPSHOT.
+    func testRenderSlashMenu() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let directory = env["NEKO_RENDER_DIR"], let snapshotPath = env["NEKO_RENDER_SNAPSHOT"] else {
+            throw XCTSkip("Set NEKO_RENDER_DIR and NEKO_RENDER_SNAPSHOT to render the / menu")
+        }
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let snapshot = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: URL(fileURLWithPath: snapshotPath)))
+        for scheme in [ColorScheme.dark, .light] {
+            let model = AppModel(transport: { _ in .object([:]) })
+            model.snapshot = snapshot
+            model.loadingSetup = false
+            model.onboarding = false
+            model.chatDrafts.set("/", for: TodayView.scope(model))
+            try render(WorkspaceView(model: model, page: .home), size: CGSize(width: 1100, height: 760), scheme: scheme,
+                       to: URL(fileURLWithPath: directory).appendingPathComponent("slash-menu-\(scheme == .dark ? "dark" : "light").png"))
+        }
+    }
+
     /// A real ticket page, when NEKO_RENDER_SNAPSHOT names a saved workbench
     /// snapshot and NEKO_RENDER_TICKET a ticket in it. NEKO_RENDER_PATCH may
     /// name a diff to serve as its changes. Nothing reaches the daemon.

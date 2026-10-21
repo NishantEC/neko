@@ -97,6 +97,12 @@ struct ComposerMenuList: View {
     let items: [ComposerMenuItem]
     @Binding var index: Int
     var body: some View {
+        // Its own height, fixed from the row count: an overlay is offered the
+        // composer's height, and rows spilling past that both covered the
+        // composer and ran off the bottom of the window.
+        let visible = CGFloat(min(items.count, NekoChat.menuMaxRows))
+        ScrollViewReader { proxy in
+        ScrollView(.vertical) {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 let selected = index == min(self.index, items.count - 1)
@@ -109,17 +115,28 @@ struct ComposerMenuList: View {
                         Spacer(minLength: NekoSpace.sm)
                         if !item.shortcut.isEmpty { Text(item.shortcut).font(NekoFont.meta).foregroundStyle(N.text3) }
                     }
-                    .padding(.horizontal, NekoSpace.md).frame(minHeight: NekoChat.menuRow)
+                    .padding(.horizontal, NekoSpace.md).frame(height: NekoChat.menuRow)
                     .background(selected ? N.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .onHover { if $0 { self.index = index } }
+                .id(item.id)
             }
         }
+        }
+        .scrollIndicators(items.count > NekoChat.menuMaxRows ? .automatic : .hidden)
+        .frame(height: visible * NekoChat.menuRow)
+        .onChange(of: index) { _, now in
+            guard items.indices.contains(now) else { return }
+            proxy.scrollTo(items[now].id)
+        }
+        }
         .padding(NekoSpace.sm)
-        .liquidGlass(radius: NekoRadius.xl)
+        // Opaque: it sits over the transcript, and glass let the text
+        // underneath show through the commands.
+        .background(NekoRaisedSurface(radius: NekoRadius.xl))
         .nekoElevation(.floating)
     }
 }

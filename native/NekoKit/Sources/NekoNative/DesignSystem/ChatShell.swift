@@ -40,6 +40,8 @@ enum NekoChat {
     static let sendButton: CGFloat = 32
     static let attachButton: CGFloat = 28
     static let menuRow: CGFloat = 32
+    /// Rows the / and @ menu shows before it scrolls.
+    static let menuMaxRows = 7
     static let menuTitleWidth: CGFloat = 96
     static let jumpButton: CGFloat = 32
     /// A collapsed request on a ticket, and the fade over its cut edge.
