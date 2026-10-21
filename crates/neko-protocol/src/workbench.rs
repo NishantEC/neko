@@ -591,7 +591,13 @@ pub struct ChatMessage {
     /// status`"), shown live under a pending reply. Bounded and short.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub activity: Vec<String>,
+    /// When Neko started on a reply. `at_ms` becomes the finish time once
+    /// the turn completes, so the two give how long it worked. 0 = unknown.
+    #[serde(default, skip_serializing_if = "is_zero_ms")]
+    pub started_ms: i64,
 }
+
+fn is_zero_ms(value: &i64) -> bool { *value == 0 }
 
 /// One reading of the Mac, and the limit it puts on new agent work.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
