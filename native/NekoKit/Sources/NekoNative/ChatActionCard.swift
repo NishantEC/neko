@@ -3,19 +3,26 @@ import NekoKit
 
 /// Something Neko, as chief of staff, proposes doing to a task. Nothing
 /// happens until you press Do it; the daemon then runs the same command the
-/// task's own buttons send.
+/// task's own buttons send. Built from values, never the app model, so a
+/// workbench tick does not redraw it.
 struct ChatActionCard: View {
-    @ObservedObject var model: AppModel
-    let messageID: String
     let action: JSONValue
+    /// The task's title, or nil when the task no longer exists.
+    let taskTitle: String?
+    /// For a merge: the title of the task it merges into, or nil when gone.
+    var mergeTarget: String? = nil
+    /// Answers the proposal; returns when the daemon has.
+    let decide: (Bool) async -> Void
+    let open: () -> Void
     @State private var deciding = false
 
-    private var task: JSONValue { model.snapshot["tasks"].array.first { $0.recordID == action["task_id"].string } ?? .null }
-    private var mergeTarget: String {
-        let target = model.snapshot["tasks"].array.first { $0.recordID == action["text"].string } ?? .null
-        return target == .null ? "a task that no longer exists" : TaskText(task: target, snapshot: model.snapshot).title
+    /// The titles an action card shows, looked up once by the caller.
+    static func titles(for action: JSONValue, snapshot: JSONValue) -> (task: String?, merge: String?) {
+        let tasks = snapshot["tasks"].array
+        let task = tasks.first { $0.recordID == action["task_id"].string }
+        let target = action["kind"].string == "merge" ? tasks.first { $0.recordID == action["text"].string } : nil
+        return (task.map { TaskText(task: $0, snapshot: snapshot).title }, target.map { TaskText(task: $0, snapshot: snapshot).title })
     }
-    private var taskTitle: String { task == .null ? "A task that no longer exists" : TaskText(task: task, snapshot: model.snapshot).title }
 
     /// What the action does, in the person's words.
     static func verb(_ kind: String) -> String {
@@ -40,9 +47,9 @@ struct ChatActionCard: View {
             HStack(alignment: .firstTextBaseline, spacing: NekoSpace.sm) {
                 Image(systemName: symbol(status)).foregroundStyle(tint(status)).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: NekoSpace.xxs) {
-                    Text("\(Self.verb(action["kind"].string)) · \(taskTitle)").font(NekoFont.heading).lineLimit(2)
+                    Text("\(Self.verb(action["kind"].string)) · \(taskTitle ?? "A task that no longer exists")").font(NekoFont.heading).lineLimit(2)
                     if action["kind"].string == "merge" {
-                        Text("Into: \(mergeTarget)").font(NekoFont.body).foregroundStyle(N.text2)
+                        Text("Into: \(mergeTarget ?? "a task that no longer exists")").font(NekoFont.body).foregroundStyle(N.text2)
                     } else if !action["text"].string.isEmpty {
                         Text(action["kind"].string == "rename" ? "New name: \(action["text"].string)" : "“\(action["text"].string)”")
                             .font(NekoFont.body).foregroundStyle(N.text2).textSelection(.enabled)
@@ -54,20 +61,20 @@ struct ChatActionCard: View {
                 Spacer(minLength: NekoSpace.md)
                 switch status {
                 case "Proposed":
-                    Button("Not now") { decide(false) }.nekoButton(.quiet).disabled(deciding)
-                    Button("Do it") { decide(true) }.nekoButton(.primary).disabled(deciding || task == .null)
+                    Button("Not now") { answer(false) }.nekoButton(.quiet).disabled(deciding)
+                    Button("Do it") { answer(true) }.nekoButton(.primary).disabled(deciding || taskTitle == nil)
                 case "Done": Text("Done").font(NekoFont.meta).foregroundStyle(NekoStyle.mint)
                 case "Declined": Text("Skipped").font(NekoFont.meta).foregroundStyle(N.text3)
                 default: Text("Didn't work").font(NekoFont.meta).foregroundStyle(NekoStyle.amber)
                 }
             }
-            if task != .null {
-                Button("Open task") { model.openAgent(task.recordID, from: .home) }.nekoButton(.quiet).font(NekoFont.meta)
+            if taskTitle != nil {
+                Button("Open task", action: open).nekoButton(.quiet).font(NekoFont.meta)
             }
         }
-        .padding(NekoLayout.rowInset)
+        .padding(NekoChat.blockInset)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .nekoCard(padding: 0, radius: NekoRadius.xl)
+        .nekoCard(padding: 0, radius: NekoRadius.lg)
         .accessibilityElement(children: .contain)
     }
 
@@ -87,10 +94,10 @@ struct ChatActionCard: View {
         default: NekoStyle.accent
         }
     }
-    private func decide(_ accept: Bool) {
+    private func answer(_ accept: Bool) {
         deciding = true
         Task {
-            await model.workbench(.command("DecideChatAction", ["message_id": .string(messageID), "action_id": action["id"], "accept": .bool(accept)]))
+            await decide(accept)
             deciding = false
         }
     }

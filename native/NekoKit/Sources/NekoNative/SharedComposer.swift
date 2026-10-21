@@ -102,6 +102,8 @@ struct SharedComposer<Controls: View>: View {
     var onInterrupt: (() -> Void)? = nil
     var onContext: (() -> Void)? = nil
     var onMenuKey: ((ComposerMenuKey) -> Bool)? = nil
+    /// A decision waiting on you, shown inside the same glass above the editor.
+    var tray: AnyView? = nil
     @ViewBuilder var controls: () -> Controls
 
     private var actionLabel: String {
@@ -113,7 +115,8 @@ struct SharedComposer<Controls: View>: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoSpace.lg) {
+        VStack(alignment: .leading, spacing: NekoSpace.sm) {
+            if let tray { tray }
             if !attachments.isEmpty { ComposerAttachmentStrip(attachments: attachments, remove: onRemove) }
             ComposerView(
                 text: $text,
@@ -127,32 +130,28 @@ struct SharedComposer<Controls: View>: View {
             if let validationError {
                 Text(validationError).font(NekoFont.meta).foregroundStyle(NekoStyle.amber).fixedSize(horizontal: false, vertical: true)
             }
-            HStack(alignment: .bottom, spacing: NekoSpace.md) {
+            // One row with no width-dependent fallback: a second layout that
+            // appears at some widths would change the dock's height, and the
+            // transcript would jump with it. Long labels truncate instead.
+            HStack(alignment: .center, spacing: NekoSpace.sm) {
                 Button("Attach files", systemImage: "paperclip", action: onChooseAttachments)
                     .labelStyle(.iconOnly).font(NekoFont.body)
-                    .frame(width: 32, height: 32).contentShape(Rectangle())
+                    .frame(width: NekoChat.attachButton, height: NekoChat.attachButton)
+                    .contentShape(Rectangle().inset(by: -NekoSpace.hair))
                     .nekoButton(.quiet).foregroundStyle(.secondary)
                     .help("Attach images or files; you can also paste or drop them")
                     .accessibilityLabel("Attach images or files")
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 10) { controls() }
-                    VStack(alignment: .leading, spacing: NekoSpace.xs) { controls() }
-                }.layoutPriority(1)
-                Spacer(minLength: 4)
-                ViewThatFits(in: .horizontal) {
-                    Text("Shift-Return for a new line").fixedSize()
-                    Color.clear.frame(width: 0, height: 0)
-                }
-                .font(.caption2).foregroundStyle(.secondary)
-                .frame(height: 34)
-                .accessibilityHidden(true) // The editor's help already describes these shortcuts.
+                HStack(spacing: NekoSpace.sm) { controls() }
+                    .lineLimit(1).truncationMode(.middle)
+                    .layoutPriority(-1)
+                Spacer(minLength: NekoSpace.xxs)
                 ComposerPrimaryButton(label: actionLabel, symbol: state.primary == .stop ? "stop.fill" : state.primary == .queue ? "text.badge.plus" : "arrow.up",
                                       enabled: state.buttonEnabled, submitting: state.primary == .submitting) {
                     if state.primary == .stop { onStop() } else { onSend() }
                 }
             }
         }
-        .padding(18)
+        .padding(NekoSpace.md)
         .modifier(ComposerSurface())
     }
 }
@@ -194,7 +193,7 @@ struct ComposerPrimaryButton: View {
                 if submitting { ProgressView().controlSize(.mini) }
                 else { Image(systemName: symbol).font(NekoFont.of(.body, weight: .semibold)) }
             }
-            .frame(width: 34, height: 34)
+            .frame(width: NekoChat.sendButton, height: NekoChat.sendButton)
             .foregroundStyle(enabled ? N.onInverse : N.text4)
             .background(enabled ? N.inverse : N.selected, in: Circle())
             .contentShape(Circle())
@@ -259,22 +258,5 @@ enum ComposerRuntimeLabel {
         guard !modelID.isEmpty else { return providerName + " · Provider default" }
         let modelName = source?.models.first { $0.id == modelID }?.label ?? modelID
         return providerName + " · " + modelName
-    }
-}
-
-/// Shared message metadata; timestamps are shown only when the record has one.
-struct ChatAuthorLine: View {
-    let author: String
-    var timestamp: Int = 0
-    var body: some View {
-        HStack(spacing: NekoSpace.sm) {
-            Text(author).font(NekoFont.heading).foregroundStyle(.primary)
-            if timestamp > 0 {
-                let date = Date(timeIntervalSince1970: Double(timestamp) / 1000)
-                Text(date, format: .dateTime.hour().minute())
-                    .font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
-                    .help(date.formatted(date: .abbreviated, time: .shortened))
-            }
-        }.accessibilityElement(children: .combine)
     }
 }

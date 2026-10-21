@@ -217,7 +217,8 @@ private actor ControlledTransport {
         XCTAssertEqual(summary.failed, 1)
         XCTAssertEqual(summary.awaitingApproval, 1)
         XCTAssertFalse(summary.showsReceiptsSeparately)
-        XCTAssertEqual(summary.title, "4 tool calls · 1 needs approval")
+        XCTAssertEqual(summary.title, "Used 4 tools · 1 waiting for you")
+        XCTAssertEqual(summary.title(connections: ["Linear", "Sentry", "Linear", "GitHub", ""]), "Used 4 tools · Linear, Sentry +1 · 1 waiting for you")
 
         let legacy = ChatToolActivitySummary(calls: [], receipts: receipts)
         XCTAssertTrue(legacy.showsReceiptsSeparately)

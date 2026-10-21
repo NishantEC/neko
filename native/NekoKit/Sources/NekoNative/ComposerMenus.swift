@@ -91,7 +91,8 @@ struct ComposerMenuState {
     }
 }
 
-/// The floating list above the composer while a / or @ menu is open.
+/// The / or @ menu, floating over the transcript above the composer. It is an
+/// overlay, so opening it never changes the dock's height.
 struct ComposerMenuList: View {
     let items: [ComposerMenuItem]
     @Binding var index: Int
@@ -100,25 +101,26 @@ struct ComposerMenuList: View {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 let selected = index == min(self.index, items.count - 1)
                 Button { item.apply() } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: item.symbol).font(NekoFont.caption).frame(width: 16)
-                            .foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) : .secondary)
-                        Text(item.title).font(NekoFont.body).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor) : .primary).frame(minWidth: 84, alignment: .leading)
-                        Text(item.detail).font(NekoFont.meta).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor).opacity(0.8) : .secondary).lineLimit(1)
-                        Spacer(minLength: 8)
-                        if !item.shortcut.isEmpty { Text(item.shortcut).font(NekoFont.meta).foregroundStyle(selected ? Color(nsColor: .alternateSelectedControlTextColor).opacity(0.8) : .secondary) }
+                    HStack(spacing: NekoSpace.sm) {
+                        Image(systemName: item.symbol).font(NekoFont.caption).frame(width: NekoSpace.lg)
+                            .foregroundStyle(selected ? N.text : N.text3)
+                        Text(item.title).font(NekoFont.body).foregroundStyle(N.text).frame(minWidth: NekoChat.menuTitleWidth, alignment: .leading)
+                        Text(item.detail).font(NekoFont.meta).foregroundStyle(selected ? N.text2 : N.text3).lineLimit(1)
+                        Spacer(minLength: NekoSpace.sm)
+                        if !item.shortcut.isEmpty { Text(item.shortcut).font(NekoFont.meta).foregroundStyle(N.text3) }
                     }
-                    .padding(.horizontal, NekoSpace.md).frame(minHeight: 34)
-                    .background(selected ? Color(nsColor: .selectedContentBackgroundColor) : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous))
+                    .padding(.horizontal, NekoSpace.md).frame(minHeight: NekoChat.menuRow)
+                    .background(selected ? N.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
                 .onHover { if $0 { self.index = index } }
             }
         }
         .padding(NekoSpace.sm)
         .liquidGlass(radius: NekoRadius.xl)
-        .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+        .nekoElevation(.floating)
     }
 }
 

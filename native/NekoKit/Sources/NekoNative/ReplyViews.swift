@@ -3,9 +3,13 @@ import AppKit
 import NekoKit
 
 /// Lets a reply view answer for the person: send a message or fill the composer.
-struct ReplyActions: Sendable {
+/// Equal by identity, so the environment does not redraw every reply view
+/// reading it each time the chat renders.
+struct ReplyActions: Sendable, Equatable {
+    private let id = UUID()
     var send: @MainActor @Sendable (String) -> Void = { _ in }
     var draft: @MainActor @Sendable (String) -> Void = { _ in }
+    static func == (a: Self, b: Self) -> Bool { a.id == b.id }
 }
 private struct ReplyActionsKey: EnvironmentKey { static let defaultValue = ReplyActions() }
 extension EnvironmentValues {
@@ -41,29 +45,21 @@ extension View {
     }
 }
 
-/// Home and ticket replies share one quiet, readable user-message treatment.
-/// Keep saved text literal; attachment rendering follows the existing path.
+/// Home and ticket replies share one compact bubble for your turns, with no
+/// "You" label. Keep saved text literal; attachment rendering follows the
+/// existing path.
 struct ChatUserMessage: View {
     let text: String
     var timestamp: Int = 0
     var queued = false
+    /// What VoiceOver calls the speaker ("You", "Request").
+    var label = "You"
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Spacer(minLength: NekoLayout.pageInset)
-            VStack(alignment: .trailing, spacing: NekoLayout.authorGap) {
-                ChatAuthorLine(author: "You", timestamp: timestamp)
-                Group {
-                    if text.contains("![") { ReadableText(text: text) }
-                    else { Text(text).textSelection(.enabled) }
-                }
-                .font(NekoFont.chat).lineSpacing(4)
-                .multilineTextAlignment(.leading)
-                .padding(NekoLayout.messageInset)
-                .background(N.card, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-                if queued { Label("Queued", systemImage: "clock").font(NekoFont.meta).foregroundStyle(.secondary) }
-            }.frame(maxWidth: 640, alignment: .trailing)
-        }.frame(maxWidth: .infinity, alignment: .trailing)
+        ChatBubble(timestamp: timestamp, label: label, spoken: text, note: queued ? "Queued · sends when Neko is free" : nil) {
+            if text.contains("![") { ReadableText(text: text) }
+            else { Text(text).textSelection(.enabled) }
+        }
     }
 }
 
@@ -333,63 +329,7 @@ struct ReplySources: View {
     }
 }
 
-// MARK: - Steps, errors, memory, tickets
-
-struct ReplySteps: View {
-    let calls: [JSONValue]
-    let receipts: [JSONValue]
-    let connectionName: (String) -> String
-    let workedFor: String?
-    @State private var expanded = false
-    private struct Row: Identifiable { let id: String; let status: String; let tool: String; let detail: String }
-    private var rows: [Row] {
-        if calls.isEmpty {
-            return receipts.map { Row(id: $0.recordID, status: $0["success"].bool ? "succeeded" : "failed", tool: $0["tool_name"].string, detail: "") }
-        }
-        return calls.filter { $0["status"].string != "awaiting_approval" }.map { call in
-            Row(id: call.recordID, status: call["status"].string, tool: call["tool_name"].string, detail: connectionName(call["connection_id"].string))
-        }
-    }
-    var body: some View {
-        let items = rows
-        if !items.isEmpty {
-            let failed = items.filter { ["failed", "denied"].contains($0.status) }.count
-            VStack(alignment: .leading, spacing: 6) {
-                Button { withNekoAnimation(.select) { expanded.toggle() } } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold))
-                            .rotationEffect(.degrees(expanded ? 90 : 0)).frame(width: 10)
-                        Text([workedFor, "\(items.count) \(items.count == 1 ? "step" : "steps")", failed > 0 ? "\(failed) failed" : nil].compactMap { $0 }.joined(separator: " · "))
-                            .font(NekoFont.of(.caption, weight: .medium))
-                    }.foregroundStyle(failed > 0 ? ReplyStyle.orange : .secondary).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                if expanded {
-                    VStack(spacing: 0) {
-                        ForEach(items) { row in
-                            HStack(spacing: 8) {
-                                Image(systemName: symbol(row.status)).symbolRenderingMode(.hierarchical)
-                                    .foregroundStyle(color(row.status)).font(NekoFont.caption).frame(width: 14)
-                                Text(verb(row.status)).font(ReplyStyle.small).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
-                                Text(row.tool).font(ReplyStyle.small).lineLimit(1)
-                                if !row.detail.isEmpty { Text("· " + row.detail).font(ReplyStyle.small).foregroundStyle(.tertiary).lineLimit(1) }
-                                Spacer(minLength: 0)
-                            }.padding(.horizontal, NekoLayout.rowInset).frame(minHeight: 34)
-                        }
-                    }.padding(.vertical, 4).replyGroup(padding: 0)
-                }
-            }
-        }
-    }
-    private func symbol(_ status: String) -> String {
-        switch status { case "failed", "denied": "xmark.circle.fill"; case "running", "approved": "circle.dotted"; default: "checkmark.circle.fill" }
-    }
-    private func color(_ status: String) -> Color {
-        switch status { case "failed", "denied": ReplyStyle.red; case "running", "approved": NekoStyle.accent; default: ReplyStyle.green }
-    }
-    private func verb(_ status: String) -> String {
-        switch status { case "failed": "Failed"; case "denied": "Denied"; case "running", "approved": "Running"; default: "Used" }
-    }
-}
+// MARK: - Errors, memory, tickets
 
 struct ReplyErrorCallout: View {
     let message: String
