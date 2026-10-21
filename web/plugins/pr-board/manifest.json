@@ -1,0 +1,5 @@
+{
+  "title": "PR board",
+  "entry": "index.js",
+  "description": "Tasks that have a pull request, grouped by status."
+}
