@@ -321,6 +321,11 @@ module doc before changing them:
 - `FOLLOW_UP: <repo> | <title> | <detail>` in a result proposes a task in
   that repository (folder, remote or package name), AwaitingApproval,
   recorded in `Snapshot::follow_up_of` and drawn under its parent in the tree.
+- A PR task's run that merges newer base-branch work (a conflict, or
+  fast-forwarding to a branch updated with main) is reviewed and described
+  from `native_runner::pull_request_base` (`merge-base HEAD origin/<base>`,
+  only when newer than the run's start), which also becomes `base_commit`:
+  otherwise a 7-file fix read as 914 files (navihealth #14671).
 - Not adopted yet: in-thread replies/resolution after a fix (OpenHands), one
   batched query per repository and idle backoff, Renovate's "edited by
   someone else, stop pushing" block, and duplicate-title suffixes.
@@ -393,6 +398,14 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   so reused pids are safe) and their groups. Claude/OpenCode still have no
   quiet-stall check (they emit no command-start events); the wall-clock
   `RunSpec::timeout` (30 min builders, 10 min planning/review) bounds them.
+
+**Long-lived children die with the daemon** (`native_runner::spawn_guarded`):
+the app-index `mdfind -live` and the Codex app-server run under the same
+guardian agent runs use, which ends the child's process group when the
+daemon's end of a socket closes, however the daemon ends. Spawned plainly,
+each daemon restart left an `mdfind -live` behind until the next app install
+(ten found, up to seven days old). The guardian blocks on that socket
+(`poll`, 100 ms) instead of waking every 10 ms, since it may live all day.
 
 **Machine steward** (`neko_core::machine`): a thread reads load, memory
 pressure, compressed memory, swap, free disk, kernel_task and RAM per kind of

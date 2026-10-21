@@ -1110,6 +1110,26 @@ pub fn head(directory: &Path, cancel: &AtomicBool) -> Result<String, String> {
         .into())
 }
 
+/// Where a pull request's change now starts. When a run brings newer work
+/// from the base branch in (resolving a conflict, or fast-forwarding to a
+/// branch someone updated with main), measuring from where the run began
+/// shows every file the base branch changed: one navihealth PR's 7-file fix
+/// read as 914 files. The change is measured from `merge-base HEAD
+/// origin/<base_branch>` instead, but only when that is newer than `base`,
+/// so a run that merged nothing is measured exactly as before.
+pub fn pull_request_base(directory: &Path, base: &str, base_branch: &str, cancel: &AtomicBool) -> String {
+    if base_branch.is_empty() || base_branch.starts_with('-') || base_branch.contains("..") {
+        return base.to_owned();
+    }
+    let upstream = format!("refs/remotes/origin/{base_branch}");
+    let Ok(merge_base) = git_output(directory, &["merge-base", "HEAD", &upstream], cancel).map(|s| s.trim().to_owned()) else {
+        return base.to_owned();
+    };
+    let newer = !merge_base.is_empty() && merge_base != base
+        && git_output(directory, &["merge-base", "--is-ancestor", base, &merge_base], cancel).is_ok();
+    if newer { merge_base } else { base.to_owned() }
+}
+
 /// Binary patch with untracked additions. Commands never invoke repository
 /// hooks, external diff drivers, or a shell. Patch evidence stays in memory.
 pub fn task_patch(directory: &Path, base: &str, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
@@ -1670,7 +1690,82 @@ fn guard_run(mut command: Command) -> Result<ExitStatus, String> {
         if let Some(status) = process.poll()? {
             return Ok(status);
         }
-        std::thread::sleep(Duration::from_millis(10));
+        // Sleep until the parent's end of the socket closes (readable/HUP),
+        // or 100 ms to look at the child: a guardian that lives as long as
+        // the daemon (the app-index watch) must not wake 100 times a second.
+        let mut wait = libc::pollfd { fd: GUARD_FD, events: libc::POLLIN, revents: 0 };
+        // SAFETY: one valid pollfd on a descriptor this process owns.
+        unsafe { libc::poll(&mut wait, 1, 100) };
+    }
+}
+
+/// A long-lived child process that ends when this daemon ends, however it
+/// ends: a quit, a crash, or an install replacing the binary. It runs under
+/// the same guardian agent runs use, which kills the child's whole process
+/// group as soon as this process's end of a socket closes. Without it, a
+/// child such as `mdfind -live` outlived every daemon restart (ten were
+/// found, up to seven days old). Outside the real daemon (tests, other
+/// hosts) the child is spawned directly.
+pub struct GuardedChild {
+    pub child: std::process::Child,
+    control: Option<UnixStream>,
+}
+
+/// `stdio` sets pipes on whichever command actually starts (the guardian
+/// passes its own stdio to the child, so pipes reach the child itself).
+pub fn spawn_guarded(command: Command, stdio: impl Fn(&mut Command)) -> io::Result<GuardedChild> {
+    let helper = std::env::current_exe()
+        .ok()
+        .filter(|path| path.file_stem().is_some_and(|name| name == "neko-daemon"));
+    spawn_guarded_with(command, stdio, helper.as_deref())
+}
+
+fn spawn_guarded_with(mut command: Command, stdio: impl Fn(&mut Command), helper: Option<&Path>) -> io::Result<GuardedChild> {
+    let Some(helper) = helper else {
+        stdio(&mut command);
+        return Ok(GuardedChild { child: command.spawn()?, control: None });
+    };
+    let (reader, writer) = UnixStream::pair()?;
+    let mut guarded = guardian_command(&command, helper, reader.as_raw_fd());
+    stdio(&mut guarded);
+    let child = guarded.spawn()?;
+    drop(reader);
+    Ok(GuardedChild { child, control: Some(writer) })
+}
+
+impl GuardedChild {
+    /// Ends the child's whole process group. With a guardian, killing the
+    /// guardian itself would leave the child running, so the guardian is
+    /// told instead, by closing its socket.
+    pub fn kill(&mut self) -> io::Result<()> {
+        match self.control.take() {
+            Some(control) => { drop(control); Ok(()) }
+            None => self.child.kill(),
+        }
+    }
+    pub fn wait(&mut self) -> io::Result<ExitStatus> {
+        self.child.wait()
+    }
+}
+
+impl std::ops::Deref for GuardedChild {
+    type Target = std::process::Child;
+    fn deref(&self) -> &Self::Target { &self.child }
+}
+impl std::ops::DerefMut for GuardedChild {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.child }
+}
+
+impl Drop for GuardedChild {
+    fn drop(&mut self) {
+        if self.control.take().is_some() {
+            // Closing the socket tells the guardian to end the child's group;
+            // it then exits on its own.
+            let _ = self.child.wait();
+        } else {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }
 
@@ -2701,6 +2796,59 @@ sleep 10
         .unwrap_err();
         assert!(err.contains("cancelled"), "{err}");
         assert!(!root.exists());
+    }
+
+    #[test]
+    fn a_pull_request_that_merged_its_base_is_measured_from_where_it_now_branches() {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path();
+        let git = |args: &[&str]| {
+            let out = Command::new("git").current_dir(dir).args(args)
+                .env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t")
+                .output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        fs::write(dir.join("a"), "1").unwrap();
+        git(&["add", "."]); git(&["commit", "-qm", "start"]);
+        let base = git(&["rev-parse", "HEAD"]);
+        git(&["checkout", "-qb", "fix"]);
+        fs::write(dir.join("fix"), "f").unwrap();
+        git(&["add", "."]); git(&["commit", "-qm", "fix"]);
+        let cancel = AtomicBool::new(false);
+        // origin/main is the remote-tracking ref a fetch would leave.
+        git(&["update-ref", "refs/remotes/origin/main", &base]);
+        assert_eq!(pull_request_base(dir, &base, "main", &cancel), base, "nothing merged: unchanged");
+        git(&["checkout", "-q", "main"]);
+        for n in 0..5 { fs::write(dir.join(format!("m{n}")), "m").unwrap(); }
+        git(&["add", "."]); git(&["commit", "-qm", "main moved"]);
+        let moved = git(&["rev-parse", "HEAD"]);
+        git(&["update-ref", "refs/remotes/origin/main", &moved]);
+        git(&["checkout", "-q", "fix"]);
+        git(&["merge", "-q", "--no-edit", "main"]);
+        let now = pull_request_base(dir, &base, "main", &cancel);
+        assert_eq!(now, moved, "measured from the main it merged");
+        assert_eq!(changed_files(dir, &now, &cancel).unwrap(), ["fix"], "only the PR's own file, not main's five");
+        assert_eq!(pull_request_base(dir, &base, "--evil", &cancel), base);
+    }
+
+    #[test]
+    fn a_guarded_long_lived_child_ends_with_its_owner() {
+        let (temp, child, _) = fixture("touch started; (sleep 0.6; touch survived) & sleep 20");
+        let helper = guardian_fixture(temp.path());
+        let mut command = Command::new(&child);
+        command.current_dir(temp.path()).env("NEKO_TEST_CHILD_EXECUTABLE", &child);
+        let guarded = spawn_guarded_with(command, |c| { c.stdin(Stdio::null()).stdout(Stdio::null()); }, Some(&helper)).unwrap();
+        let started = Instant::now();
+        while !temp.path().join("started").exists() && started.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let closed = Instant::now();
+        drop(guarded); // the daemon ending closes its end of the socket
+        assert!(closed.elapsed() < Duration::from_secs(5), "the guardian notices within its poll interval");
+        std::thread::sleep(Duration::from_millis(750));
+        assert!(!temp.path().join("survived").exists(), "the child's whole group ended with it");
     }
 
     #[test]
