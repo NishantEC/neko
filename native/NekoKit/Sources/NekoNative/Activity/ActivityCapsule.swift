@@ -7,6 +7,8 @@ struct ActivityCapsule: View {
     var label: String? = nil
     /// In-line in a page: just the glyph and the shimmering words, no pill.
     var plain = false
+    /// The label's type; the default suits a headline status, a log line passes `meta`.
+    var font: Font = NekoFont.of(.callout, weight: .medium)
 
     private var title: String { label ?? (activity.animates ? activity.label + "…" : activity.label) }
 
@@ -14,7 +16,7 @@ struct ActivityCapsule: View {
         if plain {
             HStack(spacing: 8) {
                 PixelGlyph(activity: activity, size: 14)
-                ShimmerText(text: title, active: activity.animates)
+                ShimmerText(text: title, active: activity.animates, font: font)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(title)

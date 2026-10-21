@@ -21,7 +21,10 @@ enum NekoChat {
 
     static let bubbleInsetX: CGFloat = 14
     static let bubbleInsetY: CGFloat = 10
-    static let bubbleWidth: CGFloat = 520
+    /// Your bubble never takes more than this share of the column.
+    static let bubbleFraction: CGFloat = 0.8
+    /// A sent message rests this far below the top edge while the reply is written under it.
+    static let anchorMargin: CGFloat = 0
 
     /// Rich blocks: header height and side inset.
     static let blockHeader: CGFloat = 36
@@ -82,8 +85,7 @@ struct ChatBubble<Content: View>: View {
 
     private var date: Date? { timestamp > 0 ? Date(timeIntervalSince1970: Double(timestamp) / 1000) : nil }
     var body: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: NekoLayout.pageInset)
+        ChatBubbleLane {
             VStack(alignment: .trailing, spacing: NekoSpace.xxs) {
                 content()
                     .font(NekoFont.chat).lineSpacing(NekoLeading.body)
@@ -112,7 +114,6 @@ struct ChatBubble<Content: View>: View {
                 .font(NekoFont.caption)
                 .frame(minHeight: NekoChat.speakerHeight - NekoSpace.xxs)
             }
-            .frame(maxWidth: NekoChat.bubbleWidth, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .contentShape(Rectangle())
@@ -121,6 +122,22 @@ struct ChatBubble<Content: View>: View {
     private var accessibility: String {
         let time = date.map { ", \($0.formatted(date: .omitted, time: .shortened))" } ?? ""
         return spoken.isEmpty ? label + time : "\(label)\(time): \(spoken)"
+    }
+}
+
+/// Places one child against the trailing edge, at most `NekoChat.bubbleFraction`
+/// of the width offered: text wraps at 80% of the column however wide it is.
+struct ChatBubbleLane: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil }
+        let size = child.sizeThatFits(ProposedViewSize(width: width.map { $0 * NekoChat.bubbleFraction }, height: proposal.height))
+        return CGSize(width: width ?? size.width, height: size.height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let child = subviews.first else { return }
+        let size = child.sizeThatFits(ProposedViewSize(width: bounds.width * NekoChat.bubbleFraction, height: bounds.height))
+        child.place(at: CGPoint(x: bounds.maxX - size.width, y: bounds.minY), anchor: .topLeading, proposal: ProposedViewSize(size))
     }
 }
 
@@ -346,33 +363,46 @@ struct ChatJumpButton: View {
 
 // MARK: - Folded work
 
+/// The disclosure mark every folded line of work shares.
+struct ChatWorkChevron: View {
+    let open: Bool
+    var body: some View {
+        Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold))
+            .foregroundStyle(N.text3)
+            .rotationEffect(.degrees(open ? 90 : 0))
+            .frame(width: NekoSpace.md)
+            .accessibilityHidden(true)
+    }
+}
+
 /// One quiet line standing for a stretch of work ("Used 3 tools · Linear"),
 /// opening in place on click. No disclosure triangle, so the label is not
 /// indented by AppKit.
 struct ChatWorkFold<Content: View>: View {
     let label: String
     var failed = false
+    /// Quiet text at the trailing edge ("Worked for 1m 12s").
+    var trailing: String? = nil
     @Binding var open: Bool
     @ViewBuilder var content: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: NekoSpace.xxs) {
             Button { withNekoAnimation(.reveal) { open.toggle() } } label: {
                 HStack(spacing: NekoSpace.xs) {
-                    Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold))
-                        .rotationEffect(.degrees(open ? 90 : 0))
-                        .frame(width: NekoSpace.md)
+                    ChatWorkChevron(open: open)
                     if failed {
                         Image(systemName: "exclamationmark.circle").foregroundStyle(NekoStyle.amber).accessibilityHidden(true)
                     }
                     Text(label).monospacedDigit().lineLimit(1)
                     Spacer(minLength: 0)
+                    if let trailing { Text(trailing).monospacedDigit().foregroundStyle(N.text4).lineLimit(1) }
                 }
                 .font(NekoFont.meta).foregroundStyle(N.text3)
                 .frame(minHeight: NekoChat.workRow)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(label)
+            .accessibilityLabel(trailing.map { "\(label), \($0)" } ?? label)
             .accessibilityValue(open ? "Expanded" : "Collapsed")
             .accessibilityHint(open ? "Hide the details" : "Show the details")
             if open { content() }
