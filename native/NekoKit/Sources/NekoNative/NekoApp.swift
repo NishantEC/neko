@@ -4,6 +4,7 @@ import NekoKit
 @main struct NekoNativeApp: App {
     @StateObject private var model = AppModel()
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     init() { NativeLifecycle.startDaemon() }
     var body: some Scene {
         Window("Neko", id: "workspace") {
@@ -18,6 +19,10 @@ import NekoKit
         .commands {
             CommandGroup(after: .newItem) { Button("Quick panel") { PaletteController.shared.toggle(model: model) }.keyboardShortcut("k", modifiers: [.command]) }
             CommandGroup(replacing: .appSettings) { Button("Settings…") { model.requestedPage = .settings; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }.keyboardShortcut(",", modifiers: [.command]) }
+            // View ▸ Appearance keeps the choice a keystroke away; Settings has it too.
+            CommandGroup(after: .sidebar) {
+                Picker("Appearance", selection: $appearance) { ForEach(NekoAppearance.allCases) { Text($0.title).tag($0.rawValue) } }
+            }
             CommandMenu("Work") {
                 Button("Stop all work") { Task { await StopAllWork.run(model) } }.keyboardShortcut(.escape, modifiers: [.command, .shift])
                 Button("Clear finished tickets") { Task { await model.workbench(.command("ClearFinishedTasks", ["workspace_id": model.selectedWorkspace.map { .string($0) } ?? .null])) } }
@@ -63,7 +68,12 @@ struct WorkspaceView: View {
     var body: some View {
         Group {
             if model.loadingSetup {
-                VStack(spacing: 20) { ProgressView("Connecting to Neko…"); if model.error != nil { Button("Retry connection") { Task { await model.start() } } } }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: NekoSpace.lg) {
+                    BrandMark(size: 56)
+                    ProgressView().controlSize(.small)
+                    Text("Connecting to Neko…").font(NekoFont.meta).foregroundStyle(N.text3)
+                    if model.error != nil { Button("Retry connection") { Task { await model.start() } } }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.onboarding { OnboardingView(model: model) }
             else {
                 NavigationSplitView(columnVisibility: $columns) {
@@ -106,12 +116,12 @@ struct WorkspaceView: View {
         .environment(\.nekoLook, NekoLook(rawValue: look) ?? .ambient)
         .safeAreaInset(edge: .top) {
             if let notice = model.notice, model.error == nil {
-                NekoNotice(kind: .success, text: notice) { model.notice = nil }.transition(.move(edge: .top))
+                NekoNotice(kind: .success, text: notice) { model.notice = nil }.nekoEntrance()
             }
             if let error = model.error {
                 NekoNotice(kind: .warning, text: error) { model.error = nil } actions: {
                     Button("Retry") { Task { await model.refresh() } }.nekoButton(.secondary)
-                }.transition(.move(edge: .top))
+                }.nekoEntrance()
             }
         }
         .sheet(isPresented: $addingWorkspace) { WorkspaceEditor(model: model) }
@@ -148,7 +158,6 @@ struct NativeSidebar: View {
     @State private var selection: String?
     @State private var filter = ""
     @Binding var addingWorkspace: Bool
-    @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
     private let shown = 5
     private static let stages: [TaskStage] = [.needsYou, .review, .running, .upNext]
     var body: some View {
@@ -158,18 +167,23 @@ struct NativeSidebar: View {
         // the header and let them take its clicks.
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: NekoSpace.sm) {
-                WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace)
-                    .menuStyle(.button).nekoButton(.quiet)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button { newTask() } label: {
-                    Label("New task", systemImage: "square.and.pencil").frame(maxWidth: .infinity, alignment: .leading)
+                // Where Neko works, and a quiet New task: ⌘N and Home's
+                // composer already own that action, so it takes no full row.
+                HStack(spacing: NekoSpace.xs) {
+                    WorkspaceMenu(model: model, addingWorkspace: $addingWorkspace)
+                        .menuStyle(.button).nekoButton(.quiet)
+                        .font(NekoFont.of(.callout, weight: .semibold)).foregroundStyle(N.text).tint(N.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { newTask() } label: {
+                        Image(systemName: "square.and.pencil").frame(width: NekoLayout.iconButton, height: NekoLayout.iconButton).contentShape(Rectangle())
+                    }
+                    .nekoButton(.quiet)
+                    .keyboardShortcut("n", modifiers: .command)
+                    .help("New task (⌘N)").accessibilityLabel("New task")
                 }
-                .nekoButton(.secondary).controlSize(.large)
-                .keyboardShortcut("n", modifiers: .command)
-                .help("Describe what you want done (⌘N)")
                 NekoSearchField(title: "Find a task", text: $filter, size: .small)
             }
-            .padding(.horizontal, NekoSpace.lg).padding(.vertical, NekoSpace.md)
+            .padding(.horizontal, NekoSpace.lg).padding(.top, NekoSpace.sm).padding(.bottom, NekoSpace.md)
             List(selection: $selection) {
                 Section {
                     row(.home, title: "Home", symbol: "house", badge: 0)
@@ -181,23 +195,20 @@ struct NativeSidebar: View {
             }
             .listStyle(.sidebar)
             .font(NekoFont.of(.callout))
-            .environment(\.defaultMinListRowHeight, 30)
-            Divider()
-            MachineStrip(health: model.machine)
-                .padding(.horizontal, NekoSpace.lg).padding(.top, NekoSpace.md)
-            HStack(spacing: NekoSpace.md) {
-                WatchingStatus(connected: model.connected, snapshot: model.snapshot)
-                Spacer()
-                Menu {
-                    Picker("Appearance", selection: $appearance) { ForEach(NekoAppearance.allCases) { Text($0.title).tag($0.rawValue) } }.pickerStyle(.inline)
-                } label: { Image(systemName: "paintpalette") }
-                .menuStyle(.button).nekoButton(.quiet).menuIndicator(.hidden).fixedSize()
-                .help("Light, dark or match your Mac").accessibilityLabel("Appearance")
+            .environment(\.defaultMinListRowHeight, N.rowHeight)
+            Hairline()
+            // One quiet line: the Mac, what Neko watches, and Settings.
+            // Appearance lives in Settings and View ▸ Appearance.
+            HStack(spacing: NekoSpace.xs) {
+                MachineStrip(health: model.machine)
+                WatchingStatus(connected: model.connected, snapshot: model.snapshot, inline: true)
+                    .fixedSize().layoutPriority(1)
+                Spacer(minLength: NekoSpace.xs)
                 Button { model.agentID = nil; page = .settings } label: { Image(systemName: "gearshape") }
                     .nekoButton(.quiet).help("Settings (⌘,)").accessibilityLabel("Settings")
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, NekoSpace.lg).padding(.vertical, NekoSpace.md)
+            .padding(.horizontal, NekoSpace.lg).padding(.vertical, NekoSpace.sm)
         }
         .onAppear { selection = page.rawValue }
         .onChange(of: selection) { _, value in
@@ -276,13 +287,20 @@ struct NativeSidebar: View {
 struct WatchingStatus: View {
     let connected: Bool
     let snapshot: JSONValue
+    /// Text only, continuing a line that already has a status dot.
+    var inline = false
     var body: some View {
         let status = WatchingPresentation(connected: connected, snapshot: snapshot)
-        HStack(spacing: 6) {
-            Circle().fill(status.active ? NekoStyle.mint : Color.secondary)
-                .frame(width: 6, height: 6).accessibilityHidden(true)
-            Text(status.title).font(NekoFont.meta)
-        }.accessibilityElement(children: .combine)
+        HStack(spacing: NekoSpace.xs) {
+            if inline {
+                Text("· " + status.title).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1)
+            } else {
+                Circle().fill(status.active ? NekoStyle.mint : Color.secondary)
+                    .frame(width: 7, height: 7).accessibilityHidden(true)
+                Text(status.title).font(NekoFont.meta)
+            }
+        }
+        .accessibilityElement(children: .ignore).accessibilityLabel(status.title)
     }
 }
 

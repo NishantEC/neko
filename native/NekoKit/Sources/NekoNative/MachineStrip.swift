@@ -1,7 +1,7 @@
 import SwiftUI
 import NekoKit
 
-/// What the Mac can take right now, in words: the line under the sidebar.
+/// What the Mac can take right now, in words: the start of the sidebar's footer.
 struct MachineStatus {
     let health: JSONValue
     enum Level { case ok, limited, holding }
@@ -47,7 +47,6 @@ struct MachineStrip: View {
             HStack(spacing: NekoSpace.sm) {
                 Circle().fill(status.known ? status.color : N.text4).frame(width: 7, height: 7).accessibilityHidden(true)
                 Text(status.title).font(NekoFont.meta).foregroundStyle(status.level == .ok ? N.text3 : status.color).lineLimit(1)
-                Spacer(minLength: 0)
             }
             .contentShape(Rectangle())
         }

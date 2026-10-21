@@ -30,17 +30,23 @@ struct SidePanel<Panel: View>: ViewModifier {
                 panel()
                     .frame(width: current)
                     .frame(maxHeight: .infinity, alignment: .top)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+                    .background(N.panel)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
     }
 
     private var handle: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(hovering || dragStart != nil ? 0.18 : 0.08))
+        let active = hovering || dragStart != nil
+        // The handle takes one point of layout; the wider hover bar is drawn
+        // over its neighbours, so nothing shifts under the pointer.
+        return Color.clear
             .frame(width: 1)
             .frame(maxHeight: .infinity)
+            .overlay {
+                Rectangle().fill(active ? N.lineStrong : N.line).frame(width: active ? 3 : 1)
+                    .nekoAnimation(.hover, value: active)
+            }
             .overlay {
                 Color.clear.frame(width: 9).contentShape(Rectangle())
                     .onHover { inside in
