@@ -22,9 +22,9 @@ struct ComposerRuntimePanel: View {
                     Button("Back to effort", systemImage: "chevron.left") { page = .effort }
                         .labelStyle(.iconOnly).nekoButton(.quiet)
                 }
-                Text(title).font(.headline).help(page == .effort ? "Reasoning effort" : title)
+                Text(title).font(NekoFont.heading).help(page == .effort ? "Reasoning effort" : title)
                 Spacer()
-                if sample { Text("Sample").font(.caption).foregroundStyle(.secondary) }
+                if sample { Text("Sample").font(NekoFont.caption).foregroundStyle(.secondary) }
                 if page == .effort && selection.draft.reasoningEffort != nil {
                     Button("Auto") { selection.draft.reasoningEffort = nil }
                         .nekoButton(.quiet).disabled(selection.saving).accessibilityLabel("Reset effort to Auto")
@@ -33,10 +33,10 @@ struct ComposerRuntimePanel: View {
                     .labelStyle(.iconOnly).nekoButton(.quiet).disabled(selection.loading || selection.saving)
             }
             if selection.loading {
-                HStack { ProgressView().controlSize(.small); Text("Loading models…").font(.caption) }
+                HStack { ProgressView().controlSize(.small); Text("Loading models…").font(NekoFont.caption) }
             }
             if let error = selection.catalogError {
-                Text("Models could not be loaded: \(error)").font(.caption).foregroundStyle(NekoStyle.amber)
+                Text("Models could not be loaded: \(error)").font(NekoFont.caption).foregroundStyle(NekoStyle.amber)
                     .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             }
             Group {
@@ -49,25 +49,25 @@ struct ComposerRuntimePanel: View {
                 }
             }.disabled(selection.saving)
             ForEach(selection.reconciliation, id: \.self) { notice in
-                Text(notice).font(.caption).foregroundStyle(NekoStyle.amber)
+                Text(notice).font(NekoFont.caption).foregroundStyle(NekoStyle.amber)
             }
             if let message = selection.validationMessage {
-                Text(message).font(.caption).foregroundStyle(NekoStyle.amber)
+                Text(message).font(NekoFont.caption).foregroundStyle(NekoStyle.amber)
             }
             Divider()
             if let error = selection.applyError {
-                Text("Settings were not applied. \(error)").font(.caption).foregroundStyle(NekoStyle.amber)
+                Text("Settings were not applied. \(error)").font(NekoFont.caption).foregroundStyle(NekoStyle.amber)
                     .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             } else if let status = selection.status, !selection.dirty {
-                Text(status).font(.caption).foregroundStyle(.secondary)
+                Text(status).font(NekoFont.caption).foregroundStyle(.secondary)
             }
             HStack {
                 if selection.saving {
                     ProgressView().controlSize(.small)
-                    Text("Checking…").font(.caption)
+                    Text("Checking…").font(NekoFont.caption)
                 } else if selection.dirty {
                     Button("Discard", action: selection.discard).nekoButton(.quiet)
-                    Text("Not applied").font(.caption).foregroundStyle(.secondary)
+                    Text("Not applied").font(NekoFont.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(sample ? "Apply sample" : "Check & apply", action: apply)
@@ -75,7 +75,7 @@ struct ComposerRuntimePanel: View {
             }
             Text(sample ? "Local sample. No check or worker runs."
                  : "One short check may use allowance. Applies to the next turn or worker.")
-                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(NekoFont.of(.small)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 .help(sample ? "Sample catalog and local settings only."
                       : "Manual pins are checked before saving. Active work keeps its captured settings. Resetting to automatic settings does not run an inference check.")
         }

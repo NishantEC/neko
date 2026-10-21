@@ -180,6 +180,8 @@ struct ChatStatusDivider: View {
 struct ChatBlock<Trailing: View, Content: View>: View {
     let label: String
     var mono = false
+    /// `N.sunken` for code, output and diffs (a well below the canvas); `N.panel` otherwise.
+    var fill: Color = N.panel
     @ViewBuilder var trailing: () -> Trailing
     @ViewBuilder var content: () -> Content
     var body: some View {
@@ -195,14 +197,14 @@ struct ChatBlock<Trailing: View, Content: View>: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
+        .background(fill, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
     }
 }
 
 extension ChatBlock where Trailing == EmptyView {
-    init(label: String, mono: Bool = false, @ViewBuilder content: @escaping () -> Content) {
-        self.init(label: label, mono: mono, trailing: { EmptyView() }, content: content)
+    init(label: String, mono: Bool = false, fill: Color = N.panel, @ViewBuilder content: @escaping () -> Content) {
+        self.init(label: label, mono: mono, fill: fill, trailing: { EmptyView() }, content: content)
     }
 }
 

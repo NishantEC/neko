@@ -70,7 +70,7 @@ private actor RuntimeIdentitySaveGate {
         host.layoutSubtreeIfNeeded()
     }
 
-    func testResponsiveFooterSharesDraftPendingCheckAndErrorThenCleansUpScope() async throws {
+    func testFooterKeepsOneRowAndSharesDraftPendingCheckAndErrorThenCleansUpScope() async throws {
         let catalog: JSONValue = .object(["AgentModels": .object(["sources": .array([
             .object(["provider": .string("sample"), "status": .string("ready"), "models": .array([
                 .object(["id": .string("sample-model"), "effort_options": .array([
@@ -84,7 +84,7 @@ private actor RuntimeIdentitySaveGate {
         let host = NSHostingView(rootView: RuntimeIdentityHost(model: model, conversationID: scope, width: 900, recorder: recorder))
         resize(host, model: model, scope: scope, width: 900, recorder: recorder)
         let selection = try XCTUnwrap(recorder.selections.last)
-        XCTAssertGreaterThanOrEqual(recorder.selections.count, 2, "ViewThatFits constructs multiple picker candidates")
+        XCTAssertGreaterThanOrEqual(recorder.selections.count, 1)
         XCTAssertTrue(recorder.selections.allSatisfy { $0 === selection })
         let wideHeight = host.fittingSize.height
         for _ in 0..<10000 {
@@ -100,7 +100,7 @@ private actor RuntimeIdentitySaveGate {
         XCTAssertTrue(checking)
         resize(host, model: model, scope: scope, width: 420, recorder: recorder)
         let narrowSelection = try XCTUnwrap(recorder.selections.last)
-        XCTAssertGreaterThan(host.fittingSize.height, wideHeight, "Narrow width must select the stacked footer")
+        XCTAssertEqual(host.fittingSize.height, wideHeight, accuracy: 1, "The footer keeps one row at every width, so the transcript never jumps")
         XCTAssertTrue(narrowSelection === selection)
         XCTAssertTrue(recorder.selections.allSatisfy { $0 === selection })
         XCTAssertEqual(narrowSelection.draft.reasoningEffort, "high")

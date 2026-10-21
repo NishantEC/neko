@@ -21,7 +21,7 @@ extension EnvironmentValues {
 
 /// Native macOS values for the chat surface, shared across light and dark modes.
 enum ReplyStyle {
-    static let groupFill = N.card
+    static let groupFill = N.panel
     static let groupStroke = N.line
     static let codeFill = N.panel
     static let hairline = N.line
@@ -38,10 +38,11 @@ enum ReplyStyle {
 
 extension View {
     /// An opaque group for related controls or evidence. Prose stays on the canvas.
-    func replyGroup(padding: CGFloat = NekoLayout.rowInset) -> some View {
+    /// The same fill and radius as every other block in a reply (`ChatBlock`).
+    func replyGroup(padding: CGFloat = NekoChat.blockInset) -> some View {
         self.padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
+            .background(ReplyStyle.groupFill, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
     }
 }
 
@@ -247,7 +248,7 @@ struct ReplyPlan: View {
                 ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("\(index + 1)").font(ReplyStyle.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 20, alignment: .trailing)
-                        Text(step).font(ReplyStyle.body).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        Text(step).font(ReplyStyle.body).lineSpacing(NekoLeading.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                     }.padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 12)
                     if index < steps.count - 1 { Divider().opacity(0.6) }
@@ -255,8 +256,8 @@ struct ReplyPlan: View {
             }.replyGroup(padding: 0)
             HStack {
                 Spacer()
-                Button("Change Plan…") { actions.draft("Change the plan: ") }.disabled(sent)
-                Button(sent ? "Sent" : "Go Ahead") { sent = true; actions.send("Go ahead with this plan.") }
+                Button("Change plan…") { actions.draft("Change the plan: ") }.disabled(sent)
+                Button(sent ? "Sent" : "Go ahead") { sent = true; actions.send("Go ahead with this plan.") }
                     .nekoButton(.primary).disabled(sent)
             }.controlSize(.small)
         }
@@ -334,18 +335,23 @@ struct ReplySources: View {
 struct ReplyErrorCallout: View {
     let message: String
     let retry: (() -> Void)?
+    /// Always states a next step: Try again when the question is known,
+    /// otherwise where to ask again.
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "exclamationmark.circle").foregroundStyle(ReplyStyle.red).font(NekoFont.of(.subtitle))
-            VStack(alignment: .leading, spacing: 10) {
-                Text("This reply didn’t finish").font(NekoFont.heading)
-                if !message.isEmpty { Text(message).font(ReplyStyle.small).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                if let retry { Button("Try Again", action: retry).nekoButton(.primary).controlSize(.small) }
+        HStack(alignment: .firstTextBaseline, spacing: NekoSpace.sm) {
+            Image(systemName: "exclamationmark.circle").foregroundStyle(NekoStyle.coral).font(NekoFont.body).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: NekoSpace.xxs) {
+                Text("Neko stopped before finishing").font(NekoFont.heading)
+                if !message.isEmpty { Text(message).font(NekoFont.meta).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true) }
+                if retry == nil { Text("Ask again from the composer.").font(NekoFont.meta).foregroundStyle(N.text3) }
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: NekoSpace.sm)
+            if let retry { Button("Try again", action: retry).nekoButton(.secondary).controlSize(.small) }
         }
-        .padding(NekoLayout.rowInset)
-        .background(ReplyStyle.red.opacity(0.08), in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
+        .padding(NekoChat.blockInset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .nekoFill(N.panel, radius: NekoRadius.lg)
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -369,7 +375,7 @@ struct ReplyTicketRow: View {
             HStack(alignment: .top, spacing: 12) {
                 StatusGlyph(status: status, size: 16).padding(.top, 2).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(title).font(NekoFont.heading).lineSpacing(3).lineLimit(2)
+                    Text(title).font(NekoFont.heading).lineSpacing(NekoLeading.tight).lineLimit(2)
                     Text([workspace, friendlyTaskStatus(status)].filter { !$0.isEmpty }.joined(separator: " · ")).font(ReplyStyle.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)

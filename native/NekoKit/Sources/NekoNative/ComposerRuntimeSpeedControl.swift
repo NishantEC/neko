@@ -31,7 +31,7 @@ struct ComposerRuntimeSpeedControl: View {
                         }.menuStyle(.borderlessButton).fixedSize()
                             .accessibilityLabel("Speed is Auto; choose a manual speed")
                     } else {
-                        Text(RuntimeSelectionLabel.speed(selection.draft, catalog: selection.catalog)).font(.caption).foregroundStyle(.secondary)
+                        Text(RuntimeSelectionLabel.speed(selection.draft, catalog: selection.catalog)).font(NekoFont.caption).foregroundStyle(.secondary)
                         Button("Auto") { selection.draft.serviceTier = nil }
                             .nekoButton(.quiet).accessibilityLabel("Reset speed to Auto")
                     }
@@ -45,7 +45,7 @@ struct ComposerRuntimeSpeedControl: View {
             }
         } else if let tier = selection.draft.serviceTier {
             HStack {
-                Text(tier == "default" ? "Speed: Normal" : "Speed pin unavailable").font(.caption)
+                Text(tier == "default" ? "Speed: Normal" : "Speed pin unavailable").font(NekoFont.caption)
                 Spacer()
                 Button("Auto") { selection.draft.serviceTier = nil }.nekoButton(.quiet)
                     .accessibilityLabel("Reset speed to Auto")

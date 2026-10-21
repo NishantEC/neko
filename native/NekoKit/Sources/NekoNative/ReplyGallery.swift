@@ -63,7 +63,7 @@ struct ReplyGallery: View {
                     .object(["id": .string("2"), "tool_name": .string("list_events"), "status": .string("succeeded"), "connection_id": .string("sentry")]),
                     .object(["id": .string("3"), "tool_name": .string("run_query"), "status": .string("failed"), "connection_id": .string("sentry")]),
                 ], receipts: []), connectionName: { ["linear": "Linear", "sentry": "Sentry"][$0] ?? "" })
-                ReadableText(text: ReplyGallery.sample).font(NekoFont.meta).lineSpacing(3)
+                ReadableText(text: ReplyGallery.sample).font(NekoFont.meta).lineSpacing(NekoLeading.body)
                 ReplyErrorCallout(message: "Codex went quiet for 5 minutes while reading 1,200 files.", retry: {})
                 ReplyMemoryNote(text: "test funnel fixes against CleverTap, not only unit tests.")
                 ReplyTicketRow(title: "Keep slot after address change", status: "AwaitingApproval", workspace: "hme/athena") {}

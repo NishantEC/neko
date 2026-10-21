@@ -195,7 +195,7 @@ struct TicketReviewCard: View {
                 .font(NekoFont.heading)
                 .foregroundStyle(!verdict.passed ? NekoStyle.amber : current ? NekoStyle.mint : N.text3)
             if !current { Text("Recorded for an earlier attempt.").font(NekoFont.meta).foregroundStyle(N.text3) }
-            ReadableText(text: verdict.summary).lineSpacing(3)
+            ReadableText(text: verdict.summary).lineSpacing(NekoLeading.body)
             ForEach(Array(verdict.findings.enumerated()), id: \.offset) { _, finding in
                 Label { ReadableText(text: finding) } icon: { Image(systemName: "exclamationmark.circle").foregroundStyle(NekoStyle.amber) }
             }

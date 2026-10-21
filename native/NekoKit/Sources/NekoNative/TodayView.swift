@@ -207,7 +207,7 @@ struct TodayView: View {
                     .font(NekoFont.meta)
                 }
                 if !message["text"].string.isEmpty {
-                    ReadableText(text: message["text"].string).font(NekoFont.chat).lineSpacing(4)
+                    ReadableText(text: message["text"].string).font(NekoFont.chat).lineSpacing(NekoLeading.reading)
                 }
                 if message["failed"].bool {
                     ReplyErrorCallout(message: "", retry: retry.map { text in { [model] in Self.post(text, model: model) } })

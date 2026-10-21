@@ -107,7 +107,6 @@ struct NativeDiffBlock: View {
         _expanded = State(initialValue: Set(0..<max(openFiles, 0)))
     }
     @State private var lineLimits: [Int: Int] = [:]
-    @State private var copied = false
     private struct FileDiff { var name: String; var lines: [String]; var added: Int; var removed: Int }
     private var files: [FileDiff] {
         var result: [FileDiff] = []
@@ -127,63 +126,61 @@ struct NativeDiffBlock: View {
     }
     var body: some View {
         let all = files
-        VStack(spacing: 0) {
-            HStack {
-                Text("Changes").font(ReplyStyle.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button(copied ? "Copied" : "Copy full diff") {
-                    NSPasteboard.general.clearContents()
-                    copied = NSPasteboard.general.setString(code, forType: .string)
-                }.nekoButton(.quiet).font(ReplyStyle.caption)
-            }.padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 12)
-            ForEach(Array(all.enumerated()), id: \.offset) { index, file in
-                if index > 0 { Divider().opacity(0.6) }
-                Button {
-                    if expanded.contains(index) { expanded.remove(index) } else { expanded.insert(index) }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: expanded.contains(index) ? "chevron.down" : "chevron.right").font(NekoFont.of(.micro, weight: .semibold)).foregroundStyle(.secondary).frame(width: 10)
-                        Text((file.name as NSString).lastPathComponent).font(ReplyStyle.small)
-                        Text((file.name as NSString).deletingLastPathComponent).font(ReplyStyle.caption).foregroundStyle(.tertiary).lineLimit(1)
-                        Spacer()
-                        if file.added > 0 { Text("+\(file.added)").font(ReplyStyle.caption.monospacedDigit()).foregroundStyle(ReplyStyle.green) }
-                        if file.removed > 0 { Text("−\(file.removed)").font(ReplyStyle.caption.monospacedDigit()).foregroundStyle(ReplyStyle.red) }
-                    }.padding(.horizontal, NekoLayout.rowInset).frame(minHeight: 40).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                if expanded.contains(index) {
-                    Divider().opacity(0.6)
-                    ScrollView(.horizontal) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(file.lines.prefix(lineLimits[index, default: 400]).enumerated()), id: \.offset) { _, line in
-                                Text(line.isEmpty ? " " : line)
-                                    .font(ReplyStyle.mono)
-                                    .foregroundStyle(line.hasPrefix("@@") ? Color.secondary : .primary.opacity(line.hasPrefix("+") || line.hasPrefix("-") ? 0.95 : 0.85))
-                                    .padding(.horizontal, NekoLayout.rowInset).frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
-                                    .background(line.hasPrefix("+") ? ReplyStyle.green.opacity(0.13) : line.hasPrefix("-") ? ReplyStyle.red.opacity(0.14) : .clear)
-                            }
-                        }.padding(.vertical, 8).fixedSize(horizontal: true, vertical: false)
-                    }.textSelection(.enabled)
-                    let shown = min(file.lines.count, lineLimits[index, default: 400])
-                    if shown < file.lines.count {
-                        HStack {
-                            Text("Showing \(shown) of \(file.lines.count) lines").foregroundStyle(.secondary)
+        ChatBlock(label: "\(all.count) \(all.count == 1 ? "file" : "files") changed", fill: N.sunken) {
+            ChatCopyButton(text: { code }, help: "Copy full diff")
+        } content: {
+            VStack(spacing: 0) {
+                ForEach(Array(all.enumerated()), id: \.offset) { index, file in
+                    if index > 0 { Divider().opacity(0.6) }
+                    Button {
+                        if expanded.contains(index) { expanded.remove(index) } else { expanded.insert(index) }
+                    } label: {
+                        HStack(spacing: NekoSpace.xs) {
+                            Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold)).foregroundStyle(N.text3)
+                                .rotationEffect(.degrees(expanded.contains(index) ? 90 : 0)).frame(width: NekoSpace.md)
+                            Text((file.name as NSString).lastPathComponent).font(NekoFont.meta).foregroundStyle(N.text)
+                            Text((file.name as NSString).deletingLastPathComponent).font(NekoFont.caption).foregroundStyle(N.text4).lineLimit(1).truncationMode(.middle)
                             Spacer()
-                            Button("Show next \(min(400, file.lines.count - shown)) lines") { lineLimits[index] = shown + 400 }
-                                .nekoButton(.quiet)
-                        }.font(ReplyStyle.caption).padding(NekoLayout.rowInset)
+                            if file.added > 0 { Text("+\(file.added)").font(NekoFont.caption.monospacedDigit()).foregroundStyle(NekoStyle.mint) }
+                            if file.removed > 0 { Text("−\(file.removed)").font(NekoFont.caption.monospacedDigit()).foregroundStyle(NekoStyle.coral) }
+                        }.padding(.horizontal, NekoChat.blockInset).frame(minHeight: NekoChat.blockHeader).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityValue(expanded.contains(index) ? "Expanded" : "Collapsed")
+                    if expanded.contains(index) {
+                        Divider().opacity(0.6)
+                        ScrollView(.horizontal) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(file.lines.prefix(lineLimits[index, default: 400]).enumerated()), id: \.offset) { _, line in
+                                    Text(line.isEmpty ? " " : line)
+                                        .font(NekoChat.code)
+                                        .foregroundStyle(line.hasPrefix("@@") ? N.text3 : line.hasPrefix("+") || line.hasPrefix("-") ? N.text : N.text2)
+                                        .padding(.horizontal, NekoChat.blockInset).frame(maxWidth: .infinity, minHeight: NekoSpace.xl, alignment: .leading)
+                                        .background(line.hasPrefix("+") ? NekoStyle.mint.opacity(0.13) : line.hasPrefix("-") ? NekoStyle.coral.opacity(0.14) : .clear)
+                                }
+                            }.padding(.vertical, NekoSpace.sm).fixedSize(horizontal: true, vertical: false)
+                        }.textSelection(.enabled)
+                        let shown = min(file.lines.count, lineLimits[index, default: 400])
+                        if shown < file.lines.count {
+                            HStack {
+                                Text("Showing \(shown) of \(file.lines.count) lines").foregroundStyle(N.text3)
+                                Spacer()
+                                Button("Show next \(min(400, file.lines.count - shown)) lines") { lineLimits[index] = shown + 400 }
+                                    .nekoButton(.quiet)
+                            }.font(NekoFont.caption).padding(NekoChat.blockInset)
+                        }
                     }
                 }
             }
         }
-        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
     }
 }
 
+/// Command output: one selectable text per block, coloured line by line,
+/// rather than one view per line.
 struct NativeTerminalBlock: View {
     let language: String
     let code: String
-    @State private var copied = false
     @State private var lineLimit = 300
     private var command: String? {
         let first = code.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -194,42 +191,40 @@ struct NativeTerminalBlock: View {
         return command == nil ? lines : Array(lines.dropFirst())
     }
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(command ?? (language.isEmpty ? "Output" : language)).font(ReplyStyle.mono).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
-                let failed = output.filter { $0.contains("✗") || $0.lowercased().contains("fail") || $0.contains("error") }.count
-                if failed > 0 { Text("\(failed) failed").font(ReplyStyle.caption).foregroundStyle(ReplyStyle.red) }
-                Button(copied ? "Copied" : "Copy") {
-                    NSPasteboard.general.clearContents()
-                    copied = NSPasteboard.general.setString(code, forType: .string)
-                }.nekoButton(.quiet).font(ReplyStyle.caption)
-            }.padding(.horizontal, NekoLayout.rowInset).frame(minHeight: 44)
-            Divider().opacity(0.6)
+        let lines = output
+        let failed = lines.filter { $0.contains("✗") || $0.lowercased().contains("fail") || $0.contains("error") }.count
+        ChatBlock(label: command ?? (language.isEmpty ? "Output" : language), mono: command != nil, fill: N.sunken) {
+            if failed > 0 { Text("\(failed) failed").font(NekoFont.caption.monospacedDigit()).foregroundStyle(NekoStyle.coral) }
+            ChatCopyButton(text: { code })
+        } content: {
             ScrollView(.horizontal) {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(output.prefix(lineLimit).enumerated()), id: \.offset) { _, line in
-                        Text(line.isEmpty ? " " : line).font(ReplyStyle.mono).foregroundStyle(color(line))
-                    }
-                }.padding(NekoLayout.rowInset).fixedSize(horizontal: true, vertical: false)
+                Text(Self.colored(Array(lines.prefix(lineLimit))))
+                    .font(NekoChat.code).lineSpacing(NekoChat.codeLineSpacing)
+                    .padding(NekoChat.blockInset).fixedSize(horizontal: true, vertical: false)
             }.textSelection(.enabled)
-            if output.count > lineLimit {
+            if lines.count > lineLimit {
                 HStack {
-                    Text("Showing \(lineLimit) of \(output.count) lines").foregroundStyle(.secondary)
+                    Text("Showing \(lineLimit) of \(lines.count) lines").foregroundStyle(N.text3)
                     Spacer()
-                    Button("Show next \(min(300, output.count - lineLimit)) lines") { lineLimit += 300 }
+                    Button("Show next \(min(300, lines.count - lineLimit)) lines") { lineLimit += 300 }
                         .nekoButton(.quiet)
-                }.font(ReplyStyle.caption).padding(NekoLayout.rowInset)
+                }.font(NekoFont.caption).padding(NekoChat.blockInset)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ReplyStyle.codeFill, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
     }
-    private func color(_ line: String) -> Color {
+    static func colored(_ lines: [String]) -> AttributedString {
+        var result = AttributedString()
+        for (index, line) in lines.enumerated() {
+            var run = AttributedString((line.isEmpty ? " " : line) + (index == lines.count - 1 ? "" : "\n"))
+            run.foregroundColor = color(line)
+            result += run
+        }
+        return result
+    }
+    private static func color(_ line: String) -> Color {
         let text = line.trimmingCharacters(in: .whitespaces)
-        if text.hasPrefix("✓") || text.hasPrefix("PASS") || text.hasPrefix("ok ") { return ReplyStyle.green }
-        if text.hasPrefix("✗") || text.hasPrefix("FAIL") || text.lowercased().hasPrefix("error") { return ReplyStyle.red }
-        return .primary.opacity(0.85)
+        if text.hasPrefix("✓") || text.hasPrefix("PASS") || text.hasPrefix("ok ") { return NekoStyle.mint }
+        if text.hasPrefix("✗") || text.hasPrefix("FAIL") || text.lowercased().hasPrefix("error") { return NekoStyle.coral }
+        return N.text2
     }
 }
