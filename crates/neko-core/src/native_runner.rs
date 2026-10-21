@@ -1667,6 +1667,13 @@ fn guard_run(mut command: Command) -> Result<ExitStatus, String> {
     if parent_closed(&mut control)? {
         return Err("Parent exited before child launch".into());
     }
+    // Asked to stop (the installer sends SIGTERM to every Neko process,
+    // guardians included): end the child's group first, as when the parent
+    // goes. Dying on the default action left the child running.
+    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+        // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+        unsafe { libc::signal(signal, guard_stop as extern "C" fn(libc::c_int) as libc::sighandler_t) };
+    }
     command
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
@@ -1680,7 +1687,7 @@ fn guard_run(mut command: Command) -> Result<ExitStatus, String> {
         terminated: false,
     };
     loop {
-        if parent_closed(&mut control)? {
+        if GUARD_STOP.load(Ordering::Acquire) || parent_closed(&mut control)? {
             process.kill();
             return process
                 .child
@@ -1697,6 +1704,12 @@ fn guard_run(mut command: Command) -> Result<ExitStatus, String> {
         // SAFETY: one valid pollfd on a descriptor this process owns.
         unsafe { libc::poll(&mut wait, 1, 100) };
     }
+}
+
+static GUARD_STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn guard_stop(_: libc::c_int) {
+    GUARD_STOP.store(true, Ordering::Release);
 }
 
 /// A long-lived child process that ends when this daemon ends, however it
@@ -2849,6 +2862,26 @@ sleep 10
         assert!(closed.elapsed() < Duration::from_secs(5), "the guardian notices within its poll interval");
         std::thread::sleep(Duration::from_millis(750));
         assert!(!temp.path().join("survived").exists(), "the child's whole group ended with it");
+    }
+
+    #[test]
+    fn a_guardian_told_to_stop_ends_its_child_first() {
+        let (temp, child, _) = fixture("touch started; (sleep 0.6; touch survived) & sleep 20");
+        let helper = guardian_fixture(temp.path());
+        let mut command = Command::new(&child);
+        command.current_dir(temp.path()).env("NEKO_TEST_CHILD_EXECUTABLE", &child);
+        let mut guarded = spawn_guarded_with(command, |c| { c.stdin(Stdio::null()).stdout(Stdio::null()); }, Some(&helper)).unwrap();
+        let started = Instant::now();
+        while !temp.path().join("started").exists() && started.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // What the installer does to every Neko process, guardians included.
+        // SAFETY: signalling our own child process.
+        unsafe { libc::kill(guarded.child.id() as libc::pid_t, libc::SIGTERM) };
+        let status = guarded.child.wait().unwrap();
+        assert!(status.code().is_some(), "the guardian exits by itself rather than dying on the signal: {status:?}");
+        std::thread::sleep(Duration::from_millis(750));
+        assert!(!temp.path().join("survived").exists(), "its child's group ended first");
     }
 
     #[test]
