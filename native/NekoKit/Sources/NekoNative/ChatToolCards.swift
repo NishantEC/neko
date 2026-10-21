@@ -10,6 +10,19 @@ struct ChatToolActivitySummary {
     var failed: Int { showsReceiptsSeparately ? receipts.filter { !$0["success"].bool }.count : calls.filter { ["failed", "denied"].contains($0["status"].string) }.count }
     var awaitingApproval: Int { calls.filter { $0["status"].string == "awaiting_approval" }.count }
     var title: String { title(connections: []) }
+    /// Each call as plain values, for rows that must not observe the app model.
+    func values(connectionName: (String) -> String) -> [ChatToolCallValue] {
+        if showsReceiptsSeparately {
+            return receipts.map {
+                ChatToolCallValue(id: $0.recordID, tool: $0["tool_name"].string, connection: connectionName($0["connection_id"].string),
+                                  status: $0["success"].bool ? "succeeded" : "failed", arguments: "")
+            }
+        }
+        return calls.map {
+            ChatToolCallValue(id: $0.recordID, tool: $0["tool_name"].string, connection: connectionName($0["connection_id"].string),
+                              status: $0["status"].string, arguments: $0["arguments_json"].string)
+        }
+    }
     /// "Used 3 tools · Linear, Sentry · 1 failed": what the work touched, in
     /// one line. At most two connection names, then "+N".
     func title(connections: [String]) -> String {
@@ -43,18 +56,7 @@ struct ChatToolActivity: View {
     let connectionName: (String) -> String
     @State private var open = false
 
-    private var calls: [ChatToolCallValue] {
-        if activity.showsReceiptsSeparately {
-            return activity.receipts.map {
-                ChatToolCallValue(id: $0.recordID, tool: $0["tool_name"].string, connection: connectionName($0["connection_id"].string),
-                                  status: $0["success"].bool ? "succeeded" : "failed", arguments: "")
-            }
-        }
-        return activity.calls.map {
-            ChatToolCallValue(id: $0.recordID, tool: $0["tool_name"].string, connection: connectionName($0["connection_id"].string),
-                              status: $0["status"].string, arguments: $0["arguments_json"].string)
-        }
-    }
+    private var calls: [ChatToolCallValue] { activity.values(connectionName: connectionName) }
 
     var body: some View {
         let all = calls

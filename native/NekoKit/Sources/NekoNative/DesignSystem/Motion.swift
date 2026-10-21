@@ -19,6 +19,8 @@ enum NekoMotion {
     case exit
     /// "Something is running", repeating until it stops.
     case pulse
+    /// Newly streamed text settling in: short enough to finish before the next token batch.
+    case stream
 
     // Springs with no bounce: they retarget smoothly when interrupted, and
     // nothing overshoots.
@@ -31,6 +33,7 @@ enum NekoMotion {
         case .appear: .spring(duration: 0.36, bounce: 0)
         case .exit: .easeOut(duration: 0.15)
         case .pulse: .easeInOut(duration: 1.1).repeatForever(autoreverses: true)
+        case .stream: .easeOut(duration: 0.16)
         }
     }
 

@@ -191,7 +191,11 @@ struct ComposerPrimaryButton: View {
         Button(action: action) {
             Group {
                 if submitting { ProgressView().controlSize(.mini) }
-                else { Image(systemName: symbol).font(NekoFont.of(.body, weight: .semibold)) }
+                else {
+                    // One button that changes what it is (Send, Queue, Stop) in place.
+                    Image(systemName: symbol).font(NekoFont.of(.body, weight: .semibold))
+                        .contentTransition(.symbolEffect(.replace))
+                }
             }
             .frame(width: NekoChat.sendButton, height: NekoChat.sendButton)
             .foregroundStyle(enabled ? N.onInverse : N.text4)
@@ -199,6 +203,7 @@ struct ComposerPrimaryButton: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain).disabled(!enabled)
+        .nekoAnimation(.select, value: symbol)
         .accessibilityLabel(label).help(label)
     }
 }

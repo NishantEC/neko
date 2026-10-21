@@ -15,6 +15,10 @@ struct TodayView: View {
     /// Turns newer than this arrived while the chat was open and fade in.
     @State private var openedAt = Int(Date().timeIntervalSince1970 * 1000)
     @State private var fades = ChatFadeLedger()
+    /// Which work logs the reader opened, and when this window watched a reply finish
+    /// (for replies whose message carries no completion time).
+    @State private var workLedger = ChatWorkLedger()
+    @State private var finishedAt: [String: Int] = [:]
     private var workspaceName: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
     private var scope: ChatDraftScope { Self.scope(model) }
     /// The draft scope for the model's current selection, also used outside a view pass.
@@ -46,7 +50,7 @@ struct TodayView: View {
         let related = ChatTurnRelated(snapshot: model.snapshot)
         VStack(spacing: 0) {
             FullDiskAccessBanner().padding(.bottom, NekoSpace.xxs)
-            ChatTranscript(identity: scope, signal: signal(messages)) {
+            ChatTranscript(identity: scope, signal: signal(messages), anchorsSend: true) {
                 transcript(messages, related)
             } dock: {
                 composer(messages, related)
@@ -56,6 +60,9 @@ struct TodayView: View {
         .navigationSubtitle(headerSubtitle(messages))
         .toolbar { todayToolbar(messages) }
         .environment(\.replyActions, replyActions)
+        .onChange(of: signal(messages).pendingID) { old, new in
+            if let old, new != old { finishedAt[old] = Int(Date().timeIntervalSince1970 * 1000) }
+        }
         .onAppear {
             replyActions = ReplyActions(send: { [model] text in Self.post(text, model: model) },
                                         draft: { [model] text in model.chatDrafts.set(text, for: Self.scope(model)) })
@@ -93,19 +100,35 @@ struct TodayView: View {
             }
         }
         let awaiting = Self.awaitingApprovals(in: messages)
-        ForEach(Array(messages.enumerated()), id: \.element.recordID) { index, message in
-            let isUser = message["role"].string == "user"
-            let previous = index > 0 ? messages[index - 1]["role"].string : nil
-            let speaker = ChatRhythm.showsSpeaker(isUser ? "user" : "neko", previous: previous.map { $0 == "user" ? "user" : "neko" })
-            let extra: JSONValue = .array([.bool(speaker), .number(Double(message["pending"].bool ? awaiting : 0))])
-            ChatTurn(key: related.key(for: message, extra: extra)) {
-                messageView(message, related, showsSpeaker: speaker, retry: isUser ? nil : retryText(for: index, in: messages))
-            }
-            .equatable()
-            .padding(.top, ChatRhythm.gap(isUser: isUser, isFirst: index == 0))
-            .modifier(ChatTurnFade(id: message.recordID, fresh: message["at_ms"].int >= openedAt, ledger: fades))
-            .id(message.recordID)
+        // Your newest message and everything after it is one exchange, so the
+        // chat can hold it at the top while the reply is written.
+        let split = messages.lastIndex { $0["role"].string == "user" } ?? messages.count
+        let indexed = Array(messages.enumerated())
+        ForEach(indexed.prefix(split), id: \.element.recordID) { index, message in
+            row(index, message, in: messages, related, awaiting)
         }
+        if split < messages.count {
+            ChatExchange {
+                ForEach(indexed.suffix(from: split), id: \.element.recordID) { index, message in
+                    row(index, message, in: messages, related, awaiting)
+                }
+            }
+        }
+    }
+
+    private func row(_ index: Int, _ message: JSONValue, in messages: [JSONValue], _ related: ChatTurnRelated, _ awaiting: Int) -> some View {
+        let isUser = message["role"].string == "user"
+        let previous = index > 0 ? messages[index - 1]["role"].string : nil
+        let speaker = ChatRhythm.showsSpeaker(isUser ? "user" : "neko", previous: previous.map { $0 == "user" ? "user" : "neko" })
+        let extra: JSONValue = .array([.bool(speaker), .number(Double(message["pending"].bool ? awaiting : 0)),
+                                       .number(Double(finishedAt[message.recordID] ?? 0))])
+        return ChatTurn(key: related.key(for: message, extra: extra)) {
+            messageView(message, related, showsSpeaker: speaker, retry: isUser ? nil : retryText(for: index, in: messages))
+        }
+        .equatable()
+        .padding(.top, ChatRhythm.gap(isUser: isUser, isFirst: index == 0))
+        .modifier(ChatTurnFade(id: message.recordID, fresh: message["at_ms"].int >= openedAt, ledger: fades))
+        .id(message.recordID)
     }
 
     private func composer(_ messages: [JSONValue], _ related: ChatTurnRelated) -> some View {
@@ -195,19 +218,6 @@ struct TodayView: View {
         } else {
             VStack(alignment: .leading, spacing: NekoSpace.sm) {
                 if showsSpeaker { ChatSpeaker(name: "Neko", timestamp: message["at_ms"].int) }
-                if message["pending"].bool {
-                    let now = ChatActivity.describe(message, model: model)
-                    HStack(spacing: NekoSpace.sm) {
-                        ActivityCapsule(activity: now.activity, label: now.label, plain: true)
-                        ChatElapsed(since: message["at_ms"].int)
-                    }
-                    .frame(minHeight: NekoSpace.xl + NekoSpace.hair, alignment: .leading)
-                    ChatSteps(steps: message["activity"].array.map(\.string))
-                }
-                let activity = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: related.receipts(for: message))
-                if activity.count > 0 {
-                    ChatToolActivity(activity: activity, connectionName: related.connectionName)
-                }
                 if message["ticket_ids"].array.isEmpty &&
                     (message["text"].string.contains("I could not open every task") || message["text"].string.contains("No task was created")) {
                     Label {
@@ -217,9 +227,16 @@ struct TodayView: View {
                     }
                     .font(NekoFont.meta)
                 }
-                if !message["text"].string.isEmpty {
-                    ReadableText(text: message["text"].string).font(NekoFont.chat).lineSpacing(NekoLeading.reading)
+                let text = message["text"].string
+                let pending = message["pending"].bool
+                if !text.isEmpty {
+                    // A reply being written is drawn as Markdown as it arrives; only its tail redraws.
+                    Group {
+                        if pending { ChatStreamingText(text: text) } else { ReadableText(text: text) }
+                    }
+                    .font(NekoFont.chat).lineSpacing(NekoLeading.reading)
                 }
+                workLog(message, related, pending: pending, hasText: !text.isEmpty)
                 if message["failed"].bool {
                     ReplyErrorCallout(message: "", retry: retry.map { text in { [model] in Self.post(text, model: model) } })
                 }
@@ -248,6 +265,26 @@ struct TodayView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .contain)
+        }
+    }
+    /// What the reply did, as one line under its text: live while it works,
+    /// a summary with how long it worked once it is done.
+    @ViewBuilder private func workLog(_ message: JSONValue, _ related: ChatTurnRelated, pending: Bool, hasText: Bool) -> some View {
+        let tools = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: related.receipts(for: message))
+            .values(connectionName: related.connectionName).filter { $0.status != "awaiting_approval" }
+        let steps = message["activity"].array.map(\.string)
+        let summary = ChatWorkSummary(activity: steps, toolCount: tools.count,
+                                      toolFailed: tools.filter { ["failed", "denied"].contains($0.status) }.count)
+        if pending || summary.hasWork {
+            let now = pending ? ChatActivity.describe(message, model: model) : (activity: NekoActivity.thinking, label: "")
+            let label = ChatWorkLive.label(steps: steps, fallback: now.label, keepFallback: now.activity == .needsYou || now.activity == .reading)
+            ChatWorkLog(id: message.recordID, summary: summary, tools: tools, running: pending,
+                        startMs: message["at_ms"].int,
+                        completedMs: ChatDuration.completion(of: message) ?? finishedAt[message.recordID],
+                        live: (now.activity, label), ledger: workLedger)
+        } else if !hasText, !message["failed"].bool, message["ticket_ids"].array.isEmpty, message["actions"].array.isEmpty,
+                  message["remembered"].array.isEmpty, message["responsibility_ids"].array.isEmpty, message["tool_calls"].array.isEmpty {
+            Text("No reply came back.").font(NekoFont.meta).foregroundStyle(N.text3)
         }
     }
     private func retryText(for index: Int, in messages: [JSONValue]) -> String? {
@@ -453,31 +490,9 @@ struct ChatElapsed: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let seconds = max(0, Int(context.date.timeIntervalSince1970) - since / 1000)
-            Text(seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s")
+            Text(ChatDuration.text(seconds: seconds))
                 .font(NekoFont.meta).monospacedDigit().foregroundStyle(N.text4)
         }
         .accessibilityHidden(true)
-    }
-}
-
-/// The last few things Neko did on a pending reply ("Ran `git status`"),
-/// newest at the bottom, so the wait reads as work rather than silence.
-struct ChatSteps: View {
-    let steps: [String]
-    var body: some View {
-        if !steps.isEmpty {
-            VStack(alignment: .leading, spacing: NekoSpace.xxs) {
-                ForEach(Array(steps.suffix(4).enumerated()), id: \.offset) { index, step in
-                    let latest = index == min(steps.count, 4) - 1
-                    HStack(alignment: .firstTextBaseline, spacing: NekoSpace.xs) {
-                        Image(systemName: step.hasSuffix("· failed") ? "xmark.circle" : "checkmark.circle")
-                            .foregroundStyle(step.hasSuffix("· failed") ? NekoStyle.coral : N.text4)
-                        Text(LocalizedStringKey(step)).foregroundStyle(latest ? N.text2 : N.text3).lineLimit(1).truncationMode(.middle)
-                    }
-                    .font(NekoFont.meta)
-                }
-            }
-            .accessibilityElement(children: .combine)
-        }
     }
 }
