@@ -393,7 +393,16 @@ pub fn bearer_cancellable(id: &str, url: &str, cancel: &AtomicBool) -> Result<St
             if token.is_empty() || token.len() > 8192 || token.chars().any(char::is_control) {
                 return Err(FAILED.into());
             }
-            saved.credentials = store.load().await.map_err(|_| FAILED)?.ok_or(FAILED)?;
+            let refreshed = store.load().await.map_err(|_| FAILED)?.ok_or(FAILED)?;
+            // A still-valid token leaves the credentials as they were. Saving
+            // them anyway rewrote the whole login keychain (1.3 MB on the
+            // owner's Mac) on every MCP call, most of the daemon's disk writes.
+            if serde_json::to_vec(&refreshed).ok() == serde_json::to_vec(&saved.credentials).ok() {
+                // Still checked against a concurrent replace or removal.
+                CREDENTIAL_GATE.commit(id, epoch, false, || Ok(()))?;
+                return Ok(token);
+            }
+            saved.credentials = refreshed;
             CREDENTIAL_GATE.commit(id, epoch, false, || {
                 if cancel.load(Ordering::Acquire) || tokio::time::Instant::now() >= deadline {
                     return Err("Authentication cancelled or timed out".into());
