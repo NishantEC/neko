@@ -23,13 +23,25 @@ struct PullRequestRow: Identifiable, Equatable {
             case .closed: "Closed"
             }
         }
-        var color: Color {
+        var tone: NekoTone {
             switch self {
-            case .ready, .merged: NekoStyle.mint
-            case .close: NekoStyle.coral
-            case .needsYou: NekoStyle.amber
-            case .merging, .working: NekoStyle.accent
-            case .closed, .unchecked: N.text4
+            case .ready, .merged: .done
+            case .close: .failed
+            case .needsYou: .attention
+            case .merging, .working: .running
+            case .closed, .unchecked: .neutral
+            }
+        }
+        var color: Color { tone.color }
+        /// Every verdict colour comes with a symbol, so colour is never the only cue.
+        var symbol: String {
+            switch self {
+            case .ready: "checkmark.circle"
+            case .close, .closed: "xmark.circle"
+            case .needsYou: "hand.raised"
+            case .merging, .merged: "arrow.triangle.merge"
+            case .working: "hammer"
+            case .unchecked: "clock"
             }
         }
         /// Shown when nothing in the section is waiting, so it never reads as broken.
@@ -53,6 +65,33 @@ struct PullRequestRow: Identifiable, Equatable {
     let behind: Bool
     let draft: Bool
     let updated: Int
+    /// The branch it merges into ("main").
+    let base: String
+    let checksFailing: Bool
+
+    /// What it is, on one quiet line. Problems get their own line instead.
+    var meta: String {
+        [number.isEmpty ? nil : number, repository, review, draft ? "Draft" : nil, checksFailing ? nil : checks]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// What stands between it and merging, each with its own symbol.
+    var problems: [(symbol: String, text: String)] {
+        var out: [(String, String)] = []
+        if checksFailing, let checks { out.append(("xmark.octagon", checks)) }
+        if conflicts { out.append(("arrow.triangle.branch", "Conflicts with \(base)")) }
+        if behind { out.append(("arrow.down.circle", "Behind \(base)")) }
+        return out
+    }
+
+    /// "2 ready · 1 to close", only the parts that are not zero.
+    static func subtitle(_ rows: [PullRequestRow]) -> String {
+        let parts = [(Verdict.ready, "ready"), (.close, "to close"), (.needsYou, "need you")].compactMap { verdict, label -> String? in
+            let count = rows.filter { $0.verdict == verdict }.count
+            return count > 0 ? "\(count) \(label)" : nil
+        }
+        return parts.isEmpty ? "Nothing waiting on you" : parts.joined(separator: " · ")
+    }
 
     init(task: JSONValue, snapshot: JSONValue) {
         let pr = task["pull_request"]
@@ -65,7 +104,9 @@ struct PullRequestRow: Identifiable, Equatable {
         repository = text.repository
         updated = task["updated_at_ms"].int
         conflicts = status["merge_state"].string == "DIRTY" || status["mergeable"].string == "CONFLICTING"
-        let alsoOnBase = status["base_failing"].bool ? " (also failing on \(status["base"].string.isEmpty ? "main" : status["base"].string))" : ""
+        base = status["base"].string.isEmpty ? "main" : status["base"].string
+        checksFailing = status["checks"].string == "failing"
+        let alsoOnBase = status["base_failing"].bool ? " (also failing on \(base))" : ""
         checks = switch status["checks"].string {
         case "passing": "Checks passing"
         case "failing": "Checks failing" + (status["failing"].array.isEmpty ? "" : ": " + status["failing"].array.map(\.string).joined(separator: ", ")) + alsoOnBase
@@ -125,39 +166,36 @@ struct PullRequestsView: View {
 
     var body: some View {
         let grouped = Dictionary(grouping: rows, by: \.verdict)
+        let shown = PullRequestRow.Verdict.allCases.filter { verdict in
+            !(grouped[verdict] ?? []).isEmpty && (showFinished || ![.merged, .closed].contains(verdict))
+        }
         List {
-            Text("Neko checks every pull request it opened on GitHub every few minutes. Failing checks, merge conflicts and reviewers' comments go back to the task's agent automatically; merging and closing wait for you.")
-                .font(NekoFont.meta).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Neko checks each pull request on GitHub every 3 minutes. Failing checks, conflicts and review comments go back to the task's agent; merging and closing wait for you.")
+                .font(NekoFont.meta).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, NekoSpace.md)
                 .listRowSeparator(.hidden)
-            ForEach(PullRequestRow.Verdict.allCases, id: \.self) { verdict in
+            ForEach(shown, id: \.self) { verdict in
                 let items = grouped[verdict] ?? []
-                if !items.isEmpty && (showFinished || ![.merged, .closed].contains(verdict)) {
-                    Section {
-                        ForEach(items) { row($0) }
-                    } header: {
-                        HStack(spacing: NekoSpace.sm) {
-                            Circle().fill(verdict.color).frame(width: 6, height: 6).accessibilityHidden(true)
-                            Text(verdict.title).font(NekoFont.heading)
-                            Text(String(items.count)).font(NekoFont.meta.monospacedDigit()).foregroundStyle(.secondary)
-                        }
-                        .padding(.top, NekoSpace.lg).padding(.bottom, NekoSpace.xs)
-                        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
-                    }
+                Section {
+                    ForEach(items) { row($0).listRowSeparator(.hidden) }
+                } header: {
+                    NekoListHeader(title: verdict.title, tone: verdict.tone, count: items.count, spaced: verdict != shown.first)
                 }
             }
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
         .contentMargins(.horizontal, NekoLayout.pageInset, for: .scrollContent)
+        .contentMargins(.vertical, NekoSpace.md, for: .scrollContent)
         .frame(maxWidth: NekoLayout.pageWidth).frame(maxWidth: .infinity)
         .overlay {
             if rows.isEmpty {
-                ContentUnavailableView("No pull requests yet", systemImage: "arrow.triangle.pull",
-                                       description: Text("When a task's work passes its independent review, Neko opens a pull request and it appears here."))
+                NekoEmptyState("When a task's work passes its independent review, Neko opens a pull request and it appears here.",
+                               title: "No pull requests yet", symbol: "arrow.triangle.pull", block: true)
             }
         }
         .navigationTitle("Pull requests")
-        .navigationSubtitle("\(ready.count) ready · \(rows.filter { $0.verdict == .close }.count) to close · \(rows.filter { $0.verdict == .needsYou }.count) need you")
+        .navigationSubtitle(PullRequestRow.subtitle(rows))
         .toolbar { toolbar }
         .alert("Close \(closing?.number ?? "the pull request")?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } })) {
             TextField("Why (posted as a comment)", text: $closeReason)
@@ -197,9 +235,12 @@ struct PullRequestsView: View {
             Button("Re-check all") { confirmReview = true }
                 .disabled(reviewable == 0)
                 .help("Have each agent re-check its open pull request and give a verdict")
-            Button("Merge all ready") { confirmMergeAll = true }
-                .disabled(ready.isEmpty)
-                .help("Merge every pull request in Ready to merge once its checks pass")
+            if !ready.isEmpty {
+                // The page's one primary action; gone rather than disabled when there is nothing to merge.
+                Button("Merge \(ready.count) ready") { confirmMergeAll = true }
+                    .nekoButton(.primary)
+                    .help("Merge every pull request in Ready to merge once its checks pass")
+            }
             Menu {
                 Button("Check GitHub now") { Task { await model.workbench(.command("CheckPullRequests")) } }
                 Toggle("Show merged and closed", isOn: $showFinished)
@@ -230,49 +271,81 @@ struct PullRequestsView: View {
     }
 
     private func row(_ row: PullRequestRow) -> some View {
-        HStack(alignment: .top, spacing: NekoSpace.lg) {
-            VStack(alignment: .leading, spacing: NekoSpace.xs) {
-                Text(row.title).font(NekoFont.heading).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                Text([row.number, row.repository, row.draft ? "Draft" : nil, row.checks, row.review, row.conflicts ? "Conflicts with its base branch" : nil, row.behind ? "Behind its base branch" : nil].compactMap { $0 }.joined(separator: " · "))
-                    .font(NekoFont.meta).foregroundStyle(row.conflicts || row.checks?.hasPrefix("Checks failing") == true ? NekoStyle.amber : .secondary)
-                    .lineLimit(2)
+        HStack(alignment: .top, spacing: NekoSpace.md) {
+            Image(systemName: row.verdict.symbol).font(NekoFont.body).foregroundStyle(row.verdict.color)
+                .frame(width: NekoLayout.listGlyphSlot)
+                .accessibilityLabel(row.verdict.title)
+            VStack(alignment: .leading, spacing: NekoSpace.xxs) {
+                // The title opens the task; the actions stay sibling buttons, never nested inside it.
+                Button { model.openAgent(row.id, from: .pullRequests) } label: {
+                    Text(verbatim: row.title).font(NekoFont.of(.callout, weight: .medium)).foregroundStyle(N.text)
+                        .lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open the task for \(row.number.isEmpty ? "this pull request" : row.number)")
+                .accessibilityHint("Opens the task")
+                if !row.meta.isEmpty {
+                    Text(row.meta).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(1)
+                }
+                if !row.problems.isEmpty {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: NekoSpace.xs) { problemLabels(row) }
+                        VStack(alignment: .leading, spacing: NekoSpace.xxs) { problemLabels(row) }
+                    }
+                }
                 if let reason = row.reason, !reason.isEmpty {
-                    Text(reason).font(NekoFont.meta).foregroundStyle(N.text2).lineLimit(4).fixedSize(horizontal: false, vertical: true)
+                    Text(reason).font(NekoFont.meta).foregroundStyle(N.text2).lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true).help(reason)
                 }
             }
             Spacer(minLength: NekoSpace.lg)
             actions(row)
         }
-        .padding(.vertical, NekoSpace.xs)
+        .padding(.vertical, NekoSpace.sm)
         .contextMenu {
             Button("Open on GitHub") { open(row.url) }
             Button("Open task") { model.openAgent(row.id, from: .pullRequests) }
         }
     }
 
+    @ViewBuilder private func problemLabels(_ row: PullRequestRow) -> some View {
+        ForEach(row.problems, id: \.text) { problem in
+            NekoStatusLabel(tone: .attention, symbol: problem.symbol, text: problem.text)
+        }
+    }
+
+    /// One prominent button per page (the toolbar's Merge): row actions stay
+    /// secondary, so a list of ready pull requests isn't a wall of blue.
     @ViewBuilder private func actions(_ row: PullRequestRow) -> some View {
         HStack(spacing: NekoSpace.sm) {
             switch row.verdict {
             case .ready:
-                Button("Merge") { send("SetMergeWhenReady", row, ["enabled": .bool(true)], done: "Merging \(row.number) once its checks pass.") }
-                    .nekoButton(.primary)
-                Button("Close…") { startClosing(row) }.nekoButton(.secondary)
+                closeButton(row).nekoButton(.quiet)
+                mergeButton(row).nekoButton(.secondary)
             case .close:
-                Button("Close…") { startClosing(row) }.nekoButton(.primary)
-                Button("Merge") { send("SetMergeWhenReady", row, ["enabled": .bool(true)], done: "Merging \(row.number) once its checks pass.") }
-                    .nekoButton(.secondary)
+                mergeButton(row).nekoButton(.quiet)
+                closeButton(row).nekoButton(.secondary)
             case .merging:
                 Button("Cancel merge") { send("SetMergeWhenReady", row, ["enabled": .bool(false)], done: "Won't merge \(row.number).") }
-                    .nekoButton(.secondary)
+                    .nekoButton(.secondary).accessibilityLabel("Cancel merging \(row.number)")
             case .needsYou, .working, .unchecked, .merged, .closed:
                 Button("Open task") { model.openAgent(row.id, from: .pullRequests) }.nekoButton(.secondary)
+                    .accessibilityLabel("Open task for \(row.number)")
             }
             Button { open(row.url) } label: { Image(systemName: "arrow.up.right.square") }
-                .nekoButton(.quiet).help("Open \(row.number) on GitHub").accessibilityLabel("Open on GitHub")
+                .nekoButton(.quiet).help("Open \(row.number) on GitHub").accessibilityLabel("Open \(row.number) on GitHub")
         }
         .fixedSize()
     }
 
+    private func mergeButton(_ row: PullRequestRow) -> some View {
+        Button("Merge") { send("SetMergeWhenReady", row, ["enabled": .bool(true)], done: "Merging \(row.number) once its checks pass.") }
+            .accessibilityLabel("Merge \(row.number)")
+    }
+    private func closeButton(_ row: PullRequestRow) -> some View {
+        Button("Close…") { startClosing(row) }.accessibilityLabel("Close \(row.number)…")
+    }
     private func startClosing(_ row: PullRequestRow) {
         closeReason = row.reason ?? ""
         closing = row
