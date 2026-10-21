@@ -18,7 +18,7 @@ struct TodayView: View {
     private var workspaceName: String { model.selectedWorkspace.flatMap { id in model.workspaces.first { $0.recordID == id }?["name"].string } ?? "All workspaces" }
     private var scope: ChatDraftScope { Self.scope(model) }
     /// The draft scope for the model's current selection, also used outside a view pass.
-    @MainActor private static func scope(_ model: AppModel) -> ChatDraftScope {
+    @MainActor static func scope(_ model: AppModel) -> ChatDraftScope {
         let profiles = model.snapshot["agent_profiles"]
         let profile: String
         if let scope = model.selectedWorkspace {
@@ -140,9 +140,16 @@ struct TodayView: View {
         // The / and @ menu floats above the dock; it never changes the
         // dock's measured height, so the transcript does not move.
         .overlay(alignment: .top) {
+            // A zero-height anchor on the composer's top edge, with the menu
+            // hung from its bottom: the menu grows upward over the transcript
+            // and can never cover the composer or run off the window.
             if !items.isEmpty {
-                ComposerMenuList(items: items, index: $menu.index)
-                    .alignmentGuide(.top) { $0[.bottom] + NekoSpace.sm }
+                Color.clear.frame(height: 0)
+                    .overlay(alignment: .bottom) {
+                        ComposerMenuList(items: items, index: $menu.index)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.bottom, NekoSpace.sm)
+                    }
             }
         }
         .task(id: menu.mentionQuery(in: draft)) {
