@@ -822,6 +822,11 @@ pub enum Command {
         /// Where new tickets should go when the message doesn't say.
         workspace_id: Option<String>,
     },
+    /// Take back a message that is still waiting in the queue behind a reply
+    /// in progress (the queue tray's remove, edit and steer all start here).
+    DiscardQueuedMessage {
+        message_id: String,
+    },
     /// Stop the current reply, then send this message before other queued messages.
     InterruptAndSendMessage {
         text: String,

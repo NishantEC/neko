@@ -1149,6 +1149,7 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
         | Command::InterruptAndSendMessage { .. }
         | Command::DecideChatTool { .. }
         | Command::DecideChatAction { .. }
+        | Command::DiscardQueuedMessage { .. }
         | Command::CancelChat { .. } => {
             return Err("Talking to Neko requires the daemon".into());
         }

@@ -284,6 +284,15 @@ pub fn prioritize_queued_turn(db: &Db, id: &str) -> Result<(), String> {
     save(db, &messages)
 }
 
+/// Removes a message that is still queued. A message Neko has started on (no
+/// longer `queued`) cannot be taken back.
+pub fn discard_queued(db: &Db, id: &str) -> Result<(), String> {
+    let mut messages = load(db)?;
+    let index = messages.iter().position(|m| m.id == id && m.queued).ok_or("That message already left the queue")?;
+    messages.remove(index);
+    save(db, &messages)
+}
+
 pub fn finish_turn(
     db: &Db,
     id: &str,
@@ -1000,6 +1009,19 @@ mod tests {
         begin_turn(&db, "one").unwrap();
         assert!(begin_turn(&db, "two").is_ok());
         assert_eq!(load(&db).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_queued_message_can_be_taken_back_but_a_running_turn_cannot() {
+        let db = Db::open_in_memory().unwrap();
+        let running = begin_turn(&db, "one").unwrap();
+        let queued = begin_turn(&db, "two").unwrap();
+        assert!(load(&db).unwrap().iter().any(|m| m.id == queued && m.queued));
+        discard_queued(&db, &queued).unwrap();
+        assert!(!load(&db).unwrap().iter().any(|m| m.id == queued), "the message is gone");
+        assert!(discard_queued(&db, &queued).is_err(), "gone means gone");
+        assert!(discard_queued(&db, &running).is_err(), "only a queued message can be taken back");
+        assert_eq!(load(&db).unwrap().len(), 2, "the running turn and its reply are untouched");
     }
 
     #[test]
