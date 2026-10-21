@@ -160,3 +160,7 @@ kbd { font: 11px var(--font); opacity: 0.7; }
 .composer { position: relative; z-index: 1; }
 .action-status[data-status="Declined"] { color: var(--fg-muted); }
 .action-status[data-status="Failed"] { color: var(--danger); }
+
+/* Inside the native window the page shows the window's own canvas. */
+html[data-shell="native"] body, html[data-shell="native"] .side { background: transparent; }
+html[data-shell="native"] .composer { background: rgb(255 255 255 / 0.06); }
