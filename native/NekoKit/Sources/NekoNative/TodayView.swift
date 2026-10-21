@@ -197,8 +197,12 @@ struct TodayView: View {
                 if showsSpeaker { ChatSpeaker(name: "Neko", timestamp: message["at_ms"].int) }
                 if message["pending"].bool {
                     let now = ChatActivity.describe(message, model: model)
-                    ActivityCapsule(activity: now.activity, label: now.label, plain: true)
-                        .frame(minHeight: NekoSpace.xl + NekoSpace.hair, alignment: .leading)
+                    HStack(spacing: NekoSpace.sm) {
+                        ActivityCapsule(activity: now.activity, label: now.label, plain: true)
+                        ChatElapsed(since: message["at_ms"].int)
+                    }
+                    .frame(minHeight: NekoSpace.xl + NekoSpace.hair, alignment: .leading)
+                    ChatSteps(steps: message["activity"].array.map(\.string))
                 }
                 let activity = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: related.receipts(for: message))
                 if activity.count > 0 {
@@ -283,7 +287,9 @@ struct TodayView: View {
                 symbol: "checkmark.seal.fill", tint: NekoStyle.sky, title: Text(title), announcement: title,
                 detail: "Its changes and checks are in the agent chat.",
                 secondary: ChatTrayButton(label: "Show task") { inspect(task.recordID) },
-                primary: ChatTrayButton(label: "Accept locally", shortcut: KeyboardShortcut("1", modifiers: .command), hint: "⌘1") { ticketCommand("CompleteTask", task.recordID) },
+                primary: TicketPresentation.openPullRequest(task).map { url in
+                    ChatTrayButton(label: "Open pull request", shortcut: KeyboardShortcut("1", modifiers: .command), hint: "⌘1") { NSWorkspace.shared.open(url) }
+                } ?? ChatTrayButton(label: "Mark done", shortcut: KeyboardShortcut("1", modifiers: .command), hint: "⌘1") { ticketCommand("CompleteTask", task.recordID) },
                 busy: model.busy))
         }
         if let decision = askingDecision {
@@ -437,6 +443,41 @@ struct TodayView: View {
         case .setup: model.onboarding = true
         case .help: draft = "/"
         case .remember, .forget, .recall: break
+        }
+    }
+}
+
+/// Seconds since Neko started on this reply, so a long turn visibly moves.
+struct ChatElapsed: View {
+    let since: Int
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let seconds = max(0, Int(context.date.timeIntervalSince1970) - since / 1000)
+            Text(seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s")
+                .font(NekoFont.meta).monospacedDigit().foregroundStyle(N.text4)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The last few things Neko did on a pending reply ("Ran `git status`"),
+/// newest at the bottom, so the wait reads as work rather than silence.
+struct ChatSteps: View {
+    let steps: [String]
+    var body: some View {
+        if !steps.isEmpty {
+            VStack(alignment: .leading, spacing: NekoSpace.xxs) {
+                ForEach(Array(steps.suffix(4).enumerated()), id: \.offset) { index, step in
+                    let latest = index == min(steps.count, 4) - 1
+                    HStack(alignment: .firstTextBaseline, spacing: NekoSpace.xs) {
+                        Image(systemName: step.hasSuffix("· failed") ? "xmark.circle" : "checkmark.circle")
+                            .foregroundStyle(step.hasSuffix("· failed") ? NekoStyle.coral : N.text4)
+                        Text(LocalizedStringKey(step)).foregroundStyle(latest ? N.text2 : N.text3).lineLimit(1).truncationMode(.middle)
+                    }
+                    .font(NekoFont.meta)
+                }
+            }
+            .accessibilityElement(children: .combine)
         }
     }
 }

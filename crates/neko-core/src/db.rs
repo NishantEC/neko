@@ -25,6 +25,19 @@ pub struct Db {
 /// Keys that `set_setting`/`set_setting_deferred` route to the task tables
 /// instead of the settings table (see `write_row`).
 pub const TASK_KEY: &str = "\u{0}task:";
+
+/// Bumped whenever a stored value changes (written, queued for a deferred
+/// write, or deleted). Readers waiting for "anything new" (the app's
+/// change wait) check this instead of reloading the snapshot to compare.
+static DATA_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+pub fn data_revision() -> u64 {
+    DATA_REVISION.load(std::sync::atomic::Ordering::Acquire)
+}
+
+fn data_changed() {
+    DATA_REVISION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+}
 pub const EVENTS_KEY: &str = "\u{0}events:";
 
 /// How long a deferred settings write may wait before it reaches disk.
@@ -102,6 +115,7 @@ impl Db {
         self.pending
             .borrow_mut()
             .insert(key.to_owned(), (value.to_owned(), since));
+        data_changed();
         self.flush_due(DEFERRED_WRITE_DELAY)
     }
 
@@ -262,6 +276,7 @@ impl Db {
         self.pending.borrow_mut().remove(key);
         self.written.borrow_mut().remove(key);
         self.conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        data_changed();
         Ok(())
     }
 
@@ -273,6 +288,7 @@ impl Db {
         }
         self.conn.execute("DELETE FROM workbench_task_events WHERE task_id = ?1", [task_id])?;
         self.conn.execute("DELETE FROM workbench_tasks WHERE id = ?1", [task_id])?;
+        data_changed();
         Ok(())
     }
 
@@ -364,6 +380,7 @@ impl Db {
             return Err(error);
         }
         self.setting_writes.set(self.setting_writes.get() + 1);
+        data_changed();
         self.written
             .borrow_mut()
             .insert(key.to_owned(), value.to_owned());

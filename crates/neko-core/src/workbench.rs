@@ -210,6 +210,13 @@ pub(crate) fn verification_command_event(command: Option<&str>, exit_code: Optio
     receipt.event()
 }
 
+/// A runner's command event as (command, exit code), for a live one-line
+/// summary; `None` for any other event.
+pub fn command_of_event(event: &str) -> Option<(String, Option<i64>)> {
+    let receipt = VerificationReceipt::decode(event.strip_prefix(VERIFICATION_COMMAND_PREFIX)?);
+    Some((receipt.command.filter(|c| !c.trim().is_empty())?, receipt.exit_code))
+}
+
 fn bounded_event_message(role: &str, message: &str) -> String {
     // Only these roles receive runner tool events. Notes/system messages that
     // quote the wire prefix are text, never evidence to decode or rewrite.

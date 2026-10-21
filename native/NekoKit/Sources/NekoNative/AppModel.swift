@@ -91,19 +91,27 @@ import NekoKit
         await loadSetup()
         polling?.cancel()
         polling = Task { [weak self] in
-            var tick = 0
+            var machineChecked = ContinuousClock.now - .seconds(60)
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
+                // The daemon holds this request until something changes (or
+                // 20 s pass), so a reply, a tool step or a status change shows
+                // up as it happens instead of on the next two-second poll.
+                let asked = ContinuousClock.now
+                await self?.refresh(waitForChange: true)
                 guard !Task.isCancelled else { return }
-                await self?.refresh()
-                tick += 1
-                if tick % 7 == 1 { await self?.refreshMachine() }
+                // A quick answer (a burst of changes, an error, a busy model)
+                // still leaves a quarter second between requests.
+                if ContinuousClock.now - asked < .milliseconds(250) { try? await Task.sleep(for: .milliseconds(250)) }
+                if ContinuousClock.now - machineChecked > .seconds(14) {
+                    machineChecked = .now
+                    await self?.refreshMachine()
+                }
                 // Started before the daemon was up: finish setup once it answers.
                 if let self, self.loadingSetup, self.connected { await self.loadSetup() }
             }
         }
     }
-    func refresh() async {
+    func refresh(waitForChange: Bool = false) async {
         guard !busy else { return }
         let started = generation
         refreshSequence += 1
@@ -113,7 +121,7 @@ import NekoKit
             // the whole workbench; otherwise let the daemon say "unchanged".
             let ask: JSONValue = digest.isEmpty
                 ? .object(["Workbench": .string("Snapshot")])
-                : .object(["WorkbenchIfChanged": .object(["digest": .string(digest)])])
+                : .object(["WorkbenchIfChanged": .object(["digest": .string(digest), "wait_ms": .number(waitForChange ? 20_000 : 0)])])
             let result = try await request(ask)
             guard started == generation, sequence == refreshSequence else { return }
             if case .object = result["WorkbenchUnchanged"] {

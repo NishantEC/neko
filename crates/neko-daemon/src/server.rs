@@ -733,13 +733,7 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             Ok(snapshot) => Response::Workbench(with_digest(snapshot)),
             Err(message) => Response::Error { message },
         },
-        Request::WorkbenchIfChanged { digest } => match state.workbench.command(neko_protocol::workbench::Command::Snapshot) {
-            Ok(snapshot) => {
-                let snapshot = with_digest(snapshot);
-                if snapshot.digest == digest { Response::WorkbenchUnchanged { digest } } else { Response::Workbench(snapshot) }
-            }
-            Err(message) => Response::Error { message },
-        },
+        Request::WorkbenchIfChanged { digest, wait_ms } => wait_for_change(state, digest, wait_ms),
         Request::MachineHealth => Response::MachineHealth(neko_core::machine::latest()),
         Request::Ping => Response::Pong,
         Request::AgentModels { refresh } => {
@@ -2145,6 +2139,32 @@ mod tests {
             message.contains("no action"),
             "unexpected message: {message}"
         );
+    }
+}
+
+/// The longest an app's change wait is held.
+const MAX_CHANGE_WAIT: std::time::Duration = std::time::Duration::from_secs(25);
+
+/// Answers as soon as the workbench differs from `digest`, or after
+/// `wait_ms` (capped) with "unchanged". It reloads the snapshot only when a
+/// stored value changed, plus every two seconds for anything held in memory,
+/// the cadence the app used to poll at; between those it sleeps without the
+/// database lock.
+fn wait_for_change(state: &AppState, digest: String, wait_ms: u64) -> Response {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms).min(MAX_CHANGE_WAIT);
+    loop {
+        let seen = neko_core::db::data_revision();
+        let snapshot = match state.workbench.command(neko_protocol::workbench::Command::Snapshot) {
+            Ok(snapshot) => with_digest(snapshot),
+            Err(message) => return Response::Error { message },
+        };
+        if snapshot.digest != digest { return Response::Workbench(snapshot); }
+        let reload_by = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if std::time::Instant::now() >= deadline { return Response::WorkbenchUnchanged { digest }; }
+            if neko_core::db::data_revision() != seen || std::time::Instant::now() >= reload_by { break; }
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        }
     }
 }
 

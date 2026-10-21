@@ -438,6 +438,10 @@ pub enum Request {
     /// nothing new costs neither side a multi-megabyte copy.
     WorkbenchIfChanged {
         digest: String,
+        /// Hold the answer up to this long while nothing changes, so the app
+        /// hears about a change as it happens instead of on its next poll.
+        #[serde(default)]
+        wait_ms: u64,
     },
     /// The machine's health alone. It changes every reading, so it is kept
     /// out of the snapshot's digest and fetched on its own.
