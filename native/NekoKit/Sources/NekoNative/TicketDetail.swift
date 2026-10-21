@@ -91,7 +91,7 @@ struct TicketDetail: View {
                 .disabled(model.busy)
         }
         if ticket["status"].string == "AwaitingApproval" && TicketPresentation.waitingReason(ticket) == nil {
-            ToolbarItem(placement: .primaryAction) { action("Approve", "ApproveTask").nekoButton(.primary).disabled(model.busy) }
+            ToolbarItem(placement: .primaryAction) { action("Approve plan", "ApproveTask").nekoButton(.primary).disabled(model.busy) }
         }
         if ticket["status"].string == "ReadyForReview" {
             ToolbarItem(placement: .primaryAction) { action("Accept locally", "CompleteTask").nekoButton(.primary).disabled(model.busy) }
@@ -221,7 +221,7 @@ struct TicketDetail: View {
         if !text.isEmpty {
             VStack(alignment: .leading, spacing: NekoSpace.sm) {
                 ChatSpeaker(name: title, symbol: "map").accessibilityAddTraits(.isHeader)
-                ReadableText(text: text).font(NekoFont.chat).lineSpacing(NekoLeading.body)
+                ReadableText(text: text).font(NekoFont.chat).lineSpacing(NekoLeading.reading)
             }
         }
     }
@@ -254,7 +254,7 @@ private struct TicketOutcomeReadback: View {
             if review.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("No result text was saved for this task.").foregroundStyle(N.text2)
             } else {
-                ReadableText(text: review.body).font(NekoFont.chat).lineSpacing(NekoLeading.body)
+                ReadableText(text: review.body).font(NekoFont.chat).lineSpacing(NekoLeading.reading)
             }
             if let verdict = review.verdict {
                 TicketReviewCard(verdict: verdict, current: outcome.reviewIsCurrent, receipts: events.compactMap(TicketCommandReceipt.from(event:)))

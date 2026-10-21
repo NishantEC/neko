@@ -71,6 +71,19 @@ final class DesignSystemGuardTests: XCTestCase {
         try assertNone(#"\.animation\((\.|reduceMotion)"#, "Use .nekoAnimation(_:value:), which honours Reduce Motion.")
     }
 
+    /// The chat surfaces (Home, tickets, composer, replies) take every type
+    /// role from NekoFont. Other screens still use a few system roles.
+    func testChatTypeComesFromNekoFont() throws {
+        let chat = ["Chat", "Composer", "Reply", "Ticket", "Today", "SharedComposer", "SlashCommands", "RichText"]
+        let regex = try NSRegularExpression(pattern: #"\.font\(\.(caption2?|headline|callout|subheadline|footnote|body|title\d?)\)"#)
+        let found = try Self.screens().filter { file in chat.contains { file.path.hasPrefix($0) } }.flatMap { file in
+            file.lines.enumerated().compactMap { index, line in
+                regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) == nil ? nil : "\(file.path):\(index + 1)"
+            }
+        }
+        XCTAssert(found.isEmpty, "Use a NekoFont role, not a system text style.\n" + found.joined(separator: "\n"))
+    }
+
     func testButtonStylesComeFromNekoButton() throws {
         try assertNone(#"\.buttonStyle\(\.(bordered|borderedProminent|borderless)\)"#, "Use .nekoButton(.primary/.secondary/.quiet/.destructive).")
     }

@@ -12,7 +12,7 @@ struct ComposerRuntimeSettingsView: View {
                     Text("Model").foregroundStyle(.secondary)
                     Spacer()
                     Text(RuntimeSelectionLabel.model(selection.draft, catalog: selection.catalog)).lineLimit(2)
-                    Image(systemName: "chevron.right").font(.caption)
+                    Image(systemName: "chevron.right").font(NekoFont.caption)
                 }.contentShape(Rectangle())
             }
             .nekoButton(.quiet)
@@ -25,7 +25,7 @@ struct ComposerRuntimeSettingsView: View {
                 ComposerRuntimeSpeedControl(selection: selection)
             }
             if let model = selection.selectedModel, model.effortOptions == nil || model.speedOptions == nil {
-                Text("Some capabilities are unknown. Refresh to check.").font(.caption).foregroundStyle(.secondary)
+                Text("Some capabilities are unknown. Refresh to check.").font(NekoFont.caption).foregroundStyle(.secondary)
             }
             Toggle("Allow automatic paid speed", isOn: $selection.draft.allowPaidSpeed)
                 .toggleStyle(.switch).controlSize(.small)

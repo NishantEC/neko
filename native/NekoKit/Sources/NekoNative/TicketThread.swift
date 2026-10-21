@@ -172,7 +172,7 @@ struct TicketThreadView: View {
         case .agent(let role, let text):
             VStack(alignment: .leading, spacing: NekoSpace.sm) {
                 if row.showsSpeaker { ChatSpeaker(name: TicketThread.agentName(role), symbol: TicketThread.symbol(role)) }
-                ReadableText(text: text).font(NekoFont.chat).lineSpacing(NekoLeading.body)
+                ReadableText(text: text).font(NekoFont.chat).lineSpacing(NekoLeading.reading)
             }
             .accessibilityElement(children: .contain)
         case .steps(let role, let commands):

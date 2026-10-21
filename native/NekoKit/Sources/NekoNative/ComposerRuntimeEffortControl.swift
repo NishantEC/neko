@@ -44,15 +44,15 @@ struct ComposerRuntimeEffortControl: View {
                     Text("Auto")
                     Spacer()
                     Text(options.last?.label ?? "")
-                }.font(.caption2).foregroundStyle(.secondary).accessibilityHidden(true)
+                }.font(NekoFont.of(.small)).foregroundStyle(.secondary).accessibilityHidden(true)
                 if let option = options.first(where: { $0.id == selection.draft.reasoningEffort }), let description = option.description {
-                    Text(description).font(.caption).foregroundStyle(.secondary)
+                    Text(description).font(NekoFont.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         } else if selection.draft.reasoningEffort != nil {
             HStack {
-                Text("Effort pin unavailable").font(.caption).foregroundStyle(NekoStyle.amber)
+                Text("Effort pin unavailable").font(NekoFont.caption).foregroundStyle(NekoStyle.amber)
                 Spacer()
                 Button("Reset effort to Auto") { selection.draft.reasoningEffort = nil }.nekoButton(.quiet)
             }

@@ -16,14 +16,14 @@ struct TodayHero: View {
         }
         let counts = workSummary.counts
         let waiting = counts.waitingOnYou
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: NekoSpace.md) {
             Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide)))
                 .font(NekoFont.meta).foregroundStyle(N.text3)
             Text(waiting == 0 ? "\(part). Nothing is waiting on you." : "\(part). \(waiting) \(waiting == 1 ? "task is" : "tasks are") waiting on you.")
                 .font(NekoFont.display).foregroundStyle(N.text)
                 .fixedSize(horizontal: false, vertical: true)
             Text(Self.subline(counts: counts, hasWorkspace: !model.workspaces.isEmpty))
-                .font(NekoFont.body).lineSpacing(4).foregroundStyle(N.text3)
+                .font(NekoFont.body).lineSpacing(NekoLeading.body).foregroundStyle(N.text3)
                 .fixedSize(horizontal: false, vertical: true)
             if !model.workspaces.isEmpty {
                 HStack(spacing: NekoSpace.sm) {
@@ -46,7 +46,7 @@ struct TodayHero: View {
                 }
             }
         }
-        .padding(.top, NekoLayout.sectionGap)
+        .padding(.top, NekoSpace.page * 2)
     }
 
     /// One plain sentence about what Neko is doing, never a status code.
@@ -94,7 +94,7 @@ struct TodayBrief: View {
     let fill: (String) -> Void
     private let shown = 5
     var body: some View {
-        VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
+        VStack(alignment: .leading, spacing: NekoChat.turnGap) {
             if !workSummary.needsYou.isEmpty {
                 group("Waiting on you", tasks: workSummary.needsYou, total: workSummary.counts.waitingOnYou, filter: "all")
             }
@@ -103,11 +103,13 @@ struct TodayBrief: View {
                 group("Running now", tasks: running, total: running.count, filter: TaskStage.running.rawValue)
             }
             if workSummary.activeCount == 0 {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: NekoSpace.sm) {
                     heading("Try asking")
-                    BriefRow(dot: N.text4, title: "Plan my next step", meta: "Neko looks around and suggests one useful move. Changes nothing.", action: "Ask") { fill("Help me decide the next small, useful step in this workspace. Read only and explain your reasoning.") }
-                    BriefRow(dot: N.text4, title: "Review my changes", meta: "Risks and missing tests. Changes nothing.", action: "Ask") { fill("Review the current changes in this workspace. Do not modify files; explain risks and missing tests.") }
-                    BriefRow(dot: N.text4, title: "Teach Neko how I work", meta: "A preference it will remember next time.", action: "Ask") { fill("Remember this preference: ") }
+                    HStack(spacing: NekoSpace.sm) {
+                        TryAsking(title: "Plan my next step", help: "Neko looks around and suggests one useful move. Changes nothing.") { fill("Help me decide the next small, useful step in this workspace. Read only and explain your reasoning.") }
+                        TryAsking(title: "Review my changes", help: "Risks and missing tests. Changes nothing.") { fill("Review the current changes in this workspace. Do not modify files; explain risks and missing tests.") }
+                        TryAsking(title: "Teach Neko how I work", help: "A preference it will remember next time.") { fill("Remember this preference: ") }
+                    }
                 }
             }
         }
@@ -118,7 +120,7 @@ struct TodayBrief: View {
     }
 
     private func group(_ title: String, tasks: [JSONValue], total: Int, filter: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: NekoSpace.xxs) {
             heading(title)
             ForEach(Array(tasks.prefix(shown)), id: \.recordID) { task in
                 let text = TaskText(task: task, snapshot: model.snapshot)
@@ -165,17 +167,37 @@ struct BriefRow: View {
                 }
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 12)
-                Text(action).font(NekoFont.meta).foregroundStyle(hover ? N.text : N.text2)
-                    .padding(.horizontal, NekoSpace.xs).frame(height: 26)
-                    .fixedSize()
+                Spacer(minLength: NekoSpace.md)
+                HStack(spacing: NekoSpace.xxs) {
+                    Text(action)
+                    Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold))
+                }
+                .font(NekoFont.meta).foregroundStyle(hover ? N.text : N.text2)
+                .padding(.horizontal, NekoSpace.xs).frame(height: NekoSpace.xxl + NekoSpace.hair)
+                .fixedSize()
             }
-            .padding(.vertical, NekoLayout.rowInset).padding(.horizontal, NekoSpace.sm)
+            .padding(.vertical, NekoSpace.md).padding(.horizontal, NekoSpace.sm)
             .background(hover ? N.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
-            .overlay(alignment: .top) { N.line.frame(height: 1).padding(.horizontal, NekoSpace.sm) }
-            .padding(.horizontal, -8)
             .contentShape(Rectangle())
         }.buttonStyle(.plain).onHover { h in withNekoAnimation(.hover) { hover = h } }
+    }
+}
+
+/// A suggestion capsule: clicking fills the composer, never sends.
+struct TryAsking: View {
+    let title: String
+    let help: String
+    let fill: () -> Void
+    var body: some View {
+        Button(action: fill) {
+            Text(title).font(NekoFont.meta).foregroundStyle(N.text2)
+                .padding(.horizontal, NekoSpace.md).padding(.vertical, NekoSpace.xs + 1)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .liquidGlassCapsule(interactive: true)
+        .help(help)
+        .accessibilityHint(help)
     }
 }
 
@@ -197,7 +219,7 @@ struct LoopStep: View {
             }.frame(width: 22, height: 22).padding(.top, 1)
             VStack(alignment: .leading, spacing: NekoSpace.xs) {
                 Text(title).font(NekoFont.heading).foregroundStyle(N.text)
-                Text(detail).font(NekoFont.body).lineSpacing(3).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
+                Text(detail).font(NekoFont.body).lineSpacing(NekoLeading.body).foregroundStyle(N.text3).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 16)
             Button(action, action: perform).nekoButton(.secondary).controlSize(.small).padding(.top, NekoSpace.hair)

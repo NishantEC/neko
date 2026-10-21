@@ -32,8 +32,8 @@ struct ComposerRuntimeModelList: View {
                 if !models.isEmpty || (!source.ready && query.isEmpty) {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         Text(source.label + (source.connection.isEmpty ? "" : " · " + source.connection))
-                            .font(.caption).foregroundStyle(.secondary)
-                        if !source.ready { Text(source.note ?? "This source is not ready.").font(.caption).foregroundStyle(.secondary) }
+                            .font(NekoFont.caption).foregroundStyle(.secondary)
+                        if !source.ready { Text(source.note ?? "This source is not ready.").font(NekoFont.caption).foregroundStyle(.secondary) }
                         ForEach(models) { model in
                             Button {
                                 selection.select(provider: source.provider, model: model)
@@ -43,10 +43,10 @@ struct ComposerRuntimeModelList: View {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(model.label).fontWeight(.medium)
                                         if let detail = model.reason ?? model.description {
-                                            Text(detail).font(.caption).foregroundStyle(.secondary)
+                                            Text(detail).font(NekoFont.caption).foregroundStyle(.secondary)
                                                 .fixedSize(horizontal: false, vertical: true)
                                         }
-                                        if !model.usable { Text("Unavailable").font(.caption).foregroundStyle(.secondary) }
+                                        if !model.usable { Text("Unavailable").font(NekoFont.caption).foregroundStyle(.secondary) }
                                     }
                                     Spacer(minLength: 8)
                                     if selection.draft.provider == source.provider && selection.draft.model == model.id {
@@ -60,7 +60,7 @@ struct ComposerRuntimeModelList: View {
             }
             if !hasMatches && !selection.loading {
                 Text(query.isEmpty ? "No models available. Refresh models or connect a provider in Settings → AI." : "No models match this search.")
-                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(NekoFont.of(.callout)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
     }

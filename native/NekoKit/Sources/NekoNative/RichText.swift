@@ -161,9 +161,10 @@ enum NativeAttachmentPath {
 
 /// Parsed markdown, remembered by text. A chat re-renders far more often
 /// than its messages change, and parsing a long reply on every pass was
-/// visible as stutter.
+/// visible as stutter. Inline runs are cached too, per paragraph.
 @MainActor enum MarkdownCache {
     private static var blocks: [String: [NativeMarkdownBlock]] = [:]
+    private static var runs: [String: AttributedString] = [:]
     static func parsed(_ text: String) -> [NativeMarkdownBlock] {
         if let cached = blocks[text] { return cached }
         let parsed = NativeMarkdown.parse(text)
@@ -171,8 +172,17 @@ enum NativeAttachmentPath {
         blocks[text] = parsed
         return parsed
     }
+    static func inline(_ text: String) -> AttributedString {
+        if let cached = runs[text] { return cached }
+        let parsed = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+        if runs.count >= 1024 { runs.removeAll(keepingCapacity: true) }
+        runs[text] = parsed
+        return parsed
+    }
 }
 
+/// A reply's markdown. Prose (paragraphs, lists, quotes, headings) is capped
+/// at the reading width; code, tables and diffs use the whole column.
 struct ReadableText: View, Equatable {
     let text: String
     var body: some View {
@@ -181,10 +191,12 @@ struct ReadableText: View, Equatable {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 Group {
                 switch block {
-                case .paragraph(let value): inline(value)
+                case .paragraph(let value): inline(value).chatProse()
                 case .heading(let level, let value):
-                    inline(value).font(level <= 2 ? NekoFont.title : NekoFont.heading)
-                        .padding(.top, index == 0 ? 0 : 12).accessibilityAddTraits(.isHeader)
+                    inline(value).font(Self.headingFont(level))
+                        .padding(.top, index == 0 ? 0 : Self.headingSpace(level))
+                        .accessibilityAddTraits(.isHeader)
+                        .chatProse()
                 case .code(let language, let code):
                     if language.lowercased() == "diff" || language.lowercased() == "patch" { NativeDiffBlock(code: code) }
                     else if ReplyStyle.terminalLanguages.contains(language.lowercased()) { NativeTerminalBlock(language: language, code: code) }
@@ -192,30 +204,53 @@ struct ReadableText: View, Equatable {
                 case .table(let headers, let rows): NativeTableBlock(headers: headers, rows: rows)
                 case .view(let kind, let source): ReplyBlockView(kind: kind, source: source)
                 case .listItem(let marker, let value):
-                    HStack(alignment: .top, spacing: 10) { Text(marker).foregroundStyle(.secondary).frame(minWidth: 20, alignment: .trailing); inline(value) }
+                    HStack(alignment: .firstTextBaseline, spacing: NekoSpace.xs) {
+                        Text(marker).monospacedDigit().foregroundStyle(N.text3)
+                            .frame(width: NekoChat.speakerHeight - NekoSpace.hair, alignment: .trailing)
+                        inline(value)
+                    }.chatProse()
                 case .quote(let value):
-                    HStack(alignment: .top, spacing: 14) { RoundedRectangle(cornerRadius: NekoRadius.micro).fill(N.lineStrong).frame(width: 3); inline(value).foregroundStyle(.secondary) }
-                        .padding(.vertical, 4).fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .top, spacing: NekoSpace.md) {
+                        RoundedRectangle(cornerRadius: NekoRadius.micro).fill(N.lineStrong).frame(width: NekoSpace.hair + 1)
+                        inline(value).foregroundStyle(N.text2)
+                    }
+                    .padding(.vertical, NekoSpace.xxs).fixedSize(horizontal: false, vertical: true)
+                    .chatProse()
                 case .image(let alt, let path): NativeAttachmentImage(alt: alt, reference: path)
                 case .divider: Divider()
                 }
-                }.padding(.bottom, index == blocks.count - 1 ? 0 : blockSpacing(block))
+                }.padding(.bottom, index == blocks.count - 1 ? 0 : Self.blockSpacing(block))
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
             .environment(\.openURL, OpenURLAction { url in
                 ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") ? .systemAction : .discarded
             })
     }
-    private func blockSpacing(_ block: NativeMarkdownBlock) -> CGFloat {
+    /// Three distinct levels: 22, 17, then body-size semibold.
+    static func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: NekoFont.title
+        case 2: NekoFont.of(.subtitle, weight: .semibold)
+        default: NekoFont.heading
+        }
+    }
+    static func headingSpace(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: NekoSpace.xl
+        case 2: NekoSpace.lg
+        default: NekoSpace.md
+        }
+    }
+    static func blockSpacing(_ block: NativeMarkdownBlock) -> CGFloat {
         switch block {
-        case .listItem: 7
-        case .heading: 10
-        case .code, .table, .view, .image, .divider: 20
-        default: 16
+        case .listItem: NekoSpace.xs
+        case .heading: NekoSpace.sm
+        case .code, .table, .view, .image, .divider: NekoChat.blockGap
+        default: NekoSpace.md
         }
     }
     private func inline(_ value: String) -> some View {
-        Text((try? AttributedString(markdown: value, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value))
+        Text(MarkdownCache.inline(value))
             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -224,21 +259,15 @@ struct ReadableText: View, Equatable {
 private struct NativeCodeBlock: View {
     let language: String
     let code: String
-    @State private var copied = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(language.isEmpty ? "Code" : language).font(NekoFont.meta).foregroundStyle(.secondary)
-                Spacer()
-                Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                    NSPasteboard.general.clearContents()
-                    copied = NSPasteboard.general.setString(code, forType: .string)
-                }.nekoButton(.quiet).font(NekoFont.meta).accessibilityLabel("Copy code")
-            }.padding(.horizontal, NekoLayout.rowInset).padding(.vertical, 12)
-            Divider()
-            ScrollView(.horizontal) { Text(code).font(NekoFont.mono).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: true, vertical: false).padding(NekoLayout.rowInset) }
-        }.background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
+        ChatBlock(label: language.isEmpty ? "Code" : language, fill: N.sunken) {
+            ChatCopyButton(text: { code }, help: "Copy code")
+        } content: {
+            ScrollView(.horizontal) {
+                Text(code).font(NekoChat.code).lineSpacing(NekoChat.codeLineSpacing).textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: false).padding(NekoChat.blockInset)
+            }
+        }
     }
 }
 
