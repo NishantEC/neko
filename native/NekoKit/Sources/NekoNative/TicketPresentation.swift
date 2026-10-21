@@ -2,6 +2,18 @@ import SwiftUI
 import NekoKit
 
 enum TicketPresentation {
+    /// An agent is working on it right now, so Stop means something.
+    static func isRunning(_ task: JSONValue) -> Bool {
+        ["Queued", "Planning", "Building", "Reviewing"].contains(task["status"].string)
+    }
+    /// The task's open pull request, when its work went out as one. A task
+    /// waiting on review there is finished from the agent's side; what is
+    /// left happens on the pull request.
+    static func openPullRequest(_ task: JSONValue) -> URL? {
+        let link = task["pull_request"]["url"].string
+        guard !link.isEmpty, !["MERGED", "CLOSED"].contains(task["pull_request"]["status"]["state"].string) else { return nil }
+        return URL(string: link)
+    }
     /// The planner's question for a ticket waiting on you, if it asked one.
     static func waitingReason(_ task: JSONValue) -> String? {
         guard task["status"].string == "AwaitingApproval" else { return nil }
