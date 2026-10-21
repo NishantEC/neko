@@ -104,7 +104,10 @@ struct ToolsSkillsList: View {
                 VStack(alignment: .leading, spacing: NekoSpace.sm) {
                 Text(skill["description"].string).font(NekoFont.body).foregroundStyle(N.text3)
                 Text(skill["path"].string).font(NekoFont.meta).foregroundStyle(N.text4).textSelection(.enabled)
-                if changed { Text("Instructions changed. Review them before enabling the updated version.").foregroundStyle(.orange) }
+                if changed {
+                    Label("Instructions changed. Review them before enabling the updated version.", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(NekoStyle.amber)
+                }
                 Button("Open instructions to review") {
                     if !NSWorkspace.shared.open(URL(fileURLWithPath: skill["path"].string)) { report("Could not open this instruction file.") }
                 }

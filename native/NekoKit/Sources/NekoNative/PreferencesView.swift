@@ -119,8 +119,10 @@ enum HotkeyFallbacks {
 
 struct PreferencesView: View {
     @AppStorage("neko.settings.tab") private var settingsTab: SettingsTab = .general
-    /// Inside the Settings hub, which lists the sections itself.
+    /// Inside the Settings hub, which lists the sections and owns search itself.
     var inHub = false
+    /// A setting the hub's search asked to show.
+    var jump: SettingsJump? = nil
     @State private var query = ""
     @State private var highlighted: SettingsTarget?
     @State private var searchFocus = 0
@@ -132,7 +134,6 @@ struct PreferencesView: View {
     @State private var agents: [JSONValue] = []
     @State private var path = ""
     @State private var pending = false
-    @State private var clipboard = ClipboardConsentState()
     @State private var agentProvider = "codex"
     @State private var agentModel = ""
     @State private var catalog = ModelCatalog()
@@ -174,18 +175,18 @@ struct PreferencesView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: NekoLayout.sectionGap) {
-            HStack(spacing: NekoSpace.md) {
-                if !inHub {
+            if !inHub {
+                HStack(spacing: NekoSpace.md) {
                     ViewThatFits(in: .horizontal) {
                         sectionPicker.pickerStyle(.segmented).labelsHidden().fixedSize(horizontal: true, vertical: false)
                         sectionPicker.pickerStyle(.menu).fixedSize()
                     }
+                    Spacer(minLength: NekoSpace.md)
+                    NekoSearchField(title: "Find a setting", text: $query, focusRequest: searchFocus).frame(width: NekoLayout.settingsSidebarWidth)
                 }
-                Spacer(minLength: NekoSpace.md)
-                NekoSearchField(title: "Find a setting", text: $query, focusRequest: searchFocus).frame(width: 220)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .nekoAlignedWithGroupedForm()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .nekoAlignedWithGroupedForm()
             NekoPageIntro(title: query.isEmpty ? settingsTab.title : "Results", message: query.isEmpty ? settingsTab.summary : "Choose a setting to jump to it.")
                 .accessibilityElement(children: .combine)
                 .nekoAlignedWithGroupedForm()
@@ -221,18 +222,17 @@ struct PreferencesView: View {
                         .accessibilityHint("A small status in the corner. Click it to return to Neko.")
                     }
                     Section("Clipboard") {
-                        Toggle(isOn: Binding(get: { clipboard.enabled ?? false }, set: { value in setClipboard(value) })) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Save clipboard history")
-                                Text("Stored on this Mac. Turning it off stops capture and keeps existing history.")
-                                    .font(NekoFont.meta).foregroundStyle(.secondary)
+                        // One live switch, in Permissions: two bound to separate
+                        // requests could show different values mid-change.
+                        LabeledContent {
+                            Button("Show") { settingsTab = .permissions }.nekoButton(.quiet)
+                                .accessibilityLabel("Show clipboard history in Permissions")
+                        } label: {
+                            VStack(alignment: .leading, spacing: NekoSpace.xxs) {
+                                Text("Clipboard history")
+                                Text("Managed in Permissions").font(NekoFont.meta).foregroundStyle(.secondary)
                             }
                         }
-                        .settingsTarget(.clipboardHistory)
-                        .accessibilityLabel("Save clipboard history")
-                        .accessibilityHint("Stored on this Mac. Turning it off stops capture and keeps existing history.")
-                        .disabled(clipboard.enabled == nil)
-                        if clipboard.enabled == nil { Button("Read clipboard setting") { Task { await loadClipboard() } } }
                     }
                 }.nekoGroupedForm()
                 case .ai:
@@ -295,7 +295,7 @@ struct PreferencesView: View {
                         }
                         if let check {
                             Label(check.message, systemImage: check.ok ? "checkmark.circle.fill" : "xmark.circle")
-                                .foregroundStyle(check.ok ? Color.green : (check.unavailable ? NekoStyle.amber : Color.red))
+                                .foregroundStyle(check.ok ? NekoStyle.mint : (check.unavailable ? NekoStyle.amber : NekoStyle.coral))
                                 .font(NekoFont.body)
                         }
                         Text("Checking sends one short reply through the same runner tasks use, so it may use quota. A failed check keeps your current model. New conversations, tasks and background checks use the saved model; work already running is not interrupted.")
@@ -422,12 +422,16 @@ struct PreferencesView: View {
         .padding(NekoLayout.pageInset)
         .navigationTitle("Settings")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Find a setting", systemImage: "magnifyingglass") { searchFocus += 1 }
-                    .keyboardShortcut("f", modifiers: .command).help("Find a setting (⌘F)")
+            if !inHub {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Find a setting", systemImage: "magnifyingglass") { searchFocus += 1 }
+                        .keyboardShortcut("f", modifiers: .command).help("Find a setting (⌘F)")
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { if let jump, jump.isFresh { open(jump.target) } }
+        .onChange(of: jump) { _, value in if let value { open(value.target) } }
         .task {
             await load()
             catalog = await AgentModelCatalog.load(model)
@@ -463,7 +467,6 @@ struct PreferencesView: View {
         agentModel = runtime["model"].string
         let cents = model.snapshot["task_budget_cents"]
         budget = cents == .null ? "" : String(format: "%.2f", Double(cents.int) / 100)
-        await loadClipboard()
         do {
             settings = try await search("preference")
             folders = try await search("folder-scope")
@@ -515,23 +518,6 @@ struct PreferencesView: View {
     }
     private func search(_ provider: String) async throws -> [JSONValue] {
         (try await model.request(.command("Search", ["query": .string(""), "limit": .number(200), "provider": .string(provider)])))["SearchResults"]["items"].array
-    }
-    private func loadClipboard() async {
-        guard !pending else { return }
-        do { try clipboard.load(await model.request(.string("GetClipboardHistoryEnabled"))) }
-        catch { model.error = error.localizedDescription }
-    }
-    private func setClipboard(_ enabled: Bool) {
-        guard !pending, clipboard.begin(enabled) else { return }
-        pending = true
-        Task {
-            defer { pending = false }
-            do {
-                let reply = try await model.request(.command("SetClipboardHistoryEnabled", ["enabled": .bool(enabled)]))
-                try clipboard.finish(reply)
-                model.error = nil
-            } catch { clipboard.failed(); model.error = error.localizedDescription }
-        }
     }
     private func activate(_ kind: String, _ id: String, action: String? = nil) {
         guard !pending else { return }

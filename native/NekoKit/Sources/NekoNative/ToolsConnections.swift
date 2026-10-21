@@ -33,22 +33,21 @@ struct ToolsConnectionsList: View {
     let connections: [JSONValue]
     let open: (JSONValue) -> Void
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Text("Connections").font(NekoFont.heading).foregroundStyle(N.text)
-                Text("\(connections.count)").monospacedDigit()
-                Spacer()
+        VStack(alignment: .leading, spacing: NekoSpace.xs) {
+            NekoListHeader(title: "Connections", tone: .neutral, count: connections.count) {
                 Text(workspace.isEmpty ? "All workspaces" : (model.workspaces.first { $0.recordID == workspace }?["name"].string ?? "Selected workspace"))
                     .lineLimit(1)
-            }.font(NekoFont.meta).foregroundStyle(N.text3)
+            }
             if connections.isEmpty {
                 NekoEmptyState("Browse MCP servers, import from this Mac, or add a URL manually.",
                                title: model.connected ? "No connections yet" : "Waiting for connections…", symbol: "link", block: true)
             } else {
+                let sorted = ToolsPresentation.sorted(connections)
                 VStack(spacing: 0) {
-                    ForEach(Array(connections.enumerated()), id: \.element.recordID) { index, connection in
+                    ForEach(Array(sorted.enumerated()), id: \.element.recordID) { index, connection in
                         connectionRow(connection)
-                        if index < connections.count - 1 { Divider().padding(.leading, 42) }
+                        // Starts at the title's edge, past the glyph slot.
+                        if index < sorted.count - 1 { Hairline().padding(.leading, NekoLayout.listGlyphSlot + NekoSpace.md + NekoSpace.md) }
                     }
                 }
             }
@@ -62,21 +61,15 @@ struct ToolsConnectionsList: View {
         return Button {
             open(connection)
         } label: {
-            HStack(spacing: NekoSpace.lg) {
+            NekoListRow(title: connection["label"].string, note: ToolsPresentation.connectionDetail(connection)) {
                 Image(systemName: connection["config"]["transport"].string == "http" ? "link" : "terminal")
-                    .font(NekoFont.body).foregroundStyle(N.text3).frame(width: 26).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: NekoSpace.xs) {
-                    Text(connection["label"].string).font(NekoFont.heading).foregroundStyle(N.text).lineLimit(2)
-                    Text(ToolsPresentation.connectionDetail(connection)).font(NekoFont.meta).foregroundStyle(N.text3).lineLimit(2)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(status).foregroundStyle(status == "Needs attention" || status == "Sign in needed" ? NekoStyle.amber : N.text3)
-                    if summary != status { Text(summary).foregroundStyle(N.text3).monospacedDigit() }
-                }.font(NekoFont.meta).fixedSize()
+                    .font(NekoFont.body).accessibilityHidden(true)
+            } trailing: {
+                NekoStatusLabel(tone: ToolsPresentation.connectionTone(connection), symbol: ToolsPresentation.connectionSymbol(connection), text: status)
+                if summary != status { Text(summary).font(NekoFont.caption.monospacedDigit()).foregroundStyle(N.text3).fixedSize() }
                 Image(systemName: "chevron.right").font(NekoFont.of(.micro, weight: .semibold)).foregroundStyle(N.text3).accessibilityHidden(true)
             }
-            .padding(.vertical, NekoLayout.rowInset)
-            .contentShape(Rectangle())
+            .padding(.vertical, NekoSpace.xxs)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(connection["label"].string), \(scope), \(status), \(summary)")

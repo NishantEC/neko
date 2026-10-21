@@ -8,6 +8,7 @@ struct WatchRow: View {
     @State private var expanded = false
     @State private var confirmingActivation = false
     @State private var renaming = false
+    @State private var confirmingDelete = false
 
     private var status: String {
         if !item["enabled"].bool { return item["failures"].int > 0 ? "Paused · last check failed" : "Paused" }
@@ -16,8 +17,8 @@ struct WatchRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 18) {
+        VStack(alignment: .leading, spacing: NekoSpace.md) {
+            HStack(alignment: .top, spacing: NekoSpace.md) {
                 let title = Watching.title(item)
                 WatchRowHeader(title: title, instruction: title == item["instruction"].string ? nil : item["instruction"].string, status: status,
                                needsAttention: item["enabled"].bool && item["failures"].int > 0,
@@ -31,9 +32,13 @@ struct WatchRow: View {
             }
             if expanded { WatchRowDetails(model: model, item: item, onEdit: onEdit) }
         }
-        .padding(.vertical, NekoLayout.rowInset)
-        .overlay(alignment: .top) { N.line.frame(height: 1) }
+        .padding(.vertical, NekoSpace.md)
+        .overlay(alignment: .top) { Hairline() }
         .accessibilityElement(children: .contain)
+        .nekoConfirmDestructive(isPresented: $confirmingDelete, title: "Delete “\(Watching.title(item))”?",
+                                message: "Neko stops checking it. Tasks it already filed stay.", action: "Delete watch") {
+            Watching.remove(model, item)
+        }
         .modifier(WatchActivationConfirmation(model: model, item: item, isPresented: $confirmingActivation))
         .renameAlert("Rename watch", isPresented: $renaming, current: item["name"].string) { name in
             submit(model, nested("Mcp", "RenameResponsibility", ["responsibility_id": item["id"], "name": .string(name)]))
@@ -46,7 +51,7 @@ struct WatchRow: View {
                 .disabled(!item["enabled"].bool)
             Button("Rename…") { renaming = true }
             Button("Edit", action: onEdit)
-            Button("Delete", role: .destructive) { Watching.remove(model, item) }
+            Button("Delete watch…", role: .destructive) { confirmingDelete = true }
         }
         .labelStyle(.iconOnly).menuStyle(.borderlessButton).fixedSize().disabled(model.busy)
     }

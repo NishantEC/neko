@@ -30,6 +30,53 @@ extension View {
     func settingsTarget(_ target: SettingsTarget) -> some View { modifier(SettingsTargetModifier(target: target)) }
 }
 
+/// The Settings hub's results: sections and the settings inside them.
+/// Return in the search field opens the first.
+struct SettingsHubSearchResults: View {
+    let query: String
+    let open: (SettingsHit) -> Void
+    var body: some View {
+        let results = SettingsSearch.hubResults(for: query)
+        if results.isEmpty {
+            NekoEmptyState(reason: .noMatches(query), block: true)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(results) { hit in
+                    Button { open(hit) } label: {
+                        NekoListRow(title: title(hit), detail: nil, meta: nil) {
+                            Image(systemName: symbol(hit)).font(NekoFont.body).accessibilityHidden(true)
+                        } trailing: {
+                            Text(place(hit)).font(NekoFont.meta).foregroundStyle(N.text3)
+                            Image(systemName: "chevron.right").font(NekoFont.of(.small, weight: .semibold)).foregroundStyle(N.text4).accessibilityHidden(true)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(title(hit)), \(place(hit))")
+                }
+            }
+        }
+    }
+    private func title(_ hit: SettingsHit) -> String {
+        switch hit {
+        case .section(let section): section.title
+        case .setting(let target): target.title
+        }
+    }
+    private func symbol(_ hit: SettingsHit) -> String {
+        switch hit {
+        case .section(let section): section.symbol
+        case .setting(let target): SettingsSection(tab: target.tab).symbol
+        }
+    }
+    /// Where it lives: a section's group, or a setting's section.
+    private func place(_ hit: SettingsHit) -> String {
+        switch hit {
+        case .section(let section): SettingsSection.groups.first { $0.sections.contains(section) }?.title ?? "Settings"
+        case .setting(let target): target.tab == .agents ? "Legacy agents" : SettingsSection(tab: target.tab).title
+        }
+    }
+}
+
 /// Search results in place of the tab's content while a query is typed.
 struct SettingsSearchResults: View {
     let query: String

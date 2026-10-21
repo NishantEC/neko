@@ -38,7 +38,7 @@ struct DiagnosticsView: View {
                 ForEach(checks) { check in
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: check.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                            .foregroundStyle(check.ok ? Color.green : NekoStyle.amber)
+                            .foregroundStyle(check.ok ? NekoStyle.mint : NekoStyle.amber)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(check.name).font(NekoFont.heading)
                             Text(check.detail).font(NekoFont.meta).foregroundStyle(.secondary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
