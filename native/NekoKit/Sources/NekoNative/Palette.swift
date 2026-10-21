@@ -505,7 +505,8 @@ private struct PaletteView: View {
                             }
                             Divider()
                             Button("Close actions") { state.showActions = false }.keyboardShortcut(.escape, modifiers: [])
-                        }.padding(NekoSpace.md).frame(width: 210).liquidGlass(radius: NekoRadius.lg)
+                        }.padding(NekoSpace.md).frame(width: 210).liquidGlass(radius: NekoRadius.lg).nekoElevation(.floating)
+                            .nekoEntrance()
                             .padding(.trailing, NekoSpace.md).padding(.bottom, NekoLayout.paletteBarHeight + NekoSpace.sm)
                     }
                 }

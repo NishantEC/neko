@@ -36,7 +36,7 @@ struct RulebookView: View {
                     .scrollContentBackground(.hidden)
                     .padding(NekoSpace.lg)
                     .frame(minHeight: NekoLayout.editorMinHeight)
-                    .nekoFill(N.panel, radius: NekoRadius.lg, stroke: N.line)
+                    .nekoFill(N.sunken, radius: NekoRadius.lg, stroke: N.line)
                     .accessibilityLabel("Rulebook")
                 Text("Changes apply to the next agent that starts; agents already running keep the rules they started with.")
                     .font(NekoFont.meta).foregroundStyle(N.text3)

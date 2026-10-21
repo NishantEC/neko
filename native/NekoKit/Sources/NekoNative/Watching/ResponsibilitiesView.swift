@@ -99,7 +99,7 @@ struct ResponsibilitiesView: View {
 
     private func sectionTitle(_ title: String, detail: String) -> some View {
         HStack(spacing: NekoSpace.sm) {
-            Text(title).font(NekoFont.heading).foregroundStyle(N.text)
+            Text(title).font(NekoFont.section).foregroundStyle(N.text)
             Text(detail).font(NekoFont.meta).foregroundStyle(N.text3).monospacedDigit()
         }.accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
     }
@@ -121,7 +121,7 @@ struct ResponsibilitiesView: View {
             TextField("New Linear issues assigned to me", text: $ask, axis: .vertical)
                 .textFieldStyle(.plain).font(NekoFont.body).lineLimit(3...6).onSubmit { send(ask) }
                 .padding(NekoSpace.md)
-                .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
+                .background(N.sunken, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous).strokeBorder(N.line))
                 .accessibilityLabel("What should Neko keep an eye on?")
             ViewThatFits(in: .horizontal) {
