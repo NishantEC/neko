@@ -66,8 +66,12 @@ struct TodayView: View {
                                 }
                             }
                             ForEach(DecisionPresentation.latest(model.snapshot["decision_records"].array.filter { model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace }).prefix(3), id: \.recordID) { DecisionCard(model: model, record: $0) }
+                            let related = ChatTurnRelated(snapshot: model.snapshot)
                             ForEach(messages, id: \.recordID) { message in
-                                messageView(message)
+                                ChatTurn(key: related.key(for: message, awaitingApprovals: message["pending"].bool ? awaitingApprovals : 0)) {
+                                    messageView(message)
+                                }
+                                .equatable()
                                 .id(message.recordID)
                                 .transition(.opacity)
                             }
@@ -454,5 +458,53 @@ struct TodayView: View {
         case .help: draft = "/"
         case .remember, .forget, .recall: break
         }
+    }
+}
+
+/// One chat message, redrawn only when what it shows changes. The chat sits
+/// inside a view that observes the whole app state, which changes every few
+/// seconds while agents work; rebuilding every visible message on each change
+/// re-parsed its markdown and re-measured its height, and a one-pixel
+/// difference made the transcript scroll again.
+struct ChatTurn<Content: View>: View, Equatable {
+    /// Everything this message shows, and nothing else.
+    let key: JSONValue
+    @ViewBuilder let content: () -> Content
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.key == b.key }
+    var body: some View { content() }
+}
+
+/// What a message shows besides its own text, gathered once per render
+/// rather than searched for by every message.
+struct ChatTurnRelated {
+    private let receipts: [String: [JSONValue]]
+    private let tasks: [String: JSONValue]
+    private let watches: [String: JSONValue]
+    private let workspaces: [String: String]
+    private let connections: JSONValue
+
+    init(snapshot: JSONValue) {
+        receipts = Dictionary(grouping: snapshot["mcp"]["receipts"].array, by: { $0["run_id"].string })
+        tasks = Dictionary(snapshot["tasks"].array.map { ($0.recordID, $0) }, uniquingKeysWith: { first, _ in first })
+        watches = Dictionary(snapshot["mcp"]["responsibilities"].array.map { ($0.recordID, $0) }, uniquingKeysWith: { first, _ in first })
+        workspaces = Dictionary(snapshot["workspaces"].array.map { ($0.recordID, $0["name"].string) }, uniquingKeysWith: { first, _ in first })
+        connections = .array(snapshot["mcp"]["connections"].array.map { .array([.string($0.recordID), $0["label"]]) })
+    }
+
+    func key(for message: JSONValue, awaitingApprovals: Int) -> JSONValue {
+        let linked = message["ticket_ids"].array.map { id -> JSONValue in
+            let task = tasks[id.string] ?? .null
+            return .array([task["title"], task["status"], .string(workspaces[task["workspace_id"].string] ?? "")])
+        }
+        let watched = message["responsibility_ids"].array.map { watches[$0.string] ?? .null }
+        return .object([
+            "message": message,
+            "receipts": .array(receipts["chat:\(message.recordID)"] ?? []),
+            "tasks": .array(linked),
+            "watches": .array(watched),
+            // A watch row names its connections, so their labels are part of what it shows.
+            "connections": watched.isEmpty ? .null : connections,
+            "awaiting": .number(Double(awaitingApprovals)),
+        ])
     }
 }
