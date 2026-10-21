@@ -29,27 +29,31 @@ extension View {
 
 // MARK: - Small labels
 
-/// A count on a sidebar row or tab, in the accent colour.
+/// How many things need you, on a sidebar row or tab. Amber, because needing
+/// you is amber's one meaning.
 struct NekoBadge: View {
     let count: Int
     var body: some View {
         if count > 0 {
-            Text(String(count)).font(NekoFont.of(.small, weight: .semibold).monospacedDigit()).foregroundStyle(N.canvas)
-                .padding(.horizontal, NekoSpace.xs).frame(height: 16).background(NekoStyle.accent, in: Capsule())
+            Text(String(count)).font(NekoFont.of(.small, weight: .bold).monospacedDigit()).foregroundStyle(NekoStyle.onStatus)
+                .padding(.horizontal, NekoSpace.xs).frame(height: 18).background(NekoStyle.amber, in: Capsule())
                 .accessibilityLabel("\(count) need you")
         }
     }
 }
 
-/// A tinted symbol tile, for setting rows and empty states.
+/// A symbol on a quiet sunken tile, for setting rows and empty states.
+/// Neutral by default; pass a status `tint` only when the tile means that state.
 struct NekoIconTile: View {
     let symbol: String
-    var tint: Color = NekoStyle.accent
-    var size: CGFloat = 40
+    var tint: Color = N.text2
+    var size: CGFloat = 32
     var body: some View {
-        Image(systemName: symbol).font(NekoFont.scaled(size * 0.5))
+        let shape = RoundedRectangle(cornerRadius: NekoRadius.sm, style: .continuous)
+        Image(systemName: symbol).font(NekoFont.scaled(size * 0.47, weight: .medium))
             .foregroundStyle(tint).frame(width: size, height: size)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: NekoRadius.md, style: .continuous))
+            .background(N.sunken, in: shape)
+            .overlay(shape.strokeBorder(N.line))
             .accessibilityHidden(true)
     }
 }
@@ -70,13 +74,14 @@ struct StatusGlyph: View {
         ZStack {
             switch status {
             case "Completed":
-                Circle().fill(color); Image(systemName: "checkmark").font(NekoFont.scaled(size * 0.5, weight: .bold)).foregroundStyle(.black)
+                Circle().fill(color); Image(systemName: "checkmark").font(NekoFont.scaled(size * 0.5, weight: .bold)).foregroundStyle(NekoStyle.onStatus)
             case "Cancelled":
-                Circle().strokeBorder(Color.secondary, lineWidth: 1.4); Image(systemName: "xmark").font(NekoFont.scaled(size * 0.42, weight: .bold)).foregroundStyle(.secondary)
+                Circle().strokeBorder(Color.secondary, lineWidth: 1.5); Image(systemName: "xmark").font(NekoFont.scaled(size * 0.42, weight: .bold)).foregroundStyle(.secondary)
             case "Failed":
-                Circle().fill(color); Image(systemName: "exclamationmark").font(NekoFont.scaled(size * 0.5, weight: .bold)).foregroundStyle(.black)
+                Circle().fill(color); Image(systemName: "exclamationmark").font(NekoFont.scaled(size * 0.5, weight: .bold)).foregroundStyle(NekoStyle.onStatus)
             default:
-                Circle().strokeBorder(color, style: StrokeStyle(lineWidth: 1.4, dash: status == "Queued" ? [1.6, 1.6] : []))
+                // A 2pt dash still reads as dashed at 14pt on a 2× display.
+                Circle().strokeBorder(color, style: StrokeStyle(lineWidth: 1.5, dash: status == "Queued" ? [2, 2] : []))
                 Circle().trim(from: 0, to: progress).stroke(color, style: StrokeStyle(lineWidth: size * 0.36)).rotationEffect(.degrees(-90)).padding(size * 0.3)
             }
         }.frame(width: size, height: size)

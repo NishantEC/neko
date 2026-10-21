@@ -50,7 +50,76 @@ struct GlassGroup<Content: View>: View {
 
 // MARK: - Opaque surfaces
 
-/// A raised, opaque content surface. `interactive` adds a hover wash.
+/// How far a surface sits above the canvas. Elevation comes from light, not
+/// lines: borders give structure, shadows give height.
+enum NekoElevation {
+    /// Cards and grouped sections on a page.
+    case raised
+    /// Menus, popovers and previews that float over other content.
+    case floating
+}
+
+/// Shadows for an elevation. Light mode only for `raised` (a dark canvas has
+/// no light to cast them; `NekoRaisedSurface` gives dark mode a lit edge
+/// instead), and none for `raised` under Increased Contrast, which draws a
+/// strong border. `lifted` is the hover state of an interactive card.
+private struct NekoElevationModifier: ViewModifier {
+    let level: NekoElevation
+    var lifted = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    func body(content: Content) -> some View {
+        switch level {
+        case .raised:
+            // Zero-opacity shadows rather than none, so hover and appearance
+            // changes animate the same two layers instead of swapping views.
+            let shows = scheme == .light && contrast != .increased
+            content
+                .shadow(color: .black.opacity(shows ? 0.06 : 0), radius: 1, y: 1)
+                .shadow(color: .black.opacity(shows ? (lifted ? 0.08 : 0.05) : 0), radius: lifted ? 16 : 12, y: lifted ? 8 : 6)
+        case .floating:
+            content.shadow(color: .black.opacity(0.18), radius: 24, y: 12)
+        }
+    }
+}
+
+extension View {
+    /// The shadow for an elevation. Apply it to an opaque shape or a view
+    /// with an opaque background, or the shadow follows every glyph.
+    func nekoElevation(_ level: NekoElevation, lifted: Bool = false) -> some View {
+        modifier(NekoElevationModifier(level: level, lifted: lifted))
+    }
+}
+
+/// The raised, opaque surface behind cards and grouped sections: no border by
+/// default, a soft shadow in light mode and a lit top edge in dark mode.
+/// Increased Contrast swaps both for a 2pt strong border. `highlighted` marks
+/// the selected or current item with the accent.
+struct NekoRaisedSurface: View {
+    var radius: CGFloat = NekoRadius.xl
+    var highlighted = false
+    var lifted = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        // A hover wash over the card rather than in place of it, so the
+        // surface never turns transparent.
+        shape.fill(N.card).overlay { shape.fill(N.selected).opacity(lifted ? 1 : 0) }
+            .nekoElevation(.raised, lifted: lifted)
+            .overlay {
+                if highlighted {
+                    shape.strokeBorder(NekoStyle.accent, lineWidth: contrast == .increased ? 2 : 1.5)
+                } else if contrast == .increased {
+                    shape.strokeBorder(N.lineStrong, lineWidth: 2)
+                } else if scheme == .dark {
+                    shape.strokeBorder(LinearGradient(colors: [.white.opacity(0.08), .white.opacity(0.02)], startPoint: .top, endPoint: .bottom), lineWidth: 1)
+                }
+            }
+    }
+}
+
+/// A raised, opaque content surface. `interactive` adds a hover wash and lift.
 struct NekoCardModifier: ViewModifier {
     var padding: CGFloat = NekoSpace.xl
     var radius: CGFloat = NekoRadius.xl
@@ -59,8 +128,7 @@ struct NekoCardModifier: ViewModifier {
     @State private var hover = false
     func body(content: Content) -> some View {
         content.padding(padding)
-            .background(hover && interactive ? N.selected : N.card, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(highlighted ? NekoStyle.accent.opacity(0.55) : (hover && interactive ? N.lineStrong : N.line)))
+            .background { NekoRaisedSurface(radius: radius, highlighted: highlighted, lifted: hover && interactive) }
             .nekoAnimation(.hover, value: hover)
             .onHover { if interactive { hover = $0 } }
     }

@@ -11,7 +11,7 @@ final class DesignSystemGuardTests: XCTestCase {
 
     /// Raw padding and stack-spacing numbers outside the design system. This
     /// may only go down: lower it when a change removes some, never raise it.
-    private static let spacingLiteralCeiling = 324
+    private static let spacingLiteralCeiling = 289
 
     private static var sourceRoot: URL {
         URL(fileURLWithPath: #filePath)

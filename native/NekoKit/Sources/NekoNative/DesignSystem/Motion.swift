@@ -15,16 +15,21 @@ enum NekoMotion {
     case reveal
     /// Content arrives on screen for the first time.
     case appear
+    /// Content leaves. Shorter than any entrance, so dismissing never waits.
+    case exit
     /// "Something is running", repeating until it stops.
     case pulse
 
+    // Springs with no bounce: they retarget smoothly when interrupted, and
+    // nothing overshoots.
     var animation: Animation {
         switch self {
         case .hover: .easeOut(duration: 0.12)
         case .press: .snappy(duration: 0.15)
-        case .select: .snappy(duration: 0.2)
-        case .reveal: .smooth(duration: 0.18)
-        case .appear: .easeOut(duration: 0.35)
+        case .select: .spring(duration: 0.24, bounce: 0)
+        case .reveal: .spring(duration: 0.28, bounce: 0)
+        case .appear: .spring(duration: 0.36, bounce: 0)
+        case .exit: .easeOut(duration: 0.15)
         case .pulse: .easeInOut(duration: 1.1).repeatForever(autoreverses: true)
         }
     }
@@ -45,11 +50,28 @@ private struct NekoAnimationModifier<Value: Equatable>: ViewModifier {
     }
 }
 
+/// How something floating (a toast) arrives and leaves: a short rise and fade
+/// in, a quicker fade out. Under Reduce Motion it only cross-fades, so the
+/// change still reads without anything moving. The transition carries its own
+/// timing, so the insert or removal itself needs no `withAnimation`.
+private struct NekoEntranceModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View {
+        let fadeOut = AnyTransition.opacity.animation(NekoMotion.exit.animation)
+        content.transition(reduceMotion
+            ? fadeOut
+            : .asymmetric(insertion: AnyTransition.opacity.combined(with: .offset(y: 8)).animation(NekoMotion.appear.animation),
+                          removal: fadeOut))
+    }
+}
+
 extension View {
     /// Animate changes of `value` with a named motion, or not at all under Reduce Motion.
     func nekoAnimation<Value: Equatable>(_ motion: NekoMotion, value: Value) -> some View {
         modifier(NekoAnimationModifier(motion: motion, value: value))
     }
+    /// The insertion and removal transition for floating content. See `NekoEntranceModifier`.
+    func nekoEntrance() -> some View { modifier(NekoEntranceModifier()) }
 }
 
 /// `withAnimation`, routed through a named motion and Reduce Motion.
