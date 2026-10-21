@@ -38,10 +38,11 @@ struct MachineStatus {
 }
 
 struct MachineStrip: View {
-    let snapshot: JSONValue
+    /// `MachineHealth` as the daemon reports it.
+    let health: JSONValue
     @State private var open = false
     var body: some View {
-        let status = MachineStatus(health: snapshot["machine"])
+        let status = MachineStatus(health: health)
         Button { open.toggle() } label: {
             HStack(spacing: NekoSpace.sm) {
                 Circle().fill(status.known ? status.color : N.text4).frame(width: 7, height: 7).accessibilityHidden(true)

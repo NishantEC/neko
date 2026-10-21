@@ -3,6 +3,12 @@ import NekoKit
 
 @MainActor final class AppModel: ObservableObject {
     @Published var snapshot: JSONValue = .object([:])
+    /// The Mac's health, polled on its own: it changes every reading, and
+    /// inside the snapshot it made every poll re-send and redraw everything.
+    @Published var machine: JSONValue = .null
+    /// `Snapshot::digest` of what `snapshot` holds; sent back so the daemon
+    /// can answer "unchanged" instead of the whole workbench.
+    private var digest = ""
     @Published var selectedWorkspace: String?
     @Published var requestedPage: Page?
     @Published var agentID: String?
@@ -85,10 +91,13 @@ import NekoKit
         await loadSetup()
         polling?.cancel()
         polling = Task { [weak self] in
+            var tick = 0
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled else { return }
                 await self?.refresh()
+                tick += 1
+                if tick % 7 == 1 { await self?.refreshMachine() }
                 // Started before the daemon was up: finish setup once it answers.
                 if let self, self.loadingSetup, self.connected { await self.loadSetup() }
             }
@@ -100,10 +109,19 @@ import NekoKit
         refreshSequence += 1
         let sequence = refreshSequence
         do {
-            let result = try await request(.object(["Workbench": .string("Snapshot")]))
+            // With nothing held yet (or a daemon that sends no digest) ask for
+            // the whole workbench; otherwise let the daemon say "unchanged".
+            let ask: JSONValue = digest.isEmpty
+                ? .object(["Workbench": .string("Snapshot")])
+                : .object(["WorkbenchIfChanged": .object(["digest": .string(digest)])])
+            let result = try await request(ask)
             guard started == generation, sequence == refreshSequence else { return }
-            guard case .object = result["Workbench"] else { throw invalidResponse() }
-            acceptSnapshot(result["Workbench"])
+            if case .object = result["WorkbenchUnchanged"] {
+                // Nothing new: no copy was sent, nothing is decoded or redrawn.
+            } else {
+                guard case .object = result["Workbench"] else { throw invalidResponse() }
+                acceptSnapshot(result["Workbench"])
+            }
             if !connected { connected = true }
             if connectionError != nil { connectionError = nil }
             // A connection failure from before the daemon was up is no longer true.
@@ -162,14 +180,31 @@ import NekoKit
         NSError(domain: "Neko", code: 1, userInfo: [NSLocalizedDescriptionKey: "The daemon returned an unexpected response. Please try again."])
     }
 
+    func refreshMachine() async {
+        guard let result = try? await request(.string("MachineHealth")) else { return }
+        let health = result["MachineHealth"]
+        if health != machine { machine = health }
+    }
+
     private func acceptSnapshot(_ value: JSONValue) {
-        // The native UI uses successful IPC for connection health. A daemon
-        // heartbeat alone does not change any displayed content.
-        var previous = snapshot.object
-        var incoming = value.object
-        previous.removeValue(forKey: "heartbeat_ms")
-        incoming.removeValue(forKey: "heartbeat_ms")
-        if previous != incoming { snapshot = value }
+        // The daemon's digest says whether anything a view shows changed
+        // (heartbeat and machine health excluded). Comparing the
+        // multi-megabyte trees field by field instead ran on the main
+        // thread on every poll, a stall every two seconds.
+        let incoming = value["digest"].string
+        if incoming.isEmpty {
+            // No digest (an older daemon): compare, ignoring the heartbeat.
+            var previous = snapshot.object
+            var next = value.object
+            previous.removeValue(forKey: "heartbeat_ms")
+            next.removeValue(forKey: "heartbeat_ms")
+            digest = ""
+            if previous != next { snapshot = value }
+        } else if incoming != digest {
+            digest = incoming
+            snapshot = value
+        }
+        if machine == .null, value["machine"] != .null { machine = value["machine"] }
     }
 }
 

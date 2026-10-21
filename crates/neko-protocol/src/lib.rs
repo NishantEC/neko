@@ -432,6 +432,16 @@ pub struct MeterStat {
 pub enum Request {
     McpBridge(mcp_host::BridgeRequest),
     Workbench(workbench::Command),
+    /// The workbench, unless it is still what the client has: `digest` is
+    /// the `Snapshot::digest` the client last received. Answered with
+    /// `WorkbenchUnchanged` when nothing changed, so a poll that finds
+    /// nothing new costs neither side a multi-megabyte copy.
+    WorkbenchIfChanged {
+        digest: String,
+    },
+    /// The machine's health alone. It changes every reading, so it is kept
+    /// out of the snapshot's digest and fetched on its own.
+    MachineHealth,
     Ping,
     /// The daemon-owned model catalog. `refresh: false` may answer from a
     /// short-lived cache; discovery never generates tokens.
@@ -560,6 +570,10 @@ pub enum Response {
         json: String,
     },
     Workbench(workbench::Snapshot),
+    WorkbenchUnchanged {
+        digest: String,
+    },
+    MachineHealth(Option<workbench::MachineHealth>),
     Pong,
     AgentModels(agent_models::ModelCatalog),
     AgentModelCheck(agent_models::ModelCheck),

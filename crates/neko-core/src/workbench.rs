@@ -430,6 +430,7 @@ fn encode(snapshot: &Snapshot) -> Result<Snapshot, String> {
     compacted.conversation.clear();
     compacted.rulebook_default.clear();
     compacted.machine = None;
+    compacted.digest.clear();
     // "Run next" only means something until the task starts.
     let waiting: std::collections::HashSet<&str> = snapshot.tasks.iter()
         .filter(|t| t.status == TaskStatus::Queued).map(|t| t.id.as_str()).collect();
