@@ -61,6 +61,7 @@ struct PermissionsView: View {
                     Toggle("Clipboard history", isOn: Binding(get: { clipboard.enabled ?? false }, set: { value in setClipboard(value) }))
                         .labelsHidden().toggleStyle(.switch).disabled(clipboard.enabled == nil || pending)
                 }
+                .settingsTarget(.clipboardHistory)
             } header: { Text("This Mac") }
             Section {
                 let protected = PermissionCatalog.protectedFolders(workspacePaths, home: FileManager.default.homeDirectoryForCurrentUser.path)

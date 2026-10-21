@@ -7,7 +7,8 @@ struct ResponsibilitiesView: View {
     @State private var ask = ""
     @State private var target: String?
     @State private var askedAt: Int?
-    @State private var showSuggestions = false
+    /// Open by default: suggestions are decisions waiting on you.
+    @State private var showSuggestions = true
     @State private var showPaused = false
     @State private var showReply = false
 
@@ -28,10 +29,11 @@ struct ResponsibilitiesView: View {
     }
 
     var body: some View {
-        NekoPage(title: "Watching", message: "Keep up with the sources that matter. Neko checks every 10 minutes while it’s running and brings relevant work to Home.") {
-                Button("New watch", systemImage: "plus") {
+        NekoPage(title: "Watching", message: "Keep up with the sources that matter. Neko checks your sources while it’s running and brings what needs you to Home.") {
+                Button("Write it yourself…", systemImage: "square.and.pencil") {
                     draft = ManagementDraft(value: .object([:]), workspace: workspaceID)
                 }.disabled(model.workspaces.isEmpty || model.busy)
+                .help("Open the watch editor and write the instruction and sources yourself")
             } content: {
             if let error = model.error {
                 DisclosureGroup {
@@ -43,11 +45,10 @@ struct ResponsibilitiesView: View {
             if model.workspaces.isEmpty {
                 NekoEmptyState(model.connected ? "Add a workspace to create a watch." : "Waiting for your workspaces…")
             } else {
-                watchingSection
-                if !paused.isEmpty {
-                    DisclosureGroup(isExpanded: $showPaused) { watchRows(paused) } label: {
-                        sectionTitle("Paused", detail: "\(paused.count)")
-                    }
+                // Making a watch first, then decisions waiting on you, then what runs.
+                NekoSection(title: "New watch", grouped: true) {
+                    askBox
+                    if let reply { Hairline(); replyView(reply) }
                 }
                 if !suggested.isEmpty {
                     DisclosureGroup(isExpanded: $showSuggestions) {
@@ -62,8 +63,12 @@ struct ResponsibilitiesView: View {
                         sectionTitle("Suggestions", detail: "\(suggested.count) to review")
                     }
                 }
-                askBox
-                if let reply { replyView(reply) }
+                watchingSection
+                if !paused.isEmpty {
+                    DisclosureGroup(isExpanded: $showPaused) { watchRows(paused) } label: {
+                        sectionTitle("Paused", detail: "\(paused.count)")
+                    }
+                }
             }
         }
         .font(NekoFont.body)
@@ -77,7 +82,7 @@ struct ResponsibilitiesView: View {
         VStack(alignment: .leading, spacing: NekoSpace.lg) {
             sectionTitle("Active watches", detail: "\(active.count)")
             if active.isEmpty {
-                NekoEmptyState("No active watches. " + (paused.isEmpty ? "Describe a watch below, or review a suggestion." : "Resume a paused watch or describe a new one below."))
+                NekoEmptyState("No active watches. " + (paused.isEmpty ? "Describe a watch above, or review a suggestion." : "Resume a paused watch or describe a new one above."))
             } else { watchRows(active) }
         }
     }
@@ -101,9 +106,9 @@ struct ResponsibilitiesView: View {
 
     private var askBox: some View {
         let tools = Watching.connections(model, workspace: workspaceID)
-        return VStack(alignment: .leading, spacing: 18) {
+        return VStack(alignment: .leading, spacing: NekoSpace.md) {
             HStack {
-                Text("Describe a watch").font(NekoFont.heading).foregroundStyle(N.text)
+                Text("What should Neko keep an eye on?").font(NekoFont.meta).foregroundStyle(N.text3)
                 Spacer()
                 if !tools.isEmpty {
                     Menu("Use an idea", systemImage: "lightbulb") {
@@ -113,20 +118,19 @@ struct ResponsibilitiesView: View {
                     }.fixedSize().controlSize(.regular)
                 }
             }
-            TextField("What should Neko keep an eye on?", text: $ask, axis: .vertical)
+            TextField("New Linear issues assigned to me", text: $ask, axis: .vertical)
                 .textFieldStyle(.plain).font(NekoFont.body).lineLimit(3...6).onSubmit { send(ask) }
-                .padding(NekoLayout.rowInset)
+                .padding(NekoSpace.md)
                 .background(N.panel, in: RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: NekoRadius.lg, style: .continuous).strokeBorder(N.line))
                 .accessibilityLabel("What should Neko keep an eye on?")
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: NekoSpace.md) { workspacePicker; Spacer(minLength: 8); askActions(tools) }
-                VStack(alignment: .leading, spacing: 10) { workspacePicker; askActions(tools) }
+                HStack(spacing: NekoSpace.md) { workspacePicker; Spacer(minLength: NekoSpace.sm); askActions(tools) }
+                VStack(alignment: .leading, spacing: NekoSpace.sm + NekoSpace.hair) { workspacePicker; askActions(tools) }
             }
             Text(tools.isEmpty ? "Connect a source in Tools & skills to start." : "\(tools.count) connected \(tools.count == 1 ? "source" : "sources") available. Review access before turning on a suggestion.")
                 .font(NekoFont.meta).foregroundStyle(N.text3)
         }
-        .padding(.top, NekoSpace.sm)
         .accessibilityElement(children: .contain)
     }
 
@@ -146,7 +150,7 @@ struct ResponsibilitiesView: View {
             if sending { ProgressView().controlSize(.small).accessibilityLabel("Asking Neko") }
             Button("Suggest from tools", systemImage: "sparkles") { send(Watching.suggestPrompt) }
                 .disabled(sending || model.busy || tools.isEmpty)
-            Button("Ask Neko") { send(ask) }.nekoButton(.primary)
+            Button("Set up watch") { send(ask) }.nekoButton(.primary)
                 .disabled(sending || model.busy || ask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .keyboardShortcut(.return, modifiers: .command)
         }.controlSize(.regular).fixedSize()

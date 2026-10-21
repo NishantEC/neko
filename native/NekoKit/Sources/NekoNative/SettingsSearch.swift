@@ -33,7 +33,8 @@ enum SettingsTarget: String, CaseIterable, Identifiable, Sendable {
 
     var tab: SettingsTab {
         switch self {
-        case .appearance, .launchAtLogin, .activityStatus, .clipboardHistory: .general
+        case .appearance, .launchAtLogin, .activityStatus: .general
+        case .clipboardHistory: .permissions
         case .runtime, .model, .customModel, .budget, .ticketsAtOnce, .startOver: .ai
         case .includedFolders, .addFolder: .search
         case .permissions: .permissions
@@ -87,9 +88,48 @@ enum SettingsTarget: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// One thing Settings search can open: a whole section, or one setting in it.
+enum SettingsHit: Hashable, Identifiable, Sendable {
+    case section(SettingsSection)
+    case setting(SettingsTarget)
+    var id: String {
+        switch self {
+        case .section(let section): "section." + section.rawValue
+        case .setting(let target): "setting." + target.rawValue
+        }
+    }
+}
+
 /// Ranks settings for a query: title prefix, then a word in the title, then a
 /// keyword, then the tab name. Pure, so it is tested without a window.
 enum SettingsSearch {
+    /// Everything Settings can open for a query: its sections (Watches,
+    /// Rulebook, Tools…) and the individual settings inside them. A section
+    /// ranks ahead of a setting with the same score, since it is the broader answer.
+    static func hubResults(for query: String) -> [SettingsHit] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return [] }
+        let sections = SettingsSection.allCases.compactMap { section in
+            score(title: section.title, keywords: section.keywords, needle).map { (SettingsHit.section(section), $0 * 2, section.title) }
+        }
+        let settings = SettingsTarget.allCases.compactMap { target in
+            score(target, needle).map { (SettingsHit.setting(target), $0 * 2 + 1, target.title) }
+        }
+        return (sections + settings)
+            .sorted { $0.1 != $1.1 ? $0.1 < $1.1 : $0.2 < $1.2 }
+            .map(\.0)
+    }
+
+    /// Lower is better; nil means no match.
+    static func score(title: String, keywords: [String], _ needle: String) -> Int? {
+        let title = title.lowercased()
+        if title.hasPrefix(needle) { return 0 }
+        if title.split(whereSeparator: { $0 == " " || $0 == "&" }).contains(where: { $0.hasPrefix(needle) }) { return 1 }
+        if keywords.contains(where: { $0.hasPrefix(needle) }) { return 2 }
+        if title.contains(needle) || keywords.contains(where: { $0.contains(needle) }) { return 3 }
+        return nil
+    }
+
     static func results(for query: String) -> [SettingsTarget] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !needle.isEmpty else { return [] }

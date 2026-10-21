@@ -126,6 +126,7 @@ struct DecisionCard: View {
 struct WorkingStyleView: View {
     @ObservedObject var model: AppModel
     @State private var editor: ManagementDraft?
+    @State private var forgetting: JSONValue?
     private var preferences: [JSONValue] {
         model.snapshot["working_preferences"].array.filter {
             (model.selectedWorkspace == nil || $0["workspace_id"].string == model.selectedWorkspace) && $0["agent_profile_id"].string == profileFor(model)
@@ -173,6 +174,10 @@ struct WorkingStyleView: View {
             }
         }
         .sheet(item: $editor) { WorkingPreferenceEditor(model: model, original: $0.value) }
+        .nekoConfirmDestructive(item: $forgetting, title: { _ in "Forget this guidance?" },
+                                message: "Neko stops applying it. This can’t be undone.", action: "Forget guidance") { item in
+            submit(model, DecisionPresentation.preferenceCommand("ForgetPreference", item))
+        }
     }
     private func preferenceRow(_ item: JSONValue) -> some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -204,7 +209,7 @@ struct WorkingStyleView: View {
                 if item["state"].string != "dismissed" { Button("Dismiss") { submit(model, DecisionPresentation.preferenceCommand("DismissPreference", item)) } }
                 Spacer(minLength: 8)
                 Menu("Guidance actions", systemImage: "ellipsis") {
-                    Button("Forget guidance", role: .destructive) { submit(model, DecisionPresentation.preferenceCommand("ForgetPreference", item)) }
+                    Button("Forget guidance…", role: .destructive) { forgetting = item }
                 }.labelStyle(.iconOnly).fixedSize()
             }.controlSize(.regular).disabled(model.busy)
         }.font(NekoFont.body)

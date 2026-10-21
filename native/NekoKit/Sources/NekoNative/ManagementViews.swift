@@ -75,6 +75,7 @@ struct MemoryView: View {
     @ObservedObject var model: AppModel
     @State private var tab = "memories"
     @State private var draft: ManagementDraft?
+    @State private var forgetting: JSONValue?
     private func memoryToggle(_ title: String, key: String, help: String) -> some View {
         let options = model.snapshot["memory_options"]
         let on = options[key] == .null ? true : options[key].bool
@@ -128,7 +129,7 @@ struct MemoryView: View {
                         NekoItemFooter(meta: "\(entry["kind"].string.capitalized) · \(scopeLabel(entry))") {
                             Button("Edit") { draft = ManagementDraft(value: entry) }
                             Menu("Memory actions", systemImage: "ellipsis") {
-                                Button("Forget memory", role: .destructive) { submit(model, .command("DeleteMemory", ["id": entry["id"]])) }
+                                Button("Forget memory…", role: .destructive) { forgetting = entry }
                             }.labelStyle(.iconOnly).fixedSize()
                         }
                         MemorySourceDetails(model: model, source: entry["source"].string)
@@ -138,6 +139,10 @@ struct MemoryView: View {
         }
         }.sheet(item: $draft) { item in
             ManagementEditor(model: model, kind: .memory, original: item.value, workspace: model.selectedWorkspace, profileID: profileFor(model))
+        }
+        .nekoConfirmDestructive(item: $forgetting, title: { _ in "Forget this memory?" },
+                                message: "Agents stop using it. This can’t be undone.", action: "Forget memory") { entry in
+            submit(model, .command("DeleteMemory", ["id": entry["id"]]))
         }
     }
 }
@@ -180,8 +185,9 @@ func relativeTime(_ ms: Int) -> String {
 struct SchedulesView: View {
     @ObservedObject var model: AppModel
     @State private var draft: ManagementDraft?
+    @State private var deleting: JSONValue?
     var body: some View {
-        NekoPage(title: "Schedules", message: "Recurring briefs and reviews, delivered to All agents.") {
+        NekoPage(title: "Schedules", message: "Recurring briefs and reviews. Each run appears in All tasks.") {
             if model.workspaces.isEmpty { NekoEmptyState("Add a workspace in Workspaces, then create its first schedule here.") }
             ForEach(scopedWorkspaces(model), id: \.element.recordID) { index, workspace in
                 let items = model.snapshot["schedules"].array.filter { $0["workspace_id"].string == workspace.recordID }
@@ -207,7 +213,7 @@ struct SchedulesView: View {
                                 Button("Edit schedule") { draft = ManagementDraft(value: item, workspace: workspace.recordID) }
                                 Spacer()
                                 Menu("Schedule actions", systemImage: "ellipsis") {
-                                    Button("Delete schedule", role: .destructive) { submit(model, nested("Schedules", "Remove", ["id": item["id"]])) }
+                                    Button("Delete schedule…", role: .destructive) { deleting = item }
                                 }.labelStyle(.iconOnly).fixedSize()
                             }
                         }
@@ -216,6 +222,10 @@ struct SchedulesView: View {
             }
         }.sheet(item: $draft) { item in
             ManagementEditor(model: model, kind: .schedule, original: item.value, workspace: item.workspace ?? model.selectedWorkspace, profileID: profileFor(model))
+        }
+        .nekoConfirmDestructive(item: $deleting, title: { "Delete “\($0["name"].string)”?" },
+                                message: "Future runs stop. Tasks it already created stay.", action: "Delete schedule") { item in
+            submit(model, nested("Schedules", "Remove", ["id": item["id"]]))
         }
     }
 }

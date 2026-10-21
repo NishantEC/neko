@@ -41,6 +41,34 @@ enum ToolsPresentation {
         let program = (config["args"].array.last?.string).flatMap { $0.isEmpty ? nil : $0 } ?? config["command"].string
         return "Runs on this Mac · " + URL(fileURLWithPath: program).lastPathComponent
     }
+    /// What a connection's status means, so it wears the matching colour.
+    static func connectionTone(_ connection: JSONValue) -> NekoTone {
+        switch connectionStatus(connection) {
+        case "Sign in needed", "Needs attention": .attention
+        case "Discovering": .running
+        case "Available": .done
+        default: .neutral
+        }
+    }
+    static func connectionSymbol(_ connection: JSONValue) -> String {
+        switch connectionTone(connection) {
+        case .attention: "exclamationmark.triangle"
+        case .running: "arrow.triangle.2.circlepath"
+        case .done: "checkmark"
+        default: connection["enabled"].bool ? "minus.circle" : "pause"
+        }
+    }
+    /// Problems first, then work in progress, then what works, then the rest;
+    /// by name within each, so a broken connection rises to the top.
+    static func sorted(_ connections: [JSONValue]) -> [JSONValue] {
+        func rank(_ tone: NekoTone) -> Int {
+            switch tone { case .attention, .failed: 0; case .running: 1; case .done, .review: 2; case .neutral: 3 }
+        }
+        return connections.sorted {
+            let a = rank(connectionTone($0)), b = rank(connectionTone($1))
+            return a != b ? a < b : $0["label"].string.localizedStandardCompare($1["label"].string) == .orderedAscending
+        }
+    }
     static func toolSummary(_ connection: JSONValue) -> String {
         let count = connection["tools"].array.count
         if count > 0 { return "\(count) \(count == 1 ? "tool" : "tools")" }
@@ -104,7 +132,7 @@ struct ToolsView: View {
                     Text("Connections").tag(0)
                     Text("Skills").tag(1)
                 }
-                .pickerStyle(.segmented).labelsHidden().controlSize(.regular).frame(width: 240)
+                .pickerStyle(.segmented).labelsHidden().controlSize(.regular).fixedSize()
                 Spacer()
                 if busy { ProgressView().controlSize(.small).accessibilityLabel("Updating tools and skills") }
             }

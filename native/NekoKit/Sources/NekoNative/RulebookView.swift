@@ -14,13 +14,12 @@ struct RulebookView: View {
     }
     private var usingDefault: Bool { model.snapshot["rulebook"].string.isEmpty }
     var body: some View {
-        NekoPage(title: "Rulebook", message: "Neko and every agent it hands work to follow these rules: how to engineer a change, how to review one, how to treat this Mac and your repositories. Write them in plain words.") {
+        NekoPage(title: "Rulebook", message: "Neko and every agent it hands work to follow these rules: how to engineer a change, how to review one, how to treat this Mac and your repositories. Write them in plain words. "
+                 + (usingDefault ? "You’re using Neko’s default rules." : "You’re using your own rules.")) {
             EmptyView()
         } content: {
             VStack(alignment: .leading, spacing: NekoSpace.md) {
                 HStack {
-                    Label(usingDefault ? "Using Neko's default rules" : "Using your own rules", systemImage: usingDefault ? "book.closed" : "pencil")
-                        .font(NekoFont.meta).foregroundStyle(N.text3)
                     Spacer()
                     if !usingDefault {
                         Button("Restore default") { save("") }.nekoButton(.quiet).disabled(saving)
@@ -28,13 +27,16 @@ struct RulebookView: View {
                     Button(saving ? "Saving…" : "Save") { save(draft) }
                         .nekoButton(.primary).disabled(saving || draft == saved)
                         .keyboardShortcut("s", modifiers: .command)
+                        .help("Save the rulebook (⌘S)")
                 }
+                // Prose, so it reads as a document rather than code.
                 TextEditor(text: $draft)
-                    .font(NekoFont.mono)
+                    .font(NekoFont.body)
+                    .lineSpacing(NekoSpace.xxs)
                     .scrollContentBackground(.hidden)
-                    .padding(NekoSpace.md)
-                    .frame(minHeight: 420)
-                    .nekoFill(N.panel, radius: NekoRadius.lg)
+                    .padding(NekoSpace.lg)
+                    .frame(minHeight: NekoLayout.editorMinHeight)
+                    .nekoFill(N.panel, radius: NekoRadius.lg, stroke: N.line)
                     .accessibilityLabel("Rulebook")
                 Text("Changes apply to the next agent that starts; agents already running keep the rules they started with.")
                     .font(NekoFont.meta).foregroundStyle(N.text3)
