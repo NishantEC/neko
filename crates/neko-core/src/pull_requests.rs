@@ -205,17 +205,22 @@ pub fn reconcile(task: &mut Task, observed: &Observed, working: bool, admin: boo
         }
         _ => {}
     }
-    // Keys say which head and base a signal was seen on: the same conflict
-    // or failure is acted on once, and a base branch that moves can create
-    // a genuinely new conflict on an unchanged head.
-    let conflict_key = format!("{}:{}", status.head, status.base_head);
+    // A conflict is keyed by head: once it has been handed back at a head,
+    // only a push (a new head) can resolve it, so the base branch moving
+    // again is not news. Keying by base too re-sent one unresolved conflict
+    // every time main moved. A failure is keyed by head and failing checks.
+    let conflict_key = status.head.clone();
     let failure_key = format!("{}:{}", status.head, status.failing.join(","));
     // The first read is a baseline, not news: otherwise turning the watch on
     // would start an agent for every old failure and comment at once. They
-    // show in the Pull requests table; "Re-check all" acts on them.
+    // show in the Pull requests table; "Re-check all" acts on them. A PR that
+    // is clean at its first read and conflicts later is genuinely new, so a
+    // conflict is only baselined when it is (or may be) there already.
     if first_look {
         pr.follow_up.seen_comments.extend(observed.comments.iter().map(|c| c.id.clone()));
-        pr.follow_up.handled_conflict = Some(conflict_key.clone());
+        if matches!(status.merge_state.as_str(), "DIRTY" | "UNKNOWN" | "") {
+            pr.follow_up.handled_conflict = Some(conflict_key.clone());
+        }
         pr.follow_up.handled_failure = Some(failure_key.clone());
     }
     // Only a finished task is handed back or merged; work in progress pushes
@@ -224,7 +229,9 @@ pub fn reconcile(task: &mut Task, observed: &Observed, working: bool, admin: boo
         return Next::Nothing;
     }
     let new: Vec<&Comment> = observed.comments.iter().filter(|c| !pr.follow_up.seen_comments.contains(&c.id)).collect();
-    let conflict = status.merge_state == "DIRTY" && pr.follow_up.handled_conflict.as_deref() != Some(&conflict_key);
+    // Keys stored before 2026-10-21 were "head:base"; only their head counts.
+    let conflict = status.merge_state == "DIRTY"
+        && pr.follow_up.handled_conflict.as_deref().and_then(|k| k.split(':').next()) != Some(conflict_key.as_str());
     let failure = status.checks == "failing" && !status.base_failing
         && pr.follow_up.handled_failure.as_deref() != Some(&failure_key);
 
@@ -591,15 +598,33 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_merge_state_decides_nothing_and_a_moved_base_is_a_new_conflict() {
+    fn a_conflict_is_handed_back_once_per_head_however_often_main_moves() {
         let mut t = task();
         t.pull_request.as_mut().unwrap().status = None;
         assert_eq!(reconcile(&mut t, &view("UNKNOWN", PASS, ""), false, false), Next::Nothing, "first read: baseline");
         assert_eq!(reconcile(&mut t, &view("DIRTY", PASS, ""), false, false), Next::Nothing,
-                   "GitHub finishing its computation is not news: same head and base as the baseline");
+                   "GitHub finishing its computation is not news");
         let mut moved = view("DIRTY", PASS, "");
         moved.status.base_head = "base2".into();
-        assert!(matches!(reconcile(&mut t, &moved, false, false), Next::HandBack(_)), "main moved and now conflicts");
+        assert_eq!(reconcile(&mut t, &moved, false, false), Next::Nothing, "main moving again does not resend it");
+        let mut pushed = view("DIRTY", PASS, "");
+        pushed.status.head = "def".into();
+        assert!(matches!(reconcile(&mut t, &pushed, false, false), Next::HandBack(_)), "a new head that still conflicts is new");
+    }
+
+    #[test]
+    fn a_conflict_handled_under_the_old_key_is_still_handled() {
+        let mut t = task();
+        t.pull_request.as_mut().unwrap().follow_up.handled_conflict = Some("abc:base1".into());
+        assert_eq!(reconcile(&mut t, &view("DIRTY", PASS, ""), false, false), Next::Nothing);
+    }
+
+    #[test]
+    fn a_pr_clean_at_first_read_that_later_conflicts_is_handed_back() {
+        let mut t = task();
+        t.pull_request.as_mut().unwrap().status = None;
+        assert_eq!(reconcile(&mut t, &view("CLEAN", PASS, ""), false, false), Next::Nothing);
+        assert!(matches!(reconcile(&mut t, &view("DIRTY", PASS, ""), false, false), Next::HandBack(_)), "main moved and now it conflicts");
     }
 
     #[test]

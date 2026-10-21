@@ -301,7 +301,9 @@ module doc before changing them:
   them `Bot`, with no `[bot]` suffix) and not the PR's author (Neko and other
   agents comment as that account) — OpenHands resolver, claude-code-action.
   `gh pr view --json reviews` has no inline text; the first version missed it.
-- Each signal once per (head, base) commit, at most `MAX_FOLLOW_UPS` (4) per
+- A conflict once per head (main moving again is not news; keying by base
+  too re-sent athena #4632 each time main moved), a failure once per head and
+  failing checks, at most `MAX_FOLLOW_UPS` (4) per
   PR (Sweep stops at 2); the first read is a baseline (keyed by head and
   base, so GitHub finishing a computation is not news).
 - Hand-back: a note plus `start_when_planned`, reply marked handled (no
