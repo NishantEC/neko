@@ -730,9 +730,17 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             Err(message) => Response::Error { message },
         },
         Request::Workbench(command) => match state.workbench.command(command) {
-            Ok(snapshot) => Response::Workbench(snapshot),
+            Ok(snapshot) => Response::Workbench(with_digest(snapshot)),
             Err(message) => Response::Error { message },
         },
+        Request::WorkbenchIfChanged { digest } => match state.workbench.command(neko_protocol::workbench::Command::Snapshot) {
+            Ok(snapshot) => {
+                let snapshot = with_digest(snapshot);
+                if snapshot.digest == digest { Response::WorkbenchUnchanged { digest } } else { Response::Workbench(snapshot) }
+            }
+            Err(message) => Response::Error { message },
+        },
+        Request::MachineHealth => Response::MachineHealth(neko_core::machine::latest()),
         Request::Ping => Response::Pong,
         Request::AgentModels { refresh } => {
             Response::AgentModels(neko_core::agent_catalog::catalog(refresh))
@@ -2138,4 +2146,20 @@ mod tests {
             "unexpected message: {message}"
         );
     }
+}
+
+/// Fingerprints what the client would see, leaving out the two values that
+/// change on every reading (the heartbeat and the machine's health), so a
+/// poll can learn that nothing changed without receiving the snapshot.
+fn with_digest(mut snapshot: neko_protocol::workbench::Snapshot) -> neko_protocol::workbench::Snapshot {
+    use std::hash::{Hash, Hasher};
+    let (heartbeat, machine) = (snapshot.heartbeat_ms, snapshot.machine.take());
+    snapshot.heartbeat_ms = 0;
+    snapshot.digest.clear();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    serde_json::to_string(&snapshot).unwrap_or_default().hash(&mut hasher);
+    snapshot.digest = format!("{:016x}", hasher.finish());
+    snapshot.heartbeat_ms = heartbeat;
+    snapshot.machine = machine;
+    snapshot
 }

@@ -371,6 +371,11 @@ pub struct Snapshot {
     /// restore it. Never stored.
     #[serde(default)]
     pub rulebook_default: String,
+    /// What this snapshot holds, as a short fingerprint (machine health and
+    /// the heartbeat excluded). Attached by the daemon for readers; a client
+    /// sends it back with `WorkbenchIfChanged`. Never stored.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub digest: String,
     /// The Mac's health as Neko last read it, and what that means for new
     /// work. Attached for readers; never stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]

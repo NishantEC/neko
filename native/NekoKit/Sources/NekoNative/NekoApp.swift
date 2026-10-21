@@ -183,7 +183,7 @@ struct NativeSidebar: View {
             .font(NekoFont.of(.callout))
             .environment(\.defaultMinListRowHeight, 30)
             Divider()
-            MachineStrip(snapshot: model.snapshot)
+            MachineStrip(health: model.machine)
                 .padding(.horizontal, NekoSpace.lg).padding(.top, NekoSpace.md)
             HStack(spacing: NekoSpace.md) {
                 WatchingStatus(connected: model.connected, snapshot: model.snapshot)
