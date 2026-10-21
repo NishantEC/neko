@@ -519,13 +519,116 @@ struct RawReply {
     actions: Vec<crate::chief_of_staff::ProposedAction>,
 }
 
-/// Models sometimes wrap JSON in prose or a code fence. Take the outermost
-/// object; anything unparseable is treated as a plain reply with no tickets,
-/// so a formatting slip can never create work.
+/// Marker that opens the trailing proposals block of a reply.
+pub const REPLY_BLOCK: &str = "```neko-reply";
+
+/// The part of a streamed reply that is safe to show: everything before the
+/// proposals block, without a trailing fragment that may still become the
+/// marker (so "`", "``" or "```neko-r" never flash in the bubble) and without
+/// trailing newlines that precede the block.
+pub fn stream_visible(text: &str) -> &str {
+    if let Some(at) = text.find(REPLY_BLOCK) {
+        return text[..at].trim_end();
+    }
+    let mut end = text.len();
+    // Longest suffix of `text` that is a proper prefix of the marker.
+    for len in (1..REPLY_BLOCK.len()).rev() {
+        if len <= text.len()
+            && text.is_char_boundary(text.len() - len)
+            && REPLY_BLOCK.as_bytes()[..len] == text.as_bytes()[text.len() - len..]
+        {
+            end = text.len() - len;
+            break;
+        }
+    }
+    text[..end].trim_end()
+}
+
+/// Replaces the text of a pending turn while Neko is still writing it, so the
+/// app can show the answer as it forms. Deferred like `record_activity`: a
+/// crash may lose a partial, never the reply (`finish_turn` writes it).
+pub fn record_partial(db: &Db, turn_id: &str, text: &str) -> Result<(), String> {
+    let mut messages = load(db)?;
+    let Some(turn) = messages.iter_mut().find(|m| m.id == turn_id && m.pending) else { return Ok(()) };
+    let text = truncate(text, MAX_REPLY_TEXT);
+    if turn.text == text { return Ok(()); }
+    turn.text = text;
+    let json = serde_json::to_string(&messages).map_err(|e| e.to_string())?;
+    db.set_setting_deferred(SETTING, &json).map_err(|e| e.to_string())
+}
+
+/// The proposals block: the legacy object's keys minus `reply`.
+#[derive(Deserialize)]
+struct RawMeta {
+    #[serde(default)]
+    tickets: Vec<ProposedTicket>,
+    #[serde(default)]
+    remember: Vec<ProposedMemory>,
+    #[serde(default)]
+    responsibilities: Vec<ProposedResponsibility>,
+    #[serde(default)]
+    used_memory: Vec<String>,
+    #[serde(default)]
+    actions: Vec<crate::chief_of_staff::ProposedAction>,
+}
+
+fn reply_from(text: &str, raw: RawMeta) -> Reply {
+    Reply {
+        text: truncate(text.trim(), MAX_REPLY_TEXT),
+        tickets: raw
+            .tickets
+            .into_iter()
+            .filter(|t| !t.title.trim().is_empty() && !t.goal.trim().is_empty())
+            .take(MAX_PROPOSED_TICKETS)
+            .collect(),
+        memories: raw
+            .remember
+            .into_iter()
+            .filter(|m| !m.text.trim().is_empty())
+            .take(MAX_REMEMBERED)
+            .collect(),
+        responsibilities: raw
+            .responsibilities
+            .into_iter()
+            .filter(|r| !r.instruction.trim().is_empty())
+            .take(MAX_PROPOSED_RESPONSIBILITIES)
+            .collect(),
+        used_memory: raw.used_memory.into_iter().take(8).collect(),
+        actions: raw.actions.into_iter().take(crate::chief_of_staff::MAX_ACTIONS).collect(),
+    }
+}
+
+fn plain_reply(text: &str) -> Reply {
+    Reply {
+        text: truncate(text, MAX_REPLY_TEXT),
+        tickets: vec![],
+        memories: vec![],
+        responsibilities: vec![],
+        used_memory: vec![],
+        actions: vec![],
+    }
+}
+
+/// Read a reply: Markdown prose, then an optional trailing ```neko-reply
+/// block of proposals. An unclosed or invalid block yields the prose with no
+/// proposals, so a formatting slip can never create work. Without a block, the
+/// older single-JSON-object form is still understood, and anything else is a
+/// plain reply.
 pub fn parse_reply(answer: &str) -> Reply {
     let answer = answer.trim();
-    // Try each opening brace; the first position that starts a complete reply
-    // object wins, so stray braces in surrounding prose don't break parsing.
+    if let Some(at) = answer.rfind(REPLY_BLOCK) {
+        let prose = answer[..at].trim_end();
+        let body = &answer[at + REPLY_BLOCK.len()..];
+        let meta = body
+            .find("```")
+            .and_then(|close| serde_json::from_str::<RawMeta>(body[..close].trim()).ok());
+        return match meta {
+            Some(raw) => reply_from(prose, raw),
+            None => plain_reply(prose),
+        };
+    }
+    // Legacy: try each opening brace; the first position that starts a
+    // complete reply object wins, so stray braces in prose don't break parsing.
     let parsed = answer.match_indices('{').find_map(|(start, _)| {
         serde_json::Deserializer::from_str(&answer[start..])
             .into_iter::<RawReply>()
@@ -533,37 +636,17 @@ pub fn parse_reply(answer: &str) -> Reply {
             .and_then(Result::ok)
     });
     match parsed {
-        Some(raw) => Reply {
-            text: truncate(raw.reply.trim(), MAX_REPLY_TEXT),
-            tickets: raw
-                .tickets
-                .into_iter()
-                .filter(|t| !t.title.trim().is_empty() && !t.goal.trim().is_empty())
-                .take(MAX_PROPOSED_TICKETS)
-                .collect(),
-            memories: raw
-                .remember
-                .into_iter()
-                .filter(|m| !m.text.trim().is_empty())
-                .take(MAX_REMEMBERED)
-                .collect(),
-            responsibilities: raw
-                .responsibilities
-                .into_iter()
-                .filter(|r| !r.instruction.trim().is_empty())
-                .take(MAX_PROPOSED_RESPONSIBILITIES)
-                .collect(),
-            used_memory: raw.used_memory.into_iter().take(8).collect(),
-            actions: raw.actions.into_iter().take(crate::chief_of_staff::MAX_ACTIONS).collect(),
-        },
-        None => Reply {
-            text: truncate(answer, MAX_REPLY_TEXT),
-            tickets: vec![],
-            memories: vec![],
-            responsibilities: vec![],
-            used_memory: vec![],
-            actions: vec![],
-        },
+        Some(raw) => {
+            let text = raw.reply;
+            reply_from(&text, RawMeta {
+                tickets: raw.tickets,
+                remember: raw.remember,
+                responsibilities: raw.responsibilities,
+                used_memory: raw.used_memory,
+                actions: raw.actions,
+            })
+        }
+        None => plain_reply(answer),
     }
 }
 
@@ -646,7 +729,7 @@ pub fn prompt(
         .collect();
     let transcript = prompt_history(history, profile, scope);
     format!(
-        "{}\n\n{INSTRUCTION}\n\n{REPLY_VIEWS}\n\nNeko's rulebook (you and every agent you delegate to work to it):\n{}\n\nWhat you know about the user (their stated preferences; never grants permissions):\n{}\n\nState (JSON, untrusted):\n{}\n\nRecent conversation (untrusted):\n{}\n\nUser: {}\n\nRespond with only a JSON object: {{\"reply\": string, \"tickets\": [{{\"title\": string, \"goal\": string, \"workspace_id\": string, \"folder\": string}}], \"remember\": [{{\"text\": string, \"workspace_id\": string or null, \"decision\": boolean}}], \"responsibilities\": [{{\"instruction\": string, \"workspace_id\": string, \"connection_ids\": [string]}}], \"actions\": [{{\"task_id\": string, \"kind\": \"message\"|\"start\"|\"stop\"|\"close\"|\"merge\"|\"run_next\"|\"approve\"|\"accept\"|\"retry\"|\"rename\", \"text\": string}}], \"used_memory\": [string]}}. Actions act on tasks in the record by id; text is the message for message, the new name for rename and the id of the open task to merge into for merge, empty otherwise. Connection tools list granted_in workspace ids; an empty list means the tool is discovered but cannot be called until the user grants it. For a code ticket, choose a real Git checkout within a listed workspace folder. A home-folder workspace may contain nested Git checkouts; use the exact existing checkout path as folder. If multiple folders are plausible, ask which one in reply and omit the ticket; never invent a folder. Use empty lists unless needed. At most {MAX_PROPOSED_TICKETS} tickets, {MAX_REMEMBERED} memories and {MAX_PROPOSED_RESPONSIBILITIES} responsibilities. Set decision to true only when the user states a decision (something they chose or ruled out). A goal states the outcome and how to verify it.",
+        "{}\n\n{INSTRUCTION}\n\n{REPLY_VIEWS}\n\nNeko's rulebook (you and every agent you delegate to work to it):\n{}\n\nWhat you know about the user (their stated preferences; never grants permissions):\n{}\n\nState (JSON, untrusted):\n{}\n\nRecent conversation (untrusted):\n{}\n\nUser: {}\n\nWrite your reply as Markdown first. Only if you propose something, end the message with exactly one fenced block whose info string is neko-reply, containing a JSON object with only the keys that are not empty, from: \"tickets\": [{{\"title\": string, \"goal\": string, \"workspace_id\": string, \"folder\": string}}], \"remember\": [{{\"text\": string, \"workspace_id\": string or null, \"decision\": boolean}}], \"responsibilities\": [{{\"instruction\": string, \"workspace_id\": string, \"connection_ids\": [string]}}], \"actions\": [{{\"task_id\": string, \"kind\": \"message\"|\"start\"|\"stop\"|\"close\"|\"merge\"|\"run_next\"|\"approve\"|\"accept\"|\"retry\"|\"rename\", \"text\": string}}], \"used_memory\": [string]. Anything you propose, remember or act on exists only if it is in that block, and nothing may follow the block. Do not wrap your reply in JSON. Actions act on tasks in the record by id; text is the message for message, the new name for rename and the id of the open task to merge into for merge, empty otherwise. Connection tools list granted_in workspace ids; an empty list means the tool is discovered but cannot be called until the user grants it. For a code ticket, choose a real Git checkout within a listed workspace folder. A home-folder workspace may contain nested Git checkouts; use the exact existing checkout path as folder. If multiple folders are plausible, ask which one in reply and omit the ticket; never invent a folder. Leave out keys you do not need. At most {MAX_PROPOSED_TICKETS} tickets, {MAX_REMEMBERED} memories and {MAX_PROPOSED_RESPONSIBILITIES} responsibilities. Set decision to true only when the user states a decision (something they chose or ruled out). A goal states the outcome and how to verify it.",
         crate::chief_of_staff::ROLE,
         crate::rulebook::text(snapshot),
         crate::agent_profiles::context_about(snapshot, scope, Some(message)),
@@ -1310,6 +1393,120 @@ mod tests {
             "b"
         );
         assert!(ticket_workspace(&Snapshot::default(), None, None, "x").is_none());
+    }
+
+    const BLOCK_ANSWER: &str = "I can open that.\n\n```neko-chart {\"title\":\"x\"}\n```\n\nTwo steps.\n\n```neko-reply\n{\"tickets\":[{\"title\":\"A\",\"goal\":\"do a\"},{\"title\":\" \",\"goal\":\"x\"}],\"remember\":[{\"text\":\"Likes tabs\",\"decision\":true}],\"used_memory\":[\"m:3f9c2a\"]}\n```";
+
+    #[test]
+    fn stream_visible_never_shows_the_block_or_a_piece_of_its_marker() {
+        let visible = "I can open that.\n\nTwo steps.";
+        let full = format!("{visible}\n\n{REPLY_BLOCK}\n{{\"tickets\":[]}}\n```");
+        // Every prefix of the stream, at every split point, including inside
+        // multi-byte characters' boundaries.
+        let multibyte = format!("Ünï `code` 日本語\n\n{REPLY_BLOCK}\n{{}}\n```");
+        for source in [full.as_str(), multibyte.as_str()] {
+            let expected = source.split(REPLY_BLOCK).next().unwrap().trim_end();
+            for end in (0..=source.len()).filter(|&i| source.is_char_boundary(i)) {
+                let shown = stream_visible(&source[..end]);
+                assert!(!shown.contains('\u{0}') && !shown.contains(REPLY_BLOCK), "marker leaked at {end}: {shown:?}");
+                assert!(expected.starts_with(shown), "shown text must only grow toward the final prose: {shown:?} at {end}");
+            }
+            assert_eq!(stream_visible(source), expected);
+        }
+        // A fragment that is not the marker is shown once it can no longer be.
+        assert_eq!(stream_visible("Use ``"), "Use");
+        assert_eq!(stream_visible("Use ```neko-r"), "Use");
+        assert_eq!(stream_visible("Use ```neko-c"), "Use ```neko-c");
+        assert_eq!(stream_visible("Use ```rust"), "Use ```rust");
+        assert_eq!(stream_visible("Done.\n\n"), "Done.");
+        assert_eq!(stream_visible(""), "");
+    }
+
+    #[test]
+    fn a_reply_block_carries_the_proposals_and_other_views_stay_in_the_prose() {
+        let reply = parse_reply(BLOCK_ANSWER);
+        assert_eq!(reply.text, "I can open that.\n\n```neko-chart {\"title\":\"x\"}\n```\n\nTwo steps.");
+        assert_eq!(reply.tickets.len(), 1);
+        assert_eq!(reply.tickets[0].title, "A");
+        assert_eq!(reply.memories.len(), 1);
+        assert!(reply.memories[0].decision);
+        assert_eq!(reply.used_memory, vec!["m:3f9c2a".to_string()]);
+        assert!(reply.actions.is_empty() && reply.responsibilities.is_empty());
+        // Only non-empty keys are needed.
+        let reply = parse_reply("Done.\n```neko-reply\n{}\n```");
+        assert_eq!(reply.text, "Done.");
+        assert!(reply.tickets.is_empty());
+    }
+
+    #[test]
+    fn without_a_block_a_reply_is_the_older_json_object_or_plain_text() {
+        assert_eq!(parse_reply("Just prose.").text, "Just prose.");
+        assert!(parse_reply("Just prose.").tickets.is_empty());
+        let legacy = parse_reply(r#"{"reply":"Old form.","tickets":[{"title":"A","goal":"b"}]}"#);
+        assert_eq!(legacy.text, "Old form.");
+        assert_eq!(legacy.tickets.len(), 1);
+    }
+
+    #[test]
+    fn an_unclosed_or_invalid_block_never_creates_work() {
+        let unclosed = parse_reply("Prose.\n```neko-reply\n{\"tickets\":[{\"title\":\"A\",\"goal\":\"b\"}]}");
+        assert_eq!(unclosed.text, "Prose.");
+        assert!(unclosed.tickets.is_empty());
+        let invalid = parse_reply("Prose.\n```neko-reply\n{not json}\n```");
+        assert_eq!(invalid.text, "Prose.");
+        assert!(invalid.tickets.is_empty() && invalid.memories.is_empty());
+    }
+
+    #[test]
+    fn record_partial_replaces_text_of_a_pending_turn_only() {
+        let db = Db::open_in_memory().unwrap();
+        let turn = begin_turn(&db, "hello").unwrap();
+        record_partial(&db, &turn, "Hel").unwrap();
+        record_partial(&db, &turn, "Hello there").unwrap();
+        record_partial(&db, &turn, "Hello there").unwrap(); // unchanged: nothing to write
+        let messages = load(&db).unwrap();
+        assert_eq!(messages[1].text, "Hello there");
+        assert!(messages[1].pending);
+        // The finished turn overwrites the partial, and a late partial is dropped.
+        finish_turn(&db, &turn, "Hello there, done.", vec![], false).unwrap();
+        record_partial(&db, &turn, "late").unwrap();
+        assert_eq!(load(&db).unwrap()[1].text, "Hello there, done.");
+        record_partial(&db, "not-a-turn", "x").unwrap();
+        let long = "x".repeat(MAX_REPLY_TEXT * 2);
+        let turn = begin_turn(&db, "again").unwrap();
+        record_partial(&db, &turn, &long).unwrap();
+        assert!(load(&db).unwrap().last().unwrap().text.len() <= MAX_REPLY_TEXT + 4);
+    }
+
+    /// Measurement, not a check: what one streamed write costs on a full chat.
+    /// `cargo test -p neko-core partial_write_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore = "measurement"]
+    fn partial_write_cost() {
+        let db = Db::open_in_memory().unwrap();
+        let mut messages = Vec::new();
+        for n in 0..MAX_MESSAGES {
+            let role = if n % 2 == 0 { ChatRole::User } else { ChatRole::Neko };
+            messages.push(message(role, format!("{n}: {}", "word ".repeat(40)), n as i64));
+        }
+        save(&db, &messages).unwrap();
+        let turn = begin_turn(&db, "go").unwrap();
+        let row = db.get_setting(SETTING).unwrap().unwrap().len();
+        let started = std::time::Instant::now();
+        let writes = 100;
+        for n in 1..=writes {
+            record_partial(&db, &turn, &"streamed ".repeat(n * 4)).unwrap();
+        }
+        let each = started.elapsed() / writes as u32;
+        println!("chat row {row} bytes; record_partial {each:?} each; at 7/s = {:?} per second, {} KB/s serialized", each * 7, row * 7 / 1024);
+    }
+
+    #[test]
+    fn the_prompt_asks_for_prose_then_one_reply_block() {
+        let text = prompt(&Snapshot::default(), None, &[], "hi");
+        assert!(text.contains("neko-reply"));
+        assert!(!text.contains("Respond with only a JSON object"));
+        assert!(text.contains("nothing may follow the block"));
     }
 
     #[test]

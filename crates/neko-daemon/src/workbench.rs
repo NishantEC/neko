@@ -5,7 +5,7 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[path = "workbench/import.rs"]
 mod import;
 #[path = "workbench/memory_learning.rs"]
@@ -1619,13 +1619,36 @@ fn converse(
         timeout: Duration::from_secs(900),
         runtime: snapshot.agent_runtime.clone(),
     };
-    // Each command Neko runs shows under the pending reply as it finishes.
+    // Each command Neko runs shows under the pending reply as it finishes,
+    // and the reply text shows as it is written. Text is written to the turn
+    // at most every `CHAT_PARTIAL_INTERVAL`; any later event flushes a
+    // trailing piece, and the finished turn overwrites it with the answer.
+    let mut streamed = String::new();
+    let mut streamed_dirty = false;
+    let mut streamed_at: Option<Instant> = None;
     let mut progress = |event: String| {
-        if let Some(line) = neko_chat::activity_line(&event) {
+        if event == native_runner::TEXT_RESET_EVENT {
+            streamed.clear();
+            streamed_dirty = true;
+        } else if let Some(delta) = event.strip_prefix(native_runner::TEXT_DELTA_EVENT) {
+            // The turn keeps at most MAX_REPLY_TEXT, so a long reply need not be buffered whole.
+            if streamed.len() < 4 * neko_chat::MAX_REPLY_TEXT {
+                streamed.push_str(delta);
+                streamed_dirty = true;
+            }
+        } else if let Some(line) = neko_chat::activity_line(&event) {
             let guard = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Err(error) = neko_chat::record_activity(&guard, pending, line) {
                 eprintln!("neko chat: could not record activity: {error}");
             }
+        }
+        if streamed_dirty && streamed_at.is_none_or(|at| at.elapsed() >= CHAT_PARTIAL_INTERVAL) {
+            let guard = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Err(error) = neko_chat::record_partial(&guard, pending, neko_chat::stream_visible(&streamed)) {
+                eprintln!("neko chat: could not record partial reply: {error}");
+            }
+            streamed_at = Some(Instant::now());
+            streamed_dirty = false;
         }
     };
     let result = (|| {
@@ -1662,9 +1685,9 @@ fn converse(
                 sources_through_bridge: false,
             };
             // Lease drop also cancels any approval waiter and in-flight call.
-            native_runner::run_with_bridge(&spec, &bridge, cancel, &mut progress)
+            native_runner::run_with_bridge_streaming(&spec, &bridge, cancel, &mut progress)
         } else {
-            native_runner::run(&spec, cancel, &mut progress)
+            native_runner::run_streaming(&spec, cancel, &mut progress)
         }
     })();
     if let Some(dir) = &scratch {
@@ -2150,6 +2173,9 @@ fn propose_ticket_skill(
 
 /// The planner's closing `QUESTION:` line, when it needs an answer first.
 /// How a ticket works by default: like a developer handed the issue.
+/// Least time between two writes of a streaming chat reply to its turn.
+const CHAT_PARTIAL_INTERVAL: Duration = Duration::from_millis(150);
+
 const DIRECT_WORK: &str = "Work on this ticket directly, as a developer would: investigate, change the code in this worktree and verify it. There is no separate planning step and no approval to wait for. Stop before changing anything only when the work is critical (production data or migrations, authentication or security, payments, deleting data, large irreversible rewrites): then reply with your plan and end with a final line `NEEDS_APPROVAL: <why>`. If after investigating there is nothing to change (not a real bug, already fixed, not actionable), end with a final line `NO_CHANGE: <why>`. If a decision only the user can make blocks you, end with a final line `QUESTION: <question>`. Otherwise finish the work.";
 
 enum DirectStop {
