@@ -439,37 +439,35 @@ private struct PaletteView: View {
     @FocusState private var searchFocused: Bool
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: NekoSpace.md) {
                 if state.mode != nil { Button { state.leaveMode() } label: { Image(systemName: "chevron.left") }.buttonStyle(.plain).accessibilityLabel("Back to search") }
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
                 TextField(state.mode.map { "Search \($0)…" } ?? "Search apps, files, and commands…", text: $state.query)
-                    .textFieldStyle(.plain).font(NekoFont.of(.title)).focused($searchFocused)
-                if state.loading { ProgressView().controlSize(.small) }
-            }.padding(22)
+                    .textFieldStyle(.plain).font(NekoFont.of(.subtitle)).focused($searchFocused)
+                if state.loading { ProgressView().controlSize(.small).accessibilityLabel("Searching") }
+            }
+            .padding(.horizontal, NekoSpace.xl).padding(.vertical, NekoSpace.lg)
             Divider()
             HStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 3) {
+                        LazyVStack(spacing: NekoSpace.hair) {
                             ForEach(Array(state.rows.enumerated()), id: \.offset) { index, row in
                                 if index == 0 || state.rows[index - 1]["section_label"] != row["section_label"] {
-                                    Text(row["section_label"].string).font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.top, 8)
+                                    Text(row["section_label"].string).font(NekoFont.label).foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, NekoSpace.md).padding(.top, NekoSpace.md).padding(.bottom, NekoSpace.xxs)
+                                        .accessibilityAddTraits(.isHeader)
                                 }
-                                Button { state.selected = index; state.activateSelection() } label: {
-                                    HStack(spacing: 12) {
-                                        PaletteIcon(icon: row["icon"]).frame(width: 24, height: 24)
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(row["title"].string).lineLimit(1)
-                                            if !row["subtitle"].string.isEmpty { Text(row["subtitle"].string).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                                            if row["meter"] != .null { PaletteMeter(meter: row["meter"]) }
-                                        }
-                                        Spacer(minLength: 0)
-                                        Text(row["accessory"].string).font(.caption).foregroundStyle(.secondary)
-                                    }.padding(10).contentShape(Rectangle()).background(index == state.selected ? state.theme.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.md))
-                                }.buttonStyle(.plain).id(index)
+                                Button { state.selected = index; state.activateSelection() } label: { rowView(row, selected: index == state.selected) }
+                                    .buttonStyle(.plain).id(index)
+                                    .accessibilityLabel(rowLabel(row))
+                                    .accessibilityAddTraits(index == state.selected ? .isSelected : [])
                             }
-                            if state.rows.isEmpty, !state.loading { Text("No results").foregroundStyle(.secondary).padding(32) }
-                        }.padding(10)
+                            if state.rows.isEmpty, !state.loading, !state.query.isEmpty {
+                                NekoEmptyState(reason: .noMatches(state.query), block: true)
+                            }
+                        }.padding(NekoSpace.sm)
                     }.onChange(of: state.selected) { _, value in proxy.scrollTo(value) }
                 }
                 if state.mode != nil, PalettePresentation.hasDetail(state.selection) {
@@ -477,18 +475,15 @@ private struct PaletteView: View {
                     PaletteDetail(row: state.selection).frame(width: 330)
                 }
             }
-            if let error = state.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled).padding(10).frame(maxWidth: .infinity, alignment: .leading) }
+            if let error = state.error {
+                Label(error, systemImage: "exclamationmark.triangle.fill").font(NekoFont.caption).foregroundStyle(NekoStyle.coral)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, NekoSpace.md).padding(.vertical, NekoSpace.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Divider()
-            HStack {
-                Menu {
-                    Button("Open workspace") { PaletteController.shared.dismiss(); NotificationCenter.default.post(name: .nekoOpenWorkspace, object: nil) }
-                    Button("Preferences…") { PaletteController.shared.dismiss(); NotificationCenter.default.post(name: .nekoOpenPreferences, object: nil) }
-                } label: { Label("Neko", systemImage: "sparkle") }.menuStyle(.borderlessButton).fixedSize()
-                Spacer()
-                Text(state.selection["action_label"].string).font(.caption).foregroundStyle(.secondary)
-                Button("Actions ⌘K") { state.showActions.toggle() }.disabled(state.selection["actions"].array.isEmpty)
-            }.padding(12)
-        }.frame(width: 760, height: 500).foregroundStyle(state.theme.text)
+            footer
+        }.frame(width: NekoLayout.paletteWidth, height: NekoLayout.paletteHeight).foregroundStyle(state.theme.text)
             .background(state.theme.surface.opacity(state.theme.alpha))
             .liquidGlass(radius: NekoRadius.xl).clipShape(RoundedRectangle(cornerRadius: NekoRadius.xl, style: .continuous))
             .preferredColorScheme(state.theme.light ? .light : .dark)
@@ -498,39 +493,107 @@ private struct PaletteView: View {
                 if state.showActions {
                     ZStack(alignment: .bottomTrailing) {
                         Color.clear.contentShape(Rectangle()).onTapGesture { state.showActions = false }
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: NekoSpace.xxs) {
                             ForEach(Array(state.selection["actions"].array.enumerated()), id: \.offset) { index, action in
                                 Button(role: action["destructive"].bool ? .destructive : nil) { state.activateSelection(action: action) } label: {
-                                    Text(action["label"].string).frame(maxWidth: .infinity, alignment: .leading).padding(6).background(state.selectedAction == index ? state.theme.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.sm))
-                                }.buttonStyle(.plain)
+                                    Text(action["label"].string).frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, NekoSpace.xs).padding(.vertical, NekoSpace.xxs)
+                                        .background(state.selectedAction == index ? state.theme.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.sm))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(state.selectedAction == index ? .isSelected : [])
                             }
                             Divider()
                             Button("Close actions") { state.showActions = false }.keyboardShortcut(.escape, modifiers: [])
-                        }.padding(NekoSpace.md).frame(width: 210).liquidGlass(radius: NekoRadius.lg).shadow(radius: 12).padding(.trailing, NekoSpace.md).padding(.bottom, 50)
+                        }.padding(NekoSpace.md).frame(width: 210).liquidGlass(radius: NekoRadius.lg)
+                            .padding(.trailing, NekoSpace.md).padding(.bottom, NekoLayout.paletteBarHeight + NekoSpace.sm)
                     }
                 }
             }
-            .alert("Delete this item?", isPresented: Binding(get: { state.pendingAction != nil }, set: { if !$0 { state.pendingAction = nil } })) {
-                Button("Delete", role: .destructive) { state.confirmDestructiveAction() }
+            .alert("Delete from clipboard history?", isPresented: Binding(get: { state.pendingAction != nil }, set: { if !$0 { state.pendingAction = nil } })) {
+                Button("Delete item", role: .destructive) { state.confirmDestructiveAction() }
                 Button("Cancel", role: .cancel) { state.pendingAction = nil }
             } message: { Text("This removes the item from clipboard history permanently.") }
+    }
+
+    /// One line, as Raycast lays it out: icon, title, the subtitle inline
+    /// after it, and the accessory on the right. A meter adds its own line.
+    private func rowView(_ row: JSONValue, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: NekoSpace.xxs) {
+            HStack(spacing: NekoSpace.md) {
+                PaletteIcon(icon: row["icon"]).frame(width: NekoLayout.listGlyphSlot, height: NekoLayout.listGlyphSlot).accessibilityHidden(true)
+                HStack(alignment: .firstTextBaseline, spacing: NekoSpace.sm) {
+                    Text(row["title"].string).font(NekoFont.of(.callout)).lineLimit(1)
+                    if !row["subtitle"].string.isEmpty {
+                        Text(row["subtitle"].string).font(NekoFont.meta).foregroundStyle(.secondary).lineLimit(1).layoutPriority(-1)
+                    }
+                }
+                Spacer(minLength: 0)
+                Text(row["accessory"].string).font(NekoFont.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            if row["meter"] != .null { PaletteMeter(meter: row["meter"]).padding(.leading, NekoLayout.listGlyphSlot + NekoSpace.md) }
+        }
+        .padding(.horizontal, NekoSpace.md).padding(.vertical, NekoSpace.sm)
+        .frame(minHeight: NekoLayout.paletteRowHeight)
+        .contentShape(Rectangle())
+        .background(selected ? state.theme.selected : .clear, in: RoundedRectangle(cornerRadius: NekoRadius.sm, style: .continuous))
+        .help([row["title"].string, row["subtitle"].string].filter { !$0.isEmpty }.joined(separator: " — "))
+    }
+
+    /// The whole row for VoiceOver, including the subtitle that truncates first.
+    private func rowLabel(_ row: JSONValue) -> String {
+        [row["title"].string, row["subtitle"].string, row["accessory"].string].filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    /// The menu on the left; on the right, what Return does and how to see more.
+    private var footer: some View {
+        HStack(spacing: NekoSpace.sm) {
+            Menu {
+                Button("Open workspace") { PaletteController.shared.dismiss(); NotificationCenter.default.post(name: .nekoOpenWorkspace, object: nil) }
+                Button("Preferences…") { PaletteController.shared.dismiss(); NotificationCenter.default.post(name: .nekoOpenPreferences, object: nil) }
+            } label: {
+                Label { Text("Neko") } icon: { BrandMark(size: NekoSpace.lg) }
+            }.menuStyle(.borderlessButton).fixedSize()
+            Spacer()
+            let verb = state.selection["action_label"].string
+            if !verb.isEmpty {
+                HStack(spacing: NekoSpace.xs) {
+                    Text(verb).font(NekoFont.caption).foregroundStyle(.secondary)
+                    NekoKeycap("↵")
+                }
+                .accessibilityElement(children: .ignore).accessibilityLabel("\(verb), Return")
+                Hairline(vertical: true).frame(height: NekoSpace.lg)
+            }
+            Button { state.showActions.toggle() } label: {
+                HStack(spacing: NekoSpace.xxs) {
+                    Text("Actions").font(NekoFont.caption)
+                    NekoKeycap("⌘")
+                    NekoKeycap("K")
+                }
+            }
+            .nekoButton(.quiet)
+            .disabled(state.selection["actions"].array.isEmpty)
+            .accessibilityLabel("Actions, Command K")
+        }
+        .padding(.horizontal, NekoSpace.md)
+        .frame(height: NekoLayout.paletteBarHeight)
     }
 }
 
 private struct PaletteMeter: View {
     let meter: JSONValue
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: NekoSpace.xxs) {
             ProgressView(value: PalettePresentation.meterFraction(meter)).accessibilityLabel("Usage")
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: NekoSpace.md) {
                 ForEach(Array(meter["stats"].array.enumerated()), id: \.offset) { _, stat in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(stat["label"].string).font(.caption2).foregroundStyle(.secondary)
-                        Text(stat["value"].string).font(.caption.weight(.medium))
+                    VStack(alignment: .leading, spacing: NekoSpace.hair) {
+                        Text(stat["label"].string).font(NekoFont.of(.small)).foregroundStyle(.secondary)
+                        Text(stat["value"].string).font(NekoFont.of(.caption, weight: .medium))
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-        }.padding(.top, 4)
+        }.padding(.top, NekoSpace.xxs)
     }
 }
 
@@ -538,8 +601,8 @@ private struct PaletteDetail: View {
     let row: JSONValue
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if !row["speaker"].string.isEmpty { Text(row["speaker"].string.capitalized).font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+            VStack(alignment: .leading, spacing: NekoSpace.md) {
+                if !row["speaker"].string.isEmpty { Text(row["speaker"].string.capitalized).font(NekoFont.of(.caption, weight: .semibold)).foregroundStyle(.secondary) }
                 let preview = PalettePresentation.preview(row)
                 if row["preview_markdown"].bool {
                     Text((try? AttributedString(markdown: preview, options: .init(interpretedSyntax: .full))) ?? AttributedString(preview)).textSelection(.enabled)
@@ -555,10 +618,10 @@ private struct PaletteDetail: View {
                     if !row["badge"].string.isEmpty { LabeledContent("Content Type", value: row["badge"].string.capitalized) }
                     if !row["accessory"].string.isEmpty { LabeledContent("Copied", value: row["accessory"].string) }
                 } else {
-                    if !row["source"].string.isEmpty { Divider(); Text("Source: " + row["source"].string).font(.caption).foregroundStyle(.secondary) }
-                    if !row["badge"].string.isEmpty { Text(row["badge"].string).font(.caption2).foregroundStyle(.secondary) }
+                    if !row["source"].string.isEmpty { Divider(); Text("Source: " + row["source"].string).font(NekoFont.caption).foregroundStyle(.secondary) }
+                    if !row["badge"].string.isEmpty { Text(row["badge"].string).font(NekoFont.of(.small)).foregroundStyle(.secondary) }
                 }
-            }.frame(maxWidth: .infinity, alignment: .topLeading).padding(18)
+            }.frame(maxWidth: .infinity, alignment: .topLeading).padding(NekoSpace.lg)
         }
     }
 }
