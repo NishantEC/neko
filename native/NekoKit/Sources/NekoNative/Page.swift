@@ -8,6 +8,8 @@ import Foundation
 /// state keep working.
 enum Page: String, CaseIterable, Identifiable, Sendable {
     case home = "Home"
+    /// The same Home chat, served by the daemon as a web page (trial).
+    case homeWeb = "Home (web)"
     case tickets = "Tickets"
     case pullRequests = "Pull requests"
     case workspaces = "Workspaces"
@@ -41,6 +43,7 @@ enum Page: String, CaseIterable, Identifiable, Sendable {
     var symbol: String {
         switch self {
         case .home: "house"
+        case .homeWeb: "globe"
         case .tickets: "checklist"
         case .pullRequests: "arrow.triangle.pull"
         case .workspaces: "square.stack.3d.up"

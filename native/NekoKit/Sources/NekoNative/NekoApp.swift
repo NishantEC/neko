@@ -137,6 +137,7 @@ struct WorkspaceView: View {
     @ViewBuilder private func content(for page: Page) -> some View {
         switch page {
         case .home: TodayView(model: model)
+        case .homeWeb: WebHomeView()
         case .tickets: TicketsView(model: model)
         case .pullRequests: PullRequestsView(model: model)
         case .workspaces, .watching, .tools, .memory, .profiles, .schedules, .settings:
@@ -187,6 +188,7 @@ struct NativeSidebar: View {
             List(selection: $selection) {
                 Section {
                     row(.home, title: "Home", symbol: "house", badge: 0)
+                    row(.homeWeb, title: "Home (web)", symbol: "globe", badge: 0)
                     row(.tickets, title: "All tasks", symbol: "checklist", badge: counts.waitingOnYou)
                     row(.pullRequests, title: "Pull requests", symbol: "arrow.triangle.pull",
                         badge: PullRequestRow.rows(snapshot: model.snapshot, tasks: model.tasks).filter(\.verdict.isDecision).count)
