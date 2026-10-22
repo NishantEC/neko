@@ -250,3 +250,40 @@ with `NEKO_WEB_ONBOARDING=1`; `shell.mjs` resets it through `SetOnboardingComple
 test daemon runs no model, so `shell.mjs` answers `AgentModels` and a pinned
 `SetConversationRuntime` itself (the real daemon runs a model check first) and patches
 the snapshot to show tasks in every stage and a Mac under load; everything else is real.
+
+## Spacing, measured (2026-10-22)
+
+Source: hushbacks `origin/main` at `da20dfaeb` (apps/spa, packages/ui; the local
+checkout was 50 commits behind and is not the reference). Colours stay Neko's;
+headings stay plain sans.
+
+**The finding.** The primitives are the same (`button` default is `h-9 sm:h-8` in
+both), but hushbacks' app shell is `<SidebarProvider className="sky …">` and
+`components/Sky/sky-materials.css` re-sizes every control inside it. Read from the
+primitives alone, the two look alike; in the running app hushbacks' controls are
+30-40% taller. Neko had no equivalent layer, so it rendered the raw 32/28/24 px sizes.
+
+| Thing | hushbacks (running app) | Neko before |
+| --- | --- | --- |
+| Button `default` / `lg` | **40 px**, 16 px side padding (`--sky-control-height`) | 32 px, 11 px padding |
+| Button `sm` | **36 px**, 14 px padding (`--sky-row-height`) | 28 px, 9 px padding |
+| Button `xs` | **32 px**, 10 px padding | 24 px, 7 px padding |
+| Button `xl` | 44 px, 18 px padding | 40 px |
+| Icon button `icon` / `icon-sm` / `icon-xs` | 40 / 36 / 28 px | 32 / 28 / 24 px |
+| Input, select trigger | 40 px, 14 px padding; `sm` trigger 36 px | 40 px; `sm` trigger 32 px |
+| Tabs list / tab | 40 px / 34 px, 14 px tab padding | segmented chips ~32 px |
+| Sidebar nav item | **40 px** (`sky-control`), `px-3`, `gap-3`, 16 px icon, `text-sm` | 32 px, `p-2`, `gap-2` |
+| Sidebar recent rows | 36 px (`sky-row`), `px-3` | 32 px |
+| Sidebar header / footer | `px-3 pt-3 pb-2`, 36 px logo row | `px-4 pt-4 pb-3` |
+| Page column (`PageContainer`) | `max-w-[1200px]`, `px-6 md:px-10`, `pt-12 md:pt-16 pb-24` | `max-w-3xl`-ish, `px-6 py-10` |
+| Settings panel row | `min-h-14` (56 px), `px-6 py-3`; panel header `px-6 pt-5 pb-4` | `px-5 py-4` |
+| Settings stack gap | 12 px between panels, `space-y-8` between sections | `gap-8` / `gap-4` |
+| Chat composer | `p-1.5`, `rounded-2xl`, textarea `min-h-15` (60 px), 15 px text, send button 36 px | `min-h-6` textarea, 14 px, 32 px send |
+| Chat turn rhythm | `gap-2` inside a turn, 16 px+ between turns, user bubble `px-4 py-3` | already `mt-7`/`mt-10`, `px-4 py-3` (no change needed) |
+| Tool/step line | `py-1`, 12.5 px | `min-h-7`, 12 px (no change needed) |
+| Dialog / popover radius | 26 / 16 px (Sky) | 14-16 px (left alone: shape, not spacing) |
+| Body | Inter, browser 16 px base, `text-sm` (14) used per component | 14 px base, 1.625 line height (left alone) |
+
+What was deliberately not copied: the pill radius (24 px) and squircle corners, the
+sky gradient/glass surfaces, and `text-[56px]` hero headings. Those are look, not
+spacing, and the owner asked for spacing and density only.
