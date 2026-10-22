@@ -13,11 +13,12 @@ import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, Comma
 import { Kbd } from "@/ui/kbd";
 import { Keyboard } from "@phosphor-icons/react";
 import {
-  ArrowRight, ArrowsClockwise, CheckCircle, CircleHalf, Copy, Moon, Plus, PuzzlePiece, Rocket, Sun, Stop,
+  ArrowRight, ArrowsClockwise, CheckCircle, CircleHalf, Copy, Moon, Plus, Rocket, Sun, Stop,
 } from "@/ui/icons";
-import { pages } from "@/pages";
+import "@/pages";
+import { usePages } from "@/registry";
 import { navigate } from "@/router";
-import { refreshPlugins, usePlugins } from "@/plugins";
+import { refreshPlugins } from "@/plugins";
 import { setTheme } from "@/theme";
 import { useCommands, type PaletteCommand } from "@/shell/commands";
 import { approveFirstDecision, copyText, newTask, stopAllWork } from "@/shell/actions";
@@ -37,7 +38,7 @@ const STAGE_DOT: Record<string, string> = {
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
-  const { pages: pluginPages } = usePlugins();
+  const pages = usePages();
   const registered = useCommands();
   const { snapshot } = useWorkbench();
   const status = useShellStatus();
@@ -115,8 +116,8 @@ export function CommandPalette() {
           <CommandGroup heading="Actions">
             {shellActions.map(item)}
             {(groups.find(([heading]) => heading === "Actions")?.[1] ?? []).map(item)}
-            <CommandItem value="Reload plugins refresh" keywords={["plugins"]} onSelect={run(() => void refreshPlugins())}>
-              <ArrowsClockwise /> Reload plugins
+            <CommandItem value="Reload customisations plugins refresh" keywords={["plugins", "pages", "css"]} onSelect={run(() => void refreshPlugins())}>
+              <ArrowsClockwise /> Reload customisations
             </CommandItem>
           </CommandGroup>
           {groups.filter(([heading]) => heading !== "Actions").map(([heading, list]) => (
@@ -127,14 +128,8 @@ export function CommandPalette() {
               <CommandItem key={p.id} value={`Go to ${p.title}`} keywords={p.keywords} onSelect={run(() => navigate(p.id))}>
                 <p.icon />
                 <span className="min-w-0 flex-1 truncate">Go to {p.title}</span>
+                {p.source === "user" ? <CommandShortcut>yours</CommandShortcut> : p.customised ? <CommandShortcut>customised</CommandShortcut> : null}
                 <ArrowRight className="opacity-40" />
-              </CommandItem>
-            ))}
-            {pluginPages.map((p) => (
-              <CommandItem key={p.key} value={`Go to ${p.title}`} keywords={["plugin", p.plugin]} onSelect={run(() => navigate(p.key))}>
-                <PuzzlePiece />
-                <span className="min-w-0 flex-1 truncate">Go to {p.title}</span>
-                <CommandShortcut>plugin</CommandShortcut>
               </CommandItem>
             ))}
           </CommandGroup>

@@ -7,8 +7,9 @@
 // nav under a hairline with the sliding pebble and Settings' sub-navigation
 // revealed under it; a footer with the theme segment.
 //
-// Neko's own content, kept: Home and every registered page by group, the live
-// chips (Working / Needs you / counts), Plugins and their load problems, the
+// Neko's own content, kept: Home and every registered page by group (yours sit
+// in the same groups, marked "yours"), the live
+// chips (Working / Needs you / counts), load problems of your pages, the
 // Connected indicator, ⌘K search. Adapted: TanStack links are hash links, the
 // workspace switcher is the product name (Neko has no active workspace), the
 // account row is the connection row, the usage well and notification bell are
@@ -21,9 +22,11 @@ import {
 import { Button } from "@/ui/button";
 import { Kbd } from "@/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
-import { Command as CommandIcon, MagnifyingGlass, Plus, PuzzlePiece, Warning } from "@/ui/icons";
+import { Command as CommandIcon, MagnifyingGlass, Plus, Warning } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
-import { pages, type PageDef } from "@/pages";
+import "@/pages";
+import { usePages, type PageGroup } from "@/registry";
+import { useSettingsSections } from "@/extensions";
 import { SECTIONS } from "@/pages/setup/settings/registry";
 import { hrefFor, HOME } from "@/router";
 import { usePlugins } from "@/plugins";
@@ -85,6 +88,13 @@ const STAGE_DOT: Record<Stage, string> = {
   upNext: "bg-muted-foreground/50",
   done: "bg-success",
 };
+
+/** "yours" on a page you wrote, "Customised" on a built-in you replaced; nothing on Neko's own. */
+function OwnerMark({ source, customised }: { source: "builtin" | "user"; customised?: boolean }) {
+  if (customised) return <Chip tone="primary" label="You replaced this page">Customised</Chip>;
+  if (source === "user") return <Chip tone="muted" label="A page you added">yours</Chip>;
+  return null;
+}
 
 /** The live chip for a page row, from the snapshot (null when there is nothing to say). */
 function PageChip({ id }: { id: string }) {
@@ -231,6 +241,8 @@ function SubNavItem({ label, active, layoutId, reduce = false, onClick }: {
 function SettingsSubReveal({ open, reduce }: { open: boolean; reduce: boolean }) {
   const current = useCurrentSettingsSection();
   const { state } = useSidebar();
+  const extra = useSettingsSections();
+  const sections = [...SECTIONS.map((s) => ({ id: s.id as string, title: s.title })), ...extra.map((s) => ({ id: s.id, title: s.title }))];
   const layoutId = "settings-sub-active";
   return (
     <AnimatePresence initial={false}>
@@ -248,7 +260,7 @@ function SettingsSubReveal({ open, reduce }: { open: boolean; reduce: boolean })
           className="overflow-hidden group-data-[collapsible=icon]:hidden"
         >
           <nav aria-label="Settings sections" data-slot="settings-nav" className="mt-1 ml-[1.15rem] flex flex-col gap-0.5 border-l border-border/60 pl-3">
-            {SECTIONS.map((s, si) => (
+            {sections.map((s, si) => (
               <motion.div
                 key={s.id}
                 initial={reduce ? undefined : { opacity: 0, x: -5 }}
@@ -350,7 +362,7 @@ function GroupLabel({ children }: { children: ReactNode }) {
   return <span className="block pb-1 pl-3 pr-1.5 pt-3 text-xs font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">{children}</span>;
 }
 
-const GROUPS: { id: PageDef["group"]; label: string | null }[] = [
+const GROUPS: { id: PageGroup; label: string | null }[] = [
   { id: "main", label: null },
   { id: "work", label: "Work" },
   { id: "system", label: "System" },
@@ -360,7 +372,8 @@ export function AppSidebar({ route }: { route: string }) {
   const reduce = useReducedMotion() ?? false;
   const [settled] = useState(shellAlreadyPainted);
   const still = reduce || settled;
-  const { pages: pluginPages, problems } = usePlugins();
+  const { problems } = usePlugins();
+  const pages = usePages();
 
   let step = 0;
   const cascade = () => {
@@ -416,19 +429,15 @@ export function AppSidebar({ route }: { route: string }) {
                   {label ? <GroupLabel>{label}</GroupLabel> : null}
                   {list.map((p) => (
                     <motion.div key={p.id} {...cascade()} className="flex flex-col">
-                      <NavItem item={{ label: p.title, icon: p.icon, href: hrefFor(p.id) }} active={route === p.id} reduce={reduce} trailing={<PageChip id={p.id} />} />
+                      <NavItem item={{ label: p.title, icon: p.icon, href: hrefFor(p.id) }} active={route === p.id} reduce={reduce} trailing={<><PageChip id={p.id} /><OwnerMark source={p.source} customised={p.customised} /></>} />
                       {p.id === "settings" ? <SettingsSubReveal open={route === "settings"} reduce={reduce} /> : null}
                     </motion.div>
                   ))}
                 </div>
               );
             })}
-            {pluginPages.length > 0 || problems.length > 0 ? (
+            {problems.length > 0 ? (
               <div className="flex flex-col gap-1">
-                <GroupLabel>Plugins</GroupLabel>
-                {pluginPages.map((p) => (
-                  <NavItem key={p.key} item={{ label: p.title, icon: PuzzlePiece, href: hrefFor(p.key) }} active={route === p.key} reduce={reduce} />
-                ))}
                 {problems.map((p) => (
                   <NavItem
                     key={p.plugin}

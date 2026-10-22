@@ -1,27 +1,33 @@
-// #/plugins: what is installed in Neko's plugin folder, and a way to ask Neko to
-// grow a new one. A plugin is a folder `<data dir>/plugins/<name>/` with a
-// manifest.json and an ES module; the page lists them straight from the daemon
-// (GET /api/plugins) and manages them through POST /api/plugins/<name>/enable|
-// disable and DELETE /api/plugins/<name>.
+// #/customisations: everything that is yours in Neko, in one place. Pages you
+// (or Neko's agents) added, built-in pages you replaced or wrapped, and your
+// own stylesheet. There is no separate "plugin world": these pages sit in the
+// normal sidebar groups and register through the same host as Neko's own (see
+// docs/design/one-registry.md). A page is a folder `<data dir>/plugins/<name>/`
+// with a manifest.json and an ES module; the list comes straight from the
+// daemon (GET /api/plugins) and is managed through POST /api/plugins/<name>/
+// enable|disable and DELETE /api/plugins/<name>. `#/plugins` still lands here.
 import { useEffect, useMemo, useState } from "react";
-import { PageHeader, Panel, MonoLabel } from "@/editorial";
+import { PageHeader, Panel } from "@/editorial";
 import { PageContainer } from "@/shell/PageContainer";
 import { Button } from "@/ui/button";
 import { Badge } from "@/ui/badge";
 import { Switch } from "@/ui/switch";
 import { Skeleton } from "@/ui/skeleton";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/ui/empty";
-import { ArrowsClockwise, Copy, Info, PuzzlePiece, Sparkle, Trash, Warning } from "@/ui/icons";
+import { ArrowCounterClockwise, ArrowsClockwise, Copy, Info, SlidersHorizontal, Sparkle, Trash, Warning } from "@/ui/icons";
 import { toast } from "@/ui/sonner";
 import { cn } from "@/ui/lib/utils";
-import { pluginFolder, reloadPlugin, removePlugin, setPluginEnabled, usePlugins, type PluginListing } from "@/plugins";
+import { reloadPlugin, removePlugin, setPluginEnabled, usePlugins, type PluginListing } from "@/plugins";
+import { setOverrideOff, useUserEntries, type UserEntry } from "@/registry";
 import { confirm } from "@/shell/confirm";
 import { copyText } from "@/shell/actions";
 import { registerCommands } from "@/shell/commands";
 import { navigate } from "@/router";
 import { Inspector } from "@/shell/inspector";
-import { BuildDialog } from "@/pages/plugins/BuildDialog";
-import { MANIFEST_EXAMPLE } from "@/pages/plugins/prompt";
+import { requestSettings } from "@/setup/settingsNav";
+import { useWorkbench } from "@/useStore";
+import { ChangeDialog } from "@/pages/customisations/ChangeDialog";
+import { MANIFEST_EXAMPLE } from "@/pages/customisations/prompt";
 
 type Status = { tone: "ok" | "off" | "error"; label: string };
 
@@ -37,8 +43,10 @@ const TONE: Record<Status["tone"], string> = {
   error: "bg-destructive/15 text-destructive-foreground",
 };
 
-/** What the inspector shows for a plugin: its manifest as written, and where it lives. */
-function PluginDetails({ listing }: { listing: PluginListing }) {
+const LABEL = "text-[12px] font-medium text-muted-foreground";
+
+/** What the inspector shows for a customisation: its manifest as written, and where it lives. */
+function Details({ listing }: { listing: PluginListing }) {
   const [manifest, setManifest] = useState<string | null>(null);
   useEffect(() => {
     setManifest(null);
@@ -57,12 +65,12 @@ function PluginDetails({ listing }: { listing: PluginListing }) {
     <div data-slot="plugin-details" className="flex flex-col gap-4 px-4 py-4 text-[13px]">
       {listing.description ? <p className="text-muted-foreground">{listing.description}</p> : null}
       <section className="flex flex-col gap-1">
-        <MonoLabel className="text-[10px]">manifest.json</MonoLabel>
+        <span className={LABEL}>manifest.json</span>
         <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-border bg-foreground/[0.03] p-3 font-mono text-[12px] text-foreground">{manifest ?? "Reading…"}</pre>
       </section>
       {listing.path ? (
         <section className="flex flex-col gap-1">
-          <MonoLabel className="text-[10px]">Folder</MonoLabel>
+          <span className={LABEL}>Folder</span>
           <code className="break-all font-mono text-[12px] text-muted-foreground">{listing.path}</code>
         </section>
       ) : null}
@@ -71,24 +79,54 @@ function PluginDetails({ listing }: { listing: PluginListing }) {
   );
 }
 
-function PluginRow({ listing, problem, pages, busy, onToggle, onReload, onRemove, onDetails }: {
+/** One page a customisation registered: a link, or for a built-in it replaced, the way back. */
+function EntryLine({ entry }: { entry: UserEntry }) {
+  const [busy, setBusy] = useState(false);
+  if (!entry.overrides) {
+    return (
+      <button type="button" data-slot="own-page" onClick={() => navigate(entry.route)} className="rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[12px] text-foreground outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring">
+        {entry.title}
+      </button>
+    );
+  }
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await setOverrideOff(entry.overrides!, !entry.off);
+      toast(entry.off ? `Using your version of ${entry.title} again.` : `${entry.title} is back to the original.`);
+    } catch (e) {
+      toast.error("That did not work", { description: e instanceof Error ? e.message : String(e) });
+    }
+    setBusy(false);
+  };
+  return (
+    <span data-slot="override" data-builtin={entry.overrides} data-off={entry.off ? "true" : "false"} className="inline-flex items-center gap-1.5 rounded-full bg-foreground/[0.06] py-0.5 pe-0.5 ps-2.5 text-[12px] text-foreground">
+      {entry.off ? "Original" : entry.wraps ? "Wraps" : "Replaces"} {entry.title}
+      <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => void toggle()} className="h-5 rounded-full px-2 text-[11.5px]">
+        {entry.off ? "Use my version" : (<><ArrowCounterClockwise /> Reset to original</>)}
+      </Button>
+    </span>
+  );
+}
+
+function CustomisationRow({ listing, problem, entries, busy, onToggle, onReload, onRemove, onDetails }: {
   listing: PluginListing;
   problem: string | undefined;
-  pages: { key: string; title: string }[];
+  entries: UserEntry[];
   busy: boolean;
   onToggle(enabled: boolean): void;
   onReload(): void;
   onRemove(): void;
   onDetails(): void;
 }) {
-  const status = statusOf(listing, problem, pages.length);
+  const status = statusOf(listing, problem, entries.length);
   const lastError = listing.error ?? problem;
   const label = listing.title || listing.id;
   return (
     <li data-slot="plugin-row" data-plugin={listing.id} data-status={status.tone} className="flex flex-col gap-3 px-6 py-4">
       <div className="flex items-start gap-3.5">
         <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-foreground/[0.06] text-foreground">
-          {status.tone === "error" ? <Warning className="text-warning-foreground" /> : <PuzzlePiece />}
+          {status.tone === "error" ? <Warning className="text-warning-foreground" /> : <SlidersHorizontal />}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
@@ -102,12 +140,10 @@ function PluginRow({ listing, problem, pages, busy, onToggle, onReload, onRemove
             <dt className="text-muted-foreground">Entry</dt><dd className="truncate font-mono text-foreground">{listing.entry ? listing.entry.replace(`/plugins/${listing.id}/`, "") : "—"}</dd>
             {listing.path ? (<><dt className="text-muted-foreground">Folder</dt><dd className="truncate font-mono text-muted-foreground" title={listing.path}>{listing.path}</dd></>) : null}
           </dl>
-          {pages.length > 0 ? (
+          {entries.length > 0 ? (
             <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
               Pages:
-              {pages.map((p) => (
-                <button key={p.key} type="button" onClick={() => navigate(p.key)} className="rounded-full bg-foreground/[0.06] px-2 py-0.5 text-foreground outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring">{p.title}</button>
-              ))}
+              {entries.map((entry) => <EntryLine key={entry.pageId} entry={entry} />)}
             </p>
           ) : null}
         </div>
@@ -122,7 +158,7 @@ function PluginRow({ listing, problem, pages, busy, onToggle, onReload, onRemove
           <Button type="button" variant="ghost" size="icon-sm" aria-label={`Details of ${label}`} title="Details" onClick={onDetails}>
             <Info />
           </Button>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={`Reload ${label}`} title="Reload this plugin" disabled={busy || listing.disabled} onClick={onReload}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label={`Reload ${label}`} title="Reload this one" disabled={busy || listing.disabled} onClick={onReload}>
             <ArrowsClockwise />
           </Button>
           {listing.path ? (
@@ -130,14 +166,14 @@ function PluginRow({ listing, problem, pages, busy, onToggle, onReload, onRemove
               <Copy />
             </Button>
           ) : null}
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${label}`} title="Remove this plugin" disabled={busy} className="text-destructive-foreground hover:bg-destructive/10" onClick={onRemove}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${label}`} title="Remove this" disabled={busy} className="text-destructive-foreground hover:bg-destructive/10" onClick={onRemove}>
             <Trash />
           </Button>
         </div>
       </div>
       {lastError ? (
         <div role="alert" data-slot="plugin-error" className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2">
-          <MonoLabel className="text-[10px] text-destructive-foreground">Last error</MonoLabel>
+          <span className="text-[12px] font-medium text-destructive-foreground">Last error</span>
           <pre className="mt-1 select-text whitespace-pre-wrap font-mono text-[12px] text-destructive-foreground">{lastError}</pre>
         </div>
       ) : null}
@@ -145,20 +181,33 @@ function PluginRow({ listing, problem, pages, busy, onToggle, onReload, onRemove
   );
 }
 
-export default function Plugins() {
-  const { pages, problems, listings, listed, failed } = usePlugins();
-  const [folder, setFolder] = useState<string | null>(null);
+function PathRow({ slot, label, path, note, onCopy }: { slot: string; label: string; path: string | undefined; note?: string; onCopy(): void }) {
+  return (
+    <div className="flex items-center gap-3 px-6 py-3">
+      <span className={cn(LABEL, "w-20 shrink-0")}>{label}</span>
+      <code data-slot={slot} className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-foreground" title={path}>{path ?? "…"}</code>
+      {note ? <span className="shrink-0 text-[12px] text-muted-foreground">{note}</span> : null}
+      <Button type="button" variant="ghost" size="xs" disabled={!path} onClick={onCopy}>
+        <Copy /> Copy path
+      </Button>
+    </div>
+  );
+}
+
+export default function Customisations() {
+  const { problems, listings, listed, failed, custom } = usePlugins();
+  const entries = useUserEntries();
+  const { snapshot } = useWorkbench();
   const [building, setBuilding] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const detail = listings.find((l) => l.id === detailId) ?? null;
+  const checkout = typeof snapshot?.self_update?.checkout === "string" ? snapshot.self_update.checkout : null;
+  const places = custom ? { pluginsDir: custom.plugins_dir, cssPath: custom.css_path, checkout } : null;
 
-  useEffect(() => {
-    void pluginFolder().then(setFolder);
-  }, []);
   useEffect(
-    () => registerCommands([{ id: "plugins.build", title: "Build a plugin with Neko", keywords: ["create", "extend", "new plugin"], icon: Sparkle, group: "Plugins", run: () => setBuilding(true) }]),
+    () => registerCommands([{ id: "customisations.change", title: "Change Neko", keywords: ["create", "extend", "new page", "build a plugin", "customise", "style"], icon: Sparkle, group: "Customisations", run: () => setBuilding(true) }]),
     [],
   );
 
@@ -184,7 +233,7 @@ export default function Plugins() {
           Turn it off instead if you may want it back.
         </>
       ),
-      action: "Remove plugin",
+      action: "Remove",
       destructive: true,
     });
     if (ok) await act(listing.id, () => removePlugin(listing.id), `Removed ${listing.title || listing.id}.`);
@@ -194,7 +243,7 @@ export default function Plugins() {
     setReloading(true);
     await reloadPlugin();
     setReloading(false);
-    toast("Plugins reloaded.");
+    toast("Customisations reloaded.");
   }
 
   return (
@@ -202,33 +251,40 @@ export default function Plugins() {
       <>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <PageHeader
-            eyebrow="System"
-            title={<>Plugins</>}
-            subtitle="Pages and tools that live in a folder on this Mac. Neko’s agents can write them too, and they appear here without a rebuild."
+            eyebrow={null}
+            title="Customisations"
+            subtitle="Your own pages, the built-in pages you replaced, and your styles. They live in a folder on this Mac, and Neko’s agents can change them without a rebuild."
           />
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" onClick={() => void reloadAll()} disabled={reloading}>
               <ArrowsClockwise className={cn(reloading && "animate-spin")} /> Reload
             </Button>
-            <Button type="button" onClick={() => setBuilding(true)} data-slot="build-plugin">
-              <Sparkle /> Build a plugin with Neko
+            <Button type="button" onClick={() => setBuilding(true)} data-slot="change-neko">
+              <Sparkle /> Change Neko
             </Button>
           </div>
         </div>
 
         <Panel>
-          <div className="flex items-center gap-3 px-6 py-3">
-            <MonoLabel className="text-[10.5px]">Folder</MonoLabel>
-            <code data-slot="plugin-folder" className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-foreground" title={folder ?? undefined}>{folder ?? "…"}</code>
-            <Button type="button" variant="ghost" size="xs" disabled={!folder} onClick={() => folder && void copyText(folder, "Folder path copied")}>
-              <Copy /> Copy path
-            </Button>
+          <div className="divide-y divide-border/70">
+            <PathRow slot="plugin-folder" label="Pages" path={custom?.plugins_dir} onCopy={() => custom && void copyText(custom.plugins_dir, "Folder path copied")} />
+            <PathRow
+              slot="css-path"
+              label="Styles"
+              path={custom?.css_path}
+              note={custom ? (custom.css_exists ? "In use" : "Not created yet") : undefined}
+              onCopy={() => custom && void copyText(custom.css_path, "File path copied")}
+            />
           </div>
+          <p className="border-t border-border/70 px-6 py-3 text-[12.5px] text-muted-foreground">
+            Paste a path into Finder with Go to Folder (⇧⌘G). Styles in <code className="font-mono text-[12px]">custom.css</code> apply as you save; restyle anything with the app’s variables
+            (<code className="font-mono text-[12px]">--background</code>, <code className="font-mono text-[12px]">--foreground</code>, <code className="font-mono text-[12px]">--primary</code>, <code className="font-mono text-[12px]">--card</code>, <code className="font-mono text-[12px]">--border</code>, <code className="font-mono text-[12px]">--radius</code>).
+          </p>
         </Panel>
 
         {!listed && !failed ? (
           <Panel>
-            <div className="space-y-4 p-5" aria-busy="true" role="status" aria-label="Loading plugins">
+            <div className="space-y-4 p-5" aria-busy="true" role="status" aria-label="Loading customisations">
               <Skeleton className="h-5 w-48" />
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-5 w-40" />
@@ -240,31 +296,31 @@ export default function Plugins() {
             <EmptyHeader>
               <EmptyMedia variant="icon"><Warning /></EmptyMedia>
               <EmptyTitle>Neko’s daemon did not answer</EmptyTitle>
-              <EmptyDescription>The plugin list could not be read. It tries again every few seconds.</EmptyDescription>
+              <EmptyDescription>The list could not be read. It tries again every few seconds.</EmptyDescription>
             </EmptyHeader>
             <EmptyContent><Button type="button" variant="outline" onClick={() => void reloadAll()}>Try now</Button></EmptyContent>
           </Empty>
         ) : listings.length === 0 ? (
           <Empty data-slot="plugins-empty" className="border border-dashed">
             <EmptyHeader>
-              <EmptyMedia variant="icon"><PuzzlePiece /></EmptyMedia>
-              <EmptyTitle>No plugins yet</EmptyTitle>
+              <EmptyMedia variant="icon"><SlidersHorizontal /></EmptyMedia>
+              <EmptyTitle>Nothing customised yet</EmptyTitle>
               <EmptyDescription>
-                A plugin is a folder in the plugins folder with a <code className="font-mono text-[12px]">manifest.json</code> and an ES module. Describe what you want and Neko writes one for you.
+                A page of yours is a folder with a <code className="font-mono text-[12px]">manifest.json</code> and an ES module. Give it a built-in page’s id and it replaces that page. Describe what you want and Neko writes it for you.
               </EmptyDescription>
             </EmptyHeader>
             <pre className="max-w-full overflow-x-auto rounded-xl border border-border bg-foreground/[0.03] px-4 py-3 text-start font-mono text-[12px] text-muted-foreground">{MANIFEST_EXAMPLE}</pre>
-            <EmptyContent><Button type="button" onClick={() => setBuilding(true)}><Sparkle /> Build a plugin with Neko</Button></EmptyContent>
+            <EmptyContent><Button type="button" onClick={() => setBuilding(true)}><Sparkle /> Change Neko</Button></EmptyContent>
           </Empty>
         ) : (
           <Panel>
-            <ul aria-label="Installed plugins" className="divide-y divide-border/70">
+            <ul aria-label="Your customisations" className="divide-y divide-border/70">
               {listings.map((listing) => (
-                <PluginRow
+                <CustomisationRow
                   key={listing.id}
                   listing={listing}
                   problem={problemFor.get(listing.id)}
-                  pages={pages.filter((p) => p.plugin === listing.id).map((p) => ({ key: p.key, title: p.title }))}
+                  entries={entries.filter((e) => e.plugin === listing.id)}
                   busy={busy === listing.id}
                   onToggle={(enabled) => void act(listing.id, () => setPluginEnabled(listing.id, enabled), undefined)}
                   onReload={() => void act(listing.id, () => reloadPlugin(listing.id))}
@@ -275,11 +331,19 @@ export default function Plugins() {
             </ul>
           </Panel>
         )}
+
+        <p className="text-[12.5px] text-muted-foreground">
+          Changes Neko makes to its own source go live after they land, and the previous web UI is kept.{" "}
+          <button type="button" onClick={() => { navigate("settings"); requestSettings({ section: "updates" }); }} className="rounded underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+            Roll back the web UI in Settings
+          </button>
+          .
+        </p>
       </>
-      <Inspector open={detail !== null} onClose={() => setDetailId(null)} title={detail?.title || detail?.id} subtitle="Plugin">
-        {detail ? <PluginDetails listing={detail} /> : null}
+      <Inspector open={detail !== null} onClose={() => setDetailId(null)} title={detail?.title || detail?.id} subtitle="Customisation">
+        {detail ? <Details listing={detail} /> : null}
       </Inspector>
-      <BuildDialog open={building} onOpenChange={setBuilding} folder={folder} />
+      <ChangeDialog open={building} onOpenChange={setBuilding} places={places} />
     </PageContainer>
   );
 }

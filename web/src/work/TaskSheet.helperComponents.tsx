@@ -5,6 +5,7 @@
 import type { CSSProperties } from "react";
 import { GitPullRequest } from "@/ui/icons";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/ui/tabs";
+import { useTaskTabs } from "@/extensions";
 import { cn } from "@/ui/lib/utils";
 import { TaskComposer, TaskConversation } from "@/chat/TaskConversation";
 import { Changes } from "@/work/Changes";
@@ -43,6 +44,7 @@ type TaskSheetBodyProps = {
 };
 
 export function TaskSheetBody({ task, snapshot, ui, actions, tab, onTab, onOpenTask, swapFade }: TaskSheetBodyProps) {
+  const extraTabs = useTaskTabs(); // tabs a page added with host.addTab
   const repo = repositoryOf(snapshot, task);
   const prNumber = pullRequestNumber(task);
   return (
@@ -70,6 +72,7 @@ export function TaskSheetBody({ task, snapshot, ui, actions, tab, onTab, onOpenT
             <TabsTab value="conversation">Conversation</TabsTab>
             <TabsTab value="changes">Changes</TabsTab>
             <TabsTab value="details">Details</TabsTab>
+            {extraTabs.map((t) => <TabsTab key={t.id} value={t.id}>{t.title}</TabsTab>)}
           </TabsList>
         </div>
         <TabsPanel value="conversation" className="flex min-h-0 flex-col">
@@ -89,6 +92,11 @@ export function TaskSheetBody({ task, snapshot, ui, actions, tab, onTab, onOpenT
             <Details task={task} snapshot={snapshot} open={onOpenTask} />
           </div>
         </TabsPanel>
+        {extraTabs.map((t) => (
+          <TabsPanel key={t.id} value={t.id} className="min-h-0 overflow-y-auto">
+            <div key={task.id} className={cn("min-w-0 px-6 pt-4", swapFade)}><t.component task={task} /></div>
+          </TabsPanel>
+        ))}
       </Tabs>
       <div className="shrink-0 px-4 pt-1">
         <TaskComposer task={task} ui={ui} />

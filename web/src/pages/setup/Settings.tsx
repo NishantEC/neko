@@ -19,6 +19,7 @@ import { useSetupCommands } from "@/setup/commands";
 import { setCurrentSettingsSection, takeSettingsRequest, usePendingSettingsRequest } from "@/setup/settingsNav";
 import "@/pages/setup/settings/settings-surface.css";
 import { SECTIONS, searchSettings, type SectionId } from "@/pages/setup/settings/registry";
+import { useSettingsSections } from "@/extensions";
 import { GeneralSection } from "@/pages/setup/settings/General";
 import { AiSection } from "@/pages/setup/settings/Ai";
 import { RulebookSection } from "@/pages/setup/settings/Rulebook";
@@ -62,12 +63,16 @@ function reveal(target: string) {
 }
 
 function SettingsBody() {
-  const [section, setSection] = useState<SectionId>(initialSection);
+  const [chosen, setSection] = useState<string>(initialSection);
+  const extras = useSettingsSections();
+  // A section a page added (`host.addSection`) is listed after Neko's own; one that went away falls back to General.
+  const sections = [...SECTIONS.map((s) => ({ id: s.id as string, title: s.title })), ...extras.map((s) => ({ id: s.id, title: s.title }))];
+  const section = sections.some((s) => s.id === chosen) ? chosen : "general";
   const [query, setQuery] = useState("");
   const search = useRef<HTMLInputElement>(null);
   const pending = usePendingSettingsRequest();
 
-  const open = useCallback((id: SectionId, target?: string) => {
+  const open = useCallback((id: string, target?: string) => {
     setSection(id);
     setQuery("");
     try { localStorage.setItem(STORAGE, id); } catch { /* ignore */ }
@@ -80,7 +85,7 @@ function SettingsBody() {
     if (!pending) return;
     const request = takeSettingsRequest();
     if (!request) return;
-    if (request.section) open(request.section as SectionId, request.target);
+    if (request.section) open(request.section, request.target);
     if (request.focusSearch) setTimeout(() => search.current?.focus(), 30);
   }, [pending, open]);
 
@@ -110,8 +115,9 @@ function SettingsBody() {
   }, [section]);
 
   const hits = searchSettings(query);
-  const current = SECTIONS.find((s) => s.id === section)!;
-  const Content = RENDER[section];
+  const extra = extras.find((s) => s.id === section);
+  const current = SECTIONS.find((s) => s.id === section) ?? { title: extra?.title ?? "General", summary: extra?.summary ?? "" };
+  const Content = extra ? extra.component : RENDER[section as SectionId];
 
   return (
     <div className="flex h-full w-full flex-1 flex-col overflow-hidden">
@@ -125,7 +131,7 @@ function SettingsBody() {
             {query.trim() ? "Search" : current.title}
           </span>
         </nav>
-        <SettingsPhoneNav current={section} onOpen={open} />
+        <SettingsPhoneNav current={section} sections={sections} onOpen={open} />
       </header>
       <div data-slot="setup-page" className="settings-surface min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[52rem] px-6 pt-8 pb-24">
@@ -192,12 +198,12 @@ function SettingsBody() {
  * hushbacks' SettingsPhoneNav: the section pills in the bar, for when the
  * sidebar cannot show its sub-navigation (collapsed, or on a phone).
  */
-function SettingsPhoneNav({ current, onOpen }: { current: SectionId; onOpen: (id: SectionId) => void }) {
+function SettingsPhoneNav({ current, sections, onOpen }: { current: string; sections: { id: string; title: string }[]; onOpen: (id: string) => void }) {
   const { state, isMobile } = useSidebar();
   if (state !== "collapsed" && !isMobile) return null;
   return (
     <nav aria-label="Settings sections" data-slot="settings-nav" className="-mx-2 flex min-w-0 flex-1 gap-1 overflow-x-auto px-2 md:ms-6">
-      {SECTIONS.map((entry) => {
+      {sections.map((entry) => {
         const active = entry.id === current;
         return (
           <button

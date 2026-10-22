@@ -2,17 +2,30 @@
 //
 //   #/            -> "home"
 //   #/ui          -> "ui"
-//   #/pr-board:board  -> "pr-board:board"   (a plugin page: <plugin>:<page>)
+//   #/pr-board:board  -> "pr-board:board"   (a user page: <plugin>:<page>)
 //
-// Pages register in pages/index.ts; plugin pages come from plugins.tsx.
+// Pages (built-in and yours) register in registry.ts through the host. Old
+// routes that moved keep working: #/plugins is now #/customisations.
 import { useSyncExternalStore } from "react";
 
 export const HOME = "home";
+
+/** Routes that were renamed; the address is rewritten to the new name. */
+const MOVED: Record<string, string> = { plugins: "customisations" };
 
 function read(): string {
   const raw = location.hash.replace(/^#\/?/, "").split("?")[0];
   return raw === "" ? HOME : decodeURIComponent(raw);
 }
+
+function redirectMoved() {
+  const route = read();
+  const to = MOVED[route];
+  if (to) history.replaceState(null, "", `${location.pathname}${location.search}${hrefFor(to)}`);
+  if (to) dispatchEvent(new HashChangeEvent("hashchange"));
+}
+addEventListener("hashchange", redirectMoved);
+redirectMoved();
 
 export function hrefFor(route: string): string {
   return route === HOME ? "#/" : `#/${encodeURIComponent(route).replace(/%3A/gi, ":")}`;

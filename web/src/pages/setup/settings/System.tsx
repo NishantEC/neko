@@ -6,8 +6,9 @@ import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Skeleton } from "@/ui/skeleton";
 import { Stethoscope } from "@phosphor-icons/react";
-import { ArrowSquareOut, ArrowsClockwise, CheckCircle, FolderSimple, WarningCircle, X } from "@/ui/icons";
+import { ArrowCounterClockwise, ArrowSquareOut, ArrowsClockwise, CheckCircle, FolderSimple, WarningCircle, X } from "@/ui/icons";
 import { Panel } from "@/setup/kit";
+import { confirm } from "@/shell/confirm";
 import { useWorkbench } from "@/useStore";
 import { ErrorNote, Row, Section, SettingRow, Status, Toggle } from "@/setup/kit";
 import { activate, arr, foldersOf, num, providerRows, rec, relativeTime, str, useLoad, useNow, useRun, workspacesOf } from "@/setup/lib";
@@ -227,6 +228,19 @@ export function UpdatesSection() {
             </SettingRow>
             <SettingRow id="update-now" title="Update Neko now" description="Applies everything new on the checkout’s main branch, safety-critical changes included.">
               <Button variant="outline" onClick={() => void run(() => command("UpdateNekoNow"))} disabled={busy}>Update now</Button>
+            </SettingRow>
+            <SettingRow id="roll-back-web" title="Roll back the web UI" description="Neko keeps the web UI it replaced (web-live.prev). This switches back to it, or to the one the app shipped with when there is none. Your pages and styles are not touched. Open pages reload when you are not typing.">
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => void confirm({
+                  title: "Roll back the web UI?",
+                  description: "The web UI goes back to the previous build. Pages reload on their own. The change that went live is not undone in the source; update again to get it back.",
+                  action: "Roll back",
+                }).then((ok) => ok && run(() => command("RollBackWebUi")))}
+              >
+                <ArrowCounterClockwise /> Roll back
+              </Button>
             </SettingRow>
           </div>
           {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} title="Update" onDismiss={clear} /></div> : null}

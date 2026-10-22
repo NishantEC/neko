@@ -44,6 +44,7 @@ export const SETTINGS: SettingDef[] = [
   { id: "auto-update-ui", section: "updates", title: "Update the web UI automatically", keywords: ["auto-update", "live", "reload"] },
   { id: "auto-update-app", section: "updates", title: "Reinstall the app automatically", keywords: ["auto-update", "install", "native", "daemon"] },
   { id: "update-now", section: "updates", title: "Update Neko now", keywords: ["upgrade", "rebuild", "install"] },
+  { id: "roll-back-web", section: "updates", title: "Roll back the web UI", keywords: ["undo", "previous", "revert", "web-live.prev", "ui"] },
   { id: "updates", section: "about", title: "Updates and version", keywords: ["version", "update", "build", "about"] },
 ];
 
