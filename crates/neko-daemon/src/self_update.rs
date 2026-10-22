@@ -270,7 +270,7 @@ fn apply(state: &Arc<AppState>, checkout: &Path, data: &Path, bundle: Option<&st
                 tell(state, task_id.as_deref(), &summary, false);
             }
             Err(error) => {
-                let summary = format!("Couldn't update the web UI to {}: {error}. The current UI stays.", core::short(&head));
+                let summary = format!("Couldn't update the web UI to {}: {}. The current UI stays.", core::short(&head), error.trim_end_matches(['.', ' ']));
                 with_snapshot(state, |s| s.self_update.last_failure = Some(record(&head, &summary)))?;
                 tell(state, task_id.as_deref(), &summary, false);
             }
