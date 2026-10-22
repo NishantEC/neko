@@ -22,7 +22,7 @@ import { SECTIONS, searchSettings, type SectionId } from "@/pages/setup/settings
 import { GeneralSection } from "@/pages/setup/settings/General";
 import { AiSection } from "@/pages/setup/settings/Ai";
 import { RulebookSection } from "@/pages/setup/settings/Rulebook";
-import { AboutSection, DiagnosticsSection, PermissionsSection, SearchSection } from "@/pages/setup/settings/System";
+import { AboutSection, DiagnosticsSection, PermissionsSection, SearchSection, UpdatesSection } from "@/pages/setup/settings/System";
 
 const STORAGE = "neko.web.settings.section";
 
@@ -33,6 +33,7 @@ const RENDER: Record<SectionId, () => React.ReactElement> = {
   search: () => <SearchSection />,
   permissions: () => <PermissionsSection />,
   diagnostics: () => <DiagnosticsSection />,
+  updates: () => <UpdatesSection />,
   about: () => <AboutSection />,
 };
 
