@@ -284,6 +284,11 @@ impl Controller {
             }
             Command::SendMessage { text, workspace_id } => self.send_message(text, workspace_id, false),
             Command::InterruptAndSendMessage { text, workspace_id } => self.send_message(text, workspace_id, true),
+            command @ (Command::UpdateNekoNow | Command::ApplyPendingUpdate | Command::SetSelfUpdate { .. }) => {
+                let result = store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), command);
+                crate::self_update::wake();
+                result
+            }
             command => store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), command),
         }
     }
@@ -543,6 +548,14 @@ impl Controller {
             record_host_failure(&db, &snapshot, id)?;
             Ok(())
         })
+    }
+
+    /// What restarting the daemon now would interrupt: running task workers,
+    /// publishes in flight, and whether Neko is replying in chat.
+    pub fn busy(&self) -> (usize, usize, bool) {
+        let workers = self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len();
+        let chat = self.chat_active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some();
+        (workers, publish::in_flight_count(), chat)
     }
 
     pub fn start(self: &Arc<Self>) {

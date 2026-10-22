@@ -1,5 +1,6 @@
 mod codex;
 mod mcp_host;
+mod self_update;
 mod server;
 mod web;
 mod workbench;
@@ -155,6 +156,8 @@ fn main() {
     }
 
     server::spawn_web_bridge(state.clone());
+    // Neko applying landed changes to itself (see `self_update.rs`).
+    self_update::spawn(state.clone());
 
     eprintln!("neko-daemon: listening on {}", socket_path.display());
     for stream in listener.incoming() {

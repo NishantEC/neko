@@ -43,7 +43,7 @@ fn start() -> Harness {
     let listener = bind(0).unwrap();
     let port = listener.local_addr().unwrap().port();
     let backend = Arc::new(Fake { seen: Mutex::new(Vec::new()), events: Mutex::new(Vec::new()) });
-    let config = Config { token: TOKEN.into(), web_root: dir.path().join("web"), plugins_dir: dir.path().join("plugins"), attachments_dir: dir.path().join("attachments") };
+    let config = Config { token: TOKEN.into(), web_root: dir.path().join("web"), live_web: None, plugins_dir: dir.path().join("plugins"), attachments_dir: dir.path().join("attachments") };
     let served = backend.clone();
     std::thread::spawn(move || serve(listener, config, served));
     Harness { port, backend, dir }
@@ -601,4 +601,30 @@ fn a_browser_without_the_cookie_is_told_how_to_sign_in() {
     let api = http(h.port, "GET", "/api/plugins", &[&host], "");
     assert_eq!(api.status, 401);
     assert!(!api.body.contains("<html"));
+}
+
+#[test]
+fn a_live_web_ui_is_preferred_and_old_chunks_stay_reachable() {
+    let dir = tempfile::tempdir().unwrap();
+    let bundle = dir.path().join("bundle");
+    fs::create_dir_all(bundle.join("assets")).unwrap();
+    fs::write(bundle.join("index.html"), "<html>bundle</html>").unwrap();
+    fs::write(bundle.join("assets/old.js"), "old").unwrap();
+    let data = dir.path().join("data");
+    let config = Config { token: TOKEN.into(), web_root: bundle.clone(), live_web: Some(data.clone()), plugins_dir: dir.path().join("plugins"), attachments_dir: dir.path().join("attachments") };
+    let page = |path: &str| String::from_utf8(serve_static(&web_roots(&config), path).body).unwrap();
+    assert_eq!(page("/"), "<html>bundle</html>", "no live UI: the bundle's");
+    // A rebuilt UI is swapped in.
+    let next = neko_core::self_update::web_paths(&data).next;
+    fs::create_dir_all(next.join("assets")).unwrap();
+    fs::write(next.join("index.html"), r#"<html><script src="/assets/new.js"></script></html>"#).unwrap();
+    fs::write(next.join("assets/new.js"), "new").unwrap();
+    neko_core::self_update::swap_in(&data, "abc123").unwrap();
+    assert!(page("/").contains("new.js"));
+    assert!(page("/tasks").contains("new.js"), "client routes get the live shell");
+    assert_eq!(page("/assets/new.js"), "new");
+    assert_eq!(page("/assets/old.js"), "old", "a page loaded before the swap can still load its chunks");
+    assert_eq!(serve_static(&web_roots(&config), "/assets/none.js").status, 404);
+    neko_core::self_update::clear_web(&data);
+    assert_eq!(page("/"), "<html>bundle</html>", "cleared: back to the bundle");
 }
