@@ -9,24 +9,22 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "@/ui/tabs";
 import { ArrowDown, CaretRight, Globe, Plus, PlugsConnected, Terminal, Wrench, WarningCircle } from "@/ui/icons";
 import { Panel } from "@/setup/kit";
 import { navigate } from "@/router";
-import { toast } from "@/ui/sonner";
 import { EmptyBlock, Gate, Pick, Row, Section, SetupPage, Status, registerCommands } from "@/setup/kit";
 import { ScopePicker, useScope } from "@/setup/scope";
 import { useSetupCommands } from "@/setup/commands";
 import {
-  arr, connectionDetail, connectionStatus, connectionTone, mcp, rec, sortConnections, str, toolSummary, useRun, workspaceName, workspacesOf,
+  arr, connectionDetail, connectionStatus, connectionTone, rec, sortConnections, str, toolSummary, workspaceName, workspacesOf,
 } from "@/setup/lib";
-import { ConnectionDetail, reconnectAction } from "@/pages/setup/tools/ConnectionDetail";
+import { ConnectionDetail, useReconnect } from "@/pages/setup/tools/ConnectionDetail";
 import { ImportDialog, ManualConnectionDialog, RegistryDialog } from "@/pages/setup/tools/AddConnection";
 import { SkillsTab } from "@/pages/setup/tools/Skills";
 
 type Dialogs = "manual" | "registry" | "import" | null;
 
 function ConnectionRow({ snapshot, connection, onOpen }: { snapshot: Json; connection: Json; onOpen: () => void }) {
-  const { run, busy } = useRun();
   const status = connectionStatus(connection);
   const summary = toolSummary(connection);
-  const reconnect = reconnectAction(connection);
+  const reconnect = useReconnect(connection);
   const scope = str(connection.workspace_id) ? workspaceName(snapshot, connection.workspace_id) : "All workspaces";
   const http = rec(connection.config).transport === "http";
   return (
@@ -47,10 +45,10 @@ function ConnectionRow({ snapshot, connection, onOpen }: { snapshot: Json; conne
           }
         />
       </div>
-      {reconnect ? (
+      {reconnect.action ? (
         <div className="py-3.5 pe-4">
-          <Button size="sm" disabled={busy} loading={busy} onClick={() => void run(() => mcp(reconnect.command, reconnect.fields)).then((ok) => ok && toast.success(`${reconnect.label}: asked ${str(connection.label)}.`))}>
-            {reconnect.label}
+          <Button size="sm" disabled={reconnect.busy} loading={reconnect.busy} onClick={() => void reconnect.go()}>
+            {reconnect.action.label}
           </Button>
         </div>
       ) : null}
