@@ -12,13 +12,17 @@
 // POST /api/request), `onEvent`, `registerPage`, and two ways into the shell:
 // `registerCommands([{ id, title, run }])` adds entries to ⌘K while the plugin
 // is loaded, and `inspector.open({ title, children })` / `inspector.close()`
-// uses the resizable panel on the right. A page is an ordinary React component.
+// uses the resizable panel on the right. `ui` is the app's own component set
+// (Button, Input, Panel, Badge, Tabs, Table, Dialog, … see pluginKit.ts) and
+// `icons` its icons, so a plugin is built from the same parts as every page.
+// A page is an ordinary React component.
 
 import * as React from "react";
 import { Component, useEffect, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import { request, onEvent, type Json } from "./api";
 import { registerCommands, type PaletteCommand } from "./shell/commands";
 import { inspector } from "./shell/inspector";
+import { pluginIcons, pluginUi } from "./pluginKit";
 
 export interface PluginPage {
   id: string;
@@ -34,6 +38,10 @@ export interface PluginHost {
   /** Adds entries to the ⌘K palette until the plugin is switched off, reloaded or removed. */
   registerCommands(list: PaletteCommand[]): void;
   inspector: typeof inspector;
+  /** Neko's own components (Button, Input, Panel, Badge, Tabs, Table, Dialog, …), so a plugin looks like the app. */
+  ui: Record<string, any>;
+  /** Phosphor icons by name (`icons.Heart`). */
+  icons: Record<string, any>;
 }
 
 export interface PluginListing {
@@ -111,6 +119,8 @@ async function load(listing: Listing) {
       removers.set(listing.id, [...(removers.get(listing.id) ?? []), registerCommands(own)]);
     },
     inspector,
+    ui: pluginUi,
+    icons: pluginIcons,
   };
   try {
     // `?v=` is the module file's mtime: an edit is a new URL, so the browser
