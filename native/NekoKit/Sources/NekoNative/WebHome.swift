@@ -100,3 +100,81 @@ private struct WebHomeRepresentable: NSViewRepresentable {
         }
     }
 }
+
+/// Where "Open Neko" goes. The web app is the main interface: by default it
+/// opens in the browser (or the installed Neko web app), and the native window
+/// stays available as a fallback (status menu ▸ Open Neko in ▸ Neko window).
+/// The native side keeps what a browser cannot do: the global hotkey, the quick
+/// panel, the menu bar item and macOS permission prompts.
+enum OpenNeko: String, CaseIterable, Identifiable {
+    case browser, window
+    static let defaultsKey = "neko.openIn"
+    var id: String { rawValue }
+    var title: String { self == .browser ? "Browser" : "Neko window" }
+
+    static var preference: OpenNeko { OpenNeko(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .browser }
+
+    /// Whether "Open Neko" will use the browser right now: chosen, and the
+    /// daemon has published its address and token.
+    static var usesBrowser: Bool { preference == .browser && WebHomeLocation.url() != nil }
+
+    /// Opens the web app at `route` (a hash route such as "settings"), signing
+    /// the browser in with the token URL. False when the address is not known.
+    @discardableResult
+    static func inBrowser(route: String? = nil, environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        guard let url = browserURL(route: route, environment: environment) else { return false }
+        return NSWorkspace.shared.open(url)
+    }
+
+    static func browserURL(route: String? = nil, environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
+        guard let base = WebHomeLocation.url(environment: environment) else { return nil }
+        guard let route, !route.isEmpty else { return base }
+        // The daemon answers the token URL with a redirect to "/" and the
+        // browser carries the fragment across it.
+        return URL(string: base.absoluteString + "#/" + route)
+    }
+
+    /// Opens Neko where the person chose: the browser, or the native window.
+    @MainActor static func workspace(route: String? = nil, openWindow: () -> Void) {
+        if usesBrowser, inBrowser(route: route) { return }
+        openWindow()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+/// Runs the app's startup once, whichever view appears first: the menu bar
+/// label always exists, the workspace window only when someone opens it.
+@MainActor enum NekoStartup {
+    private static var started = false
+    static func run(_ model: AppModel) async {
+        guard !started else { return }
+        started = true
+        PreviousAppContext.shared.start()
+        PresenceController.shared.start(model: model)
+        await model.start()
+        await PaletteController.shared.configure(model: model)
+    }
+}
+
+/// Launch and Dock behaviour for the browser-first interface.
+final class NekoAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard OpenNeko.preference == .browser, ProcessInfo.processInfo.environment["NEKO_START_PAGE"] == nil else { return }
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        let atLogin = event?.eventID == kAEOpenApplication
+            && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+        // SwiftUI opens the workspace window during launch; close it and open
+        // the browser instead (but stay quiet when started at login).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard OpenNeko.usesBrowser || atLogin else { return }
+            for window in NSApp.windows where window.identifier?.rawValue.contains("workspace") == true { window.close() }
+            if !atLogin { OpenNeko.inBrowser() }
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        guard !hasVisibleWindows, OpenNeko.usesBrowser else { return true }
+        OpenNeko.inBrowser()
+        return false
+    }
+}

@@ -118,7 +118,7 @@ fn accepts_bearer_cookie_and_the_token_url_which_sets_the_cookie() {
     assert_eq!(http(h.port, "GET", "/", &[&host, &format!("Cookie: other=1; neko_token={TOKEN}")], "").status, 200);
     let redirect = http(h.port, "GET", &format!("/?token={TOKEN}"), &[&host], "");
     assert_eq!(redirect.status, 302);
-    assert!(redirect.head.contains(&format!("Set-Cookie: neko_token={TOKEN}; Path=/; HttpOnly; SameSite=Strict")), "{}", redirect.head);
+    assert!(redirect.head.contains(&format!("Set-Cookie: neko_token={TOKEN}; Path=/; Max-Age={COOKIE_MAX_AGE_SECS}; HttpOnly; SameSite=Strict")), "{}", redirect.head);
     assert!(redirect.head.contains("Location: /"));
     // A stale cookie must not shadow a good URL token.
     assert_eq!(http(h.port, "GET", &format!("/?token={TOKEN}"), &[&host, "Cookie: neko_token=old"], "").status, 302);
@@ -567,4 +567,38 @@ fn file_mentions_are_sanitised_located_and_need_a_real_query() {
     let host = format!("Host: 127.0.0.1:{}", h.port);
     assert_eq!(http(h.port, "GET", "/api/files?q=ab", &[&host], "").status, 401);
     assert_eq!(get(h.port, "/api/files?q=ab", &["Origin: https://evil.example"]).status, 403);
+}
+
+#[test]
+fn install_manifest_and_icons_are_public_but_still_host_checked() {
+    let h = start();
+    fs::create_dir_all(h.dir.path().join("web/icons")).unwrap();
+    fs::write(h.dir.path().join("web/manifest.webmanifest"), "{}").unwrap();
+    fs::write(h.dir.path().join("web/icons/neko-192.png"), "png").unwrap();
+    let host = format!("Host: 127.0.0.1:{}", h.port);
+    let manifest = http(h.port, "GET", "/manifest.webmanifest", &[&host], "");
+    assert_eq!(manifest.status, 200);
+    assert!(manifest.head.contains("application/manifest+json"), "{}", manifest.head);
+    assert_eq!(http(h.port, "GET", "/icons/neko-192.png", &[&host], "").status, 200);
+    // Nothing else becomes public: not the app, not a nested path, not the API.
+    assert_eq!(http(h.port, "GET", "/icons/a/b.png", &[&host], "").status, 401);
+    assert_eq!(http(h.port, "GET", "/assets/app.js", &[&host], "").status, 401);
+    assert_eq!(http(h.port, "POST", "/manifest.webmanifest", &[&host], "").status, 401);
+    // The Host and Origin checks still apply.
+    assert_eq!(http(h.port, "GET", "/manifest.webmanifest", &["Host: evil.example"], "").status, 403);
+    assert_eq!(http(h.port, "GET", "/manifest.webmanifest", &[&host, "Origin: https://evil.example"], "").status, 403);
+}
+
+#[test]
+fn a_browser_without_the_cookie_is_told_how_to_sign_in() {
+    let h = start();
+    let host = format!("Host: 127.0.0.1:{}", h.port);
+    let page = http(h.port, "GET", "/", &[&host], "");
+    assert_eq!(page.status, 401);
+    assert!(page.head.contains("text/html"), "{}", page.head);
+    assert!(page.body.contains("Open Neko"), "{}", page.body);
+    // The API keeps its plain answer.
+    let api = http(h.port, "GET", "/api/plugins", &[&host], "");
+    assert_eq!(api.status, 401);
+    assert!(!api.body.contains("<html"));
 }

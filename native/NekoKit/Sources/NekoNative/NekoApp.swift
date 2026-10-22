@@ -2,6 +2,7 @@ import SwiftUI
 import NekoKit
 
 @main struct NekoNativeApp: App {
+    @NSApplicationDelegateAdaptor(NekoAppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
     @Environment(\.openWindow) private var openWindow
     @AppStorage("nekoAppearance") private var appearance = NekoAppearance.system.rawValue
@@ -10,15 +11,13 @@ import NekoKit
         Window("Neko", id: "workspace") {
             WorkspaceView(model: model)
                 .tint(NekoStyle.accent)
-                .task { PreviousAppContext.shared.start(); PresenceController.shared.start(model: model); await model.start(); await PaletteController.shared.configure(model: model) }
-                .onReceive(NotificationCenter.default.publisher(for: .nekoOpenWorkspace)) { _ in openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
-                .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
+                .task { await NekoStartup.run(model) }
         }
         .defaultSize(width: 1280, height: 820)
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) { Button("Quick panel") { PaletteController.shared.toggle(model: model) }.keyboardShortcut("k", modifiers: [.command]) }
-            CommandGroup(replacing: .appSettings) { Button("Settings…") { model.requestedPage = .settings; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }.keyboardShortcut(",", modifiers: [.command]) }
+            CommandGroup(replacing: .appSettings) { Button("Settings…") { openSettings() }.keyboardShortcut(",", modifiers: [.command]) }
             // View ▸ Appearance keeps the choice a keystroke away; Settings has it too.
             CommandGroup(after: .sidebar) {
                 Picker("Appearance", selection: $appearance) { ForEach(NekoAppearance.allCases) { Text($0.title).tag($0.rawValue) } }
@@ -31,21 +30,33 @@ import NekoKit
         MenuBarExtra { StatusMenu(model: model) } label: {
             // The icon says whether anything needs you, without opening the menu.
             let state = MenuBarState(StatusSummary(snapshot: model.snapshot))
+            // The label always exists, so app startup and "open Neko" requests
+            // (quick panel, presence pill) live here rather than on the window,
+            // which is closed when Neko opens in the browser.
             Image(nsImage: MenuBarIcon.image(for: state)).accessibilityLabel(state.accessibilityLabel)
+                .task { await NekoStartup.run(model) }
+                .onReceive(NotificationCenter.default.publisher(for: .nekoOpenWorkspace)) { _ in OpenNeko.workspace { openWindow(id: "workspace") } }
+                .onReceive(NotificationCenter.default.publisher(for: .nekoOpenPreferences)) { _ in openSettings() }
         }
+    }
+
+    private func openSettings() {
+        OpenNeko.workspace(route: "settings") { model.requestedPage = .settings; openWindow(id: "workspace") }
     }
 }
 
 struct StatusMenu: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    @AppStorage(OpenNeko.defaultsKey) private var openIn = OpenNeko.browser.rawValue
     var body: some View {
         Text(StatusSummary(snapshot: model.snapshot).attentionLabel)
         Text(StatusSummary(snapshot: model.snapshot).workingLabel)
         Divider()
         Button("Quick panel") { PaletteController.shared.toggle(model: model) }
-        Button("Open Neko") { openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
-        Button("Settings…") { model.requestedPage = .settings; openWindow(id: "workspace"); NSApp.activate(ignoringOtherApps: true) }
+        Button("Open Neko") { OpenNeko.workspace { openWindow(id: "workspace") } }
+        Button("Settings…") { OpenNeko.workspace(route: "settings") { model.requestedPage = .settings; openWindow(id: "workspace") } }
+        Picker("Open Neko in", selection: $openIn) { ForEach(OpenNeko.allCases) { Text($0.title).tag($0.rawValue) } }
         Divider()
         Button("Stop all work (\(StopAllWork.shortcutLabel))") { Task { await StopAllWork.run(model) } }
         Divider()
