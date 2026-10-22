@@ -133,7 +133,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   };
   const rows = () => page.locator("[data-slot='task-row']");
 
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 900 });
   await page.emulateMedia({ colorScheme: "dark" });
 
   // ===== 1. the test daemon's own data =========================================================
