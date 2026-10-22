@@ -23,7 +23,8 @@ A conversation is a list of SDK `UIMessage`s: `{ id, role, parts, metadata }`.
 | `reasoning` | the model's reasoning, when the agent reports it (Claude `thinking`, Codex `reasoning`) |
 | `dynamic-tool` | every tool an agent used: `toolName`, `toolCallId`, `title`, `state`, `input`, `output`, `errorText`, `approval` |
 | `data-neko-choices` `-form` `-plan` `-chart` `-files` `-sources` | the structured views a reply can carry (was ```` ```neko-* ```` fences in the text) |
-| `data-neko-ticket` `-memory` `-watch` | what a reply proposed or saved, settled by the daemon (ticket opened, memory kept, watch saved paused) |
+| `data-neko-memory` | what the reply remembered. Tickets it opened are `metadata.tickets` (links), watches it saved are `responsibility_ids` |
+| `data-neko-status` | a status line in a task conversation (`system` messages) |
 | `file` | a user's attachment (`url` is the daemon's `/api/attachments/…` path) |
 | `step-start` | each assistant message of an agent run (Claude `message_start`, Codex message item) |
 
@@ -119,11 +120,12 @@ its state), then every later chunk. A reload, a second window and the SDK's own
 `resume: true` all take that path; the transport sets `resumeStreamIsReplay` so the client
 resets the message at the replay's `start`. No chunk log grows with the reply.
 
-Other windows learn that something changed from `Event::ChatChanged { conversation,
-revision }` on `/api/events` (broadcast when a message is added, queued, settled or
-finished; **not** per delta, deltas travel on the stream). On it an idle window refetches
-`GET /api/chat/<conversation>`; a window that is itself streaming ignores it and refetches
-when its stream ends.
+Other windows learn that something changed from the workbench snapshot they already hold
+(no new event): the web's snapshot carries each message's lifecycle and approval ledgers but
+**no parts**, and its digest ignores parts, so tokens never wake it. When the chat signature
+changes (a message added, queued, settled; an approval answered) a window refetches
+`GET /api/chat/<conversation>`. A window that is itself streaming keeps the message it is
+following and takes everything around it from the log; it refetches when its stream ends.
 
 ### The web client
 
@@ -192,7 +194,8 @@ them and `ChatChanged` carries a task's changes, so the transport is the same on
 
 ## Not done / limits (stated up front)
 
-* Task runs do not token-stream; task conversations update per message.
+* Task runs do not token-stream; task conversations update per message (the stream endpoints answer `204`).
+* The browser checks (`scripts/verify/chat.mjs`) were written but could not be run where this was built (shared Chrome would not start); the daemon side is verified by tests and by curl against `web_harness`.
 * `neko-*` fences remain what the *model* writes. The SDK's own answer, tool calls, needs a
   tool channel; the agent CLIs only have one (MCP bridge) when a workspace is scoped, and
   proposals must work unscoped. So the contract is typed blocks parsed once, in the daemon.
