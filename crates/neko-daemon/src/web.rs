@@ -53,6 +53,10 @@ const MAX_BODY: usize = 8 * 1024 * 1024;
 const MAX_ATTACHMENT: usize = 32 * 1024 * 1024;
 const MAX_STATIC_FILE: u64 = 32 * 1024 * 1024;
 const MAX_MANIFEST: u64 = 64 * 1024;
+/// One stored value, one namespace's key count, and the custom stylesheet.
+const MAX_STORAGE_VALUE: usize = 1024 * 1024;
+const MAX_STORAGE_KEYS: usize = 256;
+const MAX_CUSTOM_CSS: u64 = 1024 * 1024;
 const MAX_CONNECTIONS: usize = 96;
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 const BODY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -78,6 +82,11 @@ pub struct Config {
     pub live_web: Option<PathBuf>,
     /// `<data dir>/plugins`, read again on every listing.
     pub plugins_dir: PathBuf,
+    /// `<data dir>/plugin-data`: one folder per page or plugin, JSON values a
+    /// page keeps through `host.storage` (see `storage_route`).
+    pub plugin_data_dir: PathBuf,
+    /// `<data dir>/custom.css`: the person's own styles, linked after the app's.
+    pub custom_css: PathBuf,
     /// `<data dir>/attachments`: where files attached in the web composer are
     /// kept, the same folder the native composer writes to.
     pub attachments_dir: PathBuf,
@@ -276,7 +285,13 @@ fn read_request(stream: &TcpStream, gate: &dyn Fn(&Req) -> Result<(), HttpError>
         Some(v) => v.parse::<usize>().map_err(|_| HttpError(400, "Bad Request"))?,
     };
     gate(&req)?;
-    let limit = if req.path == "/api/attachments" { MAX_ATTACHMENT } else { MAX_BODY };
+    let limit = if req.path == "/api/attachments" {
+        MAX_ATTACHMENT
+    } else if req.path.starts_with("/api/storage/") {
+        MAX_STORAGE_VALUE
+    } else {
+        MAX_BODY
+    };
     if length > limit {
         return Err(HttpError(413, "Payload Too Large"));
     }
@@ -442,6 +457,12 @@ fn route(mut stream: TcpStream, req: Req, config: &Config, backend: &dyn Backend
         if !get { Reply::text(405, "Method Not Allowed") } else { Reply::json(&serde_json::json!({ "path": config.plugins_dir.to_string_lossy() })) }
     } else if let Some(rest) = path.strip_prefix("/api/plugins/") {
         plugin_route(&config.plugins_dir, &req.method, rest)
+    } else if let Some(rest) = path.strip_prefix("/api/storage/") {
+        storage_route(&config.plugin_data_dir, &req.method, rest, &req.body)
+    } else if path == "/api/customisation" {
+        if !get { Reply::text(405, "Method Not Allowed") } else { Reply::json(&customisation_info(config)) }
+    } else if path == "/custom.css" {
+        if !get { Reply::text(405, "Method Not Allowed") } else { custom_css_reply(&config.custom_css) }
     } else if path == "/api/files" {
         if !get { Reply::text(405, "Method Not Allowed") } else { mention_files(&req.query, backend) }
     } else if path == "/api/attachments" {
@@ -631,6 +652,9 @@ struct PluginInfo {
     description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    /// The sidebar group the manifest asks for: `main`, `work` or `system`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group: Option<String>,
 }
 
 /// Reads `<plugins>/*/manifest.json` now (never cached). A broken plugin is
@@ -644,7 +668,7 @@ fn list_plugins(dir: &Path) -> Vec<PluginInfo> {
         if !valid_plugin_id(&id) || !entry.path().is_dir() { continue; }
         let disabled = entry.path().join(DISABLED_MARKER).exists();
         let path = entry.path().to_string_lossy().into_owned();
-        let broken = |error: String| PluginInfo { id: id.clone(), title: id.clone(), entry: String::new(), version: 0, manifest_version: None, disabled, path: path.clone(), description: None, error: Some(error) };
+        let broken = |error: String| PluginInfo { id: id.clone(), title: id.clone(), entry: String::new(), version: 0, manifest_version: None, disabled, path: path.clone(), description: None, error: Some(error), group: None };
         let manifest_path = entry.path().join("manifest.json");
         let manifest = match fs::File::open(&manifest_path).and_then(|f| {
             let mut text = String::new();
@@ -675,6 +699,7 @@ fn list_plugins(dir: &Path) -> Vec<PluginInfo> {
             entry: format!("/plugins/{id}/{}", relative.to_string_lossy()),
             version,
             manifest_version: json.get("version").and_then(|v| v.as_str()).map(str::to_string),
+            group: json.get("group").and_then(|v| v.as_str()).filter(|g| matches!(*g, "main" | "work" | "system")).map(str::to_string),
             disabled,
             path,
             error: None,
@@ -729,6 +754,127 @@ fn plugin_route(plugins: &Path, method: &str, rest: &str) -> Reply {
     match done {
         Ok(()) => Reply::json(&list_plugins(plugins)),
         Err(_) => Reply::text(500, "Internal Server Error"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Storage for pages: `host.storage`
+// ---------------------------------------------------------------------------
+
+/// A storage key: letters, digits, `.`, `_`, `-`; no leading dot; 1-128 bytes.
+fn valid_storage_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= 128 && !key.starts_with('.') && key.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// The file a key is kept in. `.json` is appended, so a key can never name a
+/// dotfile or the folder's own bookkeeping.
+fn storage_file(namespace: &Path, key: &str) -> PathBuf {
+    namespace.join(format!("{key}.json"))
+}
+
+/// Keys of one namespace, sorted. Only plain files named `<key>.json`.
+fn storage_keys(namespace: &Path) -> Vec<(String, u64)> {
+    let mut keys = Vec::new();
+    let Ok(entries) = fs::read_dir(namespace) else { return keys };
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else { continue };
+        let Some(key) = name.strip_suffix(".json").filter(|k| valid_storage_key(k)) else { continue };
+        match entry.metadata() {
+            Ok(meta) if meta.is_file() => keys.push((key.to_string(), meta.len())),
+            _ => {}
+        }
+    }
+    keys.sort();
+    keys
+}
+
+/// `GET /api/storage/<id>` lists keys; `GET|PUT|DELETE /api/storage/<id>/<key>`
+/// reads, writes (a JSON body) and removes one value. `<id>` follows the plugin
+/// id rule, so a namespace is one flat folder under `plugin-data` and nothing
+/// can climb out of it; a symlinked namespace or value is refused, never
+/// followed. Values are bounded (1 MiB, 256 keys) and written atomically.
+/// The same Host/Origin/token gates as every other route apply before this runs.
+fn storage_route(root: &Path, method: &str, rest: &str, body: &[u8]) -> Reply {
+    let (id, key) = match rest.split_once('/') {
+        Some((id, key)) => (id, Some(key)),
+        None => (rest, None),
+    };
+    if !valid_plugin_id(id) || key.is_some_and(|k| !valid_storage_key(k)) {
+        return Reply::text(400, "Bad Request");
+    }
+    let namespace = root.join(id);
+    let namespace_state = fs::symlink_metadata(&namespace);
+    if namespace_state.as_ref().is_ok_and(|m| !m.is_dir()) {
+        return Reply::text(404, "Not Found");
+    }
+    let Some(key) = key else {
+        if method != "GET" { return Reply::text(405, "Method Not Allowed"); }
+        let keys: Vec<_> = storage_keys(&namespace).into_iter().map(|(key, size)| serde_json::json!({ "key": key, "size": size })).collect();
+        return Reply::json(&serde_json::json!({ "keys": keys }));
+    };
+    let file = storage_file(&namespace, key);
+    match method {
+        "GET" => match fs::symlink_metadata(&file) {
+            Ok(meta) if meta.is_file() && meta.len() <= MAX_STORAGE_VALUE as u64 => match fs::read(&file) {
+                Ok(bytes) => Reply::new(200, "OK", "application/json", bytes),
+                Err(_) => Reply::text(404, "Not Found"),
+            },
+            _ => Reply::text(404, "Not Found"),
+        },
+        "PUT" => {
+            if body.len() > MAX_STORAGE_VALUE { return Reply::text(413, "Payload Too Large"); }
+            if serde_json::from_slice::<serde_json::Value>(body).is_err() { return Reply::text(400, "Bad Request"); }
+            if namespace_state.is_err() && fs::create_dir_all(&namespace).is_err() { return Reply::text(500, "Internal Server Error"); }
+            if fs::symlink_metadata(&file).is_ok_and(|m| !m.is_file()) { return Reply::text(404, "Not Found"); }
+            if !file.exists() && storage_keys(&namespace).len() >= MAX_STORAGE_KEYS { return Reply::text(413, "Payload Too Large"); }
+            let temp = namespace.join(format!(".{key}.tmp"));
+            match fs::write(&temp, body).and_then(|()| fs::rename(&temp, &file)) {
+                Ok(()) => Reply::json(&serde_json::json!({ "ok": true })),
+                Err(_) => {
+                    let _ = fs::remove_file(&temp);
+                    Reply::text(500, "Internal Server Error")
+                }
+            }
+        }
+        "DELETE" => match fs::symlink_metadata(&file) {
+            Ok(meta) if meta.is_file() => match fs::remove_file(&file) {
+                Ok(()) => Reply::json(&serde_json::json!({ "ok": true })),
+                Err(_) => Reply::text(500, "Internal Server Error"),
+            },
+            _ => Reply::text(404, "Not Found"),
+        },
+        _ => Reply::text(405, "Method Not Allowed"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The person's own stylesheet: `<data dir>/custom.css`
+// ---------------------------------------------------------------------------
+
+fn custom_css_version(file: &Path) -> u64 {
+    fs::metadata(file).and_then(|m| m.modified()).ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// Where things a person customises live, and when `custom.css` last changed
+/// (so the shell reloads it by itself).
+fn customisation_info(config: &Config) -> serde_json::Value {
+    serde_json::json!({
+        "plugins_dir": config.plugins_dir.to_string_lossy(),
+        "css_path": config.custom_css.to_string_lossy(),
+        "css_exists": config.custom_css.is_file(),
+        "css_version": custom_css_version(&config.custom_css),
+    })
+}
+
+/// `GET /custom.css`: an empty sheet when there is none (a `<link>` should not
+/// error), a plain file only (a symlink is not followed), at most 1 MiB.
+fn custom_css_reply(file: &Path) -> Reply {
+    let css = |bytes: Vec<u8>| Reply::new(200, "OK", "text/css; charset=utf-8", bytes);
+    match fs::symlink_metadata(file) {
+        Ok(meta) if meta.is_file() && meta.len() <= MAX_CUSTOM_CSS => css(fs::read(file).unwrap_or_default()),
+        Ok(meta) if meta.is_file() => Reply::text(413, "Payload Too Large"),
+        _ => css(Vec::new()),
     }
 }
 
