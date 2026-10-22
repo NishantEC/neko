@@ -206,7 +206,8 @@ export function connectionTone(c: Json): Tone {
 export function connectionDetail(c: Json): string {
   const error = str(c.error);
   const lower = error.toLowerCase();
-  if (lower.includes("definition changed")) return "Changed since you approved it. Open to review.";
+  if (lower.includes("definition changed")) return "Its definition changed since you approved it. Review it to use it again.";
+  if (lower.includes("definition is unavailable")) return "No longer found where it was imported from. Pause it, or add it again.";
   if (/auth|401|sign-in/.test(lower)) return "Signed out. Open to sign in again.";
   if (error) return error.split(/[.\n]/)[0] || error;
   const config = rec(c.config);

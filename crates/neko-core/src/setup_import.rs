@@ -135,7 +135,18 @@ pub fn config_identity(config: &ServerConfig) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// Scripts up to this size are fingerprinted by content.
+const SCRIPT_HASH_LIMIT: u64 = 4 * 1024 * 1024;
+
 /// Detect replacement or in-place modification of a trusted local launcher.
+///
+/// Only properties that survive a reboot go in: the device number (`st_dev`)
+/// and the inode change time are not stable on macOS (APFS renumbers volumes
+/// at mount, and Spotlight, Time Machine or an xattr update move ctime), and
+/// including them made every approved local server "changed" after a restart.
+/// The launcher is fingerprinted by path, inode, size, mtime and mode; script
+/// arguments (small files) by their content, so editing a script still voids
+/// the approval.
 pub fn executable_identity(config: &ServerConfig) -> Result<Option<String>, String> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let ServerConfig::Stdio { command, args, cwd } = config else {
@@ -149,15 +160,12 @@ pub fn executable_identity(config: &ServerConfig) -> Result<Option<String>, Stri
         return Err("Linked MCP executable is unavailable".into());
     }
     let mut identity = format!(
-        "{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
+        "v2\0{}\0{}\0{}\0{}\0{}\0{}",
         path.display(),
-        metadata.dev(),
         metadata.ino(),
         metadata.len(),
         metadata.mtime(),
         metadata.mtime_nsec(),
-        metadata.ctime(),
-        metadata.ctime_nsec(),
         metadata.mode()
     );
     // A launcher such as node or python is only half of the trusted program.
@@ -196,20 +204,16 @@ pub fn executable_identity(config: &ServerConfig) -> Result<Option<String>, Stri
             continue;
         }
         use std::fmt::Write;
-        write!(
-            identity,
-            "\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
-            path.display(),
-            metadata.dev(),
-            metadata.ino(),
-            metadata.len(),
-            metadata.mtime(),
-            metadata.mtime_nsec(),
-            metadata.ctime(),
-            metadata.ctime_nsec(),
-            metadata.mode()
-        )
-        .expect("String formatting cannot fail");
+        // Scripts are small: hash what they say. Anything large (a bundled
+        // binary passed as an argument) falls back to its stable metadata.
+        let fingerprint = if metadata.len() <= SCRIPT_HASH_LIMIT {
+            let bytes = fs::read(&path).map_err(|_| "Linked MCP script is unavailable")?;
+            format!("sha256:{:x}", Sha256::digest(&bytes))
+        } else {
+            format!("{}\0{}\0{}\0{}", metadata.ino(), metadata.len(), metadata.mtime(), metadata.mtime_nsec())
+        };
+        write!(identity, "\0{}\0{}\0{}", path.display(), fingerprint, metadata.mode())
+            .expect("String formatting cannot fail");
     }
     Ok(Some(format!("{:x}", Sha256::digest(identity.as_bytes()))))
 }
@@ -1321,6 +1325,36 @@ mod tests {
         };
         let before = executable_identity(&config).unwrap();
         fs::write(&script, "version two has changed").unwrap();
+        assert_ne!(before, executable_identity(&config).unwrap());
+    }
+
+    #[test]
+    fn trusted_launcher_identity_ignores_metadata_that_moves_without_a_change() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("launcher");
+        let script = directory.path().join("server.py");
+        fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(&script, "print('hi')").unwrap();
+        let config = ServerConfig::Stdio {
+            command: executable.to_string_lossy().into_owned(),
+            args: vec![script.to_string_lossy().into_owned()],
+            cwd: None,
+        };
+        let before = executable_identity(&config).unwrap();
+        // A permission round trip changes only ctime, as Spotlight or an
+        // xattr write would. The approval must survive it.
+        for path in [&executable, &script] {
+            let mode = fs::metadata(path).unwrap().permissions().mode();
+            fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o040)).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+        }
+        // Rewriting the script with the same content keeps it approved too.
+        fs::write(&script, "print('hi')").unwrap();
+        assert_eq!(before, executable_identity(&config).unwrap());
+        // Replacing the launcher still voids it.
+        fs::write(&executable, "#!/bin/sh\nexit 1\n").unwrap();
         assert_ne!(before, executable_identity(&config).unwrap());
     }
 

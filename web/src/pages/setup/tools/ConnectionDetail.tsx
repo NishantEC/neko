@@ -9,21 +9,73 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ArrowsClockwise, CaretDown, CaretRight, Key, MagnifyingGlass, Pause, Play } from "@/ui/icons";
 import { JsonViewer } from "@/chat/json-viewer";
 import { ErrorNote, Status } from "@/setup/kit";
+import { confirm } from "@/shell/confirm";
+import { toast } from "@/ui/sonner";
 import { arr, connectionStatus, connectionTone, mcp, rec, str, toolSummary, useRun, workspaceName } from "@/setup/lib";
 
 export function needsSignIn(c: Json) {
   return connectionStatus(c) === "Sign in needed";
 }
 
-/** What "reconnect" means for this connection: sign in again, or discover its tools again. */
-export function reconnectAction(c: Json): { label: string; command: string; fields: Record<string, unknown> } | null {
+/** What "reconnect" means for this connection: sign in again, approve a changed
+ * source definition again, or discover its tools again. Null when nothing the
+ * button could do would help (paused, or the source definition is gone). */
+export function reconnectAction(c: Json): { label: string; kind: "signin" | "relink" | "discover" } | null {
   if (!c.enabled) return null;
   const status = connectionStatus(c);
   if (status !== "Sign in needed" && status !== "Needs attention") return null;
-  if (rec(c.config).transport === "http" && status === "Sign in needed") {
-    return { label: "Sign in again", command: "Authenticate", fields: { connection_id: c.id, client_id: null } };
-  }
-  return { label: "Reconnect", command: "Discover", fields: { connection_id: c.id } };
+  const error = str(c.error).toLowerCase();
+  if (error.includes("definition is unavailable")) return null;
+  if (error.includes("definition changed") && c.source_link) return { label: "Review & approve", kind: "relink" };
+  if (rec(c.config).transport === "http" && status === "Sign in needed") return { label: "Sign in again", kind: "signin" };
+  return { label: "Reconnect", kind: "discover" };
+}
+
+/** Runs the reconnect for a connection and says what really happened: the
+ * daemon answers with a snapshot, and the connection's own error in it is the
+ * truth, not the fact that the request was accepted. */
+export function useReconnect(c: Json) {
+  const { run, busy, error, clear } = useRun();
+  const action = reconnectAction(c);
+  const go = async () => {
+    if (!action) return;
+    const label = str(c.label);
+    if (action.kind === "relink") {
+      const config = rec(c.config);
+      const local = config.transport !== "http";
+      const what = local ? [str(config.command), ...arr(config.args).map(String)].join(" ") : str(config.url);
+      const ok = await confirm({
+        title: `Approve ${label} again?`,
+        description: (
+          <span className="flex flex-col gap-2">
+            <span>Its definition in {str(c.source_link?.source_path) || "its source file"} no longer matches what you approved. Neko will run it as it is now:</span>
+            <code className="block select-text break-all rounded-lg bg-foreground/[0.05] px-3 py-2 font-mono text-[12px] text-foreground">{what}</code>
+            {local ? <span>This is a program on this Mac. Approve it only if you recognise it.</span> : null}
+          </span>
+        ),
+        action: "Approve again",
+      });
+      if (!ok) return;
+    }
+    let after: Json | null = null;
+    const done = await run(async () => {
+      if (action.kind === "relink") {
+        await mcp("LinkSource", { workspace_id: c.workspace_id, candidate_id: c.source_link.candidate_id, trust_local_process: rec(c.config).transport !== "http" });
+      }
+      const result = action.kind === "signin"
+        ? await mcp("Authenticate", { connection_id: c.id, client_id: null })
+        : await mcp("Discover", { connection_id: c.id });
+      after = result;
+      return result;
+    });
+    if (!done) return;
+    if (action.kind === "signin") return toast.success(`Finish signing in to ${label} in your browser.`);
+    const latest = arr((after as Json | null)?.mcp?.connections).find((x) => x.id === c.id);
+    const problem = latest ? str(latest.error) : "";
+    if (problem) toast.error(`${label} still can’t connect: ${problem}`);
+    else toast.success(`${label} is connected${latest ? ` · ${toolSummary(latest)}` : ""}.`);
+  };
+  return { action, go, busy, error, clear };
 }
 
 function ToolRow({ tool }: { tool: Json }) {
@@ -75,7 +127,7 @@ export function ConnectionDetail({ snapshot, connection, onClose }: { snapshot: 
   const tools = arr(c.tools);
   const filtered = tools.filter((t) => !search || `${str(t.name)} ${str(t.description)}`.toLowerCase().includes(search.toLowerCase()));
   const status = connectionStatus(c);
-  const reconnect = reconnectAction(c);
+  const reconnect = useReconnect(c);
   const send = (name: string, fields: Record<string, unknown>) => void run(() => mcp(name, fields));
   return (
     <Dialog open onOpenChange={(o) => { if (!o) { setSearch(""); clear(); onClose(); } }}>
@@ -91,9 +143,9 @@ export function ConnectionDetail({ snapshot, connection, onClose }: { snapshot: 
           <div className="flex flex-wrap items-center gap-2">
             <Status tone={connectionTone(c)}>{status}</Status>
             <span className="flex-1" />
-            {reconnect ? (
-              <Button size="sm" disabled={busy} loading={busy} onClick={() => send(reconnect.command, reconnect.fields)}>
-                {reconnect.command === "Authenticate" ? <Key /> : <ArrowsClockwise />} {reconnect.label}
+            {reconnect.action ? (
+              <Button size="sm" disabled={busy || reconnect.busy} loading={reconnect.busy} onClick={() => void reconnect.go()}>
+                {reconnect.action.kind === "signin" ? <Key /> : <ArrowsClockwise />} {reconnect.action.label}
               </Button>
             ) : null}
             <Button variant="outline" size="sm" disabled={busy || !c.enabled} onClick={() => send("Discover", { connection_id: c.id })}><ArrowsClockwise /> Refresh tools</Button>
