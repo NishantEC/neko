@@ -149,7 +149,7 @@ export default function Tools() {
   return (
     <SetupPage
       eyebrow="Knowledge & tools"
-      title={<>Tools &amp; <em>skills.</em></>}
+      title={<>Tools &amp; skills</>}
       subtitle="Connections provide access. Skills provide instructions."
     >
       <Gate>{(snapshot) => <ToolsBody snapshot={snapshot} />}</Gate>

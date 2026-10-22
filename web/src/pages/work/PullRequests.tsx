@@ -156,7 +156,7 @@ export default function PullRequests() {
       <WorkHeader
         className="w-full max-w-[1088px]"
         eyebrow="Work"
-        title={<>Pull <em>requests.</em></>}
+        title={<>Pull requests</>}
         subtitle={snapshot ? pullRequestSubtitle(rows) : "Loading…"}
         actions={
           <>

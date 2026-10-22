@@ -436,7 +436,7 @@ export default function Memory() {
   return (
     <SetupPage
       eyebrow="Knowledge & tools"
-      title={<>What Neko <em>remembers.</em></>}
+      title={<>Memory</>}
       subtitle="Saved context and working guidance. Suggestions wait for your approval."
     >
       <Gate>{(snapshot) => <MemoryBody snapshot={snapshot} />}</Gate>

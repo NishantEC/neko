@@ -135,7 +135,7 @@ export default function Profiles() {
   return (
     <SetupPage
       eyebrow="Knowledge & tools"
-      title={<>Profiles for <em>kinds of work.</em></>}
+      title={<>Profiles</>}
       subtitle="Instructions and memories for each kind of work."
       actions={<Button onClick={() => setDraft({ value: {} })}><Plus /> New profile</Button>}
     >

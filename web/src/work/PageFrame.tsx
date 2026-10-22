@@ -3,10 +3,10 @@
 // controls to its right.
 import type { ReactNode } from "react";
 import { cn } from "@/ui/lib/utils";
-import { EditorialHeading, MonoLabel } from "@/editorial";
+import { EditorialHeading } from "@/editorial";
 import { Skeleton } from "@/ui/skeleton";
 
-export function WorkHeader({ eyebrow, title, subtitle, actions, children, className }: {
+export function WorkHeader({ title, subtitle, actions, children, className }: {
   className?: string;
   eyebrow: ReactNode;
   title: ReactNode;
@@ -18,8 +18,7 @@ export function WorkHeader({ eyebrow, title, subtitle, actions, children, classN
     <header data-slot="work-header" className={cn("shrink-0 px-6 pt-5 pb-3", className)}>
       <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
         <div className="flex min-w-0 flex-col gap-1.5">
-          <MonoLabel className="text-foreground/45">{eyebrow}</MonoLabel>
-          <EditorialHeading as="h1" className="text-[28px]">{title}</EditorialHeading>
+          <EditorialHeading as="h1" className="text-[22px]">{title}</EditorialHeading>
           {subtitle ? <p data-slot="work-subtitle" className="text-[13.5px] text-muted-foreground">{subtitle}</p> : null}
         </div>
         <div className="ms-auto flex flex-wrap items-center gap-2">{actions}</div>

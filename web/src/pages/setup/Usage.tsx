@@ -190,7 +190,7 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
   const top = spend.tasks[0];
   const hasData = spend.runs > 0;
   return (
-    <Section eyebrow="Spend" title={<>What agents <em>cost.</em></>} intro="Read from the cost each Claude Code and OpenCode run reports. Codex subscriptions don’t report a price, so their runs aren’t counted here.">
+    <Section eyebrow="Spend" title={<>What agents cost.</>} intro="Read from the cost each Claude Code and OpenCode run reports. Codex subscriptions don’t report a price, so their runs aren’t counted here.">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-slot="spend-wells">
         <Well label="Recorded spend" value={usd(spend.total)} detail={`${spend.runs} priced ${spend.runs === 1 ? "run" : "runs"} · ${compact(spend.tokensIn)} in · ${compact(spend.tokensOut)} out`} />
         <Well label="Last 7 days" value={usd(spend.week)} tone={spend.week > 0 ? "neutral" : "success"} detail={spend.week > 0 ? "Across every task" : "Nothing priced this week"} />
@@ -354,7 +354,7 @@ export default function Usage() {
   return (
     <SetupPage
       eyebrow="System"
-      title={<>Usage &amp; <em>machine.</em></>}
+      title={<>Usage &amp; machine</>}
       subtitle="What the Mac can take right now, and what Neko’s agents have cost."
       width="max-w-[980px]"
     >

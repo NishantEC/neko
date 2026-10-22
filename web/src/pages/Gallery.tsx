@@ -99,11 +99,11 @@ const SWATCHES = [
 
 function Foundations() {
   return (
-    <Section id="foundations" eyebrow="Foundations" title={<>Type, colour <em>&amp; light.</em></>}>
+    <Section id="foundations" eyebrow="Foundations" title={<>Type, colour &amp; light.</>}>
       <div className="grid items-start gap-8 md:grid-cols-2">
         <Specimen label="Three voices" className="flex-col items-start">
           <MonoLabel>Eyebrow · mono</MonoLabel>
-          <EditorialHeading as="p" className="text-[2rem]">Who is <em>waiting.</em></EditorialHeading>
+          <EditorialHeading as="p" className="text-[2rem]">Who is waiting.</EditorialHeading>
           <p className="text-muted-foreground">Body in Inter, muted. Numbers are tabular: 1,284 tokens · 12:48.</p>
           <code className="rounded-md bg-foreground/[0.05] px-1.5 py-0.5 text-[12px]">gh pr view 4641 --json reviews</code>
         </Specimen>
@@ -139,7 +139,7 @@ function Foundations() {
 function Controls() {
   const [on, setOn] = useState(true);
   return (
-    <Section id="controls" eyebrow="Primitives" title={<>Buttons <em>&amp; badges.</em></>}>
+    <Section id="controls" eyebrow="Primitives" title={<>Buttons &amp; badges.</>}>
       <div className="grid items-start gap-8 md:grid-cols-2">
         <Specimen label="Button variants">
           <Button>Approve</Button>
@@ -196,7 +196,7 @@ function Controls() {
 
 function Forms() {
   return (
-    <Section id="forms" eyebrow="Primitives" title={<>Forms <em>&amp; fields.</em></>}>
+    <Section id="forms" eyebrow="Primitives" title={<>Forms &amp; fields.</>}>
       <div className="grid max-w-3xl gap-6 md:grid-cols-2">
         <Field>
           <FormLabel htmlFor="g-name">Task title</FormLabel>
@@ -237,7 +237,7 @@ function Forms() {
 
 function Overlays() {
   return (
-    <Section id="overlays" eyebrow="Primitives" title={<>Overlays <em>&amp; menus.</em></>}>
+    <Section id="overlays" eyebrow="Primitives" title={<>Overlays &amp; menus.</>}>
       <div className="grid items-start gap-8 md:grid-cols-2">
         <Specimen label="Dialog · alert dialog · sheet">
           <Dialog>
@@ -331,7 +331,7 @@ function Overlays() {
 
 function DataDisplay() {
   return (
-    <Section id="data" eyebrow="Primitives" title={<>Data <em>&amp; layout.</em></>}>
+    <Section id="data" eyebrow="Primitives" title={<>Data &amp; layout.</>}>
       <div className="lg:columns-2 lg:gap-8 [&>*]:mb-8 [&>*]:break-inside-avoid">
         <Specimen label="Table" className="w-full">
           <div className="w-full overflow-x-auto rounded-xl border border-border">
@@ -448,11 +448,11 @@ function DataDisplay() {
 
 function Editorial() {
   return (
-    <Section id="editorial" eyebrow="Editorial" title={<>One panel, <em>divided into rows.</em></>}>
+    <Section id="editorial" eyebrow="Editorial" title={<>One panel, divided into rows.</>}>
       <div className="grid items-start gap-8 lg:grid-cols-2">
         <div className="flex flex-col gap-8">
-          <PageHeader eyebrow="Settings · Budget" title={<>Spend, <em>kept honest.</em></>} subtitle="What Neko may spend before it asks you." />
-          <SectionHead eyebrow="Watching" title={<>Things Neko <em>keeps an eye on.</em></>} intro="A watch checks a source on a schedule and files a task when something needs doing." />
+          <PageHeader eyebrow="Settings · Budget" title={<>Spend, kept honest.</>} subtitle="What Neko may spend before it asks you." />
+          <SectionHead eyebrow="Watching" title={<>Things Neko keeps an eye on.</>} intro="A watch checks a source on a schedule and files a task when something needs doing." />
         </div>
         <Panel className="max-w-2xl">
           <div className="px-5 py-4"><MonoLabel>Daily budget</MonoLabel><p className="mt-1 text-strong">$10.00 per day</p></div>
@@ -481,7 +481,7 @@ function ChatSection() {
   const [text, setText] = useState("");
   const [open] = useState(true);
   return (
-    <Section id="chat" eyebrow="Chat" title={<>The conversation, <em>piece by piece.</em></>}>
+    <Section id="chat" eyebrow="Chat" title={<>The conversation, piece by piece.</>}>
       <div className="grid items-start gap-10 lg:grid-cols-2">
         <div className="flex flex-col gap-3">
           <FieldLabel>Turns: user bubble, finished reply (work log, tool call, table), live reply</FieldLabel>
@@ -571,7 +571,7 @@ export default function Gallery() {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-16 px-8 py-10">
         <PageHeader
           eyebrow="Design system"
-          title={<>UI <em>gallery.</em></>}
+          title={<>UI gallery.</>}
           subtitle="Every primitive, editorial and chat component Neko's web UI is built from, with realistic data. Switch light and dark in the sidebar."
         />
         <Foundations />

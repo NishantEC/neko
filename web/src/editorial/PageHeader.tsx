@@ -2,7 +2,6 @@
 import type { ReactNode } from "react";
 
 import { EditorialHeading } from "./EditorialHeading";
-import { MonoLabel } from "./MonoLabel";
 
 export interface PageHeaderProps {
   eyebrow: ReactNode;
@@ -10,11 +9,10 @@ export interface PageHeaderProps {
   subtitle?: ReactNode;
 }
 
-export function PageHeader({ eyebrow, title, subtitle }: PageHeaderProps) {
+export function PageHeader({ title, subtitle }: PageHeaderProps) {
   return (
     <div className="flex flex-col gap-2">
-      <MonoLabel className="text-foreground/45">{eyebrow}</MonoLabel>
-      <EditorialHeading as="h1" className="text-[clamp(1.75rem,2.5vw+0.5rem,2.5rem)]">
+      <EditorialHeading as="h1" className="text-[22px]">
         {title}
       </EditorialHeading>
       {subtitle ? <p className="text-muted-foreground">{subtitle}</p> : null}

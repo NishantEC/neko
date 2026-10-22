@@ -37,7 +37,7 @@ export function RulebookSection() {
     <div className="flex flex-col gap-8">
       <Section
         eyebrow="Every agent"
-        title={<>The <em>rulebook.</em></>}
+        title={<>Rulebook</>}
         intro={<>Neko and every agent it hands work to follow these rules: how to engineer a change, how to review one, how to treat this Mac and your repositories. Write them in plain words.</>}
         actions={<Status tone={usingDefault ? "neutral" : "success"}>{usingDefault ? "Using Neko’s default rules" : "Using your own rules"}</Status>}
       >

@@ -211,7 +211,7 @@ export default function Workspaces() {
   return (
     <SetupPage
       eyebrow="Work"
-      title={<>Where Neko <em>works.</em></>}
+      title={<>Workspaces</>}
       subtitle="Project folders, connected tools, and the work Neko watches."
       actions={<Button onClick={() => setDialog({ open: true, id: null })}><Plus /> Add workspace</Button>}
     >
