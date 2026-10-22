@@ -10,6 +10,7 @@
 //
 //   pnpm --dir web build && node scripts/web-verify.mjs
 //
+// NEKO_WEB_WIDTH=1100 narrows the viewport; NEKO_WEB_SHOTS sets the output dir.
 // An agent can edit web/src, rebuild (`pnpm --dir web build`), run this script
 // and read /tmp/neko-web/*.png: the whole edit-and-look loop without a human.
 //
@@ -158,7 +159,7 @@ try {
   execFileSync(sharedChrome, ["acquire", LEASE], { stdio: "inherit" });
   leased = true;
   browser = await chromium.connectOverCDP(CHROME);
-  context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
+  context = await browser.newContext({ viewport: { width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
   const page = await context.newPage();
   const problems = [];
   page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${m.text()}`); });
@@ -286,7 +287,7 @@ try {
   // --- gallery: every section, dark then light -----------------------------------------
   const sections = await page.locator("[data-gallery-section]").evaluateAll((els) => els.map((e) => e.getAttribute("data-gallery-section")));
   check(sections.length >= 7, `the gallery renders ${sections.length} sections: ${sections.join(", ")}`);
-  await page.setViewportSize({ width: 1440, height: 2600 });
+  await page.setViewportSize({ width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 2600 });
   for (const theme of ["dark", "light"]) {
     await page.emulateMedia({ colorScheme: theme });
     await sleep(700);
@@ -295,7 +296,7 @@ try {
     }
     await a11y(`gallery (${theme})`);
   }
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 900 });
   for (const theme of ["dark", "light"]) {
     await page.emulateMedia({ colorScheme: theme });
     await sleep(500);
