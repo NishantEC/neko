@@ -1,5 +1,10 @@
-// The composer, after hushbacks' ChatInput (packages/ui/src/components/ChatInput)
-// and Neko's native composer (SharedComposer.swift).
+// The composer. Chrome from t3code apps/web/src/components/chat/ChatComposer.tsx
+// and ChatView.tsx @3b95e7831 (MIT): ComposerSurface, the banner dock, the body
+// with the media row and file list, the footer with controls and the primary
+// action. T3's Tiptap prompt editor is not ported — a textarea carries its
+// classes, so Neko keeps its key handling and drafts. Behaviour after
+// hushbacks' ChatInput (packages/ui/src/components/ChatInput) and Neko's native
+// composer (SharedComposer.swift).
 //
 // Kept: one rounded container with the controls inside it, auto-growing
 // textarea, paste / drop / choose attachments, the send ↔ queue ↔ stop morph,
@@ -12,7 +17,10 @@
 // Images keep a local data: URL preview (the daemon's CSP allows `data:` but
 // not `blob:` images). A page that uploads reads `attachments`.
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, CircleNotch, File as FileIcon, Image as ImageIcon, Paperclip, Square, X } from "@/ui/icons";
+import { File as FileIcon, Image as ImageIcon, Paperclip, X } from "lucide-react";
+import { ComposerSurface } from "@/chat/t3/ComposerSurface";
+import { ComposerBanner } from "@/chat/t3/ComposerBanner";
+import { ComposerPrimaryActions } from "@/chat/t3/ComposerPrimaryActions";
 import { Button } from "@/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import { cn } from "@/ui/lib/utils";
@@ -120,12 +128,12 @@ export function ChatInput({
     [ref],
   );
 
-  // Auto-grow to the content, up to 220px, then scroll.
+  // Auto-grow to the content, up to 208px (max-h-52), then scroll.
   useLayoutEffect(() => {
     const el = inner.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 208)}px`;
   }, [text]);
 
   const addImage = useCallback(
@@ -159,166 +167,237 @@ export function ChatInput({
   const tooLong = sizeUsed > limit;
   const uploading = attachments.some((a) => a.status === "uploading");
   const hasContent = Boolean(trimmed || attachments.some((a) => a.status !== "error"));
-  const showStop = isGenerating && !hasContent;
   const nearLimit = sizeUsed >= limit - Math.min(200, limit / 5);
   const message = error ?? problem;
   const canSend = hasContent && !disabled && !sending && !tooLong && !uploading;
 
+  const imageAttachments = attachments.filter((a) => a.isImage && a.previewUrl);
+  const fileAttachments = attachments.filter((a) => !(a.isImage && a.previewUrl));
+  const removeAttachment = (a: ChatAttachment) =>
+    onRemoveAttachment ? onRemoveAttachment(a.id) : setAttachments(attachments.filter((x) => x.id !== a.id));
+  const attachmentStatus = (a: ChatAttachment) =>
+    a.status === "uploading" ? "Uploading…" : a.status === "error" ? (a.error ?? "Could not attach") : a.isImage ? "Image" : "File";
+
+  // T3 Code's composer chrome (ChatView + ChatComposer): ComposerSurface.Shell /
+  // Host / Main, the banner dock for what sits on the composer's top edge, the
+  // body with the media row and file list over the prompt, and the footer with
+  // controls on the left and attach + the primary action on the right.
   return (
     <div className={cn("relative", className)}>
       {menu}
-      {tray}
-      {message ? <p role="alert" data-slot="composer-error" className="mb-2 ms-1.5 text-[13px] text-destructive">{message}</p> : null}
-      <form
-        data-slot="composer"
-        data-tray={Boolean(tray)}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (canSend) onSendMessage();
-        }}
-        onPaste={(e) => {
-          if (!accepts) return;
-          const files = onFiles ? pastedFiles(e.clipboardData) : [pickPastedImage(e.clipboardData)].filter((f): f is File => !!f);
-          if (!files.length) return;
-          e.preventDefault();
-          take(files);
-        }}
-        onDragOver={(e) => {
-          if (!accepts || !Array.from(e.dataTransfer.types).includes("Files")) return;
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          if (!accepts) return;
-          e.preventDefault();
-          setDragging(false);
-          take(Array.from(e.dataTransfer.files));
-        }}
-        className={cn(
-          "relative z-[1] flex flex-col gap-1 rounded-3xl border border-border bg-card p-2 shadow-xs transition-[border-color,box-shadow] duration-150",
-          "focus-within:border-foreground/20 focus-within:ring-[3px] focus-within:ring-ring/10",
-          dragging && "border-primary ring-[3px] ring-primary/20",
-        )}
-      >
-        {attachments.length > 0 ? (
-          <ul data-slot="attachments" className="flex flex-wrap gap-2 px-2 pt-1.5" aria-label="Attachments">
-            {attachments.map((a) => (
-              <li
-                key={a.id}
-                data-slot="attachment"
-                data-status={a.status ?? "ready"}
-                className={cn("flex max-w-[240px] items-center gap-2 rounded-xl bg-foreground/[0.05] py-1.5 ps-2 pe-1", a.status === "error" && "ring-1 ring-destructive/50")}
-              >
-                {a.isImage && a.previewUrl ? (
-                  <img src={a.previewUrl} alt={a.name || "Pasted image"} className="size-8 shrink-0 rounded-lg object-cover ring-1 ring-border" />
-                ) : (
-                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-foreground/[0.06] text-muted-foreground">
-                    {a.isImage ? <ImageIcon /> : <FileIcon />}
-                  </span>
-                )}
-                <span className="min-w-0 leading-tight">
-                  <span className="block truncate text-[12.5px] font-medium text-strong" title={a.name}>{a.name}</span>
-                  <span className={cn("block truncate text-[11px]", a.status === "error" ? "text-destructive" : "text-muted-foreground")} title={a.error}>
-                    {a.status === "uploading" ? "Uploading…" : a.status === "error" ? (a.error ?? "Could not attach") : a.isImage ? "Image" : "File"}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${a.name || "attachment"}`}
-                  onClick={() => (onRemoveAttachment ? onRemoveAttachment(a.id) : setAttachments(attachments.filter((x) => x.id !== a.id)))}
-                  className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      {message ? <p role="alert" data-slot="composer-error" className="mb-2 ms-1.5 text-xs text-destructive">{message}</p> : null}
+      <ComposerSurface.Shell>
+        <ComposerSurface.Host>
+          <form
+            data-slot="composer"
+            data-chat-composer-form="true"
+            data-tray={Boolean(tray)}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (canSend) onSendMessage();
+            }}
+            onPaste={(e) => {
+              if (!accepts) return;
+              const files = onFiles ? pastedFiles(e.clipboardData) : [pickPastedImage(e.clipboardData)].filter((f): f is File => !!f);
+              if (!files.length) return;
+              e.preventDefault();
+              take(files);
+            }}
+            onDragOver={(e) => {
+              if (!accepts || !Array.from(e.dataTransfer.types).includes("Files")) return;
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              if (!accepts) return;
+              e.preventDefault();
+              setDragging(false);
+              take(Array.from(e.dataTransfer.files));
+            }}
+            className="mx-auto w-full min-w-0 max-w-(--chat-content-max-width)"
+          >
+            {tray ? (
+              <ComposerBanner.Dock>
+                <ComposerBanner.Column>{tray}</ComposerBanner.Column>
+              </ComposerBanner.Dock>
+            ) : null}
+            <div className="relative">
+              <ComposerSurface.Main>
+                <div
+                  data-chat-composer-surface="true"
+                  className={cn(
+                    "rounded-3xl transition-[background-color] duration-200",
+                    dragging ? "bg-accent/45 ring-1 ring-inset ring-primary/70" : null,
+                  )}
                 >
-                  <X size={11} weight="bold" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <textarea
-          ref={setRefs}
-          rows={1}
-          value={text}
-          disabled={disabled}
-          placeholder={placeholder}
-          aria-label="Message Neko"
-          role={menuState ? "combobox" : undefined}
-          aria-expanded={menuState ? true : undefined}
-          aria-controls={menuState?.id}
-          aria-activedescendant={menuState?.activeId}
-          aria-autocomplete={menuState ? "list" : undefined}
-          onChange={(e) => onTextChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) e.preventDefault();
-            onKeyDown?.(e);
-          }}
-          className="block max-h-[220px] min-h-14 w-full resize-none overflow-y-auto border-0 bg-transparent px-3.5 pt-3 pb-1.5 text-[15px] leading-[1.625] text-strong outline-none placeholder:text-muted-foreground/70 disabled:opacity-60"
-        />
-        <div className="flex items-center gap-2 px-1 pb-0.5">
-          {accepts ? (
-            <>
-              <input
-                ref={fileInput}
-                type="file"
-                multiple={Boolean(onFiles)}
-                accept={onFiles ? undefined : IMAGE_TYPES.join(",")}
-                className="hidden"
-                tabIndex={-1}
-                aria-label="Choose files to attach"
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  e.target.value = "";
-                  take(files);
-                }}
-              />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button type="button" variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground" onClick={() => fileInput.current?.click()}>
-                    <Paperclip />
-                    <span className="sr-only">Attach files</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">Attach images or files; you can also paste or drop them</TooltipContent>
-              </Tooltip>
-            </>
-          ) : null}
-          {leading}
-          {controls}
-          <span className="flex-1" />
-          {nearLimit ? (
-            <span aria-live="polite" className={cn("text-xs tabular-nums", tooLong ? "text-destructive" : "text-muted-foreground")}>
-              {sizeUsed.toLocaleString()} / {limit.toLocaleString()}
-            </span>
-          ) : null}
-          {showStop ? (
-            <Button
-              type="button"
-              data-slot="send"
-              data-mode="stop"
-              size="icon"
-              aria-label="Stop"
-              title="Stop this reply"
-              className="size-9 shrink-0 rounded-full border-destructive bg-destructive text-white hover:bg-destructive/90"
-              onClick={onStop}
-            >
-              <Square weight="fill" className="size-3.5" />
-            </Button>
-          ) : (
-            <Button
-              type="submit"
-              data-slot="send"
-              data-mode={isGenerating ? "queue" : "send"}
-              size="icon"
-              aria-label={sending ? "Sending" : isGenerating ? "Queue message" : "Send"}
-              title={isGenerating ? "Queue message (⌘↵ interrupts and sends)" : "Send (↵)"}
-              disabled={!canSend}
-              className="size-9 shrink-0 rounded-full"
-            >
-              {sending || uploading ? <CircleNotch className="animate-spin" /> : <ArrowUp weight="bold" />}
-            </Button>
-          )}
-        </div>
-      </form>
+                  <div data-chat-composer-body="true" className="relative px-3 pt-3.5 pb-2 sm:px-4 sm:pt-4">
+                    {attachments.length > 0 ? (
+                      <div data-slot="attachments" role="list" aria-label="Attachments">
+                        {imageAttachments.length > 0 ? (
+                          <div className="mb-3 flex max-w-full flex-wrap gap-2">
+                            {imageAttachments.map((a) => (
+                              <div
+                                key={a.id}
+                                role="listitem"
+                                data-slot="attachment"
+                                data-status={a.status ?? "ready"}
+                                className={cn(
+                                  "group/attachment relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border/80 bg-background",
+                                  a.status === "error" && "border-destructive/60",
+                                )}
+                              >
+                                <img src={a.previewUrl} alt={a.name || "Pasted image"} className="h-full w-full object-cover" />
+                                <span className="sr-only">
+                                  {a.name} · {attachmentStatus(a)}
+                                </span>
+                                {a.status === "uploading" || a.status === "error" ? (
+                                  <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 bg-background/85 px-1 text-center text-3xs text-foreground">
+                                    {attachmentStatus(a)}
+                                  </span>
+                                ) : null}
+                                <Button
+                                  variant="secondary"
+                                  size="icon-xs"
+                                  className="absolute top-1 right-1 size-5 rounded-full bg-background/85 backdrop-blur-sm"
+                                  onClick={() => removeAttachment(a)}
+                                  aria-label={`Remove ${a.name || "attachment"}`}
+                                >
+                                  <X className="size-3" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        {fileAttachments.length > 0 ? (
+                          <div className="mb-3 flex flex-col gap-1">
+                            {fileAttachments.map((a) => (
+                              <div
+                                key={a.id}
+                                role="listitem"
+                                data-slot="attachment"
+                                data-status={a.status ?? "ready"}
+                                className="flex min-w-0 items-center gap-2 py-1 text-sm text-foreground"
+                              >
+                                {a.isImage ? (
+                                  <ImageIcon className="size-4 shrink-0 text-secondary-label" aria-hidden />
+                                ) : (
+                                  <FileIcon className="size-4 shrink-0 text-secondary-label" aria-hidden />
+                                )}
+                                <span className="min-w-0 flex-1 truncate text-left" title={a.name}>
+                                  {a.name}
+                                </span>
+                                <span className={cn("shrink-0 text-xs", a.status === "error" ? "text-destructive" : "text-secondary-label")} title={a.error}>
+                                  {attachmentStatus(a)}
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  className="size-6 text-muted-foreground"
+                                  onClick={() => removeAttachment(a)}
+                                  aria-label={`Remove ${a.name || "attachment"}`}
+                                >
+                                  <X className="size-3.5" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="relative flow-root text-sm">
+                      <textarea
+                        ref={setRefs}
+                        rows={1}
+                        value={text}
+                        disabled={disabled}
+                        placeholder={placeholder}
+                        aria-label="Message Neko"
+                        data-testid="composer-editor"
+                        role={menuState ? "combobox" : undefined}
+                        aria-expanded={menuState ? true : undefined}
+                        aria-controls={menuState?.id}
+                        aria-activedescendant={menuState?.activeId}
+                        aria-autocomplete={menuState ? "list" : undefined}
+                        onChange={(e) => onTextChange(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) e.preventDefault();
+                          onKeyDown?.(e);
+                        }}
+                        className="-m-1 block max-h-52 min-h-19.5 w-[calc(100%+0.5rem)] resize-none overflow-y-auto border-0 bg-transparent p-1 whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground outline-none placeholder:text-placeholder/75 focus:outline-none disabled:opacity-60"
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    data-chat-composer-footer="true"
+                    className="flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:px-4 sm:pb-4"
+                  >
+                    <div
+                      data-chat-composer-controls="left"
+                      className="relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    >
+                      {leading}
+                      {controls}
+                    </div>
+                    <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
+                      {nearLimit ? (
+                        <span aria-live="polite" className={cn("text-xs tabular-nums", tooLong ? "text-destructive" : "text-muted-foreground")}>
+                          {sizeUsed.toLocaleString()} / {limit.toLocaleString()}
+                        </span>
+                      ) : null}
+                      {accepts ? (
+                        <>
+                          <input
+                            ref={fileInput}
+                            type="file"
+                            multiple={Boolean(onFiles)}
+                            accept={onFiles ? undefined : IMAGE_TYPES.join(",")}
+                            className="hidden"
+                            tabIndex={-1}
+                            aria-label="Choose files to attach"
+                            onChange={(e) => {
+                              const files = Array.from(e.target.files ?? []);
+                              e.target.value = "";
+                              take(files);
+                            }}
+                          />
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                                  onPointerDown={(event) => event.preventDefault()}
+                                  onClick={() => fileInput.current?.click()}
+                                  aria-label="Attach files"
+                                />
+                              }
+                            >
+                              <Paperclip className="size-4" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top">Attach images or files; you can also paste or drop them</TooltipContent>
+                          </Tooltip>
+                        </>
+                      ) : null}
+                      <ComposerPrimaryActions
+                        isRunning={isGenerating}
+                        canInterrupt={isGenerating && !!onStop}
+                        hasSendableContent={hasContent}
+                        isSendBusy={sending || uploading}
+                        disabled={disabled || tooLong}
+                        onInterrupt={onStop}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </ComposerSurface.Main>
+            </div>
+          </form>
+        </ComposerSurface.Host>
+      </ComposerSurface.Shell>
     </div>
   );
 }

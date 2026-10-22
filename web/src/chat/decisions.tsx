@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
 import { accept, command, type Json } from "@/api";
-import { Shield } from "@/ui/icons";
-import { Button } from "@/ui/button";
-import { Kbd } from "@/ui/kbd";
-import { MonoLabel } from "@/editorial";
+import { ComposerApprovalDrawer, ComposerPendingApprovalActions, ComposerPendingApprovalPanel } from "@/chat/t3/ComposerPendingApproval";
 
 export interface Decision {
   key: string;
@@ -82,7 +79,11 @@ export function pendingDecisions(messages: Json[], tasks: Json[]): Decision[] {
 
 export const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
-/** The card the user answers: what is being approved, the exact thing, two buttons. */
+/**
+ * The card the user answers: T3 Code's approval drawer on the composer's top
+ * edge (ComposerPendingApprovalPanel / Actions), holding what is being
+ * approved, the exact thing, and two buttons.
+ */
 export function DecisionCard({
   decision, count = 1, busy, error, onDecide,
 }: {
@@ -93,31 +94,15 @@ export function DecisionCard({
   onDecide: (approve: boolean) => void;
 }) {
   return (
-    <section
+    <ComposerApprovalDrawer
       data-slot="decision"
       role="alertdialog"
       aria-label={decision.label}
-      className="mb-2 rounded-2xl border border-warning/40 bg-warning/[0.07] px-4 py-3 shadow-xs"
+      error={error}
+      actions={<ComposerPendingApprovalActions isResponding={!!busy} onDecide={onDecide} approveKey={isMac ? "⌘↵" : "Ctrl↵"} />}
     >
-      <div className="flex items-center gap-2 text-warning-foreground">
-        <Shield size={15} weight="fill" aria-hidden />
-        <MonoLabel className="text-warning-foreground">{decision.label}</MonoLabel>
-        {count > 1 ? <span className="ms-auto text-xs text-muted-foreground">1 of {count}</span> : null}
-      </div>
-      <div className="mt-1.5 font-medium text-strong">{decision.subject}</div>
-      <pre className="mt-1.5 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-foreground/[0.04] px-2.5 py-1.5 font-mono text-xs leading-[1.55] text-muted-foreground">
-        {decision.detail}
-      </pre>
-      {error ? <p className="mt-2 text-[13px] text-destructive">{error}</p> : null}
-      <div className="mt-3 flex justify-end gap-2">
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => onDecide(false)}>
-          Decline <Kbd>Esc</Kbd>
-        </Button>
-        <Button size="sm" disabled={busy} onClick={() => onDecide(true)}>
-          Approve <Kbd className="bg-white/15 text-primary-foreground">{isMac ? "⌘↵" : "Ctrl↵"}</Kbd>
-        </Button>
-      </div>
-    </section>
+      <ComposerPendingApprovalPanel label={decision.label} subject={decision.subject} detail={decision.detail} pendingCount={count} />
+    </ComposerApprovalDrawer>
   );
 }
 

@@ -1,6 +1,6 @@
-// Home: the conversation with Neko. Built from the vendored chat set —
-// Conversation (use-stick-to-bottom), the turns, ChatInput with its queue tray,
-// and the decision dock — and nothing hand-rolled.
+// Home: the conversation with Neko. Conversation (use-stick-to-bottom), the
+// turns drawn with T3 Code's timeline rows, and the composer in T3's chrome with
+// the decision and the queue docked on its top edge.
 import { useEffect, useMemo, useRef } from "react";
 import { accept, command } from "@/api";
 import { useWorkbench } from "@/useStore";
@@ -51,7 +51,7 @@ export default function Home() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Conversation className="min-h-0 flex-1">
-        <ConversationContent className="mx-auto w-full max-w-[728px] gap-0 px-6 pt-0 pb-6">
+        <ConversationContent className="mx-auto w-full max-w-(--chat-content-max-width) gap-0 px-6 pt-0 pb-6">
           {!snapshot && <p className="mt-24 text-center text-muted-foreground">{error ?? "Connecting to Neko…"}</p>}
           {snapshot && messages.length === 0 && (
             <ConversationEmptyState
@@ -77,12 +77,18 @@ export default function Home() {
           <CaretDown /> Scroll to end
         </ConversationScrollButton>
       </Conversation>
-      <div className="mx-auto w-full max-w-[728px] px-6 pt-2 pb-6">
+      <div className="mx-auto w-full max-w-(--chat-content-max-width) px-6 pt-2 pb-6">
         {!connected && snapshot && (
           <p role="status" className="mb-2 ms-1.5 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p>
         )}
-        <Decisions items={decisions} />
-        <NekoComposer pendingTurn={pendingTurn} queued={queued} decisionPending={decisions.length > 0} workspaceId={workspaceId} draftRef={draft} />
+        <NekoComposer
+          pendingTurn={pendingTurn}
+          queued={queued}
+          decisionPending={decisions.length > 0}
+          workspaceId={workspaceId}
+          draftRef={draft}
+          tray={<Decisions items={decisions} />}
+        />
       </div>
     </div>
   );

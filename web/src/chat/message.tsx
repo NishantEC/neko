@@ -1,4 +1,6 @@
 // from hushbacks packages/ui/src/components/ai-elements/message.tsx
+// (changed: MessageResponse renders T3 Code's ChatMarkdown, chat/t3/ChatMarkdown.tsx,
+// instead of Streamdown, so every reply in the app reads the same way)
 import { ArrowLeft, ArrowRight, Paperclip as PaperclipIcon, X } from "@/ui/icons";
 import { Button } from "@/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/ui/button-group";
@@ -6,46 +8,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/ui/t
 import { cn } from "@/ui/lib/utils";
 import type { FileUIPart, Role } from "@/chat/types";
 import type { ComponentProps, HTMLAttributes } from "react";
-import {
-  type ReactNode,
-  Suspense,
-  createContext,
-  isValidElement,
-  lazy,
-  memo,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
-import type { StreamdownProps } from "streamdown";
-
-const MessageMarkdown = lazy(() => import("./message-markdown"));
-
-// Tables keep the look Neko's chat settled on (measured against T3 Code): no
-// card, hairline rows under a header, 12px text, scrolling sideways when wider
-// than the column. Streamdown supplies the wrapper, the horizontal scroll and
-// the copy / download controls; these rules replace its borders and fills.
-const TABLE_STYLES =
-  "[&_[data-streamdown=table-wrapper]]:my-4 [&_[data-streamdown=table-wrapper]]:space-y-1 " +
-  "[&_table]:my-0 [&_table]:w-full [&_table]:border-0 [&_table]:text-[12px] [&_table]:leading-[19.5px] " +
-  "[&_thead]:bg-transparent [&_tbody]:divide-y-0 [&_tbody]:bg-transparent [&_tr]:border-0 " +
-  "[&_th]:min-w-[120px] [&_th]:px-3 [&_th]:py-2 [&_th]:text-[12px] [&_th]:font-semibold [&_th]:text-foreground " +
-  "[&_td]:min-w-[120px] [&_td]:border-t [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[12px] " +
-  "[&_th:first-child]:pl-1 [&_td:first-child]:pl-1";
-
-// Prose at T3's measured scale: 14px / 1.625, small headings, outside bullets.
-const PROSE_STYLES =
-  "[&_p]:my-3 [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[18px] [&_h1]:text-strong [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:text-strong " +
-  "[&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[14px] [&_h3]:text-strong [&_strong]:font-semibold [&_strong]:text-strong " +
-  "[&_a]:font-normal [&_a]:text-info-foreground [&_a]:underline-offset-3 " +
-  "[&_ul]:my-3 [&_ul]:list-outside [&_ul]:pl-5 [&_ol]:my-3 [&_ol]:list-outside [&_ol]:pl-5 [&_li]:py-0.5 " +
-  "[&_[data-streamdown=inline-code]]:rounded-md [&_[data-streamdown=inline-code]]:border [&_[data-streamdown=inline-code]]:border-border " +
-  "[&_[data-streamdown=inline-code]]:bg-foreground/[0.04] [&_[data-streamdown=inline-code]]:px-1.5 [&_[data-streamdown=inline-code]]:py-px " +
-  "[&_[data-streamdown=inline-code]]:text-[12px] [&_[data-streamdown=inline-code]]:text-strong " +
-  "[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3.5 [&_blockquote]:not-italic";
-
-const TASK_LIST_STYLES = "[&_input[type=checkbox]]:mr-1.5 [&_input[type=checkbox]]:translate-y-px";
-
+import { type ReactNode, createContext, isValidElement, memo, useContext, useEffect, useState } from "react";
+import ChatMarkdown from "@/chat/t3/ChatMarkdown";
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: Role;
 };
@@ -282,24 +246,14 @@ export const MessageBranchPage = ({ className, ...props }: MessageBranchPageProp
   );
 };
 
-export type MessageResponseProps = StreamdownProps;
+/** Markdown prose: T3 Code's ChatMarkdown (chat/t3/ChatMarkdown.tsx). */
+export type MessageResponseProps = { children?: string | null; className?: string; isStreaming?: boolean };
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => {
-    const classes = cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", PROSE_STYLES, TABLE_STYLES, TASK_LIST_STYLES, className);
-    return (
-      <Suspense
-        fallback={
-          <div className={cn(classes, "whitespace-pre-wrap")}>
-            {typeof props.children === "string" ? props.children : null}
-          </div>
-        }
-      >
-        <MessageMarkdown className={classes} {...props} />
-      </Suspense>
-    );
-  },
-  (prevProps, nextProps) => prevProps.children === nextProps.children,
+  ({ className, children, isStreaming }: MessageResponseProps) => (
+    <ChatMarkdown text={typeof children === "string" ? children : ""} className={className} isStreaming={isStreaming} />
+  ),
+  (prevProps, nextProps) => prevProps.children === nextProps.children && prevProps.isStreaming === nextProps.isStreaming,
 );
 
 MessageResponse.displayName = "MessageResponse";
