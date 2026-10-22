@@ -1,5 +1,5 @@
 // from hushbacks packages/ui/src/components/ai-elements/attachments.tsx
-import type { FileUIPart, SourceDocumentUIPart } from "@/chat/types";
+import type { FileUIPart, SourceDocumentUIPart } from "ai";
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
 
 import { Button } from "@/ui/button";

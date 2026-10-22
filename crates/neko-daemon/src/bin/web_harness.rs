@@ -40,7 +40,9 @@ mod workbench;
 use std::path::Path;
 use std::sync::Arc;
 
+use neko_core::ui_message as ui;
 use neko_core::Db;
+use serde_json::json;
 use neko_protocol::workbench::{ChatAction, ChatActionStatus, ChatMessage, ChatRole, ChatToolCall, ChatToolStatus, Snapshot, Task};
 
 fn main() {
@@ -96,7 +98,13 @@ fn main() {
     }
     // A reply is "in progress" for the whole run, so a message sent from the
     // web composer queues behind it and no model, `gh` or agent ever starts.
-    state.workbench.hold_chat_for_verification();
+    // `NEKO_WEB_SCRIPTED=1` instead answers every message with a scripted
+    // reply, streamed through the real chunks, reader and completion path.
+    if std::env::var_os("NEKO_WEB_SCRIPTED").is_some_and(|v| v == "1") {
+        workbench::SCRIPTED_CHAT.store(true, std::sync::atomic::Ordering::Release);
+    } else {
+        state.workbench.hold_chat_for_verification();
+    }
     server::spawn_web_bridge(state.clone());
     if let Some(id) = std::env::var_os("NEKO_WEB_STREAM").and_then(|_| pending_turn_id(&state)) {
         let state = state.clone();
@@ -163,16 +171,54 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
     neko_core::workbench::save(db, &snapshot)?;
 
     let mut conversation: Vec<ChatMessage> = source.conversation.iter().rev().take(8).rev().cloned().collect();
-    // The last real reply becomes the "worked for 1m 12s" example.
+    // A saved snapshot from before the AI SDK stored `text`; read it back as one text part.
+    let saved: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    let saved = saved["conversation"].as_array().cloned().unwrap_or_default();
+    let skipped = source.conversation.len() - conversation.len();
+    for (index, message) in conversation.iter_mut().enumerate() {
+        if message.parts.is_empty() {
+            if let Some(text) = saved.get(skipped + index).and_then(|m| m["text"].as_str()) { message.parts = ChatMessage::text_parts(text); }
+        }
+    }
+    // The last real reply becomes the "worked for 1m 12s" example: reasoning,
+    // commands with their output (one failed), an edit, then its prose.
     if let Some(last) = conversation.iter_mut().rev().find(|m| m.role == ChatRole::Neko && !m.pending) {
         last.started_ms = last.at_ms - 72_000;
-        last.activity = vec![
-            "Ran `gh pr list --state open --json number,title,statusCheckRollup`".into(),
-            "Ran `gh pr view 4641 --json reviews,mergeStateStatus`".into(),
-            "Read neko_chat.rs".into(),
-            "Ran `git log --oneline -5` · failed".into(),
-        ];
+        let prose = last.text();
+        let mut chunks = vec![json!({"type": "start-step"})];
+        chunks.extend([
+            json!({"type": "reasoning-start", "id": "r"}),
+            json!({"type": "reasoning-delta", "id": "r", "delta": "Look at what GitHub reports for each open pull request before answering."}),
+            json!({"type": "reasoning-end", "id": "r"}),
+            ui::tool_input("h1", "Bash", &json!({"command": "gh pr list --state open --json number,title,statusCheckRollup"})),
+            ui::tool_output("h1", json!({"exit_code": 0, "output": "4641 Update the branch\n4628 Fix the sync\n4616 Cache the index"})),
+            ui::tool_input("h2", "Bash", &json!({"command": "gh pr view 4641 --json reviews,mergeStateStatus"})),
+            ui::tool_output("h2", json!({"exit_code": 0, "output": "{\"mergeStateStatus\":\"BEHIND\"}"})),
+            ui::tool_input("h3", "Read", &json!({"file_path": "/Users/you/Documents/neko/crates/neko-core/src/neko_chat.rs"})),
+            ui::tool_output("h3", json!({"output": "…"})),
+            ui::tool_input("h4", "Bash", &json!({"command": "git log --oneline -5"})),
+            ui::tool_output("h4", json!({"exit_code": 128, "output": "fatal: not a git repository"})),
+        ]);
+        chunks.extend(ui::text_chunks("t", &prose));
+        last.parts = parts_of(&chunks);
     }
+    // An earlier reply that asked a question with a choices block, and one with a chart.
+    let asked = ChatMessage {
+        id: neko_core::workbench::new_id(), at_ms: now - 120_000, started_ms: now - 126_000, role: ChatRole::Neko,
+        parts: parts_of(&[
+            json!({"type": "start-step"}),
+            ui::text_chunks("a", "Two of them are blocked. Which should I take first?")[0].clone(),
+            json!({"type": "text-delta", "id": "a", "delta": "Two of them are blocked. Which should I take first?"}),
+            json!({"type": "text-end", "id": "a"}),
+            json!({"type": "data-neko-choices", "data": {"question": "Which pull request first?", "options": [
+                {"label": "athena #4641", "detail": "Branch is behind master"}, {"label": "athena #4623", "detail": "Reviewer asked for a change"}]}}),
+            json!({"type": "data-neko-chart", "data": {"title": "Open for", "source": "GitHub", "unit": " days", "bars": [
+                {"label": "athena #4641", "value": 6.0, "highlight": true}, {"label": "athena #4623", "value": 3.0}, {"label": "riavox #410", "value": 1.0}]}}),
+        ]),
+        ..blank_message(ChatRole::Neko)
+    };
+    let at = conversation.len().saturating_sub(0);
+    conversation.insert(at, asked);
     let first_task = snapshot.tasks.first().map(|t| t.id.clone()).unwrap_or_default();
     let user_id = neko_core::workbench::new_id();
     conversation.push(ChatMessage {
@@ -183,15 +229,13 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
         id: user_id,
         at_ms: now - 25_000,
         role: ChatRole::User,
-        text: "what is blocking the pull requests that are ready to review?".into(),
+        parts: ChatMessage::text_parts("what is blocking the pull requests that are ready to review?"),
         ticket_ids: vec![],
         pending: false,
         queued: false,
         failed: false,
-        remembered: vec![],
         responsibility_ids: vec![],
         actions: vec![],
-        activity: vec![],
         started_ms: 0,
     });
     conversation.push(ChatMessage {
@@ -209,12 +253,11 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
         id: neko_core::workbench::new_id(),
         at_ms: now - 24_000,
         role: ChatRole::Neko,
-        text: "Checking the five open pull requests against what GitHub reports now.\n\n".into(),
+        parts: pending_parts(&first_task),
         ticket_ids: vec![],
         pending: true,
         queued: false,
         failed: false,
-        remembered: vec![],
         responsibility_ids: vec![],
         actions: vec![ChatAction {
             id: "act-1".into(),
@@ -224,14 +267,40 @@ fn seed_from(db: &Db, path: &Path) -> Result<(), String> {
             status: ChatActionStatus::Proposed,
             note: String::new(),
         }],
-        activity: vec![
-            "Ran `gh pr list --state open`".into(),
-            "Ran `gh pr checks 4628`".into(),
-            "Ran `gh pr view 4616 --json reviewDecision`".into(),
-        ],
         started_ms: now - 24_000,
     });
+    // The pending reply is in flight: followers attach to it like any other.
+    if let Some(turn) = conversation.last() { ui::begin(&turn.id, turn.parts.clone(), turn.started_ms); }
     neko_core::neko_chat::save(db, &conversation)
+}
+
+fn blank_message(role: ChatRole) -> ChatMessage {
+    ChatMessage {
+        agent_profile_revision: 0, agent_profile_id: "default".into(), workspace_id: None, tool_calls: vec![], id: String::new(), at_ms: 0,
+        role, parts: vec![], ticket_ids: vec![], pending: false, queued: false, failed: false, responsibility_ids: vec![], actions: vec![], started_ms: 0,
+    }
+}
+
+fn parts_of(chunks: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut parts = Vec::new();
+    for chunk in chunks { ui::apply_chunk(&mut parts, chunk); }
+    parts
+}
+
+/// What the in-flight reply holds when the page opens: prose, a command, and
+/// the two things waiting for a click (a tool call and a proposed action).
+fn pending_parts(task_id: &str) -> Vec<serde_json::Value> {
+    let mut chunks = vec![json!({"type": "start-step"})];
+    chunks.extend(ui::text_chunks("p", "Checking the five open pull requests against what GitHub reports now."));
+    chunks.extend([
+        ui::tool_input("p1", "Bash", &json!({"command": "gh pr list --state open"})),
+        ui::tool_output("p1", json!({"exit_code": 0, "output": "5 open"})),
+        { let mut call = ui::tool_input("call-1", "save_issue", &json!({"title": "Update athena #4641 branch", "team": "HEA", "description": "Rebase onto master and rerun checks"})); call["toolMetadata"] = json!({"connectionId": "linear"}); call },
+        json!({"type": "tool-approval-request", "toolCallId": "call-1", "approvalId": "call-1", "reason": "Uses linear"}),
+        ui::tool_input("action:act-1", neko_core::neko_chat::ACTION_TOOL, &json!({"taskId": task_id, "kind": "message", "text": "Bring the branch up to date with master, resolve any conflicts without changing the PR's scope, and rerun the checks. Do not merge."})),
+        json!({"type": "tool-approval-request", "toolCallId": "action:act-1", "approvalId": "act-1"}),
+    ]);
+    parts_of(&chunks)
 }
 
 fn pending_turn_id(state: &server::AppState) -> Option<String> {
@@ -239,15 +308,19 @@ fn pending_turn_id(state: &server::AppState) -> Option<String> {
     neko_core::neko_chat::load(&db).ok()?.into_iter().rev().find(|m| m.pending).map(|m| m.id)
 }
 
-/// Grows the pending turn's text word by word, as a streaming reply does.
+/// Grows the pending turn's text word by word, as a streaming reply does:
+/// chunks into the reply in flight (every window following it sees them), and
+/// the parts written when a write is due.
 fn stream_text(state: &server::AppState, id: &str) {
     let words = "Three of the five only need an approving review: **athena #4628**, **athena #4616** and **riavox #410**.\n\nTheir checks pass and none has a conflict. The other two need work first.\n\n| PR | Blocker |\n|---|---|\n| athena #4641 | Branch is behind `master` |\n| athena #4623 | Reviewer asked for a change |\n\nI have not messaged any agent yet.";
-    let mut shown = String::from("Checking the five open pull requests against what GitHub reports now.\n\n");
+    let send = |chunk: serde_json::Value| {
+        if let Some(parts) = ui::emit(id, &chunk) {
+            if let Ok(db) = state.db.lock() { let _ = neko_core::neko_chat::persist_parts(&db, id, parts); }
+        }
+    };
+    send(json!({"type": "text-start", "id": "s"}));
     for word in words.split_inclusive(' ') {
         std::thread::sleep(std::time::Duration::from_millis(220));
-        shown.push_str(word);
-        if let Ok(db) = state.db.lock() {
-            let _ = neko_core::neko_chat::record_partial(&db, id, &shown);
-        }
+        send(json!({"type": "text-delta", "id": "s", "delta": word}));
     }
 }

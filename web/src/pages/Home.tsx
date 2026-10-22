@@ -8,9 +8,9 @@ import { CaretDown, ChatCircle, Stop } from "@/ui/icons";
 import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from "@/chat/conversation";
 import { Suggestion, Suggestions } from "@/chat/suggestion";
 import { NekoComposer } from "@/chat/ChatInputComposer";
-import { Decisions, pendingDecisions } from "@/chat/decisions";
+import { Decisions, decisionsFromParts } from "@/chat/decisions";
 import { NekoTurn, UserTurn } from "@/chat/turns";
-import type { NekoMessage } from "@/chat/types";
+import { chatSignature, useNekoChat } from "@/chat/sdk/chats";
 import { registerCommands } from "@/shell/commands";
 
 const SUGGESTIONS = [
@@ -22,11 +22,13 @@ const SUGGESTIONS = [
 export default function Home() {
   const { snapshot, connected, error } = useWorkbench();
   const draft = useRef<{ set(text: string): void; focus(): void } | null>(null);
-  const all: NekoMessage[] = snapshot?.conversation ?? [];
-  const messages = all.filter((m) => !(m.role === "user" && m.queued));
-  const queued = all.filter((m) => m.role === "user" && m.queued);
-  const pendingTurn = [...all].reverse().find((m) => m.pending);
-  const decisions = useMemo(() => pendingDecisions(all, snapshot?.tasks ?? []), [all, snapshot?.tasks]);
+  // The conversation is the SDK's: `useChat` over the daemon's chat endpoints.
+  // The snapshot only says when the log should be read again.
+  const { chat, messages: all, loaded } = useNekoChat("neko", chatSignature(snapshot?.conversation));
+  const messages = all.filter((m) => m.metadata?.state !== "queued");
+  const queued = all.filter((m) => m.role === "user" && m.metadata?.state === "queued");
+  const pendingTurn = [...all].reverse().find((m) => m.metadata?.state === "pending");
+  const decisions = useMemo(() => decisionsFromParts(all, snapshot?.tasks ?? []), [all, snapshot?.tasks]);
   const workspaceId: string | null = null;
 
   // Actions the ⌘K palette offers while Home is open.
@@ -53,7 +55,7 @@ export default function Home() {
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-(--chat-content-max-width) gap-0 px-6 pt-0 pb-6">
           {!snapshot && <p className="mt-24 text-center text-muted-foreground">{error ?? "Connecting to Neko…"}</p>}
-          {snapshot && messages.length === 0 && (
+          {snapshot && loaded && messages.length === 0 && (
             <ConversationEmptyState
               className="mt-24"
               icon={<ChatCircle size={22} weight="duotone" />}
@@ -67,7 +69,13 @@ export default function Home() {
               </Suggestions>
             </ConversationEmptyState>
           )}
-          {messages.map((m) => (m.role === "user" ? <UserTurn key={m.id} message={m} /> : <NekoTurn key={m.id} message={m} />))}
+          {messages.map((m, index) =>
+            m.role === "user" ? (
+              <UserTurn key={m.id} message={m} />
+            ) : (
+              <NekoTurn key={m.id} message={m} answered={messages.slice(index + 1).some((later) => later.role === "user")} />
+            ),
+          )}
         </ConversationContent>
         <ConversationScrollButton
           data-slot="to-end"
@@ -82,6 +90,7 @@ export default function Home() {
           <p role="status" className="mb-2 ms-1.5 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p>
         )}
         <NekoComposer
+          chat={chat}
           pendingTurn={pendingTurn}
           queued={queued}
           decisionPending={decisions.length > 0}

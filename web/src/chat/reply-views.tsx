@@ -1,12 +1,13 @@
-// The structured blocks Neko's own replies can carry, drawn here as the native
-// app draws them (ReplyViews.swift): neko-choices, neko-form, neko-plan,
-// neko-chart, neko-files and neko-sources. The daemon's prompt (REPLY_VIEWS in
-// neko_chat.rs) asks the model for these instead of a paragraph when it needs
-// an answer, so a block that is not drawn reads as a broken question.
+// The structured views Neko's own replies can carry, drawn here as the native
+// app draws them (ReplyViews.swift): choices, form, plan, chart, files and
+// sources. They arrive as typed `data-neko-*` parts of the message (the daemon
+// reads the block the model wrote and types it once), so nothing here parses a
+// fence. The reply prompt (REPLY_VIEWS in neko_chat.rs) asks the model for
+// these instead of a paragraph when it needs an answer.
 //
-// A block answers by sending a message as the person, or by filling the
+// A view answers by sending a message as the person, or by filling the
 // composer; `NekoComposer` registers both for as long as it is mounted.
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Switch } from "@/ui/switch";
@@ -24,7 +25,9 @@ export function setReplyActions(next: ReplyActions): () => void {
   return () => { if (actions === next) actions = { send: () => undefined, draft: () => undefined }; };
 }
 
-export const REPLY_KINDS = new Set(["neko-chart", "neko-choices", "neko-form", "neko-plan", "neko-files", "neko-sources"]);
+/** Whether a later message already answered the one this view is in. */
+const AnswerContext = createContext(false);
+export const ReplyAnswered = AnswerContext.Provider;
 
 const arr = (v: unknown): Json[] => (Array.isArray(v) ? v : []);
 const str = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -37,7 +40,9 @@ const Title = ({ children }: { children: ReactNode }) => <h3 className="text-[15
 function Choices({ value }: { value: Json }) {
   const options = arr(value.options);
   const [selected, setSelected] = useState<number | null>(null);
-  const [sent, setSent] = useState(false);
+  const [clicked, setSent] = useState(false);
+  const answered = useContext(AnswerContext);
+  const sent = clicked || answered;
   return (
     <Group kind="choices">
       <Title>{str(value.question)}</Title>
@@ -77,7 +82,9 @@ function Form({ value }: { value: Json }) {
   const fields = arr(value.fields);
   const [values, setValues] = useState<Record<number, string>>({});
   const [toggles, setToggles] = useState<Record<number, boolean>>({});
-  const [sent, setSent] = useState(false);
+  const [clicked, setSent] = useState(false);
+  const answered = useContext(AnswerContext);
+  const sent = clicked || answered;
   const current = (field: Json, index: number) => values[index] ?? (str(field.value) || (field.kind === "choice" ? str(arr(field.options)[0]) : ""));
   const submit = () => {
     const lines = [str(value.title) ? `${str(value.title)}:` : "Here are the details:"];
@@ -119,7 +126,9 @@ function Form({ value }: { value: Json }) {
 
 function Plan({ value }: { value: Json }) {
   const steps = arr(value.steps).map((s) => (typeof s === "string" ? s : str(s.title)));
-  const [sent, setSent] = useState(false);
+  const [clicked, setSent] = useState(false);
+  const answered = useContext(AnswerContext);
+  const sent = clicked || answered;
   return (
     <Group kind="plan">
       <div className="flex items-baseline justify-between gap-3">
@@ -192,11 +201,9 @@ function Sources({ value }: { value: Json }) {
   );
 }
 
-/** The drawn block, or null when the JSON is not (yet) valid: the caller then shows the code. */
-export function ReplyBlock({ kind, source }: { kind: string; source: string }): ReactNode {
-  let value: Json;
-  try { value = JSON.parse(source); } catch { return null; }
-  if (!value || typeof value !== "object") return null;
+/** One `data-neko-<kind>` part, drawn. */
+export function ReplyData({ kind, data }: { kind: string; data: unknown }): ReactNode {
+  const value: Json = data && typeof data === "object" ? data : {};
   switch (kind) {
     case "neko-choices": return <Choices value={value} />;
     case "neko-form": return <Form value={value} />;

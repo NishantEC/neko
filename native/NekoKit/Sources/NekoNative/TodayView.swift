@@ -214,14 +214,14 @@ struct TodayView: View {
 
     @ViewBuilder private func messageView(_ message: JSONValue, _ related: ChatTurnRelated, showsSpeaker: Bool, retry: String?) -> some View {
         if message["role"].string == "user" {
-            ChatUserMessage(text: message["text"].string, timestamp: message["at_ms"].int, queued: message["queued"].bool)
+            ChatUserMessage(text: message.chatText, timestamp: message["at_ms"].int, queued: message["queued"].bool)
         } else {
             VStack(alignment: .leading, spacing: NekoSpace.md) {
                 // What the reply did leads it, as in T3 Code: its header and
                 // summary first, then the answer, then the footer.
-                workLog(message, related, pending: message["pending"].bool, hasText: !message["text"].string.isEmpty)
+                workLog(message, related, pending: message["pending"].bool, hasText: !message.chatText.isEmpty)
                 if message["ticket_ids"].array.isEmpty &&
-                    (message["text"].string.contains("I could not open every task") || message["text"].string.contains("No task was created")) {
+                    (message.chatText.contains("I could not open every task") || message.chatText.contains("No task was created")) {
                     Label {
                         Text("No task was created from this reply").foregroundStyle(N.text3)
                     } icon: {
@@ -229,7 +229,7 @@ struct TodayView: View {
                     }
                     .font(NekoFont.meta)
                 }
-                let text = message["text"].string
+                let text = message.chatText
                 let pending = message["pending"].bool
                 if !text.isEmpty {
                     // A reply being written is drawn as Markdown as it arrives; only its tail redraws.
@@ -241,7 +241,7 @@ struct TodayView: View {
                 if message["failed"].bool {
                     ReplyErrorCallout(message: "", retry: retry.map { text in { [model] in Self.post(text, model: model) } })
                 }
-                ForEach(message["remembered"].array, id: \.self) { memory in ReplyMemoryNote(text: memory.string) }
+                ForEach(message.chatRemembered, id: \.self) { memory in ReplyMemoryNote(text: memory.string) }
                 ForEach(message["responsibility_ids"].array, id: \.self) { id in
                     if let item = related.watch(id.string) {
                         SuggestedResponsibilityCard(model: model, item: item)
@@ -276,7 +276,7 @@ struct TodayView: View {
     @ViewBuilder private func workLog(_ message: JSONValue, _ related: ChatTurnRelated, pending: Bool, hasText: Bool) -> some View {
         let tools = ChatToolActivitySummary(calls: message["tool_calls"].array, receipts: related.receipts(for: message))
             .values(connectionName: related.connectionName).filter { $0.status != "awaiting_approval" }
-        let steps = message["activity"].array.map(\.string)
+        let steps = message.chatActivity
         let summary = ChatWorkSummary(activity: steps, toolCount: tools.count,
                                       toolFailed: tools.filter { ["failed", "denied"].contains($0.status) }.count)
         if pending || summary.hasWork {
@@ -288,12 +288,12 @@ struct TodayView: View {
                             : ChatDuration.completion(of: message) ?? finishedAt[message.recordID],
                         at: message["at_ms"].int, live: (now.activity, label), ledger: workLedger)
         } else if !hasText, !message["failed"].bool, message["ticket_ids"].array.isEmpty, message["actions"].array.isEmpty,
-                  message["remembered"].array.isEmpty, message["responsibility_ids"].array.isEmpty, message["tool_calls"].array.isEmpty {
+                  message.chatRemembered.isEmpty, message["responsibility_ids"].array.isEmpty, message["tool_calls"].array.isEmpty {
             Text("No reply came back.").font(NekoFont.meta).foregroundStyle(N.text3)
         }
     }
     private func retryText(for index: Int, in messages: [JSONValue]) -> String? {
-        messages[..<index].last { $0["role"].string == "user" }?["text"].string
+        messages[..<index].last { $0["role"].string == "user" }?.chatText
     }
 
     /// The one decision this conversation is waiting on, inside the dock. It

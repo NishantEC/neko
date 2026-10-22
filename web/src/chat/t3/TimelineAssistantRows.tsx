@@ -10,9 +10,12 @@ import { MessageCopyButton } from "./MessageCopyButton";
 import { MessageAuthorHeading, formatChatTimestampTooltip, formatDayAwareTimestamp } from "./TimelineRowParts";
 
 export function AssistantTimelineRow({
-  text, streaming = false, createdAt, author = "Neko", showMeta = true, children, className,
+  text, streaming = false, createdAt, author = "Neko", showMeta = true, blocks, children, className,
 }: {
+  /** The reply as plain text: what Copy copies, and the prose when there are no `blocks`. */
   text: string;
+  /** The reply as it is drawn: prose and typed views in the order they were said. */
+  blocks?: ReactNode;
   streaming?: boolean;
   createdAt?: number;
   author?: string;
@@ -24,11 +27,11 @@ export function AssistantTimelineRow({
   return (
     <div className={cn("group/assistant relative min-w-0 px-1 py-0.5", className)}>
       <MessageAuthorHeading>{author}</MessageAuthorHeading>
-      {text ? (
+      {blocks ?? (text ? (
         <div data-slot="prose">
           <ChatMarkdown text={text} isStreaming={streaming} />
         </div>
-      ) : null}
+      ) : null)}
       {children}
       {showMeta && !streaming && createdAt ? (
         <AssistantMessageMeta className="mt-1.5" text={text} createdAt={createdAt} />
