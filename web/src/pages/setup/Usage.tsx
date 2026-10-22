@@ -9,7 +9,8 @@ import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
 import { ArrowsClockwise } from "@/ui/icons";
 import { Panel } from "@/setup/kit";
-import { BarChart } from "@/ui/charts";
+import { Bar, BarChart as RechartsBarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/ui/chart";
 import { BarList, EmptyBlock, ErrorNote, Gate, Row, Section, SetupPage, Status, Well } from "@/setup/kit";
 import { useSetupCommands } from "@/setup/commands";
 import { arr, num, rec, relativeTime, sizeLabel, str, useNow, type Tone } from "@/setup/lib";
@@ -206,7 +207,15 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
         <Panel>
           <div className="px-5 pt-4">
             <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Spend per day · last 14 days (USD)</p>
-            <BarChart data={spend.days} dataKey="cost" labelKey="day" chartConfig={{ cost: { label: "Spend (USD)", color: "var(--chart-1)" } }} emptyMessage="No spend yet" height="180px" xAxisProps={{ dataKey: "day", interval: 1 } as never} barProps={{ isAnimationActive: false } as never} />
+            <ChartContainer config={{ cost: { label: "Spend (USD)", color: "var(--chart-1)" } }} className="mt-3 aspect-auto h-44 w-full" data-slot="spend-chart">
+              <RechartsBarChart accessibilityLayer data={spend.days} margin={{ top: 8, right: 4, left: 8, bottom: 0 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} interval={1} />
+                <YAxis tickLine={false} axisLine={false} width={44} tickFormatter={(v) => `$${v}`} />
+                <ChartTooltip cursor={false} content={<ChartTooltipContent formatter={(v) => `$${Number(v).toFixed(2)}`} />} />
+                <Bar dataKey="cost" fill="var(--color-cost)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              </RechartsBarChart>
+            </ChartContainer>
           </div>
           <div className="divide-y divide-border/70 border-t border-border/70">
             {spend.tasks.slice(0, 5).map((t) => (
@@ -280,7 +289,7 @@ function QuotaSection() {
           })}
         </div>
       ) : (
-        <EmptyBlock icon={Gauge} title="Quota isn’t reported by this daemon" description={unavailable ? `${unavailable}. Vendor quota windows come from the legacy palette providers (NEKO_LEGACY_AGENTS=1); the standalone workspace doesn’t read them.` : "No vendor is signed in, or none has a metered window."}>
+        <EmptyBlock icon={Gauge} title="Quota isn’t reported by this daemon" description={unavailable ? "Vendor quota windows come from the legacy palette providers (NEKO_LEGACY_AGENTS=1); the standalone workspace doesn’t read them, so there is nothing to show here yet." : "No vendor is signed in, or none has a metered window."}>
           <Button variant="outline" size="sm" onClick={() => { setLoading(true); void load(); }}><ArrowsClockwise /> Check again</Button>
         </EmptyBlock>
       )}

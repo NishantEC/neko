@@ -151,6 +151,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await page.waitForSelector("[data-slot='error-note']", { timeout: 10000 });
   const wsError = await dialog().locator("[data-slot='error-note']").innerText();
   check(/does not exist/i.test(wsError), `a failed save shows the daemon's own words (“${wsError.replace(/\s+/g, " ").slice(0, 70)}”)`);
+  await sleep(500);
   await shot("setup-workspaces-add-error");
   await a11y("Workspaces add dialog");
   await cancel();
@@ -200,6 +201,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   check(true, "…and pausing it again leaves it as found");
   await page.getByRole("button", { name: "Edit schedule" }).first().click();
   await dialog().waitFor();
+  await sleep(500);
   await shot("setup-schedules-editor");
   await a11y("Schedules editor");
   await cancel();
@@ -218,6 +220,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await dialog().getByRole("button", { name: "Add connection" }).click();
   await page.waitForSelector("[data-slot='error-note']");
   check(/complete HTTP or HTTPS/.test(await dialog().innerText()), "a bad URL is refused before anything is sent");
+  await sleep(500);
   await shot("setup-tools-add-dialog");
   await a11y("Tools add dialog");
   await cancel();
@@ -225,6 +228,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await page.getByRole("button", { name: /^Sentry, All workspaces, Needs attention/ }).first().click();
   await page.waitForSelector("[data-slot='connection-detail']");
   check((await page.locator("[data-slot='connection-detail']").innerText()).includes("Reconnect"), "a broken connection offers Reconnect");
+  await sleep(500);
   await shot("setup-tools-detail-broken");
   await a11y("Tools connection detail (broken)");
   await page.keyboard.press("Escape");
@@ -234,6 +238,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   check((await page.locator("[data-slot='connection-detail']").innerText()).includes("search_issues"), "an available connection lists its tools");
   await page.getByRole("button", { name: /^search_issues/ }).click();
   await sleep(300);
+  await sleep(500);
   await shot("setup-tools-detail-tools");
   await page.keyboard.press("Escape");
   await page.waitForSelector("[data-slot='connection-detail']", { state: "detached" });
@@ -241,6 +246,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await page.getByRole("menuitem", { name: /Browse MCP servers/ }).click();
   await dialog().waitFor();
   check((await dialog().innerText()).includes("sentry-mcp"), "the registry browser lists a featured server");
+  await sleep(500);
   await shot("setup-tools-registry");
   await a11y("Tools registry");
   await page.keyboard.press("Escape");
@@ -268,6 +274,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await page.getByRole("menuitem", { name: /Forget memory/ }).click();
   await page.getByRole("alertdialog").waitFor();
   check(true, "forgetting a memory asks first");
+  await sleep(500);
   await shot("setup-memory-forget");
   await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("tab", { name: "Working style" }).click();
@@ -373,7 +380,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
     await page.locator("[data-slot='command']").waitFor({ timeout: 5000 });
     await page.keyboard.press("Meta+a");
     await page.keyboard.type(text);
-    await sleep(300);
+    await sleep(900);
     return page.locator("[data-slot='command-item']").allInnerTexts();
   };
   check((await palette("rulebook")).some((e) => /Open Rulebook/.test(e)), "⌘K offers “Open Rulebook” on a setup page");
