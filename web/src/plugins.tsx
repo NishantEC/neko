@@ -142,9 +142,11 @@ export class PluginBoundary extends Component<{ plugin: string; children: ReactN
   render() {
     if (this.state.error) {
       return (
-        <div className="plugin-error">
-          <h2>The “{this.props.plugin}” plugin crashed</h2>
-          <pre>{String(this.state.error)}</pre>
+        <div role="alert" className="mx-auto w-full max-w-[728px] px-6 py-10">
+          <h2 className="text-lg font-semibold text-strong">The “{this.props.plugin}” plugin crashed</h2>
+          <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-border bg-foreground/[0.03] p-3 text-destructive">
+            {String(this.state.error)}
+          </pre>
         </div>
       );
     }
