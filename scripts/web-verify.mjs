@@ -252,7 +252,7 @@ try {
   await page.locator("[data-slot='to-end']").click();
   await page.waitForFunction(() => { const e = document.querySelector("[role='log'] > div"); return e.scrollHeight - e.scrollTop - e.clientHeight < 90; }, null, { timeout: 5000 });
   check(true, "the pill returns to the end of the conversation");
-  check((await page.locator("[data-streamdown='table-wrapper'] button[title='Copy table']").count()) > 0, "each table has a copy button");
+  check((await page.locator(".chat-markdown-table-container button[aria-label='Copy table']").count()) > 0, "each table has a copy button");
 
   // --- Home in light: the same page, the system preference flipped ------------
   await page.emulateMedia({ colorScheme: "light" });
@@ -359,7 +359,13 @@ try {
     if (only.length && !only.some((name) => file.startsWith(name))) continue;
     console.log(`\n== ${file}`);
     const area = (await import(pathToFileURL(path.join(dir, file)).href)).default;
-    await area({ page, shot, a11y, check, sleep, PORT, DATA, OUT });
+    try {
+      await area({ page, shot, a11y, check, sleep, PORT, DATA, OUT });
+    } catch (error) {
+      // An area that throws stops the run; say what the page logged first.
+      if (problems.length) console.error(`console/network problems so far:\n  ${problems.join("\n  ")}`);
+      throw error;
+    }
   }
 
   check(problems.length === 0, problems.length ? `console/network problems:\n  ${problems.join("\n  ")}` : "no console errors or failed requests");
