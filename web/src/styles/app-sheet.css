@@ -1,0 +1,21 @@
+/* from hushbacks apps/spa/src/index.css and ResponsesView.css @5d9a64b11
+ *
+ * The shared exit of every app sheet (the response details sheet, the
+ * notification panel; here the task sheet): it fades out quickly in place
+ * instead of sliding back. And the quick fade a sheet's content plays when it
+ * swaps to the previous or next item (`response-swap`, renamed `sheet-swap`).
+ */
+[data-slot="sheet-content"][data-variant][data-side].app-sheet[data-ending-style] {
+  translate: none;
+  transition-duration: var(--motion-quick);
+}
+
+.sheet-swap {
+  animation: sheet-swap var(--motion-quick) var(--ease-out);
+}
+
+@keyframes sheet-swap {
+  from {
+    opacity: 0;
+  }
+}
