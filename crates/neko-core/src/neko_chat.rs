@@ -339,6 +339,17 @@ pub fn finish_turn_suggesting(
     save(db, &messages)
 }
 
+/// A message from Neko that no turn produced (it updated itself, or rolled an
+/// update back), with any actions waiting for the owner's click.
+pub fn post_notice(db: &Db, text: &str, ticket_ids: Vec<String>, actions: Vec<ChatAction>) -> Result<String, String> {
+    let mut messages = load(db)?;
+    let notice = ChatMessage { ticket_ids, actions, ..message(ChatRole::Neko, truncate(text, 4000), crate::now_unix_ms()) };
+    let id = notice.id.clone();
+    messages.push(notice);
+    save(db, &messages)?;
+    Ok(id)
+}
+
 /// Puts the actions Neko proposed on its finished reply.
 pub fn attach_actions(db: &Db, id: &str, actions: Vec<ChatAction>) -> Result<(), String> {
     if actions.is_empty() { return Ok(()); }

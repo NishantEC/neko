@@ -718,6 +718,8 @@ fn main() {
                             }
                             last_attention_count = count;
                         }
+                        // For open web pages; the panel serves no web UI.
+                        Event::WebUpdated { .. } => {}
                     }
                 }
 

@@ -714,6 +714,11 @@ pub enum Event {
     AttentionChanged {
         count: usize,
     },
+    /// Neko rebuilt its own web UI from a landed change and swapped it in
+    /// (`<data dir>/web-live`). Open pages reload when the person is idle.
+    WebUpdated {
+        commit: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

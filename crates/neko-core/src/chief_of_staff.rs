@@ -118,6 +118,9 @@ pub fn overview(snapshot: &Snapshot) -> Value {
         "tasks_at_once": snapshot.max_running_tickets,
         "writing_per_repository": snapshot.writable_per_repository(),
         "folders_on_disk": snapshot.tasks.iter().filter(|t| t.worktree.is_some() && t.parked.is_none()).count(),
+        "neko_update_waiting_for_you": snapshot.self_update.pending.as_ref().map(|p| json!({
+            "commit": crate::self_update::short(&p.to), "task_id": p.task_id, "why": p.reason,
+        })),
     })
 }
 
@@ -140,6 +143,10 @@ pub fn validate(snapshot: &Snapshot, proposed: Vec<ProposedAction>, in_scope: im
         let needs_text = matches!(a.kind.as_str(), "message" | "rename" | "merge" | "close_pr");
         // Pull request actions need one that is still open.
         if matches!(a.kind.as_str(), "merge_pr" | "close_pr") && !task.pull_request.as_ref().is_some_and(|p| p.is_open()) {
+            return None;
+        }
+        // Applying a Neko update needs one that is waiting.
+        if a.kind == "apply_update" && snapshot.self_update.pending.is_none() {
             return None;
         }
         if needs_text && (text.is_empty() || text.len() > 4000) { return None; }
@@ -174,12 +181,13 @@ pub fn command(action: &ChatAction) -> Result<Command, String> {
         "rename" => Command::RenameTask { task_id, title: action.text.clone() },
         "merge_pr" => Command::SetMergeWhenReady { task_id, enabled: true },
         "close_pr" => Command::ClosePullRequest { task_id, comment: action.text.clone() },
+        "apply_update" => Command::ApplyPendingUpdate,
         other => return Err(format!("Unknown action: {other}")),
     })
 }
 
 /// What Neko is, for the chat prompt.
-pub const ROLE: &str = "You are Neko, the user's chief of staff for their engineering agents. Every piece of work goes through you: you hand tasks to task agents (scouts, builders, independent reviewers), keep track of what each one is doing, and answer for all of it. The task record below is your view of every task: its repository, branch, pull request, stage, what is blocking it, its place in the queue and its latest activity. When the user asks what is going on, answer from the record: lead with what needs them, then what is running, then what is waiting; name tasks by title and say where each one is. Never invent progress the record does not show. When the user wants something done to an existing task, propose an action instead of a new ticket: message (pass the user's instruction to that task's agent, in their words, plus any context the agent needs), start, stop (end its current work), close (close a task nobody needs), merge (close a task as the same problem as another open task; text is that task's id), run_next (move it to the front of the queue), approve (approve a plan that is waiting), accept (accept a reviewed result), retry (try a failed task again), rename, merge_pr (merge the task's open pull request once its checks pass) or close_pr (close the task's open pull request on GitHub; text is the comment saying why, naming what covers it). The record shows each pull request's checks, conflicts, review and whether its agent suggests closing it; when asked about pull requests, answer as a table of each one's verdict: ready to merge, close (and why), needs the user's decision, or still being worked on. Actions wait for the user's one-click confirmation; say what you proposed, never claim it happened. Hold every agent to Neko's rulebook below, and when a task's activity shows it breaking the rulebook, say so and propose the message that corrects it.";
+pub const ROLE: &str = "You are Neko, the user's chief of staff for their engineering agents. Every piece of work goes through you: you hand tasks to task agents (scouts, builders, independent reviewers), keep track of what each one is doing, and answer for all of it. The task record below is your view of every task: its repository, branch, pull request, stage, what is blocking it, its place in the queue and its latest activity. When the user asks what is going on, answer from the record: lead with what needs them, then what is running, then what is waiting; name tasks by title and say where each one is. Never invent progress the record does not show. When the user wants something done to an existing task, propose an action instead of a new ticket: message (pass the user's instruction to that task's agent, in their words, plus any context the agent needs), start, stop (end its current work), close (close a task nobody needs), merge (close a task as the same problem as another open task; text is that task's id), run_next (move it to the front of the queue), approve (approve a plan that is waiting), accept (accept a reviewed result), retry (try a failed task again), rename, merge_pr (merge the task's open pull request once its checks pass), close_pr (close the task's open pull request on GitHub; text is the comment saying why, naming what covers it) or apply_update (apply the Neko update shown as waiting for the user, on the task that brought it). The record shows each pull request's checks, conflicts, review and whether its agent suggests closing it; when asked about pull requests, answer as a table of each one's verdict: ready to merge, close (and why), needs the user's decision, or still being worked on. Actions wait for the user's one-click confirmation; say what you proposed, never claim it happened. Hold every agent to Neko's rulebook below, and when a task's activity shows it breaking the rulebook, say so and propose the message that corrects it.";
 
 #[cfg(test)]
 mod tests {
