@@ -1,0 +1,399 @@
+// from hushbacks packages/ui/src/components/ai-elements/message.tsx
+import { ArrowLeft, ArrowRight, Paperclip as PaperclipIcon, X } from "@/ui/icons";
+import { Button } from "@/ui/button";
+import { ButtonGroup, ButtonGroupText } from "@/ui/button-group";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/ui/tooltip";
+import { cn } from "@/ui/lib/utils";
+import type { FileUIPart, Role } from "@/chat/types";
+import type { ComponentProps, HTMLAttributes } from "react";
+import {
+  type ReactNode,
+  Suspense,
+  createContext,
+  isValidElement,
+  lazy,
+  memo,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
+import type { StreamdownProps } from "streamdown";
+
+const MessageMarkdown = lazy(() => import("./message-markdown"));
+
+// Tables keep the look Neko's chat settled on (measured against T3 Code): no
+// card, hairline rows under a header, 12px text, scrolling sideways when wider
+// than the column. Streamdown supplies the wrapper, the horizontal scroll and
+// the copy / download controls; these rules replace its borders and fills.
+const TABLE_STYLES =
+  "[&_[data-streamdown=table-wrapper]]:my-4 [&_[data-streamdown=table-wrapper]]:space-y-1 " +
+  "[&_table]:my-0 [&_table]:w-full [&_table]:border-0 [&_table]:text-[12px] [&_table]:leading-[19.5px] " +
+  "[&_thead]:bg-transparent [&_tbody]:divide-y-0 [&_tbody]:bg-transparent [&_tr]:border-0 " +
+  "[&_th]:min-w-[120px] [&_th]:px-3 [&_th]:py-2 [&_th]:text-[12px] [&_th]:font-semibold [&_th]:text-foreground " +
+  "[&_td]:min-w-[120px] [&_td]:border-t [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-[12px] " +
+  "[&_th:first-child]:pl-1 [&_td:first-child]:pl-1";
+
+// Prose at T3's measured scale: 14px / 1.625, small headings, outside bullets.
+const PROSE_STYLES =
+  "[&_p]:my-3 [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[18px] [&_h1]:text-strong [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[16px] [&_h2]:text-strong " +
+  "[&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[14px] [&_h3]:text-strong [&_strong]:font-semibold [&_strong]:text-strong " +
+  "[&_a]:font-normal [&_a]:text-info-foreground [&_a]:underline-offset-3 " +
+  "[&_ul]:my-3 [&_ul]:list-outside [&_ul]:pl-5 [&_ol]:my-3 [&_ol]:list-outside [&_ol]:pl-5 [&_li]:py-0.5 " +
+  "[&_[data-streamdown=inline-code]]:rounded-md [&_[data-streamdown=inline-code]]:border [&_[data-streamdown=inline-code]]:border-border " +
+  "[&_[data-streamdown=inline-code]]:bg-foreground/[0.04] [&_[data-streamdown=inline-code]]:px-1.5 [&_[data-streamdown=inline-code]]:py-px " +
+  "[&_[data-streamdown=inline-code]]:text-[12px] [&_[data-streamdown=inline-code]]:text-strong " +
+  "[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3.5 [&_blockquote]:not-italic";
+
+const TASK_LIST_STYLES = "[&_input[type=checkbox]]:mr-1.5 [&_input[type=checkbox]]:translate-y-px";
+
+export type MessageProps = HTMLAttributes<HTMLDivElement> & {
+  from: Role;
+};
+
+export const Message = ({ className, from, ...props }: MessageProps) => (
+  <div
+    className={cn(
+      "group flex w-full max-w-[95%] flex-col gap-2",
+      from === "user" ? "is-user ml-auto justify-end" : "is-assistant",
+      className,
+    )}
+    {...props}
+  />
+);
+
+export type MessageContentProps = HTMLAttributes<HTMLDivElement>;
+
+export const MessageContent = ({ children, className, ...props }: MessageContentProps) => (
+  <div
+    className={cn(
+      "is-user:dark flex w-fit max-w-full min-w-0 flex-col gap-2 overflow-hidden text-sm",
+      "group-[.is-user]:ml-auto group-[.is-user]:rounded-lg group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
+      "group-[.is-assistant]:text-foreground",
+      className,
+    )}
+    {...props}
+  >
+    {children}
+  </div>
+);
+
+export type MessageActionsProps = ComponentProps<"div">;
+
+export const MessageActions = ({ className, children, ...props }: MessageActionsProps) => (
+  <div className={cn("flex items-center gap-1", className)} {...props}>
+    {children}
+  </div>
+);
+
+export type MessageActionProps = ComponentProps<typeof Button> & {
+  tooltip?: string;
+  label?: string;
+};
+
+export const MessageAction = ({
+  tooltip,
+  children,
+  label,
+  variant = "ghost",
+  size = "icon-sm",
+  ...props
+}: MessageActionProps) => {
+  const button = (
+    <Button size={size} type="button" variant={variant} {...props}>
+      {children}
+      <span className="sr-only">{label || tooltip}</span>
+    </Button>
+  );
+
+  if (tooltip) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent>
+            <p>{tooltip}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  return button;
+};
+
+type MessageBranchContextType = {
+  currentBranch: number;
+  totalBranches: number;
+  goToPrevious: () => void;
+  goToNext: () => void;
+  branches: ReactNode[];
+  setBranches: (branches: ReactNode[]) => void;
+};
+
+const MessageBranchContext = createContext<MessageBranchContextType | null>(null);
+
+const useMessageBranch = () => {
+  const context = useContext(MessageBranchContext);
+
+  if (!context) {
+    throw new Error("MessageBranch components must be used within MessageBranch");
+  }
+
+  return context;
+};
+
+export type MessageBranchProps = HTMLAttributes<HTMLDivElement> & {
+  defaultBranch?: number;
+  onBranchChange?: (branchIndex: number) => void;
+};
+
+export const MessageBranch = ({ defaultBranch = 0, onBranchChange, className, ...props }: MessageBranchProps) => {
+  const [currentBranch, setCurrentBranch] = useState(defaultBranch);
+  const [branches, setBranches] = useState<ReactNode[]>([]);
+
+  const handleBranchChange = (newBranch: number) => {
+    setCurrentBranch(newBranch);
+    onBranchChange?.(newBranch);
+  };
+
+  const goToPrevious = () => {
+    const newBranch = currentBranch > 0 ? currentBranch - 1 : branches.length - 1;
+    handleBranchChange(newBranch);
+  };
+
+  const goToNext = () => {
+    const newBranch = currentBranch < branches.length - 1 ? currentBranch + 1 : 0;
+    handleBranchChange(newBranch);
+  };
+
+  const contextValue: MessageBranchContextType = {
+    currentBranch,
+    totalBranches: branches.length,
+    goToPrevious,
+    goToNext,
+    branches,
+    setBranches,
+  };
+
+  return (
+    <MessageBranchContext.Provider value={contextValue}>
+      <div className={cn("grid w-full gap-2 [&>div]:pb-0", className)} {...props} />
+    </MessageBranchContext.Provider>
+  );
+};
+
+export type MessageBranchContentProps = HTMLAttributes<HTMLDivElement>;
+
+export const MessageBranchContent = ({ children, ...props }: MessageBranchContentProps) => {
+  const { currentBranch, setBranches, branches } = useMessageBranch();
+  const childrenArray = (Array.isArray(children) ? children : [children]) as ReactNode[];
+
+  // Use useEffect to update branches when they change
+  useEffect(() => {
+    if (branches.length !== childrenArray.length) {
+      setBranches(childrenArray);
+    }
+  }, [childrenArray, branches, setBranches]);
+
+  return childrenArray.map((branch, index) => (
+    <div
+      className={cn("grid gap-2 overflow-hidden [&>div]:pb-0", index === currentBranch ? "block" : "hidden")}
+      key={(isValidElement(branch) ? branch.key : null) ?? index}
+      {...props}
+    >
+      {branch}
+    </div>
+  ));
+};
+
+export type MessageBranchSelectorProps = HTMLAttributes<HTMLDivElement> & {
+  from: Role;
+};
+
+export const MessageBranchSelector = ({ className, from, ...props }: MessageBranchSelectorProps) => {
+  const { totalBranches } = useMessageBranch();
+
+  // Don't render if there's only one branch
+  if (totalBranches <= 1) {
+    return null;
+  }
+
+  return (
+    <ButtonGroup
+      className="[&>*:not(:first-child)]:rounded-l-md [&>*:not(:last-child)]:rounded-r-md"
+      orientation="horizontal"
+      {...props}
+    />
+  );
+};
+
+export type MessageBranchPreviousProps = ComponentProps<typeof Button>;
+
+export const MessageBranchPrevious = ({ children, ...props }: MessageBranchPreviousProps) => {
+  const { goToPrevious, totalBranches } = useMessageBranch();
+
+  return (
+    <Button
+      aria-label="Previous branch"
+      disabled={totalBranches <= 1}
+      onClick={goToPrevious}
+      size="icon-sm"
+      type="button"
+      variant="ghost"
+      {...props}
+    >
+      {children ?? <ArrowLeft size={14} />}
+    </Button>
+  );
+};
+
+export type MessageBranchNextProps = ComponentProps<typeof Button>;
+
+export const MessageBranchNext = ({ children, className, ...props }: MessageBranchNextProps) => {
+  const { goToNext, totalBranches } = useMessageBranch();
+
+  return (
+    <Button
+      aria-label="Next branch"
+      disabled={totalBranches <= 1}
+      onClick={goToNext}
+      size="icon-sm"
+      type="button"
+      variant="ghost"
+      {...props}
+    >
+      {children ?? <ArrowRight size={14} />}
+    </Button>
+  );
+};
+
+export type MessageBranchPageProps = HTMLAttributes<HTMLSpanElement>;
+
+export const MessageBranchPage = ({ className, ...props }: MessageBranchPageProps) => {
+  const { currentBranch, totalBranches } = useMessageBranch();
+
+  return (
+    <ButtonGroupText
+      className={cn("border-none bg-transparent text-muted-foreground shadow-none", className)}
+      {...props}
+    >
+      {currentBranch + 1} of {totalBranches}
+    </ButtonGroupText>
+  );
+};
+
+export type MessageResponseProps = StreamdownProps;
+
+export const MessageResponse = memo(
+  ({ className, ...props }: MessageResponseProps) => {
+    const classes = cn("size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", PROSE_STYLES, TABLE_STYLES, TASK_LIST_STYLES, className);
+    return (
+      <Suspense
+        fallback={
+          <div className={cn(classes, "whitespace-pre-wrap")}>
+            {typeof props.children === "string" ? props.children : null}
+          </div>
+        }
+      >
+        <MessageMarkdown className={classes} {...props} />
+      </Suspense>
+    );
+  },
+  (prevProps, nextProps) => prevProps.children === nextProps.children,
+);
+
+MessageResponse.displayName = "MessageResponse";
+
+export type MessageAttachmentProps = HTMLAttributes<HTMLDivElement> & {
+  data: FileUIPart;
+  className?: string;
+  onRemove?: () => void;
+};
+
+export function MessageAttachment({ data, className, onRemove, ...props }: MessageAttachmentProps) {
+  const filename = data.filename || "";
+  const mediaType = data.mediaType?.startsWith("image/") && data.url ? "image" : "file";
+  const isImage = mediaType === "image";
+  const attachmentLabel = filename || (isImage ? "Image" : "Attachment");
+
+  return (
+    <div className={cn("group relative size-24 overflow-hidden rounded-lg", className)} {...props}>
+      {isImage ? (
+        <>
+          <img
+            alt={filename || "attachment"}
+            className="size-full object-cover"
+            height={100}
+            src={data.url}
+            width={100}
+          />
+          {onRemove && (
+            <Button
+              aria-label="Remove attachment"
+              className="absolute top-2 right-2 size-6 rounded-full bg-background/80 p-0 opacity-0 backdrop-blur-sm transition-opacity hover:bg-background group-hover:opacity-100 [&>svg]:size-3"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+              type="button"
+              variant="ghost"
+            >
+              <X />
+              <span className="sr-only">Remove</span>
+            </Button>
+          )}
+        </>
+      ) : (
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex size-full shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <PaperclipIcon className="size-4" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{attachmentLabel}</p>
+            </TooltipContent>
+          </Tooltip>
+          {onRemove && (
+            <Button
+              aria-label="Remove attachment"
+              className="size-6 shrink-0 rounded-full p-0 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100 [&>svg]:size-3"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+              type="button"
+              variant="ghost"
+            >
+              <X />
+              <span className="sr-only">Remove</span>
+            </Button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+export type MessageAttachmentsProps = ComponentProps<"div">;
+
+export function MessageAttachments({ children, className, ...props }: MessageAttachmentsProps) {
+  if (!children) {
+    return null;
+  }
+
+  return (
+    <div className={cn("ml-auto flex w-fit flex-wrap items-start gap-2", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export type MessageToolbarProps = ComponentProps<"div">;
+
+export const MessageToolbar = ({ className, children, ...props }: MessageToolbarProps) => (
+  <div className={cn("mt-4 flex w-full items-center justify-between gap-4", className)} {...props}>
+    {children}
+  </div>
+);
