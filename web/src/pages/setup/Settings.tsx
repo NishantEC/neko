@@ -1,6 +1,11 @@
 // Settings: everything that configures Neko, in sections, with search that
 // finds both sections and individual settings, jumps to one and lights it.
 // ⌘F (or "Find a setting" in ⌘K) focuses the search field.
+//
+// The layout is hushbacks' settings route (apps/spa/src/routes/_app.settings.tsx
+// @da20dfaeb): a breadcrumb bar, then one 52rem column of sections on the
+// settings surface. The section list lives in the sidebar under Settings (its
+// SubReveal); with the sidebar collapsed, the bar shows the pill nav instead.
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Input } from "@/ui/input";
 import { Kbd } from "@/ui/kbd";
@@ -8,9 +13,11 @@ import { Skeleton } from "@/ui/skeleton";
 import { ArrowRight, Command as CommandIcon, Gear, ListChecks, MagnifyingGlass, X } from "@/ui/icons";
 import { Panel } from "@/setup/kit";
 import { cn } from "@/ui/lib/utils";
-import { EmptyBlock, Gate, Row, SetupPage, registerCommands } from "@/setup/kit";
+import { EmptyBlock, Gate, Row, registerCommands } from "@/setup/kit";
+import { useSidebar } from "@/ui/sidebar";
 import { useSetupCommands } from "@/setup/commands";
-import { takeSettingsRequest, usePendingSettingsRequest } from "@/setup/settingsNav";
+import { setCurrentSettingsSection, takeSettingsRequest, usePendingSettingsRequest } from "@/setup/settingsNav";
+import "@/pages/setup/settings/settings-surface.css";
 import { SECTIONS, searchSettings, type SectionId } from "@/pages/setup/settings/registry";
 import { GeneralSection } from "@/pages/setup/settings/General";
 import { AiSection } from "@/pages/setup/settings/Ai";
@@ -96,100 +103,123 @@ function SettingsBody() {
     [open],
   );
 
+  useEffect(() => {
+    setCurrentSettingsSection(section);
+    return () => setCurrentSettingsSection(null);
+  }, [section]);
+
   const hits = searchSettings(query);
   const current = SECTIONS.find((s) => s.id === section)!;
-  const groups = [...new Set(SECTIONS.map((s) => s.group))];
   const Content = RENDER[section];
 
   return (
-    <>
-      <div className="relative max-w-md">
-        <MagnifyingGlass aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          ref={search}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setQuery("");
-            if (e.key === "Enter" && hits[0]) {
-              const hit = hits[0];
-              open(hit.section.id, hit.kind === "setting" ? hit.setting.id : undefined);
-            }
-          }}
-          aria-label="Find a setting"
-          placeholder="Find a setting"
-          className="ps-9 pe-16"
-        />
-        <span className="pointer-events-none absolute end-2.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
-          {query ? null : <Kbd className="bg-transparent"><CommandIcon size={11} />F</Kbd>}
-        </span>
-        {query ? (
-          <button type="button" onClick={() => { setQuery(""); search.current?.focus(); }} aria-label="Clear search" className="absolute end-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-            <X size={14} />
-          </button>
-        ) : null}
-      </div>
-
-      {query.trim() ? (
-        <section aria-label="Search results" data-slot="settings-results" className="flex flex-col gap-3">
-          <p className="text-[13px] text-muted-foreground">{hits.length ? "Choose a setting to jump to it." : `No setting matches “${query.trim()}”.`}</p>
-          {hits.length ? (
-            <Panel><div className="divide-y divide-border/70">
-              {hits.map((hit) => (
-                <Row
-                  key={hit.kind === "section" ? `s.${hit.section.id}` : `t.${hit.setting.id}`}
-                  title={hit.kind === "section" ? hit.section.title : hit.setting.title}
-                  description={hit.kind === "section" ? hit.section.summary : `${hit.section.title}`}
-                  leading={hit.kind === "section" ? <ListChecks /> : <Gear />}
-                  trailing={<ArrowRight aria-hidden className="text-muted-foreground" />}
-                  onClick={() => open(hit.section.id, hit.kind === "setting" ? hit.setting.id : undefined)}
-                  label={hit.kind === "section" ? `Open ${hit.section.title}` : `${hit.setting.title} in ${hit.section.title}`}
-                />
-              ))}
-            </div></Panel>
-          ) : <EmptyBlock icon={MagnifyingGlass} title="No matches" description="Try another word: a runtime, a limit, “dark”, “folders”." />}
-        </section>
-      ) : (
-        <div className="grid gap-8 md:grid-cols-[11.5rem_minmax(0,1fr)]">
-          <nav aria-label="Settings sections" data-slot="settings-nav" className="flex flex-col gap-5 md:sticky md:top-0 md:self-start">
-            {groups.map((group) => (
-              <div key={group} className="flex flex-col gap-0.5">
-                <span className="px-2.5 pb-1 text-[12.5px] font-medium text-muted-foreground">{group}</span>
-                {SECTIONS.filter((s) => s.group === group).map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => open(s.id)}
-                    aria-current={s.id === section ? "page" : undefined}
-                    data-active={s.id === section ? "" : undefined}
-                    className={cn("rounded-lg px-2.5 py-1.5 text-start text-[14px] outline-none transition-colors hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring", s.id === section ? "bg-foreground/[0.07] font-medium text-foreground" : "text-muted-foreground")}
-                  >
-                    {s.title}
-                  </button>
-                ))}
+    <div className="flex h-full w-full flex-1 flex-col overflow-hidden">
+      <header className="flex shrink-0 items-center border-b border-border px-4 py-1.5 md:h-12 md:px-6 md:py-0">
+        <nav aria-label="Breadcrumb" className="hidden items-center gap-2 text-sm md:flex">
+          <span className="text-muted-foreground">Settings</span>
+          <span aria-hidden className="text-muted-foreground/50">
+            /
+          </span>
+          <span aria-current="page" className="font-medium text-foreground">
+            {query.trim() ? "Search" : current.title}
+          </span>
+        </nav>
+        <SettingsPhoneNav current={section} onOpen={open} />
+      </header>
+      <div data-slot="setup-page" className="settings-surface min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[52rem] px-6 pt-8 pb-24">
+          <div className="settings-stack flex flex-col">
+            <div className="relative max-w-md">
+              <MagnifyingGlass aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={search}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setQuery("");
+                  if (e.key === "Enter" && hits[0]) {
+                    const hit = hits[0];
+                    open(hit.section.id, hit.kind === "setting" ? hit.setting.id : undefined);
+                  }
+                }}
+                aria-label="Find a setting"
+                placeholder="Find a setting"
+                className="ps-9! pe-16!"
+              />
+              <span className="pointer-events-none absolute end-2.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
+                {query ? null : <Kbd className="bg-transparent"><CommandIcon size={11} />F</Kbd>}
+              </span>
+              {query ? (
+                <button type="button" onClick={() => { setQuery(""); search.current?.focus(); }} aria-label="Clear search" className="absolute end-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                  <X size={14} />
+                </button>
+              ) : null}
+            </div>
+            {query.trim() ? (
+              <section aria-label="Search results" data-slot="settings-results" className="flex flex-col gap-3">
+                <p className="text-[13px] text-muted-foreground">{hits.length ? "Choose a setting to jump to it." : `No setting matches “${query.trim()}”.`}</p>
+                {hits.length ? (
+                  <Panel><div className="divide-y divide-border/70">
+                    {hits.map((hit) => (
+                      <Row
+                        key={hit.kind === "section" ? `s.${hit.section.id}` : `t.${hit.setting.id}`}
+                        title={hit.kind === "section" ? hit.section.title : hit.setting.title}
+                        description={hit.kind === "section" ? hit.section.summary : `${hit.section.title}`}
+                        leading={hit.kind === "section" ? <ListChecks /> : <Gear />}
+                        trailing={<ArrowRight aria-hidden className="text-muted-foreground" />}
+                        onClick={() => open(hit.section.id, hit.kind === "setting" ? hit.setting.id : undefined)}
+                        label={hit.kind === "section" ? `Open ${hit.section.title}` : `${hit.setting.title} in ${hit.section.title}`}
+                      />
+                    ))}
+                  </div></Panel>
+                ) : <EmptyBlock icon={MagnifyingGlass} title="No matches" description="Try another word: a runtime, a limit, “dark”, “folders”." />}
+              </section>
+            ) : (
+              <div className="min-w-0" data-slot="settings-section" data-section={section}>
+                <h2 className="sr-only">{current.title}: {current.summary}</h2>
+                <Suspense fallback={<Skeleton className="h-48 w-full" />}><Content /></Suspense>
               </div>
-            ))}
-          </nav>
-          <div className="min-w-0" data-slot="settings-section" data-section={section}>
-            <h2 className="sr-only">{current.title}: {current.summary}</h2>
-            <Suspense fallback={<Skeleton className="h-48 w-full" />}><Content /></Suspense>
+            )}
           </div>
         </div>
-      )}
-    </>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * hushbacks' SettingsPhoneNav: the section pills in the bar, for when the
+ * sidebar cannot show its sub-navigation (collapsed, or on a phone).
+ */
+function SettingsPhoneNav({ current, onOpen }: { current: SectionId; onOpen: (id: SectionId) => void }) {
+  const { state, isMobile } = useSidebar();
+  if (state !== "collapsed" && !isMobile) return null;
+  return (
+    <nav aria-label="Settings sections" data-slot="settings-nav" className="-mx-2 flex min-w-0 flex-1 gap-1 overflow-x-auto px-2 md:ms-6">
+      {SECTIONS.map((entry) => {
+        const active = entry.id === current;
+        return (
+          <button
+            key={entry.id}
+            type="button"
+            onClick={() => onOpen(entry.id)}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "inline-flex h-11 shrink-0 items-center rounded-full px-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-9",
+              active ? "sky-pebble font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {entry.title}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
 export default function Settings() {
   useSetupCommands();
   return (
-    <SetupPage
-      eyebrow="System"
-      title={<>Settings</>}
-      subtitle="Everything that configures Neko. Search finds sections and individual settings."
-      width="max-w-[1040px]"
-    >
-      <Gate>{() => <SettingsBody />}</Gate>
-    </SetupPage>
+    <Gate>{() => <SettingsBody />}</Gate>
   );
 }

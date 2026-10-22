@@ -5,6 +5,7 @@
 // disable and DELETE /api/plugins/<name>.
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader, Panel, MonoLabel } from "@/editorial";
+import { PageContainer } from "@/shell/PageContainer";
 import { Button } from "@/ui/button";
 import { Badge } from "@/ui/badge";
 import { Switch } from "@/ui/switch";
@@ -197,8 +198,8 @@ export default function Plugins() {
   }
 
   return (
-    <div data-slot="plugins-page" className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 pt-12 pb-20 md:px-10">
+    <PageContainer data-slot="plugins-page" className="flex max-w-[52rem] flex-col gap-8">
+      <>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <PageHeader
             eyebrow="System"
@@ -274,11 +275,11 @@ export default function Plugins() {
             </ul>
           </Panel>
         )}
-      </div>
+      </>
       <Inspector open={detail !== null} onClose={() => setDetailId(null)} title={detail?.title || detail?.id} subtitle="Plugin">
         {detail ? <PluginDetails listing={detail} /> : null}
       </Inspector>
       <BuildDialog open={building} onOpenChange={setBuilding} folder={folder} />
-    </div>
+    </PageContainer>
   );
 }

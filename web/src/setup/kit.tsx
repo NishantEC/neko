@@ -1,7 +1,8 @@
-// The small set of layout pieces every setup page shares, built only from the
-// design system (@/ui, @/editorial): a page frame, sections that open
-// eyebrow → heading → subtitle, one Panel divided into rows with a footer
-// action bar, instrument wells, empty/loading/error states and a confirm.
+// The small set of layout pieces every setup page shares. The frame is
+// hushbacks' PageContainer (shell/PageContainer.tsx); Section, Panel, Row and the
+// footer strip follow hushbacks' settings layout (apps/spa/src/pages/Settings/
+// settings.ui.tsx @da20dfaeb), kept on Neko's props so the pages are unchanged.
+// Also: instrument wells, empty/loading/error states and a confirm.
 import { useEffect, type ReactNode } from "react";
 import { cn } from "@/ui/lib/utils";
 import { Button } from "@/ui/button";
@@ -16,11 +17,16 @@ import {
   AlertDialogHeader, AlertDialogTitle,
 } from "@/ui/alert-dialog";
 import { WarningCircle, type Icon } from "@/ui/icons";
-import { EditorialHeading, FieldLabel, PageHeader, Panel as BasePanel } from "@/editorial";
+import { FieldLabel, PageHeader } from "@/editorial";
+import { PageContainer } from "@/shell/PageContainer";
 import { useWorkbench } from "@/useStore";
 import type { Tone } from "@/setup/lib";
 
-/** The page frame: header (eyebrow, serif title, subtitle) with page actions, then the content. */
+/**
+ * The page frame: hushbacks' PageContainer column (max 1200px, px-6 md:px-10,
+ * pt-12 md:pt-16 pb-24) with its PageHeader and the page actions beside it.
+ * `width` narrows the column for pages that are a single list.
+ */
 export function SetupPage({
   eyebrow, title, subtitle, actions, children, width = "max-w-[880px]", toolbar,
 }: {
@@ -33,20 +39,22 @@ export function SetupPage({
   width?: string;
 }) {
   return (
-    <div data-slot="setup-page" className="min-h-0 flex-1 overflow-y-auto">
-      <div className={cn("mx-auto flex w-full flex-col gap-8 px-6 pt-12 pb-20 md:px-10", width)}>
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <PageHeader eyebrow={eyebrow} title={title} subtitle={subtitle} />
-          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-        </div>
-        {toolbar}
-        {children}
+    <PageContainer data-slot="setup-page" className={cn("flex flex-col gap-8", width)}>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <PageHeader eyebrow={eyebrow} title={title} subtitle={subtitle} />
+        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
-    </div>
+      {toolbar}
+      {children}
+    </PageContainer>
   );
 }
 
-/** A group on a page: eyebrow → heading → intro, then its content. */
+/**
+ * A group on a page. The heading is hushbacks' settings Section header
+ * (pages/Settings/settings.ui.tsx: base semibold title, one muted line, actions
+ * on the right); Neko keeps it above the Panel it introduces.
+ */
 export function Section({
   title, intro, actions, children, id, className,
 }: {
@@ -59,41 +67,41 @@ export function Section({
   className?: string;
 }) {
   return (
-    <section id={id} data-slot="setup-section" className={cn("flex flex-col gap-4", className)}>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <EditorialHeading as="h2" className="text-[clamp(1.25rem,1.2vw+0.9rem,1.625rem)]">{title}</EditorialHeading>
-          {intro ? <p className="max-w-[62ch] text-[14px] leading-[1.55] text-muted-foreground">{intro}</p> : null}
+    <section id={id} data-slot="setup-section" className={cn("flex flex-col gap-3", className)}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-balance text-base font-semibold text-foreground">{title}</h2>
+          {intro ? <p className="mt-1 max-w-prose text-pretty text-sm text-muted-foreground">{intro}</p> : null}
         </div>
-        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
       {children}
     </section>
   );
 }
 
-/**
- * The editorial Panel, with the attributes it would otherwise drop (`data-slot`,
- * aria-*) carried on a layout-free wrapper so checks and styles can find it.
- */
+/** hushbacks' settings card (settings.ui.tsx `Section`): one surface, no border, 20px corners. */
 export function Panel({ children, className, ...rest }: React.ComponentProps<"div">) {
   return (
-    <div {...rest} className="contents">
-      <BasePanel className={className}>{children}</BasePanel>
-    </div>
-  );
-}
-
-/** A distinct footer action bar for a Panel. */
-export function PanelFooter({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={cn("flex flex-wrap items-center justify-end gap-2 border-t border-border/70 bg-foreground/[0.02] px-6 py-4", className)}>
+    <div data-slot="setup-panel" {...rest} className={cn("overflow-hidden rounded-[20px] bg-card", className)}>
       {children}
     </div>
   );
 }
 
-/** A row: title and a muted line under it, with leading and trailing content. */
+/** The card's footer strip (settings.ui.tsx): a hint on the left, the action on the right. */
+export function PanelFooter({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      data-slot="setup-panel-footer"
+      className={cn("flex min-h-[52px] flex-wrap items-center justify-end gap-x-4 gap-y-2 bg-muted px-6 py-2.5 text-sm text-muted-foreground", className)}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A row: title and a muted line under it (settings.ui.tsx `Row`), with leading and trailing content. */
 export function Row({
   title, description, leading, trailing, children, className, onClick, label, id, highlighted,
 }: {
@@ -111,9 +119,9 @@ export function Row({
   const head = (
     <>
       {leading ? <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center text-muted-foreground">{leading}</span> : null}
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-start">
-        <span className="text-[14px] font-medium leading-snug text-foreground">{title}</span>
-        {description ? <span className="text-[13px] leading-[1.45] text-muted-foreground">{description}</span> : null}
+      <span className="flex min-w-0 flex-1 flex-col text-start">
+        <span className="text-sm font-medium text-foreground">{title}</span>
+        {description ? <span className="mt-0.5 text-pretty text-xs text-muted-foreground">{description}</span> : null}
       </span>
     </>
   );
@@ -122,9 +130,9 @@ export function Row({
       id={id}
       data-slot="setup-row"
       data-highlighted={highlighted ? "" : undefined}
-      className={cn("min-h-14 px-6 py-4 transition-colors data-[highlighted]:bg-primary/10", className)}
+      className={cn("min-h-14 px-6 py-3 transition-colors data-[highlighted]:bg-primary/10", className)}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-center gap-3">
         {onClick ? (
           <button
             type="button"
@@ -145,8 +153,9 @@ export function Row({
 }
 
 /**
- * A labelled control row, for settings. `id` lets search jump to it: the page
- * scrolls to `#setting-<id>` and lights it by setting `data-highlighted`.
+ * A labelled control row (settings.ui.tsx `Row`): label and hint on the left,
+ * the control on the right. `id` lets search jump to it: the page scrolls to
+ * `#setting-<id>` and lights it by setting `data-highlighted`.
  */
 export function SettingRow({
   id, title, description, children, highlighted, stacked,
@@ -164,13 +173,16 @@ export function SettingRow({
       data-slot="setting-row"
       data-setting={id}
       data-highlighted={highlighted ? "" : undefined}
-      className={cn("scroll-mt-24 min-h-14 px-6 py-4 transition-colors duration-500 data-[highlighted]:bg-primary/10", stacked ? "flex flex-col gap-3" : "flex flex-wrap items-center justify-between gap-x-6 gap-y-3")}
+      className={cn(
+        "flex min-h-14 scroll-mt-24 px-6 py-3 transition-colors duration-500 data-[highlighted]:bg-primary/10",
+        stacked ? "flex-col gap-2" : "flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
+      )}
     >
-      <div className="flex min-w-0 max-w-[44ch] flex-col gap-0.5">
-        <FieldLabel className="text-[11px]">{title}</FieldLabel>
-        {description ? <p className="text-[13px] leading-[1.5] text-muted-foreground">{description}</p> : null}
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-foreground">{title}</div>
+        {description ? <div className="mt-0.5 max-w-prose text-pretty text-xs text-muted-foreground">{description}</div> : null}
       </div>
-      <div className={cn("flex items-center gap-2", stacked && "w-full")}>{children}</div>
+      <div className={cn("flex min-w-0 flex-wrap items-center gap-2", stacked ? "w-full" : "sm:shrink-0 sm:justify-end")}>{children}</div>
     </div>
   );
 }

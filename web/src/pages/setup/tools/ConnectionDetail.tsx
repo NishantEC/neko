@@ -129,7 +129,7 @@ export function ConnectionDetail({ snapshot, connection, onClose }: { snapshot: 
               {tools.length > 0 ? (
                 <div className="relative w-56">
                   <MagnifyingGlass aria-hidden className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search tools" placeholder="Search tools" className="h-8 ps-8" />
+                  <Input value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search tools" placeholder="Search tools" className="h-8 ps-8!" />
                 </div>
               ) : null}
             </div>

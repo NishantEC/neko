@@ -1,0 +1,30 @@
+/* from hushbacks apps/spa/src/pages/Settings/settings-surface.css @da20dfaeb
+ *
+ * On the settings surface, hushbacks' cards go flat: no fill, no corners, the
+ * rows lose their side padding and the footer strip loses its fill, so a section
+ * reads as a heading over its rows on the page itself, 12px apart.
+ * Neko: the selectors name Neko's kit slots (setup-panel, setup-panel-footer,
+ * setting-row, setup-row) instead of hushbacks' settings-section/settings-panel.
+ */
+.sky .settings-surface .settings-stack {
+  gap: 12px;
+}
+
+.sky .settings-surface .settings-stack [data-slot="setup-panel"] {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.sky .settings-surface .settings-stack [data-slot="setup-panel"] :is([data-slot="setting-row"], [data-slot="setup-row"]) {
+  padding-inline: 0;
+}
+
+.sky .settings-surface [data-slot="setup-panel-footer"] {
+  min-height: 0;
+  padding-inline: 0;
+  padding-top: 0;
+  padding-bottom: 20px;
+  background: transparent;
+}

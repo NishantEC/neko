@@ -236,7 +236,7 @@ export function RegistryDialog({
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void search(); }}>
           <div className="relative flex-1">
             <MagnifyingGlass aria-hidden className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search the public registry" placeholder="Search the public registry" className="ps-8" />
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search the public registry" placeholder="Search the public registry" className="ps-8!" />
           </div>
           <Button type="submit" variant="outline" className="h-10" disabled={!query.trim() || searching} loading={searching}>Search</Button>
         </form>
