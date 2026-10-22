@@ -11,7 +11,9 @@ import { Kanban, Rows } from "@/work/icons";
 import { Button } from "@/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/ui/input-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
-import { ToggleGroup, ToggleGroupItem } from "@/ui/toggle-group";
+import { SegmentedControl, SegmentedControlItem } from "@/ui/segmented-control";
+import { StageFilters } from "@/work/StageFilters";
+import { isBoardDragging } from "@/work/board/moves";
 import { Kbd } from "@/ui/kbd";
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -29,7 +31,7 @@ import { taskActions } from "@/work/taskActions";
 import { TaskBoard, TaskList } from "@/work/TaskViews";
 import { TreeView } from "@/work/TreeView";
 import { useLocal } from "@/work/useLocal";
-import { buildTree, STAGE_TITLE, STAGES, taskCount, taskTitle, type Stage } from "@/work/model";
+import { buildTree, STAGE_TITLE, taskCount, taskTitle, type Stage } from "@/work/model";
 import { navigate } from "@/router";
 
 type Layout = "list" | "board" | "tree";
@@ -95,7 +97,7 @@ export default function Tasks() {
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
       if (document.querySelector("[role=alertdialog],[role=dialog]:not([data-type]),[data-slot='command']")) return;
       if (e.key === "/") { e.preventDefault(); searchBox.current?.focus(); return; }
-      if (e.key === "Escape" && taskId) { e.preventDefault(); close(); return; }
+      if (e.key === "Escape" && taskId && !isBoardDragging()) { e.preventDefault(); close(); return; }
       if (e.key !== "j" && e.key !== "k") return;
       const rows = [...(page.current?.querySelectorAll<HTMLElement>("[data-slot='task-row']") ?? [])];
       if (!rows.length) return;
@@ -141,19 +143,8 @@ export default function Tasks() {
   const title = stage === "all" ? <>All tasks</> : <>{STAGE_TITLE[stage]}</>;
 
   const controls = (
-    <div className="mt-3 flex flex-wrap items-center gap-2" role="search" aria-label="Filter tasks">
-      <ToggleGroup
-        type="single" variant="outline" size="sm" value={stage}
-        onValueChange={(v) => setStage((v || "all") as Stage | "all")}
-        aria-label="Show tasks in"
-      >
-        <ToggleGroupItem value="all" aria-label="All tasks" className="px-2.5 text-[12.5px]">All</ToggleGroupItem>
-        {STAGES.map((s) => (
-          <ToggleGroupItem key={s} value={s} aria-label={`${STAGE_TITLE[s]}, ${counts[s]}`} className="gap-1.5 px-2.5 text-[12.5px]">
-            {STAGE_TITLE[s]} <span className="tabular-nums text-muted-foreground">{counts[s]}</span>
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+    <div className="mt-4 flex flex-wrap items-center gap-2" role="search" aria-label="Filter tasks">
+      <StageFilters stage={stage} counts={counts} onChange={setStage} />
       <span className="flex-1" />
       <InputGroup className="h-8 w-56">
         <InputGroupAddon><MagnifyingGlass aria-hidden /></InputGroupAddon>
@@ -176,11 +167,16 @@ export default function Tasks() {
           </SelectContent>
         </Select>
       ) : null}
-      <ToggleGroup type="single" variant="outline" size="sm" value={layout} onValueChange={(v) => v && setLayout(v)} aria-label="Layout">
-        <ToggleGroupItem value="list" aria-label="List" title="Show tasks as a list"><Rows /></ToggleGroupItem>
-        <ToggleGroupItem value="board" aria-label="Board" title="Show tasks as a board"><Kanban /></ToggleGroupItem>
-        <ToggleGroupItem value="tree" aria-label="Tree" title="Show which agent started each task"><TreeStructure /></ToggleGroupItem>
-      </ToggleGroup>
+    </div>
+  );
+
+  const headerActions = (
+    <>
+      <SegmentedControl value={layout} onValueChange={(v) => isLayout(v) && setLayout(v)} aria-label="Layout">
+        <SegmentedControlItem value="list" aria-label="List" title="Show tasks as a list"><Rows /> List</SegmentedControlItem>
+        <SegmentedControlItem value="board" aria-label="Board" title="Show tasks as a board"><Kanban /> Board</SegmentedControlItem>
+        <SegmentedControlItem value="tree" aria-label="Tree" title="Show which agent started each task"><TreeStructure /> Tree</SegmentedControlItem>
+      </SegmentedControl>
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Work options" title="Work options" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-72">
@@ -215,7 +211,8 @@ export default function Tasks() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+      <Button size="sm" onClick={() => navigate("home")}><Plus /> New task</Button>
+    </>
   );
 
   const viewProps = { snapshot, byStage: grouped, selectedId: taskId, onOpen: open, ui, showWorkspace: !workspaceId && workspaces.length > 1 };
@@ -247,7 +244,11 @@ export default function Tasks() {
       ) : null}
     </Empty>
   ) : layout === "board" ? (
-    <TaskBoard {...viewProps} doneOpen={doneOpen === "true"} setDoneOpen={(v) => setDoneOpenRaw(v ? "true" : "false")} />
+    <TaskBoard
+      snapshot={snapshot} byStage={grouped} selectedId={taskId} onOpen={open} ui={ui}
+      doneOpen={doneOpen === "true"} setDoneOpen={(v) => setDoneOpenRaw(v ? "true" : "false")}
+      onShowOnly={setStage} onNewTask={() => navigate("home")}
+    />
   ) : layout === "tree" && tree ? (
     <TreeView tree={tree} onOpenTask={open} onOpenHome={() => navigate("home")} onOpenWatching={() => navigate("watching")} />
   ) : (
@@ -271,7 +272,7 @@ export default function Tasks() {
       onFocus={(e) => { const row = (e.target as HTMLElement).closest<HTMLElement>("[data-slot='task-row']"); if (row) setFocusedId(row.dataset.taskId ?? null); }}
       className="flex min-h-0 flex-1 flex-col"
     >
-      <WorkHeader eyebrow="Work" title={title} subtitle={subtitle}>{controls}</WorkHeader>
+      <WorkHeader eyebrow="Work" title={title} subtitle={subtitle} actions={headerActions}>{controls}</WorkHeader>
       {!connected && snapshot ? <p role="status" className="px-6 pb-2 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p> : null}
       <div ref={detailStage} data-slot="tasks-stage" className="relative flex min-h-0 flex-1">
         <div className={cn("h-full min-w-0 flex-1", layout === "board" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto")}>{body}</div>
