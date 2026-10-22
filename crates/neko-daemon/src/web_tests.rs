@@ -43,7 +43,7 @@ fn start() -> Harness {
     let listener = bind(0).unwrap();
     let port = listener.local_addr().unwrap().port();
     let backend = Arc::new(Fake { seen: Mutex::new(Vec::new()), events: Mutex::new(Vec::new()) });
-    let config = Config { token: TOKEN.into(), web_root: dir.path().join("web"), live_web: None, plugins_dir: dir.path().join("plugins"), attachments_dir: dir.path().join("attachments") };
+    let config = Config { token: TOKEN.into(), web_root: dir.path().join("web"), live_web: None, plugins_dir: dir.path().join("plugins"), plugin_data_dir: dir.path().join("plugin-data"), custom_css: dir.path().join("custom.css"), attachments_dir: dir.path().join("attachments") };
     let served = backend.clone();
     std::thread::spawn(move || serve(listener, config, served));
     Harness { port, backend, dir }
@@ -367,6 +367,19 @@ fn the_listing_carries_version_status_and_folder() {
 }
 
 #[test]
+fn a_manifest_may_name_a_sidebar_group_and_only_a_known_one() {
+    let h = start();
+    for (id, group) in [("a", "work"), ("b", "elsewhere"), ("c", "system")] {
+        let plugin = install(&h, id);
+        fs::write(plugin.join("manifest.json"), format!(r#"{{"title":"T","entry":"index.js","group":"{group}"}}"#)).unwrap();
+    }
+    let json = listing(&h);
+    assert_eq!(json[0]["group"], "work");
+    assert!(json[1].get("group").is_none(), "an unknown group is ignored, not passed on");
+    assert_eq!(json[2]["group"], "system");
+}
+
+#[test]
 fn a_plugin_can_be_disabled_enabled_and_removed() {
     let h = start();
     let plugin = install(&h, "demo");
@@ -449,6 +462,150 @@ fn plugin_management_needs_the_same_token_host_and_origin_as_everything_else() {
         assert_eq!(http(h.port, method, target, &refs, "").status, 403, "foreign host: {method}");
     }
     assert!(plugin.is_dir() && !plugin.join(".disabled").exists(), "every refused call left the plugin alone");
+}
+
+// ---------------------------------------------------------------------------
+// Page storage (`host.storage`) and the person's stylesheet
+// ---------------------------------------------------------------------------
+
+#[test]
+fn storage_round_trips_json_per_namespace_and_survives_nothing_it_should_not() {
+    let h = start();
+    let none = call(&h, "GET", "/api/storage/health", &[], "");
+    assert_eq!((none.status, none.body.as_str()), (200, r#"{"keys":[]}"#), "an unused namespace lists empty");
+    assert_eq!(call(&h, "GET", "/api/storage/health/weight", &[], "").status, 404);
+    assert_eq!(call(&h, "PUT", "/api/storage/health/weight", &[], r#"{"kg":[71.5,71.2]}"#).status, 200);
+    let read = call(&h, "GET", "/api/storage/health/weight", &[], "");
+    assert_eq!((read.status, read.body.as_str()), (200, r#"{"kg":[71.5,71.2]}"#));
+    assert!(read.head.contains("application/json"));
+    assert!(h.dir.path().join("plugin-data/health/weight.json").is_file(), "values are plain files under plugin-data/<id>/");
+    // Overwriting replaces, and a different namespace never sees it.
+    assert_eq!(call(&h, "PUT", "/api/storage/health/weight", &[], "[1]").status, 200);
+    assert_eq!(call(&h, "GET", "/api/storage/health/weight", &[], "").body, "[1]");
+    assert_eq!(call(&h, "GET", "/api/storage/other/weight", &[], "").status, 404);
+    let listed: serde_json::Value = serde_json::from_str(&call(&h, "GET", "/api/storage/health", &[], "").body).unwrap();
+    assert_eq!(listed["keys"][0]["key"], "weight");
+    assert_eq!(listed["keys"][0]["size"], 3);
+    assert_eq!(call(&h, "DELETE", "/api/storage/health/weight", &[], "").status, 200);
+    assert_eq!(call(&h, "DELETE", "/api/storage/health/weight", &[], "").status, 404, "already gone");
+    assert_eq!(call(&h, "GET", "/api/storage/health/weight", &[], "").status, 404);
+    // No temp file is left behind.
+    assert!(fs::read_dir(h.dir.path().join("plugin-data/health")).unwrap().next().is_none());
+}
+
+#[test]
+fn storage_refuses_bad_names_bad_json_oversize_and_the_wrong_method() {
+    let h = start();
+    for target in [
+        "/api/storage/..", "/api/storage/../x", "/api/storage/%2e%2e/weight", "/api/storage/a.b/k", "/api/storage/.hidden/k",
+        "/api/storage/health/.secret", "/api/storage/health/..", "/api/storage/health/a%2fb", "/api/storage/health/a%5cb",
+        "/api/storage/health/a%00b", "/api/storage/health/a/b", "/api/storage/",
+    ] {
+        assert_eq!(call(&h, "PUT", target, &[], "1").status, 400, "{target}");
+        assert_eq!(call(&h, "GET", target, &[], "").status, 400, "{target}");
+    }
+    let long = format!("/api/storage/health/{}", "k".repeat(129));
+    assert_eq!(call(&h, "PUT", &long, &[], "1").status, 400);
+    assert_eq!(call(&h, "PUT", "/api/storage/health/k", &[], "not json").status, 400);
+    assert_eq!(call(&h, "PUT", "/api/storage/health/k", &[], "").status, 400, "an empty body is not JSON");
+    // Over 1 MiB is refused from the declared length, before any body is read.
+    let mut stream = TcpStream::connect(("127.0.0.1", h.port)).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    write!(stream, "PUT /api/storage/health/k HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {TOKEN}\r\nContent-Length: {}\r\n\r\n", h.port, 1024 * 1024 + 1).unwrap();
+    let mut text = String::new();
+    let _ = stream.read_to_string(&mut text);
+    assert!(text.starts_with("HTTP/1.1 413"), "{text}");
+    let exactly = format!("\"{}\"", "x".repeat(1024 * 1024 - 2));
+    assert_eq!(call(&h, "PUT", "/api/storage/health/big", &[], &exactly).status, 200, "exactly 1 MiB is allowed");
+    assert_eq!(call(&h, "DELETE", "/api/storage/health/big", &[], "").status, 200);
+    assert_eq!(call(&h, "POST", "/api/storage/health/k", &[], "1").status, 405);
+    assert_eq!(call(&h, "PUT", "/api/storage/health", &[], "1").status, 405, "the namespace itself is read-only");
+    assert_eq!(call(&h, "DELETE", "/api/storage/health", &[], "").status, 405);
+    assert!(!h.dir.path().join("plugin-data/health/k.json").exists());
+    assert!(h.dir.path().join("secret.txt").is_file());
+}
+
+#[test]
+fn storage_stops_at_256_keys_and_never_follows_a_symlink() {
+    let h = start();
+    for i in 0..256 {
+        assert_eq!(call(&h, "PUT", &format!("/api/storage/many/k{i}"), &[], "0").status, 200);
+    }
+    assert_eq!(call(&h, "PUT", "/api/storage/many/one-too-many", &[], "0").status, 413);
+    assert_eq!(call(&h, "PUT", "/api/storage/many/k0", &[], "1").status, 200, "an existing key can still change");
+    // A symlinked namespace and a symlinked value are 404, and nothing outside is touched.
+    let outside = h.dir.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("v.json"), "\"leak\"").unwrap();
+    fs::create_dir_all(h.dir.path().join("plugin-data")).unwrap();
+    std::os::unix::fs::symlink(&outside, h.dir.path().join("plugin-data/linked")).unwrap();
+    assert_eq!(call(&h, "GET", "/api/storage/linked/v", &[], "").status, 404);
+    assert_eq!(call(&h, "PUT", "/api/storage/linked/v", &[], "1").status, 404);
+    assert_eq!(call(&h, "GET", "/api/storage/linked", &[], "").status, 404);
+    fs::create_dir_all(h.dir.path().join("plugin-data/real")).unwrap();
+    std::os::unix::fs::symlink(outside.join("v.json"), h.dir.path().join("plugin-data/real/v.json")).unwrap();
+    assert_eq!(call(&h, "GET", "/api/storage/real/v", &[], "").status, 404);
+    assert_eq!(call(&h, "PUT", "/api/storage/real/v", &[], "1").status, 404);
+    assert_eq!(call(&h, "DELETE", "/api/storage/real/v", &[], "").status, 404);
+    assert_eq!(fs::read_to_string(outside.join("v.json")).unwrap(), "\"leak\"");
+}
+
+#[test]
+fn storage_and_the_stylesheet_need_the_same_token_host_and_origin_as_everything_else() {
+    let h = start();
+    fs::write(h.dir.path().join("custom.css"), "body{color:red}").unwrap();
+    let host = format!("Host: 127.0.0.1:{}", h.port);
+    for (method, target, body) in [
+        ("PUT", "/api/storage/health/k", "1"), ("GET", "/api/storage/health/k", ""), ("DELETE", "/api/storage/health/k", ""),
+        ("GET", "/api/storage/health", ""), ("GET", "/custom.css", ""), ("GET", "/api/customisation", ""),
+    ] {
+        assert_eq!(http(h.port, method, target, &[&host], body).status, 401, "no token: {method} {target}");
+        assert_eq!(http(h.port, method, target, &[&host, "Authorization: Bearer nope"], body).status, 401, "wrong token: {method} {target}");
+        assert_eq!(call(&h, method, target, &["Origin: https://evil.example"], body).status, 403, "cross-origin: {method} {target}");
+        assert_eq!(call(&h, method, target, &["Sec-Fetch-Site: cross-site"], body).status, 403, "cross-site: {method} {target}");
+        let wrong_host = [format!("Host: evil.example:{}", h.port), format!("Authorization: Bearer {TOKEN}")];
+        let refs: Vec<&str> = wrong_host.iter().map(String::as_str).collect();
+        assert_eq!(http(h.port, method, target, &refs, body).status, 403, "foreign host: {method} {target}");
+    }
+    assert!(!h.dir.path().join("plugin-data").exists(), "every refused call wrote nothing");
+}
+
+#[test]
+fn an_unauthorised_storage_write_is_refused_before_its_body_is_read() {
+    let h = start();
+    // The gate runs on the headers alone: claim a body, never send it.
+    let mut stream = TcpStream::connect(("127.0.0.1", h.port)).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    write!(stream, "PUT /api/storage/health/k HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: 1000\r\n\r\n", h.port).unwrap();
+    let mut text = String::new();
+    let _ = stream.read_to_string(&mut text);
+    assert!(text.starts_with("HTTP/1.1 401"), "{text}");
+}
+
+#[test]
+fn the_stylesheet_is_served_empty_when_absent_and_reports_when_it_changed() {
+    let h = start();
+    let none = call(&h, "GET", "/custom.css", &[], "");
+    assert_eq!((none.status, none.body.as_str()), (200, ""), "a <link> must not 404");
+    assert!(none.head.contains("text/css"));
+    let info = |h: &Harness| -> serde_json::Value { serde_json::from_str(&call(h, "GET", "/api/customisation", &[], "").body).unwrap() };
+    assert_eq!(info(&h)["css_exists"], false);
+    assert_eq!(info(&h)["css_version"], 0);
+    assert_eq!(info(&h)["plugins_dir"], h.dir.path().join("plugins").to_string_lossy().as_ref());
+    assert_eq!(info(&h)["css_path"], h.dir.path().join("custom.css").to_string_lossy().as_ref());
+    fs::write(h.dir.path().join("custom.css"), ":root{--primary:red}").unwrap();
+    let served = call(&h, "GET", "/custom.css", &[], "");
+    assert_eq!((served.status, served.body.as_str()), (200, ":root{--primary:red}"));
+    assert_eq!(info(&h)["css_exists"], true);
+    assert!(info(&h)["css_version"].as_u64().unwrap() > 0);
+    assert_eq!(call(&h, "POST", "/custom.css", &[], "x").status, 405);
+    assert_eq!(call(&h, "PUT", "/api/customisation", &[], "x").status, 405);
+    // Too large, and a symlink, are not served.
+    fs::write(h.dir.path().join("custom.css"), vec![b'a'; 1024 * 1024 + 1]).unwrap();
+    assert_eq!(call(&h, "GET", "/custom.css", &[], "").status, 413);
+    fs::remove_file(h.dir.path().join("custom.css")).unwrap();
+    std::os::unix::fs::symlink(h.dir.path().join("secret.txt"), h.dir.path().join("custom.css")).unwrap();
+    assert_eq!(call(&h, "GET", "/custom.css", &[], "").body, "", "a symlink is not followed");
 }
 
 // ---------------------------------------------------------------------------
@@ -611,7 +768,7 @@ fn a_live_web_ui_is_preferred_and_old_chunks_stay_reachable() {
     fs::write(bundle.join("index.html"), "<html>bundle</html>").unwrap();
     fs::write(bundle.join("assets/old.js"), "old").unwrap();
     let data = dir.path().join("data");
-    let config = Config { token: TOKEN.into(), web_root: bundle.clone(), live_web: Some(data.clone()), plugins_dir: dir.path().join("plugins"), attachments_dir: dir.path().join("attachments") };
+    let config = Config { token: TOKEN.into(), web_root: bundle.clone(), live_web: Some(data.clone()), plugins_dir: dir.path().join("plugins"), plugin_data_dir: dir.path().join("plugin-data"), custom_css: dir.path().join("custom.css"), attachments_dir: dir.path().join("attachments") };
     let page = |path: &str| String::from_utf8(serve_static(&web_roots(&config), path).body).unwrap();
     assert_eq!(page("/"), "<html>bundle</html>", "no live UI: the bundle's");
     // A rebuilt UI is swapped in.

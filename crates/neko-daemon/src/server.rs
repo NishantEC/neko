@@ -1110,6 +1110,8 @@ pub fn spawn_web_bridge(state: Arc<AppState>) {
         web_root: crate::web::default_web_root(),
         live_web: Some(dir.clone()),
         plugins_dir: dir.join("plugins"),
+        plugin_data_dir: dir.join("plugin-data"),
+        custom_css: dir.join("custom.css"),
         attachments_dir: dir.join("attachments"),
     };
     eprintln!("neko-daemon: web UI on http://127.0.0.1:{port}/ (token in {})", dir.join("web-token").display());
