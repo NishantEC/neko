@@ -7,9 +7,8 @@
  * active tab is the card's own colour, 40px tall, rounded 14px on top, with a 12px
  * concave connector at each foot, so it reads as the card's tab rather than a button
  * on it. Inactive tabs are recessed 36px pills on the chrome, tinted on hover.
- * The original's sliding indicator is NOT kept: it animated one shared highlight
- * across one tablist, and a dock has a tablist per pane (tabs move between panes
- * and remount), so there is no single element to slide. Plain sans throughout. */
+ * The active tab is a per-group sliding indicator (GroupIndicator in DockWorkspace.tsx),
+ * as in the original, one per pane. Plain sans throughout. */
 /* the page behind the cards (from hushbacks builder-shell, on Neko tokens) */
 .builder-shell,
 .neko-dock-host {
@@ -19,6 +18,8 @@
 .dark .builder-shell,
 .dark .neko-dock-host {
   --builder-chrome: var(--background);
+  /* the pane is the page, lifted a touch (hushbacks builder-shell) */
+  --builder-pane: color-mix(in srgb, var(--background) 96%, white);
 }
 
 .neko-dock-host {
@@ -36,18 +37,20 @@
 
   --dv-group-view-background-color: var(--builder-pane);
   --dv-tabs-and-actions-container-background-color: var(--builder-chrome);
-  --dv-tabs-and-actions-container-height: 40px;
-  --dv-tabs-and-actions-container-font-size: 13px;
-  --dv-tab-font-size: 13px;
+  --dv-tabs-and-actions-container-height: 52px;
+  --dv-tabs-and-actions-container-font-size: 14px;
+  --dv-tab-font-size: 14px;
+  --dock-slide: 340ms;
+  --dock-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dv-tab-margin: 0;
   --dv-tab-divider-color: transparent;
   --dv-separator-border: transparent;
   --dv-paneview-header-border-color: var(--border);
   --dv-paneview-active-outline-color: var(--ring);
 
-  --dv-activegroup-visiblepanel-tab-background-color: var(--builder-pane);
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--builder-pane);
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: var(--primary);
   --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
@@ -114,44 +117,59 @@
   background: var(--builder-pane);
   border-radius: var(--dock-tab-radius);
   overflow: hidden;
+  transition: border-top-left-radius var(--dock-slide) var(--dock-ease);
 }
 /* The card's top-left corner is square when the first tab is the active one: the tab's foot meets it. */
-.neko-dock .dv-groupview:has(.dv-tabs-container > .dv-tab:first-child.dv-active-tab) .dv-content-container {
+.neko-dock .dv-groupview[data-dock-first-active] .dv-content-container {
   border-top-left-radius: 0;
 }
 
-/* Tabs. dockview owns the outer .dv-tab (draggable, role=tab); .dock-tab is ours. */
+/* Tabs. dockview owns the outer .dv-tab (draggable, role=tab); .dock-tab is ours.
+ * Geometry is hushbacks' (BuilderViewTabs @da20dfaeb): a 52px strip; idle tabs are
+ * 36px icon-only pills sitting 4px above the card; the active tab is 40px, icon +
+ * name, and is DRAWN by .dock-indicator (below), not by the tab, so it can slide. */
 .neko-dock .dv-tab {
   display: flex;
   align-items: stretch;
   padding: 0;
   height: 36px;
-  align-self: center;
-  border-radius: var(--dv-tab-border-radius);
+  margin-bottom: 4px;
+  align-self: flex-end;
+  border-radius: 8px;
+  font-size: 14px;
   font-weight: 500;
-  transition: color 120ms, background-color 120ms;
+  color: color-mix(in srgb, var(--foreground) 50%, transparent);
+  transition: color 150ms, background-color 150ms;
 }
 .neko-dock .dv-tabs-container {
-  align-items: center;
+  align-items: flex-end;
   gap: 2px;
+  position: relative;
+  z-index: 1;
+  overflow-y: hidden;
 }
 .neko-dock .dv-tab.dv-inactive-tab:hover {
   background: color-mix(in srgb, var(--foreground) 6%, transparent);
   color: var(--foreground);
 }
-/* The active tab is the pane: same surface, full strip height, concave feet. */
-.neko-dock .dv-groupview .dv-tab.dv-active-tab,
+.neko-dock .dv-groupview .dv-tab.dv-active-tab {
+  height: 40px;
+  margin-bottom: 0;
+  background: transparent;
+  border-radius: var(--dock-tab-radius) var(--dock-tab-radius) 0 0;
+  color: var(--primary);
+}
+/* The drag ghost is a clone outside the strip, so it carries its own card and feet. */
 .dv-tab-ghost-drag {
   height: 40px;
-  align-self: flex-end;
   background: var(--builder-pane, var(--card));
   border-radius: var(--dock-tab-radius, 14px) var(--dock-tab-radius, 14px) 0 0;
-  z-index: 1;
+  box-shadow: var(--shadow-md);
 }
-.dv-tab.dv-active-tab .dock-tab::before,
-.dv-tab.dv-active-tab .dock-tab::after,
 .dv-tab-ghost-drag .dock-tab::before,
-.dv-tab-ghost-drag .dock-tab::after {
+.dv-tab-ghost-drag .dock-tab::after,
+.dock-indicator::before,
+.dock-indicator::after {
   content: "";
   position: absolute;
   bottom: 0;
@@ -159,18 +177,34 @@
   height: var(--dock-tab-foot, 12px);
   pointer-events: none;
 }
-.dv-tab.dv-active-tab .dock-tab::before,
-.dv-tab-ghost-drag .dock-tab::before {
+.dv-tab-ghost-drag .dock-tab::before,
+.dock-indicator::before {
   left: calc(var(--dock-tab-foot, 12px) * -1);
   background: radial-gradient(circle 12px at 0 0, transparent 11.5px, var(--builder-pane, var(--card)) 12px);
 }
-.dv-tab.dv-active-tab .dock-tab::after,
-.dv-tab-ghost-drag .dock-tab::after {
+.dv-tab-ghost-drag .dock-tab::after,
+.dock-indicator::after {
   right: calc(var(--dock-tab-foot, 12px) * -1);
   background: radial-gradient(circle 12px at 100% 0, transparent 11.5px, var(--builder-pane, var(--card)) 12px);
 }
-.dv-tab-ghost-drag {
-  box-shadow: var(--shadow-md);
+
+/* The per-group sliding indicator (hushbacks useFusedTabIndicator: 0.34s, ease [0.22,1,0.36,1]).
+ * Placed by script with transform/width; it transitions only when the active tab changes. */
+.neko-dock .dv-tabs-and-actions-container {
+  position: relative;
+}
+.dock-indicator {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 40px;
+  width: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: var(--dock-tab-radius, 14px) var(--dock-tab-radius, 14px) 0 0;
+  background: var(--builder-pane, var(--card));
+  transition: transform var(--dock-slide) var(--dock-ease), width var(--dock-slide) var(--dock-ease), opacity 120ms;
+  will-change: transform, width;
 }
 .neko-dock .dv-tab:focus-visible::after,
 .neko-dock .dv-tab:has(:focus-visible)::after {
@@ -183,24 +217,49 @@
   height: 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   min-width: 0;
-  padding: 0 12px;
+  padding: 0 8px 4px;
   white-space: nowrap;
   user-select: none;
 }
-/* the label sits a little above centre, as in the original (pb-2 on a 40px tab) */
 .dv-tab.dv-active-tab .dock-tab {
-  padding-bottom: 4px;
+  padding: 0 6px 8px 16px;
 }
 .dock-tab-icon {
   flex-shrink: 0;
 }
+/* The name (and close) open and shut with a 0fr/1fr grid, so the tab's width animates. */
+.dock-tab-more {
+  display: grid;
+  grid-template-columns: 0fr;
+  opacity: 0;
+  transition: grid-template-columns var(--dock-slide) var(--dock-ease), opacity var(--dock-slide) var(--dock-ease);
+}
+.dock-tab-more-inner {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+.dv-tab.dv-active-tab .dock-tab-more,
+.dock-tab[data-iconless] .dock-tab-more {
+  grid-template-columns: 1fr;
+  opacity: 1;
+}
 .dock-tab-title {
   overflow: hidden;
-  text-overflow: ellipsis;
+  padding-left: 8px;
 }
-.dock-tab-close,
+.dock-tab-title-bare {
+  padding-left: 0;
+}
+.dock-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
 .dock-group-action {
   display: inline-flex;
   align-items: center;
@@ -210,26 +269,17 @@
   cursor: pointer;
 }
 .dock-tab-close {
+  flex-shrink: 0;
   width: 20px;
   height: 20px;
-  margin-right: -6px;
-  opacity: 0;
-  transition: opacity 120ms, background-color 120ms;
-}
-.dv-tab:hover .dock-tab-close,
-.dv-tab.dv-active-tab .dock-tab-close,
-.dv-tab:focus-within .dock-tab-close,
-.dock-tab-close:focus-visible {
-  opacity: 0.7;
+  margin-left: 6px;
+  border-radius: 9999px;
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
+  transition: color 150ms, background-color 150ms;
 }
 .dock-tab-close:hover {
-  opacity: 1;
-  background: var(--dv-icon-hover-background-color);
-}
-@media (hover: none) {
-  .dock-tab-close {
-    opacity: 0.7;
-  }
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 .dock-group-actions {
   display: flex;
@@ -257,7 +307,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--card);
+  background: var(--builder-pane, var(--card));
   color: var(--foreground);
 }
 
@@ -297,8 +347,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .neko-dock * {
+  .neko-dock *,
+  .neko-dock *::before,
+  .neko-dock *::after {
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
   }
 }
 

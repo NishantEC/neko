@@ -23,8 +23,9 @@
 //   the default, so the dock can never come up empty;
 // - below `narrowQuery` it is a single tabbed group (no splitting), and the
 //   wide layout comes back untouched when the window grows again.
+import { createPortal } from "react-dom";
 import {
-  createContext, useCallback, useContext, useEffect, useReducer, useRef, useState, useSyncExternalStore,
+  createContext, useCallback, useLayoutEffect, useContext, useEffect, useReducer, useRef, useState, useSyncExternalStore,
   type ReactNode,
 } from "react";
 import {
@@ -112,6 +113,12 @@ function PanelBody({ api }: IDockviewPanelProps) {
 }
 
 function DockTab({ api }: IDockviewPanelHeaderProps) {
+  const [active, setActive] = useState(api.isActive);
+  useEffect(() => {
+    setActive(api.isActive);
+    const sub = api.onDidActiveChange((e) => setActive(e.isActive));
+    return () => sub.dispose();
+  }, [api]);
   const def = useContext(PanelsContext).get(api.id);
   const [title, setTitle] = useState(api.title ?? api.id);
   useEffect(() => {
@@ -124,28 +131,116 @@ function DockTab({ api }: IDockviewPanelHeaderProps) {
     <div
       className="dock-tab"
       data-panel={api.id}
+      data-iconless={TabIcon ? undefined : "true"}
+      // An idle tab is its icon alone (hushbacks); the name is on hover and to assistive tech.
+      title={title}
       onDoubleClick={() => (api.isMaximized() ? api.exitMaximized() : api.maximize())}
     >
-      {TabIcon ? <TabIcon size={15} aria-hidden className="dock-tab-icon" /> : null}
-      <span className="dock-tab-title">{title}</span>
-      {def?.closable === false ? null : (
-        <button
-          type="button"
-          tabIndex={-1}
-          className="dock-tab-close"
-          aria-label={`Close ${title}`}
-          title={`Close ${title}`}
-          // The strip starts a drag on pointer-down; the close button must not.
-          onPointerDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          onDoubleClick={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); api.close(); }}
-        >
-          <X size={12} aria-hidden />
-        </button>
-      )}
+      {TabIcon ? <TabIcon size={18} aria-hidden className="dock-tab-icon" weight={active ? "fill" : "regular"} /> : null}
+      <span className="dock-tab-more">
+        <span className="dock-tab-more-inner">
+          <span className={cn("dock-tab-title", !TabIcon && "dock-tab-title-bare")}>{title}</span>
+          {def?.closable === false ? null : (
+            <button
+              type="button"
+              tabIndex={-1}
+              className="dock-tab-close"
+              aria-label={`Close ${title}`}
+              title={`Close ${title}`}
+              // The strip starts a drag on pointer-down; the close button must not.
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); api.close(); }}
+            >
+              <X size={13} weight="bold" aria-hidden />
+            </button>
+          )}
+        </span>
+      </span>
     </div>
   );
+}
+
+/**
+ * The sliding fused indicator for ONE group (hushbacks useFusedTabIndicator, per group).
+ * It is the card-coloured tab with its concave feet, drawn once behind the group's strip
+ * and moved with a CSS transition; the active tab itself is transparent. It lives in a
+ * portal inside the group's own header, so dockview re-rendering, moving or dragging tabs
+ * never remounts it, and a group that appears starts with the indicator already in place.
+ * Geometry is the SETTLED one (label open on the active tab, shut on the others) so the
+ * slide goes straight to where the tab will end up while its label is still opening.
+ */
+function GroupIndicator({ group }: IDockviewHeaderActionsProps) {
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    setHost((group.element as HTMLElement).querySelector<HTMLElement>(".dv-tabs-and-actions-container"));
+  }, [group]);
+
+  useLayoutEffect(() => {
+    const indicator = ref.current;
+    const root = group.element as HTMLElement;
+    const strip = host?.querySelector<HTMLElement>(".dv-tabs-container");
+    if (!host || !strip || !indicator) return;
+    let last: { id: string; ids: string } | null = null;
+    let raf = 0;
+    const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    const measure = () => {
+      raf = 0;
+      const tabs = [...strip.querySelectorAll<HTMLElement>(":scope > .dv-tab")];
+      const active = tabs.find((t) => t.classList.contains("dv-active-tab"));
+      if (!active || !active.offsetWidth) { indicator.style.opacity = "0"; return; }
+      // settled geometry: each tab's collapsible part is at its final width
+      let before = 0;
+      let width = active.offsetWidth;
+      for (const tab of tabs) {
+        const more = tab.querySelector<HTMLElement>(".dock-tab-more");
+        const inner = tab.querySelector<HTMLElement>(".dock-tab-more-inner");
+        if (!more || !inner) continue;
+        const open = tab.classList.contains("dv-active-tab") || tab.querySelector(".dock-tab")?.hasAttribute("data-iconless");
+        const delta = more.getBoundingClientRect().width - (open ? inner.scrollWidth : 0);
+        if (tab === active) width -= delta;
+        else if (tabs.indexOf(tab) < tabs.indexOf(active)) before += delta;
+      }
+      const left = strip.offsetLeft + active.offsetLeft - before - strip.scrollLeft;
+      const id = active.querySelector<HTMLElement>(".dock-tab")?.dataset.panel ?? "";
+      const ids = tabs.map((t) => t.querySelector<HTMLElement>(".dock-tab")?.dataset.panel ?? "").join("|");
+      // Slide only when the active tab changed inside the same set of tabs; anything else
+      // (first paint, a tab moved or closed, a resize) just snaps.
+      const slide = !!last && last.id !== id && last.ids === ids && !reduced();
+      last = { id, ids };
+      if (!slide) indicator.style.transition = "none";
+      indicator.style.opacity = "1";
+      indicator.style.transform = `translateX(${left}px)`;
+      indicator.style.width = `${width}px`;
+      if (!slide) { void indicator.offsetWidth; indicator.style.transition = ""; }
+      root.toggleAttribute("data-dock-first-active", tabs[0] === active);
+    };
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(measure); };
+
+    measure();
+    const ro = new ResizeObserver(schedule);
+    ro.observe(host); ro.observe(strip);
+    const mo = new MutationObserver(schedule);
+    mo.observe(strip, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+    strip.addEventListener("scroll", schedule, { passive: true });
+    // a tab's label opening or closing changes widths mid-transition: re-read each frame it moves
+    const onTransition = (e: Event) => { if ((e.target as HTMLElement).classList?.contains("dock-tab-more")) schedule(); };
+    strip.addEventListener("transitionrun", onTransition);
+    strip.addEventListener("transitionend", onTransition);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect(); mo.disconnect();
+      strip.removeEventListener("scroll", schedule);
+      strip.removeEventListener("transitionrun", onTransition);
+      strip.removeEventListener("transitionend", onTransition);
+    };
+  }, [host, group]);
+
+  if (!host) return null;
+  return createPortal(<div ref={ref} className="dock-indicator" aria-hidden="true" style={{ opacity: 0 }} />, host);
 }
 
 function GroupActions({ api, containerApi, group }: IDockviewHeaderActionsProps) {
@@ -443,6 +538,7 @@ export function DockWorkspace({
           theme={DOCK_THEME}
           components={COMPONENTS}
           tabComponents={TAB_COMPONENTS}
+          prefixHeaderActionsComponent={GroupIndicator}
           rightHeaderActionsComponent={GroupActions}
           defaultRenderer="always"
           disableFloatingGroups={narrow}

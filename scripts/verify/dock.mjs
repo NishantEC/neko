@@ -72,25 +72,63 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   const dockBox = await box(page.locator("[data-slot='dock']"));
   const paneWidth = (await box(page.locator("[data-slot='dock'] .dv-groupview").first())).width;
   check(Math.abs(paneWidth / dockBox.width - 0.35) < 0.06, `Chat takes about 35% of the width (${Math.round((paneWidth / dockBox.width) * 100)}%)`);
-  // fused tabs: the active tab is the pane's own surface, 40px tall, with concave feet; inactive tabs are recessed 36px
+  // fused tabs: each group has its OWN indicator, the pane's surface, 40px tall with concave feet,
+  // sitting exactly under the active tab; idle tabs are recessed 36px icon-only pills
   const fused = await page.evaluate(() => {
     const out = [];
     for (const g of document.querySelectorAll("[data-slot='dock'] .dv-groupview")) {
       const act = g.querySelector(".dv-tab.dv-active-tab");
       const idle = g.querySelector(".dv-tab.dv-inactive-tab");
+      const ind = g.querySelector(".dock-indicator");
       const pane = getComputedStyle(g.querySelector(".dv-content-container")).backgroundColor;
+      const ir = ind?.getBoundingClientRect();
+      const ar = act.getBoundingClientRect();
       out.push({
-        same: getComputedStyle(act).backgroundColor === pane,
-        bg: [getComputedStyle(act).backgroundColor, pane],
-        h: Math.round(act.getBoundingClientRect().height),
+        n: g.querySelectorAll(".dock-indicator").length,
+        same: !!ind && getComputedStyle(ind).backgroundColor === pane,
+        h: ind ? Math.round(ir.height) : 0,
+        aligned: !!ind && Math.abs(ir.left - ar.left) < 1.5 && Math.abs(ir.width - ar.width) < 1.5 && Math.abs(ir.bottom - ar.bottom) < 1.5,
+        strip: Math.round(g.querySelector(".dv-tabs-and-actions-container").getBoundingClientRect().height),
         idleH: idle ? Math.round(idle.getBoundingClientRect().height) : 36,
-        feet: getComputedStyle(act.querySelector(".dock-tab"), "::before").backgroundImage.includes("radial-gradient") && getComputedStyle(act.querySelector(".dock-tab"), "::after").backgroundImage.includes("radial-gradient"),
-        idleFeet: idle ? getComputedStyle(idle.querySelector(".dock-tab"), "::before").backgroundImage === "none" : true,
+        feet: !!ind && getComputedStyle(ind, "::before").backgroundImage.includes("radial-gradient") && getComputedStyle(ind, "::after").backgroundImage.includes("radial-gradient"),
       });
     }
     return out;
   });
-  check(fused.length > 0 && fused.every((f) => f.same && f.h === 40 && f.idleH === 36 && f.feet && f.idleFeet), `every active tab is fused into its pane (card colour, 40px, concave feet; inactive 36px, flat) ${JSON.stringify(fused)}`);
+  check(fused.length > 0 && fused.every((f) => f.n === 1 && f.same && f.h === 40 && f.aligned && f.strip === 52 && f.idleH === 36 && f.feet), `every group has its own fused indicator under its active tab (card colour, 40px, feet; 52px strip; idle tabs 36px) ${JSON.stringify(fused)}`);
+
+  // the indicator SLIDES: click another tab in the group and sample its box twice inside the transition
+  const ind = page.locator("[data-slot='dock'] .dv-groupview").nth(1).locator(".dock-indicator");
+  const startX = (await box(ind)).x;
+  await tab("plan").click();
+  await sleep(90);
+  const mid1 = (await box(ind)).x;
+  await sleep(60);
+  const mid2 = (await box(ind)).x;
+  await sleep(600);
+  const endBox = await box(ind);
+  const planBox = await box(tab("plan"));
+  check(mid1 !== startX && mid2 !== mid1 && Math.abs(mid1 - startX) < Math.abs(endBox.x - startX), `the indicator animates between tabs (${startX.toFixed(1)} -> ${mid1.toFixed(1)} -> ${mid2.toFixed(1)} -> ${endBox.x.toFixed(1)})`);
+  check(Math.abs(endBox.x - planBox.x) < 1.5 && Math.abs(endBox.width - planBox.width) < 1.5, `…and ends exactly under the new active tab (${JSON.stringify([endBox, planBox])})`);
+  await tab("plan").click(); // already active: nothing moves
+  // reduced motion: a click jumps at once
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await sleep(100);
+  const rStart = (await box(ind)).x;
+  await tab("changes").click();
+  await sleep(40);
+  const rNow = (await box(ind)).x;
+  const rEnd = (await box(tab("changes"))).x;
+  check(Math.abs(rNow - rEnd) < 2 && Math.abs(rNow - rStart) > 5, `with reduced motion the indicator jumps instantly (${rStart.toFixed(1)} -> ${rNow.toFixed(1)})`);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await sleep(100);
+  // settled mid-animation shots
+  await tab("plan").click();
+  await sleep(110);
+  await shot("dock-indicator-mid-slide");
+  await sleep(500);
+  await tab("changes").click();
+  await sleep(500);
   await both("dock-default");
 
   // keyboard: arrow keys move between the tabs of a group, Enter activates
@@ -135,6 +173,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   now = await groups();
   check(now.length === before + 1 && now.some((g) => g.panels.length === 1 && g.panels[0] === "plan"), `dropping a tab on a pane's edge splits it (${JSON.stringify(now)})`);
   check(await page.evaluate(() => [...document.querySelectorAll("[data-slot='dock'] .dv-tabs-container")].filter((e) => e.clientWidth > 330).every((e) => e.scrollWidth <= e.clientWidth + 1)), "the tab strips of wide panes do not overflow when their tabs fit (the concave feet do not start a scrollbar)")
+  const splitInd = await page.evaluate(() => [...document.querySelectorAll("[data-slot='dock'] .dv-groupview")].map((g) => { const i = g.querySelector(".dock-indicator"), a = g.querySelector(".dv-tab.dv-active-tab"); if (!i || !a) return false; const x = i.getBoundingClientRect(), y = a.getBoundingClientRect(); return Math.abs(x.left - y.left) < 1.5 && Math.abs(x.width - y.width) < 1.5 ? true : [x.left, x.width, y.left, y.width].map(Math.round); }));
+  check(splitInd.length >= 3 && splitInd.every((v) => v === true), `in a split layout every group has an indicator under its active tab (${JSON.stringify(splitInd)})`);
   await both("dock-split");
 
   // ===== (d) the layout survives a reload ================================================
@@ -149,6 +189,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   check(persisted.v === 1 && typeof persisted.layout === "object" && Array.isArray(persisted.closed), "one layout is saved for the person, not per task");
 
   // ===== close and reopen from the View menu; ⌘K ==========================================
+  await tab("details").click();
+  await sleep(450);
   await page.getByRole("button", { name: "Close Details" }).click();
   await sleep(300);
   check(!(await groups()).some((g) => g.panels.includes("details")), "closing a tab removes the panel");
@@ -159,7 +201,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await shot("dock-view-menu");
   await page.getByRole("menuitemcheckbox", { name: "Details" }).click();
   await page.keyboard.press("Escape");
-  await sleep(400);
+  await sleep(600);
   check((await groups()).some((g) => g.panels.includes("details")), "choosing a closed panel in the View menu reopens it");
   await page.getByRole("button", { name: "Close Details" }).click();
   await sleep(300);
