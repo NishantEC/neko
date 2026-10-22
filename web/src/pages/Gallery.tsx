@@ -32,6 +32,9 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { Field, FieldDescription, FieldLabel as FormLabel } from "@/ui/field";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/ui/hover-card";
 import * as Icons from "@/ui/icons";
+import { GitDiff } from "@phosphor-icons/react";
+import { DockWorkspace } from "@/work/dock/DockWorkspace";
+import { ThemeMenu } from "@/shell/StatusBar";
 import { Input } from "@/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/ui/input-group";
 import { Kbd, KbdGroup } from "@/ui/kbd";
@@ -569,6 +572,35 @@ function ChatSection() {
   );
 }
 
+function WorkspaceSection() {
+  const note = (text: string) => <p className="p-5 text-[13.5px] text-muted-foreground">{text}</p>;
+  return (
+    <Section id="workspace" eyebrow="Workspace" title={<>Tabs you can arrange.</>}>
+      <div className="grid items-start gap-8 lg:grid-cols-[2fr_1fr]">
+        <Specimen label="DockWorkspace: drag a tab to an edge to split, onto another pane to group, double-click to maximise" className="flex-col items-stretch">
+          <div className="h-[420px] overflow-hidden rounded-2xl border border-border">
+            <DockWorkspace
+              storageKey="neko:dock:gallery"
+              panels={[
+                { id: "chat", title: "Chat", icon: Icons.ChatCircle, closable: false, render: () => note("The conversation lives here. Move this tab anywhere.") },
+                { id: "changes", title: "Changes", icon: GitDiff, render: () => note("A diff of what the agent changed.") },
+                { id: "plan", title: "Plan", icon: Icons.ListChecks, render: () => note("The plan the agent wrote.") },
+                { id: "details", title: "Details", icon: Icons.Info, render: () => note("Status, repository and the activity log.") },
+              ]}
+              defaultLayout={[{ panels: ["chat"], size: 0.4 }, { panels: ["changes", "plan", "details"], of: 0, direction: "right" }]}
+            />
+          </div>
+        </Specimen>
+        <div className="flex flex-col gap-8">
+          <Specimen label="ThemeMenu (one button, a menu)">
+            <ThemeMenu />
+          </Specimen>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 export default function Gallery() {
   return (
     <div data-slot="gallery" className="min-h-0 flex-1 overflow-y-auto">
@@ -585,6 +617,7 @@ export default function Gallery() {
         <DataDisplay />
         <Editorial />
         <ChatSection />
+        <WorkspaceSection />
       </div>
     </div>
   );
