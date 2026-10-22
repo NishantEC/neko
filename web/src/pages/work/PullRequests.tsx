@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useWorkbench } from "@/useStore";
 import { registerCommands } from "@/shell/commands";
-import { ArrowSquareOut, ArrowsClockwise, CheckCircle, Clock, DotsThree, GitPullRequest, Hammer, WarningCircle, XCircle, type Icon } from "@/ui/icons";
+import { ArrowDown, ArrowSquareOut, ArrowsClockwise, GitBranch, CheckCircle, Clock, DotsThree, GitPullRequest, Hammer, XCircle, type Icon } from "@/ui/icons";
 import { GitMerge, HandPalm } from "@/work/icons";
 import { toast } from "@/ui/sonner";
 import { Button } from "@/ui/button";
@@ -35,7 +35,7 @@ const VERDICT_ICON: Record<Verdict, Icon> = {
   ready: CheckCircle, close: XCircle, closed: XCircle, needsYou: HandPalm,
   merging: GitMerge, merged: GitMerge, working: Hammer, unchecked: Clock,
 };
-const PROBLEM_ICON = { checks: XCircle, conflicts: WarningCircle, behind: WarningCircle } as const;
+const PROBLEM_ICON = { checks: XCircle, conflicts: GitBranch, behind: ArrowDown } as const;
 const MAX_FOLLOW_UPS = 4;
 
 const send = (name: string, row: PullRequestRow, done: string, extra: Record<string, unknown> = {}) =>

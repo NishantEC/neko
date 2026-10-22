@@ -1,5 +1,5 @@
 // Sending commands and asking before the ones that cannot be undone.
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { accept, command, type Json } from "@/api";
 import { toast } from "@/ui/sonner";
 import { Button } from "@/ui/button";
@@ -48,9 +48,13 @@ export interface ConfirmSpec {
 }
 
 /** The one confirmation every destructive action goes through. */
-export function ConfirmDialog({ spec, onClose }: { spec: ConfirmSpec | null; onClose: () => void }) {
+export function ConfirmDialog({ spec: current, onClose }: { spec: ConfirmSpec | null; onClose: () => void }) {
+  // Keep the last spec while the dialog animates out, so it does not empty before it closes.
+  const last = useRef(current);
+  if (current) last.current = current;
+  const spec = current ?? last.current;
   return (
-    <AlertDialog open={spec !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <AlertDialog open={current !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{spec?.title}</AlertDialogTitle>
@@ -82,9 +86,12 @@ export interface PromptSpec {
 }
 
 /** A dialog that asks for one line of text: a new name, why a pull request is closed. */
-export function PromptDialog({ spec, onClose }: { spec: PromptSpec | null; onClose: () => void }) {
+export function PromptDialog({ spec: current, onClose }: { spec: PromptSpec | null; onClose: () => void }) {
+  const last = useRef(current);
+  if (current) last.current = current;
+  const spec = current ?? last.current;
   return (
-    <Dialog open={spec !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={current !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent>{spec ? <PromptBody key={spec.title + spec.initial} spec={spec} onClose={onClose} /> : null}</DialogContent>
     </Dialog>
   );
