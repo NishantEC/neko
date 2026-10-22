@@ -295,7 +295,7 @@ fn pending_parts(task_id: &str) -> Vec<serde_json::Value> {
     chunks.extend([
         ui::tool_input("p1", "Bash", &json!({"command": "gh pr list --state open"})),
         ui::tool_output("p1", json!({"exit_code": 0, "output": "5 open"})),
-        ui::tool_input("call-1", "save_issue", &json!({"title": "Update athena #4641 branch", "team": "HEA", "description": "Rebase onto master and rerun checks"})),
+        { let mut call = ui::tool_input("call-1", "save_issue", &json!({"title": "Update athena #4641 branch", "team": "HEA", "description": "Rebase onto master and rerun checks"})); call["toolMetadata"] = json!({"connectionId": "linear"}); call },
         json!({"type": "tool-approval-request", "toolCallId": "call-1", "approvalId": "call-1", "reason": "Uses linear"}),
         ui::tool_input("action:act-1", neko_core::neko_chat::ACTION_TOOL, &json!({"taskId": task_id, "kind": "message", "text": "Bring the branch up to date with master, resolve any conflicts without changing the PR's scope, and rerun the checks. Do not merge."})),
         json!({"type": "tool-approval-request", "toolCallId": "action:act-1", "approvalId": "act-1"}),

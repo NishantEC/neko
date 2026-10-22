@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { accept, command, type Json } from "@/api";
+import { ACTION_TOOL, isToolPart, type NekoUIMessage } from "@/chat/sdk/types";
+import { connectionOf } from "@/chat/sdk/parts";
 import { ComposerApprovalDrawer, ComposerPendingApprovalActions, ComposerPendingApprovalPanel } from "@/chat/t3/ComposerPendingApproval";
 
 export interface Decision {
@@ -41,10 +43,48 @@ function parse(json: string): unknown {
 }
 
 /**
- * Everything waiting for a yes or a no: tool calls a chat reply needs approved
- * and actions Neko proposed on tasks. Newest reply first (older proposals can
- * linger unanswered for days and must not sit in front of the one being waited
- * on), and within a reply the tool call that blocks it before its proposals.
+ * What waits for a yes or a no in a conversation, read from the SDK's tool
+ * approval state: every `dynamic-tool` part in `approval-requested`. A bridge
+ * tool the reply needs approved answers `DecideChatTool`; an action Neko
+ * proposed on a task (`neko_task_action`) answers `DecideChatAction`. The daemon
+ * checks and runs both exactly as before and streams the approval's outcome.
+ */
+export function decisionsFromParts(messages: NekoUIMessage[], tasks: Json[]): Decision[] {
+  const out: Decision[] = [];
+  for (const message of [...messages].reverse()) {
+    for (const part of message.parts) {
+      if (!isToolPart(part) || part.state !== "approval-requested") continue;
+      const args = part.input && typeof part.input === "object" ? (part.input as Json) : {};
+      const approvalId = part.approval.id;
+      if (part.toolName === ACTION_TOOL) {
+        const task = tasks.find((t) => t.id === args.taskId);
+        out.push({
+          key: `${message.id}:${part.toolCallId}`,
+          label: ACTION_LABELS[String(args.kind)] ?? String(args.kind ?? "Action"),
+          subject: task ? task.display_title || task.title : String(args.taskId ?? ""),
+          detail: String(args.text ?? ""),
+          context: String(args.kind ?? ""),
+          decide: (approve) => command("DecideChatAction", { message_id: message.id, action_id: approvalId, accept: approve }),
+        });
+      } else {
+        out.push({
+          key: `${message.id}:${part.toolCallId}`,
+          label: `Tool approval · ${connectionOf(part) ?? "tool"}`,
+          subject: part.toolName,
+          detail: JSON.stringify(args, null, 2),
+          args,
+          decide: (approve) => command("DecideChatTool", { turn_id: message.id, call_id: part.toolCallId, approve }),
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The same list from the daemon's ledger in the workbench snapshot, for the
+ * parts of the app that count what waits without a conversation loaded (the
+ * shell's badge, the palette). The ledger and the parts are written together.
  */
 export function pendingDecisions(messages: Json[], tasks: Json[]): Decision[] {
   const out: Decision[] = [];
