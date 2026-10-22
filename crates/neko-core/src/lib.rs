@@ -8,6 +8,7 @@
 pub mod agent_profiles;
 pub mod pull_requests;
 pub mod rulebook;
+pub mod self_update;
 pub mod chief_of_staff;
 pub mod triage;
 pub mod machine;

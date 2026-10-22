@@ -1297,6 +1297,22 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
                 snapshot.land_on_main.remove(&path);
             }
         }
+        // The daemon's self-update thread acts on these (`crate::self_update`).
+        Command::UpdateNekoNow => {
+            snapshot.self_update.requested = true;
+            snapshot.self_update.status = "Checking for changes to apply…".into();
+        }
+        Command::ApplyPendingUpdate => {
+            let mut plan = snapshot.self_update.pending.take().ok_or("No update is waiting")?;
+            plan.approved = true;
+            plan.reason.clear();
+            snapshot.self_update.queued = Some(plan);
+            snapshot.self_update.status = "Applying the update you approved…".into();
+        }
+        Command::SetSelfUpdate { auto_ui, auto_native } => {
+            snapshot.self_update.auto_ui = auto_ui;
+            snapshot.self_update.auto_native = auto_native;
+        }
     }
     save(db, &snapshot)?;
     load(db)

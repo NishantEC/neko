@@ -471,6 +471,104 @@ pub struct Snapshot {
     /// Contextual guidance only. Keeping one never starts work or grants tools.
     #[serde(default)]
     pub working_preferences: Vec<crate::decision_context::WorkingPreference>,
+    /// Neko updating itself from its own checkout when a Neko task lands
+    /// there (`neko_core::self_update`).
+    #[serde(default)]
+    pub self_update: SelfUpdate,
+}
+
+fn yes() -> bool { true }
+
+/// Neko writing itself over: what is live, what is waiting and why, and
+/// whether it may update on its own. See AGENTS.md, "Neko updates itself".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SelfUpdate {
+    /// Rebuild and swap in the web UI on its own after a landed change.
+    #[serde(default = "yes")]
+    pub auto_ui: bool,
+    /// Reinstall the app (daemon and native client) on its own, once Neko is
+    /// idle and the Mac says it is fine to build.
+    #[serde(default = "yes")]
+    pub auto_native: bool,
+    /// The neko checkout updates are built from (found from `land_on_main`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
+    /// The last `main` commit whose changes were applied (or deliberately
+    /// taken as the starting point).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_through: Option<String>,
+    /// The commit the live web UI (`<data dir>/web-live`) was built from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_commit: Option<String>,
+    /// The commit the running app was built from (its `NekoGitCommit`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_commit: Option<String>,
+    /// Decided and being applied (or waiting for Neko to be idle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<UpdatePlan>,
+    /// Waits for the owner's click: it touches safety-critical code, or the
+    /// matching auto-update is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending: Option<UpdatePlan>,
+    /// A reinstall the detached installer is doing right now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installing: Option<UpdatePlan>,
+    /// The owner asked for "Update Neko now".
+    #[serde(default)]
+    pub requested: bool,
+    /// What it is doing or waiting for, in plain words; empty when idle.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_update: Option<UpdateRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failure: Option<UpdateRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_rollback: Option<UpdateRecord>,
+}
+
+impl Default for SelfUpdate {
+    fn default() -> Self {
+        Self {
+            auto_ui: true, auto_native: true, checkout: None, applied_through: None, web_commit: None,
+            native_commit: None, queued: None, pending: None, installing: None, requested: false,
+            status: String::new(), last_update: None, last_failure: None, last_rollback: None,
+        }
+    }
+}
+
+/// One update: the commits `from..to` of the neko checkout's `main`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UpdatePlan {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    pub to: String,
+    /// The task whose landed commit brought it, when one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    /// The web UI needs rebuilding.
+    #[serde(default)]
+    pub web: bool,
+    /// The app needs reinstalling.
+    #[serde(default)]
+    pub native: bool,
+    /// Safety-critical paths it touches (`neko_core::self_update::SENSITIVE`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sensitive: Vec<String>,
+    /// Why it waits, when it is pending.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    /// The owner approved it (Apply, or Update now).
+    #[serde(default)]
+    pub approved: bool,
+    pub at_ms: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UpdateRecord {
+    pub commit: String,
+    pub at_ms: i64,
+    pub summary: String,
 }
 
 /// Both on by default. Off means off: no suggestions are queued, and no
@@ -674,9 +772,11 @@ pub enum ChatActionStatus {
 /// it, stop it, close it, merge it into another task as a duplicate, run it
 /// next, approve its plan, accept its result, retry it or rename it, and for
 /// a task with an open pull request, merge it (`merge_pr`, once CI passes) or
-/// close it (`close_pr`, `text` is the comment saying why).
+/// close it (`close_pr`, `text` is the comment saying why), and `apply_update`
+/// to apply a Neko self-update that waits for the owner (its `task_id` is the
+/// task whose landed commit brought it).
 pub fn chat_action_kinds() -> &'static [&'static str] {
-    &["message", "start", "stop", "close", "merge", "run_next", "approve", "accept", "retry", "rename", "merge_pr", "close_pr"]
+    &["message", "start", "stop", "close", "merge", "run_next", "approve", "accept", "retry", "rename", "merge_pr", "close_pr", "apply_update"]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -923,6 +1023,16 @@ pub enum Command {
     },
     /// Check every open pull request on GitHub now instead of on the timer.
     CheckPullRequests,
+    /// Build and apply everything new on the neko checkout's `main` now,
+    /// safety-critical changes included (this click is the approval).
+    UpdateNekoNow,
+    /// Apply the update that waits for the owner's click.
+    ApplyPendingUpdate,
+    /// Whether Neko updates its web UI and its app on its own.
+    SetSelfUpdate {
+        auto_ui: bool,
+        auto_native: bool,
+    },
 }
 
 #[cfg(test)]
