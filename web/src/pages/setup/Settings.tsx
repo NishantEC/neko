@@ -154,7 +154,7 @@ function SettingsBody() {
           <nav aria-label="Settings sections" data-slot="settings-nav" className="flex flex-col gap-5 md:sticky md:top-0 md:self-start">
             {groups.map((group) => (
               <div key={group} className="flex flex-col gap-0.5">
-                <span className="px-2.5 pb-1 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{group}</span>
+                <span className="px-2.5 pb-1 text-[12.5px] font-medium text-muted-foreground">{group}</span>
                 {SECTIONS.filter((s) => s.group === group).map((s) => (
                   <button
                     key={s.id}

@@ -9,7 +9,7 @@ export interface FieldLabelProps {
 
 export function FieldLabel({ children, className }: FieldLabelProps) {
   return (
-    <span className={cn("font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground", className)}>
+    <span className={cn("text-[14px] font-medium text-foreground", className)}>
       {children}
     </span>
   );

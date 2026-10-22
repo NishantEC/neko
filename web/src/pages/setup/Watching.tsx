@@ -136,7 +136,7 @@ function WatchRow({ snapshot, item, onEdit }: { snapshot: Json; item: Json; onEd
             ) : null}
             {str(item.last_result) ? (
               <div className="flex flex-col gap-1.5">
-                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Last check result</span>
+                <span className="text-[12.5px] font-medium text-muted-foreground">Last check result</span>
                 <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-foreground/[0.03] p-3 font-sans text-[13px] leading-relaxed text-foreground/85">{str(item.last_result)}</pre>
               </div>
             ) : null}
@@ -323,7 +323,7 @@ function NewWatchPanel({ snapshot, workspaceId }: { snapshot: Json; workspaceId:
     <Panel data-slot="new-watch">
       <div className="flex flex-col gap-3 px-6 py-4">
         <div className="flex items-center justify-between gap-3">
-          <label htmlFor="watch-ask" className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">What should Neko keep an eye on?</label>
+          <label htmlFor="watch-ask" className="text-[12.5px] font-medium text-muted-foreground">What should Neko keep an eye on?</label>
           {tools.length > 0 ? (
             <DropdownMenu>
               <DropdownMenuTrigger render={<Button variant="ghost" size="xs" />}><Lightbulb /> Use an idea</DropdownMenuTrigger>

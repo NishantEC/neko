@@ -206,7 +206,7 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
       {hasData ? (
         <Panel>
           <div className="px-6 pt-4">
-            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Spend per day · last 14 days (USD)</p>
+            <p className="text-[12.5px] font-medium text-muted-foreground">Spend per day · last 14 days (USD)</p>
             <ChartContainer config={{ cost: { label: "Spend (USD)", color: "var(--chart-1)" } }} className="mt-3 aspect-auto h-44 w-full" data-slot="spend-chart">
               <RechartsBarChart accessibilityLayer data={spend.days} margin={{ top: 8, right: 4, left: 8, bottom: 0 }}>
                 <CartesianGrid vertical={false} />
@@ -336,7 +336,7 @@ function UsageBody({ snapshot }: { snapshot: Json }) {
             </div>
             <MachineWells health={health} />
             <div className="flex flex-col gap-3">
-              <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Memory held by agents</p>
+              <p className="text-[12.5px] font-medium text-muted-foreground">Memory held by agents</p>
               <AgentMemory health={health} />
             </div>
           </>

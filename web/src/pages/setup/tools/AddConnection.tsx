@@ -242,12 +242,12 @@ export function RegistryDialog({
         </form>
         <ErrorNote error={searchError} title="Registry search" />
         <div className="flex flex-col gap-1">
-          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Featured</span>
+          <span className="text-[12.5px] font-medium text-muted-foreground">Featured</span>
           <div className="overflow-hidden rounded-xl border border-border divide-y divide-border/70">{row(SENTRY, "Official Sentry server")}</div>
         </div>
         {results.length > 0 ? (
           <div className="flex flex-col gap-1">
-            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Registry results · {results.length}</span>
+            <span className="text-[12.5px] font-medium text-muted-foreground">Registry results · {results.length}</span>
             <div className="overflow-hidden rounded-xl border border-border divide-y divide-border/70">{results.map((r) => row(r, "Community listing · verify publisher"))}</div>
           </div>
         ) : null}

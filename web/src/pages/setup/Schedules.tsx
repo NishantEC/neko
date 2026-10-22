@@ -167,7 +167,7 @@ function ScheduleRow({ item, onEdit, now }: { item: Json; onEdit: () => void; no
       <p className="line-clamp-3 max-w-[70ch] whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">{str(item.prompt)}</p>
       {str(item.last_result) ? (
         <p className="max-w-[70ch] rounded-lg border border-border bg-foreground/[0.03] px-3 py-2 text-[13px] leading-relaxed text-foreground/80">
-          <span className="me-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Last run</span>
+          <span className="me-1.5 text-[12.5px] font-medium text-muted-foreground">Last run</span>
           {str(item.last_result)}
         </p>
       ) : null}
