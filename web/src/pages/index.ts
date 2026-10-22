@@ -15,7 +15,7 @@
 // "@/ui" (primitives), "@/editorial" (PageHeader, Panel, SectionHead) and
 // "@/chat" (conversation pieces). See docs/design/web-ui-from-hushbacks.md.
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
-import { House, Palette, type Icon } from "@/ui/icons";
+import { House, Palette, PuzzlePiece, type Icon } from "@/ui/icons";
 import { HOME } from "@/router";
 import Home from "@/pages/Home";
 
@@ -52,6 +52,14 @@ export const pages: PageDef[] = [
     keywords: ["design", "components", "primitives", "storybook"],
     group: "system",
     load: () => import("@/pages/Gallery"),
+  }),
+  page({
+    id: "plugins",
+    title: "Plugins",
+    icon: PuzzlePiece,
+    keywords: ["extend", "extensions", "build", "agents", "self-evolving"],
+    group: "system",
+    load: () => import("@/pages/plugins/Plugins"),
   }),
 ];
 
