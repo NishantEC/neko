@@ -31,3 +31,22 @@ export function usePendingSettingsRequest(): SettingsRequest | null {
     () => pending,
   );
 }
+
+// The section the Settings page shows, so the sidebar's Settings sub-navigation
+// (hushbacks' SubReveal) can mark it. The page writes it; the sidebar reads it and
+// asks for another with `requestSettings({ section })`.
+let current: string | null = null;
+const currentListeners = new Set<() => void>();
+
+export function setCurrentSettingsSection(section: string | null) {
+  if (current === section) return;
+  current = section;
+  currentListeners.forEach((l) => l());
+}
+
+export function useCurrentSettingsSection(): string | null {
+  return useSyncExternalStore(
+    (l) => { currentListeners.add(l); return () => currentListeners.delete(l); },
+    () => current,
+  );
+}
