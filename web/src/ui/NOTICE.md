@@ -40,3 +40,11 @@ meteors, warp-background and the other decorative effects; thinking-orbs.
   (no GCS upload, no speech), `chat/work-log.tsx` (WorkLog / ToolLine / ToolFold /
   ToolFailed over Neko's `activity` and `tool_calls`), `chat/decisions.tsx`,
   `chat/queue-tray.tsx`, `chat/turns.tsx`.
+
+## Local deviations (spacing, 2026-10-22)
+
+`button.tsx` size variants and `select.tsx` `data-[size=sm]` height follow what
+hushbacks' running app renders (its `Sky` layer: control 40 px, row 36 px, xs 32 px)
+instead of the raw primitives' 32/28/24 px; `sidebar.tsx` menu-button sizes do too.
+Re-vendoring these files must keep those values. See
+`docs/design/web-ui-from-hushbacks.md` → "Spacing, measured".
