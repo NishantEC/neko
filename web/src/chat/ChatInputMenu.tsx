@@ -2,6 +2,9 @@
 // the composer's top edge and grows UPWARD, so it never moves what is below it
 // and never covers the composer. It is opaque (the transcript would show
 // through anything translucent), shows seven rows and scrolls past that.
+// Row markup from t3code apps/web/src/components/chat/ComposerCommandMenu.tsx
+// @3b95e7831 (MIT): icon, a medium-weight label, the description in the
+// secondary label colour, all at text-xs, on rounded-lg rows.
 import { useEffect, useRef } from "react";
 import type { Icon } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
@@ -37,7 +40,7 @@ export function ComposerMenu({
   return (
     <div
       data-slot="composer-menu"
-      className="absolute inset-x-0 bottom-full z-30 mb-2 rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-lg ring-1 ring-foreground/5"
+      className="absolute inset-x-0 bottom-full z-30 mb-2 rounded-2xl border border-border bg-popover p-1 text-popover-foreground shadow-composer dark:shadow-composer-dark"
     >
       <div
         ref={list}
@@ -62,12 +65,14 @@ export function ComposerMenu({
               onMouseDown={(e) => e.preventDefault()}
               onClick={item.apply}
               style={{ height: MENU_ROW_PX }}
-              className={cn("flex cursor-pointer items-center gap-3 rounded-xl px-3 text-[13.5px]", on ? "bg-accent text-strong" : "text-foreground")}
+              className={cn("flex cursor-pointer select-none items-center gap-2 rounded-lg px-2 text-sm outline-none", on ? "bg-accent text-accent-foreground" : "text-foreground")}
             >
-              <item.icon className={cn("size-4 shrink-0", on ? "text-foreground" : "text-muted-foreground")} aria-hidden />
-              <span className="w-[112px] shrink-0 truncate font-medium">{item.title}</span>
-              <span className={cn("min-w-0 flex-1 truncate text-[13px]", on ? "text-foreground/75" : "text-muted-foreground")}>{item.detail}</span>
-              {item.shortcut ? <span className="shrink-0 text-[12px] text-muted-foreground">{item.shortcut}</span> : null}
+              <item.icon className="size-4 shrink-0 text-secondary-label" aria-hidden />
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="min-w-0 max-w-[45%] shrink-0 truncate font-sans text-xs font-medium">{item.title}</span>
+              <span className="min-w-0 flex-1 truncate text-left text-secondary-label text-xs">{item.detail}</span>
+                {item.shortcut ? <span className="ms-auto shrink-0 text-2xs text-muted-foreground">{item.shortcut}</span> : null}
+              </span>
             </div>
           );
         })}
