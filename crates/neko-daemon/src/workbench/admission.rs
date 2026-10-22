@@ -124,7 +124,7 @@ mod tests {
         use neko_protocol::workbench::Workspace;
         let workspace = |id: &str, repository: &str| Workspace { id: id.into(), name: id.into(), repository: repository.into(), instructions: String::new(), away_enabled: false };
         let task = |id: &str, workspace: &str, status: TaskStatus| Task { id: id.into(), workspace_id: workspace.into(), status, ..crate::workbench::tests::controller_task() };
-        let mut snapshot = Snapshot { workspaces: vec![workspace("a", "/athena"), workspace("b", "/navi")], ..Default::default() };
+        let mut snapshot = Snapshot { workspaces: vec![workspace("a", "/athena"), workspace("b", "/navi")], max_writable_per_repository: Some(4), ..Default::default() };
         // Two already writing in athena, one planning (read-only) there.
         snapshot.tasks.push(task("running-1", "a", TaskStatus::Building));
         snapshot.tasks.push(task("running-2", "a", TaskStatus::Reviewing));
