@@ -100,3 +100,30 @@ export const prRows = [
   { ref: "athena #4628", task: "Show friendly messages instead of raw server error text", status: "Ready", checks: "passing" },
   { ref: "riavox #410", task: "Let Ria agents use tools from remote MCP servers", status: "Ready", checks: "failing" },
 ];
+
+/** A reply that asks a question and shows a plan, a chart and a form, as the daemon's prompt asks the model to. */
+export const structuredReply: NekoMessage = {
+  id: "n-structured",
+  at_ms: now - 30_000,
+  role: "assistant",
+  activity: [],
+  text: [
+    "I need one answer before I propose the ticket.",
+    "",
+    "```neko-choices",
+    JSON.stringify({ question: "What should the rewrite change?", options: [{ label: "New design", detail: "Same data, a cleaner page." }, { label: "Data that isn't stuck in one browser", detail: "Save entries through the daemon." }] }),
+    "```",
+    "",
+    "```neko-plan",
+    JSON.stringify({ title: "Move the log to the daemon", estimate: "about 20 min", steps: ["Add host.storage calls", "Import the old localStorage log once", "Check a reload keeps it"] }),
+    "```",
+    "",
+    "```neko-chart",
+    JSON.stringify({ title: "Entries this week", unit: "", bars: [{ label: "Mon", value: 3 }, { label: "Tue", value: 5, highlight: true }, { label: "Wed", value: 2 }] }),
+    "```",
+    "",
+    "```neko-form",
+    JSON.stringify({ title: "Details", submit: "Send", fields: [{ label: "Track", kind: "choice", options: ["Weight", "Sleep"] }, { label: "Remind me", kind: "toggle", value: true }, { label: "Note", kind: "text", placeholder: "Optional" }] }),
+    "```",
+  ].join("\n"),
+} as NekoMessage;

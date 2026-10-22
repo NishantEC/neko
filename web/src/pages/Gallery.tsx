@@ -68,7 +68,7 @@ import { Suggestion, Suggestions } from "@/chat/suggestion";
 import { NekoTurn, UserTurn } from "@/chat/turns";
 import { ToolFailed, ToolFold, ToolLine, WorkLog } from "@/chat/work-log";
 import { cn } from "@/ui/lib/utils";
-import { finishedReply, prRows, queued, runningReply, sampleArgs, usage, userMessage } from "@/pages/gallery-sample";
+import { finishedReply, prRows, queued, runningReply, sampleArgs, structuredReply, usage, userMessage } from "@/pages/gallery-sample";
 
 function Section({ id, eyebrow, title, children }: { id: string; eyebrow: string; title: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -489,6 +489,10 @@ function ChatSection() {
             <UserTurn message={userMessage} />
             <NekoTurn message={finishedReply} />
             <NekoTurn message={runningReply} />
+          </div>
+          <FieldLabel>Reply blocks: a question, a plan, a chart and a form the model can ask for</FieldLabel>
+          <div data-slot="reply-blocks" className="rounded-2xl border border-border bg-background px-6 pb-6">
+            <NekoTurn message={structuredReply} />
           </div>
         </div>
         <div className="flex flex-col gap-8">

@@ -13,6 +13,7 @@
 // native composer references them.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { accept, command, type Json } from "@/api";
+import { setReplyActions } from "@/chat/reply-views";
 import { useWorkbench } from "@/useStore";
 import { navigate } from "@/router";
 import { ChatInput } from "@/chat/chat-input";
@@ -99,10 +100,15 @@ export function NekoComposer({
 
   useEffect(() => {
     draftRef.current = { set: (value) => setDraftText(scope, value), focus: () => area.current?.focus() };
+    const forget = setReplyActions({
+      send: (reply) => void command("SendMessage", { text: reply, workspace_id: workspaceId }),
+      draft: (reply) => { setDraftText(scope, reply); area.current?.focus(); },
+    });
     return () => {
       draftRef.current = null;
+      forget();
     };
-  }, [draftRef, scope]);
+  }, [draftRef, scope, workspaceId]);
 
   const run = useCallback(async (step: () => Promise<Json>) => {
     setError(null);
