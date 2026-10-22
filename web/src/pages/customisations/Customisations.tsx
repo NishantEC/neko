@@ -335,9 +335,8 @@ export default function Customisations() {
         <p className="text-[12.5px] text-muted-foreground">
           Changes Neko makes to its own source go live after they land, and the previous web UI is kept.{" "}
           <button type="button" onClick={() => { navigate("settings"); requestSettings({ section: "updates" }); }} className="rounded underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-            Roll back the web UI in Settings
+            Roll back the web UI in Settings.
           </button>
-          .
         </p>
       </>
       <Inspector open={detail !== null} onClose={() => setDetailId(null)} title={detail?.title || detail?.id} subtitle="Customisation">

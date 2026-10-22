@@ -473,7 +473,14 @@ fn storage_round_trips_json_per_namespace_and_survives_nothing_it_should_not() {
     let h = start();
     let none = call(&h, "GET", "/api/storage/health", &[], "");
     assert_eq!((none.status, none.body.as_str()), (200, r#"{"keys":[]}"#), "an unused namespace lists empty");
-    assert_eq!(call(&h, "GET", "/api/storage/health/weight", &[], "").status, 404);
+    let unset = call(&h, "GET", "/api/storage/health/weight", &[], "");
+    assert_eq!((unset.status, unset.body.as_str()), (200, "null"), "never stored: not an error");
+    assert!(unset.head.contains("X-Neko-Storage: unset"), "and it says so: {}", unset.head);
+    assert!(call(&h, "PUT", "/api/storage/health/nothing", &[], "null").body.contains("true"));
+    let stored_null = call(&h, "GET", "/api/storage/health/nothing", &[], "");
+    assert_eq!(stored_null.body, "null");
+    assert!(!stored_null.head.contains("X-Neko-Storage"), "a stored null is not unset");
+    assert_eq!(call(&h, "DELETE", "/api/storage/health/nothing", &[], "").status, 200);
     assert_eq!(call(&h, "PUT", "/api/storage/health/weight", &[], r#"{"kg":[71.5,71.2]}"#).status, 200);
     let read = call(&h, "GET", "/api/storage/health/weight", &[], "");
     assert_eq!((read.status, read.body.as_str()), (200, r#"{"kg":[71.5,71.2]}"#));
@@ -482,13 +489,13 @@ fn storage_round_trips_json_per_namespace_and_survives_nothing_it_should_not() {
     // Overwriting replaces, and a different namespace never sees it.
     assert_eq!(call(&h, "PUT", "/api/storage/health/weight", &[], "[1]").status, 200);
     assert_eq!(call(&h, "GET", "/api/storage/health/weight", &[], "").body, "[1]");
-    assert_eq!(call(&h, "GET", "/api/storage/other/weight", &[], "").status, 404);
+    assert!(call(&h, "GET", "/api/storage/other/weight", &[], "").head.contains("X-Neko-Storage: unset"));
     let listed: serde_json::Value = serde_json::from_str(&call(&h, "GET", "/api/storage/health", &[], "").body).unwrap();
     assert_eq!(listed["keys"][0]["key"], "weight");
     assert_eq!(listed["keys"][0]["size"], 3);
     assert_eq!(call(&h, "DELETE", "/api/storage/health/weight", &[], "").status, 200);
     assert_eq!(call(&h, "DELETE", "/api/storage/health/weight", &[], "").status, 404, "already gone");
-    assert_eq!(call(&h, "GET", "/api/storage/health/weight", &[], "").status, 404);
+    assert!(call(&h, "GET", "/api/storage/health/weight", &[], "").head.contains("X-Neko-Storage: unset"));
     // No temp file is left behind.
     assert!(fs::read_dir(h.dir.path().join("plugin-data/health")).unwrap().next().is_none());
 }
