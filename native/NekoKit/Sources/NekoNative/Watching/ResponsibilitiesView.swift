@@ -169,9 +169,9 @@ struct ResponsibilitiesView: View {
             if message["pending"].bool {
                 ProgressView().controlSize(.small)
             } else {
-                if !showReply { Text(message["text"].string).font(NekoFont.body).foregroundStyle(N.text2).lineLimit(3) }
+                if !showReply { Text(message.chatText).font(NekoFont.body).foregroundStyle(N.text2).lineLimit(3) }
                 DisclosureGroup("Full reply", isExpanded: $showReply) {
-                    ReadableText(text: message["text"].string).padding(.top, NekoSpace.sm)
+                    ReadableText(text: message.chatText).padding(.top, NekoSpace.sm)
                 }.font(NekoFont.meta)
             }
         }
