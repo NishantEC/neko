@@ -166,6 +166,16 @@ fn cookie_token(cookie: Option<&str>) -> Option<&str> {
     cookie?.split(';').filter_map(|pair| pair.trim().split_once('=')).find(|(name, _)| *name == COOKIE_NAME).map(|(_, v)| v)
 }
 
+/// Paths anyone on this Mac may read: what a browser needs to offer
+/// "Install Neko" (the web manifest and the app icons).
+pub fn is_public_asset(path: &str) -> bool {
+    path == "/manifest.webmanifest" || (path.starts_with("/icons/") && !path.contains("..") && path.matches('/').count() == 2)
+}
+
+/// How long the sign-in cookie lasts: a year, so a browser tab or an installed
+/// Neko window keeps working across restarts. Rotating `web-token` ends it.
+pub const COOKIE_MAX_AGE_SECS: u64 = 365 * 24 * 60 * 60;
+
 /// The whole gate, in the order that matters (see the module doc).
 pub fn authorize(req: &Req, port: u16, token: &str) -> Result<(), Rejection> {
     if !host_allowed(req.header("host"), port) {
@@ -178,6 +188,12 @@ pub fn authorize(req: &Req, port: u16, token: &str) -> Result<(), Rejection> {
         if !matches!(site.trim(), "same-origin" | "none") {
             return Err(Rejection::CrossSite);
         }
+    }
+    // The install manifest and its icons carry nothing secret, and a browser
+    // fetches them without the cookie (manifests default to no credentials),
+    // so they skip the token but keep every check above.
+    if req.method == "GET" && is_public_asset(&req.path) {
+        return Ok(());
     }
     // The query token is accepted on `GET /` only: that is the one request a
     // shell makes before it has a cookie, and keeping it off every other
@@ -375,14 +391,28 @@ pub fn serve(listener: TcpListener, config: Config, backend: Arc<dyn Backend>) {
     }
 }
 
+const SIGN_IN_REASON: &str = "Sign in";
+
+/// Shown to a browser that has no sign-in cookie yet. Opening Neko from its
+/// menu bar item (or the quick panel) signs this browser in.
+pub const SIGN_IN_PAGE: &str = r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="color-scheme" content="dark light"><title>Neko</title>
+<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0}main{max-width:420px;padding:24px}h1{font-size:20px;margin:0 0 8px}p{opacity:.75;margin:0}</style></head>
+<body><main><h1>Open Neko from your Mac</h1><p>Click the Neko icon in the menu bar and choose <b>Open Neko</b>. That signs this browser in, and it stays signed in.</p></main></body></html>"#;
+
 fn handle(mut stream: TcpStream, port: u16, config: &Config, backend: &dyn Backend) {
     // Authorization happens between the headers and the body.
     let gate = |req: &Req| authorize(req, port, &config.token).map_err(|rejection| {
+        // A person opening the page without the cookie gets told how to sign
+        // in, rather than a bare 401.
+        if rejection == Rejection::Unauthorized && req.method == "GET" && !req.path.starts_with("/api/") {
+            return HttpError(401, SIGN_IN_REASON);
+        }
         let (status, reason) = rejection.status();
         HttpError(status, reason)
     });
     let req = match read_request(&stream, &gate) {
         Ok(req) => req,
+        Err(HttpError(401, SIGN_IN_REASON)) => return write_reply(&mut stream, Reply::new(401, "Unauthorized", "text/html; charset=utf-8", SIGN_IN_PAGE)),
         Err(HttpError(status, reason)) => return write_reply(&mut stream, Reply::text(status, reason)),
     };
     route(stream, req, config, backend);
@@ -397,7 +427,7 @@ fn route(mut stream: TcpStream, req: Req, config: &Config, backend: &dyn Backend
     let reply = if get && path == "/" && query_param(&req.query, "token").is_some() {
         let mut redirect = Reply::new(302, "Found", "text/plain; charset=utf-8", "");
         redirect.extra.push(("Location", "/".into()));
-        redirect.extra.push(("Set-Cookie", format!("{COOKIE_NAME}={}; Path=/; HttpOnly; SameSite=Strict", config.token)));
+        redirect.extra.push(("Set-Cookie", format!("{COOKIE_NAME}={}; Path=/; Max-Age={COOKIE_MAX_AGE_SECS}; HttpOnly; SameSite=Strict", config.token)));
         redirect
     } else if path == "/api/request" {
         if req.method != "POST" { Reply::text(405, "Method Not Allowed") } else { api_request(&req, backend) }
@@ -509,6 +539,7 @@ fn mime(path: &Path) -> &'static str {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "ico" => "image/x-icon",
+        "webmanifest" => "application/manifest+json",
         "woff2" => "font/woff2",
         "woff" => "font/woff",
         "txt" | "md" => "text/plain; charset=utf-8",
