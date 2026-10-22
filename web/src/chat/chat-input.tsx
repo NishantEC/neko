@@ -252,7 +252,7 @@ export function ChatInput({
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) e.preventDefault();
             onKeyDown?.(e);
           }}
-          className="block max-h-[220px] min-h-6 w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pt-2 pb-1 text-[14px] leading-[1.625] text-strong outline-none placeholder:text-muted-foreground/70 disabled:opacity-60"
+          className="block max-h-[220px] min-h-14 w-full resize-none overflow-y-auto border-0 bg-transparent px-3.5 pt-3 pb-1.5 text-[15px] leading-[1.625] text-strong outline-none placeholder:text-muted-foreground/70 disabled:opacity-60"
         />
         <div className="flex items-center gap-2 px-1 pb-0.5">
           {accepts ? (
@@ -298,7 +298,7 @@ export function ChatInput({
               size="icon"
               aria-label="Stop"
               title="Stop this reply"
-              className="shrink-0 rounded-full border-destructive bg-destructive text-white hover:bg-destructive/90"
+              className="size-9 shrink-0 rounded-full border-destructive bg-destructive text-white hover:bg-destructive/90"
               onClick={onStop}
             >
               <Square weight="fill" className="size-3.5" />
@@ -312,7 +312,7 @@ export function ChatInput({
               aria-label={sending ? "Sending" : isGenerating ? "Queue message" : "Send"}
               title={isGenerating ? "Queue message (⌘↵ interrupts and sends)" : "Send (↵)"}
               disabled={!canSend}
-              className="shrink-0 rounded-full"
+              className="size-9 shrink-0 rounded-full"
             >
               {sending || uploading ? <CircleNotch className="animate-spin" /> : <ArrowUp weight="bold" />}
             </Button>
