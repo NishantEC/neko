@@ -9,8 +9,11 @@ import { Toaster } from "@/ui/sonner";
 import { TooltipProvider } from "@/ui/tooltip";
 import { Button } from "@/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/ui/empty";
-import { Compass } from "@phosphor-icons/react";
-import { pageById } from "@/pages";
+import { ArrowCounterClockwise, Compass } from "@phosphor-icons/react";
+import { toast } from "@/ui/sonner";
+import "@/pages";
+import { setOverrideOff, usePages } from "@/registry";
+import { HostProvider } from "@/host";
 import { HOME, navigate, useRoute } from "@/router";
 import { PluginBoundary, usePlugins } from "@/plugins";
 import { CommandPalette, openPalette } from "@/shell/CommandPalette";
@@ -40,7 +43,7 @@ function Missing({ route }: { route: string }) {
         <EmptyMedia variant="icon"><Compass /></EmptyMedia>
         <EmptyTitle>That page is not in the web app yet</EmptyTitle>
         <EmptyDescription>
-          Nothing is registered at “{route}”. It may live in the Neko app, or it may be a plugin that was removed or switched off.
+          Nothing is registered at “{route}”. It may live in the Neko app, or it may be one of your own pages that was removed or switched off.
         </EmptyDescription>
       </EmptyHeader>
       <div className="flex gap-2">
@@ -51,33 +54,53 @@ function Missing({ route }: { route: string }) {
   );
 }
 
+/** Above an overridden built-in: it says so, and offers the way back. */
+function CustomisedStrip({ id, title, plugin }: { id: string; title: string; plugin?: string }) {
+  return (
+    <div data-slot="customised-strip" className="flex shrink-0 items-center gap-3 border-b border-border/60 bg-primary/[0.05] px-6 py-1.5 text-[12.5px] text-muted-foreground">
+      <span className="rounded-full bg-primary/15 px-2 py-px text-[11px] font-medium text-primary">Customised</span>
+      <span className="min-w-0 flex-1 truncate">You are using your own version of {title}{plugin ? <> from “{plugin}”</> : null}.</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        onClick={() => void setOverrideOff(id, true).then(() => toast(`${title} is back to the original.`), (e) => toast.error("Could not reset", { description: e instanceof Error ? e.message : String(e) }))}
+      >
+        <ArrowCounterClockwise /> Reset to original
+      </Button>
+    </div>
+  );
+}
+
 function Outlet({ route }: { route: string }) {
-  const { pages: pluginPages, problems } = usePlugins();
-  const page = pageById(route);
+  const { problems } = usePlugins();
+  const page = usePages().find((p) => p.id === route);
   if (page) {
-    return (
-      <Suspense fallback={<PageFallback />}>
-        <page.component />
-      </Suspense>
+    const body = (
+      <HostProvider value={page.host}>
+        <Suspense fallback={<PageFallback />}>
+          <page.component host={page.host} />
+        </Suspense>
+      </HostProvider>
     );
-  }
-  const plugin = pluginPages.find((p) => p.key === route);
-  if (plugin) {
-    return (
-      <PluginBoundary plugin={plugin.plugin} key={plugin.key}>
-        <plugin.component />
-      </PluginBoundary>
-    );
+    // A user's page can throw; the app carries on and says which one.
+    const guarded = page.plugin && !page.overrideOff ? <PluginBoundary plugin={page.plugin} key={`${page.id}:${page.customised}`}>{body}</PluginBoundary> : body;
+    return page.customised ? (
+      <>
+        <CustomisedStrip id={page.id} title={page.title} plugin={page.plugin} />
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{guarded}</div>
+      </>
+    ) : guarded;
   }
   if (route.startsWith("problem:")) {
     const name = route.slice(8);
     return (
       <PageContainer className="max-w-[52rem]">
-        <h2 className="text-lg font-semibold text-strong">The “{name}” plugin did not load</h2>
+        <h2 className="text-lg font-semibold text-strong">The “{name}” page did not load</h2>
         <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-border bg-foreground/[0.03] p-3 text-destructive">
           {problems.find((p) => p.plugin === name)?.message ?? "It loads now."}
         </pre>
-        <Button type="button" variant="outline" className="mt-4" onClick={() => navigate("plugins")}>Open the Plugins page</Button>
+        <Button type="button" variant="outline" className="mt-4" onClick={() => navigate("customisations")}>Open Customisations</Button>
       </PageContainer>
     );
   }

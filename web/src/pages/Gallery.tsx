@@ -319,7 +319,7 @@ function Overlays() {
               <CommandEmpty>Nothing matches.</CommandEmpty>
               <CommandGroup heading="Go to">
                 <CommandItem><Icons.House /> Go to Home</CommandItem>
-                <CommandItem><Icons.GitPullRequest /> Go to PR board <CommandShortcut>plugin</CommandShortcut></CommandItem>
+                <CommandItem><Icons.GitPullRequest /> Go to PR board <CommandShortcut>yours</CommandShortcut></CommandItem>
               </CommandGroup>
             </CommandList>
           </Command>
