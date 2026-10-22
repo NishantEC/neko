@@ -13,7 +13,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/ui/tabs";
 import { Brain } from "@phosphor-icons/react";
 import { CaretDown, DotsThree, PencilSimple, Plus, Trash } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import {
   ConfirmDialog, EmptyBlock, ErrorNote, FormField, Gate, Pick, Row, Section, SetupPage, Status, Toggle, registerCommands,
 } from "@/setup/kit";
@@ -407,7 +407,7 @@ function MemoryBody({ snapshot }: { snapshot: Json }) {
         <TabsPanel value="memories" className="flex flex-col gap-8 pt-6">
           <MemoryOptions snapshot={snapshot} />
           {proposals.length ? <Proposals snapshot={snapshot} proposals={proposals} /> : null}
-          <Section eyebrow={memories.length ? `${memories.length}` : undefined} title="Remembered" intro="Saved context, grouped by where it applies. Forgetting is permanent.">
+          <Section eyebrow={memories.length ? `${memories.length} saved` : undefined} title="Remembered" intro="Saved context, grouped by where it applies. Forgetting is permanent.">
             {memories.length === 0 ? (
               <EmptyBlock icon={Brain} title="Nothing yet" description="Tell Neko “remember that…” in Home, or add one here.">
                 <Button variant="outline" onClick={() => setDraft({ value: {} })}><Plus /> Add memory</Button>

@@ -16,7 +16,7 @@ import {
   AlertDialogHeader, AlertDialogTitle,
 } from "@/ui/alert-dialog";
 import { WarningCircle, type Icon } from "@/ui/icons";
-import { EditorialHeading, FieldLabel, MonoLabel, PageHeader, Panel } from "@/editorial";
+import { EditorialHeading, FieldLabel, MonoLabel, PageHeader, Panel as BasePanel } from "@/editorial";
 import { useWorkbench } from "@/useStore";
 import type { Tone } from "@/setup/lib";
 
@@ -73,12 +73,15 @@ export function Section({
   );
 }
 
-/** One Panel, divided into rows. */
-export function Rows({ children, className }: { children: ReactNode; className?: string }) {
+/**
+ * The editorial Panel, with the attributes it would otherwise drop (`data-slot`,
+ * aria-*) carried on a layout-free wrapper so checks and styles can find it.
+ */
+export function Panel({ children, className, ...rest }: React.ComponentProps<"div">) {
   return (
-    <Panel className={className}>
-      <div className="divide-y divide-border/70">{children}</div>
-    </Panel>
+    <div {...rest} className="contents">
+      <BasePanel className={className}>{children}</BasePanel>
+    </div>
   );
 }
 
@@ -366,6 +369,26 @@ export function FormField({
       {children}
       {hint ? <p className="text-xs leading-snug text-muted-foreground">{hint}</p> : null}
     </div>
+  );
+}
+
+/** Ranked horizontal bars: a label, a mono value and a track, for short lists of comparable numbers. */
+export function BarList({ items, label }: { items: { name: string; value: number; text: string; hint?: string }[]; label: string }) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  return (
+    <ul aria-label={label} className="flex flex-col gap-3.5 px-5 py-4">
+      {items.map((item) => (
+        <li key={item.name} className="flex flex-col gap-1.5">
+          <div className="flex items-baseline justify-between gap-4 text-[13px]">
+            <span className="min-w-0 truncate text-foreground/90">{item.name}{item.hint ? <span className="ms-2 text-muted-foreground">{item.hint}</span> : null}</span>
+            <span className="shrink-0 font-mono tabular-nums text-muted-foreground">{item.text}</span>
+          </div>
+          <div role="meter" aria-label={item.name} aria-valuemin={0} aria-valuemax={max} aria-valuenow={item.value} className="h-1.5 overflow-hidden rounded-full bg-foreground/10">
+            <div className="h-full rounded-full bg-foreground/60 transition-[width] duration-500" style={{ width: `${(item.value / max) * 100}%` }} />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 

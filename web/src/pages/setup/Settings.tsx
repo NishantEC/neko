@@ -6,7 +6,7 @@ import { Input } from "@/ui/input";
 import { Kbd } from "@/ui/kbd";
 import { Skeleton } from "@/ui/skeleton";
 import { ArrowRight, Command as CommandIcon, Gear, ListChecks, MagnifyingGlass, X } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { cn } from "@/ui/lib/utils";
 import { EmptyBlock, Gate, Row, SetupPage, registerCommands } from "@/setup/kit";
 import { useSetupCommands } from "@/setup/commands";
@@ -171,7 +171,7 @@ function SettingsBody() {
             ))}
           </nav>
           <div className="min-w-0" data-slot="settings-section" data-section={section}>
-            <p className="mb-6 max-w-[60ch] text-[14px] text-muted-foreground">{current.summary}</p>
+            <h2 className="sr-only">{current.title}: {current.summary}</h2>
             <Suspense fallback={<Skeleton className="h-48 w-full" />}><Content /></Suspense>
           </div>
         </div>

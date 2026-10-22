@@ -10,7 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collap
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { ArrowsClockwise, CaretDown, CaretRight, DotsThree, Eye, Lightbulb, PencilSimple, Plus, Sparkle, Trash, WarningCircle } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { navigate } from "@/router";
 import { toast } from "@/ui/sonner";
 import {
@@ -420,7 +420,7 @@ function WatchingBody({ snapshot }: { snapshot: Json }) {
         )}
       </Section>
       {paused.length > 0 ? (
-        <Section eyebrow={`${paused.length}`} title="Paused" actions={<Button variant="ghost" size="sm" aria-expanded={showPaused} onClick={() => setShowPaused(!showPaused)}>{showPaused ? "Hide" : "Show"}</Button>}>
+        <Section eyebrow={`${paused.length} paused`} title="Paused watches" actions={<Button variant="ghost" size="sm" aria-expanded={showPaused} onClick={() => setShowPaused(!showPaused)}>{showPaused ? "Hide" : "Show"}</Button>}>
           {showPaused ? (
             <Panel><div className="divide-y divide-border/70">
               {paused.map((item) => <WatchRow key={item.id} snapshot={snapshot} item={item} onEdit={() => setDraft({ value: item, workspace: str(item.workspace_id) })} />)}

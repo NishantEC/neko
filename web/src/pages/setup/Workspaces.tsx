@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ArrowsClockwise, Eye, FolderSimple, PencilSimple, Plus, Stack, Wrench, X } from "@/ui/icons";
 import { navigate } from "@/router";
 import { ErrorNote, FormField, Gate, EmptyBlock, PanelFooter, Row, SetupPage, Status, registerCommands } from "@/setup/kit";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { arr, foldersOf, mcp, relativeTime, str, useRun, type Workspace } from "@/setup/lib";
 
 function WorkspaceDialog({ open, onOpenChange, workspace, folders: initialFolders }: {
@@ -99,7 +99,7 @@ function WorkspaceDialog({ open, onOpenChange, workspace, folders: initialFolder
                 className="font-mono"
                 autoComplete="off"
               />
-              <Button type="button" variant="outline" onClick={addPath} disabled={!path.trim()}>Add folder</Button>
+              <Button type="button" variant="outline" className="h-10" onClick={addPath} disabled={!path.trim()}>Add folder</Button>
             </div>
           </FormField>
           <FormField label="Instructions · optional" htmlFor="ws-instructions">
@@ -155,7 +155,7 @@ function WorkspacePanel({ snapshot, workspace, onEdit }: { snapshot: Json; works
           title="Watching"
           leading={<Eye />}
           description={watches.length === 0 ? "Nothing yet. Add a watch in Watching." : `${active} active${watches.length - active > 0 ? ` · ${watches.length - active} paused or suggested` : ""}`}
-          trailing={watches.length > 0 ? <Status tone={failing ? "warning" : "success"}>{failing ? "Needs attention" : `Synced ${relativeTime(lastChecked)}`}</Status> : null}
+          trailing={watches.length > 0 ? <Status tone={failing ? "warning" : lastChecked ? "success" : "neutral"}>{failing ? "Needs attention" : lastChecked ? `Synced ${relativeTime(lastChecked)}` : "Not checked yet"}</Status> : null}
         />
         <Row
           title="Folders"

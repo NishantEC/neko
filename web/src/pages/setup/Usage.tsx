@@ -8,9 +8,9 @@ import { onEvent, request, type Json } from "@/api";
 import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
 import { ArrowsClockwise } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { BarChart } from "@/ui/charts";
-import { EmptyBlock, ErrorNote, Gate, Row, Section, SetupPage, Status, Well } from "@/setup/kit";
+import { BarList, EmptyBlock, ErrorNote, Gate, Row, Section, SetupPage, Status, Well } from "@/setup/kit";
 import { useSetupCommands } from "@/setup/commands";
 import { arr, num, rec, relativeTime, sizeLabel, str, useNow, type Tone } from "@/setup/lib";
 import { Gauge } from "@phosphor-icons/react";
@@ -72,7 +72,7 @@ function machineState(h: Json): { tone: Tone; title: string; detail?: string } {
     return {
       tone: "warning",
       title: h.night ? "Night: one task at a time" : "Memory tight: one at a time",
-      detail: h.night ? "01:00–06:00: Neko runs one task at a time, and new work waits while the load is above 12." : undefined,
+      detail: h.night ? "01:00–06:00: Neko runs one task at a time, and new work waits while the load is above 12." : "Memory pressure is high, so agents start one at a time until it eases.",
     };
   }
   return { tone: "success", title: `Mac OK · load ${Math.round(num(h.load))}` };
@@ -126,15 +126,12 @@ function MachineWells({ health }: { health: Json }) {
 function AgentMemory({ health }: { health: Json }) {
   const agents = arr(health.agents).slice(0, 6);
   if (agents.length === 0) return <p className="text-[13px] text-muted-foreground">No agent processes are running right now.</p>;
-  const data = agents.map((a) => ({ name: str(a.name), mb: num(a.mb), processes: num(a.processes) }));
   return (
     <Panel data-slot="agent-memory">
-      <div className="px-5 pt-4"><BarChart data={data} dataKey="mb" labelKey="name" layout="horizontal" chartConfig={{ mb: { label: "Memory (MB)", color: "var(--chart-1)" } }} emptyMessage="No agents running" height={`${Math.max(110, agents.length * 38)}px`} barProps={{ isAnimationActive: false } as never} /></div>
-      <div className="divide-y divide-border/70 border-t border-border/70">
-        {agents.map((a) => (
-          <Row key={str(a.name)} title={str(a.name)} description={`${num(a.processes)} ${num(a.processes) === 1 ? "process" : "processes"}`} trailing={<span className="font-mono text-[13px] tabular-nums">{sizeLabel(num(a.mb))}</span>} />
-        ))}
-      </div>
+      <BarList
+        label="Memory held by each kind of agent"
+        items={agents.map((a) => ({ name: str(a.name), value: num(a.mb), text: sizeLabel(num(a.mb)), hint: `${num(a.processes)} ${num(a.processes) === 1 ? "process" : "processes"}` }))}
+      />
     </Panel>
   );
 }
@@ -236,7 +233,7 @@ function ModelSection({ snapshot }: { snapshot: Json }) {
   if (data.length === 0) return null;
   return (
     <Section eyebrow="Models" title="What ran" intro={`The last ${selections.length} dispatches, by model and effort.`}>
-      <Panel data-slot="model-use"><div className="px-5 pt-4"><BarChart data={data} dataKey="runs" labelKey="name" layout="horizontal" chartConfig={{ runs: { label: "Runs", color: "var(--chart-2)" } }} emptyMessage="No runs" height={`${Math.max(110, data.length * 38)}px`} yAxisProps={{ width: 190 } as never} barProps={{ isAnimationActive: false } as never} /></div><div className="h-3" /></Panel>
+      <Panel data-slot="model-use"><BarList label="Runs by model" items={data.map((d) => ({ name: d.name, value: d.runs, text: `${d.runs} ${d.runs === 1 ? "run" : "runs"}` }))} /></Panel>
     </Section>
   );
 }

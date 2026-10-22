@@ -8,7 +8,7 @@ import { Textarea } from "@/ui/textarea";
 import { Kbd } from "@/ui/kbd";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collapsible";
 import { ArrowCounterClockwise, CaretDown } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { useWorkbench } from "@/useStore";
 import { ConfirmDialog, ErrorNote, PanelFooter, Section, SettingRow, Status } from "@/setup/kit";
 import { str, useRun } from "@/setup/lib";

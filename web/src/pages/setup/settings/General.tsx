@@ -4,7 +4,7 @@ import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
 import { Kbd } from "@/ui/kbd";
 import { CircleHalf, Moon, Sun } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { getTheme, setTheme, subscribeTheme, type ThemeChoice } from "@/theme";
 import { ErrorNote, Section, SettingRow, Toggle } from "@/setup/kit";
 import { activate, providerRows, rec, str, useLoad, useRun } from "@/setup/lib";
