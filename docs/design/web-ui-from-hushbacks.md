@@ -36,8 +36,8 @@ operations tool).
 Pages (Swift today → web): Home, Tasks (list / board / tree + task chat),
 Pull requests, Workspaces, Watching, Schedules, Tools & skills (MCP), Memory,
 Profiles, Settings (+ Rulebook, runtime, budget), Usage & machine, ⌘K palette,
-Onboarding. New for the self-evolving direction: a Plugins page (installed
-plugins, enable/disable, "ask Neko to build one").
+Onboarding. New for the self-evolving direction: Customisations (your pages,
+overrides of built-ins and styles, "Change Neko"); see `one-registry.md`.
 
 ## Rules for everyone building here
 
@@ -68,10 +68,11 @@ and the provenance header.
   CSP (`default-src 'self'`) refuses `data:` fonts and `blob:` images, so
   `assetsInlineLimit` is 0 and pasted images are previewed as data URLs.
 - **Primitives, editorial, chat**: see NOTICE. Home is built only from them.
-- **Shell**: `shell/AppShell.tsx` (sidebar with Home, pages by group, a Plugins
-  section from the manifests, a Connected indicator, theme menu), `shell/
+- **Shell**: `shell/AppShell.tsx` (sidebar with Home and every registered page by
+  group, yours marked "yours", a Connected indicator, theme menu), `shell/
   CommandPalette.tsx` (⌘K: "Go to <page>", actions pages register with
-  `registerCommands`, theme, reload plugins), `router.ts` (hash router).
+  `registerCommands`, theme, reload customisations), `router.ts` (hash router).
+  Built-in and user pages are one registry (`registry.ts`, `host.ts`).
 - **Gallery**: `/#/ui` renders every vendored component with Neko sample data;
   `scripts/web-verify.mjs` screenshots each section in both themes.
 
@@ -117,8 +118,9 @@ and the provenance header.
 4. `pnpm --dir web build && node scripts/web-verify.mjs`, then read the
    screenshots in `/tmp/neko-web/`.
 
-Plugins (`<data dir>/plugins/<name>/`) are unchanged; they should style with the
-tokens (`var(--foreground)`, `var(--border)`, ...), as `web/plugins/pr-board` now does.
+Pages in `<data dir>/plugins/<name>/` register through the same host as the built-ins
+(`one-registry.md`); they should style with the tokens (`var(--foreground)`,
+`var(--border)`, ...), as `web/plugins/pr-board` does.
 
 ## Shell, composer, plugins and first run (2026-10-22)
 
@@ -204,23 +206,27 @@ registerCommands([...])   // same, without a hook; returns the remover
 `shell/actions.ts` has the shared implementations (`newTask`, `stopAllWork`,
 `approveFirstDecision`, `copyText`).
 
-### Plugins page (`#/plugins`, group "system")
+### Customisations page (`#/customisations`, group "system"; `#/plugins` redirects)
 
-Lists what is installed (name, manifest version, entry, status Running/Off/Error, the
+Lists what is yours (name, manifest version, entry, status Running/Off/Error, the
 last error from the daemon or from the module), switch to enable/disable, per-plugin
-reload, copy folder, remove (with confirmation), details in the inspector, and
-**Build a plugin with Neko**: a dialog sends Neko one chat message (the constant
-`BUILD_PLUGIN_PROMPT` in `pages/plugins/prompt.ts`, shown in the dialog before it is
-sent) asking it to open a task that writes the plugin into the plugins folder.
+reload, copy folder, remove (with confirmation), details in the inspector, Reset to
+original for each built-in you replaced, and **Change Neko**: a dialog sends Neko one
+chat message (the constant `CHANGE_NEKO_PROMPT` in `pages/customisations/prompt.ts`,
+shown in the dialog before it is sent) asking it to open a task that either writes a
+page or style of yours or changes the app's own source. There is no Plugins sidebar
+group: your pages sit in the normal groups. See `one-registry.md`.
 
 Plugin layout, `<data dir>/plugins/<name>/` (`name`: letters, digits, `-`, `_`, at most 64):
 
 ```json
-{ "title": "PR board", "description": "Open pull requests by stage", "version": "0.1.0", "entry": "index.js" }
+{ "title": "PR board", "description": "Open pull requests by stage", "version": "0.1.0", "entry": "index.js", "group": "work" }
 ```
 
-`entry` is an ES module whose default export is `register(host)`; `host` has
-`React`, `request`, `onEvent`, `registerPage`, `registerCommands` (⌘K) and `inspector`.
+`entry` is an ES module whose default export is `register(host)`; `host` is the object
+Neko's own pages register with (`React`, `request`, `onEvent`, `registerPage`,
+`registerCommands`, `inspector`, `ui`, `icons`, `storage`, `navigation`, `addSection`,
+`addTab`; see `one-registry.md`). `group` is optional (`main`, `work`, `system`).
 A `.disabled` file in the folder switches the plugin off.
 
 Daemon endpoints (all behind the same Host / Origin / Sec-Fetch-Site / token gate as
@@ -228,8 +234,10 @@ Daemon endpoints (all behind the same Host / Origin / Sec-Fetch-Site / token gat
 
 | Endpoint | |
 | --- | --- |
-| `GET /api/plugins` | list: `id, title, entry, version (mtime), manifest_version, disabled, path, description, error` |
+| `GET /api/plugins` | list: `id, title, entry, version (mtime), manifest_version, group, disabled, path, description, error` |
 | `GET /api/plugin-folder` | `{ path }` |
+| `GET\|PUT\|DELETE /api/storage/<id>[/<key>]` | `host.storage`: JSON values under `<data dir>/plugin-data/<id>/` (≤ 1 MiB, ≤ 256 keys, symlinks refused) |
+| `GET /custom.css` · `GET /api/customisation` | `<data dir>/custom.css` (empty when absent) and where it and the plugins folder live, with the css mtime |
 | `POST /api/plugins/<name>/enable` · `/disable` | writes/removes the `.disabled` marker; answers with the listing |
 | `DELETE /api/plugins/<name>` | removes the folder (a symlinked folder is never followed); answers with the listing |
 | `POST /api/attachments` | raw body (≤ 32 MB), `X-Neko-Filename` (percent-encoded); stored as `<data dir>/attachments/<sha256>[.ext]`; answers `{ name, reference, is_image }` |
@@ -305,7 +313,7 @@ what was adapted: `web/src/ui/NOTICE.md` → "The app shell".
 - `shell/AppSidebar.tsx`: UnifiedAppSidebar — inset, icon-collapsible (collapses
   below 900 px), header mark / name / trigger, ⌘K row, live Tasks rail, pages under a
   hairline with the sliding pebble, Settings' sections revealed under Settings,
-  Plugins, theme segment, connection row.
+  your pages (in their groups, marked "yours"), theme segment, connection row.
 - `shell/PageContainer.tsx`: every scrolling page sits in hushbacks' 1200 px column
   (`px-6 md:px-10`, `pt-12 md:pt-16 pb-24`); setup pages narrow it with `width`.
 - Settings: hushbacks' settings route — breadcrumb bar, 52rem flat settings surface.
