@@ -130,7 +130,7 @@ function Details({ task, snapshot, open }: { task: Task; snapshot: any; open: (i
   const [all, setAll] = useState(false);
   const shown = all ? events : events.slice(-EVENT_CAP);
   return (
-    <div className="grid gap-8 pb-10">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-8 pb-10">
       {assessment ? (
         <section data-slot="risk">
           <MonoLabel className="text-[10.5px]">Risk · {String(assessment.risk ?? "").replace(/^./, (c: string) => c.toUpperCase())}</MonoLabel>
@@ -149,7 +149,7 @@ function Details({ task, snapshot, open }: { task: Task; snapshot: any; open: (i
         <section key={si} data-slot="split">
           <MonoLabel className="text-[10.5px]">{split.approved ? "Parallel work" : "Parallel proposal · approval required"}</MonoLabel>
           {split.approved ? <p className="mt-1 text-[12.5px] text-muted-foreground">{split.integrated ? "Child changes integrated into this task's worktree." : "Child changes are not yet integrated."}</p> : null}
-          <div className="mt-2 grid gap-2">
+          <div className="mt-2 grid grid-cols-[minmax(0,1fr)] gap-2">
             {(split.subtasks ?? []).map((child: any, i: number) => {
               const sub = (snapshot?.tasks ?? []).find((t: any) => t.id === child.task_id);
               return (
@@ -378,7 +378,7 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
           </div>
         </TabsPanel>
         <TabsPanel value="details" className="min-h-0 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[728px] px-5 pt-5">
+          <div className="mx-auto w-full min-w-0 max-w-[728px] px-5 pt-5">
             <Details task={task} snapshot={snapshot} open={onOpenTask} />
           </div>
         </TabsPanel>

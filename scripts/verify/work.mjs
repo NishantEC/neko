@@ -225,6 +225,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     await page.getByRole("menuitem", { name: /Delete/ }).click();
     await page.getByRole("alertdialog").waitFor({ timeout: 3000 });
     check(/Delete this task\?/.test(await page.getByRole("alertdialog").innerText()), "Delete asks for confirmation");
+    await sleep(450);
     await shot("work-confirm-delete");
     await a11y("confirm dialog");
     await page.getByRole("button", { name: "Keep it" }).click();
@@ -255,6 +256,15 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   const overflow = await page.locator("[data-slot='task-board']").evaluate((el) => el.scrollWidth <= el.parentElement.clientWidth + 1);
   check(overflow, "the board's columns fit the width without scrolling sideways");
   await both("work-tasks-board");
+  // a drop the daemon would refuse is explained, not attempted: a card cannot be dragged into Ready to review
+  const card = page.locator("[data-slot='board-column'][data-stage='needsYou'] [data-slot='task-row']").first();
+  await card.dragTo(page.locator("[data-slot='board-column'][data-stage='review']"));
+  await page.getByText("Neko moves a task to review once its work and checks are done.").waitFor({ timeout: 4000 });
+  check(true, "dragging a card where the daemon will not take it says why");
+  await card.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Open" }).waitFor({ timeout: 3000 });
+  check((await page.getByRole("menuitem", { name: /^Move to Running/ }).count()) === 1, "a card's context menu offers the moves the daemon allows");
+  await page.keyboard.press("Escape");
   await page.locator("[data-slot='done-rail']").click();
   await page.locator("[data-slot='board-column'][data-stage='done']").waitFor({ timeout: 3000 });
   check(true, "the Done rail opens into a column");
@@ -288,14 +298,15 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   const closeButton = page.getByRole("button", { name: /^Close #\d+…/ }).first();
   if (await closeButton.count()) {
     await closeButton.click();
-    await page.getByRole("dialog").waitFor({ timeout: 3000 });
+    await page.getByRole("dialog", { name: /^Close #/ }).waitFor({ timeout: 3000 });
     const submit = page.getByRole("button", { name: "Close pull request" });
     await page.getByRole("textbox", { name: "Why (posted as a comment)" }).fill("");
     check(await submit.isDisabled(), "closing a pull request needs a comment");
+    await sleep(450);
     await shot("work-prs-close-dialog");
     await a11y("close pull request dialog");
     await page.getByRole("button", { name: "Cancel" }).click();
-    await page.getByRole("dialog").waitFor({ state: "detached", timeout: 3000 });
+    await page.getByRole("dialog", { name: /^Close #/ }).waitFor({ state: "detached", timeout: 3000 });
   }
   await page.getByRole("button", { name: "Pull request options" }).click();
   await page.getByRole("menu").waitFor({ timeout: 3000 });
@@ -398,6 +409,11 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   check((await page.locator("[data-slot='delivery']").count()) === 1, "the pull request shows as where the work went");
   check((await page.getByRole("link", { name: /Open pull request/ }).count()) >= 1, "a ready task with an open pull request offers Open pull request");
   await page.locator("[data-slot='result']").scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "More task actions" }).click();
+  await page.getByRole("menu").waitFor({ timeout: 3000 });
+  check((await page.getByRole("menuitemcheckbox", { name: /Land on main in athena/ }).count()) === 1, "the ⋯ menu has the land-on-main switch for the task's repository");
+  check((await page.getByRole("menuitem", { name: "Rename…" }).count()) === 1 && (await page.getByRole("menuitem", { name: "Cancel task" }).count()) === 1, "the ⋯ menu offers Rename and Cancel task");
+  await page.keyboard.press("Escape");
   await both("work-rich-task-ready");
   await page.getByRole("tab", { name: "Changes" }).click();
   await page.locator("[data-slot='changed-file']").first().waitFor({ timeout: 5000 });
