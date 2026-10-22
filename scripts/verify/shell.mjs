@@ -143,6 +143,10 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   const barText = (await bar.innerText()).replace(/\s+/g, " ");
   check(/New work is on hold/.test(barText) && /waiting on you|Working/.test(barText), `the sidebar status shows the machine hold and what waits on you: "${barText}"`);
   check((await page.locator("[data-slot='theme-menu']").count()) === 1 && (await page.locator(".sky-segment").count()) === 0, "the theme is one menu button in the sidebar, not a segmented switch");
+  await page.locator("[data-slot='theme-menu']").click();
+  await page.getByRole("menuitemradio", { name: "Light" }).waitFor({ timeout: 3000 });
+  check((await page.getByRole("menuitemradio").count()) === 3, "the theme menu opens with System, Light and Dark");
+  await page.keyboard.press("Escape");
   check((await page.locator("[data-slot='machine']").getAttribute("data-level")) === "holding", "the machine entry reports the hold level");
   await page.locator("[data-slot='machine']").click();
   await page.waitForSelector("[data-slot='popover-content']", { timeout: 3000 });
