@@ -409,6 +409,8 @@ fn route(mut stream: TcpStream, req: Req, config: &Config, backend: &dyn Backend
         if !get { Reply::text(405, "Method Not Allowed") } else { Reply::json(&serde_json::json!({ "path": config.plugins_dir.to_string_lossy() })) }
     } else if let Some(rest) = path.strip_prefix("/api/plugins/") {
         plugin_route(&config.plugins_dir, &req.method, rest)
+    } else if path == "/api/files" {
+        if !get { Reply::text(405, "Method Not Allowed") } else { mention_files(&req.query, backend) }
     } else if path == "/api/attachments" {
         if req.method != "POST" { Reply::text(405, "Method Not Allowed") } else { store_attachment(&config.attachments_dir, req.header("x-neko-filename"), &req.body) }
     } else if let Some(rest) = path.strip_prefix("/plugins/") {
@@ -675,6 +677,91 @@ fn plugin_route(plugins: &Path, method: &str, rest: &str) -> Reply {
         Ok(()) => Reply::json(&list_plugins(plugins)),
         Err(_) => Reply::text(500, "Internal Server Error"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// File mentions (`@` in the composer)
+// ---------------------------------------------------------------------------
+
+const MENTION_FILES: usize = 5;
+const MENTION_TIMEOUT: Duration = Duration::from_millis(1500);
+const MENTION_NOISE: [&str; 8] = ["/node_modules/", "/.git/", "/target/", "/.build/", "/DerivedData/", "/Pods/", "/Library/", "/."];
+
+/// Letters, digits and `._- ` only: what is left once nothing can break out of
+/// the Spotlight predicate (the native composer filters the same way).
+fn mention_pattern(query: &str) -> String {
+    query.chars().filter(|c| c.is_alphanumeric() || "._- ".contains(*c)).collect()
+}
+
+/// "Documents › neko" for `/Users/me/Documents/neko/a.rs`: the last two folders
+/// of the parent, relative to home, as the native composer shows them.
+fn mention_location(path: &str, home: &str) -> String {
+    let parent = Path::new(path).parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    let relative = parent.strip_prefix(home).unwrap_or(&parent).trim_matches('/').to_string();
+    if relative.is_empty() {
+        return "Home".into();
+    }
+    let parts: Vec<&str> = relative.split('/').collect();
+    parts[parts.len().saturating_sub(2)..].join(" › ")
+}
+
+/// `GET /api/files?q=<start of a file name>&workspace=<id>`: up to five files
+/// whose names start with `q` in the folders of that workspace (or of every
+/// workspace). The same Spotlight query the native composer runs, resolved
+/// here from the daemon's own snapshot so the browser never names a folder.
+fn mention_files(query: &str, backend: &dyn Backend) -> Reply {
+    let none = || Reply::json(&serde_json::json!({ "files": [] }));
+    let q = percent_decode(&query_param(query, "q").unwrap_or("").replace('+', " ")).unwrap_or_default();
+    let workspace = percent_decode(query_param(query, "workspace").unwrap_or("")).unwrap_or_default();
+    let pattern = mention_pattern(&q);
+    if q.chars().count() < 2 || pattern.is_empty() || pattern.len() > 64 {
+        return none();
+    }
+    let Response::Workbench(snapshot) = backend.request(Request::Workbench(neko_protocol::workbench::Command::Snapshot)) else { return none() };
+    let mut folders: Vec<String> = Vec::new();
+    for workspace_record in snapshot.workspaces.iter().filter(|w| workspace.is_empty() || w.id == workspace) {
+        let listed = snapshot.workspace_folders.get(&workspace_record.id).cloned().unwrap_or_default();
+        let listed = if listed.is_empty() { vec![workspace_record.repository.clone()] } else { listed };
+        folders.extend(listed.into_iter().filter(|f| !f.is_empty() && Path::new(f).is_dir()));
+    }
+    folders.dedup();
+    folders.truncate(6);
+    if folders.is_empty() {
+        return none();
+    }
+    let mut command = std::process::Command::new("/usr/bin/mdfind");
+    for folder in &folders {
+        command.arg("-onlyin").arg(folder);
+    }
+    command.arg(format!("kMDItemFSName == '{pattern}*'cd")).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+    let Ok(mut child) = command.spawn() else { return none() };
+    let Some(mut out) = child.stdout.take() else { return none() };
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = out.read_to_string(&mut text);
+        let _ = tx.send(text);
+    });
+    let text = match rx.recv_timeout(MENTION_TIMEOUT) {
+        Ok(text) => text,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return none();
+        }
+    };
+    let _ = child.wait();
+    let home = std::env::var("HOME").unwrap_or_default();
+    let files: Vec<serde_json::Value> = text
+        .lines()
+        .filter(|path| !MENTION_NOISE.iter().any(|noise| path.contains(noise)))
+        .take(MENTION_FILES)
+        .map(|path| {
+            let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            serde_json::json!({ "path": path, "name": name, "location": mention_location(path, &home) })
+        })
+        .collect();
+    Reply::json(&serde_json::json!({ "files": files }))
 }
 
 // ---------------------------------------------------------------------------
