@@ -2928,6 +2928,7 @@ mod tests {
         {
             let db = controller.db.lock().unwrap();
             let mut state = store::load(&db).unwrap();
+            state.max_writable_per_repository = Some(4);
             let mut other = state.workspaces[0].clone();
             other.id = "other".into();
             other.repository = "/other".into();
@@ -3039,6 +3040,7 @@ mod tests {
         {
             let db = controller.db.lock().unwrap();
             let mut state = store::load(&db).unwrap();
+            state.max_writable_per_repository = Some(4);
             for n in 0..5 {
                 let mut task = state.tasks[0].clone();
                 task.id = format!("more-{n}");
