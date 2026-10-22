@@ -137,7 +137,7 @@ function WorkspacePanel({ snapshot, workspace, onEdit }: { snapshot: Json; works
 
   return (
     <Panel data-slot="workspace" data-workspace={workspace.name}>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
         <div className="flex min-w-0 items-center gap-3">
           <span aria-hidden className="size-2 shrink-0 rounded-full bg-success" />
           <h3 className="truncate text-[17px] font-medium text-strong">{workspace.name}</h3>

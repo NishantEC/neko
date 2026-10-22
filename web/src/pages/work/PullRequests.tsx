@@ -61,7 +61,7 @@ function Row({ row, ui }: { row: PullRequestRow; ui: Ui }) {
     <Button size="sm" variant={variant} aria-label={`Merge ${row.number}`} onClick={merge}>Merge</Button>
   );
   return (
-    <li data-slot="pr-row" data-verdict={row.verdict} data-task-id={row.id} className="flex items-start gap-3 px-4 py-3">
+    <li data-slot="pr-row" data-verdict={row.verdict} data-task-id={row.id} className="flex items-start gap-3 px-5 py-4">
       <Icon size={17} weight="bold" aria-label={VERDICT_TITLE[row.verdict]} role="img" className={cn("mt-0.5 shrink-0", TONE_TEXT[tone])} />
       <div className="min-w-0 flex-1">
         {/* The title opens the task; the actions stay sibling buttons, never nested inside it. */}
@@ -213,7 +213,7 @@ export default function PullRequests() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="w-full max-w-[1040px] px-6 pb-12">
+        <div className="w-full max-w-[1040px] px-6 pb-12 md:px-10">
           {!connected ? <p role="status" className="mb-3 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p> : null}
           {shown.length === 0 ? (
             <p className="py-10 text-center text-[13px] text-muted-foreground">Nothing is open. {hiddenFinished} merged or closed.</p>

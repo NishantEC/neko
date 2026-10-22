@@ -111,7 +111,7 @@ function RuntimePanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnTy
           )}
         </SettingRow>
         {source ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 text-[13px]">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 text-[13px]">
             <span className="text-muted-foreground">Connection</span>
             <span className="flex items-center gap-2">
               <Status tone={ready ? "success" : "warning"}>{str(source.connection) || (ready ? "Ready" : "Not ready")}</Status>
@@ -145,7 +145,7 @@ function RuntimePanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnTy
             <CollapsibleTrigger render={<Button variant="outline" size="sm" className="w-fit" />}>Use an exact model ID</CollapsibleTrigger>
           </SettingRow>
           <CollapsibleContent>
-            <div className="flex items-center gap-2 px-5 pb-4">
+            <div className="flex items-center gap-2 px-6 pb-4">
               <Input aria-label="Exact model ID" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Or enter an exact model ID" className="font-mono" />
               <Button variant="outline" className="h-10" disabled={!validId(custom.trim())} onClick={() => { setModel(custom.trim()); setCheck(null); }}>Use ID</Button>
             </div>
@@ -153,7 +153,7 @@ function RuntimePanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnTy
         </Collapsible>
       </div>
       {check ? (
-        <div className="flex items-start gap-2 border-t border-border/70 px-5 py-3.5 text-[13px]" role="status">
+        <div className="flex items-start gap-2 border-t border-border/70 px-6 py-3.5 text-[13px]" role="status">
           {check.ok ? <CheckCircle className="mt-0.5 size-4 text-success" /> : check.unavailable ? <WarningCircle className="mt-0.5 size-4 text-warning-foreground" /> : <XCircle className="mt-0.5 size-4 text-destructive" />}
           <span className="select-text">{check.message}</span>
         </div>
@@ -250,7 +250,7 @@ function PinsPanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnType<
           <Toggle checked={paid} onChange={setPaid} label="Allow automatic paid speed" />
         </SettingRow>
         {last ? (
-          <div className="px-5 py-3.5 text-[13px] text-muted-foreground">
+          <div className="px-6 py-3.5 text-[13px] text-muted-foreground">
             <span className="font-mono text-[11px] uppercase tracking-[0.14em]">Last run</span>{" "}
             {str(last.runtime?.model) || "default model"}{last.runtime?.reasoning_effort ? ` · ${last.runtime.reasoning_effort} effort` : ""}
             {last.automatic ? " · chosen by Neko" : " · pinned"} — {str(last.reason)}
@@ -297,7 +297,7 @@ function BudgetPanel({ snapshot }: { snapshot: Json }) {
             <Button type="submit" size="sm" variant="outline" disabled={busy || invalid || clean === (savedText === "" ? "" : savedText)}>Save budget</Button>
           </form>
         </SettingRow>
-        {invalid ? <p className="px-5 py-3 text-[13px] text-warning-foreground">Enter an amount between 0.01 and 1000, or leave it empty.</p> : null}
+        {invalid ? <p className="px-6 py-3 text-[13px] text-warning-foreground">Enter an amount between 0.01 and 1000, or leave it empty.</p> : null}
         <SettingRow id="tickets-at-once" title="Tasks at once" description="Other tasks wait their turn and start as running ones finish. Work already running is not stopped.">
           <Pick label="Tasks at once" value={String(snapshot.max_running_tickets ?? 0)} onChange={(v) => void limit("SetMaxRunningTickets", v)} options={options([1, 2, 3, 5], snapshot.max_running_tickets, "No limit")} disabled={busy} />
         </SettingRow>

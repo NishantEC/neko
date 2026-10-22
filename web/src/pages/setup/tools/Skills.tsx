@@ -18,7 +18,7 @@ function SkillRow({ skill, workspace, enabled, run, busy }: { skill: Json; works
   return (
     <Collapsible open={open} onOpenChange={setOpen} data-slot="skill">
       <CollapsibleTrigger
-        render={<button type="button" aria-label={`${str(skill.name)}, ${!record ? "available" : changed ? "changed" : "enabled"}`} className="flex w-full items-start gap-3 px-5 py-4 text-start outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}
+        render={<button type="button" aria-label={`${str(skill.name)}, ${!record ? "available" : changed ? "changed" : "enabled"}`} className="flex w-full items-start gap-3 px-6 py-4 text-start outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}
       >
         <span aria-hidden className="mt-0.5 text-muted-foreground">{open ? <CaretDown /> : <CaretRight />}</span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -28,7 +28,7 @@ function SkillRow({ skill, workspace, enabled, run, busy }: { skill: Json; works
         <Status tone={changed ? "warning" : record ? "success" : "neutral"}>{!record ? "Available" : changed ? "Changed" : "Enabled"}</Status>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="flex flex-col gap-3 px-5 pb-5 ps-[3.25rem] text-[13px]">
+        <div className="flex flex-col gap-3 px-6 pb-5 ps-[3.5rem] text-[13px]">
           <p className="select-text break-all font-mono text-xs text-muted-foreground">{str(skill.path)}</p>
           {changed ? <p className="flex items-center gap-2 text-warning-foreground"><WarningCircle /> Instructions changed. Review them before enabling the updated version.</p> : null}
           <div className="flex flex-wrap gap-2">
@@ -58,7 +58,7 @@ function Proposal({ proposal, run, busy }: { proposal: Json; run: (s: () => Prom
   const decide = (accept: boolean) => void run(() => skillsCmd("DecideProposal", { id: proposal.id, content_hash: proposal.content_hash, accept }));
   return (
     <Collapsible data-slot="skill-proposal" data-key={key}>
-      <CollapsibleTrigger render={<button type="button" className="flex w-full items-start gap-3 px-5 py-4 text-start outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}>
+      <CollapsibleTrigger render={<button type="button" className="flex w-full items-start gap-3 px-6 py-4 text-start outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-[14px] font-medium">{str(proposal.name)}</span>
           <span className="text-[13px] text-muted-foreground">Suggested skill · Review instructions</span>
@@ -66,7 +66,7 @@ function Proposal({ proposal, run, busy }: { proposal: Json; run: (s: () => Prom
         <CaretDown aria-hidden className="text-muted-foreground" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="flex flex-col gap-3 px-5 pb-5 text-[13px]">
+        <div className="flex flex-col gap-3 px-6 pb-5 text-[13px]">
           <p className="select-text break-all text-muted-foreground">{str(proposal.source)}</p>
           <p className="text-muted-foreground">{str(proposal.audit_status)}</p>
           {auditUrl ? (
@@ -138,11 +138,11 @@ export function SkillsTab({ snapshot, workspace }: { snapshot: Json; workspace: 
       )}
       <Panel>
         <Collapsible open={showFind} onOpenChange={setShowFind}>
-          <CollapsibleTrigger render={<button type="button" className="flex w-full items-center gap-2 px-5 py-4 text-start text-[14px] font-medium outline-none hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}>
+          <CollapsibleTrigger render={<button type="button" className="flex w-full items-center gap-2 px-6 py-4 text-start text-[14px] font-medium outline-none hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}>
             <Plus aria-hidden /> Find a skill
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="flex flex-col gap-3 border-t border-border/70 px-5 py-4">
+            <div className="flex flex-col gap-3 border-t border-border/70 px-6 py-4">
               <a className="inline-flex w-fit items-center gap-1.5 text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href="https://skills.sh" target="_blank" rel="noreferrer noopener">Browse skills.sh <ArrowSquareOut /></a>
               <FormField label="GitHub SKILL.md URL" htmlFor="skill-url" hint="Only the instruction file is previewed. Scripts and references are not installed.">
                 <Input id="skill-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/…/SKILL.md" className="font-mono" />

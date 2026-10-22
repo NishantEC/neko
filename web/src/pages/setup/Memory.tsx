@@ -110,7 +110,7 @@ function MemoryRow({ snapshot, entry, onEdit, kindLabel }: { snapshot: Json; ent
   const [confirm, setConfirm] = useState(false);
   const source = str(entry.source);
   return (
-    <div data-slot="memory" className="flex flex-col gap-2.5 px-5 py-4">
+    <div data-slot="memory" className="flex flex-col gap-2.5 px-6 py-4">
       <div className="flex items-start gap-3">
         <p className="min-w-0 flex-1 select-text whitespace-pre-wrap text-[14px] leading-relaxed text-foreground/90">{str(entry.text)}</p>
         <DropdownMenu>
@@ -155,7 +155,7 @@ function Proposals({ snapshot, proposals }: { snapshot: Json; proposals: Json[] 
       <Panel>
         <div className="divide-y divide-border/70">
           {proposals.map((p) => (
-            <div key={str(p.id)} data-slot="memory-proposal" className="flex flex-col gap-3 px-5 py-4">
+            <div key={str(p.id)} data-slot="memory-proposal" className="flex flex-col gap-3 px-6 py-4">
               <p className="select-text whitespace-pre-wrap text-[14px] leading-relaxed">{str(p.text)}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" disabled={busy} onClick={() => void run(() => command("DecideMemoryProposal", { id: p.id, accept: true }))}>Keep memory</Button>
@@ -277,7 +277,7 @@ function PreferenceRow({ snapshot, item, onEdit }: { snapshot: Json; item: Json;
   const fields = { workspace_id: item.workspace_id, id: item.id, expected_version: item.version };
   const applies = [...arr(item.applicability?.terms), ...arr(item.applicability?.task_ids).map((t) => `NEK-${str(t).slice(0, 4).toUpperCase()}`)].join(", ");
   return (
-    <div data-slot="preference" className="flex flex-col gap-2.5 px-5 py-4">
+    <div data-slot="preference" className="flex flex-col gap-2.5 px-6 py-4">
       <p className="select-text whitespace-pre-wrap text-[14px] leading-relaxed">{str(item.instruction)}</p>
       <p className="text-xs text-muted-foreground">Applies to: {applies || "—"}{arr(item.exceptions).length ? ` · Except: ${arr(item.exceptions).join(", ")}` : ""}</p>
       <p className="text-xs text-muted-foreground">{workspaceName(snapshot, item.workspace_id, "Workspace")} · version {item.version}</p>
@@ -299,7 +299,7 @@ function DecisionCard({ record }: { record: Json }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   return (
-    <div data-slot="decision" className="flex flex-col gap-2 px-5 py-4">
+    <div data-slot="decision" className="flex flex-col gap-2 px-6 py-4">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-[14px] font-medium">{decisionTitle(record.action)}</p>

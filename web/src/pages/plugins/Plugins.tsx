@@ -84,7 +84,7 @@ function PluginRow({ listing, problem, pages, busy, onToggle, onReload, onRemove
   const lastError = listing.error ?? problem;
   const label = listing.title || listing.id;
   return (
-    <li data-slot="plugin-row" data-plugin={listing.id} data-status={status.tone} className="flex flex-col gap-3 px-5 py-4">
+    <li data-slot="plugin-row" data-plugin={listing.id} data-status={status.tone} className="flex flex-col gap-3 px-6 py-4">
       <div className="flex items-start gap-3.5">
         <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-foreground/[0.06] text-foreground">
           {status.tone === "error" ? <Warning className="text-warning-foreground" /> : <PuzzlePiece />}
@@ -198,7 +198,7 @@ export default function Plugins() {
 
   return (
     <div data-slot="plugins-page" className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-10">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 pt-12 pb-20 md:px-10">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <PageHeader
             eyebrow="System"
@@ -216,7 +216,7 @@ export default function Plugins() {
         </div>
 
         <Panel>
-          <div className="flex items-center gap-3 px-5 py-3">
+          <div className="flex items-center gap-3 px-6 py-3">
             <MonoLabel className="text-[10.5px]">Folder</MonoLabel>
             <code data-slot="plugin-folder" className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-foreground" title={folder ?? undefined}>{folder ?? "…"}</code>
             <Button type="button" variant="ghost" size="xs" disabled={!folder} onClick={() => folder && void copyText(folder, "Folder path copied")}>
