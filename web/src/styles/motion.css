@@ -166,3 +166,22 @@
     translate: none;
   }
 }
+
+/* BoardUI's entrance: fade + slight scale + a small blur, once, ease-out. Board cards
+   condense into place; the refusal notice rises in. Nothing repeats. */
+@keyframes board-card-in {
+  from { opacity: 0; transform: scale(0.96); filter: blur(2px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes board-notice-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.board-card-in {
+  animation: board-card-in 240ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 28ms);
+}
+.board-notice-in { animation: board-notice-in 200ms var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) {
+  .board-card-in, .board-notice-in { animation: none; }
+}

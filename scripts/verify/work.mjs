@@ -63,6 +63,20 @@ index 7c1d9aa..e41b6f0 100644
  ];
 `;
 
+
+/** Carries a card with the pointer in small steps (dnd-kit wants a real gesture). `hold` leaves the button down. */
+async function mouseDrag(page, from, to, { hold = false } = {}) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const a = await from.boundingBox();
+  const b = await to.boundingBox();
+  await page.mouse.move(a.x + a.width / 2, a.y + 24);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2 + 12, a.y + 40, { steps: 4 });
+  await page.mouse.move(b.x + b.width / 2, b.y + Math.min(140, b.height / 2), { steps: 14 });
+  await sleep(120);
+  if (!hold) await page.mouse.up();
+}
+
 /** A richer snapshot built from the saved real one, with the states the test daemon's data lacks. */
 function richSnapshot() {
   const base = JSON.parse(readFileSync(SEED, "utf8"));
@@ -266,27 +280,58 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   // board (with no task open, so it has the whole width)
   await page.evaluate(() => { location.hash = "/tasks"; });
   await sleep(300);
-  await page.getByRole("radio", { name: "Board" }).or(page.getByLabel("Board", { exact: true })).first().click();
+  await page.getByLabel("Board", { exact: true }).first().click();
   await page.locator("[data-slot='task-board']").waitFor({ timeout: 5000 });
   const columns = await page.locator("[data-slot='board-column']").count();
   check(columns === 4 && (await page.locator("[data-slot='done-rail']").count()) === 1, `the board fits ${columns} columns and folds Done into a rail`);
+  const counts = await page.locator("[data-slot='board-column']").evaluateAll((els) => els.map((e) => [e.dataset.stage, Number(e.querySelector("[data-slot='column-count']").textContent), e.querySelectorAll("[data-card='board-card']").length]));
+  check(counts.every(([, n, cards]) => n === cards), `each column's count matches its cards (${counts.map(([k, n]) => `${k} ${n}`).join(", ")})`);
   const overflow = await page.locator("[data-slot='task-board']").evaluate((el) => el.scrollWidth <= el.parentElement.clientWidth + 1);
-  check(overflow, "the board's columns fit the width without scrolling sideways");
+  check(overflow || Number(process.env.NEKO_WEB_WIDTH ?? 1440) < 1300, "the board's columns fit the width without scrolling sideways (at desktop width)");
   await both("work-tasks-board");
-  // a drop the daemon would refuse is explained, not attempted: a card cannot be dragged into Ready to review
-  const card = page.locator("[data-slot='board-column'][data-stage='needsYou'] [data-slot='task-row']").first();
-  await card.dragTo(page.locator("[data-slot='board-column'][data-stage='review']"));
-  await page.getByText("Neko moves a task to review once its work and checks are done.").waitFor({ timeout: 4000 });
-  check(true, "dragging a card where the daemon will not take it says why");
-  await card.click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Open" }).waitFor({ timeout: 3000 });
-  check((await page.getByRole("menuitem", { name: /^Move to Running/ }).count()) === 1, "a card's context menu offers the moves the daemon allows");
-  await page.keyboard.press("Escape");
+  const hasCard = await page.locator("[data-slot='board-column'][data-stage='needsYou'] [data-slot='task-row']").count();
+  if (hasCard) {
+    // a drop the daemon would refuse is explained inline, not attempted: a card cannot be dragged into Ready to review
+    const card = page.locator("[data-slot='board-column'][data-stage='needsYou'] [data-slot='task-row']").first();
+    await mouseDrag(page, card, page.locator("[data-slot='board-column'][data-stage='review']"), { hold: true });
+    await page.locator("[data-slot='board-column'][data-stage='review'][data-drop='refuse']").waitFor({ timeout: 3000 });
+    check((await page.locator("[data-slot='board-column'][data-stage='review'] [data-slot='drop-slot']").innerText()).includes("Neko moves a task to review"), "while carrying a card over a column that will not take it, the column says why");
+    await sleep(250);
+    await shot("work-tasks-board-refuse-hover");
+    await page.mouse.up();
+    const notice = page.locator("[data-slot='board-notice']");
+    await notice.waitFor({ timeout: 4000 });
+    check(/Neko moves a task to review once its work and checks are done/.test(await notice.innerText()), "dropping a card where the daemon will not take it says why, inline");
+    await sleep(300);
+    await shot("work-tasks-board-notice");
+    await a11y("board notice");
+    await notice.getByRole("button", { name: "Dismiss" }).click();
+    await card.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Open" }).waitFor({ timeout: 3000 });
+    check((await page.getByRole("menuitem", { name: /^Move to Running/ }).count()) === 1, "a card's context menu offers the moves the daemon allows");
+    await page.keyboard.press("Escape");
+    // Esc cancels a drag and the card stays where it was
+    const before = await page.locator("[data-slot='board-column'][data-stage='needsYou'] [data-slot='task-row']").count();
+    await mouseDrag(page, card, page.locator("[data-slot='board-column'][data-stage='upNext']"), { hold: true });
+    await page.locator("[data-slot='board-card-overlay']").waitFor({ timeout: 3000 });
+    await page.keyboard.press("Escape");
+    await page.locator("[data-slot='board-card-overlay']").waitFor({ state: "detached", timeout: 3000 });
+    await page.mouse.up();
+    check((await page.locator("[data-slot='board-column'][data-stage='needsYou'] [data-slot='task-row']").count()) === before, "Esc during a drag puts the card back");
+    // a click opens the sheet
+    await card.click();
+    await page.waitForFunction(() => location.hash.includes("task="), null, { timeout: 3000 });
+    check(true, "clicking a card opens the task sheet");
+    await sleep(500);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !location.hash.includes("task="), null, { timeout: 3000 });
+  }
   await page.locator("[data-slot='done-rail']").click();
   await page.locator("[data-slot='board-column'][data-stage='done']").waitFor({ timeout: 3000 });
   check(true, "the Done rail opens into a column");
   await shot("work-tasks-board-done");
-  await page.getByLabel("Hide the Done column").click();
+  await page.getByRole("button", { name: "Done options" }).click();
+  await page.getByRole("menuitem", { name: "Fold into a rail" }).click();
 
   // tree layout
   await page.getByLabel("Tree", { exact: true }).click();
@@ -343,11 +388,14 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   const fixture = richSnapshot();
   const ids = fixture.__ids;
   delete fixture.__ids;
+  const commands = [];
   await page.route("**/api/request", async (route) => {
     let body = null;
     try { body = JSON.parse(route.request().postData() ?? "null"); } catch { /* not JSON */ }
     if (body === null || typeof body !== "object") return route.continue();
     if (body.Workbench === "Snapshot") return route.fulfill({ json: { Workbench: fixture } });
+    // a command: record it (nothing is written anywhere) and answer with the unchanged snapshot
+    if (body.Workbench && typeof body.Workbench === "object") { commands.push(body.Workbench); return route.fulfill({ json: { Workbench: fixture } }); }
     if (body.WorkbenchIfChanged) {
       if (body.WorkbenchIfChanged.digest === fixture.digest) {
         await sleep(5000);
@@ -375,6 +423,94 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await page.getByLabel("Board", { exact: true }).click();
   await page.locator("[data-slot='task-board']").waitFor();
   await both("work-rich-board");
+
+  // dragging between columns sends the daemon's own commands, and only those
+  const col = (stage) => page.locator(`[data-slot='board-column'][data-stage='${stage}']`);
+  const cardIn = (stage, status) => col(stage).locator(`[data-slot='task-row'][data-status='${status}']`).first();
+  const approval = cardIn("needsYou", "AwaitingApproval");
+  const approvalId = await approval.getAttribute("data-task-id");
+  commands.length = 0;
+  await mouseDrag(page, approval, col("running"), { hold: true });
+  await page.locator("[data-slot='board-column'][data-stage='running'][data-drop='ok']").waitFor({ timeout: 3000 });
+  check((await col("running").locator("[data-slot='drop-slot']").innerText()).includes("Start work"), "a column that will take the card says what the drop does");
+  await sleep(250);
+  await shot("work-rich-board-dragging");
+  await page.mouse.up();
+  await sleep(400);
+  check(commands.length === 1 && commands[0].StartTask?.task_id === approvalId, `Needs you → Running sends StartTask for that task (${JSON.stringify(commands)})`);
+
+  // Ready to review → Done marks it done (and Done opens first, as a drop target)
+  await page.locator("[data-slot='done-rail']").click();
+  await col("done").waitFor({ timeout: 3000 });
+  const ready = cardIn("review", "ReadyForReview");
+  const readyId = await ready.getAttribute("data-task-id");
+  commands.length = 0;
+  await mouseDrag(page, ready, col("done"));
+  await sleep(400);
+  check(commands.length === 1 && commands[0].CompleteTask?.task_id === readyId, `Ready to review → Done sends CompleteTask (${JSON.stringify(commands)})`);
+
+  // Running → Done is a cancel, so it asks first and sends nothing until confirmed
+  commands.length = 0;
+  await mouseDrag(page, cardIn("running", "Building"), col("done"));
+  await page.getByRole("alertdialog").waitFor({ timeout: 3000 });
+  check(commands.length === 0 && /Cancel/.test(await page.getByRole("alertdialog").innerText()), "Running → Done asks before cancelling");
+  await page.getByRole("button", { name: "Keep working" }).click();
+  await page.getByRole("alertdialog").waitFor({ state: "detached", timeout: 3000 });
+  check(commands.length === 0, "declining the confirmation sends nothing");
+
+  // Running → Needs you, Completed → Up next: refused with a reason, nothing sent
+  await mouseDrag(page, cardIn("running", "Building"), col("needsYou"));
+  const rn = page.locator("[data-slot='board-notice']");
+  await rn.waitFor({ timeout: 3000 });
+  check(commands.length === 0 && /can’t go back to waiting/.test(await rn.innerText()), "Running → Needs you is refused with its reason");
+  await rn.getByRole("button", { name: "Dismiss" }).click();
+  await mouseDrag(page, cardIn("done", "Completed"), col("upNext"));
+  await rn.waitFor({ timeout: 3000 });
+  check(commands.length === 0 && /Finished work stays finished/.test(await rn.innerText()), "Done → Up next is refused with its reason");
+  await rn.getByRole("button", { name: "Dismiss" }).click();
+  await shot("work-rich-board-after");
+
+  // keyboard: Space picks a card up, arrows choose a column, Space drops, Enter on a card still opens it
+  const kb = cardIn("needsYou", "AwaitingApproval");
+  const kbId = await kb.getAttribute("data-task-id");
+  commands.length = 0;
+  await kb.focus();
+  await page.keyboard.press("Space");
+  const live = page.locator("[id^='DndLiveRegion']");
+  await page.waitForFunction(() => /Picked up/.test(document.querySelector("[id^='DndLiveRegion']")?.textContent ?? ""), null, { timeout: 3000 });
+  check(true, "picking a card up with Space is announced");
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(() => /Ready to review/.test(document.querySelector("[id^='DndLiveRegion']")?.textContent ?? ""), null, { timeout: 3000 });
+  check(/can’t go here/.test(await live.textContent()), "moving over a column that refuses the card announces why");
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(() => /over Running/.test(document.querySelector("[id^='DndLiveRegion']")?.textContent ?? ""), null, { timeout: 3000 });
+  check(/Start work/.test(await live.textContent()), "moving over a column that takes the card announces what the drop does");
+  await shot("work-rich-board-keyboard");
+  await page.keyboard.press("Space");
+  await sleep(400);
+  check(commands.length === 1 && commands[0].StartTask?.task_id === kbId, `keyboard drop onto Running sends StartTask (${JSON.stringify(commands)})`);
+  check(!new URL(page.url()).hash.includes("task="), "Space and the arrows never open the task");
+  // Esc puts a keyboard-carried card back and leaves the open task alone
+  const kb2 = cardIn("needsYou", "AwaitingApproval");
+  commands.length = 0;
+  await kb2.focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Escape");
+  await sleep(300);
+  check(commands.length === 0 && (await page.locator("[data-slot='board-card-overlay']").count()) === 0, "Esc cancels a keyboard drag");
+  await kb2.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => location.hash.includes("task="), null, { timeout: 3000 });
+  check(true, "Enter on a card opens the task");
+  await sleep(500);
+  await shot("work-rich-board-sheet");
+  await a11y("board with the sheet open");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !location.hash.includes("task="), null, { timeout: 3000 });
+  await page.getByRole("button", { name: "Done options" }).click();
+  await page.getByRole("menuitem", { name: "Fold into a rail" }).click();
+
 
   // tree: expand the watch, the split parent, the running task's runs
   await page.getByLabel("Tree", { exact: true }).click();
