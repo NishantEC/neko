@@ -296,6 +296,7 @@ try {
     }
     await a11y(`gallery (${theme})`);
   }
+  check((await page.locator("[data-gallery-section='workspace'] .dv-tab").count()) >= 4, "the gallery's Workspace section shows the dock with its four tabs");
   const blocks = await page.locator("[data-slot='reply-blocks'] [data-slot='reply-block']").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
   check(["choices", "plan", "chart", "form"].every((k) => blocks.includes(k)), `a reply's neko-* blocks are drawn, not shown as code (${blocks.join(", ") || "none"})`);
   check((await page.locator("[data-slot='reply-blocks'] [data-slot='reply-block'][data-kind='choices'] [role='radio']").count()) === 2, "the question offers its two options as radio choices");
