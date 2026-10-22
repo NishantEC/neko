@@ -1,32 +1,22 @@
-// A task opened: its conversation, the files it changed, the supporting detail,
-// the actions that apply to its state and a reply box (TicketPeek, TicketDetail
-// and TicketComposer in the SwiftUI app). It renders beside the list (a
-// resizable panel) or as a full page; the page decides.
+// A task opened as a full page (TaskBuilder), and the pieces the full page and the
+// side sheet (TaskSheet) share: the Details view and the task's actions.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkbench } from "@/useStore";
-import {
-  ArrowLeft, ArrowsOutSimple, Check, CaretRight, DotsThree, GitPullRequest, Link as LinkIcon, X,
-} from "@/ui/icons";
+import { Check, CaretRight, DotsThree, GitPullRequest, X } from "@/ui/icons";
 import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/ui/dropdown-menu";
-import { Tabs, TabsList, TabsPanel, TabsTab } from "@/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/ui/empty";
-import { TaskComposer, TaskConversation } from "@/chat/TaskConversation";
-import { EditorialHeading, MonoLabel } from "@/editorial";
+import { MonoLabel } from "@/editorial";
 import { MessageResponse } from "@/chat/message";
 import { cn } from "@/ui/lib/utils";
-import { Changes } from "@/work/Changes";
 import { TaskBuilder } from "@/work/TaskBuilder";
 import { Block, CommandRow } from "@/work/Thread";
 import { setLandOnMain, landsOnMain, repositoryPath, taskActions, type TaskAction, type Ui } from "@/work/taskActions";
-import { STAGE_TONE, StatusLabel, Tag } from "@/work/tone";
 import {
-  conversationState, decisionTitle, friendlyStatus, latestDecisions, pullRequestNumber, receiptOf, relative, repositoryOf,
-  stageOf, taskTitle, type Receipt, type Task,
+  conversationState, decisionTitle, friendlyStatus, latestDecisions, receiptOf, type Receipt, type Task,
 } from "@/work/model";
 
 // The task's conversation and reply box are chat/TaskConversation.tsx.
@@ -196,18 +186,16 @@ export function TaskActions({ task, snapshot, actions, ui, repo, className }: {
 export interface TaskDetailProps {
   id: string;
   ui: Ui;
-  full: boolean;
   onClose: () => void;
   onToggleFull: () => void;
   onOpenTask: (id: string) => void;
 }
 
-export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: TaskDetailProps) {
+/** A task opened as a full page: hushbacks' builder frame (TaskBuilder). Beside the list it is TaskSheet. */
+export function TaskDetail({ id, ui, onClose, onToggleFull, onOpenTask }: TaskDetailProps) {
   const { snapshot } = useWorkbench();
   const task: Task | undefined = (snapshot?.tasks ?? []).find((t: Task) => t.id === id);
-  const [tab, setTab] = useState("conversation");
   const [copied, setCopied] = useState(false);
-  useEffect(() => setTab("conversation"), [id]);
 
   const actions = useMemo(() => (task ? taskActions(task, snapshot) : []), [task, snapshot]);
   const copyLink = useCallback(() => {
@@ -234,101 +222,19 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
     );
   }
 
-  const stage = stageOf(task.status);
-  const repo = repositoryOf(snapshot, task);
-  const prNumber = pullRequestNumber(task);
-  const state = conversationState(task);
-
-  if (full) {
-    return (
-      <TaskBuilder
-        task={task}
-        snapshot={snapshot}
-        ui={ui}
-        actions={actions}
-        state={state}
-        onClose={onClose}
-        onToggleFull={onToggleFull}
-        onOpenTask={onOpenTask}
-        copied={copied}
-        onCopyLink={copyLink}
-        headingRef={heading}
-      />
-    );
-  }
-
   return (
-    <article data-slot="task-detail" data-task-id={id} aria-label={taskTitle(task)} className="flex h-full min-h-0 flex-col bg-background">
-      <header className="shrink-0 border-b border-border px-6 pt-4 pb-4">
-        <div className="mx-auto w-full max-w-[728px]">
-        <div className="flex items-center gap-1">
-          {full ? (
-            <Button variant="ghost" size="sm" onClick={onClose} className="-ms-2 text-muted-foreground"><ArrowLeft /> Tasks</Button>
-          ) : (
-            <Button variant="ghost" size="icon-sm" aria-label="Close task" title="Close (Esc)" onClick={onClose} className="-ms-2"><X /></Button>
-          )}
-          <span className="flex-1" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Copy a link to this task" onClick={copyLink}>{copied ? <Check /> : <LinkIcon />}</Button>
-            </TooltipTrigger>
-            <TooltipContent>{copied ? "Copied" : "Copy link"}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label={full ? "Show beside the list" : "Open as a full page"} onClick={onToggleFull}><ArrowsOutSimple /></Button>
-            </TooltipTrigger>
-            <TooltipContent>{full ? "Show beside the list" : "Full page"}</TooltipContent>
-          </Tooltip>
-        </div>
-        <EditorialHeading as="h2" className="mt-1 text-[22px] leading-[1.2]">
-          <span ref={heading} tabIndex={-1} className="outline-none">{taskTitle(task)}</span>
-        </EditorialHeading>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground">
-          <StatusLabel tone={STAGE_TONE[stage]} live={["Planning", "Building", "Reviewing"].includes(task.status)}>{friendlyStatus(task.status)}</StatusLabel>
-          {repo ? <Tag>{repo}</Tag> : null}
-          {prNumber ? (
-            <a href={task.pull_request.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-              <GitPullRequest size={13} aria-hidden /> {prNumber}
-            </a>
-          ) : null}
-          <span>Updated {relative(task.updated_at_ms) || "—"}</span>
-          <span className="font-mono text-[11px] text-muted-foreground/70">NEK-{String(id).slice(0, 4).toUpperCase()}</span>
-        </div>
-        <TaskActions task={task} snapshot={snapshot} actions={actions} ui={ui} repo={repo} className="mt-4" />
-        </div>
-      </header>
-
-      <Tabs value={tab} onValueChange={(v: string) => setTab(v)} className="min-h-0 flex-1 gap-0">
-        <div className="shrink-0 border-b border-border px-3">
-          <div className="mx-auto w-full max-w-[728px]">
-            <TabsList variant="underline" aria-label="Task sections">
-              <TabsTab value="conversation">Conversation</TabsTab>
-              <TabsTab value="changes">Changes</TabsTab>
-              <TabsTab value="details">Details</TabsTab>
-            </TabsList>
-          </div>
-        </div>
-        <TabsPanel value="conversation" className="flex min-h-0 flex-col">
-          <TaskConversation task={task} />
-        </TabsPanel>
-        <TabsPanel value="changes" className="min-h-0 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[728px] px-5 pb-10">
-            {task.worktree || task.parked ? <Changes taskId={id} active={tab === "changes"} /> : (
-              <p data-slot="changes-empty" className="mt-10 text-center text-[13px] text-muted-foreground">This task has no working copy yet, so nothing has changed.</p>
-            )}
-          </div>
-        </TabsPanel>
-        <TabsPanel value="details" className="min-h-0 overflow-y-auto">
-          <div className="mx-auto w-full min-w-0 max-w-[728px] px-5 pt-5">
-            <Details task={task} snapshot={snapshot} open={onOpenTask} />
-          </div>
-        </TabsPanel>
-      </Tabs>
-
-      <div className="mx-auto w-full max-w-[728px] shrink-0 px-5 pt-1 pb-4">
-        <TaskComposer task={task} ui={ui} />
-      </div>
-    </article>
+    <TaskBuilder
+      task={task}
+      snapshot={snapshot}
+      ui={ui}
+      actions={actions}
+      state={conversationState(task)}
+      onClose={onClose}
+      onToggleFull={onToggleFull}
+      onOpenTask={onOpenTask}
+      copied={copied}
+      onCopyLink={copyLink}
+      headingRef={heading}
+    />
   );
 }

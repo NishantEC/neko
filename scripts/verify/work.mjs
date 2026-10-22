@@ -188,8 +188,18 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await sleep(500);
   await both("work-task-detail-side");
 
-  // resizable side panel
-  check(await page.locator("[data-slot='resizable-handle']").count() === 1, "the task opens in a resizable side panel");
+  // the side sheet (hushbacks' response details sheet): previous / next, Esc closes
+  check(await page.locator("[data-slot='sheet-content'] [data-slot='task-detail']").count() === 1, "the task opens in a side sheet");
+  const footer = () => page.locator("[data-slot='sheet-footer']").innerText();
+  check(/Task 1 of \d+/.test(await footer()), "the sheet says where the task sits in the list");
+  await page.getByRole("button", { name: "Next task" }).click();
+  await page.waitForFunction((id) => !location.hash.includes(`task=${id}`), first, { timeout: 3000 });
+  await page.waitForFunction(() => /Task 2 of/.test(document.querySelector("[data-slot='sheet-footer']")?.textContent ?? ""), null, { timeout: 3000 }).catch(() => {});
+  check(/Task 2 of \d+/.test(await footer()), `Next task moves to the next task in the list (${await footer()})`);
+  await page.locator("[data-slot='sheet-footer']").click();
+  await page.keyboard.press("ArrowLeft");
+  await page.waitForFunction((id) => location.hash.includes(`task=${id}`), first, { timeout: 3000 });
+  check(true, "← moves back to the previous task");
 
   // detail tabs
   await page.getByRole("tab", { name: "Changes" }).click();
@@ -206,7 +216,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await page.getByRole("menuitem", { name: /Rename/ }).click();
   await page.getByRole("textbox", { name: "Name" }).fill(renamed);
   await page.getByRole("button", { name: "Rename", exact: true }).click();
-  await page.waitForFunction((t) => document.querySelector("[data-slot='task-detail'] h2")?.textContent?.includes(t), renamed, { timeout: 8000 });
+  await page.waitForFunction((t) => document.querySelector("[data-slot='task-detail'] [data-slot='task-title']")?.textContent?.includes(t), renamed, { timeout: 8000 });
   check(true, "renaming the task round-trips through the daemon and the heading updates");
   await page.waitForFunction((t) => [...document.querySelectorAll("[data-slot='task-row']")].some((r) => r.getAttribute("aria-label")?.startsWith(t)), renamed, { timeout: 8000 });
   check(true, "the list shows the new name too");
@@ -214,12 +224,15 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await page.getByRole("menuitem", { name: /Rename/ }).click();
   await page.getByRole("textbox", { name: "Name" }).fill("");
   await page.getByRole("button", { name: "Rename", exact: true }).click();
-  await page.waitForFunction((t) => !document.querySelector("[data-slot='task-detail'] h2")?.textContent?.includes(t), renamed, { timeout: 8000 });
+  await page.waitForFunction((t) => !document.querySelector("[data-slot='task-detail'] [data-slot='task-title']")?.textContent?.includes(t), renamed, { timeout: 8000 });
   check(true, "an empty name gives the task back its own title");
 
   // destructive actions ask first: open the dialog, then cancel
   const finished = page.locator("[data-slot='task-row'][data-status='Completed'], [data-slot='task-row'][data-status='Cancelled'], [data-slot='task-row'][data-status='Failed']").first();
   if (await finished.count()) {
+    // the sheet is modal, as in hushbacks: close it before picking another row
+    await page.getByRole("button", { name: "Close task" }).click();
+    await page.locator("[data-slot='task-detail']").waitFor({ state: "detached", timeout: 3000 });
     await finished.click();
     await page.getByRole("button", { name: "More task actions" }).click();
     await page.getByRole("menuitem", { name: /Delete/ }).click();

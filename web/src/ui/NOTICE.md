@@ -104,3 +104,26 @@ lines plus a dozen `@tiptap/*` packages; a textarea carries its classes and Neko
 keeps its own key handling, drafts and menus), `MessagesTimeline`'s LegendList
 virtualisation, and everything tied to T3's server state (citations, forks,
 changed-files cards, subagents, worktrees, find-in-thread, model picker).
+
+## The task side sheet, from hushbacks `apps/spa` @5d9a64b11 (2026-10-22)
+
+The task opened beside the Tasks list is hushbacks' response details sheet
+(commit 24a7b801e, "one motion system, rebuilt sheets and a response details
+sheet"). `ui/sheet.tsx` and `sheet.variants.ts` were already current.
+
+| Neko | hushbacks |
+| --- | --- |
+| `work/TaskSheet.tsx` | `pages/Builder/components/ResponseDetailPanel.tsx` |
+| `work/TaskSheet.helperComponents.tsx` | `ResponseDetailPanel.helperComponents.tsx` (ResponseDetailBody) |
+| `work/TaskSheet.hooks.ts` | `ResponseDetailPanel.hooks.ts` (useSwapFade) |
+| `work/TaskSheet.skeletons.tsx` | `ResponseDetailPanel.skeletons.tsx` + `RouteSkeletons/primitives.tsx` (Bar, Pill) |
+| `hooks/useOpenAfterMount.ts`, `lib/motion-tokens.ts` | same paths, unchanged |
+| `styles/app-sheet.css` | `index.css` (`.app-sheet` exit), `ResponsesView.css` (`response-swap`, here `sheet-swap`) |
+
+Adapted: the response became the task (title, a sky status pill, repository, PR,
+updated, ID; the task's actions and ⋯ menu under the meta row; Conversation /
+Changes / Details tabs; the reply box above the footer). Added copy link and
+full page to the header. ← → move between tasks as upstream; j / k too, as on the
+list. Docked in the list's stage from 1024 px (upstream 1280 px) and 520 px wide
+(upstream 468 px), since a conversation needs the room. The "Delete response"
+footer button has no counterpart; Delete stays in the ⋯ menu.

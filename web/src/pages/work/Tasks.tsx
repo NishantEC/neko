@@ -1,8 +1,9 @@
 // #/tasks: every task as a list, a board or a tree, with the open task beside it
-// (TicketsView.swift, TicketPeek.swift). A task is a link: #/tasks?task=<id>,
-// and `&view=full` shows it as a page. j / k move between tasks, Enter opens one,
-// Esc closes it, / searches.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// (TicketsView.swift, TicketPeek.swift) in hushbacks' response details sheet
+// (work/TaskSheet). A task is a link: #/tasks?task=<id>, and `&view=full` shows it
+// as a page. j / k move between tasks, Enter opens one, / searches; in the sheet
+// ← → (or j / k) move to the previous / next task and Esc closes it.
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useWorkbench } from "@/useStore";
 import { registerCommands, type PaletteCommand } from "@/shell/commands";
 import { DotsThree, ListChecks, MagnifyingGlass, Plus, TreeStructure, X } from "@/ui/icons";
@@ -16,7 +17,6 @@ import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/ui/dropdown-menu";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/ui/empty";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/ui/resizable";
 import { cn } from "@/ui/lib/utils";
 import { run } from "@/work/actions";
 import { useDialogs } from "@/work/dialogs";
@@ -24,6 +24,7 @@ import { byStage, flatten, stageCounts, type Filters } from "@/work/filters";
 import { setHashParams, useHashParams } from "@/work/location";
 import { WorkHeader, WorkSkeleton } from "@/work/PageFrame";
 import { TaskDetail } from "@/work/TaskDetail";
+import { TaskSheet } from "@/work/TaskSheet";
 import { taskActions } from "@/work/taskActions";
 import { TaskBoard, TaskList } from "@/work/TaskViews";
 import { TreeView } from "@/work/TreeView";
@@ -34,6 +35,15 @@ import { navigate } from "@/router";
 type Layout = "list" | "board" | "tree";
 const isLayout = (v: string): v is Layout => v === "list" || v === "board" || v === "tree";
 const ROUTE = "tasks";
+
+// hushbacks docks the sheet in the list's stage on a wide window and floats it over the page otherwise.
+const DOCK_QUERY = "(min-width: 1024px)";
+const subscribeDock = (onChange: () => void) => {
+  const mql = matchMedia(DOCK_QUERY);
+  mql.addEventListener("change", onChange);
+  return () => mql.removeEventListener("change", onChange);
+};
+const canDock = () => matchMedia(DOCK_QUERY).matches;
 
 const typing = (target: EventTarget | null) =>
   target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
@@ -54,6 +64,8 @@ export default function Tasks() {
   const [search, setSearch] = useState("");
   const searchBox = useRef<HTMLInputElement>(null);
   const page = useRef<HTMLDivElement>(null);
+  const detailStage = useRef<HTMLDivElement>(null);
+  const dock = useSyncExternalStore(subscribeDock, canDock);
   const [focusedId, setFocusedId] = useState<string | null>(null);
 
   const workspaces: { id: string; name: string }[] = snapshot?.workspaces ?? [];
@@ -240,12 +252,13 @@ export default function Tasks() {
     <TaskList {...viewProps} />
   );
 
-  const detail = taskId ? (
-    <TaskDetail key={taskId} id={taskId} ui={ui} full={full} onClose={close} onToggleFull={toggleFull} onOpenTask={open} />
-  ) : null;
-
   if (taskId && full) {
-    return <div ref={page} data-slot="tasks-page" data-layout={layout} className="flex min-h-0 flex-1 flex-col">{detail}{dialogs}</div>;
+    return (
+      <div ref={page} data-slot="tasks-page" data-layout={layout} className="flex min-h-0 flex-1 flex-col">
+        <TaskDetail key={taskId} id={taskId} ui={ui} onClose={close} onToggleFull={toggleFull} onOpenTask={open} />
+        {dialogs}
+      </div>
+    );
   }
 
   return (
@@ -258,17 +271,21 @@ export default function Tasks() {
     >
       <WorkHeader eyebrow="Work" title={title} subtitle={subtitle}>{controls}</WorkHeader>
       {!connected && snapshot ? <p role="status" className="px-6 pb-2 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p> : null}
-      <ResizablePanelGroup direction="horizontal" autoSaveId="neko-tasks-split" className="min-h-0 flex-1">
-        <ResizablePanel id="list" order={1} minSize={30} defaultSize={taskId ? 52 : 100} className="min-w-0">
-          <div className={cn("h-full", layout === "board" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto")}>{body}</div>
-        </ResizablePanel>
+      <div ref={detailStage} data-slot="tasks-stage" className="relative flex min-h-0 flex-1">
+        <div className={cn("h-full min-w-0 flex-1", layout === "board" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto")}>{body}</div>
         {taskId ? (
-          <>
-            <ResizableHandle withHandle aria-label="Resize the task panel" />
-            <ResizablePanel id="detail" order={2} minSize={30} defaultSize={48} className="min-w-0 border-s border-border">{detail}</ResizablePanel>
-          </>
+          <TaskSheet
+            id={taskId}
+            order={visible.map((t: any) => t.id)}
+            ui={ui}
+            container={dock ? detailStage : undefined}
+            onSelect={open}
+            onClose={close}
+            onToggleFull={toggleFull}
+            onOpenTask={open}
+          />
         ) : null}
-      </ResizablePanelGroup>
+      </div>
       {dialogs}
     </div>
   );
