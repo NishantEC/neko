@@ -364,7 +364,7 @@ export function FormField({
 }: { label: ReactNode; htmlFor?: string; hint?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
-      <label htmlFor={htmlFor} className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{label}</label>
+      <label htmlFor={htmlFor} className="text-[12.5px] font-medium text-muted-foreground">{label}</label>
       {children}
       {hint ? <p className="text-xs leading-snug text-muted-foreground">{hint}</p> : null}
     </div>

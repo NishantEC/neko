@@ -251,7 +251,7 @@ function PinsPanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnType<
         </SettingRow>
         {last ? (
           <div className="px-6 py-3.5 text-[13px] text-muted-foreground">
-            <span className="font-mono text-[11px] uppercase tracking-[0.14em]">Last run</span>{" "}
+            <span className="text-[12.5px] font-medium">Last run</span>{" "}
             {str(last.runtime?.model) || "default model"}{last.runtime?.reasoning_effort ? ` · ${last.runtime.reasoning_effort} effort` : ""}
             {last.automatic ? " · chosen by Neko" : " · pinned"} — {str(last.reason)}
           </div>

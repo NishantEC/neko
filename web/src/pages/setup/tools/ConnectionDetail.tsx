@@ -53,7 +53,7 @@ function ToolRow({ tool }: { tool: Json }) {
           <p>{tool.read_only ? "The server declares this tool read-only. Chat lookups can run without another prompt." : "Chat asks before each call. Turned-on watches may use their selected connections unattended."}</p>
           {schema ? (
             <div className="flex flex-col gap-1.5">
-              <span className="font-mono text-[11px] uppercase tracking-[0.14em]">Input schema</span>
+              <span className="text-[12.5px] font-medium">Input schema</span>
               <div className="max-h-72 overflow-auto rounded-xl border border-border bg-foreground/[0.03] p-3">
                 {typeof schema === "string" ? <pre className="whitespace-pre-wrap font-mono text-xs">{schema}</pre> : <JsonViewer data={schema} rootName="input" defaultExpanded />}
               </div>

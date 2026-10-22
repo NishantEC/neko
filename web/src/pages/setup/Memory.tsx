@@ -123,7 +123,7 @@ function MemoryRow({ snapshot, entry, onEdit, kindLabel }: { snapshot: Json; ent
         </DropdownMenu>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span className="font-mono uppercase tracking-[0.12em]">{kindLabel}</span>
+        <span className="font-medium">{kindLabel}</span>
         <span>{entry.workspace_id ? workspaceName(snapshot, entry.workspace_id, "Workspace") : "Everywhere"}</span>
         {source ? (
           <Collapsible>
@@ -415,7 +415,7 @@ function MemoryBody({ snapshot }: { snapshot: Json }) {
             ) : (
               scopes.map(([name, list]) => (
                 <div key={name} className="flex flex-col gap-2">
-                  <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{name} · {list.length}</span>
+                  <span className="text-[12.5px] font-medium text-muted-foreground">{name} · {list.length}</span>
                   <Panel><div className="divide-y divide-border/70">
                     {list.map((m) => <MemoryRow key={str(m.id)} snapshot={snapshot} entry={m} kindLabel={KINDS.find((k) => k.value === m.kind)?.label ?? str(m.kind)} onEdit={() => setDraft({ value: m })} />)}
                   </div></Panel>

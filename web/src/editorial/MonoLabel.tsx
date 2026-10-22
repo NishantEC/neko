@@ -10,7 +10,7 @@ export const MonoLabel: React.FC<MonoLabelProps> = ({ className, children, ...re
   <span
     {...rest}
     className={cn(
-      "inline-block font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground",
+      "inline-block text-[12.5px] font-medium text-muted-foreground",
       className,
     )}
   >
