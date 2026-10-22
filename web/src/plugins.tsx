@@ -122,6 +122,18 @@ function applyCustomCss(info: CustomisationInfo) {
   }
   const href = `/custom.css?v=${info.css_version}`;
   if (link.getAttribute("href") !== href) link.setAttribute("href", href);
+  keepLast(link);
+}
+
+/** Page chunks add their own stylesheets as you navigate; yours has to stay after all of them to win. */
+let observing = false;
+function keepLast(link: HTMLLinkElement) {
+  if (document.head.lastElementChild !== link) document.head.appendChild(link);
+  if (observing) return;
+  observing = true;
+  new MutationObserver(() => {
+    if (document.head.lastElementChild !== link) document.head.appendChild(link);
+  }).observe(document.head, { childList: true });
 }
 
 async function readCustomisation(): Promise<CustomisationInfo | null> {

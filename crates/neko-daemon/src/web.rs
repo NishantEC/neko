@@ -789,7 +789,10 @@ fn storage_keys(namespace: &Path) -> Vec<(String, u64)> {
 }
 
 /// `GET /api/storage/<id>` lists keys; `GET|PUT|DELETE /api/storage/<id>/<key>`
-/// reads, writes (a JSON body) and removes one value. `<id>` follows the plugin
+/// reads (an unset key is normal, so it answers 200 `null` with
+/// `X-Neko-Storage: unset`: a 404 is logged as an error by every browser and a
+/// 204 is reported as an aborted request), writes (a JSON body) and removes
+/// one value. `<id>` follows the plugin
 /// id rule, so a namespace is one flat folder under `plugin-data` and nothing
 /// can climb out of it; a symlinked namespace or value is refused, never
 /// followed. Values are bounded (1 MiB, 256 keys) and written atomically.
@@ -819,6 +822,11 @@ fn storage_route(root: &Path, method: &str, rest: &str, body: &[u8]) -> Reply {
                 Ok(bytes) => Reply::new(200, "OK", "application/json", bytes),
                 Err(_) => Reply::text(404, "Not Found"),
             },
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                let mut unset = Reply::new(200, "OK", "application/json", "null");
+                unset.extra.push(("X-Neko-Storage", "unset".into()));
+                unset
+            }
             _ => Reply::text(404, "Not Found"),
         },
         "PUT" => {

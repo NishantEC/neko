@@ -42,7 +42,7 @@ export function storageFor(namespace: string): PageStorage {
     async get<T>(key: string, fallback?: T) {
       check(key);
       const response = await call("GET", `${base}/${key}`);
-      if (response.status === 404) return fallback as T;
+      if (response.status === 404 || response.headers.get("x-neko-storage") === "unset") return fallback as T;
       if (!response.ok) throw new Error(`The daemon answered ${response.status}.`);
       return (await response.json()) as T;
     },

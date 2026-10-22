@@ -44,6 +44,8 @@ export interface UserRegistration {
   icon?: Icon;
   keywords?: string[];
   group?: PageGroup;
+  /** The manifest's group: for pages of its own only. A replaced built-in keeps its own group unless `group` says otherwise. */
+  defaultGroup?: PageGroup;
   component?: PageComponent;
   wrap?: (Original: PageComponent, host: Host) => ComponentType<any>;
   host: Host;
@@ -115,7 +117,7 @@ function recompute() {
     title: reg.title ?? reg.pageId,
     icon: reg.icon ?? PuzzlePiece,
     keywords: reg.keywords ?? [],
-    group: reg.group ?? "main",
+    group: reg.group ?? reg.defaultGroup ?? "main",
     component: reg.component!,
     host: reg.host,
     source: "user",
