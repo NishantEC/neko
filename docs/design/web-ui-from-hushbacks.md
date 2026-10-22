@@ -312,7 +312,8 @@ what was adapted: `web/src/ui/NOTICE.md` → "The app shell".
   The section list is in the sidebar (or the bar's pills when it is collapsed).
 - A task opened full page (`#/tasks?task=…&view=full`) is hushbacks' builder frame
   (`work/TaskBuilder.tsx`): chat panel left, Changes / Plan / Details as fused view
-  tabs on the stage, actions at the header end. Beside the list it is unchanged.
+  tabs on the stage, actions at the header end. Beside the list it is hushbacks'
+  response details sheet (`work/TaskSheet.tsx`, see NOTICE.md).
 - Tasks and Agent tree keep their own full-height frames (as hushbacks' builder does
   not use PageContainer); their headers are unchanged.
 - A field with an icon inside it needs `ps-9!`: the Sky input rule sets the padding.
