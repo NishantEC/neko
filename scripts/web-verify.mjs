@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // Self-verification loop for the web UI: starts a TEST daemon (never the real
-// one), opens the app in the shared headless Chrome, screenshots Home and the
-// PR-board plugin to /tmp/neko-web/, exercises the composer, the streaming
-// reply and plugin hot-loading, checks the daemon's access rules, and exits
-// non-zero on any console error or failed check.
+// one), opens the app in the shared headless Chrome and screenshots Home, the
+// /#/ui gallery (every section), the ⌘K palette and the PR-board plugin, each in
+// dark and light (the system preference is emulated, which is exactly how the
+// app picks its theme), to /tmp/neko-web/. It exercises the composer, the
+// streaming reply and plugin hot-loading, checks the daemon's access rules, and
+// exits non-zero on any console error, failed request or obvious accessibility
+// problem (images without alt, unlabeled buttons, inputs and links).
 //
 //   pnpm --dir web build && node scripts/web-verify.mjs
 //
@@ -33,7 +36,7 @@ const OUT = "/tmp/neko-web";
 const SEED = process.env.NEKO_WEB_SEED ?? "/tmp/neko-real-snap.json";
 const TARGET = process.env.CARGO_TARGET_DIR ?? "/Users/nish/Documents/neko/target";
 const HARNESS = process.env.NEKO_WEB_HARNESS ?? path.join(TARGET, "debug/web_harness");
-const LEASE = "neko-web";
+const LEASE = "neko-web-foundation";
 const CHROME = "http://127.0.0.1:9333";
 const sharedChrome = path.join(os.homedir(), ".agents/bin/shared-chrome");
 
@@ -94,6 +97,50 @@ function stopDaemon(child) {
 }
 
 mkdirSync(OUT, { recursive: true });
+
+/**
+ * "Axe-lite": the obvious problems, found in the live DOM. Images without alt,
+ * buttons and links with no accessible name, form controls with no label.
+ * Returns a list of strings; empty means clean.
+ */
+async function obviousProblems(page) {
+  return page.evaluate(() => {
+    const out = [];
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return s.visibility !== "hidden" && s.display !== "none" && (r.width > 0 || r.height > 0);
+    };
+    const describe = (el) => `${el.tagName.toLowerCase()}${el.getAttribute("data-slot") ? `[${el.getAttribute("data-slot")}]` : ""}${el.className && typeof el.className === "string" ? "." + el.className.split(/\s+/).slice(0, 2).join(".") : ""}`;
+    const named = (el) => {
+      if (el.getAttribute("aria-label")?.trim()) return true;
+      const by = el.getAttribute("aria-labelledby");
+      if (by && by.split(/\s+/).some((id) => document.getElementById(id)?.textContent?.trim())) return true;
+      if (el.getAttribute("title")?.trim()) return true;
+      if (el.labels && el.labels.length && [...el.labels].some((l) => l.textContent.trim())) return true;
+      if ((el.textContent ?? "").trim()) return true;
+      if ([...el.querySelectorAll("img")].some((i) => i.getAttribute("alt")?.trim())) return true;
+      if ([...el.querySelectorAll("[aria-label]")].some((i) => i.getAttribute("aria-label").trim())) return true;
+      return false;
+    };
+    for (const img of document.querySelectorAll("img")) {
+      if (!img.hasAttribute("alt")) out.push(`image without alt: ${img.getAttribute("src")?.slice(0, 60)}`);
+    }
+    for (const el of document.querySelectorAll("button, [role=button], [role=switch], [role=checkbox], [role=tab], summary")) {
+      if (visible(el) && !named(el)) out.push(`unlabeled ${describe(el)}`);
+    }
+    for (const el of document.querySelectorAll("a[href]")) {
+      if (visible(el) && !named(el)) out.push(`link without a name: ${el.getAttribute("href")}`);
+    }
+    for (const el of document.querySelectorAll("input:not([type=hidden]), textarea, select")) {
+      // Primitives keep a hidden twin input for forms; it is not a control anyone can reach.
+      if (el.closest("[aria-hidden=true]") || el.tabIndex === -1) continue;
+      if (visible(el) && !named(el)) out.push(`form control without a label: ${describe(el)}`);
+    }
+    return [...new Set(out)];
+  });
+}
+
 const daemon = startDaemon();
 let browser, context, leased = false;
 try {
@@ -111,7 +158,7 @@ try {
   execFileSync(sharedChrome, ["acquire", LEASE], { stdio: "inherit" });
   leased = true;
   browser = await chromium.connectOverCDP(CHROME);
-  context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
   const page = await context.newPage();
   const problems = [];
   page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${m.text()}`); });
@@ -119,97 +166,187 @@ try {
   page.on("requestfailed", (r) => { if (!r.url().includes("/api/events") && !r.url().includes("/api/request")) problems.push(`request failed: ${r.url()}`); });
   page.on("response", (r) => { if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`); });
 
+  const shot = (name, options = {}) => page.screenshot({ path: path.join(OUT, `${name}.png`), ...options });
+  const a11y = async (label) => {
+    const found = await obviousProblems(page);
+    check(found.length === 0, found.length ? `${label}: ${found.join("; ")}` : `${label}: no obvious accessibility problems`);
+  };
+  const scroller = () => page.locator("[role='log'] > div").first();
+  const scrollTo = (top) => scroller().evaluate((el, t) => el.scrollTo({ top: t }), top);
+
   await page.goto(`http://127.0.0.1:${PORT}/?token=${token}`, { waitUntil: "domcontentloaded" });
   check(new URL(page.url()).search === "", "the token is gone from the URL after sign-in");
-  await page.waitForSelector(".turn.user", { timeout: 20000 });
-  await page.waitForSelector("[data-running='true']", { timeout: 10000 });
-  await sleep(600);
+  await page.waitForSelector("[data-slot='user-turn']", { timeout: 20000 });
+  await page.waitForSelector("[data-slot='work-log'][data-running='true']", { timeout: 10000 });
+  await sleep(800);
+  check(await page.evaluate(() => document.documentElement.classList.contains("dark")), "the dark system preference gives <html class=dark>");
 
   // Live turn: "Working for Ns" with the newest step, and the answer growing.
-  const header = (await page.locator("[data-running='true'] .work-head").innerText()).trim();
+  const header = (await page.locator("[data-slot='work-log'][data-running='true'] [data-slot='work-head']").innerText()).trim();
   check(/^Working for \d+s/.test(header), `live work log reads "${header.replace(/\s+/g, " ")}"`);
-  check((await page.locator("[data-running='true'] .work-row.live").count()) === 1, "the newest step is shown while working");
-  const grow = async () => (await page.locator(".turn.neko[data-pending='true'] .prose").innerText().catch(() => "")).length;
+  check((await page.locator("[data-slot='work-log'][data-running='true'] [data-slot='work-live']").count()) === 1, "the newest step is shown while working");
+  const pendingProse = "[data-slot='neko-turn'][data-pending='true'] [data-slot='prose']";
+  const grow = async () => (await page.locator(pendingProse).innerText().catch(() => "")).length;
   const before = await grow();
   // Finished paragraphs arrive as whole blocks, so wait for the next one.
-  await page.waitForFunction((n) => (document.querySelector(".turn.neko[data-pending='true'] .prose")?.textContent ?? "").length > n, before, { timeout: 20000 }).catch(() => {});
+  await page.waitForFunction(([sel, n]) => (document.querySelector(sel)?.textContent ?? "").length > n, [pendingProse, before], { timeout: 20000 }).catch(() => {});
   const after = await grow();
   check(after > before, `the pending reply streams (${before} -> ${after} characters)`);
-  await page.screenshot({ path: path.join(OUT, "home-live.png") });
+  await shot("home-live");
 
   // Finished turn: scroll to its log, open it.
-  const finished = page.locator(".turn.neko[data-pending='false']").filter({ has: page.locator(".work") }).last();
+  const finished = page.locator("[data-slot='neko-turn'][data-pending='false']").filter({ has: page.locator("[data-slot='work-log']") }).last();
   await finished.scrollIntoViewIfNeeded();
-  const done = (await finished.locator(".work-head").innerText()).replace(/\s+/g, " ").trim();
+  const done = (await finished.locator("[data-slot='work-head']").innerText()).replace(/\s+/g, " ").trim();
   check(/^Worked for 1m 12s/.test(done), `finished work log reads "${done}"`);
-  await finished.locator(".work-head").click();
-  check((await finished.locator(".work-steps li").count()) > 0, "the work log expands to its steps");
+  await finished.locator("[data-slot='work-head']").click();
+  check((await finished.locator("[data-slot='work-step']").count()) > 0, "the work log expands to its steps");
   await finished.evaluate((el) => el.scrollIntoView({ block: "start" }));
-  await page.screenshot({ path: path.join(OUT, "home-worklog.png") });
-  check((await page.locator(".prose table").count()) > 0, "a GFM table renders");
+  await sleep(300);
+  await shot("home-worklog");
+  check((await page.locator("[data-slot='prose'] table").count()) > 0, "a GFM table renders");
 
   // Decision dock: the exact thing being approved, above a composer that stays usable.
-  await page.evaluate(() => document.querySelector(".scroll").scrollTo({ top: 1e9 }));
-  await page.waitForSelector(".decision", { timeout: 5000 });
-  const decision = (await page.locator(".decision").innerText()).replace(/\s+/g, " ");
-  check(/Tool approval/.test(decision) && /save_issue/.test(decision) && /Approve/.test(decision) && /Decline/.test(decision) && /1 of \d+/.test(decision), `a pending decision docks above the composer: "${decision.slice(0, 90)}…"`);
+  await scrollTo(1e9);
+  await page.waitForSelector("[data-slot='decision']", { timeout: 5000 });
+  const decision = (await page.locator("[data-slot='decision']").textContent()).replace(/\s+/g, " ");
+  check(/Tool approval/i.test(decision) && /save_issue/.test(decision) && /Approve/.test(decision) && /Decline/.test(decision) && /1 of \d+/.test(decision), `a pending decision docks above the composer: "${decision.slice(0, 90)}…"`);
   check(await page.locator("textarea").isEnabled(), "the composer stays usable while a decision is pending");
   check((await page.locator("textarea").getAttribute("placeholder")).startsWith("Queue a message"), "the composer says it can queue");
-  check((await page.locator(".send.stop").count()) === 1, "the send button is a stop square while a reply runs");
-  await page.screenshot({ path: path.join(OUT, "home-decision.png") });
+  check((await page.locator("[data-slot='send'][data-mode='stop']").count()) === 1, "the send button is a stop square while a reply runs");
+  await a11y("Home (dark)");
+  await shot("home-decision");
 
   // Queue: send while the reply runs (same SendMessage the native app sends; the test daemon never starts a model).
   const message = `web verify ${Date.now()}`;
   await page.locator("textarea").fill(message);
-  check((await page.locator(".send:not(.stop)").count()) === 1, "typing turns the stop square back into a send arrow");
+  check((await page.locator("[data-slot='send']:not([data-mode='stop'])").count()) === 1, "typing turns the stop square back into a send arrow");
   await page.locator("textarea").press("Enter");
-  await page.locator(".tray-row", { hasText: message }).waitFor({ timeout: 10000 });
+  await page.locator("[data-slot='queue-row']", { hasText: message }).waitFor({ timeout: 10000 });
   check(true, "a message sent mid-reply waits in the queue tray");
-  check((await page.locator(".bubble", { hasText: message }).count()) === 0, "a queued message is not drawn in the transcript yet");
-  await page.screenshot({ path: path.join(OUT, "home-queue.png") });
-  await page.locator(".tray-row button[aria-label='Edit queued message']").click();
+  check((await page.locator("[data-slot='user-turn']", { hasText: message }).count()) === 0, "a queued message is not drawn in the transcript yet");
+  await shot("home-queue");
+  await page.locator("[data-slot='queue-row'] button[aria-label='Edit queued message']").click();
   await page.waitForFunction((t) => document.querySelector("textarea").value === t, message, { timeout: 5000 });
-  check((await page.locator(".tray-row").count()) === 0, "editing takes the message back out of the queue into the composer");
+  check((await page.locator("[data-slot='queue-row']").count()) === 0, "editing takes the message back out of the queue into the composer");
   await page.locator("textarea").press("Enter");
-  await page.locator(".tray-row", { hasText: message }).waitFor({ timeout: 10000 });
-  await page.locator(".tray-row button[aria-label='Remove queued message']").click();
-  await page.waitForFunction(() => document.querySelectorAll(".tray-row").length === 0, null, { timeout: 5000 });
+  await page.locator("[data-slot='queue-row']", { hasText: message }).waitFor({ timeout: 10000 });
+  await page.locator("[data-slot='queue-row'] button[aria-label='Remove queued message']").click();
+  await page.waitForFunction(() => document.querySelectorAll("[data-slot='queue-row']").length === 0, null, { timeout: 5000 });
   check(true, "a queued message can be removed");
 
   // Decline with the keyboard (composer empty): the next decision moves up.
   await page.locator("textarea").press("Escape");
-  await page.waitForFunction(() => /Tell its agent/.test(document.querySelector(".decision")?.textContent ?? ""), null, { timeout: 5000 });
+  await page.waitForFunction(() => /Tell its agent/.test(document.querySelector("[data-slot='decision']")?.textContent ?? ""), null, { timeout: 5000 });
   check(true, "Esc declines the card in front and the next decision appears");
-  await page.screenshot({ path: path.join(OUT, "home-decision-tool.png") });
+  await shot("home-decision-tool");
 
   // Scroll to end pill: only when scrolled away from the bottom.
-  check((await page.locator(".to-end").count()) === 0, "no scroll-to-end pill while at the bottom");
-  await page.evaluate(() => document.querySelector(".scroll").scrollTo({ top: 0 }));
-  await page.locator(".to-end").waitFor({ timeout: 3000 });
-  await page.screenshot({ path: path.join(OUT, "home-top.png") });
-  await page.locator(".to-end").click();
-  await page.waitForFunction(() => { const e = document.querySelector(".scroll"); return e.scrollHeight - e.scrollTop - e.clientHeight < 90; }, null, { timeout: 5000 });
+  await scrollTo(1e9);
+  await sleep(500);
+  check((await page.locator("[data-slot='to-end']").count()) === 0, "no scroll-to-end pill while at the bottom");
+  await scrollTo(0);
+  await page.locator("[data-slot='to-end']").waitFor({ timeout: 3000 });
+  await shot("home-top");
+  await page.locator("[data-slot='to-end']").click();
+  await page.waitForFunction(() => { const e = document.querySelector("[role='log'] > div"); return e.scrollHeight - e.scrollTop - e.clientHeight < 90; }, null, { timeout: 5000 });
   check(true, "the pill returns to the end of the conversation");
-  check((await page.locator(".table-foot button").count()) > 0, "each table has a copy button");
+  check((await page.locator("[data-streamdown='table-wrapper'] button[title='Copy table']").count()) > 0, "each table has a copy button");
 
-  // Plugin: installed while the app is open, no rebuild.
+  // --- Home in light: the same page, the system preference flipped ------------
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.waitForFunction(() => document.documentElement.classList.contains("light"), null, { timeout: 3000 });
+  check(true, "the light system preference gives <html class=light> without a reload");
+  await finished.evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await sleep(300);
+  await shot("home-worklog-light");
+  await scrollTo(1e9);
+  await sleep(500);
+  await shot("home-light");
+  await a11y("Home (light)");
+
+  // --- ⌘K palette -----------------------------------------------------------------
+  await page.keyboard.press("Meta+k");
+  await page.locator("[data-slot='command']").waitFor({ timeout: 3000 });
+  await sleep(400);
+  const entries = await page.locator("[data-slot='command-item']").allInnerTexts();
+  check(entries.some((e) => /Go to Home/.test(e)) && entries.some((e) => /Go to UI gallery/.test(e)), `⌘K lists "Go to" entries: ${entries.slice(0, 3).map((e) => e.trim()).join(", ")}…`);
+  check(entries.some((e) => /Focus the composer/.test(e)) && entries.some((e) => /Stop the current reply/.test(e)), "⌘K lists the actions Home contributes");
+  await shot("palette-light");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await sleep(300);
+  await shot("palette-dark");
+  await a11y("palette");
+  await page.keyboard.type("gallery");
+  await sleep(200);
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("[data-gallery-section]", { timeout: 10000 });
+  check(new URL(page.url()).hash === "#/ui", "choosing “Go to UI gallery” in ⌘K routes to #/ui");
+
+  // --- gallery: every section, dark then light -----------------------------------------
+  const sections = await page.locator("[data-gallery-section]").evaluateAll((els) => els.map((e) => e.getAttribute("data-gallery-section")));
+  check(sections.length >= 7, `the gallery renders ${sections.length} sections: ${sections.join(", ")}`);
+  await page.setViewportSize({ width: 1440, height: 2600 });
+  for (const theme of ["dark", "light"]) {
+    await page.emulateMedia({ colorScheme: theme });
+    await sleep(700);
+    for (const id of sections) {
+      await page.locator(`[data-gallery-section='${id}']`).screenshot({ path: path.join(OUT, `gallery-${id}-${theme}.png`) });
+    }
+    await a11y(`gallery (${theme})`);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const theme of ["dark", "light"]) {
+    await page.emulateMedia({ colorScheme: theme });
+    await sleep(500);
+    await page.evaluate(() => document.querySelector("[data-slot='gallery']").scrollTo({ top: 0 }));
+    await shot(`gallery-${theme}`);
+  }
+  // Overlays open: a dropdown, then a dialog.
+  await page.emulateMedia({ colorScheme: "dark" });
+  await sleep(400);
+  await page.locator("[data-gallery-section='overlays']").scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: /^Actions/ }).click();
+  await page.locator("[data-slot='dropdown-menu-content']").waitFor({ timeout: 3000 });
+  await sleep(300);
+  await shot("gallery-dropdown-dark");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Dialog", exact: true }).click();
+  await page.locator("[data-slot='dialog-content']").waitFor({ timeout: 3000 });
+  await sleep(300);
+  await shot("gallery-dialog-dark");
+  await page.keyboard.press("Escape");
+  await sleep(300);
+
+  // --- plugin: installed while the app is open, no rebuild ---------------------------------
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.waitForFunction(() => document.documentElement.classList.contains("dark"), null, { timeout: 3000 });
+  await page.goto(`http://127.0.0.1:${PORT}/#/`);
+  await sleep(600);
+  const nav = (text) => page.locator("[data-slot='nav-item']", { hasText: text });
   const pluginDir = path.join(DATA, "plugins/pr-board");
-  check((await page.locator(".nav", { hasText: "PR board" }).count()) === 0, "no plugin page before the plugin is installed");
+  check((await nav("PR board").count()) === 0, "no plugin page before the plugin is installed");
   cpSync(path.join(repo, "web/plugins/pr-board"), pluginDir, { recursive: true });
-  await page.locator(".nav", { hasText: "PR board" }).waitFor({ timeout: 10000 });
+  await nav("PR board").waitFor({ timeout: 10000 });
   check(true, "the plugin appears in the sidebar without rebuilding the app");
-  await page.locator(".nav", { hasText: "PR board" }).click();
+  await nav("PR board").click();
   await page.waitForSelector(".pr-card", { timeout: 10000 });
   const cards = await page.locator(".pr-card").count();
   check(cards > 0, `the PR board lists ${cards} pull requests`);
   const groups = await page.locator(".pr-board h2").allInnerTexts();
   check(groups.length > 0, `grouped by status: ${groups.map((g) => g.replace(/\s+/g, " ")).join(", ")}`);
-  await page.screenshot({ path: path.join(OUT, "pr-board.png") });
+  await shot("pr-board");
+  await a11y("PR board (dark)");
+  await page.emulateMedia({ colorScheme: "light" });
+  await sleep(500);
+  await shot("pr-board-light");
+  await a11y("PR board (light)");
+  check((await page.locator("[data-slot='connection'][data-connected='true']").count()) === 1, "the sidebar shows Connected");
 
   // Hot edit: change the plugin file; the page picks it up.
   const entry = path.join(pluginDir, "index.js");
   writeFileSync(entry, readFileSync(entry, "utf8").replaceAll('"PR board"', '"PR board (edited)"'));
-  await page.locator(".nav", { hasText: "PR board (edited)" }).waitFor({ timeout: 10000 });
+  await nav("PR board (edited)").waitFor({ timeout: 10000 });
   check(true, "editing the plugin file reloads it live");
 
   check(problems.length === 0, problems.length ? `console/network problems:\n  ${problems.join("\n  ")}` : "no console errors or failed requests");
