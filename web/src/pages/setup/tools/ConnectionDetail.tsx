@@ -122,12 +122,13 @@ export function ConnectionDetail({ snapshot, connection, onClose }: { snapshot: 
   const [search, setSearch] = useState("");
   const [clientId, setClientId] = useState("");
   const c = connection;
+  // A hook, so it runs before the early return (React #310 otherwise, when a connection is first picked).
+  const reconnect = useReconnect(c ?? {});
   if (!c) return null;
   const config = rec(c.config);
   const tools = arr(c.tools);
   const filtered = tools.filter((t) => !search || `${str(t.name)} ${str(t.description)}`.toLowerCase().includes(search.toLowerCase()));
   const status = connectionStatus(c);
-  const reconnect = useReconnect(c);
   const send = (name: string, fields: Record<string, unknown>) => void run(() => mcp(name, fields));
   return (
     <Dialog open onOpenChange={(o) => { if (!o) { setSearch(""); clear(); onClose(); } }}>
