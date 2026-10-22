@@ -492,7 +492,7 @@ mod tests {
         assert_eq!(s.self_update.applied_through.as_deref(), Some(ordinary.as_str()), "nothing applied");
         assert!(s.tasks.iter().find(|t| t.id == "b").unwrap().events.iter().any(|e| e.message.contains("waiting for you")));
         let notice = s.conversation.last().unwrap();
-        assert!(notice.text.contains("safety-critical") && notice.actions[0].kind == "apply_update");
+        assert!(notice.text().contains("safety-critical") && notice.actions[0].kind == "apply_update");
         // Ticking again neither re-plans nor repeats the notice.
         tick_with(&state, data.path(), None).unwrap();
         assert_eq!(snapshot(&state).conversation.len(), s.conversation.len());
@@ -515,7 +515,7 @@ mod tests {
         let s = snapshot(&state);
         assert!(s.self_update.installing.is_none());
         assert!(s.self_update.last_rollback.as_ref().unwrap().summary.contains("did not become healthy"));
-        assert!(s.conversation.last().unwrap().text.starts_with("Rolled back"));
+        assert!(s.conversation.last().unwrap().text().starts_with("Rolled back"));
         assert!(!core::result_path(data.path()).exists());
     }
 

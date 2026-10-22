@@ -318,18 +318,22 @@ impl Controller {
     }
 
     fn send_message(&self, text: String, workspace_id: Option<String>, interrupt: bool) -> Result<Snapshot, String> {
+        self.send_chat(text, workspace_id, interrupt, None).map(|(snapshot, _)| snapshot)
+    }
+
+    /// `SendMessage`, for the chat stream endpoint: also says which reply the
+    /// message started (None when it had to queue behind one), and keeps the
+    /// message id the sender's list already uses.
+    pub fn send_chat(&self, text: String, workspace_id: Option<String>, interrupt: bool, message_id: Option<&str>) -> Result<(Snapshot, Option<String>), String> {
         let mut active = self.chat_active.lock().map_err(|_| "Chat state unavailable")?;
         let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
         if let Some(id) = &workspace_id {
             let state = store::load(&db)?;
             if !state.workspaces.iter().any(|w| &w.id == id) { return Err("Selected workspace no longer exists".into()); }
         }
-        let id = if active.is_some() {
-            neko_chat::queue_scoped_turn(&db, &text, workspace_id.as_deref())?
-        } else {
-            neko_chat::begin_scoped_turn(&db, &text, workspace_id.as_deref())?
-        };
+        let id = neko_chat::begin_scoped_turn_with_id(&db, &text, workspace_id.as_deref(), active.is_some(), message_id)?;
         let mut launch = None;
+        let mut started = None;
         if interrupt {
             if let Some(current) = active.as_ref() {
                 current.cancelled.store(true, Ordering::Release);
@@ -344,6 +348,7 @@ impl Controller {
                 Some((id, text.trim().to_owned(), workspace_id))
             } else { neko_chat::begin_next_queued_turn(&db)? };
             if let Some((pending, _, _)) = &launch {
+                started = Some(pending.clone());
                 *active = Some(Active { task_id: pending.clone(), cancelled: Arc::new(AtomicBool::new(false)) });
             }
         }
@@ -351,7 +356,7 @@ impl Controller {
         drop(db);
         drop(active);
         if let Some(turn) = launch { self.spawn_chat_worker(turn); }
-        Ok(snapshot)
+        Ok((snapshot, started))
     }
 
     /// For `web_harness` only: marks a reply as in progress so that messages
@@ -1509,6 +1514,45 @@ impl Controller {
     }
 }
 
+/// For `web_harness` only: replies come from `scripted_reply` instead of a
+/// model, so a verification can watch a whole reply stream without one.
+pub static SCRIPTED_CHAT: AtomicBool = AtomicBool::new(false);
+
+/// A reply written by code, through the same chunks, reader, hub and
+/// completion path a model's reply takes: reasoning, a command and its output,
+/// prose arriving word by word, and (when asked to pick) a choices block.
+#[allow(dead_code)]
+fn scripted_reply(db: &Arc<Mutex<Db>>, cancel: &AtomicBool, pending: &str, message: &str) {
+    use neko_core::ui_message as ui;
+    use serde_json::json;
+    let pause = |ms: u64| if !cfg!(test) { std::thread::sleep(Duration::from_millis(ms)) };
+    let send = |chunk: serde_json::Value| { ui::emit(pending, &chunk); };
+    send(json!({"type": "start-step"}));
+    send(json!({"type": "reasoning-start", "id": "r"}));
+    send(json!({"type": "reasoning-delta", "id": "r", "delta": "Checking what GitHub reports for the open pull requests."}));
+    send(json!({"type": "reasoning-end", "id": "r"}));
+    pause(350);
+    send(ui::tool_input("c1", "Bash", &json!({"command": "gh pr list --state open --json number,title"})));
+    pause(450);
+    send(ui::tool_output("c1", json!({"exit_code": 0, "output": "4628 Fix the sync\n4616 Cache the index\n410 Retry on 502"})));
+    send(json!({"type": "start-step"}));
+    let mut body = String::from("Three of the five only need an approving review: **athena #4628**, **athena #4616** and **riavox #410**.\n\nTheir checks pass and none has a conflict.\n\n| PR | Blocker |\n|---|---|\n| athena #4641 | Branch is behind `master` |\n| athena #4623 | Reviewer asked for a change |\n");
+    if message.to_lowercase().contains("pick") {
+        body.push_str("\nWhich should I start with?\n\n```neko-choices\n{\"question\":\"Which pull request first?\",\"options\":[{\"label\":\"athena #4641\",\"detail\":\"Rebase onto master\"},{\"label\":\"athena #4623\",\"detail\":\"Answer the reviewer\"}]}\n```\n");
+    }
+    send(json!({"type": "text-start", "id": "t"}));
+    for word in body.split_inclusive(' ') {
+        if cancel.load(Ordering::Acquire) { return; }
+        pause(90);
+        send(json!({"type": "text-delta", "id": "t", "delta": word}));
+    }
+    send(json!({"type": "text-end", "id": "t"}));
+    let reply = neko_chat::collect_reply(pending, "");
+    if let Err(error) = complete_chat_reply(db, cancel, pending, message, None, reply) {
+        eprintln!("scripted reply: {error}");
+    }
+}
+
 /// One Neko reply. Runs filesystem-read-only with scoped tools, outside any lock, and may open tickets as
 /// ordinary queued tasks so planning and approval stay exactly as they are.
 fn converse(
@@ -1530,6 +1574,9 @@ fn converse(
             eprintln!("neko chat: {error}");
         }
     };
+    if SCRIPTED_CHAT.load(Ordering::Acquire) {
+        return scripted_reply(db, cancel, pending, message);
+    }
     let mut snapshot =
         match store::load(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
             Ok(snapshot) => snapshot,
@@ -1645,36 +1692,16 @@ fn converse(
         timeout: Duration::from_secs(900),
         runtime: snapshot.agent_runtime.clone(),
     };
-    // Each command Neko runs shows under the pending reply as it finishes,
-    // and the reply text shows as it is written. Text is written to the turn
-    // at most every `CHAT_PARTIAL_INTERVAL`; any later event flushes a
-    // trailing piece, and the finished turn overwrites it with the answer.
-    let mut streamed = String::new();
-    let mut streamed_dirty = false;
-    let mut streamed_at: Option<Instant> = None;
+    // What the agent does arrives as AI SDK chunks: they build the reply in
+    // flight (and reach every window following it). The database sees the
+    // parts when `emit` says a write is due, never per token.
     let mut progress = |event: String| {
-        if event == native_runner::TEXT_RESET_EVENT {
-            streamed.clear();
-            streamed_dirty = true;
-        } else if let Some(delta) = event.strip_prefix(native_runner::TEXT_DELTA_EVENT) {
-            // The turn keeps at most MAX_REPLY_TEXT, so a long reply need not be buffered whole.
-            if streamed.len() < 4 * neko_chat::MAX_REPLY_TEXT {
-                streamed.push_str(delta);
-                streamed_dirty = true;
-            }
-        } else if let Some(line) = neko_chat::activity_line(&event) {
+        let Some(chunk) = native_runner::chunks::chunk_of(&event) else { return };
+        if let Some(parts) = neko_core::ui_message::emit(pending, &chunk) {
             let guard = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Err(error) = neko_chat::record_activity(&guard, pending, line) {
-                eprintln!("neko chat: could not record activity: {error}");
+            if let Err(error) = neko_chat::persist_parts(&guard, pending, parts) {
+                eprintln!("neko chat: could not record the reply so far: {error}");
             }
-        }
-        if streamed_dirty && streamed_at.is_none_or(|at| at.elapsed() >= CHAT_PARTIAL_INTERVAL) {
-            let guard = db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Err(error) = neko_chat::record_partial(&guard, pending, neko_chat::stream_visible(&streamed)) {
-                eprintln!("neko chat: could not record partial reply: {error}");
-            }
-            streamed_at = Some(Instant::now());
-            streamed_dirty = false;
         }
     };
     let result = (|| {
@@ -1732,7 +1759,7 @@ fn converse(
             return finish(&format!("I couldn't reply just now: {short}"), vec![], true);
         }
     };
-    let reply = neko_chat::parse_reply(&answer);
+    let reply = neko_chat::collect_reply(pending, &answer);
     if let Err(error) = complete_chat_reply(db, cancel, pending, message, chosen, reply) {
         finish(&format!("I couldn't save my reply: {error}"), vec![], true);
     }
@@ -1993,37 +2020,34 @@ fn complete_chat_reply(
     }
     let (suggested, unplaced) =
         save_suggested_responsibilities(&db, &snapshot, chosen, reply.responsibilities);
-    let mut text = if reply.text.is_empty() {
-        "Done.".to_owned()
-    } else {
-        reply.text
-    };
+    let text = if reply.text.is_empty() { "Done.".to_owned() } else { reply.text };
+    let mut notes = String::new();
     if skipped {
-        text.push_str(if opened.is_empty() {
+        notes.push_str(if opened.is_empty() {
             "\n\nNo ticket was created. Choose a Git folder for this workspace, or name its repository path and ask me to create the ticket."
         } else {
             "\n\nOne proposed ticket was not created. Choose its Git folder and ask me to retry."
         });
     }
     if unplaced {
-        text.push_str("\n\nI could not save every suggestion to watch. Connect a tool to that workspace in Tools & skills, then ask again.");
+        notes.push_str("\n\nI could not save every suggestion to watch. Connect a tool to that workspace in Tools & skills, then ask again.");
     }
     if refused_memory {
-        text.push_str("\n\nI didn’t save a password, key or card number to memory. Keep those in Keychain or a password manager.");
+        notes.push_str("\n\nI didn’t save a password, key or card number to memory. Keep those in Keychain or a password manager.");
     }
     if !cited.is_empty() {
-        text.push_str(&format!(
+        notes.push_str(&format!(
             "\n\nFrom memory: {}",
             cited.iter().map(|t| format!("“{t}”")).collect::<Vec<_>>().join(" · ")
         ));
     }
     let learning_ready = neko_core::memory_learning::has_capacity(&db)?;
     if !learning_ready {
-        text.push_str("\n\nMemory learning is busy, so I skipped additional memory suggestions for this reply.");
+        notes.push_str("\n\nMemory learning is busy, so I skipped additional memory suggestions for this reply.");
     }
     db.atomic(|| {
-        neko_chat::finish_turn_suggesting(
-            &db, pending, &text, opened, remembered, suggested, false,
+        neko_chat::finish_turn_noting(
+            &db, pending, &text, notes.trim_start(), opened, remembered, suggested, false,
         )?;
         neko_chat::attach_actions(&db, pending, actions)?;
         if learning_ready {
@@ -2363,6 +2387,24 @@ fn knowledge_paths(repository: &std::path::Path, home: &std::path::Path) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_scripted_reply_goes_through_chunks_the_reader_and_completion_into_typed_parts() {
+        let controller = controller_with_task(TaskStatus::Queued);
+        let turn = neko_chat::begin_scoped_turn(&controller.db.lock().unwrap(), "pick one", None).unwrap();
+        let follower = neko_core::ui_message::attach(&turn, 1).expect("a pending turn is followed from its first moment");
+        scripted_reply(&controller.db, &AtomicBool::new(false), &turn, "pick one");
+        let chunks: Vec<String> = std::iter::from_fn(|| follower.live.try_recv().ok()).map(|c| c["type"].as_str().unwrap().to_owned()).collect();
+        assert!(chunks.contains(&"reasoning-start".to_owned()) && chunks.contains(&"tool-input-available".to_owned()), "{chunks:?}");
+        assert!(chunks.contains(&"data-neko-choices".to_owned()), "the block became a typed part while it streamed: {chunks:?}");
+        assert_eq!(chunks.last().map(String::as_str), Some("finish"));
+        let stored = neko_chat::load(&controller.db.lock().unwrap()).unwrap().into_iter().find(|m| m.id == turn).unwrap();
+        assert!(!stored.pending && !stored.failed);
+        let kinds: Vec<&str> = stored.parts.iter().map(|p| p["type"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["step-start", "reasoning", "dynamic-tool", "step-start", "text", "data-neko-choices"], "{kinds:?}");
+        assert!(stored.text().contains("Three of the five"));
+        assert!(!stored.text().contains("neko-choices"), "no fence text is left in the prose");
+    }
 
     #[test]
     fn repository_discovery_uses_tracked_stack_paths_before_project_names() {
@@ -2776,7 +2818,7 @@ mod tests {
         assert_eq!(saved.connection_ids, vec!["linear".to_string()]);
         let reply = state.conversation.iter().find(|m| m.id == turn).unwrap();
         assert_eq!(reply.responsibility_ids, vec![saved.id.clone()]);
-        assert!(reply.text.contains("Connect a tool"));
+        assert!(reply.text().contains("Connect a tool"));
 
         let state = controller
             .command(Command::Mcp(McpCommand::RemoveResponsibility {
@@ -2839,9 +2881,9 @@ mod tests {
             "Stopped reply must not save a memory"
         );
         let message = state.conversation.iter().find(|m| m.id == turn).unwrap();
-        assert_eq!(message.text, "Stopped.");
+        assert!(message.text().contains("Stopped."));
         assert!(message.failed && !message.pending);
-        assert!(message.ticket_ids.is_empty() && message.remembered.is_empty());
+        assert!(message.ticket_ids.is_empty());
     }
 
     #[test]
@@ -2851,7 +2893,7 @@ mod tests {
         let cancel = Arc::new(AtomicBool::new(false));
         *controller.chat_active.lock().unwrap() = Some(Active { task_id: first.clone(), cancelled: cancel.clone() });
         let state = controller.command(Command::SendMessage { text: "second".into(), workspace_id: Some("w".into()) }).unwrap();
-        assert!(state.conversation.iter().any(|m| m.text == "second" && m.queued));
+        assert!(state.conversation.iter().any(|m| m.text() == "second" && m.queued));
         assert!(!cancel.load(Ordering::Acquire));
         let state = controller.command(Command::InterruptAndSendMessage { text: "urgent".into(), workspace_id: Some("w".into()) }).unwrap();
         assert!(cancel.load(Ordering::Acquire));
@@ -2919,7 +2961,7 @@ mod tests {
         let message = state.conversation.iter().find(|m| m.id == turn).unwrap();
         assert!(!message.failed && !message.pending);
         assert_eq!(message.ticket_ids.len(), 1);
-        assert_eq!(message.remembered.len(), 1);
+        assert_eq!(message.parts.iter().filter(|p| p["type"] == "data-neko-memory").count(), 1);
     }
 
     #[test]
@@ -3412,4 +3454,5 @@ mod direct_stop_tests {
         assert!(direct_stop("NEEDS_APPROVAL:", false).is_none());
         assert!(direct_stop("Implemented the fix and ran cargo test.", false).is_none());
     }
+
 }

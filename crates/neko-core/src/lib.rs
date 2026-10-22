@@ -38,6 +38,8 @@ pub mod memory_learning;
 pub mod native_runner;
 pub mod native_tasks;
 pub mod neko_chat;
+pub mod ui_message;
+pub mod task_chat;
 pub mod neko_memory;
 pub mod new_agent;
 pub mod onboarding;

@@ -1284,7 +1284,7 @@ impl WorkspaceRoot {
                         .bg(alpha(t.surface_selected, 0.9))
                         .text_size(px(14.))
                         .line_height(px(21.))
-                        .child(message.text.clone()),
+                        .child(message.text()),
                 )
                 .into_any_element();
         }
@@ -1312,7 +1312,7 @@ impl WorkspaceRoot {
                             .text_size(px(14.))
                             .line_height(px(22.))
                             .when(message.failed, |r| r.text_color(t.text_secondary))
-                            .child(crate::markdown::render_cached(&message.text)),
+                            .child(crate::markdown::render_cached(&message.text())),
                     ),
             );
             let linked: Vec<&Task> = message
@@ -1320,9 +1320,10 @@ impl WorkspaceRoot {
                 .iter()
                 .filter_map(|id| self.snapshot.tasks.iter().find(|x| &x.id == id))
                 .collect();
-            if !message.remembered.is_empty() {
+            let remembered: Vec<String> = message.parts.iter().filter(|p| p["type"] == "data-neko-memory").flat_map(|p| p["data"]["items"].as_array().cloned().unwrap_or_default()).filter_map(|v| v.as_str().map(str::to_owned)).collect();
+            if !remembered.is_empty() {
                 let mut saved = div().flex().flex_col().gap(px(4.));
-                for text in &message.remembered {
+                for text in &remembered {
                     saved = saved.child(
                         div()
                             .flex()
@@ -2751,7 +2752,7 @@ mod tests {
     }
     #[test]
     fn today_history_is_scoped_to_agent_and_workspace() {
-        let message:ChatMessage=serde_json::from_value(serde_json::json!({"agent_profile_id":"personal","workspace_id":"a","id":"m","at_ms":0,"role":"neko","text":"hello"})).unwrap();
+        let message:ChatMessage=serde_json::from_value(serde_json::json!({"agent_profile_id":"personal","workspace_id":"a","id":"m","at_ms":0,"role":"neko","parts":[{"type":"text","text":"hello"}]})).unwrap();
         assert!(conversation_in_scope(&message, "personal", Some("a")));
         assert!(!conversation_in_scope(&message, "work", Some("a")));
         assert!(!conversation_in_scope(&message, "personal", Some("b")));
