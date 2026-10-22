@@ -375,20 +375,24 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
 
   // ---- ⌘K -----------------------------------------------------------------------
   await open("usage", "[data-slot='setup-page']");
-  const palette = async (text) => {
+  // Results can arrive after typing ends, so wait for the entry expected rather
+  // than reading the list after a fixed pause.
+  const palette = async (text, expect) => {
     await page.keyboard.press("Meta+k");
     await page.locator("[data-slot='command']").waitFor({ timeout: 5000 });
     await page.keyboard.press("Meta+a");
     await page.keyboard.type(text);
-    await sleep(900);
+    if (expect) await page.locator("[data-slot='command-item']", { hasText: expect }).first().waitFor({ timeout: 5000 }).catch(() => {});
+    else await sleep(900);
     return page.locator("[data-slot='command-item']").allInnerTexts();
   };
-  check((await palette("rulebook")).some((e) => /Open Rulebook/.test(e)), "⌘K offers “Open Rulebook” on a setup page");
+  check((await palette("rulebook", /Open Rulebook/)).some((e) => /Open Rulebook/.test(e)), "⌘K offers “Open Rulebook” on a setup page");
   await page.locator("[data-slot='command-item']", { hasText: "Open Rulebook" }).click();
   await page.waitForSelector("[data-slot='rulebook']", { timeout: 8000 });
   check(true, "“Open Rulebook” lands on the Rulebook section");
-  check((await palette("check all")).some((e) => /Check all watches now/.test(e)), "⌘K offers “Check all watches now”");
+  const checkAll = await palette("check all", /Check all watches now/);
+  check(checkAll.some((e) => /Check all watches now/.test(e)), `⌘K offers “Check all watches now” (${checkAll.join(" | ") || "nothing"}; focus ${await page.evaluate(() => document.activeElement?.tagName + "." + (document.activeElement?.getAttribute("data-slot") ?? ""))})`);
   await page.keyboard.press("Escape");
-  check((await palette("ai &")).some((e) => /Settings: AI & agents/.test(e)), "⌘K lists the Settings sections");
+  check((await palette("ai &", /Settings: AI & agents/)).some((e) => /Settings: AI & agents/.test(e)), "⌘K lists the Settings sections");
   await page.keyboard.press("Escape");
 }

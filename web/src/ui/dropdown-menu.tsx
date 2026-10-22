@@ -72,8 +72,12 @@ function DropdownMenuContent({
   );
 }
 
+// Base UI's group label throws outside a group (error #31). The group marks
+// itself, and a label outside one renders as a plain heading instead.
+const InGroup = React.createContext(false);
+
 function DropdownMenuGroup(props: React.ComponentProps<typeof MenuPrimitive.Group>) {
-  return <MenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />;
+  return <InGroup.Provider value={true}>{<MenuPrimitive.Group data-slot="dropdown-menu-group" {...props} />}</InGroup.Provider>;
 }
 
 function DropdownMenuItem({
@@ -202,14 +206,12 @@ function DropdownMenuLabel({
   inset,
   ...props
 }: React.ComponentProps<typeof MenuPrimitive.GroupLabel> & { inset?: boolean }) {
-  return (
-    <MenuPrimitive.GroupLabel
-      data-slot="dropdown-menu-label"
-      data-inset={inset}
-      className={cn("px-2 py-1.5 text-xs font-medium text-muted-foreground data-inset:pl-8", className)}
-      {...props}
-    />
-  );
+  const inGroup = React.useContext(InGroup);
+  const classes = cn("px-2 py-1.5 text-xs font-medium text-muted-foreground data-inset:pl-8", className);
+  if (!inGroup) {
+    return <div role="presentation" data-slot="dropdown-menu-label" data-inset={inset} className={classes} {...(props as React.ComponentProps<"div">)} />;
+  }
+  return <MenuPrimitive.GroupLabel data-slot="dropdown-menu-label" data-inset={inset} className={classes} {...props} />;
 }
 
 function DropdownMenuSeparator({ className, ...props }: React.ComponentProps<typeof MenuPrimitive.Separator>) {
