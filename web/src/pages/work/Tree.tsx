@@ -35,7 +35,7 @@ export default function Tree() {
     <div data-slot="tree-page" className="flex min-h-0 flex-1 flex-col">
       <WorkHeader
         eyebrow="Work"
-        title={<>Who started <em>whom.</em></>}
+        title={<>Agent tree</>}
         subtitle={tree ? `${label} · ${taskCount(tree.tasks)}` : "Loading…"}
         actions={
           <>

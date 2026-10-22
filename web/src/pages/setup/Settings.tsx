@@ -185,7 +185,7 @@ export default function Settings() {
   return (
     <SetupPage
       eyebrow="System"
-      title={<>Settings, <em>your way.</em></>}
+      title={<>Settings</>}
       subtitle="Everything that configures Neko. Search finds sections and individual settings."
       width="max-w-[1040px]"
     >

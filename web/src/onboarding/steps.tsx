@@ -25,10 +25,9 @@ export const STEPS: { id: OnboardingStep; label: string }[] = [
   { id: "finish", label: "Done" },
 ];
 
-export function StepHead({ eyebrow, title, subtitle, headingRef }: { eyebrow: string; title: React.ReactNode; subtitle: string; headingRef?: React.Ref<HTMLDivElement> }) {
+export function StepHead({ title, subtitle, headingRef }: { eyebrow: string; title: React.ReactNode; subtitle: string; headingRef?: React.Ref<HTMLDivElement> }) {
   return (
     <div className="flex flex-col gap-2">
-      <MonoLabel className="text-foreground/45">{eyebrow}</MonoLabel>
       <div ref={headingRef} tabIndex={-1} className="outline-none">
         <EditorialHeading as="h2" className="text-[clamp(1.6rem,2vw+0.6rem,2.25rem)]">
           {title}
@@ -69,7 +68,7 @@ export function Welcome({ onNext, headingRef }: { onNext(): void; headingRef: Re
       <div className="flex flex-col items-center gap-3">
         <div ref={headingRef} tabIndex={-1} className="outline-none">
           <EditorialHeading as="h2" className="text-[clamp(1.9rem,3vw+0.5rem,2.75rem)]">
-            A little more <em>off your mind.</em>
+            A little more off your mind.
           </EditorialHeading>
         </div>
         <p className="max-w-[46ch] text-[15px] leading-relaxed text-muted-foreground">
@@ -128,7 +127,7 @@ export function Permissions({ headingRef }: { headingRef: React.Ref<HTMLDivEleme
   }
   return (
     <div className="flex flex-col gap-6">
-      <StepHead eyebrow="Permissions" title={<>Let Neko work on <em>your Mac.</em></>} subtitle="Each of these is optional, and you can change them later in Settings." headingRef={headingRef} />
+      <StepHead eyebrow="Permissions" title={<>Let Neko work on your Mac.</>} subtitle="Each of these is optional, and you can change them later in Settings." headingRef={headingRef} />
       <Panel>
         <div className="divide-y divide-border/70">
           <Row
@@ -223,7 +222,7 @@ export function Workspace({ headingRef }: { headingRef: React.Ref<HTMLDivElement
     <div className="flex flex-col gap-6">
       <StepHead
         eyebrow="Workspace"
-        title={<>Where do <em>you work?</em></>}
+        title={<>Where do you work?</>}
         subtitle="Choose your folders. Each workspace keeps its own tools and instructions. You can add more later."
         headingRef={headingRef}
       />
@@ -306,7 +305,7 @@ export function Runtime({ choice, onChoice, headingRef }: { choice: RuntimeChoic
     <div className="flex flex-col gap-6">
       <StepHead
         eyebrow="Runtime"
-        title={<>Which agent <em>does the work?</em></>}
+        title={<>Which agent does the work?</>}
         subtitle="Neko can choose for each task, or you can pin a model now. You can change it for any conversation from the composer."
         headingRef={headingRef}
       />
@@ -397,7 +396,7 @@ export function ImportStep({ headingRef }: { headingRef: React.Ref<HTMLDivElemen
     <div className="flex flex-col gap-6">
       <StepHead
         eyebrow="Optional"
-        title={<>Bring your <em>existing setup.</em></>}
+        title={<>Bring your existing setup.</>}
         subtitle="Neko can read the tools, skills and schedules you already set up in other agents on this Mac, and offer them to you. Nothing is imported, and no secret is copied, until you choose it."
         headingRef={headingRef}
       />
@@ -445,7 +444,7 @@ export function Finish({ headingRef, runtime }: { headingRef: React.Ref<HTMLDivE
   ];
   return (
     <div className="flex flex-col gap-6">
-      <StepHead eyebrow="All set" title={<>Neko is <em>ready.</em></>} subtitle="Tell it what you want done. It plans, asks before anything risky, and tells you when something needs you." headingRef={headingRef} />
+      <StepHead eyebrow="All set" title={<>Neko is ready.</>} subtitle="Tell it what you want done. It plans, asks before anything risky, and tells you when something needs you." headingRef={headingRef} />
       <Panel>
         <dl className="divide-y divide-border/70 text-[13.5px]">
           <div className="flex items-center justify-between px-5 py-3"><dt className="text-muted-foreground">Workspaces</dt><dd className="text-strong">{count === 0 ? "None yet — add one from the Neko app or the Workspaces page" : count}</dd></div>

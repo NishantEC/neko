@@ -126,7 +126,7 @@ export default function Tasks() {
   const subtitle = snapshot
     ? `${workspaceLabel} · ${visible.length === inWorkspace ? taskCount(inWorkspace) : `${visible.length} of ${taskCount(inWorkspace)}`}`
     : "Loading…";
-  const title = stage === "all" ? <>All <em>tasks.</em></> : <>{STAGE_TITLE[stage]}<em>.</em></>;
+  const title = stage === "all" ? <>All tasks</> : <>{STAGE_TITLE[stage]}</>;
 
   const controls = (
     <div className="mt-3 flex flex-wrap items-center gap-2" role="search" aria-label="Filter tasks">

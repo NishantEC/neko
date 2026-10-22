@@ -16,7 +16,7 @@ import {
   AlertDialogHeader, AlertDialogTitle,
 } from "@/ui/alert-dialog";
 import { WarningCircle, type Icon } from "@/ui/icons";
-import { EditorialHeading, FieldLabel, MonoLabel, PageHeader, Panel as BasePanel } from "@/editorial";
+import { EditorialHeading, FieldLabel, PageHeader, Panel as BasePanel } from "@/editorial";
 import { useWorkbench } from "@/useStore";
 import type { Tone } from "@/setup/lib";
 
@@ -48,7 +48,7 @@ export function SetupPage({
 
 /** A group on a page: eyebrow → heading → intro, then its content. */
 export function Section({
-  eyebrow, title, intro, actions, children, id, className,
+  title, intro, actions, children, id, className,
 }: {
   eyebrow?: ReactNode;
   title: ReactNode;
@@ -62,7 +62,6 @@ export function Section({
     <section id={id} data-slot="setup-section" className={cn("flex flex-col gap-4", className)}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1.5">
-          {eyebrow ? <MonoLabel>{eyebrow}</MonoLabel> : null}
           <EditorialHeading as="h2" className="text-[clamp(1.25rem,1.2vw+0.9rem,1.625rem)]">{title}</EditorialHeading>
           {intro ? <p className="max-w-[62ch] text-[14px] leading-[1.55] text-muted-foreground">{intro}</p> : null}
         </div>

@@ -304,7 +304,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await a11y("Settings search");
   await page.getByRole("button", { name: /^Task budget in AI & agents/ }).click();
   await page.waitForSelector("#setting-budget");
-  check(await page.evaluate(() => document.getElementById("setting-budget")?.hasAttribute("data-highlighted")), "choosing a result jumps to the setting and highlights it");
+  check(await page.waitForFunction(() => document.getElementById("setting-budget")?.hasAttribute("data-highlighted"), null, { timeout: 1500 }).then(() => true, () => false), "choosing a result jumps to the setting and highlights it");
   await sleep(900);
   await shot("setup-settings-jump");
   await page.getByLabel("Find a setting").fill("zzzzqq");

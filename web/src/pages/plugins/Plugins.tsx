@@ -202,7 +202,7 @@ export default function Plugins() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <PageHeader
             eyebrow="System"
-            title={<>Plugins that <em>grow Neko.</em></>}
+            title={<>Plugins</>}
             subtitle="Pages and tools that live in a folder on this Mac. Neko’s agents can write them too, and they appear here without a rebuild."
           />
           <div className="flex items-center gap-2">

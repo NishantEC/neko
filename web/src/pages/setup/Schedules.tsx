@@ -248,7 +248,7 @@ export default function Schedules() {
   return (
     <SetupPage
       eyebrow="Work"
-      title={<>Recurring, <em>on time.</em></>}
+      title={<>Schedules</>}
       subtitle="Recurring briefs and reviews. Each run appears in All tasks."
     >
       <Gate>{(snapshot) => <SchedulesBody snapshot={snapshot} />}</Gate>
