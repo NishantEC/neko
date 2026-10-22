@@ -48,6 +48,9 @@ pub const COOKIE_NAME: &str = "neko_token";
 const MAX_HEADER_LINE: u64 = 8 * 1024;
 const MAX_HEADERS: usize = 64;
 const MAX_BODY: usize = 8 * 1024 * 1024;
+/// The one route that takes a larger body: a file attached in the composer
+/// (the native composer's own limit is also 32 MB).
+const MAX_ATTACHMENT: usize = 32 * 1024 * 1024;
 const MAX_STATIC_FILE: u64 = 32 * 1024 * 1024;
 const MAX_MANIFEST: u64 = 64 * 1024;
 const MAX_CONNECTIONS: usize = 96;
@@ -72,6 +75,9 @@ pub struct Config {
     pub web_root: PathBuf,
     /// `<data dir>/plugins`, read again on every listing.
     pub plugins_dir: PathBuf,
+    /// `<data dir>/attachments`: where files attached in the web composer are
+    /// kept, the same folder the native composer writes to.
+    pub attachments_dir: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +211,10 @@ impl Req {
 
 struct HttpError(u16, &'static str);
 
-fn read_request(stream: &TcpStream) -> Result<Req, HttpError> {
+/// Reads one request. `gate` sees the request line and headers *before* any
+/// body is read, so a caller that is not allowed in never makes the server
+/// buffer a body (the attachment route takes up to 32 MB).
+fn read_request(stream: &TcpStream, gate: &dyn Fn(&Req) -> Result<(), HttpError>) -> Result<Req, HttpError> {
     let _ = stream.set_read_timeout(Some(HEADER_TIMEOUT));
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
@@ -247,7 +256,9 @@ fn read_request(stream: &TcpStream) -> Result<Req, HttpError> {
         None => 0,
         Some(v) => v.parse::<usize>().map_err(|_| HttpError(400, "Bad Request"))?,
     };
-    if length > MAX_BODY {
+    gate(&req)?;
+    let limit = if req.path == "/api/attachments" { MAX_ATTACHMENT } else { MAX_BODY };
+    if length > limit {
         return Err(HttpError(413, "Payload Too Large"));
     }
     if length > 0 {
@@ -365,14 +376,15 @@ pub fn serve(listener: TcpListener, config: Config, backend: Arc<dyn Backend>) {
 }
 
 fn handle(mut stream: TcpStream, port: u16, config: &Config, backend: &dyn Backend) {
-    let req = match read_request(&stream) {
+    // Authorization happens between the headers and the body.
+    let gate = |req: &Req| authorize(req, port, &config.token).map_err(|rejection| {
+        let (status, reason) = rejection.status();
+        HttpError(status, reason)
+    });
+    let req = match read_request(&stream, &gate) {
         Ok(req) => req,
         Err(HttpError(status, reason)) => return write_reply(&mut stream, Reply::text(status, reason)),
     };
-    if let Err(rejection) = authorize(&req, port, &config.token) {
-        let (status, reason) = rejection.status();
-        return write_reply(&mut stream, Reply::text(status, reason));
-    }
     route(stream, req, config, backend);
 }
 
@@ -393,6 +405,12 @@ fn route(mut stream: TcpStream, req: Req, config: &Config, backend: &dyn Backend
         if !get { Reply::text(405, "Method Not Allowed") } else { return events(stream, backend) }
     } else if path == "/api/plugins" {
         if !get { Reply::text(405, "Method Not Allowed") } else { Reply::json(&list_plugins(&config.plugins_dir)) }
+    } else if path == "/api/plugin-folder" {
+        if !get { Reply::text(405, "Method Not Allowed") } else { Reply::json(&serde_json::json!({ "path": config.plugins_dir.to_string_lossy() })) }
+    } else if let Some(rest) = path.strip_prefix("/api/plugins/") {
+        plugin_route(&config.plugins_dir, &req.method, rest)
+    } else if path == "/api/attachments" {
+        if req.method != "POST" { Reply::text(405, "Method Not Allowed") } else { store_attachment(&config.attachments_dir, req.header("x-neko-filename"), &req.body) }
     } else if let Some(rest) = path.strip_prefix("/plugins/") {
         if !get { Reply::text(405, "Method Not Allowed") } else { serve_plugin_file(&config.plugins_dir, rest) }
     } else if path.starts_with("/api/") {
@@ -522,6 +540,9 @@ fn serve_static(root: &Path, path: &str) -> Reply {
     Reply::text(404, "Not Found")
 }
 
+/// Presence of this file in a plugin's folder switches the plugin off.
+const DISABLED_MARKER: &str = ".disabled";
+
 fn valid_plugin_id(name: &str) -> bool {
     !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
@@ -544,6 +565,13 @@ struct PluginInfo {
     entry: String,
     /// Changes whenever the module file does, so the page reloads it.
     version: u64,
+    /// The manifest's own `"version"`, for people ("0.2.0").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest_version: Option<String>,
+    /// A `.disabled` marker file sits in the plugin folder: listed, not loaded.
+    disabled: bool,
+    /// Absolute path of the plugin's folder.
+    path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -559,7 +587,9 @@ fn list_plugins(dir: &Path) -> Vec<PluginInfo> {
     for entry in entries.flatten() {
         let Some(id) = entry.file_name().to_str().map(str::to_string) else { continue };
         if !valid_plugin_id(&id) || !entry.path().is_dir() { continue; }
-        let broken = |error: String| PluginInfo { id: id.clone(), title: id.clone(), entry: String::new(), version: 0, description: None, error: Some(error) };
+        let disabled = entry.path().join(DISABLED_MARKER).exists();
+        let path = entry.path().to_string_lossy().into_owned();
+        let broken = |error: String| PluginInfo { id: id.clone(), title: id.clone(), entry: String::new(), version: 0, manifest_version: None, disabled, path: path.clone(), description: None, error: Some(error) };
         let manifest_path = entry.path().join("manifest.json");
         let manifest = match fs::File::open(&manifest_path).and_then(|f| {
             let mut text = String::new();
@@ -589,12 +619,140 @@ fn list_plugins(dir: &Path) -> Vec<PluginInfo> {
             description: json.get("description").and_then(|v| v.as_str()).map(str::to_string),
             entry: format!("/plugins/{id}/{}", relative.to_string_lossy()),
             version,
+            manifest_version: json.get("version").and_then(|v| v.as_str()).map(str::to_string),
+            disabled,
+            path,
             error: None,
             id,
         });
     }
     plugins.sort_by(|a, b| a.id.cmp(&b.id));
     plugins
+}
+
+// ---------------------------------------------------------------------------
+// Managing plugins: enable, disable, remove
+// ---------------------------------------------------------------------------
+
+/// `POST /api/plugins/<name>/enable|disable` and `DELETE /api/plugins/<name>`.
+/// The name must be a plain id (letters, digits, `-`, `_`), so no path
+/// component can climb out of the plugins folder, and the folder itself must
+/// be a real directory inside it (a symlink is never followed or removed).
+/// Every success answers with the fresh listing.
+fn plugin_route(plugins: &Path, method: &str, rest: &str) -> Reply {
+    let (name, action) = match rest.split_once('/') {
+        Some((name, action)) => (name, Some(action)),
+        None => (rest, None),
+    };
+    if !valid_plugin_id(name) {
+        return Reply::text(400, "Bad Request");
+    }
+    if !matches!(action, None | Some("enable") | Some("disable")) {
+        return Reply::text(404, "Not Found");
+    }
+    let allowed = match action {
+        None => method == "DELETE",
+        Some(_) => method == "POST",
+    };
+    if !allowed {
+        return Reply::text(405, "Method Not Allowed");
+    }
+    let folder = plugins.join(name);
+    match fs::symlink_metadata(&folder) {
+        Ok(meta) if meta.is_dir() => {}
+        _ => return Reply::text(404, "Not Found"),
+    }
+    let done = match action {
+        Some("enable") => match fs::remove_file(folder.join(DISABLED_MARKER)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        },
+        Some(_) => fs::write(folder.join(DISABLED_MARKER), b"switched off from Neko's Plugins page\n"),
+        None => fs::remove_dir_all(&folder),
+    };
+    match done {
+        Ok(()) => Reply::json(&list_plugins(plugins)),
+        Err(_) => Reply::text(500, "Internal Server Error"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+fn sniff_image_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("png")
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("jpg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("gif")
+    } else if bytes.len() > 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("webp")
+    } else {
+        None
+    }
+}
+
+/// Letters, digits and `/` stay; everything else is `%XX` (what the native
+/// composer's `URL.absoluteString` produces for a path).
+fn percent_encode_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for b in path.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'.' | b'_' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// Keeps a file the browser sent under `<attachments>/<sha256>[.ext]` and
+/// answers with the markdown reference the native composer puts in a message
+/// (`![Image](file://…)` for an image, `[name](file://…)` otherwise), so the
+/// daemon and the agents see exactly what they see from the native app. The
+/// name only ever becomes a label and an extension; the path is the hash.
+fn store_attachment(dir: &Path, filename: Option<&str>, body: &[u8]) -> Reply {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    if body.is_empty() {
+        return Reply::text(400, "Bad Request");
+    }
+    let decoded = filename.and_then(percent_decode).unwrap_or_default();
+    let base = decoded.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let name: String = base.chars().filter(|c| !c.is_control()).take(120).collect();
+    let name = if name.is_empty() || name.starts_with('.') { "file".to_string() } else { name };
+    let image = sniff_image_extension(body);
+    let extension: String = match image {
+        Some(ext) => ext.to_string(),
+        None => Path::new(&name).extension().and_then(|e| e.to_str()).unwrap_or("")
+            .to_ascii_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).take(12).collect(),
+    };
+    let hash: String = Sha256::digest(body).iter().map(|b| format!("{b:02x}")).collect();
+    let file_name = if extension.is_empty() { hash } else { format!("{hash}.{extension}") };
+    if fs::create_dir_all(dir).is_err() {
+        return Reply::text(500, "Internal Server Error");
+    }
+    let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+    let path = dir.join(&file_name);
+    if !path.exists() {
+        let written = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path)
+            .and_then(|mut file| file.write_all(body));
+        if written.is_err() {
+            let _ = fs::remove_file(&path);
+            return Reply::text(500, "Internal Server Error");
+        }
+    }
+    let absolute = path.to_string_lossy().into_owned();
+    let reference = if image.is_some() {
+        format!("![Image](file://{absolute})")
+    } else {
+        let label = name.replace('\\', "\\\\").replace('[', "\\[").replace(']', "\\]");
+        format!("[{label}](file://{})", percent_encode_path(&absolute))
+    };
+    Reply::json(&serde_json::json!({ "name": name, "reference": reference, "is_image": image.is_some() }))
 }
 
 #[cfg(test)]

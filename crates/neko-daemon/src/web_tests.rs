@@ -42,7 +42,7 @@ fn start() -> Harness {
     let listener = bind(0).unwrap();
     let port = listener.local_addr().unwrap().port();
     let backend = Arc::new(Fake { seen: Mutex::new(Vec::new()), events: Mutex::new(Vec::new()) });
-    let config = Config { token: TOKEN.into(), web_root: dir.path().join("web"), plugins_dir: dir.path().join("plugins") };
+    let config = Config { token: TOKEN.into(), web_root: dir.path().join("web"), plugins_dir: dir.path().join("plugins"), attachments_dir: dir.path().join("attachments") };
     let served = backend.clone();
     std::thread::spawn(move || serve(listener, config, served));
     Harness { port, backend, dir }
@@ -328,4 +328,217 @@ fn host_origin_and_comparison_helpers() {
     assert!(constant_time_eq("abc", "abc"));
     assert!(!constant_time_eq("abc", "abcd"));
     assert!(!constant_time_eq("", "x"));
+}
+
+// ---------------------------------------------------------------------------
+// Plugin management
+// ---------------------------------------------------------------------------
+
+fn call(h: &Harness, method: &str, target: &str, extra: &[&str], body: &str) -> Answer {
+    let mut lines = good(h.port);
+    lines.extend(extra.iter().map(|s| s.to_string()));
+    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    http(h.port, method, target, &refs, body)
+}
+
+fn install(h: &Harness, id: &str) -> std::path::PathBuf {
+    let plugin = h.dir.path().join("plugins").join(id);
+    fs::create_dir_all(&plugin).unwrap();
+    fs::write(plugin.join("manifest.json"), r#"{"title":"Demo","entry":"index.js","version":"0.2.0"}"#).unwrap();
+    fs::write(plugin.join("index.js"), "export default () => {}").unwrap();
+    plugin
+}
+
+fn listing(h: &Harness) -> serde_json::Value {
+    serde_json::from_str(&get(h.port, "/api/plugins", &[]).body).unwrap()
+}
+
+#[test]
+fn the_listing_carries_version_status_and_folder() {
+    let h = start();
+    let plugin = install(&h, "demo");
+    let json = listing(&h);
+    assert_eq!(json[0]["manifest_version"], "0.2.0");
+    assert_eq!(json[0]["disabled"], false);
+    assert_eq!(json[0]["path"], plugin.to_string_lossy().as_ref());
+    let folder: serde_json::Value = serde_json::from_str(&get(h.port, "/api/plugin-folder", &[]).body).unwrap();
+    assert_eq!(folder["path"], h.dir.path().join("plugins").to_string_lossy().as_ref());
+}
+
+#[test]
+fn a_plugin_can_be_disabled_enabled_and_removed() {
+    let h = start();
+    let plugin = install(&h, "demo");
+    let off = call(&h, "POST", "/api/plugins/demo/disable", &[], "");
+    assert_eq!(off.status, 200);
+    let json: serde_json::Value = serde_json::from_str(&off.body).unwrap();
+    assert_eq!(json[0]["disabled"], true, "the answer is the fresh listing");
+    assert!(plugin.join(".disabled").is_file(), "disabled is a marker file in the plugin folder");
+    assert_eq!(listing(&h)[0]["disabled"], true);
+    assert_eq!(call(&h, "POST", "/api/plugins/demo/disable", &[], "").status, 200, "disabling twice is harmless");
+    let on = call(&h, "POST", "/api/plugins/demo/enable", &[], "");
+    assert_eq!(on.status, 200);
+    assert!(!plugin.join(".disabled").exists());
+    assert_eq!(call(&h, "POST", "/api/plugins/demo/enable", &[], "").status, 200, "enabling twice is harmless");
+    assert_eq!(listing(&h)[0]["disabled"], false);
+    // A marker file is never served as a plugin file.
+    fs::write(plugin.join(".disabled"), "x").unwrap();
+    assert_eq!(get(h.port, "/plugins/demo/.disabled", &[]).status, 400);
+    let gone = call(&h, "DELETE", "/api/plugins/demo", &[], "");
+    assert_eq!(gone.status, 200);
+    assert_eq!(gone.body, "[]");
+    assert!(!plugin.exists());
+    assert_eq!(call(&h, "DELETE", "/api/plugins/demo", &[], "").status, 404, "already gone");
+}
+
+#[test]
+fn plugin_management_refuses_bad_names_methods_and_unknown_plugins() {
+    let h = start();
+    let plugin = install(&h, "demo");
+    fs::write(h.dir.path().join("plugins/keep.txt"), "not a plugin").unwrap();
+    for evil in [
+        "/api/plugins/../enable", "/api/plugins/..", "/api/plugins/../web", "/api/plugins/%2e%2e/disable",
+        "/api/plugins/a%2fb/disable", "/api/plugins/a.b/disable", "/api/plugins/.hidden", "/api/plugins/a%5cb",
+        "/api/plugins/demo%00/disable", "/api/plugins//disable", "/api/plugins/",
+    ] {
+        for method in ["POST", "DELETE"] {
+            let answer = call(&h, method, evil, &[], "");
+            assert!(answer.status == 400 || answer.status == 404 || answer.status == 405, "{method} {evil} -> {}", answer.status);
+        }
+    }
+    let long = format!("/api/plugins/{}", "a".repeat(65));
+    assert_eq!(call(&h, "DELETE", &long, &[], "").status, 400, "ids are at most 64 characters");
+    assert!(plugin.is_dir() && h.dir.path().join("plugins/keep.txt").is_file() && h.dir.path().join("secret.txt").is_file());
+    assert_eq!(call(&h, "POST", "/api/plugins/demo/explode", &[], "").status, 404, "unknown action");
+    assert_eq!(call(&h, "POST", "/api/plugins/demo/disable/extra", &[], "").status, 404);
+    assert_eq!(call(&h, "GET", "/api/plugins/demo/disable", &[], "").status, 405);
+    assert_eq!(call(&h, "POST", "/api/plugins/demo", &[], "").status, 405, "removing needs DELETE");
+    assert_eq!(call(&h, "DELETE", "/api/plugins/demo/enable", &[], "").status, 405);
+    assert_eq!(call(&h, "POST", "/api/plugins/missing/disable", &[], "").status, 404);
+    assert_eq!(call(&h, "DELETE", "/api/plugins/missing", &[], "").status, 404);
+    assert!(!plugin.join(".disabled").exists(), "nothing above changed the plugin");
+}
+
+#[test]
+fn a_symlinked_plugin_folder_is_neither_followed_nor_removed() {
+    let h = start();
+    let outside = h.dir.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("precious.txt"), "keep").unwrap();
+    std::os::unix::fs::symlink(&outside, h.dir.path().join("plugins/linked")).unwrap();
+    for (method, target) in [("DELETE", "/api/plugins/linked"), ("POST", "/api/plugins/linked/disable"), ("POST", "/api/plugins/linked/enable")] {
+        assert_eq!(call(&h, method, target, &[], "").status, 404, "{method} {target}");
+    }
+    assert!(outside.join("precious.txt").is_file());
+    assert!(!outside.join(".disabled").exists(), "nothing was written through the link");
+}
+
+#[test]
+fn plugin_management_needs_the_same_token_host_and_origin_as_everything_else() {
+    let h = start();
+    let plugin = install(&h, "demo");
+    let host = format!("Host: 127.0.0.1:{}", h.port);
+    for (method, target) in [("POST", "/api/plugins/demo/disable"), ("DELETE", "/api/plugins/demo")] {
+        assert_eq!(http(h.port, method, target, &[&host], "").status, 401, "no token: {method}");
+        assert_eq!(http(h.port, method, target, &[&host, "Authorization: Bearer nope"], "").status, 401, "wrong token: {method}");
+        assert_eq!(call(&h, method, target, &["Origin: https://evil.example"], "").status, 403, "cross-origin: {method}");
+        assert_eq!(call(&h, method, target, &["Sec-Fetch-Site: cross-site"], "").status, 403, "cross-site: {method}");
+        let wrong_host = [format!("Host: evil.example:{}", h.port), format!("Authorization: Bearer {TOKEN}")];
+        let refs: Vec<&str> = wrong_host.iter().map(String::as_str).collect();
+        assert_eq!(http(h.port, method, target, &refs, "").status, 403, "foreign host: {method}");
+    }
+    assert!(plugin.is_dir() && !plugin.join(".disabled").exists(), "every refused call left the plugin alone");
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\nnot really an image, but it starts like one";
+
+/// POSTs raw bytes with a file name; returns the status and body.
+fn attach(h: &Harness, name: &str, body: &[u8]) -> (u16, String) {
+    let mut raw = format!(
+        "POST /api/attachments HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {TOKEN}\r\nX-Neko-Filename: {name}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
+        h.port,
+        body.len()
+    )
+    .into_bytes();
+    raw.extend_from_slice(body);
+    let mut stream = TcpStream::connect(("127.0.0.1", h.port)).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    stream.write_all(&raw).unwrap();
+    let mut text = String::new();
+    let _ = stream.read_to_string(&mut text);
+    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
+    (head.split(' ').nth(1).and_then(|s| s.parse().ok()).unwrap_or(0), body.to_string())
+}
+
+#[test]
+fn an_attached_image_is_kept_by_hash_and_referenced_like_the_native_composer_does() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = start();
+    let (status, body) = attach(&h, "Screen%20Shot.png", PNG);
+    assert_eq!(status, 200, "{body}");
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["is_image"], true);
+    assert_eq!(json["name"], "Screen Shot.png");
+    let reference = json["reference"].as_str().unwrap();
+    assert!(reference.starts_with("![Image](file://") && reference.ends_with(".png)"), "{reference}");
+    let path = reference.trim_start_matches("![Image](file://").trim_end_matches(')');
+    assert!(path.starts_with(h.dir.path().join("attachments").to_str().unwrap()));
+    assert_eq!(fs::read(path).unwrap(), PNG);
+    assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(fs::metadata(h.dir.path().join("attachments")).unwrap().permissions().mode() & 0o777, 0o700);
+    // The same bytes land on the same file, whatever they are called.
+    let (_, again) = attach(&h, "other.png", PNG);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&again).unwrap()["reference"], json["reference"]);
+    // The content decides "image", not the extension.
+    let (_, disguised) = attach(&h, "notes.txt", PNG);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&disguised).unwrap()["is_image"], true);
+    // A document: a labelled link with the path percent-encoded.
+    let (_, doc) = attach(&h, "Q3%20%5Bdraft%5D.pdf", b"%PDF-1.7 hello");
+    let doc: serde_json::Value = serde_json::from_str(&doc).unwrap();
+    assert_eq!(doc["is_image"], false);
+    let reference = doc["reference"].as_str().unwrap();
+    assert!(reference.starts_with("[Q3 \\[draft\\].pdf](file://") && reference.ends_with(".pdf)"), "{reference}");
+    // Where it lands never depends on the name: a path in it is only a label.
+    let (_, sneaky) = attach(&h, "..%2F..%2Fetc%2Fpasswd", b"data");
+    let sneaky: serde_json::Value = serde_json::from_str(&sneaky).unwrap();
+    assert_eq!(sneaky["name"], "passwd");
+    let reference = sneaky["reference"].as_str().unwrap();
+    assert!(reference.contains("/attachments/") && !reference.contains(".."), "{reference}");
+    let (_, hidden) = attach(&h, ".htaccess", b"data2");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&hidden).unwrap()["name"], "file");
+    let stored = fs::read_dir(h.dir.path().join("attachments")).unwrap().count();
+    assert_eq!(stored, 4, "the png (once), the pdf, passwd and htaccess");
+}
+
+#[test]
+fn attachments_refuse_the_wrong_method_an_empty_body_and_anything_too_large() {
+    let h = start();
+    assert_eq!(get(h.port, "/api/attachments", &[]).status, 405);
+    assert_eq!(call(&h, "POST", "/api/attachments", &[], "").status, 400, "nothing to keep");
+    let big = format!("Content-Length: {}", MAX_ATTACHMENT + 1);
+    assert_eq!(call(&h, "POST", "/api/attachments", &[&big], "").status, 413);
+    // Other routes keep the small limit.
+    let nine_mb = format!("Content-Length: {}", MAX_BODY + 1);
+    assert_eq!(call(&h, "POST", "/api/request", &[&nine_mb], "").status, 413);
+    assert!(!h.dir.path().join("attachments").exists(), "nothing was written");
+}
+
+#[test]
+fn an_unauthorised_upload_is_refused_before_its_body_is_read() {
+    let h = start();
+    let host = format!("Host: 127.0.0.1:{}", h.port);
+    // The body is announced and never sent: a server that tried to read it
+    // would time out (408) instead of answering at once.
+    let announce = format!("Content-Length: {MAX_ATTACHMENT}");
+    let started = std::time::Instant::now();
+    assert_eq!(http(h.port, "POST", "/api/attachments", &[&host, &announce], "").status, 401);
+    let cross = "Origin: https://evil.example".to_string();
+    let token = format!("Authorization: Bearer {TOKEN}");
+    assert_eq!(http(h.port, "POST", "/api/attachments", &[&host, &token, &cross, &announce], "").status, 403);
+    assert!(started.elapsed() < Duration::from_secs(4), "answered without waiting for a body");
+    assert!(!h.dir.path().join("attachments").exists());
 }
