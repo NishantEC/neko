@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { toast } from "@/ui/sonner";
 import { Clock, DotsThree, PencilSimple, Play, Plus, Trash } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { navigate } from "@/router";
 import {
   ConfirmDialog, EmptyBlock, ErrorNote, FormField, Gate, Pick, Section, SetupPage, Status, Toggle, registerCommands,
@@ -216,12 +216,12 @@ function SchedulesBody({ snapshot }: { snapshot: Json }) {
         return (
           <Section
             key={w.id}
-            eyebrow={list.length ? `${list.length} scheduled` : "Nothing scheduled"}
+            eyebrow={list.length ? `${list.length} scheduled` : "None scheduled"}
             title={w.name}
             actions={<Button variant="outline" size="sm" onClick={() => setDraft({ value: {}, workspace: w.id })}><Plus /> New schedule</Button>}
           >
             {list.length === 0 ? (
-              <EmptyBlock icon={Clock} title="No schedules yet" description="Create a schedule for a morning brief, a weekly review, or another recurring task." />
+              <Panel><p className="px-5 py-4 text-[13px] text-muted-foreground">No schedules yet. Create one for a morning brief, a weekly review, or another recurring task.</p></Panel>
             ) : (
               <Panel><div className="divide-y divide-border/70">
                 {list.map((s) => <ScheduleRow key={s.id} item={s} now={now} onEdit={() => setDraft({ value: s, workspace: w.id })} />)}

@@ -44,7 +44,7 @@ function ToolRow({ tool }: { tool: Json }) {
             <span className="font-mono text-[13px] font-medium text-foreground">{str(tool.name)}</span>
             <Badge variant="outline" className={`text-[11px] font-normal ${tool.read_only ? "text-muted-foreground" : "text-warning-foreground"}`}>{tool.read_only ? "Read-only" : "May change data"}</Badge>
           </span>
-          {str(tool.description) ? <span className="line-clamp-2 text-[13px] text-muted-foreground">{str(tool.description)}</span> : null}
+          {str(tool.description) && !open ? <span className="line-clamp-2 text-[13px] text-muted-foreground">{str(tool.description)}</span> : null}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -55,7 +55,7 @@ function ToolRow({ tool }: { tool: Json }) {
             <div className="flex flex-col gap-1.5">
               <span className="font-mono text-[11px] uppercase tracking-[0.14em]">Input schema</span>
               <div className="max-h-72 overflow-auto rounded-xl border border-border bg-foreground/[0.03] p-3">
-                {typeof schema === "string" ? <pre className="whitespace-pre-wrap font-mono text-xs">{schema}</pre> : <JsonViewer data={schema} rootName="input" defaultExpanded={false} />}
+                {typeof schema === "string" ? <pre className="whitespace-pre-wrap font-mono text-xs">{schema}</pre> : <JsonViewer data={schema} rootName="input" defaultExpanded />}
               </div>
             </div>
           ) : null}

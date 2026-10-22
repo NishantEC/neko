@@ -14,7 +14,7 @@ export function relativeTime(ms: number | null | undefined, now = Date.now()): s
   if (!ms || ms <= 0) return "Never";
   const diff = ms - now;
   const abs = Math.abs(diff);
-  if (abs < 45_000) return diff < 0 ? "just now" : "in a few seconds";
+  if (abs < 45_000) return "just now";
   const formatter = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
   const steps: [number, Intl.RelativeTimeFormatUnit][] = [
     [365 * 86_400_000, "year"], [30 * 86_400_000, "month"], [86_400_000, "day"], [3_600_000, "hour"], [60_000, "minute"],

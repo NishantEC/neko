@@ -7,7 +7,7 @@ import { Button } from "@/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/ui/tabs";
 import { ArrowDown, CaretRight, Globe, Plus, PlugsConnected, Terminal, Wrench, WarningCircle } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { navigate } from "@/router";
 import { toast } from "@/ui/sonner";
 import { EmptyBlock, Gate, Pick, Row, Section, SetupPage, Status, registerCommands } from "@/setup/kit";
@@ -30,7 +30,7 @@ function ConnectionRow({ snapshot, connection, onOpen }: { snapshot: Json; conne
   const scope = str(connection.workspace_id) ? workspaceName(snapshot, connection.workspace_id) : "All workspaces";
   const http = rec(connection.config).transport === "http";
   return (
-    <div data-slot="connection" data-status={status} className="flex items-start">
+    <div data-slot="mcp-connection" data-status={status} className="flex items-start">
       <div className="min-w-0 flex-1">
         <Row
           title={str(connection.label)}

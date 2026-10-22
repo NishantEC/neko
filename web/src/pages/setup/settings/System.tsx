@@ -6,7 +6,7 @@ import { Input } from "@/ui/input";
 import { Skeleton } from "@/ui/skeleton";
 import { Stethoscope } from "@phosphor-icons/react";
 import { ArrowSquareOut, CheckCircle, FolderSimple, WarningCircle, X } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { useWorkbench } from "@/useStore";
 import { ErrorNote, Row, Section, SettingRow, Status, Toggle } from "@/setup/kit";
 import { activate, arr, foldersOf, num, providerRows, str, useLoad, useRun, workspacesOf } from "@/setup/lib";
@@ -42,7 +42,7 @@ export function SearchSection() {
           <SettingRow id="add-folder" title="Add a folder" description="An absolute path on this Mac. The daemon checks that it is a folder." stacked>
             <form className="flex w-full gap-2" onSubmit={(e) => { e.preventDefault(); if (path.trim()) void act(path.trim(), "add").then(() => setPath("")); }}>
               <Input aria-label="Folder path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/Users/you/Documents" className="font-mono" />
-              <Button type="submit" disabled={!path.trim() || busy} loading={busy}>Add folder</Button>
+              <Button type="submit" className="h-10" disabled={!path.trim() || busy} loading={busy}>Add folder</Button>
             </form>
           </SettingRow>
           {error || folders.error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error ?? folders.error} onDismiss={clear} /></div> : null}

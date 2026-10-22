@@ -8,7 +8,7 @@ import { Input } from "@/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collapsible";
 import { ArrowSquareOut, ArrowsClockwise, Books, CaretDown, CaretRight, MagnifyingGlass, Plus, WarningCircle } from "@/ui/icons";
 import { EmptyBlock, ErrorNote, FormField, PanelFooter, Row, Status } from "@/setup/kit";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { arr, skillsCmd, str, useRun } from "@/setup/lib";
 
 function SkillRow({ skill, workspace, enabled, run, busy }: { skill: Json; workspace: string; enabled: Json[]; run: (s: () => Promise<Json>) => Promise<boolean>; busy: boolean }) {

@@ -8,7 +8,7 @@ import { Input } from "@/ui/input";
 import { Skeleton } from "@/ui/skeleton";
 import { CheckCircle, ArrowsClockwise, WarningCircle, XCircle } from "@/ui/icons";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collapsible";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { useWorkbench } from "@/useStore";
 import { ConfirmDialog, ErrorNote, PanelFooter, Pick, Section, SettingRow, Status, Toggle, type Option } from "@/setup/kit";
 import { arr, num, profileFor, relativeTime, str, useLoad, useRun } from "@/setup/lib";
@@ -147,7 +147,7 @@ function RuntimePanel({ snapshot, catalog }: { snapshot: Json; catalog: ReturnTy
           <CollapsibleContent>
             <div className="flex items-center gap-2 px-5 pb-4">
               <Input aria-label="Exact model ID" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Or enter an exact model ID" className="font-mono" />
-              <Button variant="outline" disabled={!validId(custom.trim())} onClick={() => { setModel(custom.trim()); setCheck(null); }}>Use ID</Button>
+              <Button variant="outline" className="h-10" disabled={!validId(custom.trim())} onClick={() => { setModel(custom.trim()); setCheck(null); }}>Use ID</Button>
             </div>
           </CollapsibleContent>
         </Collapsible>

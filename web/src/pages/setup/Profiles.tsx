@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collapsible";
 import { CaretDown, PencilSimple, Plus, Users } from "@/ui/icons";
-import { Panel } from "@/editorial";
+import { Panel } from "@/setup/kit";
 import { Checkbox } from "@/ui/checkbox";
 import { EmptyBlock, ErrorNote, FormField, Gate, PanelFooter, SetupPage, Status, registerCommands } from "@/setup/kit";
 import { useSetupCommands } from "@/setup/commands";
