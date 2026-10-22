@@ -142,6 +142,7 @@ function TaskRows() {
               <SidebarMenuItem key={task.id}>
                 <SidebarMenuButton
                   data-slot="sidebar-task"
+                  size="sm"
                   data-stage={stage}
                   title={`${taskTitle(task)} · ${STAGE_TITLES[stage]}`}
                   render={<a href={taskHref(task.id)} />}
@@ -155,7 +156,7 @@ function TaskRows() {
           })}
           {total > shown.length ? (
             <SidebarMenuItem>
-              <SidebarMenuButton className="text-muted-foreground" render={<a href={hrefFor("tasks")} />}>
+              <SidebarMenuButton size="sm" className="text-muted-foreground" render={<a href={hrefFor("tasks")} />}>
                 <span>Show all {total}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -171,7 +172,7 @@ function AppSidebar({ route }: { route: string }) {
   const { pages: pluginPages, problems } = usePlugins();
   return (
     <Sidebar>
-      <SidebarHeader className="flex-row items-center gap-2 px-4 pt-4 pb-3">
+      <SidebarHeader className="flex-row items-center gap-2 px-4 pt-4 pb-4">
         <Mark className="size-5 text-strong" />
         <EditorialHeading as="span" className="flex-1 text-[19px] leading-none">Neko</EditorialHeading>
         <Button type="button" variant="ghost" size="icon-sm" aria-label="New task" title="New task (⌘N)" className="text-sidebar-foreground" onClick={newTask}>
@@ -184,7 +185,7 @@ function AppSidebar({ route }: { route: string }) {
             <button
               type="button"
               onClick={openPalette}
-              className="flex h-8 w-full items-center gap-2 rounded-lg border border-sidebar-border bg-foreground/[0.03] px-2.5 text-[13px] text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-sidebar-border bg-foreground/[0.03] px-3 text-[13px] text-muted-foreground outline-none transition-colors hover:bg-foreground/[0.06] focus-visible:ring-2 focus-visible:ring-sidebar-ring"
               aria-label="Open the command palette"
             >
               <MagnifyingGlass size={14} />
