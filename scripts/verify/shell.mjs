@@ -124,17 +124,17 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   await page.goto(`${base}/#/`);
   await page.reload();
   await page.waitForSelector("[data-slot='composer'] textarea", { timeout: 15000 });
-  await page.waitForSelector("[data-slot='task-row']", { timeout: 10000 });
+  await page.waitForSelector("[data-slot='sidebar-task']", { timeout: 10000 });
   await sleep(600);
 
   const chips = await page.locator("[data-slot='nav-item'] [data-slot='state-chip']").allInnerTexts();
-  check(chips.some((c) => /^Working \d+s/.test(c.trim())), `Home's sidebar row shows a live "Working Ns" chip (${chips.join(" | ")})`);
+  check(chips.some((c) => /^Working \d+[ms]/.test(c.trim())), `Home's sidebar row shows a live "Working Ns" chip (${chips.join(" | ")})`);
   const tasksChip = await page.locator("[data-slot='nav-item']", { hasText: "Home" }).first().innerText();
   check(/Working/.test(tasksChip), "the chip sits in the row's right-hand slot");
-  const rows = await page.locator("[data-slot='task-row']").evaluateAll((els) => els.map((e) => ({ stage: e.getAttribute("data-stage"), text: e.textContent.trim() })));
+  const rows = await page.locator("[data-slot='sidebar-task']").evaluateAll((els) => els.map((e) => ({ stage: e.getAttribute("data-stage"), text: e.textContent.trim() })));
   check(rows.length >= 4, `the sidebar lists live tasks (${rows.length}): ${rows.map((r) => r.stage).join(", ")}`);
   check(rows[0].stage === "needsYou" && /Needs you/.test(rows[0].text), `a task that needs you leads, with an amber "Needs you" chip: "${rows[0].text}"`);
-  const amber = await page.locator("[data-slot='task-row'][data-stage='needsYou'] [data-slot='state-chip']").first().getAttribute("data-tone");
+  const amber = await page.locator("[data-slot='sidebar-task'][data-stage='needsYou'] [data-slot='state-chip']").first().getAttribute("data-tone");
   check(amber === "amber", "the Needs-you chip is the amber tone");
   check(rows.some((r) => r.stage === "review" && /Review/.test(r.text)) && rows.some((r) => r.stage === "running" && /Working/.test(r.text)), "review and running tasks carry their own chips");
   const title = await page.title();
