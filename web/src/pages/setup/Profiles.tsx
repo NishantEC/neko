@@ -67,7 +67,7 @@ function ProfilePanel({ snapshot, profile, onEdit }: { snapshot: Json; profile: 
   const granted = (source: Json) => arr(info.read_grants).some((g) => g.reader_id === profile.id && g.source_id === source.id);
   return (
     <Panel data-slot="profile" data-profile={str(profile.name)}>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
         <div className="flex min-w-0 items-center gap-3">
           <span aria-hidden className={`size-2 shrink-0 rounded-full ${active ? "bg-primary" : "bg-muted-foreground/50"}`} />
           <h3 className="truncate text-[17px] font-medium text-strong">{str(profile.name)}</h3>
@@ -86,7 +86,7 @@ function ProfilePanel({ snapshot, profile, onEdit }: { snapshot: Json; profile: 
           <Button variant="outline" size="sm" onClick={onEdit}><PencilSimple /> Edit</Button>
         </div>
       </div>
-      <div className="flex flex-col gap-3 border-t border-border/70 px-5 py-4 text-[13px]">
+      <div className="flex flex-col gap-3 border-t border-border/70 px-6 py-4 text-[13px]">
         <p className={`max-w-[70ch] whitespace-pre-wrap leading-relaxed ${str(profile.instructions) ? "text-foreground/85" : "text-muted-foreground"}`}>
           {str(profile.instructions) || "No special instructions. Edit this profile to add a voice or working rules."}
         </p>

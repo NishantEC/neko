@@ -287,7 +287,7 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
 
   return (
     <article data-slot="task-detail" data-task-id={id} aria-label={taskTitle(task)} className="flex h-full min-h-0 flex-col bg-background">
-      <header className="shrink-0 border-b border-border px-5 pt-3 pb-3">
+      <header className="shrink-0 border-b border-border px-6 pt-4 pb-4">
         <div className="mx-auto w-full max-w-[728px]">
         <div className="flex items-center gap-1">
           {full ? (
@@ -323,7 +323,7 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
           <span>Updated {relative(task.updated_at_ms) || "—"}</span>
           <span className="font-mono text-[11px] text-muted-foreground/70">NEK-{String(id).slice(0, 4).toUpperCase()}</span>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2" role="toolbar" aria-label="Task actions">
+        <div className="mt-4 flex flex-wrap items-center gap-2" role="toolbar" aria-label="Task actions">
           {buttons.map((a) => <ActionButton key={a.id} action={a} ui={ui} />)}
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="More task actions" />}><DotsThree weight="bold" /></DropdownMenuTrigger>

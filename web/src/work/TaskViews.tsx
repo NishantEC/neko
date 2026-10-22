@@ -68,7 +68,7 @@ function ListRow({ task, snapshot, selected, onOpen, ui, showWorkspace }: { task
         aria-label={`${title}, ${friendlyStatus(task.status)}${repo ? `, ${repo}` : ""}`}
         onClick={() => onOpen(task.id)}
         className={cn(
-          "group flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-start text-[13.5px] outline-none transition-colors",
+          "group flex h-10 w-full items-center gap-3 rounded-lg px-3 text-start text-[13.5px] outline-none transition-colors",
           "hover:bg-foreground/[0.05] focus-visible:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring",
           selected && "bg-foreground/[0.07]",
         )}
@@ -94,7 +94,7 @@ function ListRow({ task, snapshot, selected, onOpen, ui, showWorkspace }: { task
 
 function GroupHeader({ stage, count, spaced, children }: { stage: Stage; count: number; spaced?: boolean; children?: ReactNode }) {
   return (
-    <div data-slot="group-header" data-stage={stage} className={cn("flex h-8 items-center gap-2 px-2.5", spaced && "mt-4")}>
+    <div data-slot="group-header" data-stage={stage} className={cn("flex h-9 items-center gap-2 px-3", spaced && "mt-5")}>
       <span aria-hidden className={cn("size-2 rounded-full", TONE_DOT[STAGE_TONE[stage]])} />
       <h3 className="text-[13px] font-semibold text-strong">{STAGE_TITLE[stage]}</h3>
       <span className="text-[12.5px] tabular-nums text-muted-foreground">{count}</span>
@@ -107,7 +107,7 @@ function GroupHeader({ stage, count, spaced, children }: { stage: Stage; count: 
 export function TaskList(props: ViewProps) {
   const shown = COLUMNS.filter((c) => props.byStage[c.id].length > 0);
   return (
-    <div data-slot="task-list" role="list" aria-label="Tasks" className="@container w-full px-3.5 pt-2 pb-10">
+    <div data-slot="task-list" role="list" aria-label="Tasks" className="@container w-full px-6 pt-3 pb-12 md:px-7">
       {shown.map((column, i) => (
         <section key={column.id} role="listitem" aria-label={STAGE_TITLE[column.id]}>
           <GroupHeader stage={column.id} count={props.byStage[column.id].length} spaced={i > 0} />
@@ -211,8 +211,8 @@ export function TaskBoard({ doneOpen, setDoneOpen, ...props }: ViewProps & { don
   return (
     <div
       data-slot="task-board"
-      className="grid h-full min-h-0 gap-4 px-4 pt-2"
-      style={{ gridTemplateColumns: `${columns.map(() => "minmax(210px,1fr)").join(" ")}${doneOpen ? "" : " 44px"}` }}
+      className="grid h-full min-h-0 gap-4 px-6 pt-3 xl:px-10"
+      style={{ gridTemplateColumns: `${columns.map(() => "minmax(168px,1fr)").join(" ")}${doneOpen ? "" : " 44px"}` }}
     >
       {columns.map((c) => (
         <Column

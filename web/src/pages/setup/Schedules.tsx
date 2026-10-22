@@ -136,7 +136,7 @@ function ScheduleRow({ item, onEdit, now }: { item: Json; onEdit: () => void; no
   const [confirmDelete, setConfirmDelete] = useState(false);
   const enabled = !!item.enabled;
   return (
-    <div data-slot="schedule" data-enabled={enabled ? "true" : "false"} className="flex flex-col gap-3 px-5 py-4">
+    <div data-slot="schedule" data-enabled={enabled ? "true" : "false"} className="flex flex-col gap-3 px-6 py-4">
       <div className="flex items-start gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -221,7 +221,7 @@ function SchedulesBody({ snapshot }: { snapshot: Json }) {
             actions={<Button variant="outline" size="sm" onClick={() => setDraft({ value: {}, workspace: w.id })}><Plus /> New schedule</Button>}
           >
             {list.length === 0 ? (
-              <Panel><p className="px-5 py-4 text-[13px] text-muted-foreground">No schedules yet. Create one for a morning brief, a weekly review, or another recurring task.</p></Panel>
+              <Panel><p className="px-6 py-4 text-[13px] text-muted-foreground">No schedules yet. Create one for a morning brief, a weekly review, or another recurring task.</p></Panel>
             ) : (
               <Panel><div className="divide-y divide-border/70">
                 {list.map((s) => <ScheduleRow key={s.id} item={s} now={now} onEdit={() => setDraft({ value: s, workspace: w.id })} />)}

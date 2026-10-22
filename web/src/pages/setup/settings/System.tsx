@@ -29,7 +29,7 @@ export function SearchSection() {
             {folders.loading && !folders.data ? (
               <div className="p-5"><Skeleton className="h-4 w-64" /></div>
             ) : arr(folders.data).length === 0 ? (
-              <p className="flex items-center gap-2 px-5 py-5 text-[13px] text-muted-foreground"><FolderSimple aria-hidden /> No folders added</p>
+              <p className="flex items-center gap-2 px-6 py-5 text-[13px] text-muted-foreground"><FolderSimple aria-hidden /> No folders added</p>
             ) : arr(folders.data).map((f) => (
               <Row
                 key={str(f.id)}
@@ -100,7 +100,7 @@ export function PermissionsSection() {
         <Panel>
           <div className="divide-y divide-border/70">
             {protectedFolders.length === 0 ? (
-              <p className="px-5 py-4 text-[13px] text-muted-foreground">None of your workspaces are in a folder macOS protects, so tasks open them without asking.</p>
+              <p className="px-6 py-4 text-[13px] text-muted-foreground">None of your workspaces are in a folder macOS protects, so tasks open them without asking.</p>
             ) : protectedFolders.map(([folder, count]) => (
               <Row key={folder} title={folder} description={`${count === 1 ? "1 workspace is" : `${count} workspaces are`} here. macOS asks once, the first time a task opens it, and there is no way to check the answer without asking.`} trailing={<Status tone="success">Asked on first use</Status>} />
             ))}
@@ -108,7 +108,7 @@ export function PermissionsSection() {
         </Panel>
       </Section>
       <Section eyebrow="Agents" title="Agent access">
-        <Panel><p className="px-5 py-4 text-[13px] leading-relaxed text-muted-foreground">Neko does not record your screen or control your mouse. Authorized agents are local processes with full filesystem access; their worktrees are separate copies, not a security boundary. Publishing or changing external systems needs separate authority.</p></Panel>
+        <Panel><p className="px-6 py-4 text-[13px] leading-relaxed text-muted-foreground">Neko does not record your screen or control your mouse. Authorized agents are local processes with full filesystem access; their worktrees are separate copies, not a security boundary. Publishing or changing external systems needs separate authority.</p></Panel>
       </Section>
     </div>
   );
@@ -144,10 +144,10 @@ export function DiagnosticsSection() {
           <SettingRow id="diagnostics" title="Run diagnostics" description="Times each runtime and shows which installs Neko uses.">
             <Button onClick={() => void runChecks()} loading={running}><Stethoscope /> {running ? "Running…" : "Run diagnostics"}</Button>
           </SettingRow>
-          {roundTrip !== null ? <div className="flex items-center justify-between border-t border-border/70 px-5 py-3.5 text-[13px]"><span className="text-muted-foreground">Web page ↔ daemon</span><span className="font-mono">{roundTrip} ms</span></div> : null}
+          {roundTrip !== null ? <div className="flex items-center justify-between border-t border-border/70 px-6 py-3.5 text-[13px]"><span className="text-muted-foreground">Web page ↔ daemon</span><span className="font-mono">{roundTrip} ms</span></div> : null}
           {error ? <div className="border-t border-border/70 p-4"><ErrorNote error={error} title="Diagnostics failed" onDismiss={() => setError(null)} /></div> : null}
           {checks === null && !running ? (
-            <p className="border-t border-border/70 px-5 py-6 text-center text-[13px] text-muted-foreground">Run a check to see connection and runtime details.</p>
+            <p className="border-t border-border/70 px-6 py-6 text-center text-[13px] text-muted-foreground">Run a check to see connection and runtime details.</p>
           ) : null}
           <div className="divide-y divide-border/70 border-t border-border/70 empty:hidden" data-slot="diagnostic-checks">
             {(checks ?? []).map((c) => (

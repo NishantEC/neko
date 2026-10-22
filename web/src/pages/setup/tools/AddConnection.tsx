@@ -341,7 +341,7 @@ export function ImportDialog({
                     label={`${str(c.name)}, ${local ? "local" : "remote"}`}
                   />
                   {open ? (
-                    <div className="flex flex-col gap-3 px-5 pb-4 ps-[3.25rem]">
+                    <div className="flex flex-col gap-3 px-6 pb-4 ps-[3.5rem]">
                       {problem ? <ErrorNote error={problem} title="Needs setup" /> : null}
                       <pre className="select-text whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{str(rec(c.metadata).config_summary)}</pre>
                       {local ? <p className="text-xs text-muted-foreground">This executable runs on your Mac outside the agent sandbox. Review its command before trusting it.</p> : null}

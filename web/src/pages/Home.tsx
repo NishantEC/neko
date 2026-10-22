@@ -77,7 +77,7 @@ export default function Home() {
           <CaretDown /> Scroll to end
         </ConversationScrollButton>
       </Conversation>
-      <div className="mx-auto w-full max-w-[728px] px-6 pt-2 pb-5">
+      <div className="mx-auto w-full max-w-[728px] px-6 pt-2 pb-6">
         {!connected && snapshot && (
           <p role="status" className="mb-2 ms-1.5 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p>
         )}

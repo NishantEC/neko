@@ -190,7 +190,7 @@ export function TreeView({ tree, onOpenTask, onOpenHome, onOpenWatching }: {
 
   const ctx: Ctx = { isExpanded, toggle, choose, focusId, setFocusId, onKey };
   return (
-    <div ref={host} data-slot="agent-tree" className="w-full px-3.5 pt-2 pb-10">
+    <div ref={host} data-slot="agent-tree" className="w-full px-6 pt-3 pb-12 md:px-7">
       <div className="mb-2 flex items-center gap-2 ps-7">
         <span data-slot="tree-summary" className="font-mono text-[12px] tabular-nums text-muted-foreground" title="What runs reported spending. Codex runs report no cost, so they are not counted.">
           {treeSummary(tree)}

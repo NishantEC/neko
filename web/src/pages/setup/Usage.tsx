@@ -205,7 +205,7 @@ function SpendSection({ snapshot, now }: { snapshot: Json; now: number }) {
       </div>
       {hasData ? (
         <Panel>
-          <div className="px-5 pt-4">
+          <div className="px-6 pt-4">
             <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Spend per day · last 14 days (USD)</p>
             <ChartContainer config={{ cost: { label: "Spend (USD)", color: "var(--chart-1)" } }} className="mt-3 aspect-auto h-44 w-full" data-slot="spend-chart">
               <RechartsBarChart accessibilityLayer data={spend.days} margin={{ top: 8, right: 4, left: 8, bottom: 0 }}>

@@ -34,7 +34,7 @@ export function SetupPage({
 }) {
   return (
     <div data-slot="setup-page" className="min-h-0 flex-1 overflow-y-auto">
-      <div className={cn("mx-auto flex w-full flex-col gap-8 px-6 py-10", width)}>
+      <div className={cn("mx-auto flex w-full flex-col gap-8 px-6 pt-12 pb-20 md:px-10", width)}>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <PageHeader eyebrow={eyebrow} title={title} subtitle={subtitle} />
           {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
@@ -87,7 +87,7 @@ export function Panel({ children, className, ...rest }: React.ComponentProps<"di
 /** A distinct footer action bar for a Panel. */
 export function PanelFooter({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("flex flex-wrap items-center justify-end gap-2 border-t border-border/70 bg-foreground/[0.02] px-5 py-3.5", className)}>
+    <div className={cn("flex flex-wrap items-center justify-end gap-2 border-t border-border/70 bg-foreground/[0.02] px-6 py-4", className)}>
       {children}
     </div>
   );
@@ -122,7 +122,7 @@ export function Row({
       id={id}
       data-slot="setup-row"
       data-highlighted={highlighted ? "" : undefined}
-      className={cn("px-5 py-4 transition-colors data-[highlighted]:bg-primary/10", className)}
+      className={cn("min-h-14 px-6 py-4 transition-colors data-[highlighted]:bg-primary/10", className)}
     >
       <div className="flex items-start gap-3">
         {onClick ? (
@@ -164,9 +164,9 @@ export function SettingRow({
       data-slot="setting-row"
       data-setting={id}
       data-highlighted={highlighted ? "" : undefined}
-      className={cn("scroll-mt-24 px-5 py-4 transition-colors duration-500 data-[highlighted]:bg-primary/10", stacked ? "flex flex-col gap-3" : "flex flex-wrap items-center justify-between gap-x-6 gap-y-3")}
+      className={cn("scroll-mt-24 min-h-14 px-6 py-4 transition-colors duration-500 data-[highlighted]:bg-primary/10", stacked ? "flex flex-col gap-3" : "flex flex-wrap items-center justify-between gap-x-6 gap-y-3")}
     >
-      <div className="flex min-w-0 max-w-[52ch] flex-col gap-0.5">
+      <div className="flex min-w-0 max-w-[44ch] flex-col gap-0.5">
         <FieldLabel className="text-[11px]">{title}</FieldLabel>
         {description ? <p className="text-[13px] leading-[1.5] text-muted-foreground">{description}</p> : null}
       </div>
@@ -259,7 +259,7 @@ export function LoadingRows({ rows = 3 }: { rows?: number }) {
     <Panel aria-busy="true" aria-label="Loading">
       <div className="divide-y divide-border/70">
         {Array.from({ length: rows }, (_, i) => (
-          <div key={i} className="flex flex-col gap-2 px-5 py-4">
+          <div key={i} className="flex flex-col gap-2 px-6 py-4">
             <Skeleton className="h-4 w-48" />
             <Skeleton className="h-3 w-80 max-w-full" />
           </div>
@@ -375,7 +375,7 @@ export function FormField({
 export function BarList({ items, label }: { items: { name: string; value: number; text: string; hint?: string }[]; label: string }) {
   const max = Math.max(1, ...items.map((i) => i.value));
   return (
-    <ul aria-label={label} className="flex flex-col gap-3.5 px-5 py-4">
+    <ul aria-label={label} className="flex flex-col gap-4 px-6 py-5">
       {items.map((item) => (
         <li key={item.name} className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between gap-4 text-[13px]">

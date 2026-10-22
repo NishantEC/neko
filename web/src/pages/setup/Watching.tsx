@@ -88,7 +88,7 @@ function WatchRow({ snapshot, item, onEdit }: { snapshot: Json; item: Json; onEd
   return (
     <div data-slot="watch" data-enabled={item.enabled ? "true" : "false"}>
       <Collapsible open={open} onOpenChange={setOpen}>
-        <div className="flex items-start gap-3 px-5 py-4">
+        <div className="flex items-start gap-3 px-6 py-4">
           <CollapsibleTrigger
             render={<button type="button" aria-label={`${open ? "Hide" : "Show"} details for ${title}`} className="-m-1.5 flex min-w-0 flex-1 items-start gap-2.5 rounded-lg p-1.5 text-start outline-none transition-colors hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring" />}
           >
@@ -117,7 +117,7 @@ function WatchRow({ snapshot, item, onEdit }: { snapshot: Json; item: Json; onEd
           </div>
         </div>
         <CollapsibleContent>
-          <div className="flex flex-col gap-4 px-5 pb-5 ps-[3.25rem] text-[13px]">
+          <div className="flex flex-col gap-4 px-6 pb-5 ps-[3.5rem] text-[13px]">
             <p className="max-w-[70ch] whitespace-pre-wrap leading-relaxed text-foreground/85">{str(item.instruction)}</p>
             <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-muted-foreground">
               <dt>Status</dt><dd className="text-foreground/85">{item.enabled ? "Watching" : "Paused"}</dd>
@@ -147,7 +147,7 @@ function WatchRow({ snapshot, item, onEdit }: { snapshot: Json; item: Json; onEd
           </div>
         </CollapsibleContent>
       </Collapsible>
-      {a.error ? <div className="px-5 pb-4"><ErrorNote error={a.error} onDismiss={a.clear} /></div> : null}
+      {a.error ? <div className="px-6 pb-4"><ErrorNote error={a.error} onDismiss={a.clear} /></div> : null}
       <ActivationDialog snapshot={snapshot} item={item} open={confirmOn} onOpenChange={setConfirmOn} onConfirm={() => void a.turnOn()} />
       <ConfirmDialog
         open={confirmDelete}
@@ -177,7 +177,7 @@ function SuggestionCard({ snapshot, item, onEdit }: { snapshot: Json; item: Json
   const sources = arr(item.connection_ids).map((id) => connectionLabel(snapshot, id));
   const live = !!item.enabled;
   return (
-    <div data-slot="suggestion" className="flex flex-col gap-3 px-5 py-4">
+    <div data-slot="suggestion" className="flex flex-col gap-3 px-6 py-4">
       <div className="flex flex-col gap-1">
         <p className="line-clamp-3 text-[14px] font-medium leading-snug">{str(item.instruction)}</p>
         <p className={`text-[13px] ${a.missing.length ? "text-warning-foreground" : "text-muted-foreground"}`}>
@@ -321,7 +321,7 @@ function NewWatchPanel({ snapshot, workspaceId }: { snapshot: Json; workspaceId:
 
   return (
     <Panel data-slot="new-watch">
-      <div className="flex flex-col gap-3 px-5 py-4">
+      <div className="flex flex-col gap-3 px-6 py-4">
         <div className="flex items-center justify-between gap-3">
           <label htmlFor="watch-ask" className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">What should Neko keep an eye on?</label>
           {tools.length > 0 ? (
@@ -360,7 +360,7 @@ function NewWatchPanel({ snapshot, workspaceId }: { snapshot: Json; workspaceId:
         <ErrorNote error={error} title="Couldn’t ask Neko" onDismiss={clear} />
       </div>
       {reply ? (
-        <div className="border-t border-border/70 px-5 py-4">
+        <div className="border-t border-border/70 px-6 py-4">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-[13px] font-medium">{reply.pending ? "Looking through your tools…" : "Neko’s reply"}</span>
             {!reply.pending ? <Button variant="ghost" size="xs" onClick={() => setAskedAt(null)}>Hide reply</Button> : null}
