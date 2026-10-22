@@ -119,7 +119,7 @@ export function SkillsTab({ snapshot, workspace }: { snapshot: Json; workspace: 
       <ErrorNote error={error} title="Couldn’t update skills" onDismiss={clear} />
       <div className="relative">
         <MagnifyingGlass aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search skills" placeholder="Search skills" className="ps-9" />
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search skills" placeholder="Search skills" className="ps-9!" />
       </div>
       {unavailable.map((r) => (
         <Panel key={r.path}>

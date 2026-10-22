@@ -21,6 +21,7 @@ import {
 
 import { run } from "@/work/actions";
 import { useDialogs } from "@/work/dialogs";
+import { PageContainer } from "@/shell/PageContainer";
 import { WorkHeader, WorkSkeleton } from "@/work/PageFrame";
 import { StatusLabel, TONE_DOT, TONE_TEXT, type Tone } from "@/work/tone";
 import {
@@ -152,9 +153,9 @@ export default function PullRequests() {
   );
 
   return (
-    <div data-slot="prs-page" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <PageContainer data-slot="prs-page" className="max-w-[1088px]">
       <WorkHeader
-        className="w-full max-w-[1088px]"
+        className="px-0 pt-0 md:px-0"
         eyebrow="Work"
         title={<>Pull requests</>}
         subtitle={snapshot ? pullRequestSubtitle(rows) : "Loading…"}
@@ -213,7 +214,7 @@ export default function PullRequests() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="w-full max-w-[1040px] px-6 pb-12 md:px-10">
+        <div className="w-full">
           {!connected ? <p role="status" className="mb-3 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p> : null}
           {shown.length === 0 ? (
             <p className="py-10 text-center text-[13px] text-muted-foreground">Nothing is open. {hiddenFinished} merged or closed.</p>
@@ -247,7 +248,7 @@ export default function PullRequests() {
       {dialogs}
       <ConfirmRecheck open={confirm === "recheck"} count={reviewable} onClose={() => setConfirm(null)} onConfirm={recheck} />
       <ConfirmMerge open={confirm === "merge"} count={ready.length} onClose={() => setConfirm(null)} onConfirm={() => void mergeAll()} />
-    </div>
+    </PageContainer>
   );
 }
 
