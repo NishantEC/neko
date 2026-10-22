@@ -390,7 +390,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   check((await page.locator("[data-slot='agent-steps']").count()) >= 1, "a running task's commands fold into a work log");
   check((await page.getByRole("toolbar", { name: "Task actions" }).getByRole("button", { name: "Stop", exact: true }).count()) === 1, "a running task offers Stop");
   await page.locator("[data-slot='agent-steps'] button[aria-expanded]").first().waitFor();
-  const failing = page.locator("[data-slot='command-row'][data-failed='true'] button").first();
+  const failing = page.locator("[data-slot='command-row'][data-failed='true'] :is(button, [role='button'])").first();
   if (await failing.count()) {
     await failing.click();
     check(/FAIL packages/.test(await page.locator("[data-slot='thread']").innerText()), "a failed command opens its output in place");
