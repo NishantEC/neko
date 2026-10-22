@@ -22,6 +22,7 @@ import { MessageResponse } from "@/chat/message";
 import { CaretDown } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
 import { Changes } from "@/work/Changes";
+import { TaskBuilder } from "@/work/TaskBuilder";
 import { Block, CommandRow, DeliveryCard, PlanBlock, ResultBlock, ThreadView } from "@/work/Thread";
 import { run } from "@/work/actions";
 import { setLandOnMain, landsOnMain, repositoryPath, taskActions, type TaskAction, type Ui } from "@/work/taskActions";
@@ -42,7 +43,7 @@ const PLACEHOLDER: Record<string, string> = {
 // Drafts survive switching tasks (not a reload), like the native app's.
 const drafts = new Map<string, string>();
 
-function Composer({ task, ui }: { task: Task; ui: Ui }) {
+export function Composer({ task, ui }: { task: Task; ui: Ui }) {
   const id: string = task.id;
   const [text, setText] = useState(() => drafts.get(id) ?? "");
   const [sending, setSending] = useState(false);
@@ -122,7 +123,7 @@ function Fold({ label, children, defaultOpen = false }: { label: string; childre
 const SUPPORT_KEYS = ["evidence", "files", "tests", "sensitive_areas", "uncertainties"] as const;
 const EVENT_CAP = 150;
 
-function Details({ task, snapshot, open }: { task: Task; snapshot: any; open: (id: string) => void }) {
+export function Details({ task, snapshot, open }: { task: Task; snapshot: any; open: (id: string) => void }) {
   const assessment = task.supervision;
   const splits = (snapshot?.splits ?? []).filter((s: any) => s.parent_id === task.id);
   const decisions = latestDecisions((snapshot?.decision_records ?? []).filter((r: any) => r.task_id === task.id));
@@ -222,7 +223,7 @@ function Details({ task, snapshot, open }: { task: Task; snapshot: any; open: (i
   );
 }
 
-function ActionButton({ action, ui }: { action: TaskAction; ui: Ui }) {
+export function ActionButton({ action, ui }: { action: TaskAction; ui: Ui }) {
   const variant = action.kind === "primary" ? "default" : "outline";
   if (action.href) {
     return (
@@ -232,6 +233,65 @@ function ActionButton({ action, ui }: { action: TaskAction; ui: Ui }) {
     );
   }
   return <Button size="sm" variant={variant} onClick={() => action.run?.(ui)}>{action.label}</Button>;
+}
+
+/** The task's buttons and its ⋯ menu: the header of the side panel and the builder frame share it. */
+export function TaskActions({ task, snapshot, actions, ui, repo, className }: {
+  task: Task;
+  snapshot: any;
+  actions: TaskAction[];
+  ui: Ui;
+  repo: string | null | undefined;
+  className?: string;
+}) {
+  const buttons = actions.filter((a) => !a.menu);
+  const menu = actions.filter((a) => a.menu);
+  const repository = repositoryPath(snapshot, task);
+  return (
+    <div className={cn("flex flex-wrap items-center gap-2", className)} role="toolbar" aria-label="Task actions">
+      {buttons.map((a) => <ActionButton key={a.id} action={a} ui={ui} />)}
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="More task actions" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-56">
+          {menu.filter((a) => a.kind !== "destructive").map((a) => (
+            <DropdownMenuItem key={a.id} onClick={() => a.run?.(ui)}>{a.label}</DropdownMenuItem>
+          ))}
+          {repository ? (
+            <DropdownMenuCheckboxItem checked={landsOnMain(snapshot, task)} onCheckedChange={(on) => void setLandOnMain(snapshot, task, on)}>
+              Land on main in {repo}
+            </DropdownMenuCheckboxItem>
+          ) : null}
+          {menu.some((a) => a.kind === "destructive") ? <DropdownMenuSeparator /> : null}
+          {menu.filter((a) => a.kind === "destructive").map((a) => (
+            <DropdownMenuItem key={a.id} variant="destructive" onClick={() => a.run?.(ui)}>{a.label}</DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+/** The conversation: the thread, the plan and result blocks, delivery. Mounted by the side panel and by the builder frame's chat side. */
+export function TaskThread({ task, rows, state, hasPlanBlock }: {
+  task: Task;
+  rows: ReturnType<typeof threadRows>;
+  state: ReturnType<typeof conversationState>;
+  hasPlanBlock: boolean;
+}) {
+  return (
+    <Conversation className="min-h-0 flex-1">
+      <ConversationContent className="mx-auto w-full max-w-[728px] gap-0 px-5 pt-1 pb-6">
+        <ThreadView rows={rows} status={task.status} />
+        {hasPlanBlock ? <PlanBlock title={state.showsPlan ? state.planTitle : "Plan"} text={task.plan} /> : null}
+        {String(task.result ?? "") !== "" ? <ResultBlock task={task} outcome={state.outcome} reviewIsCurrent={state.reviewIsCurrent} /> : null}
+        <DeliveryCard task={task} />
+        {rows.length === 0 && !hasPlanBlock && !task.result ? (
+          <p className="mt-10 text-center text-[13px] text-muted-foreground">Nothing has happened on this task yet.</p>
+        ) : null}
+      </ConversationContent>
+      <ConversationScrollButton size="sm" className="gap-1.5 rounded-full bg-popover pe-3 ps-2 shadow-md"><CaretDown /> Scroll to end</ConversationScrollButton>
+    </Conversation>
+  );
 }
 
 export interface TaskDetailProps {
@@ -280,10 +340,27 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
   const state = conversationState(task);
   const repo = repositoryOf(snapshot, task);
   const prNumber = pullRequestNumber(task);
-  const buttons = actions.filter((a) => !a.menu);
-  const menu = actions.filter((a) => a.menu);
-  const repository = repositoryPath(snapshot, task);
   const hasPlanBlock = String(task.plan ?? "").trim() !== "" && (state.showsPlan || state.outcome === "previous");
+
+  if (full) {
+    return (
+      <TaskBuilder
+        task={task}
+        snapshot={snapshot}
+        ui={ui}
+        actions={actions}
+        rows={rows}
+        state={state}
+        hasPlanBlock={hasPlanBlock}
+        onClose={onClose}
+        onToggleFull={onToggleFull}
+        onOpenTask={onOpenTask}
+        copied={copied}
+        onCopyLink={copyLink}
+        headingRef={heading}
+      />
+    );
+  }
 
   return (
     <article data-slot="task-detail" data-task-id={id} aria-label={taskTitle(task)} className="flex h-full min-h-0 flex-col bg-background">
@@ -323,26 +400,7 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
           <span>Updated {relative(task.updated_at_ms) || "—"}</span>
           <span className="font-mono text-[11px] text-muted-foreground/70">NEK-{String(id).slice(0, 4).toUpperCase()}</span>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2" role="toolbar" aria-label="Task actions">
-          {buttons.map((a) => <ActionButton key={a.id} action={a} ui={ui} />)}
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="More task actions" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-56">
-              {menu.filter((a) => a.kind !== "destructive").map((a) => (
-                <DropdownMenuItem key={a.id} onClick={() => a.run?.(ui)}>{a.label}</DropdownMenuItem>
-              ))}
-              {repository ? (
-                <DropdownMenuCheckboxItem checked={landsOnMain(snapshot, task)} onCheckedChange={(on) => void setLandOnMain(snapshot, task, on)}>
-                  Land on main in {repo}
-                </DropdownMenuCheckboxItem>
-              ) : null}
-              {menu.some((a) => a.kind === "destructive") ? <DropdownMenuSeparator /> : null}
-              {menu.filter((a) => a.kind === "destructive").map((a) => (
-                <DropdownMenuItem key={a.id} variant="destructive" onClick={() => a.run?.(ui)}>{a.label}</DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        <TaskActions task={task} snapshot={snapshot} actions={actions} ui={ui} repo={repo} className="mt-4" />
         </div>
       </header>
 
@@ -357,18 +415,7 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
           </div>
         </div>
         <TabsPanel value="conversation" className="flex min-h-0 flex-col">
-          <Conversation className="min-h-0 flex-1">
-            <ConversationContent className="mx-auto w-full max-w-[728px] gap-0 px-5 pt-1 pb-6">
-              <ThreadView rows={rows} status={task.status} />
-              {hasPlanBlock ? <PlanBlock title={state.showsPlan ? state.planTitle : "Plan"} text={task.plan} /> : null}
-              {String(task.result ?? "") !== "" ? <ResultBlock task={task} outcome={state.outcome} reviewIsCurrent={state.reviewIsCurrent} /> : null}
-              <DeliveryCard task={task} />
-              {rows.length === 0 && !hasPlanBlock && !task.result ? (
-                <p className="mt-10 text-center text-[13px] text-muted-foreground">Nothing has happened on this task yet.</p>
-              ) : null}
-            </ConversationContent>
-            <ConversationScrollButton size="sm" className="gap-1.5 rounded-full bg-popover pe-3 ps-2 shadow-md"><CaretDown /> Scroll to end</ConversationScrollButton>
-          </Conversation>
+          <TaskThread task={task} rows={rows} state={state} hasPlanBlock={hasPlanBlock} />
         </TabsPanel>
         <TabsPanel value="changes" className="min-h-0 overflow-y-auto">
           <div className="mx-auto w-full max-w-[728px] px-5 pb-10">
