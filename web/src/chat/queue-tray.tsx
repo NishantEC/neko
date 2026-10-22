@@ -10,17 +10,18 @@ import { Button } from "@/ui/button";
 import { Kbd } from "@/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import { ComposerBanner } from "@/chat/t3/ComposerBanner";
-import type { NekoMessage } from "@/chat/types";
+import type { NekoUIMessage } from "@/chat/sdk/types";
+import { messageText } from "@/chat/sdk/parts";
 
 const ghostMuted = "text-muted-foreground hover:text-foreground";
 
 export function QueueTray({
   queued, onEdit, onSteer, onRemove,
 }: {
-  queued: NekoMessage[];
-  onEdit: (m: NekoMessage) => void;
-  onSteer: (m: NekoMessage) => void;
-  onRemove: (m: NekoMessage) => void;
+  queued: NekoUIMessage[];
+  onEdit: (m: NekoUIMessage) => void;
+  onSteer: (m: NekoUIMessage) => void;
+  onRemove: (m: NekoUIMessage) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const queueListId = useId();
@@ -58,8 +59,8 @@ export function QueueTray({
                 <ComposerBanner.Icon aria-hidden />
                 <ComposerBanner.Content className="text-foreground/80">
                   <Tooltip>
-                    <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>{m.text}</TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-96 break-words">{m.text}</TooltipContent>
+                    <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>{messageText(m)}</TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-96 break-words">{messageText(m)}</TooltipContent>
                   </Tooltip>
                 </ComposerBanner.Content>
                 <ComposerBanner.Actions>

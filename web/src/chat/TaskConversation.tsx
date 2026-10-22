@@ -23,11 +23,11 @@ import { LiveActivityRow, ToolActivityIconView, WorkLogList } from "@/chat/t3/Ti
 import { WorkLogButton } from "@/chat/t3/WorkLog";
 import { DeliveryCard, PlanBlock, ResultBlock } from "@/work/Thread";
 import { CommandRow } from "@/chat/CommandRow";
-import { run } from "@/work/actions";
 import { taskActions, type Ui } from "@/work/taskActions";
-import {
-  agentName, conversationState, stopReason, threadRows, waitingReason, workingLine, type Receipt, type Task, type ThreadRow,
-} from "@/work/model";
+import { conversationState, stopReason, waitingReason, workingLine, type Receipt, type Task } from "@/work/model";
+import { chatFor, sendText, taskSignature, useNekoChat } from "@/chat/sdk/chats";
+import { isToolPart, type NekoUIMessage } from "@/chat/sdk/types";
+import { messageText, receiptOfPart } from "@/chat/sdk/parts";
 
 const RECENT = 3;
 
@@ -76,35 +76,53 @@ function Author({ name }: { name: string }) {
   return <p data-slot="speaker" className="px-1 pb-1 text-2xs font-medium text-muted-foreground">{name}</p>;
 }
 
-export function TaskTimeline({ rows, status }: { rows: ThreadRow[]; status: string }) {
+/** The speaker line shows only when the speaker changes. */
+function speakerOf(message: NekoUIMessage): string {
+  return message.role === "assistant" ? message.metadata?.author ?? "Neko" : message.role === "user" ? "you" : "";
+}
+
+/** A task's conversation as the SDK's messages (the daemon's projection of its events). */
+export function TaskTimeline({ messages, status }: { messages: NekoUIMessage[]; status: string }) {
   const working = workingLine(status);
+  let previous = "";
   return (
     <div data-slot="thread" className="flex flex-col">
-      {rows.map((row, index) => {
-        const { item } = row;
-        const isLast = index === rows.length - 1;
-        switch (item.kind) {
-          case "brief":
-            return <UserTimelineRow key={row.id} text={item.text} createdAt={row.at} label="Request" className="pt-2" />;
-          case "you":
-            return <UserTimelineRow key={row.id} text={item.text} createdAt={row.at} className="pt-6" />;
-          case "status":
-            return <TimelineSystemDivider key={row.id} label={item.text} className="pt-5" />;
-          case "agent":
-            return (
-              <div key={row.id} data-slot="agent-turn" className={row.showsSpeaker ? "pt-6" : "pt-2"}>
-                {row.showsSpeaker ? <Author name={agentName(item.role)} /> : null}
-                <AssistantTimelineRow text={item.text} createdAt={row.at} author={agentName(item.role)} />
-              </div>
-            );
-          case "steps":
-            return (
-              <div key={row.id} data-slot="agent-steps" className={row.showsSpeaker ? "pt-6" : "pt-2"}>
-                {row.showsSpeaker ? <Author name={agentName(item.role)} /> : null}
-                <StepsBlock author={agentName(item.role)} commands={item.commands} startsOpen={isLast} />
-              </div>
-            );
+      {messages.map((message, index) => {
+        const speaker = speakerOf(message);
+        const showsSpeaker = speaker !== "" && speaker !== previous;
+        if (speaker) previous = speaker;
+        const at = message.metadata?.atMs ?? 0;
+        if (message.role === "user") {
+          const brief = message.metadata?.kind === "brief";
+          return <UserTimelineRow key={message.id} text={messageText(message)} createdAt={at} label={brief ? "Request" : undefined} className={brief ? "pt-2" : "pt-6"} />;
         }
+        if (message.role === "system") {
+          const part = message.parts.find((p) => p.type === "data-neko-status");
+          return <TimelineSystemDivider key={message.id} label={part && part.type === "data-neko-status" ? part.data.text ?? "" : ""} className="pt-5" />;
+        }
+        const author = message.metadata?.author ?? "Neko";
+        // Prose and the commands between it, in the order they happened.
+        const blocks: React.ReactNode[] = [];
+        let run: Receipt[] = [];
+        const flush = (key: string, last: boolean) => {
+          if (!run.length) return;
+          blocks.push(<div key={key} data-slot="agent-steps"><StepsBlock author={author} commands={run} startsOpen={last} /></div>);
+          run = [];
+        };
+        message.parts.forEach((part, i) => {
+          if (isToolPart(part)) run.push(receiptOfPart(part));
+          else if (part.type === "text") {
+            flush(`s${i}`, false);
+            blocks.push(<AssistantTimelineRow key={`t${i}`} text={part.text} createdAt={at} author={author} />);
+          }
+        });
+        flush("end", index === messages.length - 1);
+        return (
+          <div key={message.id} data-slot="agent-turn" className={showsSpeaker ? "pt-6" : "pt-2"}>
+            {showsSpeaker ? <Author name={author} /> : null}
+            {blocks}
+          </div>
+        );
       })}
       {working ? (
         <div data-slot="working" role="status" className="pt-6">
@@ -117,17 +135,17 @@ export function TaskTimeline({ rows, status }: { rows: ThreadRow[]; status: stri
 
 /** The whole conversation, scrolling, sticking to the end as the agent writes. */
 export function TaskConversation({ task, className }: { task: Task; className?: string }) {
-  const rows = threadRows(task);
+  const { messages } = useNekoChat(`task:${task.id}`, taskSignature(task));
   const state = conversationState(task);
   const hasPlanBlock = String(task.plan ?? "").trim() !== "" && (state.showsPlan || state.outcome === "previous");
   return (
     <Conversation className={cn("min-h-0 flex-1", className)}>
       <ConversationContent className="mx-auto w-full max-w-(--chat-content-max-width) gap-0 px-5 pt-1 pb-6">
-        <TaskTimeline rows={rows} status={task.status} />
+        <TaskTimeline messages={messages} status={task.status} />
         {hasPlanBlock ? <PlanBlock title={state.showsPlan ? state.planTitle : "Plan"} text={task.plan} /> : null}
         {String(task.result ?? "") !== "" ? <ResultBlock task={task} outcome={state.outcome} reviewIsCurrent={state.reviewIsCurrent} /> : null}
         <DeliveryCard task={task} />
-        {rows.length === 0 && !hasPlanBlock && !task.result ? (
+        {messages.length === 0 && !hasPlanBlock && !task.result ? (
           <p className="mt-10 text-center text-[13px] text-muted-foreground">Nothing has happened on this task yet.</p>
         ) : null}
       </ConversationContent>
@@ -206,9 +224,11 @@ export function TaskComposer({ task, ui }: { task: Task; ui: Ui }) {
     if (!trimmed || sending) return;
     setSending(true);
     setError(null);
-    const ok = await run("ReplyToTask", { task_id: id, text: trimmed });
-    if (ok) change("");
-    else setError("The reply was not sent. Your text is still here.");
+    // The reply goes the SDK's way; the daemon runs `ReplyToTask` and the
+    // conversation refills from its log.
+    const sent = await sendText(chatFor(`task:${id}`), trimmed);
+    if (sent.ok) change("");
+    else setError(`${sent.error} Your text is still here.`);
     setSending(false);
   };
 

@@ -22,6 +22,7 @@ fn call_input_chunks(call: &ChatToolCall) -> Vec<Value> {
     let input = serde_json::from_str::<Value>(&call.arguments_json).unwrap_or_else(|_| json!({"arguments": call.arguments_json}));
     let mut first = ui_message::tool_input(&call.id, &call.tool_name, &input);
     first["title"] = json!(call.tool_name);
+    first["toolMetadata"] = json!({"connectionId": call.connection_id});
     let mut chunks = vec![first];
     if call.status == ChatToolStatus::AwaitingApproval {
         chunks.push(json!({"type": "tool-approval-request", "toolCallId": call.id, "approvalId": call.id, "reason": format!("Uses {}", call.connection_id)}));

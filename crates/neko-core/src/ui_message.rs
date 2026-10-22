@@ -118,8 +118,10 @@ pub fn apply_chunk(parts: &mut Vec<Value>, chunk: &Value) {
             } else {
                 parts.push(json!({"type": "dynamic-tool", "toolName": chunk["toolName"], "toolCallId": call, "state": "input-available", "input": chunk["input"]}));
             }
-            if let Some(title) = chunk.get("title").filter(|t| t.is_string()) {
-                if let Some(part) = tool_part(parts, call) { part["title"] = title.clone(); }
+            for key in ["title", "toolMetadata"] {
+                if let Some(value) = chunk.get(key).filter(|v| !v.is_null()) {
+                    if let Some(part) = tool_part(parts, call) { part[key] = value.clone(); }
+                }
             }
         }
         "tool-approval-request" => {
@@ -196,7 +198,11 @@ pub fn replay_chunks(parts: &[Value], open_text: Option<&str>, open_reasoning: O
                 match part["state"].as_str().unwrap_or("") {
                     "input-streaming" => out.push(json!({"type": "tool-input-start", "toolCallId": call, "toolName": name, "dynamic": true})),
                     state => {
-                        out.push(json!({"type": "tool-input-available", "toolCallId": call, "toolName": name, "input": part["input"], "dynamic": true}));
+                        let mut input = json!({"type": "tool-input-available", "toolCallId": call, "toolName": name, "input": part["input"], "dynamic": true});
+                        for key in ["title", "toolMetadata"] {
+                            if let Some(value) = part.get(key) { input[key] = value.clone(); }
+                        }
+                        out.push(input);
                         let approval = &part["approval"];
                         match state {
                             "approval-requested" => out.push(json!({"type": "tool-approval-request", "toolCallId": call, "approvalId": approval["id"]})),

@@ -67,6 +67,7 @@ import { QueueTray } from "@/chat/queue-tray";
 import { Suggestion, Suggestions } from "@/chat/suggestion";
 import { NekoTurn, UserTurn } from "@/chat/turns";
 import { ToolFailed, ToolFold, ToolLine, WorkLog } from "@/chat/work-log";
+import { splitTurn } from "@/chat/sdk/parts";
 import { cn } from "@/ui/lib/utils";
 import { finishedReply, prRows, queued, runningReply, sampleArgs, structuredReply, usage, userMessage } from "@/pages/gallery-sample";
 
@@ -497,8 +498,8 @@ function ChatSection() {
         </div>
         <div className="flex flex-col gap-8">
           <Specimen label="WorkLog (live · done)" className="flex-col items-stretch">
-            <WorkLog message={runningReply} />
-            <WorkLog message={{ ...finishedReply, text: "" }} />
+            <WorkLog message={runningReply} work={splitTurn(runningReply.parts).work} />
+            <WorkLog message={finishedReply} work={splitTurn(finishedReply.parts).work} />
           </Specimen>
           <Specimen label="ToolLine · ToolFold · ToolFailed" className="flex-col items-stretch gap-0">
             <ToolLine>Updated the budget to $10 a day</ToolLine>
