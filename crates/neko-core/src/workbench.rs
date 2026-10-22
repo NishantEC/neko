@@ -1302,6 +1302,10 @@ fn apply_inner(db: &Db, command: Command) -> Result<Snapshot, String> {
             snapshot.self_update.requested = true;
             snapshot.self_update.status = "Checking for changes to apply…".into();
         }
+        Command::RollBackWebUi => {
+            snapshot.self_update.roll_back_web = true;
+            snapshot.self_update.status = "Rolling back the web UI…".into();
+        }
         Command::ApplyPendingUpdate => {
             let mut plan = snapshot.self_update.pending.take().ok_or("No update is waiting")?;
             plan.approved = true;

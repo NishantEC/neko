@@ -516,6 +516,9 @@ pub struct SelfUpdate {
     /// The owner asked for "Update Neko now".
     #[serde(default)]
     pub requested: bool,
+    /// The owner asked to go back to the previous web UI (`web-live.prev`).
+    #[serde(default)]
+    pub roll_back_web: bool,
     /// What it is doing or waiting for, in plain words; empty when idle.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub status: String,
@@ -531,7 +534,7 @@ impl Default for SelfUpdate {
     fn default() -> Self {
         Self {
             auto_ui: true, auto_native: true, checkout: None, applied_through: None, web_commit: None,
-            native_commit: None, queued: None, pending: None, installing: None, requested: false,
+            native_commit: None, queued: None, pending: None, installing: None, requested: false, roll_back_web: false,
             status: String::new(), last_update: None, last_failure: None, last_rollback: None,
         }
     }
@@ -1028,6 +1031,9 @@ pub enum Command {
     UpdateNekoNow,
     /// Apply the update that waits for the owner's click.
     ApplyPendingUpdate,
+    /// Go back to the previous web UI build (kept as `web-live.prev` after
+    /// every swap), or to the one the app shipped with when there is none.
+    RollBackWebUi,
     /// Whether Neko updates its web UI and its app on its own.
     SetSelfUpdate {
         auto_ui: bool,
