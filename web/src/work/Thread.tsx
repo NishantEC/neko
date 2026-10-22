@@ -1,20 +1,18 @@
-// A ticket read as a conversation with its agent (TicketThread.swift): your
-// brief and replies as bubbles, what each agent said as prose, the commands it
-// ran folded into one line with their output on demand, and status lines. The
-// plan, the result with its independent review, and where the work went follow
-// as their own blocks (TicketDetail.swift). Built from the chat set.
+// The blocks that follow a task's conversation (TicketDetail.swift): the plan,
+// the result with its independent review, and where the work went. The
+// conversation itself is chat/TaskConversation.tsx.
 import { useState, type ReactNode } from "react";
-import { Check, CaretDown, Copy, GitPullRequest, Hammer, Question, Sparkle, ShieldCheck, WarningCircle, X, ArrowSquareOut } from "@/ui/icons";
+import { Check, Copy, GitPullRequest, Hammer, Question, Sparkle, ShieldCheck, WarningCircle, ArrowSquareOut } from "@/ui/icons";
 import { Brain, GitMerge, MapTrifold, ShieldWarning } from "@/work/icons";
 import { Button } from "@/ui/button";
 import { cn } from "@/ui/lib/utils";
 import { MonoLabel } from "@/editorial";
-import { Message, MessageContent, MessageResponse } from "@/chat/message";
-import { ToolFold } from "@/chat/work-log";
+import { MessageResponse } from "@/chat/message";
+import { CommandRow } from "@/chat/CommandRow";
 import { StatusGlyph } from "@/work/tone";
 import {
-  agentName, OUTCOME_NOTE, OUTCOME_TITLE, parseResult, receiptFor, receiptOf, workingLine,
-  type Outcome, type Receipt, type Review, type Task, type ThreadRow,
+  OUTCOME_NOTE, OUTCOME_TITLE, parseResult, receiptFor, receiptOf,
+  type Outcome, type Receipt, type Review, type Task,
 } from "@/work/model";
 
 const SPEAKER_ICON = { Planner: MapTrifold, Builder: Hammer, Reviewer: ShieldCheck, Memory: Brain, Neko: Sparkle } as const;
@@ -29,138 +27,9 @@ export function Speaker({ name, icon }: { name: string; icon?: ReactNode }) {
   );
 }
 
-const LONG_REQUEST = 600;
-
-function Bubble({ text, label, clampable }: { text: string; label?: string; clampable?: boolean }) {
-  const [full, setFull] = useState(false);
-  const long = !!clampable && (text.length > LONG_REQUEST || text.split("\n").length > 10);
-  return (
-    <Message from="user" data-slot="user-turn" className="mt-8 max-w-full first:mt-2">
-      {label ? <MonoLabel className="mb-1 ml-auto text-[10.5px]">{label}</MonoLabel> : null}
-      <MessageContent
-        className={cn(
-          "max-w-[85%] gap-0 whitespace-pre-wrap break-words text-[14px] leading-[1.625] group-[.is-user]:rounded-2xl group-[.is-user]:bg-bubble group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-bubble-foreground",
-          long && !full && "max-h-56 overflow-hidden [mask-image:linear-gradient(to_bottom,black_75%,transparent)]",
-        )}
-      >
-        {text}
-      </MessageContent>
-      {long ? (
-        <Button variant="ghost" size="xs" className="ml-auto mt-1 text-muted-foreground" onClick={() => setFull(!full)} aria-expanded={full}>
-          {full ? "Show less" : "Show full request"}
-        </Button>
-      ) : null}
-    </Message>
-  );
-}
-
-/** One command the agent ran: outcome and command on a line; the output opens in place. */
-export function CommandRow({ receipt }: { receipt: Receipt }) {
-  const [open, setOpen] = useState(false);
-  const Icon = receipt.incomplete ? Question : receipt.failed ? X : Check;
-  const tint = receipt.incomplete ? "text-muted-foreground" : receipt.failed ? "text-destructive-foreground" : "text-success-foreground";
-  return (
-    <div data-slot="command-row" data-failed={receipt.failed}>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        aria-label={`${receipt.title}, ${receipt.status}`}
-        title={receipt.command ?? receipt.title}
-        className="flex min-h-7 w-full items-center gap-2 rounded-sm text-start outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <Icon size={12} weight="bold" className={cn("shrink-0", tint)} aria-hidden />
-        <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground/80">{receipt.title}</span>
-        {receipt.exitCode ? <span className="shrink-0 font-mono text-[11.5px] text-destructive-foreground">exit {receipt.exitCode}</span> : null}
-        <CaretDown size={11} className={cn("shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} aria-hidden />
-      </button>
-      {open ? (
-        <div className="mb-2 ms-5">
-          {receipt.notices.map((n) => (
-            <p key={n} className="mb-1 text-[12px] text-warning-foreground">{n}</p>
-          ))}
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-foreground/[0.04] px-3 py-2 font-mono text-[11.5px] leading-[1.55] text-muted-foreground">
-            {receipt.output === null ? "Output was not saved." : receipt.output === "" ? "No output." : receipt.output}
-          </pre>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-const RECENT = 3;
-
-/** What one agent ran during a stretch of work, folded into one line. */
-function StepsBlock({ author, commands, startsOpen }: { author: string; commands: Receipt[]; startsOpen: boolean }) {
-  const [all, setAll] = useState(false);
-  const failed = commands.filter((c) => c.failed).length;
-  const hidden = all ? 0 : Math.max(commands.length - RECENT, 0);
-  return (
-    <ToolFold
-      label={`${author} ran ${commands.length} ${commands.length === 1 ? "command" : "commands"}`}
-      aside={failed ? `${failed} failed` : undefined}
-      defaultOpen={startsOpen}
-    >
-      {hidden > 0 ? (
-        <Button variant="ghost" size="xs" className="mb-1 text-muted-foreground" onClick={() => setAll(true)}>
-          Show {hidden} earlier
-        </Button>
-      ) : null}
-      {commands.slice(hidden).map((receipt, i) => (
-        <CommandRow key={i + hidden} receipt={receipt} />
-      ))}
-    </ToolFold>
-  );
-}
-
-function StatusDivider({ text }: { text: string }) {
-  return (
-    <div role="separator" aria-label={text} className="mt-7 flex items-center gap-3 text-[12px] text-muted-foreground">
-      <span className="h-px flex-1 bg-border" aria-hidden />
-      <span className="max-w-[80%] truncate" title={text}>{text}</span>
-      <span className="h-px flex-1 bg-border" aria-hidden />
-    </div>
-  );
-}
-
-export function ThreadView({ rows, status }: { rows: ThreadRow[]; status: string }) {
-  const working = workingLine(status);
-  return (
-    <div data-slot="thread" className="flex flex-col">
-      {rows.map((row, index) => {
-        const { item } = row;
-        const isLast = index === rows.length - 1;
-        switch (item.kind) {
-          case "brief": return <Bubble key={row.id} text={item.text} label="Request" clampable />;
-          case "you": return <Bubble key={row.id} text={item.text} />;
-          case "status": return <StatusDivider key={row.id} text={item.text} />;
-          case "agent":
-            return (
-              <div key={row.id} data-slot="agent-turn" className={row.showsSpeaker ? "mt-8" : "mt-3"}>
-                {row.showsSpeaker ? <Speaker name={agentName(item.role)} /> : null}
-                <div data-slot="prose" className="text-[14px] leading-[1.625] text-foreground"><MessageResponse>{item.text}</MessageResponse></div>
-              </div>
-            );
-          case "steps":
-            return (
-              <div key={row.id} data-slot="agent-steps" className={row.showsSpeaker ? "mt-8" : "mt-2"}>
-                {row.showsSpeaker ? <Speaker name={agentName(item.role)} /> : null}
-                <StepsBlock author={agentName(item.role)} commands={item.commands} startsOpen={isLast} />
-              </div>
-            );
-        }
-      })}
-      {working ? (
-        <div data-slot="working" role="status" className="mt-6 flex min-h-9 items-center gap-2.5 text-[13px] text-foreground">
-          <span aria-hidden className="size-1.5 shrink-0 animate-[pulse-dot_1.2s_ease-in-out_infinite] rounded-full bg-primary" />
-          <span className="animate-shimmer-text bg-[linear-gradient(90deg,var(--muted-foreground)_0%,var(--strong)_50%,var(--muted-foreground)_100%)] bg-[length:200%_100%] bg-clip-text text-transparent motion-reduce:animate-none motion-reduce:bg-none motion-reduce:text-foreground">
-            {working}
-          </span>
-        </div>
-      ) : null}
-    </div>
-  );
-}
+// The conversation itself (bubbles, prose, the commands an agent ran, status
+// lines) is chat/TaskConversation.tsx, drawn with T3 Code's timeline rows.
+export { CommandRow };
 
 /** A block of the page: a quiet card, not a heading in the middle of a chat. */
 export function Block({ children, className, ...rest }: { children: ReactNode; className?: string } & React.HTMLAttributes<HTMLElement>) {

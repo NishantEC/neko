@@ -1,11 +1,18 @@
 // Messages sent while a reply was running, waiting their turn. Docks onto the
 // composer's top edge (ChatInput's `tray` slot).
-import { ArrowElbowDownRight, PencilSimple, X } from "@/ui/icons";
+//
+// from t3code apps/web/src/components/chat/QueuedRunsControl.tsx @3b95e7831 (MIT)
+// (adapted: Neko's queued messages and its Edit / Steer / Remove commands; no
+// drag reordering or thumbnails, which the daemon's queue does not have)
+import { useId, useState } from "react";
+import { CornerUpRightIcon, ListOrderedIcon, PencilIcon } from "lucide-react";
 import { Button } from "@/ui/button";
 import { Kbd } from "@/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
-import { MonoLabel } from "@/editorial";
+import { ComposerBanner } from "@/chat/t3/ComposerBanner";
 import type { NekoMessage } from "@/chat/types";
+
+const ghostMuted = "text-muted-foreground hover:text-foreground";
 
 export function QueueTray({
   queued, onEdit, onSteer, onRemove,
@@ -15,38 +22,82 @@ export function QueueTray({
   onSteer: (m: NekoMessage) => void;
   onRemove: (m: NekoMessage) => void;
 }) {
+  const [expanded, setExpanded] = useState(true);
+  const queueListId = useId();
   if (!queued.length) return null;
   return (
-    <div data-slot="queue-tray" role="group" aria-label="Queued messages" className="mb-2 rounded-2xl border border-border bg-card pb-1.5 shadow-xs">
-      <div className="flex items-center px-3.5 pt-2 pb-0.5">
-        <MonoLabel className="text-[10.5px]">Queued</MonoLabel>
-        <span className="flex-1" />
-        <span className="text-xs tabular-nums text-muted-foreground">{queued.length}</span>
-      </div>
-      {queued.map((m) => (
-        <div key={m.id} data-slot="queue-row" className="flex min-h-8 items-center gap-1 ps-3.5 pe-2">
-          <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" title={m.text}>{m.text}</span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-xs" aria-label="Edit queued message" onClick={() => onEdit(m)}>
-                <PencilSimple />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Edit <Kbd>⌥↑</Kbd></TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="xs" aria-label="Send now" onClick={() => onSteer(m)} className="gap-1 text-muted-foreground hover:text-foreground">
-                <ArrowElbowDownRight /> Steer
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Send now <Kbd>⌘⇧↵</Kbd></TooltipContent>
-          </Tooltip>
-          <Button variant="ghost" size="icon-xs" aria-label="Remove queued message" onClick={() => onRemove(m)}>
-            <X />
-          </Button>
-        </div>
-      ))}
-    </div>
+    <ComposerBanner.Attachment>
+      <ComposerBanner.Root
+        data-slot="queue-tray"
+        role="region"
+        aria-label={`${queued.length} queued message${queued.length === 1 ? "" : "s"}`}
+        aria-live="polite"
+        className="relative z-0"
+      >
+        <ComposerBanner.Row
+          render={<button type="button" />}
+          aria-label={expanded ? "Collapse queued messages" : "Expand queued messages"}
+          aria-expanded={expanded}
+          aria-controls={queueListId}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <ComposerBanner.Icon>
+            <ListOrderedIcon />
+          </ComposerBanner.Icon>
+          <ComposerBanner.Content className="text-muted-foreground">Queued</ComposerBanner.Content>
+          <ComposerBanner.Actions>
+            <ComposerBanner.Count>{queued.length}</ComposerBanner.Count>
+            <ComposerBanner.ToggleIcon expanded={expanded} />
+          </ComposerBanner.Actions>
+        </ComposerBanner.Row>
+        <ComposerBanner.Scroll className={expanded ? "max-h-32" : "hidden"}>
+          <ComposerBanner.Children render={<ol />} id={queueListId}>
+            {queued.map((m, index) => (
+              <ComposerBanner.Row render={<li />} key={m.id} data-slot="queue-row" className="relative rounded-sm">
+                <ComposerBanner.Icon aria-hidden />
+                <ComposerBanner.Content className="text-foreground/80">
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>{m.text}</TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-96 break-words">{m.text}</TooltipContent>
+                  </Tooltip>
+                </ComposerBanner.Content>
+                <ComposerBanner.Actions>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button size="icon-xs" variant="ghost" className={`size-6 ${ghostMuted}`} aria-label="Edit queued message" onClick={() => onEdit(m)} />
+                      }
+                    >
+                      <PencilIcon className="size-3.5" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Edit in the composer{index === queued.length - 1 ? <> <Kbd>⌥↑</Kbd></> : null}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="flex shrink-0" />}>
+                      <Button size="xs" variant="ghost" className={`h-6 gap-1 px-1.5 text-xs ${ghostMuted}`} aria-label="Send now" onClick={() => onSteer(m)}>
+                        <CornerUpRightIcon className="size-3.5" />
+                        Steer
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Stop the reply and send this now <Kbd>⌘⇧↵</Kbd>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<ComposerBanner.Dismiss className={`size-6 ${ghostMuted}`} aria-label="Remove queued message" onClick={() => onRemove(m)} />}
+                    />
+                    <TooltipContent>Remove from queue</TooltipContent>
+                  </Tooltip>
+                </ComposerBanner.Actions>
+              </ComposerBanner.Row>
+            ))}
+          </ComposerBanner.Children>
+        </ComposerBanner.Scroll>
+      </ComposerBanner.Root>
+    </ComposerBanner.Attachment>
   );
 }

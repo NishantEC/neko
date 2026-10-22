@@ -15,99 +15,21 @@ import {
 } from "@/ui/dropdown-menu";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/ui/empty";
-import { Conversation, ConversationContent, ConversationScrollButton } from "@/chat/conversation";
-import { ChatInput } from "@/chat/chat-input";
+import { TaskComposer, TaskConversation } from "@/chat/TaskConversation";
 import { EditorialHeading, MonoLabel } from "@/editorial";
 import { MessageResponse } from "@/chat/message";
-import { CaretDown } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
 import { Changes } from "@/work/Changes";
 import { TaskBuilder } from "@/work/TaskBuilder";
-import { Block, CommandRow, DeliveryCard, PlanBlock, ResultBlock, ThreadView } from "@/work/Thread";
-import { run } from "@/work/actions";
+import { Block, CommandRow } from "@/work/Thread";
 import { setLandOnMain, landsOnMain, repositoryPath, taskActions, type TaskAction, type Ui } from "@/work/taskActions";
 import { STAGE_TONE, StatusLabel, Tag } from "@/work/tone";
 import {
   conversationState, decisionTitle, friendlyStatus, latestDecisions, pullRequestNumber, receiptOf, relative, repositoryOf,
-  stageOf, stopReason, taskTitle, threadRows, waitingReason, type Receipt, type Task,
+  stageOf, taskTitle, type Receipt, type Task,
 } from "@/work/model";
 
-const PLACEHOLDER: Record<string, string> = {
-  AwaitingApproval: "Answer the agent, or tell it what to change…",
-  ReadyForReview: "Ask a question or request changes…",
-  Failed: "Tell the agent how to try again…",
-  Cancelled: "Tell the agent how to try again…",
-  Completed: "Reopen with a follow-up…",
-};
-
-// Drafts survive switching tasks (not a reload), like the native app's.
-const drafts = new Map<string, string>();
-
-export function Composer({ task, ui }: { task: Task; ui: Ui }) {
-  const id: string = task.id;
-  const [text, setText] = useState(() => drafts.get(id) ?? "");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => { setText(drafts.get(id) ?? ""); setError(null); }, [id]);
-  const change = (value: string) => { setText(value); drafts.set(id, value); };
-  const running = ["Queued", "Planning", "Building", "Reviewing"].includes(task.status);
-  const stop = taskActions(task, {}).find((a) => a.id === "stop");
-
-  const send = async () => {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
-    setSending(true);
-    setError(null);
-    const ok = await run("ReplyToTask", { task_id: id, text: trimmed });
-    if (ok) { change(""); } else setError("The reply was not sent. Your text is still here.");
-    setSending(false);
-  };
-
-  const reason = waitingReason(task);
-  const tray = reason ? (
-    <TrayNote title="The planner has a question" body={reason} />
-  ) : task.status === "Failed" ? (
-    <TrayNote title="Why it stopped" body={stopReason(task)} />
-  ) : null;
-
-  return (
-    <ChatInput
-      text={text}
-      onTextChange={change}
-      onSendMessage={send}
-      sending={sending}
-      isGenerating={running}
-      onStop={() => stop?.run?.(ui)}
-      error={error}
-      maxLength={2048}
-      placeholder={PLACEHOLDER[task.status] ?? "Redirect the agent. It pauses and replans…"}
-      tray={tray}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) void send();
-      }}
-    />
-  );
-}
-
-function TrayNote({ title, body }: { title: string; body: string }) {
-  const [open, setOpen] = useState(false);
-  const first = body.split("\n")[0];
-  return (
-    <div data-slot="task-tray" role="note" className="mb-2 rounded-2xl border border-warning/40 bg-warning/[0.07] px-3.5 py-2.5">
-      <div className="flex items-center gap-2 text-warning-foreground">
-        <MonoLabel className="text-warning-foreground">{title}</MonoLabel>
-        <span className="flex-1" />
-        {body.length > first.length || body.length > 140 ? (
-          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="rounded-sm text-xs outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring">
-            {open ? "Less" : "Full text"}
-          </button>
-        ) : null}
-      </div>
-      <p className={cn("mt-1 text-[13px] leading-[1.5] text-foreground", !open && "line-clamp-2")}>{open ? body : first}</p>
-    </div>
-  );
-}
-
+// The task's conversation and reply box are chat/TaskConversation.tsx.
 function Fold({ label, children, defaultOpen = false }: { label: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -271,29 +193,6 @@ export function TaskActions({ task, snapshot, actions, ui, repo, className }: {
   );
 }
 
-/** The conversation: the thread, the plan and result blocks, delivery. Mounted by the side panel and by the builder frame's chat side. */
-export function TaskThread({ task, rows, state, hasPlanBlock }: {
-  task: Task;
-  rows: ReturnType<typeof threadRows>;
-  state: ReturnType<typeof conversationState>;
-  hasPlanBlock: boolean;
-}) {
-  return (
-    <Conversation className="min-h-0 flex-1">
-      <ConversationContent className="mx-auto w-full max-w-[728px] gap-0 px-5 pt-1 pb-6">
-        <ThreadView rows={rows} status={task.status} />
-        {hasPlanBlock ? <PlanBlock title={state.showsPlan ? state.planTitle : "Plan"} text={task.plan} /> : null}
-        {String(task.result ?? "") !== "" ? <ResultBlock task={task} outcome={state.outcome} reviewIsCurrent={state.reviewIsCurrent} /> : null}
-        <DeliveryCard task={task} />
-        {rows.length === 0 && !hasPlanBlock && !task.result ? (
-          <p className="mt-10 text-center text-[13px] text-muted-foreground">Nothing has happened on this task yet.</p>
-        ) : null}
-      </ConversationContent>
-      <ConversationScrollButton size="sm" className="gap-1.5 rounded-full bg-popover pe-3 ps-2 shadow-md"><CaretDown /> Scroll to end</ConversationScrollButton>
-    </Conversation>
-  );
-}
-
 export interface TaskDetailProps {
   id: string;
   ui: Ui;
@@ -310,7 +209,6 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
   const [copied, setCopied] = useState(false);
   useEffect(() => setTab("conversation"), [id]);
 
-  const rows = useMemo(() => (task ? threadRows(task) : []), [task]);
   const actions = useMemo(() => (task ? taskActions(task, snapshot) : []), [task, snapshot]);
   const copyLink = useCallback(() => {
     navigator.clipboard?.writeText(`${location.origin}${location.pathname}#/tasks?task=${id}`).catch(() => {});
@@ -337,10 +235,9 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
   }
 
   const stage = stageOf(task.status);
-  const state = conversationState(task);
   const repo = repositoryOf(snapshot, task);
   const prNumber = pullRequestNumber(task);
-  const hasPlanBlock = String(task.plan ?? "").trim() !== "" && (state.showsPlan || state.outcome === "previous");
+  const state = conversationState(task);
 
   if (full) {
     return (
@@ -349,9 +246,7 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
         snapshot={snapshot}
         ui={ui}
         actions={actions}
-        rows={rows}
         state={state}
-        hasPlanBlock={hasPlanBlock}
         onClose={onClose}
         onToggleFull={onToggleFull}
         onOpenTask={onOpenTask}
@@ -415,7 +310,7 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
           </div>
         </div>
         <TabsPanel value="conversation" className="flex min-h-0 flex-col">
-          <TaskThread task={task} rows={rows} state={state} hasPlanBlock={hasPlanBlock} />
+          <TaskConversation task={task} />
         </TabsPanel>
         <TabsPanel value="changes" className="min-h-0 overflow-y-auto">
           <div className="mx-auto w-full max-w-[728px] px-5 pb-10">
@@ -432,7 +327,7 @@ export function TaskDetail({ id, ui, full, onClose, onToggleFull, onOpenTask }: 
       </Tabs>
 
       <div className="mx-auto w-full max-w-[728px] shrink-0 px-5 pt-1 pb-4">
-        <Composer task={task} ui={ui} />
+        <TaskComposer task={task} ui={ui} />
       </div>
     </article>
   );
