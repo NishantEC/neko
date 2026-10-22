@@ -287,3 +287,32 @@ primitives alone, the two look alike; in the running app hushbacks' controls are
 What was deliberately not copied: the pill radius (24 px) and squircle corners, the
 sky gradient/glass surfaces, and `text-[56px]` hero headings. Those are look, not
 spacing, and the owner asked for spacing and density only.
+
+**Superseded the same day** by "The shell, copied" below: the owner asked for
+hushbacks' own code rather than an imitation, so the Sky layer itself (pills and
+squircles included) now ships and the primitives are upstream again.
+
+## The shell, copied (2026-10-22)
+
+"Instead of rebuilding stuff on our own, copy paste from hushbacks." The app shell
+is now hushbacks' own code from `apps/spa` @da20dfaeb, data swapped, colours on
+Neko's tokens, no serif, italic emphasis or mono eyebrows. File-by-file table and
+what was adapted: `web/src/ui/NOTICE.md` → "The app shell".
+
+- `<body class="sky">` + `styles/sky-materials.css`: control sizes (40/36/32 px),
+  24 px pill radius, pebble secondary buttons, well inputs, dialog/menu radii.
+  Neko's `default` button stays blue.
+- `shell/AppSidebar.tsx`: UnifiedAppSidebar — inset, icon-collapsible (collapses
+  below 900 px), header mark / name / trigger, ⌘K row, live Tasks rail, pages under a
+  hairline with the sliding pebble, Settings' sections revealed under Settings,
+  Plugins, theme segment, connection row.
+- `shell/PageContainer.tsx`: every scrolling page sits in hushbacks' 1200 px column
+  (`px-6 md:px-10`, `pt-12 md:pt-16 pb-24`); setup pages narrow it with `width`.
+- Settings: hushbacks' settings route — breadcrumb bar, 52rem flat settings surface.
+  The section list is in the sidebar (or the bar's pills when it is collapsed).
+- A task opened full page (`#/tasks?task=…&view=full`) is hushbacks' builder frame
+  (`work/TaskBuilder.tsx`): chat panel left, Changes / Plan / Details as fused view
+  tabs on the stage, actions at the header end. Beside the list it is unchanged.
+- Tasks and Agent tree keep their own full-height frames (as hushbacks' builder does
+  not use PageContainer); their headers are unchanged.
+- A field with an icon inside it needs `ps-9!`: the Sky input rule sets the padding.

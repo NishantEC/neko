@@ -41,10 +41,24 @@ meteors, warp-background and the other decorative effects; thinking-orbs.
   ToolFailed over Neko's `activity` and `tool_calls`), `chat/decisions.tsx`,
   `chat/queue-tray.tsx`, `chat/turns.tsx`.
 
-## Local deviations (spacing, 2026-10-22)
+## The app shell, copied from hushbacks `apps/spa` @da20dfaeb (2026-10-22)
 
-`button.tsx` size variants and `select.tsx` `data-[size=sm]` height follow what
-hushbacks' running app renders (its `Sky` layer: control 40 px, row 36 px, xs 32 px)
-instead of the raw primitives' 32/28/24 px; `sidebar.tsx` menu-button sizes do too.
-Re-vendoring these files must keep those values. See
-`docs/design/web-ui-from-hushbacks.md` → "Spacing, measured".
+`button.tsx`, `select.tsx` and `sidebar.tsx` are hushbacks' originals again (the
+earlier spacing patch is gone): `<body class="sky">` and `styles/sky-materials.css`
+supply the running app's sizes exactly as hushbacks does. Each file below starts
+with `// from hushbacks <path> @da20dfaeb`:
+
+| Neko file | hushbacks `apps/spa/src/...` | Adapted |
+| --- | --- | --- |
+| `styles/sky-materials.css` | `components/Sky/sky-materials.css` | Colours on Neko tokens (pebble, well, ink, status); no scene, grain, glass blur, sidebar gradient, swatches, builder hues or composer rules; `default` buttons keep Neko's blue primary |
+| `shell/AppSidebar.tsx`, `shell/AppSidebar.parts.tsx` | `components/UnifiedAppSidebar/index.tsx`, `UnifiedAppSidebar.parts.tsx`, `AccountFooter.tsx` (ThemeSwitch), `MobileTopBar.tsx` | Hash links; Forms rail → live Tasks rail; workspace switcher → product name; account row → connection row; Settings sub-nav lists Neko's sections; ⌘K search row and page groups added; no usage well, notification bell or admin |
+| `shell/PageContainer.tsx` | `components/PageContainer.tsx` | Passes extra props (`data-slot`) to the scroll surface |
+| `pages/setup/settings/settings-surface.css` | `pages/Settings/settings-surface.css` | Targets Neko's kit slots |
+| `setup/kit.tsx` (SetupPage, Section, Panel, PanelFooter, Row, SettingRow) | `components/PageContainer.tsx`, `pages/Settings/settings.ui.tsx` | Neko's props kept; the section heading sits above its panel |
+| `pages/setup/Settings.tsx` layout | `routes/_app.settings.tsx` | Breadcrumb bar, 52rem settings surface, phone/collapsed pill nav; search stays at the top of the column |
+| `editorial/PageHeader.tsx` | `packages/ui/.../editorial/PageHeader.tsx` | No eyebrow, plain sans heading at hushbacks' size |
+| `work/builder/BuilderViewTabs.tsx` (+ `.css`), `BuilderPanelTabs.tsx`, `useFusedTabIndicator.ts`, `builderHeaderLayout.ts` | `pages/Builder/components/...` | View value is a string; builder surfaces on Neko tokens |
+| `work/TaskBuilder.tsx` | `pages/Builder/index.tsx`, `components/BuilderDesktopHeader.tsx`, `FormBuilderMode.tsx`, `hooks/useChatPanelSize.ts`, `hooks/useCollapsedChat.ts`, `useBuilderViewMode.ts` | Task conversation in the chat panel; Changes / Plan / Details views; task actions at the header end; chat 35% default (45% max) |
+
+Not copied: the Dashboard list patterns (form tiles, which Neko's lists are not), the
+form-specific builder views, presence, publish and share controls.
