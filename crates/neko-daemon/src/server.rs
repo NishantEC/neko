@@ -734,10 +734,10 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             Err(message) => Response::Error { message },
         },
         Request::Workbench(command) => match state.workbench.command(command) {
-            Ok(snapshot) => Response::Workbench(with_digest(snapshot)),
+            Ok(snapshot) => Response::Workbench(with_digest(snapshot, false)),
             Err(message) => Response::Error { message },
         },
-        Request::WorkbenchIfChanged { digest, wait_ms } => wait_for_change(state, digest, wait_ms),
+        Request::WorkbenchIfChanged { digest, wait_ms } => wait_for_change(state, digest, wait_ms, false),
         Request::MachineHealth => Response::MachineHealth(neko_core::machine::latest()),
         Request::Ping => Response::Pong,
         Request::AgentModels { refresh } => {
@@ -1068,7 +1068,47 @@ struct WebBackend(Arc<AppState>);
 impl crate::web::Backend for WebBackend {
     fn request(&self, request: Request) -> Response {
         let ctx = RequestContext::new(Cancel::never(), |_| {});
-        handle_request(&self.0, request, &ctx)
+        // The page reads conversations from the chat endpoints, so a workbench
+        // answer for it carries no message parts: a streamed token must not
+        // wake its held request, or download the snapshot again.
+        match request {
+            Request::WorkbenchIfChanged { digest, wait_ms } => wait_for_change(&self.0, digest, wait_ms, true),
+            other => match handle_request(&self.0, other, &ctx) {
+                Response::Workbench(snapshot) => Response::Workbench(with_digest(snapshot, true)),
+                response => response,
+            },
+        }
+    }
+
+    fn chat_log(&self, conversation: &str) -> Result<serde_json::Value, crate::web::ChatFail> {
+        use crate::web::ChatFail;
+        if let Some(task_id) = conversation.strip_prefix("task:") {
+            let snapshot = self.0.workbench.command(neko_protocol::workbench::Command::Snapshot).map_err(ChatFail::Refused)?;
+            let task = snapshot.tasks.iter().find(|t| t.id == task_id).ok_or(ChatFail::NotFound)?;
+            return Ok(serde_json::json!({"messages": neko_core::task_chat::task_messages(task), "active": null}));
+        }
+        let db = self.0.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let messages = neko_core::neko_chat::load(&db).map_err(ChatFail::Refused)?;
+        let active = messages.iter().find(|m| m.pending && neko_core::ui_message::is_live(&m.id)).map(|m| m.id.clone());
+        Ok(serde_json::json!({"messages": messages.iter().map(neko_core::task_chat::neko_message).collect::<Vec<_>>(), "active": active}))
+    }
+
+    fn chat_feed(&self, conversation: &str) -> Option<neko_core::ui_message::Feed> {
+        if conversation != "neko" { return None; }
+        let db = self.0.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let messages = neko_core::neko_chat::load(&db).ok()?;
+        let pending = messages.iter().find(|m| m.pending)?;
+        neko_core::ui_message::attach(&pending.id, pending.at_ms)
+    }
+
+    fn chat_send(&self, conversation: &str, send: crate::web::ChatSend) -> Result<Option<neko_core::ui_message::Feed>, crate::web::ChatFail> {
+        use crate::web::ChatFail;
+        if let Some(task_id) = conversation.strip_prefix("task:") {
+            self.0.workbench.command(neko_protocol::workbench::Command::ReplyToTask { task_id: task_id.to_owned(), text: send.text }).map_err(ChatFail::Refused)?;
+            return Ok(None);
+        }
+        let (_, started) = self.0.workbench.send_chat(send.text, send.workspace_id, send.interrupt, send.id.as_deref()).map_err(ChatFail::Refused)?;
+        Ok(started.and_then(|id| neko_core::ui_message::attach(&id, now_unix_ms())))
     }
 
     fn subscribe(&self) -> std::sync::mpsc::Receiver<Event> {
@@ -1603,6 +1643,44 @@ mod tests {
             // must not decide whether this suite passes.
             neko_core::permissions::PermissionsProvider::disabled(),
         )
+    }
+
+    #[test]
+    fn the_web_backend_serves_the_conversation_as_sdk_messages_and_keeps_parts_out_of_the_snapshot() {
+        use crate::web::Backend;
+        let state = Arc::new(test_state(Db::open_in_memory().unwrap(), Vec::new()));
+        // A reply is "in progress", so what is sent queues and no model runs.
+        state.workbench.hold_chat_for_verification();
+        let backend = WebBackend(state.clone());
+        let turn = neko_core::neko_chat::begin_scoped_turn(&state.db.lock().unwrap(), "second", None).unwrap();
+        let (_, started) = state.workbench.send_chat("first".into(), None, false, Some("u-1")).unwrap();
+        assert!(started.is_none(), "behind the running reply it queues");
+        let log = backend.chat_log("neko").unwrap();
+        let messages = log["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(log["active"], turn.as_str(), "the running reply is the one to follow");
+        let queued = &messages[2];
+        assert_eq!(queued["id"], "u-1", "the sender's id is kept");
+        assert_eq!(queued["role"], "user");
+        assert_eq!(queued["metadata"]["state"], "queued");
+        assert_eq!(queued["parts"][0]["text"], "first");
+        assert!(backend.chat_feed("neko").is_some());
+        assert!(backend.chat_feed("task:nope").is_none());
+        // The page's snapshot has no parts and its digest ignores them; the socket's has both.
+        let Response::Workbench(web) = backend.request(Request::Workbench(neko_protocol::workbench::Command::Snapshot)) else { panic!() };
+        assert!(web.conversation.iter().all(|m| m.parts.is_empty()));
+        neko_core::ui_message::emit(&turn, &serde_json::json!({"type": "text-start", "id": "a"}));
+        neko_core::ui_message::emit(&turn, &serde_json::json!({"type": "text-delta", "id": "a", "delta": "growing"}));
+        {
+            let db = state.db.lock().unwrap();
+            neko_core::neko_chat::persist_parts(&db, &turn, neko_core::ui_message::live_parts(&turn).unwrap()).unwrap();
+        }
+        let Response::Workbench(again) = backend.request(Request::Workbench(neko_protocol::workbench::Command::Snapshot)) else { panic!() };
+        assert_eq!(again.digest, web.digest, "a token written to the reply does not change what the page is told");
+        let Response::Workbench(socket) = handle_request(&state, Request::Workbench(neko_protocol::workbench::Command::Snapshot), &RequestContext::new(Cancel::never(), |_| {})) else { panic!() };
+        assert!(socket.conversation.iter().any(|m| m.text() == "growing"), "the native app still reads the text from the snapshot");
+        // A task that does not exist is not a conversation.
+        assert_eq!(backend.chat_log("task:missing").unwrap_err(), crate::web::ChatFail::NotFound);
     }
 
     #[test]
@@ -2225,12 +2303,12 @@ const MAX_CHANGE_WAIT: std::time::Duration = std::time::Duration::from_secs(25);
 /// stored value changed, plus every two seconds for anything held in memory,
 /// the cadence the app used to poll at; between those it sleeps without the
 /// database lock.
-fn wait_for_change(state: &AppState, digest: String, wait_ms: u64) -> Response {
+fn wait_for_change(state: &AppState, digest: String, wait_ms: u64, web: bool) -> Response {
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms).min(MAX_CHANGE_WAIT);
     loop {
         let seen = neko_core::db::data_revision();
         let snapshot = match state.workbench.command(neko_protocol::workbench::Command::Snapshot) {
-            Ok(snapshot) => with_digest(snapshot),
+            Ok(snapshot) => with_digest(snapshot, web),
             Err(message) => return Response::Error { message },
         };
         if snapshot.digest != digest { return Response::Workbench(snapshot); }
@@ -2246,8 +2324,12 @@ fn wait_for_change(state: &AppState, digest: String, wait_ms: u64) -> Response {
 /// Fingerprints what the client would see, leaving out the two values that
 /// change on every reading (the heartbeat and the machine's health), so a
 /// poll can learn that nothing changed without receiving the snapshot.
-fn with_digest(mut snapshot: neko_protocol::workbench::Snapshot) -> neko_protocol::workbench::Snapshot {
+///
+/// `web`: the browser reads conversations from the chat endpoints, so message
+/// parts are left out of what it gets and out of its digest.
+fn with_digest(mut snapshot: neko_protocol::workbench::Snapshot, web: bool) -> neko_protocol::workbench::Snapshot {
     use std::hash::{Hash, Hasher};
+    if web { for message in &mut snapshot.conversation { message.parts.clear(); } }
     let (heartbeat, machine) = (snapshot.heartbeat_ms, snapshot.machine.take());
     snapshot.heartbeat_ms = 0;
     snapshot.digest.clear();

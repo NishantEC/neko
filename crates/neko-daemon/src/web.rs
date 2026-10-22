@@ -38,6 +38,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
+use neko_core::ui_message::Feed;
 use neko_protocol::{Event, Request, Response};
 
 /// Default port; `NEKO_WEB_PORT` overrides it and `0` turns the bridge off.
@@ -57,6 +58,8 @@ const MAX_MANIFEST: u64 = 64 * 1024;
 const MAX_STORAGE_VALUE: usize = 1024 * 1024;
 const MAX_STORAGE_KEYS: usize = 256;
 const MAX_CUSTOM_CSS: u64 = 1024 * 1024;
+/// A chat message and the little around it; the app never sends more than this.
+const MAX_CHAT_BODY: usize = 256 * 1024;
 const MAX_CONNECTIONS: usize = 96;
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 const BODY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -70,6 +73,33 @@ pub trait Backend: Send + Sync + 'static {
     fn request(&self, request: Request) -> Response;
     /// A stream of every event the daemon broadcasts from now on.
     fn subscribe(&self) -> mpsc::Receiver<Event>;
+    /// A conversation as AI SDK messages: `{ messages, active }`. `active` is
+    /// the id of the reply in flight, when there is one.
+    fn chat_log(&self, _conversation: &str) -> Result<serde_json::Value, ChatFail> { Err(ChatFail::NotFound) }
+    /// The reply in flight, to follow: what it holds so far, then the rest.
+    fn chat_feed(&self, _conversation: &str) -> Option<Feed> { None }
+    /// A message from the person. Answers with the reply it started, or `None`
+    /// when it had to wait its turn (the conversation then shows it queued).
+    fn chat_send(&self, _conversation: &str, _send: ChatSend) -> Result<Option<Feed>, ChatFail> { Err(ChatFail::NotFound) }
+}
+
+/// Why a chat request did not go through.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ChatFail {
+    NotFound,
+    /// The daemon refused it, in words for the person (an empty message, a full queue).
+    Refused(String),
+}
+
+/// What `POST /api/chat/<conversation>/stream` carries once checked.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ChatSend {
+    /// The id the sender's list already gives this message.
+    pub id: Option<String>,
+    pub text: String,
+    pub workspace_id: Option<String>,
+    /// Stop the reply in flight and send this first (⌘↵).
+    pub interrupt: bool,
 }
 
 pub struct Config {
@@ -287,6 +317,8 @@ fn read_request(stream: &TcpStream, gate: &dyn Fn(&Req) -> Result<(), HttpError>
     gate(&req)?;
     let limit = if req.path == "/api/attachments" {
         MAX_ATTACHMENT
+    } else if req.path.starts_with("/api/chat/") {
+        MAX_CHAT_BODY
     } else if req.path.starts_with("/api/storage/") {
         MAX_STORAGE_VALUE
     } else {
@@ -469,6 +501,8 @@ fn route(mut stream: TcpStream, req: Req, config: &Config, backend: &dyn Backend
         if req.method != "POST" { Reply::text(405, "Method Not Allowed") } else { store_attachment(&config.attachments_dir, req.header("x-neko-filename"), &req.body) }
     } else if let Some(rest) = path.strip_prefix("/plugins/") {
         if !get { Reply::text(405, "Method Not Allowed") } else { serve_plugin_file(&config.plugins_dir, rest) }
+    } else if let Some(rest) = path.strip_prefix("/api/chat/") {
+        return chat_route(stream, &req, rest, backend);
     } else if path.starts_with("/api/") {
         Reply::text(404, "Not Found")
     } else if !get {
@@ -508,6 +542,97 @@ fn events(mut stream: TcpStream, backend: &dyn Backend) {
         };
         if stream.write_all(chunk.as_bytes()).and_then(|()| stream.flush()).is_err() { return; }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Chat: the AI SDK's UI message stream
+// ---------------------------------------------------------------------------
+
+/// `neko` (Home) or `task:<id>`; nothing else names a conversation.
+pub fn valid_conversation(name: &str) -> bool {
+    let id_ok = |id: &str| (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    name == "neko" || name.strip_prefix("task:").is_some_and(id_ok)
+}
+
+/// Reads the body the AI SDK's transport posts: the user's message, as text
+/// parts. Anything the daemon cannot honestly handle (other parts, a
+/// regeneration) is refused rather than half-understood.
+pub fn parse_chat_send(body: &[u8]) -> Result<ChatSend, &'static str> {
+    let body: serde_json::Value = serde_json::from_slice(body).map_err(|_| "The message was not valid JSON.")?;
+    if let Some(trigger) = body["trigger"].as_str() {
+        if trigger != "submit-message" { return Err("Only sending a new message is supported."); }
+    }
+    let message = &body["message"];
+    if message["role"] != "user" { return Err("The message must come from the user."); }
+    let parts = message["parts"].as_array().ok_or("The message has no parts.")?;
+    if parts.is_empty() || parts.len() > 8 { return Err("The message has no usable parts."); }
+    let mut texts = Vec::new();
+    for part in parts {
+        if part["type"] != "text" { return Err("Only text parts are supported."); }
+        texts.push(part["text"].as_str().ok_or("A text part has no text.")?);
+    }
+    let text = texts.join("\n");
+    if text.trim().is_empty() { return Err("Type a message first."); }
+    let short = |v: &serde_json::Value| v.as_str().filter(|s| s.len() <= 64).map(str::to_owned);
+    if !message["id"].is_null() && short(&message["id"]).is_none() { return Err("The message id is too long."); }
+    if !body["workspaceId"].is_null() && short(&body["workspaceId"]).is_none() { return Err("The workspace id is not valid."); }
+    Ok(ChatSend { id: short(&message["id"]), text, workspace_id: short(&body["workspaceId"]), interrupt: body["interrupt"] == true })
+}
+
+fn chat_route(stream: TcpStream, req: &Req, rest: &str, backend: &dyn Backend) {
+    let mut stream = stream;
+    let (name, tail) = match rest.split_once('/') { Some((name, tail)) => (name, Some(tail)), None => (rest, None) };
+    let Some(conversation) = percent_decode(name).filter(|c| valid_conversation(c)) else {
+        return write_reply(&mut stream, Reply::text(404, "Not Found"));
+    };
+    match (req.method.as_str(), tail) {
+        ("GET", None) => write_reply(&mut stream, match backend.chat_log(&conversation) {
+            Ok(log) => Reply::json(&log),
+            Err(_) => Reply::text(404, "Not Found"),
+        }),
+        // The SDK's default reconnect URL: 204 means "nothing is being written".
+        ("GET", Some("stream")) => match backend.chat_feed(&conversation) {
+            Some(feed) => sse(stream, Some(feed)),
+            None => write_reply(&mut stream, Reply::new(204, "No Content", "text/plain; charset=utf-8", "")),
+        },
+        ("POST", Some("stream")) => match parse_chat_send(&req.body) {
+            Err(why) => write_reply(&mut stream, Reply::new(400, "Bad Request", "text/plain; charset=utf-8", why)),
+            Ok(send) => match backend.chat_send(&conversation, send) {
+                Ok(feed) => sse(stream, feed),
+                Err(ChatFail::NotFound) => write_reply(&mut stream, Reply::text(404, "Not Found")),
+                Err(ChatFail::Refused(why)) => write_reply(&mut stream, Reply::new(400, "Bad Request", "text/plain; charset=utf-8", why)),
+            },
+        },
+        (_, None | Some("stream")) => write_reply(&mut stream, Reply::text(405, "Method Not Allowed")),
+        _ => write_reply(&mut stream, Reply::text(404, "Not Found")),
+    }
+}
+
+/// The SDK's UI message stream: one `data:` line per chunk, `[DONE]` at the
+/// end, a comment line every 15s so a closed tab is noticed by the failed write.
+/// With no feed (a message that queued) it is just the end.
+fn sse(mut stream: TcpStream, feed: Option<Feed>) {
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let headers = [("x-vercel-ai-ui-message-stream", "v1".to_string()), ("X-Accel-Buffering", "no".to_string())];
+    if write_head(&mut stream, 200, "OK", "text/event-stream", &headers, None).is_err() { return; }
+    let line = |chunk: &serde_json::Value| format!("data: {chunk}\n\n");
+    if let Some(feed) = feed {
+        for chunk in &feed.replay {
+            if stream.write_all(line(chunk).as_bytes()).is_err() { return; }
+        }
+        let _ = stream.flush();
+        loop {
+            let piece = match feed.live.recv_timeout(KEEPALIVE) {
+                Ok(chunk) => line(&chunk),
+                Err(mpsc::RecvTimeoutError::Timeout) => ": keepalive\n\n".to_string(),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            if stream.write_all(piece.as_bytes()).and_then(|()| stream.flush()).is_err() { return; }
+        }
+    }
+    let _ = stream.write_all(b"data: [DONE]\n\n");
+    let _ = stream.flush();
+    let _ = stream.shutdown(Shutdown::Both);
 }
 
 // ---------------------------------------------------------------------------

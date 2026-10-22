@@ -657,6 +657,10 @@ pub enum ChatRole {
 
 /// One turn in the conversation with Neko. A Neko turn starts pending and is
 /// completed (or marked failed) by the daemon; tickets it opened are linked.
+///
+/// What is shown is `parts`: the AI SDK's `UIMessage` parts (text, reasoning,
+/// `dynamic-tool`, `data-neko-*`), as `docs/design/chat-on-ai-sdk.md` lists
+/// them. The other fields are the daemon's own lifecycle and ledgers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatMessage {
     #[serde(default)]
@@ -665,12 +669,17 @@ pub struct ChatMessage {
     pub agent_profile_id: String,
     #[serde(default)]
     pub workspace_id: Option<String>,
+    /// The approval ledger for MCP tool calls: the bridge's state machine
+    /// (`call_status`, `decide_call`). The transcript shows the same calls as
+    /// `dynamic-tool` parts, which the daemon updates together with this.
     #[serde(default)]
     pub tool_calls: Vec<ChatToolCall>,
     pub id: String,
     pub at_ms: i64,
     pub role: ChatRole,
-    pub text: String,
+    /// AI SDK `UIMessage` parts, in order.
+    #[serde(default)]
+    pub parts: Vec<serde_json::Value>,
     #[serde(default)]
     pub ticket_ids: Vec<String>,
     #[serde(default)]
@@ -679,25 +688,46 @@ pub struct ChatMessage {
     pub queued: bool,
     #[serde(default)]
     pub failed: bool,
-    /// Memories Neko saved from this turn, shown under the reply.
-    #[serde(default)]
-    pub remembered: Vec<String>,
     /// Responsibilities Neko suggested in this turn. The daemon starts an
     /// untried suggestion when its selected source has readable tools.
     #[serde(default)]
     pub responsibility_ids: Vec<String>,
-    /// Actions Neko proposed on existing tasks in this turn. Each waits for
-    /// the user's one-click confirmation before anything happens.
+    /// The approval ledger for actions Neko proposed on existing tasks in this
+    /// turn. Each waits for the user's one-click confirmation before anything
+    /// happens; the transcript shows them as `dynamic-tool` approval parts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ChatAction>,
-    /// What Neko did while working on this turn, newest last ("Ran `git
-    /// status`"), shown live under a pending reply. Bounded and short.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub activity: Vec<String>,
     /// When Neko started on a reply. `at_ms` becomes the finish time once
     /// the turn completes, so the two give how long it worked. 0 = unknown.
     #[serde(default, skip_serializing_if = "is_zero_ms")]
     pub started_ms: i64,
+}
+
+impl ChatMessage {
+    /// What the turn said, as plain text: the text parts after the last tool,
+    /// reasoning or data part (earlier text is narration between steps). A
+    /// message with no tools is all of its text. Used for prompts, search and
+    /// the native app's text view; the web reads parts.
+    pub fn text(&self) -> String { text_of_parts(&self.parts) }
+
+    /// One text part: what a user types, or a short reply written by code.
+    pub fn text_parts(text: &str) -> Vec<serde_json::Value> {
+        if text.is_empty() { Vec::new() } else { vec![serde_json::json!({"type": "text", "text": text, "state": "done"})] }
+    }
+}
+
+/// The prose of a reply as plain text: the text parts after the last tool
+/// (earlier text is narration between steps), or all of them when nothing
+/// follows the last tool. Used for prompts, search and the
+/// native app's text view; the web reads parts.
+pub fn text_of_parts(parts: &[serde_json::Value]) -> String {
+    let is_text = |p: &serde_json::Value| p["type"] == "text";
+    let join = |parts: &[serde_json::Value]| {
+        parts.iter().filter(|p| is_text(p)).filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n\n").trim().to_owned()
+    };
+    let from = parts.iter().rposition(|p| p["type"] == "dynamic-tool").map_or(0, |i| i + 1);
+    let tail = join(&parts[from..]);
+    if tail.is_empty() { join(parts) } else { tail }
 }
 
 fn is_zero_ms(value: &i64) -> bool { *value == 0 }

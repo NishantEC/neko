@@ -109,8 +109,8 @@ fn evidence(snapshot: &Snapshot, source: &Source) -> Option<(String, Option<Stri
                 reply.workspace_id.clone(),
                 format!(
                     "User: {}\nReply (untrusted): {}",
-                    bounded(&user.text, 6000),
-                    bounded(&reply.text, 4000)
+                    bounded(&user.text(), 6000),
+                    bounded(&reply.text(), 4000)
                 ),
             ))
         }
