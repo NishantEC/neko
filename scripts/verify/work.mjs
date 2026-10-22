@@ -422,6 +422,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   // a ticket ready for review: result, independent review, delivery, then changes
   await page.goto(`${base}/#/tasks?task=${ids.ready}&view=full`);
   await page.locator("[data-slot='result']").waitFor({ timeout: 8000 });
+  check((await page.getByRole("tab").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).filter((n) => ["Chat", "Changes", "Plan", "Details"].includes(n)).length >= 4, "the full page is a dock: Chat, Changes, Plan and Details are tabs");
   check((await page.locator("[data-slot='review']").count()) === 1, "the result shows the independent review verdict");
   check((await page.locator("[data-slot='delivery']").count()) === 1, "the pull request shows as where the work went");
   check((await page.getByRole("link", { name: /Open pull request/ }).count()) >= 1, "a ready task with an open pull request offers Open pull request");
