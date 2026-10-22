@@ -133,6 +133,24 @@ pub fn local_hour(unix_ms: i64) -> u32 {
     tm.tm_hour.clamp(0, 23) as u32
 }
 
+/// Asks the shared `~/.agents/bin/machine-ok` (every agent on this Mac obeys
+/// it): exit 1 means wait, and its `WAIT <reason> (...)` line says why. A Mac
+/// without the script, or a script that fails to run, never holds work.
+fn comfort_wait() -> Option<String> {
+    let script = std::path::PathBuf::from(std::env::var_os("HOME")?).join(".agents/bin/machine-ok");
+    if !script.is_file() { return None; }
+    let output = Command::new(&script).output().ok()?;
+    if output.status.code() != Some(1) { return None; }
+    parse_comfort_wait(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// `WAIT owner is using the Mac with load 14.99 (thermal=…)` → the reason.
+pub fn parse_comfort_wait(line: &str) -> Option<String> {
+    let rest = line.lines().next()?.trim().strip_prefix("WAIT")?.trim();
+    let reason = rest.split(" (").next().unwrap_or(rest).trim();
+    Some(if reason.is_empty() { "the shared machine check says wait".into() } else { reason.into() })
+}
+
 /// Night, holding and cap, from the readings. Pure, so it is tested alone.
 pub fn apply_policy(health: &mut MachineHealth, hour: u32) {
     health.night = hour >= NIGHT.0 && hour < NIGHT.1;
@@ -144,6 +162,8 @@ pub fn apply_policy(health: &mut MachineHealth, hour: u32) {
         Some(format!("The Mac is overloaded (load {:.0}). New work waits until it drops below {:.0}.", health.load, LOAD_CEILING))
     } else if health.night && health.load > NIGHT_LOAD_CEILING {
         Some(format!("Night hours, and the load is {:.0}. New work waits until it drops to {:.0}.", health.load, NIGHT_LOAD_CEILING))
+    } else if let Some(reason) = &health.comfort_wait {
+        Some(format!("Keeping the Mac cool ({reason}). New work waits until it settles."))
     } else {
         None
     };
@@ -168,6 +188,7 @@ pub fn sense(with_kernel_task: bool) -> MachineHealth {
             latest().map(|h| h.kernel_task_cpu).unwrap_or(0.0)
         },
         agents: parse_agents(&run("/bin/ps", &["-axo", "rss=,comm="])),
+        comfort_wait: comfort_wait(),
         ..Default::default()
     };
     let hour = local_hour(health.at_ms);
@@ -457,6 +478,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_shared_machine_check_reason_is_read_from_its_wait_line() {
+        assert_eq!(parse_comfort_wait("WAIT owner is using the Mac with load 14.99 (thermal=nominal memory=normal)\n").as_deref(), Some("owner is using the Mac with load 14.99"));
+        assert_eq!(parse_comfort_wait("WAIT\n").as_deref(), Some("the shared machine check says wait"));
+        assert_eq!(parse_comfort_wait("OK thermal=nominal"), None);
+    }
+
+    #[test]
     fn readings_parse_from_real_macos_output() {
         assert_eq!(parse_load("{ 7.91 8.51 7.77 }"), 7.91);
         let (used, total) = parse_swap("total = 5120.00M  used = 3850.25M  free = 1269.75M  (encrypted)");
@@ -497,6 +525,9 @@ mod tests {
         let mut h = health(13.0, 100.0, "normal");
         apply_policy(&mut h, 6);
         assert!(h.holding.is_none() && !h.night, "06:00 is day again");
+        h.comfort_wait = Some("owner is using the Mac with load 15".into());
+        apply_policy(&mut h, 14);
+        assert!(h.holding.as_deref().is_some_and(|r| r.contains("Keeping the Mac cool") && r.contains("load 15")), "{:?}", h.holding);
         let mut h = health(5.0, 100.0, "warning");
         apply_policy(&mut h, 14);
         assert_eq!(h.cap, Some(1), "memory warning: one at a time");
