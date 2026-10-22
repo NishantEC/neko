@@ -122,6 +122,58 @@ Pages in `<data dir>/plugins/<name>/` register through the same host as the buil
 (`one-registry.md`); they should style with the tokens (`var(--foreground)`,
 `var(--border)`, ...), as `web/plugins/pr-board` does.
 
+## The dock: tabs that split, group and move (2026-10-22)
+
+The full-page task view is not a fixed chat | views split any more; every view is a
+tab in a docking layout (`web/src/work/dock/`, on `dockview-react`, MIT). Drag a tab
+onto an edge of a pane to split it, onto the middle of a pane (or its tab strip) to
+share that pane, along the strip to reorder; double-click a tab to maximise its
+pane; right-click a tab for Close / Close others / Maximize / Float. The header's
+**View** menu ticks the open panels (reopen a closed one) and has **Reset layout**;
+⌘K has `View: Chat | Changes | Plan | Details`, `Reset layout` and `Split right`.
+
+**How a page defines panels** (`TaskBuilder.tsx` is the example; Home and others can
+use the same component):
+
+```tsx
+const dock = useDockController();            // drive it from a header menu or ⌘K
+const open = useOpenPanels(dock);            // ids that are open now
+<DockWorkspace
+  storageKey="neko:dock:task"                // one saved layout per key
+  controller={dock}
+  panels={[{ id: "chat", title: "Chat", icon: ChatCircle, render: () => <Chat/> }, ...]}
+  defaultLayout={[
+    { panels: ["chat"], size: 0.35, minWidth: 320 },
+    { panels: ["changes", "plan", "details"], active: "changes", of: 0, direction: "right" },
+  ]}
+/>
+dock.open("plan"); dock.toggle("plan"); dock.reset(); dock.splitRight();
+```
+
+- `render` is read on every render, so a panel always shows current props. Panels
+  keep their DOM while hidden behind another tab (`renderer: "always"`), so a
+  conversation keeps its scroll position and live updates and a composer its draft.
+- **Persistence**: one layout for the person, not per task, in `localStorage`
+  (`neko:dock:task`): dockview's `toJSON()` plus the ids that were closed. It is
+  checked before use (`dockLayout.validateSaved`): wrong version/shape or a foreign
+  component -> default; unknown panel ids are dropped; a panel that is missing and was
+  not closed is added back into the first pane; a layout that throws in `fromJSON` or
+  ends up with no panels -> default. The dock can never come up empty. Reset layout
+  rebuilds the default and saves it.
+- **Narrow** (< 900px, `narrowQuery`): one tabbed pane, edge drops and floating
+  panes off. The wide layout is left in storage untouched and returns when the window
+  grows; nothing is saved while narrow.
+- **Look**: `dock.css` maps dockview's variables onto Neko tokens (cards on the
+  `--builder-chrome` page, 40px tab strip, 2px primary underline on the active tab,
+  primary-at-low-alpha drop target, splitter that only shows while dragged), so dark and
+  light need no extra code. Plain sans, no serif/italic/mono labels.
+- **Keyboard**: tabs are `role=tab` in a `tablist`, Left/Right move between them,
+  Enter/Space activate, close buttons are labelled "Close <title>", Esc cancels a drag
+  (native drag-and-drop). dockview's `keyboardNavigation` needs `dockview-enterprise`
+  and is not used.
+- Tests: `scripts/verify/dock.mjs` (real mouse drags; `window.__nekoDock[storageKey]`
+  exposes the dockview api for assertions).
+
 ## Shell, composer, plugins and first run (2026-10-22)
 
 Everything below lives in `web/src/{shell,chat,onboarding,pages/plugins}` and

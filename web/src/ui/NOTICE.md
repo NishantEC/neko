@@ -57,8 +57,10 @@ with `// from hushbacks <path> @da20dfaeb`:
 | `setup/kit.tsx` (SetupPage, Section, Panel, PanelFooter, Row, SettingRow) | `components/PageContainer.tsx`, `pages/Settings/settings.ui.tsx` | Neko's props kept; the section heading sits above its panel |
 | `pages/setup/Settings.tsx` layout | `routes/_app.settings.tsx` | Breadcrumb bar, 52rem settings surface, phone/collapsed pill nav; search stays at the top of the column |
 | `editorial/PageHeader.tsx` | `packages/ui/.../editorial/PageHeader.tsx` | No eyebrow, plain sans heading at hushbacks' size |
-| `work/builder/BuilderViewTabs.tsx` (+ `.css`), `BuilderPanelTabs.tsx`, `useFusedTabIndicator.ts`, `builderHeaderLayout.ts` | `pages/Builder/components/...` | View value is a string; builder surfaces on Neko tokens |
+| `work/dock/DockWorkspace.tsx`, `dock.css`, `dockLayout.ts` | Neko's own, on `dockview-react` | Replaces hushbacks' fixed chat / view-tab split on the task page (BuilderViewTabs, BuilderPanelTabs and the fused-tab helpers are no longer copied); tabs and surfaces keep the builder frame's look on Neko tokens |
 | `work/TaskBuilder.tsx` | `pages/Builder/index.tsx`, `components/BuilderDesktopHeader.tsx`, `FormBuilderMode.tsx`, `hooks/useChatPanelSize.ts`, `hooks/useCollapsedChat.ts`, `useBuilderViewMode.ts` | Task conversation in the chat panel; Changes / Plan / Details views; task actions at the header end; chat 35% default (45% max) |
+
+`dockview` / `dockview-react` 8.6.1 (MIT, © mathuo; licence in `THIRD_PARTY_LICENSES/dockview-MIT.txt`) is an npm dependency, not vendored source. Only the free `dockview` entry point is used: its `keyboardNavigation` option needs the separate `dockview-enterprise` package and is deliberately off.
 
 Not copied: the Dashboard list patterns (form tiles, which Neko's lists are not), the
 form-specific builder views, presence, publish and share controls.
