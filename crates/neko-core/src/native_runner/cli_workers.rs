@@ -193,13 +193,14 @@ pub(crate) struct Parser {
     pub completed: bool,
     last_text: Option<String>,
     stall: super::StallGuard,
-    /// Report the reply as `TEXT_RESET_EVENT` / `TEXT_DELTA_EVENT` events.
+    /// Report the run as AI SDK chunks (`chunks::STREAM_EVENT` events).
     stream_text: bool,
+    claude: super::chunks::ClaudeChunks,
 }
 
 impl Parser {
     pub(crate) fn new(agent: Agent, extraction: bool) -> Self {
-        Self { agent, extraction, commands: Default::default(), answer: None, failure: None, completed: false, last_text: None, stall: super::StallGuard::new(), stream_text: false }
+        Self { agent, extraction, commands: Default::default(), answer: None, failure: None, completed: false, last_text: None, stall: super::StallGuard::new(), stream_text: false, claude: Default::default() }
     }
 
     /// Also report the reply text as it is written (never for extraction).
@@ -220,6 +221,9 @@ impl Parser {
             Agent::OpenCode => self.opencode(&value, on_event),
         }
     }
+
+    /// A line from a subagent (it has a parent tool use), not the main session.
+    fn claude_parent_of(&self, value: &serde_json::Value) -> bool { !value["parent_tool_use_id"].is_null() }
 
     fn receipt(&self, command: Option<&str>, exit_code: Option<i64>, output: Option<&str>, on_event: &mut dyn FnMut(String)) -> Result<(), String> {
         on_event("Command completed".into());
@@ -258,10 +262,21 @@ impl Parser {
                         _ => {}
                     }
                 }
+                if self.stream_text { self.claude.assistant(value, on_event); }
             }
             Some("user") => {
                 for block in content.iter().filter(|b| b["type"] == "tool_result") {
                     let id = block["tool_use_id"].as_str().unwrap_or("");
+                    let is_bash = self.commands.contains_key(id);
+                    if self.stream_text && !(self.claude_parent_of(value)) {
+                        let text = match &block["content"] {
+                            serde_json::Value::String(s) => Some(s.clone()),
+                            serde_json::Value::Array(parts) => parts.iter().map(|p| p["text"].as_str()).collect::<Option<Vec<_>>>().map(|parts| parts.join("\n")),
+                            _ => None,
+                        };
+                        let bash = text.as_deref().filter(|_| is_bash).map(|t| { let (code, body) = claude_exit(t, block["is_error"].as_bool() == Some(true)); (code, body.to_owned()) });
+                        self.claude.tool_result(block, bash, on_event);
+                    }
                     let Some(command) = self.commands.remove(id) else { continue };
                     let output = match &block["content"] {
                         serde_json::Value::String(s) => Some(s.clone()),
@@ -277,18 +292,8 @@ impl Parser {
                 }
             }
             Some("stream_event") if self.stream_text && value["parent_tool_use_id"].is_null() => {
-                // Raw API events of the main session only. Each assistant
-                // message replaces the last, matching what `result` carries.
-                let event = &value["event"];
-                match event["type"].as_str() {
-                    Some("message_start") => on_event(super::TEXT_RESET_EVENT.into()),
-                    Some("content_block_delta") if event["delta"]["type"] == "text_delta" => {
-                        if let Some(text) = event["delta"]["text"].as_str().filter(|t| !t.is_empty()) {
-                            on_event(format!("{}{text}", super::TEXT_DELTA_EVENT));
-                        }
-                    }
-                    _ => {}
-                }
+                // Raw API events of the main session only.
+                self.claude.stream_event(&value["event"], on_event);
             }
             Some("result") => {
                 self.completed = true;
@@ -319,6 +324,7 @@ impl Parser {
                 }
                 let tool = part["tool"].as_str().unwrap_or("");
                 let state = &part["state"];
+                if self.stream_text { super::chunks::opencode_tool(part, on_event); }
                 if tool == "bash" && matches!(state["status"].as_str(), Some("completed" | "error")) {
                     let exit = state["metadata"]["exit"].as_i64().or_else(|| (state["status"] == "error").then_some(1));
                     let output = state["output"].as_str().or_else(|| state["error"].as_str());
@@ -333,6 +339,7 @@ impl Parser {
                     if next.len() > if self.extraction { 4096 } else { MAX_ANSWER } {
                         return Err("OpenCode answer exceeded the output limit".into());
                     }
+                    if self.stream_text { super::chunks::opencode_text(part, on_event); }
                     on_event(super::bounded_prose_event(text));
                     self.answer = Some(next);
                 }
@@ -656,27 +663,30 @@ mod tests {
     fn claude_partial_messages_become_text_events_and_the_result_stays_authoritative() {
         let lines = [
             r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}"#,
             r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}}"#,
             r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Let me "}}}"#,
             r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"look."}}}"#,
             r#"{"type":"stream_event","parent_tool_use_id":"sub1","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"subagent"}}}"#,
             r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"a\""}}}"#,
-            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Let me look."}]}}"#,
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"Let me look."}]}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
             r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m2"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}"#,
             r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Final."}}}"#,
             r#"{"type":"result","subtype":"success","is_error":false,"result":"Final."}"#,
         ];
         let mut events = Vec::new();
         let mut p = Parser::new(Agent::Claude, false).streaming(true);
         for l in lines { p.line(l.as_bytes(), &mut |e| events.push(e)).unwrap(); }
-        let streamed: Vec<&String> = events.iter().filter(|e| e.starts_with('\u{1}')).collect();
-        assert_eq!(streamed, [
-            &crate::native_runner::TEXT_RESET_EVENT.to_string(),
-            &format!("{}Let me ", crate::native_runner::TEXT_DELTA_EVENT),
-            &format!("{}look.", crate::native_runner::TEXT_DELTA_EVENT),
-            &crate::native_runner::TEXT_RESET_EVENT.to_string(),
-            &format!("{}Final.", crate::native_runner::TEXT_DELTA_EVENT),
-        ]);
+        let mut parts = Vec::new();
+        for e in &events {
+            if let Some(chunk) = crate::native_runner::chunks::chunk_of(e) { crate::ui_message::apply_chunk(&mut parts, &chunk); }
+        }
+        // Two messages, each a step; the assistant line repeats nothing the tokens carried.
+        let texts: Vec<_> = parts.iter().filter(|p| p["type"] == "text").map(|p| p["text"].as_str().unwrap()).collect();
+        assert_eq!(texts, ["Let me look.", "Final."], "{parts:?}");
+        assert!(!events.iter().any(|e| e.contains("subagent")));
         assert_eq!(p.finish().unwrap(), "Final.");
         // Without streaming, or for extraction, the same lines produce no text events.
         for (extraction, streaming) in [(false, false), (true, true)] {

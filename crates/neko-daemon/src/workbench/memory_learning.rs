@@ -538,8 +538,8 @@ mod tests {
         let state = store::load(&db.lock().unwrap()).unwrap();
         let reply = state.conversation.last().unwrap();
         assert!(!reply.pending && !reply.failed);
-        assert!(reply.text.starts_with("Your answer"));
-        assert!(reply.text.contains("Memory learning is busy"));
+        assert!(reply.text().starts_with("Your answer"));
+        assert!(reply.text().contains("Memory learning is busy"));
     }
     #[test]
     fn chat_followup_is_queued_and_late_profile_output_is_discarded() {

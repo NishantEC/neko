@@ -32,6 +32,7 @@ const MAX_PROMPT: usize = 256 * 1024;
 pub(crate) mod cli_workers;
 pub mod publish;
 pub mod parking;
+pub mod chunks;
 pub mod prior_work;
 mod review_state;
 pub use review_state::{ReviewState, capture_review_state};
@@ -170,17 +171,10 @@ pub fn run_with_bridge(
     run_configured(&resolve_codex()?, spec, Some(bridge), cancel, on_event)
 }
 
-/// Event that empties the text a streaming run has shown so far: a new
-/// assistant message is starting. The prefix is a control character, so no
-/// agent prose can collide with it (same idea as `SESSION_EVENT`).
-pub const TEXT_RESET_EVENT: &str = "\u{1}reset";
-/// Prefix of an event carrying the next piece of the assistant's reply text.
-pub const TEXT_DELTA_EVENT: &str = "\u{1}delta ";
-
-/// `run_with_bridge` that also reports the reply as it is written, as
-/// `TEXT_RESET_EVENT` / `TEXT_DELTA_EVENT` events. Claude Code reports tokens;
-/// Codex `exec` reports each completed message. The returned answer is the
-/// same as without streaming and stays authoritative.
+/// `run_with_bridge` that also reports the reply as AI SDK UI message chunks
+/// (`chunks::STREAM_EVENT` events): Claude Code reports tokens, thinking and
+/// tool calls; Codex `exec` reports each finished item. The returned answer is
+/// the same as without streaming.
 pub fn run_with_bridge_streaming(
     spec: &RunSpec,
     bridge: &BridgeConfig,
@@ -467,17 +461,15 @@ fn run_configured_streaming(
                         return Err("Codex answer exceeded the output limit".into());
                     }
                     answer = Some(text.to_owned());
-                    if stream_text {
-                        // `exec --json` has no token deltas: show each
-                        // finished message whole, replacing the last one.
-                        on_event(TEXT_RESET_EVENT.into());
-                        on_event(format!("{TEXT_DELTA_EVENT}{text}"));
-                    }
+                    if stream_text { chunks::codex_item(&value["item"], true, &mut on_event); }
                     on_event(bounded_prose_event(text));
                 }
             }
             Some("item.started" | "item.updated" | "item.completed") => {
                 let item = &value["item"];
+                if stream_text && value["type"].as_str() != Some("item.updated") {
+                    chunks::codex_item(item, value["type"].as_str() == Some("item.completed"), &mut on_event);
+                }
                 match item["type"].as_str() {
                     Some("error") => {
                         // Item errors include nonfatal CLI diagnostics (for
@@ -3504,8 +3496,12 @@ printf '%s\n' '{"type":"turn.completed"}'
         let mut events = Vec::new();
         let answer = run_configured_streaming(&executable, &spec, None, &Session::Ephemeral, &AtomicBool::new(false), |e| events.push(e), false, true).unwrap();
         assert_eq!(answer, "All done.");
-        let streamed: Vec<&str> = events.iter().filter(|e| e.starts_with('\u{1}')).map(String::as_str).collect();
-        assert_eq!(streamed, [TEXT_RESET_EVENT, "\u{1}delta Looking.", TEXT_RESET_EVENT, "\u{1}delta All done."]);
+        let mut parts = Vec::new();
+        for e in &events {
+            if let Some(chunk) = chunks::chunk_of(e) { crate::ui_message::apply_chunk(&mut parts, &chunk); }
+        }
+        let texts: Vec<_> = parts.iter().filter(|p| p["type"] == "text").map(|p| p["text"].as_str().unwrap()).collect();
+        assert_eq!(texts, ["Looking.", "All done."]);
         let mut quiet = Vec::new();
         run_configured_streaming(&executable, &spec, None, &Session::Ephemeral, &AtomicBool::new(false), |e| quiet.push(e), false, false).unwrap();
         assert!(!quiet.iter().any(|e| e.starts_with('\u{1}')));

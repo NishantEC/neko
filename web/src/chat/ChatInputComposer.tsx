@@ -33,7 +33,10 @@ import { toast } from "@/ui/sonner";
 import { cn } from "@/ui/lib/utils";
 import { openOnboarding } from "@/onboarding/open";
 import { stopAllWork } from "@/shell/actions";
-import type { NekoMessage } from "@/chat/types";
+import type { Chat } from "@ai-sdk/react";
+import { sendText } from "@/chat/sdk/chats";
+import { messageText } from "@/chat/sdk/parts";
+import type { NekoUIMessage } from "@/chat/sdk/types";
 
 interface FoundFile { path: string; name: string; location: string }
 
@@ -74,10 +77,11 @@ function ModeSwitch({ mode, onChange }: { mode: ComposerMode; onChange(mode: Com
 }
 
 export function NekoComposer({
-  pendingTurn, queued, decisionPending, workspaceId, draftRef, tray: extraTray,
+  chat, pendingTurn, queued, decisionPending, workspaceId, draftRef, tray: extraTray,
 }: {
-  pendingTurn: NekoMessage | undefined;
-  queued: NekoMessage[];
+  chat: Chat<NekoUIMessage>;
+  pendingTurn: NekoUIMessage | undefined;
+  queued: NekoUIMessage[];
   decisionPending: boolean;
   workspaceId: string | null;
   draftRef: React.RefObject<{ set(text: string): void; focus(): void } | null>;
@@ -101,7 +105,7 @@ export function NekoComposer({
   useEffect(() => {
     draftRef.current = { set: (value) => setDraftText(scope, value), focus: () => area.current?.focus() };
     const forget = setReplyActions({
-      send: (reply) => void command("SendMessage", { text: reply, workspace_id: workspaceId }),
+      send: (reply) => void deliver.current(reply, false),
       draft: (reply) => { setDraftText(scope, reply); area.current?.focus(); },
     });
     return () => {
@@ -109,6 +113,26 @@ export function NekoComposer({
       forget();
     };
   }, [draftRef, scope, workspaceId]);
+
+  // A message goes the SDK's way when Neko is idle (it streams back on the
+  // same response); while a reply runs it is Neko's queue, and ⌘↵ is
+  // interrupt-and-send. Those two are the daemon's, not the protocol's.
+  const deliver = useRef<(text: string, interrupt: boolean) => Promise<boolean>>(async () => false);
+  deliver.current = async (body, interrupt) => {
+    setError(null);
+    if (!pendingTurn && queued.length === 0) {
+      const sent = await sendText(chat, body, { workspaceId });
+      if (!sent.ok) setError(sent.error);
+      return sent.ok;
+    }
+    try {
+      accept(await command(interrupt ? "InterruptAndSendMessage" : "SendMessage", { text: body, workspace_id: workspaceId }));
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  };
 
   const run = useCallback(async (step: () => Promise<Json>) => {
     setError(null);
@@ -171,7 +195,7 @@ export function NekoComposer({
       const invalid = validationError(body);
       if (invalid) return setError(invalid);
       setSending(true);
-      const ok = await run(() => command(interrupt ? "InterruptAndSendMessage" : "SendMessage", { text: body, workspace_id: workspaceId }));
+      const ok = await deliver.current(body, interrupt);
       completeSubmission(s, ok);
       setSending(false);
     },
@@ -179,19 +203,19 @@ export function NekoComposer({
   );
 
   // ---- the queue tray ------------------------------------------------------------------
-  const edit = async (m: NekoMessage) => {
+  const edit = async (m: NekoUIMessage) => {
     if (await run(() => command("DiscardQueuedMessage", { message_id: m.id }))) {
       const current = getDraft(scope).text;
-      setDraftText(scope, current ? `${m.text}\n${current}` : m.text);
+      setDraftText(scope, current ? `${messageText(m)}\n${current}` : messageText(m));
       area.current?.focus();
     }
   };
-  const steer = (m: NekoMessage) =>
+  const steer = (m: NekoUIMessage) =>
     run(async () => {
       await command("DiscardQueuedMessage", { message_id: m.id });
-      return command("InterruptAndSendMessage", { text: m.text, workspace_id: m.workspace_id ?? workspaceId });
+      return command("InterruptAndSendMessage", { text: messageText(m), workspace_id: m.metadata?.workspaceId ?? workspaceId });
     });
-  const remove = (m: NekoMessage) => run(() => command("DiscardQueuedMessage", { message_id: m.id }));
+  const remove = (m: NekoUIMessage) => run(() => command("DiscardQueuedMessage", { message_id: m.id }));
 
   // ---- the menu ----------------------------------------------------------------------
   const query = dismissed === text ? null : mentionQuery(text);

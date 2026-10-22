@@ -1,20 +1,23 @@
 // What a reply did, drawn with T3 Code's work-log rows (chat/t3/WorkLog.tsx and
-// TimelineWorkRows.tsx, from t3code @3b95e7831, MIT) over Neko's data:
-// `activity` strings, `tool_calls`, and `started_ms` / `at_ms`.
+// TimelineWorkRows.tsx, from t3code @3b95e7831, MIT) over the message's parts:
+// reasoning, tool calls (`dynamic-tool`, with their SDK states), and the prose
+// said between steps.
 //
 // While the turn runs: "Working for 12s" over the newest step with its shine.
 // Once it is finished: one "Worked for 1m 12s ›" fold, the steps inside it.
-// A tool call is an entry with its arguments on demand.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CircleAlertIcon } from "lucide-react";
 import { cn } from "@/ui/lib/utils";
-import { splitStep, steps, type Step } from "@/chat/work";
+import { splitStep } from "@/chat/work";
 import { WorkLogButton, WorkLogDetails, WorkLogList, WorkLogRow } from "@/chat/t3/WorkLog";
 import {
   LiveActivityRow, SimpleWorkEntryRow, ToolActivityIconView, TurnFoldTimelineRow, WorkingTimelineRow, formatDuration,
   type WorkEntryIconName,
 } from "@/chat/t3/TimelineWorkRows";
-import type { NekoMessage, ToolCall } from "@/chat/types";
+import { ACTION_TOOL, isToolPart, type NekoPart, type NekoUIMessage } from "@/chat/sdk/types";
+import {
+  connectionOf, toolDeclined, toolDetail, toolFailed, toolKind, toolRunning, toolText, toolWaiting, type Kind,
+} from "@/chat/sdk/parts";
 
 /** Seconds since `since`, re-read every second while `active`. */
 export function useElapsed(since: number, active: boolean) {
@@ -28,7 +31,7 @@ export function useElapsed(since: number, active: boolean) {
   return Math.max(0, (now - since) / 1000);
 }
 
-export const KIND_ICON: Record<Step["kind"], WorkEntryIconName> = {
+export const KIND_ICON: Record<Kind, WorkEntryIconName> = {
   command: "terminal",
   edit: "square-pen",
   read: "eye",
@@ -94,48 +97,76 @@ export function ToolFailed({ what, detail }: { what: string; detail?: string }) 
   );
 }
 
-const STATUS_WORD: Record<string, string> = {
-  awaiting_approval: "waiting for approval",
-  approved: "approved",
-  running: "running",
-  succeeded: "done",
-  failed: "failed",
-  denied: "declined",
-};
+// ---------------------------------------------------------------------------
+// The entries of a turn's work
+// ---------------------------------------------------------------------------
 
-function prettyArgs(json: string): string {
-  try {
-    return JSON.stringify(JSON.parse(json), null, 2);
-  } catch {
-    return json;
-  }
+interface Entry {
+  key: string;
+  text: string;
+  aside?: string;
+  kind: Kind;
+  icon: WorkEntryIconName;
+  failed: boolean;
+  waiting: boolean;
+  running: boolean;
+  detail: string | null;
 }
 
-/** One MCP tool call the reply made: an entry, with its arguments on demand. */
-export function ToolCallLine({ call }: { call: ToolCall }) {
+const STATE_WORD: Record<string, string> = {
+  "approval-requested": "waiting for approval",
+  "output-denied": "declined",
+  "input-streaming": "starting",
+};
+
+/** The steps of a turn, in the order they happened. */
+export function entriesOf(work: NekoPart[]): Entry[] {
+  const out: Entry[] = [];
+  work.forEach((part, index) => {
+    if (isToolPart(part)) {
+      if (part.toolName === ACTION_TOOL) return; // a proposal: it has its own card
+      const kind = toolKind(part);
+      const connection = connectionOf(part);
+      const declined = toolDeclined(part);
+      const aside = [connection, STATE_WORD[part.state] ?? (declined ? "declined" : null)].filter(Boolean).join(" · ") || undefined;
+      out.push({
+        key: part.toolCallId, text: toolText(part), aside, kind, icon: declined ? "x" : toolWaiting(part) ? "message-circle" : KIND_ICON[kind],
+        failed: toolFailed(part), waiting: toolWaiting(part), running: toolRunning(part), detail: toolDetail(part),
+      });
+    } else if (part.type === "reasoning" && part.text.trim()) {
+      out.push({ key: `r${index}`, text: "Thought", kind: "other", icon: "brain", failed: false, waiting: false, running: part.state === "streaming", detail: part.text.trim() });
+    } else if (part.type === "text" && part.text.trim()) {
+      const first = part.text.trim().split("\n")[0];
+      const long = part.text.trim().length > first.length || first.length > 110;
+      out.push({ key: `t${index}`, text: first.length > 110 ? `${first.slice(0, 109)}…` : first, kind: "other", icon: "message-circle", failed: false, waiting: false, running: false, detail: long ? part.text.trim() : null });
+    }
+  });
+  return out;
+}
+
+function EntryRow({ entry }: { entry: Entry }) {
   return (
-    <div data-slot="tool-call" data-status={call.status}>
-      <SimpleWorkEntryRow
-        slot="tool-call-row"
-        label={call.tool_name}
-        aside={`${call.connection_id} · ${STATUS_WORD[call.status] ?? call.status}`}
-        iconName={call.status === "awaiting_approval" ? "message-circle" : call.status === "denied" ? "x" : "hammer"}
-        failed={call.status === "failed"}
-        warning={call.status === "awaiting_approval"}
-        detail={prettyArgs(call.arguments_json)}
-      />
-    </div>
+    <SimpleWorkEntryRow
+      slot={entry.waiting ? "tool-call-row" : "work-step"}
+      label={entry.kind === "command" || entry.kind === "edit" || entry.kind === "read" || entry.kind === "search" ? <StepLabel text={entry.text} /> : entry.text}
+      aside={entry.aside}
+      iconName={entry.icon}
+      failed={entry.failed}
+      warning={entry.waiting}
+      detail={entry.detail}
+    />
   );
 }
 
 /** One live line while working; one fold once finished. */
-export function WorkLog({ message }: { message: NekoMessage }) {
-  const list: Step[] = useMemo(() => steps(message.activity), [message.activity]);
-  const running = !!message.pending;
-  const started = message.started_ms || message.at_ms;
+export function WorkLog({ message, work }: { message: NekoUIMessage; work: NekoPart[] }) {
+  const entries = useMemo(() => entriesOf(work), [work]);
+  const meta = message.metadata ?? {};
+  const running = meta.state === "pending";
+  const started = meta.startedMs || meta.atMs || Date.now();
   const [open, setOpen] = useState(false);
-  const worked = message.started_ms ? formatDuration((message.at_ms - message.started_ms) / 1000) : null;
-  const latest = list[list.length - 1];
+  const worked = meta.startedMs && meta.atMs ? formatDuration((meta.atMs - meta.startedMs) / 1000) : null;
+  const latest = entries[entries.length - 1];
 
   return (
     <section data-slot="work-log" data-running={running} className="pb-2">
@@ -144,7 +175,12 @@ export function WorkLog({ message }: { message: NekoMessage }) {
           <WorkingTimelineRow startedAt={started} />
           {latest ? (
             <div data-slot="work-live" className="pt-1">
-              <LiveActivityRow label={<StepLabel text={latest.text} />} iconName={KIND_ICON[latest.kind]} failed={latest.failed} active />
+              <LiveActivityRow
+                label={latest.waiting ? <>{latest.text} <span className="text-warning-foreground">· waiting for you</span></> : <StepLabel text={latest.text} />}
+                iconName={latest.icon}
+                failed={latest.failed}
+                active={!latest.waiting}
+              />
             </div>
           ) : null}
         </>
@@ -153,16 +189,14 @@ export function WorkLog({ message }: { message: NekoMessage }) {
           <TurnFoldTimelineRow
             label={worked ? `Worked for ${worked}` : "Worked"}
             expanded={open}
-            disabled={list.length === 0}
+            disabled={entries.length === 0}
             onToggle={() => setOpen((v) => !v)}
-            createdAt={message.at_ms}
+            createdAt={meta.atMs ?? 0}
           />
-          {open && list.length ? (
+          {open && entries.length ? (
             <div data-slot="work-steps" className="pt-1">
               <WorkLogList>
-                {list.map((step, i) => (
-                  <SimpleWorkEntryRow key={i} label={<StepLabel text={step.text} />} iconName={KIND_ICON[step.kind]} failed={step.failed} />
-                ))}
+                {entries.map((entry) => <EntryRow key={entry.key} entry={entry} />)}
               </WorkLogList>
             </div>
           ) : null}

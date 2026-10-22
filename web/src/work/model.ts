@@ -361,25 +361,7 @@ export function receiptFor(test: string, receipts: Receipt[]): Receipt | null {
   }) ?? null;
 }
 
-// ---------------------------------------------------------------------------
-// The thread (TicketThread.swift)
-// ---------------------------------------------------------------------------
-
-export type ThreadItem =
-  | { kind: "brief"; text: string }
-  | { kind: "you"; text: string }
-  | { kind: "agent"; role: string; text: string }
-  | { kind: "steps"; role: string; commands: Receipt[] }
-  | { kind: "status"; text: string };
-
-export interface ThreadRow {
-  id: string;
-  at: number;
-  item: ThreadItem;
-  /** The speaker line shows only when the speaker changes. */
-  showsSpeaker: boolean;
-}
-
+/** A task's agents, by the name the person knows them by (the daemon's `task_chat::agent_name`). */
 export function agentName(role: string): string {
   switch (role) {
     case "scout": case "supervisor": case "splitter": return "Planner";
@@ -387,59 +369,6 @@ export function agentName(role: string): string {
     case "reviewer": return "Reviewer";
     case "learning": return "Memory";
     default: return "Neko";
-  }
-}
-
-function isPlumbing(message: string): boolean {
-  return (
-    message.startsWith("Command ") || message.startsWith("Advisory:") || message.startsWith("USAGE ") ||
-    message === "Updating workspace files" || message.startsWith("{") || message.startsWith("Decision: ") ||
-    message.startsWith("Needs your input before building:") || message.startsWith("Nothing to build:") ||
-    message === "Agent started in an isolated task worktree"
-  );
-}
-
-export function threadRows(task: Task): ThreadRow[] {
-  const entries: { start: number; at: number; item: ThreadItem }[] = [];
-  const goal = str(task.goal).trim();
-  if (goal) entries.push({ start: -1, at: num(task.created_at_ms), item: { kind: "brief", text: goal } });
-  const echoes = [str(task.plan), str(task.result)].map((s) => s.trim().slice(0, 160)).filter(Boolean);
-  arr(task.events).forEach((event, index) => {
-    const role = str(event.role);
-    const message = str(event.message).trim();
-    const at = num(event.at_ms);
-    if (!message) return;
-    const receipt = receiptOf(event);
-    if (receipt) {
-      const last = entries[entries.length - 1];
-      if (last && last.item.kind === "steps" && last.item.role === role) last.item.commands.push(receipt);
-      else entries.push({ start: index, at, item: { kind: "steps", role, commands: [receipt] } });
-      return;
-    }
-    if (isPlumbing(message)) return;
-    if (role === "note") entries.push({ start: index, at, item: { kind: "you", text: message } });
-    else if (role === "user" || role === "system") entries.push({ start: index, at, item: { kind: "status", text: message } });
-    else {
-      if (echoes.some((e) => message.startsWith(e) || e.startsWith(message.slice(0, 160)))) return;
-      if (message.startsWith("Working in ") || message === "Plan ready." || message.startsWith("Investigation complete.")) {
-        entries.push({ start: index, at, item: { kind: "status", text: message } });
-      } else entries.push({ start: index, at, item: { kind: "agent", role, text: message } });
-    }
-  });
-  let previous: string | null = null;
-  return entries.map((entry) => {
-    const speaker = speakerOf(entry.item);
-    const showsSpeaker = speaker !== null && speaker !== previous;
-    if (speaker) previous = speaker;
-    return { id: `${entry.item.kind}#${entry.start}`, at: entry.at, item: entry.item, showsSpeaker };
-  });
-}
-
-function speakerOf(item: ThreadItem): string | null {
-  switch (item.kind) {
-    case "brief": case "you": return "you";
-    case "agent": case "steps": return agentName(item.role);
-    default: return null;
   }
 }
 

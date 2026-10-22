@@ -9,6 +9,10 @@ const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789a
 struct Fake {
     seen: Mutex<Vec<String>>,
     events: Mutex<Vec<mpsc::Sender<Event>>>,
+    /// Chat calls that got past the gates: "log:<c>", "feed:<c>", "send:<c>:<text>".
+    chat: Mutex<Vec<String>>,
+    /// What `chat_feed` / `chat_send` hand back, once.
+    feed: Mutex<Option<neko_core::ui_message::Feed>>,
 }
 
 impl Backend for Fake {
@@ -24,6 +28,19 @@ impl Backend for Fake {
         let (tx, rx) = mpsc::channel();
         self.events.lock().unwrap().push(tx);
         rx
+    }
+    fn chat_log(&self, conversation: &str) -> Result<serde_json::Value, ChatFail> {
+        self.chat.lock().unwrap().push(format!("log:{conversation}"));
+        Ok(serde_json::json!({"messages": [], "active": null}))
+    }
+    fn chat_feed(&self, conversation: &str) -> Option<neko_core::ui_message::Feed> {
+        self.chat.lock().unwrap().push(format!("feed:{conversation}"));
+        self.feed.lock().unwrap().take()
+    }
+    fn chat_send(&self, conversation: &str, send: ChatSend) -> Result<Option<neko_core::ui_message::Feed>, ChatFail> {
+        self.chat.lock().unwrap().push(format!("send:{conversation}:{}", send.text));
+        if send.text == "refuse me" { return Err(ChatFail::Refused("Neko already has 20 messages queued.".into())); }
+        Ok(self.feed.lock().unwrap().take())
     }
 }
 
@@ -42,7 +59,7 @@ fn start() -> Harness {
     fs::create_dir_all(dir.path().join("plugins")).unwrap();
     let listener = bind(0).unwrap();
     let port = listener.local_addr().unwrap().port();
-    let backend = Arc::new(Fake { seen: Mutex::new(Vec::new()), events: Mutex::new(Vec::new()) });
+    let backend = Arc::new(Fake { seen: Mutex::new(Vec::new()), events: Mutex::new(Vec::new()), chat: Mutex::new(Vec::new()), feed: Mutex::new(None) });
     let config = Config { token: TOKEN.into(), web_root: dir.path().join("web"), live_web: None, plugins_dir: dir.path().join("plugins"), plugin_data_dir: dir.path().join("plugin-data"), custom_css: dir.path().join("custom.css"), attachments_dir: dir.path().join("attachments") };
     let served = backend.clone();
     std::thread::spawn(move || serve(listener, config, served));
@@ -791,4 +808,157 @@ fn a_live_web_ui_is_preferred_and_old_chunks_stay_reachable() {
     assert_eq!(serve_static(&web_roots(&config), "/assets/none.js").status, 404);
     neko_core::self_update::clear_web(&data);
     assert_eq!(page("/"), "<html>bundle</html>", "cleared: back to the bundle");
+}
+
+// ---------------------------------------------------------------------------
+// Chat: the AI SDK's UI message stream
+// ---------------------------------------------------------------------------
+
+fn post(port: u16, target: &str, extra: &[&str], body: &str) -> Answer {
+    let mut lines = good(port);
+    lines.push("Content-Type: application/json".into());
+    lines.extend(extra.iter().map(|s| s.to_string()));
+    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    http(port, "POST", target, &refs, body)
+}
+
+fn user_message(text: &str) -> String {
+    serde_json::json!({"id": "u1", "trigger": "submit-message", "message": {"id": "u1", "role": "user", "parts": [{"type": "text", "text": text}]}}).to_string()
+}
+
+fn chunk_names(body: &str) -> Vec<String> {
+    body.lines().filter_map(|l| l.strip_prefix("data: ")).map(|d| serde_json::from_str::<serde_json::Value>(d).ok().and_then(|v| v["type"].as_str().map(str::to_owned)).unwrap_or_else(|| d.to_owned())).collect()
+}
+
+#[test]
+fn every_gate_applies_to_the_chat_endpoints_and_nothing_reaches_the_conversation() {
+    let h = start();
+    let host = format!("Host: 127.0.0.1:{}", h.port);
+    for target in ["/api/chat/neko", "/api/chat/neko/stream", "/api/chat/task%3Aabc/stream"] {
+        // No credentials, a wrong one, and the URL token (honoured on `/` only).
+        assert_eq!(http(h.port, "GET", target, &[&host], "").status, 401, "no token {target}");
+        assert_eq!(http(h.port, "GET", target, &[&host, "Authorization: Bearer nope"], "").status, 401, "{target}");
+        assert_eq!(http(h.port, "GET", &format!("{target}?token={TOKEN}"), &[&host], "").status, 401, "{target}");
+        // A foreign host, a foreign origin, a cross-site fetch: all refused even with the token.
+        assert_eq!(http(h.port, "GET", target, &["Host: evil.example", &format!("Authorization: Bearer {TOKEN}")], "").status, 403, "host {target}");
+        assert_eq!(get(h.port, target, &["Origin: https://evil.example"]).status, 403, "origin {target}");
+        assert_eq!(get(h.port, target, &["Sec-Fetch-Site: cross-site"]).status, 403, "site {target}");
+    }
+    let body = user_message("hello");
+    assert_eq!(http(h.port, "POST", "/api/chat/neko/stream", &[&host, "Content-Type: application/json"], &body).status, 401);
+    assert_eq!(post(h.port, "/api/chat/neko/stream", &["Origin: https://evil.example"], &body).status, 403);
+    assert_eq!(post(h.port, "/api/chat/neko/stream", &["Sec-Fetch-Site: cross-site"], &body).status, 403);
+    assert!(h.backend.chat.lock().unwrap().is_empty(), "no rejected request may touch a conversation: {:?}", h.backend.chat.lock().unwrap());
+    assert!(h.backend.seen.lock().unwrap().is_empty());
+}
+
+#[test]
+fn chat_paths_and_methods_are_exact() {
+    let h = start();
+    for target in ["/api/chat/", "/api/chat/other", "/api/chat/task:", "/api/chat/task%3A", "/api/chat/task%3A..%2Fx", "/api/chat/neko/nope", "/api/chat/neko/stream/more", "/api/chat/neko%2F..%2Fx"] {
+        assert_eq!(get(h.port, target, &[]).status, 404, "{target}");
+    }
+    assert_eq!(post(h.port, "/api/chat/neko", &[], &user_message("x")).status, 405, "the log is read-only");
+    assert_eq!(http(h.port, "DELETE", "/api/chat/neko/stream", &good(h.port).iter().map(String::as_str).collect::<Vec<_>>(), "").status, 405);
+    assert_eq!(get(h.port, "/api/chat/neko/stream", &[]).status, 204, "nothing in flight is a 204, the SDK's reconnect contract");
+    let log = get(h.port, "/api/chat/neko", &[]);
+    assert_eq!(log.status, 200);
+    assert!(log.body.contains("\"messages\""));
+    assert_eq!(h.backend.chat.lock().unwrap().as_slice(), ["feed:neko", "log:neko"]);
+}
+
+#[test]
+fn a_chat_message_is_checked_before_it_reaches_the_conversation() {
+    let h = start();
+    let sent = |body: &str| post(h.port, "/api/chat/neko/stream", &[], body);
+    assert_eq!(sent("not json").status, 400);
+    assert_eq!(sent("{}").status, 400, "no message");
+    let assistant = serde_json::json!({"message": {"role": "assistant", "parts": [{"type": "text", "text": "x"}]}}).to_string();
+    assert_eq!(sent(&assistant).status, 400, "only the user speaks here");
+    let file = serde_json::json!({"message": {"role": "user", "parts": [{"type": "file", "url": "x", "mediaType": "a/b"}]}}).to_string();
+    assert_eq!(sent(&file).status, 400, "parts the daemon does not understand are refused, not dropped");
+    let regenerate = serde_json::json!({"trigger": "regenerate-message", "message": {"role": "user", "parts": [{"type": "text", "text": "x"}]}}).to_string();
+    assert_eq!(sent(&regenerate).status, 400);
+    assert_eq!(sent(&user_message("   ")).status, 400, "blank");
+    let long_id = serde_json::json!({"message": {"id": "x".repeat(65), "role": "user", "parts": [{"type": "text", "text": "x"}]}}).to_string();
+    assert_eq!(sent(&long_id).status, 400);
+    let refused = sent(&user_message("refuse me"));
+    assert_eq!((refused.status, refused.body.as_str()), (400, "Neko already has 20 messages queued."), "the daemon's own words come back");
+    assert!(h.backend.chat.lock().unwrap().iter().all(|c| c.ends_with("refuse me")), "only the well-formed message got through: {:?}", h.backend.chat.lock().unwrap());
+}
+
+#[test]
+fn a_chat_body_over_the_limit_is_refused_before_it_is_read() {
+    let h = start();
+    let mut lines = good(h.port);
+    lines.push("Content-Type: application/json".into());
+    lines.push(format!("Content-Length: {}", MAX_CHAT_BODY + 1));
+    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    assert_eq!(http(h.port, "POST", "/api/chat/neko/stream", &refs, "").status, 413);
+    assert!(h.backend.chat.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_message_that_queues_answers_an_empty_stream() {
+    let h = start();
+    let answer = post(h.port, "/api/chat/neko/stream", &[], &user_message("second"));
+    assert_eq!(answer.status, 200);
+    assert!(answer.head.to_lowercase().contains("x-vercel-ai-ui-message-stream: v1"), "{}", answer.head);
+    assert!(answer.head.contains("text/event-stream"));
+    assert_eq!(chunk_names(&answer.body), ["[DONE]"]);
+    assert_eq!(h.backend.chat.lock().unwrap().as_slice(), ["send:neko:second"]);
+}
+
+#[test]
+fn a_reply_streams_as_the_sdk_expects_and_a_second_follower_gets_the_same() {
+    use neko_core::ui_message as ui;
+    let h = start();
+    ui::begin("m-http", Vec::new(), 1);
+    ui::emit("m-http", &serde_json::json!({"type": "text-start", "id": "a"}));
+    ui::emit("m-http", &serde_json::json!({"type": "text-delta", "id": "a", "delta": "Hello "}));
+    *h.backend.feed.lock().unwrap() = ui::attach("m-http", 2);
+    let port = h.port;
+    // Send: the reply it started streams back on the same response.
+    let reader = std::thread::spawn(move || post(port, "/api/chat/neko/stream", &[], &user_message("hi")));
+    std::thread::sleep(Duration::from_millis(200));
+    ui::emit("m-http", &serde_json::json!({"type": "text-delta", "id": "a", "delta": "there."}));
+    ui::emit("m-http", &serde_json::json!({"type": "text-end", "id": "a"}));
+    ui::finish("m-http", "done", 3);
+    let answer = reader.join().unwrap();
+    assert_eq!(answer.status, 200);
+    assert_eq!(chunk_names(&answer.body), ["start", "text-start", "text-delta", "text-delta", "text-end", "finish", "[DONE]"], "{}", answer.body);
+    assert!(answer.body.contains("\"messageId\":\"m-http\""));
+    let mut parts = Vec::new();
+    for line in answer.body.lines().filter_map(|l| l.strip_prefix("data: ")).filter(|d| *d != "[DONE]") {
+        ui::apply_chunk(&mut parts, &serde_json::from_str(line).unwrap());
+    }
+    assert_eq!(parts[0]["text"], "Hello there.");
+}
+
+#[test]
+fn reconnecting_mid_reply_replays_what_was_written_then_follows_the_rest() {
+    use neko_core::ui_message as ui;
+    let h = start();
+    ui::begin("m-resume", Vec::new(), 1);
+    for c in [serde_json::json!({"type": "text-start", "id": "a"}), serde_json::json!({"type": "text-delta", "id": "a", "delta": "Half "}), ui::tool_input("c1", "Bash", &serde_json::json!({"command": "ls"}))] {
+        ui::emit("m-resume", &c);
+    }
+    *h.backend.feed.lock().unwrap() = ui::attach("m-resume", 2);
+    let port = h.port;
+    let reader = std::thread::spawn(move || get(port, "/api/chat/neko/stream", &[]));
+    std::thread::sleep(Duration::from_millis(200));
+    ui::emit("m-resume", &serde_json::json!({"type": "text-delta", "id": "a", "delta": "done."}));
+    ui::emit("m-resume", &ui::tool_output("c1", serde_json::json!({"exit_code": 0, "output": ""})));
+    ui::finish("m-resume", "done", 3);
+    let answer = reader.join().unwrap();
+    assert_eq!(chunk_names(&answer.body), ["start", "text-start", "text-delta", "tool-input-available", "text-delta", "tool-output-available", "text-end", "finish", "[DONE]"], "{}", answer.body);
+}
+
+#[test]
+fn the_conversation_names_are_checked() {
+    assert!(valid_conversation("neko"));
+    assert!(valid_conversation("task:3f9c2a-1_b"));
+    for bad in ["", "Neko", "task:", "task:a b", "task:a/b", "task:..", "tasks:a", &format!("task:{}", "a".repeat(65))] {
+        assert!(!valid_conversation(bad), "{bad:?}");
+    }
 }

@@ -9,7 +9,6 @@ import remarkGfm from "remark-gfm";
 import remarkBreaks from "./remark-breaks";
 
 import { cn } from "@/ui/lib/utils";
-import { REPLY_KINDS, ReplyBlock } from "@/chat/reply-views";
 import { MarkdownCodeBlock, ShikiCodeBlock, extractFenceLanguage } from "./MarkdownCodeBlock";
 import { MarkdownTable } from "./MarkdownTable";
 
@@ -49,10 +48,6 @@ function components(isStreaming: boolean): Components {
       const codeBlock = extractCodeBlock(children);
       if (!codeBlock) return <pre {...props}>{children}</pre>;
       const language = extractFenceLanguage(codeBlock.className);
-      if (REPLY_KINDS.has(language) && !isStreaming) {
-        const block = ReplyBlock({ kind: language, source: codeBlock.code });
-        if (block) return <>{block}</>;
-      }
       const plain = <pre {...props}>{children}</pre>;
       return (
         <MarkdownCodeBlock code={codeBlock.code} language={language}>
