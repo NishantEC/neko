@@ -137,15 +137,46 @@ export function onEvent(listener: EventListener) {
 // Live reload: an agent that rebuilds the app (`pnpm watch`) sees it at once.
 // ---------------------------------------------------------------------------
 
+// Neko also rebuilds this app itself when one of its tasks lands a change
+// (`WebUpdated`). Either way the page reloads only when the person is idle:
+// never mid-typing, and never while a field holds an unsent draft.
+
+let lastInput = 0;
+const IDLE_MS = 5000;
+
+/** Nothing typed for a few seconds, and no focused field holding text. */
+export function idleForReload(now = Date.now(), active: Element | null = document.activeElement): boolean {
+  if (now - lastInput < IDLE_MS) return false;
+  const editable = active as HTMLInputElement | HTMLTextAreaElement | HTMLElement | null;
+  if (!editable) return true;
+  if (editable instanceof HTMLInputElement || editable instanceof HTMLTextAreaElement) return editable.value.trim() === "";
+  if (editable.isContentEditable) return (editable.textContent ?? "").trim() === "";
+  return true;
+}
+
 export function watchForNewBuild() {
   const bundle = (html: string) => html.match(/\/assets\/index-[\w-]+\.js/)?.[0] ?? "";
   let current: string | null = null;
+  let wanted = false;
+  for (const type of ["keydown", "input", "pointerdown", "compositionupdate"]) {
+    window.addEventListener(type, () => { lastInput = Date.now(); }, { capture: true, passive: true });
+  }
+  const want = () => {
+    wanted = true;
+    (window as any).__nekoReloadPending = true;
+  };
+  onEvent((event) => {
+    if (event && typeof event === "object" && "WebUpdated" in event) want();
+  });
+  setInterval(() => {
+    if (wanted && idleForReload()) location.reload();
+  }, 1000);
   setInterval(async () => {
     try {
       const html = await (await fetch("/", { cache: "no-store" })).text();
       const now = bundle(html);
       if (current === null) current = now;
-      else if (now && now !== current) location.reload();
+      else if (now && now !== current) want();
     } catch {
       /* the daemon is restarting; try again next tick */
     }

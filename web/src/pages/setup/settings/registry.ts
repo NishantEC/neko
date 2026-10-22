@@ -2,7 +2,7 @@
 // that search can open. Ranking is the native app's (SettingsSearch.swift):
 // title prefix, a word in the title, a keyword, then a substring.
 
-export type SectionId = "general" | "ai" | "rulebook" | "search" | "permissions" | "diagnostics" | "about";
+export type SectionId = "general" | "ai" | "rulebook" | "search" | "permissions" | "diagnostics" | "updates" | "about";
 
 export interface SectionDef { id: SectionId; title: string; summary: string; group: string; keywords: string[] }
 export interface SettingDef { id: string; section: SectionId; title: string; keywords: string[] }
@@ -14,6 +14,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "search", title: "Quick panel", group: "This Mac", summary: "Choose which folders appear in the quick panel.", keywords: ["quick panel", "palette", "folders", "files", "spotlight"] },
   { id: "permissions", title: "Permissions", group: "This Mac", summary: "Review what Neko can access on this Mac.", keywords: ["privacy", "full disk access", "accessibility", "clipboard"] },
   { id: "diagnostics", title: "Diagnostics", group: "This Mac", summary: "Check local runtimes and the connection to Neko.", keywords: ["health", "debug", "logs", "troubleshoot", "connection"] },
+  { id: "updates", title: "Neko updates", group: "This Mac", summary: "Neko applying its own landed changes: version, pending update, rollbacks.", keywords: ["update", "upgrade", "version", "self-update", "rollback", "reinstall", "auto-update"] },
   { id: "about", title: "About", group: "This Mac", summary: "Version, updates and where this page comes from.", keywords: ["version", "update", "build"] },
 ];
 
@@ -39,6 +40,10 @@ export const SETTINGS: SettingDef[] = [
   { id: "full-disk-access", section: "permissions", title: "Full Disk Access", keywords: ["privacy", "protected folders", "documents", "desktop"] },
   { id: "accessibility", section: "permissions", title: "Accessibility", keywords: ["paste", "selected text", "hotkey"] },
   { id: "diagnostics", section: "diagnostics", title: "Run diagnostics", keywords: ["health", "connection", "debug", "logs", "troubleshoot"] },
+  { id: "pending-update", section: "updates", title: "Apply update", keywords: ["pending", "waiting", "safety", "approve"] },
+  { id: "auto-update-ui", section: "updates", title: "Update the web UI automatically", keywords: ["auto-update", "live", "reload"] },
+  { id: "auto-update-app", section: "updates", title: "Reinstall the app automatically", keywords: ["auto-update", "install", "native", "daemon"] },
+  { id: "update-now", section: "updates", title: "Update Neko now", keywords: ["upgrade", "rebuild", "install"] },
   { id: "updates", section: "about", title: "Updates and version", keywords: ["version", "update", "build", "about"] },
 ];
 
