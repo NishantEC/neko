@@ -743,7 +743,7 @@ screen. Nothing else may call `.repeat()`.
 - A theme supplies *independent* colours as a `Spec`; one `const fn build()`
   derives every dependent token. A theme cannot redefine what a token means.
 
-Seventeen ship. Light ones also move the real `NSWindow`'s `NSAppearance`,
+Eighteen ship. Light ones also move the real `NSWindow`'s `NSAppearance`,
 because the native material behind the panel renders in it — a cream panel over
 a `darkAqua` blur reads as a dark halo. See
 [adding-a-theme.md](adding-a-theme.md).

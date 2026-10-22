@@ -5,7 +5,7 @@
 import { useSyncExternalStore } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
-import { Desktop, Moon, Sun, type Icon } from "@/ui/icons";
+import { Desktop, Moon, Sparkle, Sun, type Icon } from "@/ui/icons";
 import { getTheme, setTheme, subscribeTheme, type ThemeChoice } from "@/theme";
 import { useWorkbench } from "@/useStore";
 import { Kbd } from "@/ui/kbd";
@@ -20,11 +20,12 @@ const THEMES: { value: ThemeChoice; label: string; icon: Icon }[] = [
   { value: "system", label: "System", icon: Desktop },
   { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
+  { value: "glass", label: "Glass", icon: Sparkle },
 ];
 
 const ICON_BUTTON = "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
 
-/** One button showing the current theme; its menu picks System, Light or Dark. */
+/** One button showing the current theme; its menu picks System, Light, Dark or Glass. */
 export function ThemeMenu() {
   const theme = useSyncExternalStore(subscribeTheme, getTheme);
   const current = THEMES.find((t) => t.value === theme) ?? THEMES[0];

@@ -145,7 +145,16 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   check((await page.locator("[data-slot='theme-menu']").count()) === 1 && (await page.locator(".sky-segment").count()) === 0, "the theme is one menu button in the sidebar, not a segmented switch");
   await page.locator("[data-slot='theme-menu']").click();
   await page.getByRole("menuitemradio", { name: "Light" }).waitFor({ timeout: 3000 });
-  check((await page.getByRole("menuitemradio").count()) === 3, "the theme menu opens with System, Light and Dark");
+  check((await page.getByRole("menuitemradio").count()) === 4, "the theme menu opens with System, Light, Dark and Glass");
+  await page.getByRole("menuitemradio", { name: "Glass" }).click();
+  await page.waitForFunction(() => document.documentElement.classList.contains("glass") && document.documentElement.classList.contains("dark"), null, { timeout: 3000 });
+  check(true, "choosing Glass sets html.dark.glass");
+  await sleep(400);
+  await shot("shell-glass");
+  await a11y("shell (glass)");
+  // a radio item keeps the menu open: choose System from the same menu
+  await page.getByRole("menuitemradio", { name: "System" }).click();
+  await page.waitForFunction(() => !document.documentElement.classList.contains("glass"), null, { timeout: 3000 });
   await page.keyboard.press("Escape");
   check((await page.locator("[data-slot='machine']").getAttribute("data-level")) === "holding", "the machine entry reports the hold level");
   await page.locator("[data-slot='machine']").click();

@@ -166,6 +166,87 @@
   color-scheme: dark;
 }
 
+/* ------------------------------------------------------------------ glass */
+/* Glassmorphism, layered on `.dark` (src/theme.ts sets both classes): a navy
+ * and violet wash behind everything, translucent frosted surfaces that blur
+ * it, thin light hairlines and soft shadows. Only `html.glass` reaches these
+ * rules, so every other theme renders exactly as before. Text tokens are
+ * chosen against the brightest point the wash can composite to (see
+ * docs/evidence/glass-theme-report.md): all clear WCAG AA 4.5:1. */
+html.glass {
+  --background: rgb(13 22 38 / 0.42);
+  --foreground: #e8eef8;
+  --strong: #f6f9fe;
+  --card: rgb(28 42 66 / 0.48);
+  --card-foreground: #e8eef8;
+  --popover: rgb(20 32 52 / 0.78);
+  --popover-foreground: #e8eef8;
+  --secondary: --alpha(var(--color-white) / 8%);
+  --secondary-foreground: #edf2fa;
+  --muted: --alpha(var(--color-white) / 6%);
+  --muted-foreground: #a9b8cd;
+  --accent: --alpha(var(--color-white) / 10%);
+  --accent-foreground: #f6f9fe;
+  --border: --alpha(var(--color-white) / 14%);
+  --input: --alpha(var(--color-white) / 16%);
+  --sidebar: rgb(15 26 43 / 0.46);
+  --sidebar-foreground: #c3cfdf;
+  --sidebar-accent: --alpha(var(--color-white) / 10%);
+  --sidebar-accent-foreground: #f6f9fe;
+  --sidebar-border: --alpha(var(--color-white) / 14%);
+  --code: rgb(8 14 26 / 0.62);
+  --panel: rgb(28 42 66 / 0.42);
+  --panel-border: --alpha(var(--color-white) / 16%);
+  --panel-highlight: --alpha(var(--color-white) / 10%);
+  --smooth-ring-color: rgba(255, 255, 255, 0.16);
+  --glass-wash:
+    radial-gradient(ellipse 70% 60% at 12% 0%, oklch(0.42 0.13 285 / 0.55), transparent 70%),
+    radial-gradient(ellipse 60% 55% at 100% 100%, oklch(0.42 0.09 215 / 0.5), transparent 70%),
+    linear-gradient(160deg, #0b1424 0%, #101a30 55%, #0c1626 100%);
+  --glass-frost: blur(22px) saturate(160%);
+}
+
+html.glass:not([data-shell="native"]) body {
+  background: var(--glass-wash) fixed;
+}
+
+html.glass .bg-background,
+html.glass .bg-card,
+html.glass .bg-popover,
+html.glass .bg-sidebar,
+html.glass .ui-popup-surface,
+html.glass .ui-panel-surface {
+  -webkit-backdrop-filter: var(--glass-frost);
+  backdrop-filter: var(--glass-frost);
+}
+
+html.glass .ui-popup-surface,
+html.glass .ui-panel-surface,
+html.glass [data-slot="card"] {
+  border-color: --alpha(var(--color-white) / 14%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 8px 32px -12px rgb(0 0 0 / 0.45);
+}
+
+/* StatusGlyph (src/work/tone.tsx) knocks its check and "!" out of a filled
+ * circle with `var(--background)`. A translucent mark would blend into the
+ * circle (about 2:1), so in Glass the glyph sees the solid fallback value. */
+html.glass svg[data-status] {
+  --background: #0d1626;
+}
+
+/* Without backdrop-filter a translucent surface over the wash would leave
+ * text sitting on an unblurred gradient; fall back to solid fills. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html.glass {
+    --background: #0d1626;
+    --card: #1a2740;
+    --popover: #16233a;
+    --sidebar: #0f1a2b;
+  }
+}
+
 @theme inline {
   --font-sans: "Inter Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --font-display: var(--font-sans);

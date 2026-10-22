@@ -116,6 +116,11 @@ pub const BUILTIN_THEMES: &[BuiltinTheme] = &[
         description: "Dark · violet and magenta · translucent",
     },
     BuiltinTheme {
+        id: "glass",
+        name: "Glass",
+        description: "Dark · frosted glass · translucent",
+    },
+    BuiltinTheme {
         id: "catppuccin-mocha",
         name: "Catppuccin Mocha",
         description: "Dark · Catppuccin · translucent",

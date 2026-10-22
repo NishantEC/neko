@@ -13,7 +13,7 @@ import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, Comma
 import { Kbd } from "@/ui/kbd";
 import { Keyboard } from "@phosphor-icons/react";
 import {
-  ArrowRight, ArrowsClockwise, CheckCircle, CircleHalf, Copy, Moon, Plus, Rocket, Sun, Stop,
+  ArrowRight, ArrowsClockwise, CheckCircle, CircleHalf, Copy, Moon, Plus, Rocket, Sparkle, Sun, Stop,
 } from "@/ui/icons";
 import "@/pages";
 import { usePages } from "@/registry";
@@ -169,6 +169,9 @@ export function CommandPalette() {
             </CommandItem>
             <CommandItem value="Theme: dark" keywords={["appearance"]} onSelect={run(() => setTheme("dark"))}>
               <Moon /> Dark theme
+            </CommandItem>
+            <CommandItem value="Theme: glass" keywords={["appearance", "frosted", "translucent", "blur"]} onSelect={run(() => setTheme("glass"))}>
+              <Sparkle /> Glass theme
             </CommandItem>
             <CommandItem value="Theme: system" keywords={["appearance", "auto"]} onSelect={run(() => setTheme("system"))}>
               <CircleHalf /> Follow the system theme
