@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/ui/toggle-group";
 import { Kbd } from "@/ui/kbd";
 import {
-  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/ui/dropdown-menu";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/ui/empty";
 import { cn } from "@/ui/lib/utils";
@@ -184,6 +184,7 @@ export default function Tasks() {
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Work options" title="Work options" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-72">
+          <DropdownMenuGroup>
           <DropdownMenuLabel>New tasks</DropdownMenuLabel>
           <DropdownMenuCheckboxItem checked={planFirst} onCheckedChange={(enabled) => void run("SetPlanFirst", { enabled })}>
             Plan before working
@@ -196,6 +197,7 @@ export default function Tasks() {
               Start tasks without asking
             </DropdownMenuCheckboxItem>
           ) : null}
+          </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuCheckboxItem checked={includeStoppedRaw !== "false"} onCheckedChange={(on) => setIncludeStopped(on ? "true" : "false")}>
             Show failed and cancelled

@@ -4,7 +4,7 @@
 // entry opens the same facts MachineStrip.swift shows.
 import { useSyncExternalStore } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { Desktop, Moon, Sun, type Icon } from "@/ui/icons";
 import { getTheme, setTheme, subscribeTheme, type ThemeChoice } from "@/theme";
 import { useWorkbench } from "@/useStore";
@@ -35,6 +35,7 @@ export function ThemeMenu() {
         <CurrentIcon size={15} />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="end" className="min-w-40">
+        <DropdownMenuGroup>
         <DropdownMenuLabel>Theme</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as ThemeChoice)}>
           {THEMES.map(({ value, label, icon: ItemIcon }) => (
@@ -43,6 +44,7 @@ export function ThemeMenu() {
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

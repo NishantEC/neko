@@ -146,6 +146,10 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   check(/\d+ tasks?/.test(subtitle), `the header counts them: "${subtitle}"`);
   check((await page.locator("[data-slot='nav-item']", { hasText: "Tasks" }).count()) === 1 && (await page.locator("[data-slot='nav-item']", { hasText: "Pull requests" }).count()) === 1, "Tasks and Pull requests are in the sidebar's Work group");
   await both("work-tasks-list");
+  await page.getByRole("button", { name: "Work options" }).click();
+  await page.getByRole("menuitemcheckbox", { name: /Plan before working/ }).waitFor({ timeout: 3000 });
+  check(true, "the Work options menu opens");
+  await page.keyboard.press("Escape");
 
   // filter: search narrows, clear restores
   await page.getByLabel("Search tasks").fill("zzzz-no-such-task");
