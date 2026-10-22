@@ -164,7 +164,7 @@ try {
   const problems = [];
   page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${m.text()}`); });
   page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
-  page.on("requestfailed", (r) => { if (!r.url().includes("/api/events") && !r.url().includes("/api/request")) problems.push(`request failed: ${r.url()}`); });
+  page.on("requestfailed", (r) => { if (!r.url().includes("/api/events") && !r.url().includes("/api/request")) problems.push(`request failed: ${r.url()} (${r.failure()?.errorText ?? "?"})`); });
   page.on("response", (r) => { if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`); });
 
   const shot = (name, options = {}) => page.screenshot({ path: path.join(OUT, `${name}.png`), ...options });
