@@ -92,17 +92,17 @@ export default function register(host) {
 const CSS = `
 .pr-board { flex: 1; overflow-y: auto; width: 100%; max-width: 728px; margin: 0 auto; padding: 28px 24px 48px; }
 .pr-board header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
-.pr-board h1 { font-size: 20px; font-weight: 600; margin: 0; color: rgb(255 255 255 / .97); }
-.pr-board h2 { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #8f8f8f; margin: 26px 0 8px; display: flex; gap: 8px; align-items: center; }
-.pr-board .count { font-weight: 400; color: #6a6a6a; }
-.pr-list { border-top: 1px solid rgb(255 255 255 / .06); }
-.pr-card { display: block; padding: 10px 4px; border-bottom: 1px solid rgb(255 255 255 / .06); color: inherit; text-decoration: none; }
-.pr-card:hover { background: rgb(255 255 255 / .03); }
-.pr-title { color: rgb(255 255 255 / .92); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pr-meta { display: flex; gap: 8px; align-items: center; margin-top: 2px; font-size: 12px; color: #8f8f8f; }
-.pr-ref { font-family: ui-monospace, Menlo, monospace; }
-.pill { padding: 0 8px; line-height: 18px; border-radius: 999px; background: rgb(255 255 255 / .06); }
-.pill[data-tone="ok"], .pill[data-tone="done"] { color: #4cc38a; }
-.pill[data-tone="bad"] { color: #e5484d; }
-.pill[data-tone="pending"], .pill[data-tone="open"] { color: #e0a042; }
+.pr-board h1 { font-family: var(--font-serif); font-optical-sizing: auto; font-variation-settings: "opsz" 144; font-size: 28px; font-weight: 500; letter-spacing: -0.015em; line-height: 1.1; margin: 0; color: var(--strong); }
+.pr-board h2 { font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: .18em; text-transform: uppercase; color: var(--muted-foreground); margin: 26px 0 8px; display: flex; gap: 8px; align-items: center; }
+.pr-board .count { font-weight: 400; opacity: .7; }
+.pr-list { border-top: 1px solid var(--border); }
+.pr-card { display: block; padding: 10px 4px; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; }
+.pr-card:hover { background: var(--accent); }
+.pr-title { color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-meta { display: flex; gap: 8px; align-items: center; margin-top: 2px; font-size: 12px; color: var(--muted-foreground); }
+.pr-ref { font-family: var(--font-mono); }
+.pill { padding: 0 8px; line-height: 18px; border-radius: 999px; background: var(--muted); }
+.pill[data-tone="ok"], .pill[data-tone="done"] { color: var(--success-foreground); }
+.pill[data-tone="bad"] { color: var(--destructive-foreground); }
+.pill[data-tone="pending"], .pill[data-tone="open"] { color: var(--warning-foreground); }
 `;

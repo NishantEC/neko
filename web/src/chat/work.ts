@@ -75,3 +75,12 @@ export function duration(seconds: number): string {
 export function clock(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: false });
 }
+
+/** "Ran `git status`" -> verb "Ran", target "git status" (backticks removed, mono). */
+export function splitStep(text: string): { verb: string; target: string; code: boolean } {
+  const space = text.indexOf(" ");
+  if (space < 0) return { verb: text, target: "", code: false };
+  const rest = text.slice(space + 1).trim();
+  const code = rest.startsWith("`") && rest.includes("`", 1);
+  return { verb: text.slice(0, space), target: code ? rest.replace(/^`|`$/g, "") : rest, code };
+}
