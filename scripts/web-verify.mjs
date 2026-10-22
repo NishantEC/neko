@@ -19,12 +19,12 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_CORE ?? "/Users/nish/Documents/loreswipe/node_modules/playwright-core");
@@ -32,11 +32,11 @@ const { chromium } = require(process.env.PLAYWRIGHT_CORE ?? "/Users/nish/Documen
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.NEKO_WEB_PORT ?? 4748);
 const DATA = process.env.NEKO_WEB_VERIFY_DATA ?? "/tmp/neko-web-data";
-const OUT = "/tmp/neko-web";
+const OUT = process.env.NEKO_WEB_SHOTS ?? "/tmp/neko-web";
 const SEED = process.env.NEKO_WEB_SEED ?? "/tmp/neko-real-snap.json";
 const TARGET = process.env.CARGO_TARGET_DIR ?? "/Users/nish/Documents/neko/target";
 const HARNESS = process.env.NEKO_WEB_HARNESS ?? path.join(TARGET, "debug/web_harness");
-const LEASE = "neko-web-foundation";
+const LEASE = process.env.NEKO_WEB_LEASE ?? "neko-web-foundation";
 const CHROME = "http://127.0.0.1:9333";
 const sharedChrome = path.join(os.homedir(), ".agents/bin/shared-chrome");
 
@@ -348,6 +348,18 @@ try {
   writeFileSync(entry, readFileSync(entry, "utf8").replaceAll('"PR board"', '"PR board (edited)"'));
   await nav("PR board (edited)").waitFor({ timeout: 10000 });
   check(true, "editing the plugin file reloads it live");
+
+  // --- per-area checks: scripts/verify/*.mjs, one file per area -------------------------------
+  // Each file default-exports `async ({ page, shot, a11y, check, sleep, PORT, DATA, OUT })`
+  // and opens its own pages. Optional filter: NEKO_WEB_ONLY=tasks,prs runs matching files only.
+  const only = (process.env.NEKO_WEB_ONLY ?? "").split(",").filter(Boolean);
+  const dir = path.join(repo, "scripts/verify");
+  for (const file of existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".mjs")).sort() : []) {
+    if (only.length && !only.some((name) => file.startsWith(name))) continue;
+    console.log(`\n== ${file}`);
+    const area = (await import(pathToFileURL(path.join(dir, file)).href)).default;
+    await area({ page, shot, a11y, check, sleep, PORT, DATA, OUT });
+  }
 
   check(problems.length === 0, problems.length ? `console/network problems:\n  ${problems.join("\n  ")}` : "no console errors or failed requests");
 } catch (error) {
