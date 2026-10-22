@@ -1,14 +1,20 @@
 /* dockview, on Neko's tokens. Every colour is a CSS variable the app already
  * switches with `.dark` / `.light`, so there is no per-theme code here.
  *
- * Shape (the builder frame's): a quiet chrome behind, each pane a rounded card
- * with a 40px tab strip, the active tab marked by a 2px primary underline and
- * primary text (the `underline` variant in ui/tabs), a hairline under the strip.
- * Plain sans throughout. Panes are separated by a 6px gap of chrome. */
+ * Shape: hushbacks' "fused tab" (apps/spa Builder: BuilderViewTabs / BuilderPanelTabs
+ * @da20dfaeb, recovered from this repo's web/src/work/builder before fd8f4e7). A quiet
+ * chrome behind; each pane is a rounded card; the tab strip sits on the chrome. The
+ * active tab is the card's own colour, 40px tall, rounded 14px on top, with a 12px
+ * concave connector at each foot, so it reads as the card's tab rather than a button
+ * on it. Inactive tabs are recessed 36px pills on the chrome, tinted on hover.
+ * The original's sliding indicator is NOT kept: it animated one shared highlight
+ * across one tablist, and a dock has a tablist per pane (tabs move between panes
+ * and remount), so there is no single element to slide. Plain sans throughout. */
 /* the page behind the cards (from hushbacks builder-shell, on Neko tokens) */
 .builder-shell,
 .neko-dock-host {
   --builder-chrome: var(--sidebar);
+  --builder-pane: var(--card);
 }
 .dark .builder-shell,
 .dark .neko-dock-host {
@@ -28,8 +34,8 @@
   overflow: clip;
   font-family: inherit;
 
-  --dv-group-view-background-color: var(--card);
-  --dv-tabs-and-actions-container-background-color: var(--card);
+  --dv-group-view-background-color: var(--builder-pane);
+  --dv-tabs-and-actions-container-background-color: var(--builder-chrome);
   --dv-tabs-and-actions-container-height: 40px;
   --dv-tabs-and-actions-container-font-size: 13px;
   --dv-tab-font-size: 13px;
@@ -39,9 +45,9 @@
   --dv-paneview-header-border-color: var(--border);
   --dv-paneview-active-outline-color: var(--ring);
 
-  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-visiblepanel-tab-background-color: var(--builder-pane);
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--builder-pane);
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: var(--primary);
   --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
@@ -65,6 +71,8 @@
 
   --dv-border-radius: 14px;
   --dv-tab-border-radius: 8px;
+  --dock-tab-radius: 14px;
+  --dock-tab-foot: 12px;
   --dv-sash-border-radius: 3px;
   --dv-dropdown-border-radius: 10px;
   --dv-transition-duration: 160ms;
@@ -74,7 +82,7 @@
   --dv-floating-box-shadow: var(--shadow-lg);
   --dv-floating-border: 1px solid var(--border);
   --dv-floating-group-border: none;
-  --dv-floating-titlebar-background-color: var(--card);
+  --dv-floating-titlebar-background-color: var(--builder-chrome);
   --dv-floating-titlebar-border-bottom: 1px solid var(--border);
   --dv-overlay-z-index: 50;
 }
@@ -94,18 +102,22 @@
   color: var(--foreground);
 }
 .neko-dock .dv-groupview .dv-tabs-and-actions-container {
-  border-radius: var(--dv-border-radius) var(--dv-border-radius) 0 0;
-  border-bottom: 1px solid var(--border);
-  padding: 0 6px;
+  padding: 0 6px 0 0;
+  background: var(--builder-chrome);
+}
+/* room either side for the end tabs' concave feet (the strip clips overflow, and a foot past the end would start a scrollbar) */
+.neko-dock .dv-groupview .dv-tabs-container {
+  padding-left: var(--dock-tab-foot);
+  padding-right: var(--dock-tab-foot);
 }
 .neko-dock .dv-groupview .dv-content-container {
-  background: var(--card);
-  border-radius: 0 0 var(--dv-border-radius) var(--dv-border-radius);
+  background: var(--builder-pane);
+  border-radius: var(--dock-tab-radius);
   overflow: hidden;
 }
-/* The group the keyboard or last click is in keeps the primary underline; the others say it quieter. */
-.neko-dock .dv-groupview.dv-inactive-group .dock-tab::after {
-  background: color-mix(in srgb, var(--foreground) 35%, transparent);
+/* The card's top-left corner is square when the first tab is the active one: the tab's foot meets it. */
+.neko-dock .dv-groupview:has(.dv-tabs-container > .dv-tab:first-child.dv-active-tab) .dv-content-container {
+  border-top-left-radius: 0;
 }
 
 /* Tabs. dockview owns the outer .dv-tab (draggable, role=tab); .dock-tab is ours. */
@@ -113,17 +125,51 @@
   display: flex;
   align-items: stretch;
   padding: 0;
-  height: 100%;
+  height: 36px;
+  align-self: center;
   border-radius: var(--dv-tab-border-radius);
   font-weight: 500;
   transition: color 120ms, background-color 120ms;
+}
+.neko-dock .dv-tabs-container {
+  align-items: center;
+  gap: 2px;
 }
 .neko-dock .dv-tab.dv-inactive-tab:hover {
   background: color-mix(in srgb, var(--foreground) 6%, transparent);
   color: var(--foreground);
 }
-.neko-dock .dv-tab.dv-tab-dragging {
-  background: var(--card);
+/* The active tab is the pane: same surface, full strip height, concave feet. */
+.neko-dock .dv-groupview .dv-tab.dv-active-tab,
+.dv-tab-ghost-drag {
+  height: 40px;
+  align-self: flex-end;
+  background: var(--builder-pane, var(--card));
+  border-radius: var(--dock-tab-radius, 14px) var(--dock-tab-radius, 14px) 0 0;
+  z-index: 1;
+}
+.dv-tab.dv-active-tab .dock-tab::before,
+.dv-tab.dv-active-tab .dock-tab::after,
+.dv-tab-ghost-drag .dock-tab::before,
+.dv-tab-ghost-drag .dock-tab::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: var(--dock-tab-foot, 12px);
+  height: var(--dock-tab-foot, 12px);
+  pointer-events: none;
+}
+.dv-tab.dv-active-tab .dock-tab::before,
+.dv-tab-ghost-drag .dock-tab::before {
+  left: calc(var(--dock-tab-foot, 12px) * -1);
+  background: radial-gradient(circle 12px at 0 0, transparent 11.5px, var(--builder-pane, var(--card)) 12px);
+}
+.dv-tab.dv-active-tab .dock-tab::after,
+.dv-tab-ghost-drag .dock-tab::after {
+  right: calc(var(--dock-tab-foot, 12px) * -1);
+  background: radial-gradient(circle 12px at 100% 0, transparent 11.5px, var(--builder-pane, var(--card)) 12px);
+}
+.dv-tab-ghost-drag {
   box-shadow: var(--shadow-md);
 }
 .neko-dock .dv-tab:focus-visible::after,
@@ -143,30 +189,16 @@
   white-space: nowrap;
   user-select: none;
 }
+/* the label sits a little above centre, as in the original (pb-2 on a 40px tab) */
+.dv-tab.dv-active-tab .dock-tab {
+  padding-bottom: 4px;
+}
 .dock-tab-icon {
   flex-shrink: 0;
 }
 .dock-tab-title {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.dock-tab::after {
-  content: "";
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 0;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: currentColor;
-  opacity: 0;
-  transition: opacity 120ms;
-}
-.neko-dock .dv-tab.dv-active-tab .dock-tab::after {
-  opacity: 1;
-}
-.neko-dock .dv-groupview.dv-active-group .dv-tab.dv-active-tab .dock-tab::after {
-  background: var(--primary);
 }
 .dock-tab-close,
 .dock-group-action {
