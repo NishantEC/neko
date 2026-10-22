@@ -15,16 +15,21 @@ Write it as a folder in {{PLUGINS_DIR}}/<name>/ (name: lowercase letters, digits
 manifest.json
 { "title": "Short title", "description": "One sentence", "version": "0.1.0", "entry": "index.js" }
 
-index.js (an ES module; React comes from the host, so no imports and no bundler)
+index.js (an ES module; React and Neko's own components come from the host, so no imports and no bundler)
 export default function register(host) {
-  const { React, request, registerPage } = host;
+  const { React, request, registerPage, ui, icons } = host;
+  const h = React.createElement;
+  const { PageHeader, Panel, Button, Input, Badge } = ui;
   function Page() {
-    return React.createElement("div", { style: { padding: 24, color: "var(--foreground)" } }, "Hello");
+    return h("div", { className: "mx-auto w-full max-w-3xl px-6 py-10 flex flex-col gap-6" },
+      h(PageHeader, { title: "Short title", subtitle: "One sentence" }),
+      h(Panel, null, h(Button, { onClick: () => ui.toast.success("Hi") }, h(icons.Check), "Save")));
   }
   registerPage({ id: "main", title: "Short title", component: Page });
 }
 
-Rules: style only with the app's CSS variables (var(--foreground), var(--muted-foreground), var(--border), var(--card), var(--background)); talk to the daemon with request(...), the same JSON the app sends; call no other site. The page shows up in the sidebar by itself a few seconds after the files are saved. Open it in the browser, fix whatever breaks, then tell me what you built.`;
+Build the page from host.ui, never from hand-styled elements: PageHeader, Panel, Button, Input, Textarea, Select*, Switch, Checkbox, Badge, StatusBadge, Tabs*, Table*, Dialog*, DropdownMenu*, Tooltip*, Progress, Skeleton, Spinner, Empty*, toast. Icons are host.icons.<Name> (Phosphor). Layout uses ordinary class names the app already ships (flex, gap-4, px-6, text-sm, text-muted-foreground, border, rounded-xl); for anything else use var(--foreground), var(--muted-foreground), var(--border), var(--card), var(--background).
+Rules: talk to the daemon with request(...), the same JSON the app sends; call no other site. The page shows up in the sidebar by itself a few seconds after the files are saved. Open it in the browser, fix whatever breaks, then tell me what you built.`;
 
 export const MANIFEST_EXAMPLE = `{
   "title": "PR board",
