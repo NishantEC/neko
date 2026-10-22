@@ -1,25 +1,24 @@
 // A task opened as a full page, in hushbacks' builder frame
 // (apps/spa/src/pages/Builder/index.tsx, components/BuilderDesktopHeader.tsx and
-// FormBuilderMode.tsx @da20dfaeb): a header row whose left column carries the
-// breadcrumb, the status and the fused panel tab, and whose right column is
-// where the view tabs and the actions mount; under it a resizable split, the
-// chat on the left in its rounded panel surface and the stage on the right
-// with the task's views (Changes, Plan, Details).
+// FormBuilderMode.tsx @da20dfaeb): a header row (breadcrumb, status, the task's
+// actions) over the stage.
 //
-// Neko: the form's ChatProvider, presence, sync and publish controls are gone;
-// the chat side mounts the task conversation (TaskThread + Composer, owned by the
-// chat work) unchanged; the header end is the task's own actions. The chat panel
-// opens wider than hushbacks' (35% default, 45% max, against 25% / 30%) because
-// a task conversation carries work logs and tables a form chat does not.
-import { useCallback, useEffect, useState, type ReactNode, type RefObject } from "react";
+// Neko: the stage is a docking layout (dock/DockWorkspace, dockview) rather than
+// hushbacks' fixed chat | views split. Every view is a tab: Chat (the task
+// conversation + composer, owned by the chat work and mounted unchanged),
+// Changes, Plan and Details. Tabs can be dragged to any pane, dropped on an edge
+// to split, grouped, reordered, closed and reopened from the header's View menu.
+// The default layout is the old one: Chat on the left (35%), the three views
+// grouped on the right. One layout is kept for the person, not per task.
+import { type ReactNode, type RefObject } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { GitDiff } from "@phosphor-icons/react";
-import { ArrowLeft, ArrowsOutSimple, ChatCircle, Check, GitPullRequest, Info, Link as LinkIcon, ListChecks } from "@/ui/icons";
+import { ArrowLeft, ArrowsOutSimple, ArrowCounterClockwise, ChatCircle, Check, GitPullRequest, Info, Layout, Link as LinkIcon, ListChecks, SquareHalf } from "@/ui/icons";
 import { Button } from "@/ui/button";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup, type ImperativePanelHandle } from "@/ui/resizable";
-import { cn } from "@/ui/lib/utils";
 import { hrefFor } from "@/router";
+import { useRegisterCommands } from "@/shell/commands";
 import { Changes } from "@/work/Changes";
 import { PlanBlock } from "@/work/Thread";
 import { STAGE_TONE, StatusLabel, Tag } from "@/work/tone";
@@ -27,65 +26,26 @@ import { conversationState, friendlyStatus, pullRequestNumber, repositoryOf, sta
 import type { TaskAction, Ui } from "@/work/taskActions";
 import { Details, TaskActions } from "@/work/TaskDetail";
 import { TaskComposer, TaskConversation } from "@/chat/TaskConversation";
-import { BuilderPanelTabs, type BuilderPanelTab } from "@/work/builder/BuilderPanelTabs";
-import { BuilderViewTabs, type BuilderViewTabItem } from "@/work/builder/BuilderViewTabs";
-import { BUILDER_HEADER_SLOT } from "@/work/builder/builderHeaderLayout";
+import { DockWorkspace, useDockController, useOpenPanels, type DockGroupSpec, type DockPanelDef } from "@/work/dock/DockWorkspace";
 
 const EASE_OUT: [number, number, number, number] = [0.16, 1, 0.3, 1];
 
-type PanelTab = "chat";
-const PANEL_TABS: BuilderPanelTab<PanelTab>[] = [{ title: "Chat", icon: ChatCircle, value: "chat" }];
+/** One layout for the person, whichever task is open. */
+export const TASK_DOCK_KEY = "neko:dock:task";
 
-type View = "changes" | "plan" | "details";
-const VIEW_TABS: BuilderViewTabItem<View>[] = [
-  { title: "Changes", icon: GitDiff, value: "changes" },
-  { type: "separator" },
-  { title: "Plan", icon: ListChecks, value: "plan" },
-  { title: "Details", icon: Info, value: "details" },
+/** The panels a task page offers, in the order the View menu lists them. */
+const PANELS = [
+  { id: "chat", title: "Chat", icon: ChatCircle },
+  { id: "changes", title: "Changes", icon: GitDiff },
+  { id: "plan", title: "Plan", icon: ListChecks },
+  { id: "details", title: "Details", icon: Info },
+] as const;
+
+// Chat opens wider than hushbacks' form chat (35%, not 25%): a task conversation carries work logs and tables.
+const DEFAULT_LAYOUT: DockGroupSpec[] = [
+  { panels: ["chat"], size: 0.35, minWidth: 320 },
+  { panels: ["changes", "plan", "details"], active: "changes", of: 0, direction: "right" },
 ];
-
-// hushbacks' hooks/useChatPanelSize + hooks/useCollapsedChat, on Neko's keys.
-const SIZE_KEY = "neko:task-builder:chat-size";
-const COLLAPSED_KEY = "neko:task-builder:chat-collapsed";
-const DEFAULT_CHAT_PANEL_SIZE = 35;
-const NARROW_QUERY = "(max-width: 899px)";
-
-function readSize(): number {
-  try {
-    const stored = Number.parseFloat(localStorage.getItem(SIZE_KEY) ?? "");
-    return Number.isFinite(stored) && stored > 0 ? stored : DEFAULT_CHAT_PANEL_SIZE;
-  } catch {
-    return DEFAULT_CHAT_PANEL_SIZE;
-  }
-}
-
-function readCollapsed(): boolean {
-  if (typeof matchMedia === "function" && matchMedia(NARROW_QUERY).matches) return true;
-  try {
-    return localStorage.getItem(COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-// hushbacks' useBuilderViewMode: the view is remembered per task.
-function useTaskViewMode(taskId: string): [View, (next: View) => void] {
-  const key = `neko:task-builder:view:${taskId}`;
-  const read = (): View => {
-    try {
-      const stored = localStorage.getItem(key);
-      if (stored === "changes" || stored === "plan" || stored === "details") return stored;
-    } catch { /* storage can be blocked */ }
-    return "changes";
-  };
-  const [view, setViewState] = useState<View>(read);
-  useEffect(() => setViewState(read()), [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  const setView = useCallback((next: View) => {
-    setViewState(next);
-    try { localStorage.setItem(key, next); } catch { /* ignore */ }
-  }, [key]);
-  return [view, setView];
-}
 
 export interface TaskBuilderProps {
   task: Task;
@@ -101,7 +61,7 @@ export interface TaskBuilderProps {
   headingRef: RefObject<HTMLHeadingElement | null>;
 }
 
-/** One view inside the stage: the rounded card, scrolled, on the column the side panel uses. */
+/** One view inside a pane: scrolled, on the column the side panel uses. */
 function StageView({ children, slot }: { children: ReactNode; slot?: string }) {
   return (
     <div data-slot={slot} className="h-full min-h-0 overflow-y-auto bg-card">
@@ -114,43 +74,107 @@ export function TaskBuilder({
   task, snapshot, ui, actions, state, onClose, onToggleFull, onOpenTask, copied, onCopyLink, headingRef,
 }: TaskBuilderProps) {
   const reduceMotion = useReducedMotion();
-  const [chatCollapsed, setChatCollapsedState] = useState(readCollapsed);
-  const [chatPanelSize, setChatPanelSizeState] = useState(readSize);
-  const [panelTab, setPanelTab] = useState<PanelTab>("chat");
-  const [viewHeaderTarget, setViewHeaderTarget] = useState<HTMLDivElement | null>(null);
-  const [chatPanel, setChatPanel] = useState<ImperativePanelHandle | null>(null);
-  const [view, setView] = useTaskViewMode(task.id);
-
-  const setChatCollapsed = (next: boolean) => {
-    setChatCollapsedState(next);
-    try { localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0"); } catch { /* ignore */ }
-  };
-
-  const handlePanelTabChange = (next: PanelTab) => {
-    setPanelTab(next);
-    if (chatPanel?.isCollapsed()) {
-      chatPanel.expand();
-      chatPanel.resize(chatPanelSize);
-    }
-  };
-
-  const handleChatPanelResize = (size: number) => {
-    const collapsed = size === 0;
-    if (collapsed !== chatCollapsed) setChatCollapsed(collapsed);
-    if (size > 0) {
-      setChatPanelSizeState(size);
-      try { localStorage.setItem(SIZE_KEY, String(size)); } catch { /* ignore */ }
-    }
-  };
+  const dock = useDockController();
+  const openPanels = useOpenPanels(dock);
 
   const stage = stageOf(task.status);
   const repo = repositoryOf(snapshot, task);
   const prNumber = pullRequestNumber(task);
-  const gridTemplateColumns = chatCollapsed ? "auto minmax(0, 1fr)" : `minmax(22.5rem, ${chatPanelSize}%) minmax(0, 1fr)`;
+
+  useRegisterCommands(
+    [
+      ...PANELS.map((p) => ({
+        id: `task-view.${p.id}`,
+        title: `View: ${p.title}`,
+        group: "Task view",
+        icon: p.icon,
+        keywords: ["panel", "tab", "show", "open", "focus"],
+        run: () => dock.open(p.id),
+      })),
+      { id: "task-view.reset", title: "Reset layout", group: "Task view", icon: ArrowCounterClockwise, keywords: ["panels", "dock", "default"], run: () => dock.reset() },
+      { id: "task-view.split-right", title: "Split right", group: "Task view", icon: SquareHalf, keywords: ["panel", "pane", "tab", "side by side"], run: () => dock.splitRight() },
+    ],
+    [dock],
+  );
+
+  const panels: DockPanelDef[] = [
+    {
+      id: "chat",
+      title: "Chat",
+      icon: ChatCircle,
+      render: () => (
+        <div data-slot="dock-chat" className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-card">
+          <TaskConversation task={task} />
+          <div className="w-full shrink-0 px-3 pt-1 pb-3">
+            <TaskComposer task={task} ui={ui} />
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "changes",
+      title: "Changes",
+      icon: GitDiff,
+      render: () => (
+        <StageView>
+          {task.worktree || task.parked ? <Changes taskId={task.id} active /> : (
+            <p data-slot="changes-empty" className="mt-10 text-center text-[13px] text-muted-foreground">This task has no working copy yet, so nothing has changed.</p>
+          )}
+        </StageView>
+      ),
+    },
+    {
+      id: "plan",
+      title: "Plan",
+      icon: ListChecks,
+      render: () => (
+        <StageView>
+          {String(task.plan ?? "").trim() ? (
+            <PlanBlock title={state.showsPlan ? state.planTitle : "Plan"} text={task.plan} />
+          ) : (
+            <p className="mt-10 text-center text-[13px] text-muted-foreground">The agent has not written a plan for this task.</p>
+          )}
+        </StageView>
+      ),
+    },
+    {
+      id: "details",
+      title: "Details",
+      icon: Info,
+      render: () => (
+        <StageView>
+          <div className="mb-6 flex flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground">
+            {repo ? <Tag>{repo}</Tag> : null}
+            {prNumber ? (
+              <a href={task.pull_request.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                <GitPullRequest size={13} aria-hidden /> {prNumber}
+              </a>
+            ) : null}
+            <span className="font-mono text-[11px] text-muted-foreground/70">NEK-{String(task.id).slice(0, 4).toUpperCase()}</span>
+          </div>
+          <Details task={task} snapshot={snapshot} open={onOpenTask} />
+        </StageView>
+      ),
+    },
+  ];
 
   const headerEnd = (
-    <div className="flex items-center gap-2">
+    <div className="flex shrink-0 items-center gap-2">
       <TaskActions task={task} snapshot={snapshot} actions={actions} ui={ui} repo={repo} className="flex-nowrap" />
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label="View: choose panels" data-slot="view-menu" />}>
+          <Layout aria-hidden /> View
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-48">
+          {PANELS.map((p) => (
+            <DropdownMenuCheckboxItem key={p.id} checked={openPanels.includes(p.id)} onCheckedChange={() => dock.toggle(p.id)}>
+              {p.title}
+            </DropdownMenuCheckboxItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => dock.reset()}><ArrowCounterClockwise aria-hidden /> Reset layout</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="ghost" size="icon-sm" aria-label="Copy a link to this task" onClick={onCopyLink}>{copied ? <Check /> : <LinkIcon />}</Button>
@@ -178,121 +202,32 @@ export function TaskBuilder({
         initial={reduceMotion ? false : { opacity: 0, y: -6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: reduceMotion ? 0 : 0.35, ease: EASE_OUT }}
-        className="shrink-0"
+        className="flex min-h-[52px] shrink-0 items-center gap-3 px-3"
       >
-        <div className="grid min-h-[52px]" style={{ gridTemplateColumns }}>
-          <div className={cn("flex min-w-0 items-stretch gap-3 pl-3", !chatCollapsed && "@container/chathead")}>
-            <nav
-              aria-label="Breadcrumb"
-              className={cn("flex min-w-0 flex-1 items-center gap-1.5 text-sm", chatCollapsed ? "max-w-48 min-[900px]:max-w-80" : "max-w-none", BUILDER_HEADER_SLOT)}
-            >
-              <a
-                href={hrefFor("tasks")}
-                onClick={(e) => { e.preventDefault(); onClose(); }}
-                aria-label="Back to Tasks"
-                title="Back to Tasks (Esc)"
-                className="flex shrink-0 items-center gap-1.5 rounded-md px-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-              >
-                <ArrowLeft size={14} aria-hidden /> Tasks
-              </a>
-              <span aria-hidden className="shrink-0 text-foreground/30">/</span>
-              <h2 className="min-w-0 truncate font-medium text-foreground" title={taskTitle(task)}>
-                <span ref={headingRef} tabIndex={-1} className="outline-none">{taskTitle(task)}</span>
-              </h2>
-            </nav>
-
-            <div className={cn("flex shrink-0 items-center gap-2 text-[12.5px] text-muted-foreground @max-[30rem]/chathead:hidden", BUILDER_HEADER_SLOT)}>
-              <StatusLabel tone={STAGE_TONE[stage]} live={["Planning", "Building", "Reviewing"].includes(task.status)}>{friendlyStatus(task.status)}</StatusLabel>
-            </div>
-
-            <BuilderPanelTabs
-              tabs={PANEL_TABS}
-              value={panelTab}
-              collapsed={chatCollapsed}
-              onChange={handlePanelTabChange}
-              onClose={() => chatPanel?.collapse()}
-              className="ml-auto self-end pr-7"
-            />
+        <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
+          <a
+            href={hrefFor("tasks")}
+            onClick={(e) => { e.preventDefault(); onClose(); }}
+            aria-label="Back to Tasks"
+            title="Back to Tasks (Esc)"
+            className="flex shrink-0 items-center gap-1.5 rounded-md px-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <ArrowLeft size={14} aria-hidden /> Tasks
+          </a>
+          <span aria-hidden className="shrink-0 text-foreground/30">/</span>
+          <h2 className="min-w-0 truncate font-medium text-foreground" title={taskTitle(task)}>
+            <span ref={headingRef} tabIndex={-1} className="outline-none">{taskTitle(task)}</span>
+          </h2>
+          <div className="ml-2 hidden shrink-0 items-center gap-2 text-[12.5px] text-muted-foreground min-[640px]:flex">
+            <StatusLabel tone={STAGE_TONE[stage]} live={["Planning", "Building", "Reviewing"].includes(task.status)}>{friendlyStatus(task.status)}</StatusLabel>
           </div>
-          <div ref={setViewHeaderTarget} className="min-w-0 overflow-visible pl-1.5 pr-3" />
-        </div>
+        </nav>
+        {headerEnd}
       </motion.header>
 
-      <ResizablePanelGroup direction="horizontal" className={cn("min-h-0 flex-1", !chatCollapsed && "[&>[data-panel-id=builder-chat-panel]]:min-w-90!")}>
-        <ResizablePanel
-          id="builder-chat-panel"
-          order={1}
-          ref={setChatPanel}
-          defaultSize={chatCollapsed ? 0 : chatPanelSize}
-          minSize={25}
-          maxSize={45}
-          collapsible
-          collapsedSize={0}
-          onResize={handleChatPanelResize}
-        >
-          {chatCollapsed ? null : (
-            <div className="flex h-full min-h-0 flex-col pb-3 pl-3 pr-0.5">
-              <div
-                id="builder-panel-surface"
-                role="tabpanel"
-                aria-labelledby={`builder-panel-tab-${panelTab}`}
-                className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-xl rounded-b-4xl bg-[var(--builder-panel)] p-1"
-              >
-                <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-t-lg rounded-b-[28px] bg-card">
-                  <TaskConversation task={task} />
-                  <div className="w-full shrink-0 px-3 pt-1 pb-3">
-                    <TaskComposer task={task} ui={ui} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </ResizablePanel>
-
-        <ResizableHandle className="opacity-0" aria-label="Resize the chat" />
-
-        <ResizablePanel id="builder-stage-panel" order={2} defaultSize={chatCollapsed ? 100 : 100 - chatPanelSize} minSize={55} className={cn("builder-stage-panel", chatCollapsed && "pl-3")}>
-          <div className="flex h-full flex-1 flex-col overflow-hidden pb-3 pl-[3px] pr-3">
-            <BuilderViewTabs
-              tabs={VIEW_TABS}
-              value={view}
-              onChange={setView}
-              headerEnd={headerEnd}
-              headerPortalTarget={viewHeaderTarget}
-              renderContent={(value) =>
-                value === "changes" ? (
-                  <StageView>
-                    {task.worktree || task.parked ? <Changes taskId={task.id} active /> : (
-                      <p data-slot="changes-empty" className="mt-10 text-center text-[13px] text-muted-foreground">This task has no working copy yet, so nothing has changed.</p>
-                    )}
-                  </StageView>
-                ) : value === "plan" ? (
-                  <StageView>
-                    {String(task.plan ?? "").trim() ? (
-                      <PlanBlock title={state.showsPlan ? state.planTitle : "Plan"} text={task.plan} />
-                    ) : (
-                      <p className="mt-10 text-center text-[13px] text-muted-foreground">The agent has not written a plan for this task.</p>
-                    )}
-                  </StageView>
-                ) : (
-                  <StageView>
-                    <div className="mb-6 flex flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground">
-                      {repo ? <Tag>{repo}</Tag> : null}
-                      {prNumber ? (
-                        <a href={task.pull_request.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-                          <GitPullRequest size={13} aria-hidden /> {prNumber}
-                        </a>
-                      ) : null}
-                      <span className="font-mono text-[11px] text-muted-foreground/70">NEK-{String(task.id).slice(0, 4).toUpperCase()}</span>
-                    </div>
-                    <Details task={task} snapshot={snapshot} open={onOpenTask} />
-                  </StageView>
-                )
-              }
-            />
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+      <div className="min-h-0 flex-1">
+        <DockWorkspace panels={panels} defaultLayout={DEFAULT_LAYOUT} storageKey={TASK_DOCK_KEY} controller={dock} />
+      </div>
     </article>
   );
 }
