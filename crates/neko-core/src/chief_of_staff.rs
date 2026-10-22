@@ -241,6 +241,18 @@ mod tests {
     }
 
     #[test]
+    fn applying_a_neko_update_needs_one_waiting() {
+        let mut snapshot = Snapshot::default();
+        snapshot.tasks = vec![task("t", TaskStatus::Completed, 0)];
+        let apply = || vec![ProposedAction { task_id: "t".into(), kind: "apply_update".into(), text: String::new() }];
+        assert!(validate(&snapshot, apply(), |_| true).is_empty(), "nothing waits");
+        snapshot.self_update.pending = Some(neko_protocol::workbench::UpdatePlan { to: "abc".into(), ..Default::default() });
+        let actions = validate(&snapshot, apply(), |_| true);
+        assert!(matches!(command(&actions[0]).unwrap(), Command::ApplyPendingUpdate));
+        assert!(overview(&snapshot)["neko_update_waiting_for_you"]["commit"] == "abc");
+    }
+
+    #[test]
     fn merging_needs_a_real_open_target_and_closes_the_duplicate_with_a_note() {
         let db = crate::Db::open_in_memory().unwrap();
         let mut snapshot = Snapshot::default();
