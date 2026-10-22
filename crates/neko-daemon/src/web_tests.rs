@@ -16,6 +16,7 @@ impl Backend for Fake {
         self.seen.lock().unwrap().push(format!("{request:?}"));
         match request {
             Request::Ping => Response::Pong,
+            Request::Workbench(neko_protocol::workbench::Command::Snapshot) => Response::Workbench(neko_protocol::workbench::Snapshot::default()),
             _ => Response::Error { message: "unexpected".into() },
         }
     }
@@ -541,4 +542,29 @@ fn an_unauthorised_upload_is_refused_before_its_body_is_read() {
     assert_eq!(http(h.port, "POST", "/api/attachments", &[&host, &token, &cross, &announce], "").status, 403);
     assert!(started.elapsed() < Duration::from_secs(4), "answered without waiting for a body");
     assert!(!h.dir.path().join("attachments").exists());
+}
+
+// ---------------------------------------------------------------------------
+// File mentions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn file_mentions_are_sanitised_located_and_need_a_real_query() {
+    assert_eq!(mention_pattern("read'me*)"), "readme");
+    assert_eq!(mention_pattern("a b_c-d.e"), "a b_c-d.e");
+    assert_eq!(mention_pattern("'; rm -rf /"), " rm -rf ");
+    assert_eq!(mention_location("/Users/me/Documents/neko/crates/a.rs", "/Users/me"), "neko › crates");
+    assert_eq!(mention_location("/Users/me/a.rs", "/Users/me"), "Home");
+    assert_eq!(mention_location("/opt/tools/a.rs", "/Users/me"), "opt › tools");
+    let h = start();
+    for target in ["/api/files", "/api/files?q=a", "/api/files?q=", "/api/files?q=%27%27", "/api/files?q=ab&workspace=nope", &format!("/api/files?q={}", "a".repeat(80))] {
+        let answer = get(h.port, target, &[]);
+        assert_eq!(answer.status, 200, "{target}");
+        assert_eq!(answer.body, r#"{"files":[]}"#, "{target}");
+    }
+    let post = call(&h, "POST", "/api/files?q=ab", &[], "");
+    assert_eq!(post.status, 405);
+    let host = format!("Host: 127.0.0.1:{}", h.port);
+    assert_eq!(http(h.port, "GET", "/api/files?q=ab", &[&host], "").status, 401);
+    assert_eq!(get(h.port, "/api/files?q=ab", &["Origin: https://evil.example"]).status, 403);
 }
