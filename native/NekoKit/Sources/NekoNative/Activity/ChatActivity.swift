@@ -12,7 +12,7 @@ enum ChatActivity {
             let source = Watching.label(model, connection: call["connection_id"].string)
             return (.reading, "Reading \(source)…")
         }
-        if let step = message["activity"].array.last?.string, !step.isEmpty {
+        if let step = message.chatActivity.last, !step.isEmpty {
             return (.analyzing, "Working…")
         }
         return calls.isEmpty ? (.thinking, "Thinking…") : (.analyzing, "Putting it together…")
