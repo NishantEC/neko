@@ -14,7 +14,6 @@ import { pageById } from "@/pages";
 import { HOME, navigate, useRoute } from "@/router";
 import { PluginBoundary, usePlugins } from "@/plugins";
 import { CommandPalette, openPalette } from "@/shell/CommandPalette";
-import { StatusBar } from "@/shell/StatusBar";
 import { InspectorHost } from "@/shell/inspector";
 import { ShortcutsOverlay } from "@/shell/shortcuts";
 import { ConfirmHost } from "@/shell/confirm";
@@ -118,7 +117,6 @@ export function AppShell() {
               <Outlet route={route} />
             </div>
           </InspectorHost>
-          <StatusBar />
         </SidebarInset>
         <CommandPalette />
         <ShortcutsOverlay />

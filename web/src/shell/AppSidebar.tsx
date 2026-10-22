@@ -13,7 +13,7 @@
 // workspace switcher is the product name (Neko has no active workspace), the
 // account row is the connection row, the usage well and notification bell are
 // not taken. Colours are Neko's tokens; the pebble comes from sky-materials.css.
-import { useEffect, useState, useSyncExternalStore, type ComponentProps, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarTrigger, useSidebar,
@@ -21,16 +21,16 @@ import {
 import { Button } from "@/ui/button";
 import { Kbd } from "@/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
-import { Command as CommandIcon, Desktop, MagnifyingGlass, Moon, Plus, PuzzlePiece, Sun, Warning, type Icon } from "@/ui/icons";
+import { Command as CommandIcon, MagnifyingGlass, Plus, PuzzlePiece, Warning } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
 import { pages, type PageDef } from "@/pages";
 import { SECTIONS } from "@/pages/setup/settings/registry";
 import { hrefFor, HOME } from "@/router";
 import { usePlugins } from "@/plugins";
-import { getTheme, setTheme, subscribeTheme, type ThemeChoice } from "@/theme";
 import { useWorkbench } from "@/useStore";
 import neko from "@/assets/neko-mark.svg";
 import { openPalette } from "@/shell/CommandPalette";
+import { SidebarStatus } from "@/shell/StatusBar";
 import { newTask } from "@/shell/actions";
 import { elapsed, STAGE_TITLES, taskHref, taskTitle, useNow, useShellStatus, type Stage } from "@/shell/status";
 import { requestSettings, useCurrentSettingsSection } from "@/setup/settingsNav";
@@ -269,46 +269,7 @@ function SettingsSubReveal({ open, reduce }: { open: boolean; reduce: boolean })
 // The footer: hushbacks' AccountFooter ThemeSwitch, then the connection row
 // ---------------------------------------------------------------------------
 
-const THEMES: { value: ThemeChoice; label: string; icon: Icon }[] = [
-  { value: "dark", label: "Dark", icon: Moon },
-  { value: "light", label: "Light", icon: Sun },
-  { value: "system", label: "System", icon: Desktop },
-];
 
-export function ThemeSwitch() {
-  const theme = useSyncExternalStore(subscribeTheme, getTheme);
-  return (
-    <fieldset aria-label="Theme" className="sky-segment min-w-0 flex-1">
-      {THEMES.map(({ value, label, icon: ThemeIcon }) => {
-        const active = theme === value;
-        return (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={active}
-            aria-label={`${label} theme`}
-            onClick={() => setTheme(value)}
-            className="outline-none"
-          >
-            <ThemeIcon size={13} weight={active ? "fill" : "regular"} />
-          </button>
-        );
-      })}
-    </fieldset>
-  );
-}
-
-function ConnectionRow() {
-  const { connected } = useWorkbench();
-  return (
-    <div className="flex items-center gap-2.5 px-1 py-1 group-data-[collapsible=icon]:justify-center">
-      <span data-slot="connection" data-connected={connected} className="flex min-w-0 flex-1 items-center gap-2.5 px-2 text-[13px] text-muted-foreground group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:px-0">
-        <span aria-hidden className={cn("size-2 shrink-0 rounded-full", connected ? "bg-success" : "bg-warning")} />
-        <span className="truncate group-data-[collapsible=icon]:sr-only">{connected ? "Connected" : "Reconnecting…"}</span>
-      </span>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 
@@ -486,10 +447,7 @@ export function AppSidebar({ route }: { route: string }) {
         <SidebarFooter className="px-0 pb-2 pt-0 gap-0">
           <div aria-hidden className="mx-3 mb-2 h-px bg-border/60 group-data-[collapsible=icon]:mx-2" />
           <div className="flex flex-col gap-2 px-2">
-            <div className="flex items-center gap-1.5 group-data-[collapsible=icon]:hidden">
-              <ThemeSwitch />
-            </div>
-            <ConnectionRow />
+            <SidebarStatus />
           </div>
         </SidebarFooter>
       </Sidebar>
