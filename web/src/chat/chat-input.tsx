@@ -1,27 +1,33 @@
-// The composer, after hushbacks' ChatInput (packages/ui/src/components/ChatInput).
+// The composer, after hushbacks' ChatInput (packages/ui/src/components/ChatInput)
+// and Neko's native composer (SharedComposer.swift).
 //
 // Kept: one rounded container with the controls inside it, auto-growing
-// textarea, image paste / drop / attach, the send ↔ stop morph, character count
-// near the limit. Dropped: GCS upload, speech-to-text, the effort menu. Added:
-// a `tray` slot that docks queued messages / decisions onto the top edge, and a
-// `leading` slot for the "Neko decides" chip.
+// textarea, paste / drop / choose attachments, the send ↔ queue ↔ stop morph,
+// character count near the limit. Dropped: GCS upload, speech-to-text.
+// Added: a `tray` slot that docks queued messages / decisions onto the top
+// edge, `leading` / `controls` slots for the toolbar (mode switch, runtime
+// picker), a `menu` slot that floats ABOVE the composer for `/` and `@`, and
+// attachments of any file kind that a page uploads (`onFiles`).
 //
-// Images stay local (data URLs): the daemon's CSP allows `data:` but not `blob:`
-// images, and nothing uploads. A page that wants to send them reads
-// `attachments`.
+// Images keep a local data: URL preview (the daemon's CSP allows `data:` but
+// not `blob:` images). A page that uploads reads `attachments`.
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, CircleNotch, Image as ImageIcon, Square, X } from "@/ui/icons";
+import { ArrowUp, CircleNotch, File as FileIcon, Image as ImageIcon, Paperclip, Square, X } from "@/ui/icons";
 import { Button } from "@/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import { cn } from "@/ui/lib/utils";
 import { pickPastedImage } from "@/chat/clipboard";
+import { byteLength } from "@/chat/ChatInputSlash";
 
 export interface ChatAttachment {
   id: string;
   name: string;
   type: string;
   /** A data: URL, so it renders under the daemon's CSP and survives a re-render. */
-  previewUrl: string;
+  previewUrl?: string;
+  isImage?: boolean;
+  status?: "uploading" | "ready" | "error";
+  error?: string;
 }
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -36,6 +42,14 @@ function readDataUrl(file: File): Promise<string> {
   });
 }
 
+/** Files on the clipboard, unless it also carries text (then it is a text paste). */
+function pastedFiles(data: DataTransfer): File[] {
+  if (data.getData("text/plain").trim()) return [];
+  return Array.from(data.files).map((file) =>
+    file.name ? file : new File([file], `pasted-image.${file.type.split("/")[1] || "png"}`, { type: file.type }),
+  );
+}
+
 export interface ChatInputProps {
   ref?: React.Ref<HTMLTextAreaElement>;
   text: string;
@@ -46,25 +60,40 @@ export interface ChatInputProps {
   onStop?: () => void;
   placeholder?: string;
   maxLength?: number;
+  /** Count and limit the message in UTF-8 bytes of `sizeText` (default `text`), as the daemon does. */
+  limitBytes?: number;
+  sizeText?: string;
   disabled?: boolean;
   sending?: boolean;
   /** Docked onto the top edge of the composer: queued messages, a decision. */
   tray?: React.ReactNode;
-  /** Left of the toolbar: the chip that says who decides the model. */
+  /** Floats above the composer (the `/` and `@` menu). Nothing in the page moves when it opens. */
+  menu?: React.ReactNode;
+  /** The combobox wiring for the textarea while `menu` is open. */
+  menuState?: { id: string; activeId?: string } | null;
+  /** Left of the toolbar, after the attach button: the Ask / Plan switch. */
   leading?: React.ReactNode;
+  /** Toolbar controls beside `leading`: the runtime picker. */
+  controls?: React.ReactNode;
   /** Shown above the composer in the danger colour. */
   error?: string | null;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  /** Images only, kept in the browser (the original behaviour). */
   allowImages?: boolean;
+  /** Files of any kind: paste, drop or choose; the page uploads them. */
+  onFiles?: (files: File[]) => void;
   attachments?: ChatAttachment[];
   onAttachmentsChange?: (next: ChatAttachment[]) => void;
+  onRemoveAttachment?: (id: string) => void;
+  /** Label of the send button's primary action; "Queue message" while a reply runs. */
   className?: string;
 }
 
 export function ChatInput({
   ref, text, onTextChange, onSendMessage, isGenerating = false, onStop,
-  placeholder = "Ask Neko anything", maxLength = 4096, disabled = false, sending = false,
-  tray, leading, error, onKeyDown, allowImages = false, attachments: controlled, onAttachmentsChange, className,
+  placeholder = "Ask Neko anything", maxLength = 4096, limitBytes, sizeText, disabled = false, sending = false,
+  tray, menu, menuState, leading, controls, error, onKeyDown, allowImages = false, onFiles, attachments: controlled,
+  onAttachmentsChange, onRemoveAttachment, className,
 }: ChatInputProps) {
   const inner = useRef<HTMLTextAreaElement | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -72,6 +101,7 @@ export function ChatInput({
   const [problem, setProblem] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const attachments = controlled ?? internal;
+  const accepts = Boolean(allowImages || onFiles);
 
   const setAttachments = useCallback(
     (next: ChatAttachment[]) => {
@@ -105,7 +135,7 @@ export function ChatInput({
       setProblem(null);
       try {
         const previewUrl = await readDataUrl(file);
-        setAttachments([...attachments, { id: crypto.randomUUID(), name: file.name, type: file.type, previewUrl }]);
+        setAttachments([...attachments, { id: crypto.randomUUID(), name: file.name, type: file.type, previewUrl, isImage: true }]);
       } catch (e) {
         setProblem(e instanceof Error ? e.message : String(e));
       }
@@ -113,43 +143,57 @@ export function ChatInput({
     [attachments, setAttachments],
   );
 
+  const take = useCallback(
+    (files: File[]) => {
+      if (!files.length) return;
+      setProblem(null);
+      if (onFiles) onFiles(files);
+      else if (allowImages) void addImage(files[0]);
+    },
+    [onFiles, allowImages, addImage],
+  );
+
   const trimmed = text.trim();
-  const tooLong = trimmed.length > maxLength;
-  const hasContent = Boolean(trimmed || attachments.length);
+  const sizeUsed = limitBytes ? byteLength(sizeText ?? text) : trimmed.length;
+  const limit = limitBytes ?? maxLength;
+  const tooLong = sizeUsed > limit;
+  const uploading = attachments.some((a) => a.status === "uploading");
+  const hasContent = Boolean(trimmed || attachments.some((a) => a.status !== "error"));
   const showStop = isGenerating && !hasContent;
-  const nearLimit = text.length >= maxLength - 200;
+  const nearLimit = sizeUsed >= limit - Math.min(200, limit / 5);
   const message = error ?? problem;
+  const canSend = hasContent && !disabled && !sending && !tooLong && !uploading;
 
   return (
     <div className={cn("relative", className)}>
+      {menu}
       {tray}
-      {message ? <p role="alert" className="mb-2 ms-1.5 text-[13px] text-destructive">{message}</p> : null}
+      {message ? <p role="alert" data-slot="composer-error" className="mb-2 ms-1.5 text-[13px] text-destructive">{message}</p> : null}
       <form
         data-slot="composer"
         data-tray={Boolean(tray)}
         onSubmit={(e) => {
           e.preventDefault();
-          if (hasContent && !disabled && !sending && !tooLong) onSendMessage();
+          if (canSend) onSendMessage();
         }}
         onPaste={(e) => {
-          if (!allowImages) return;
-          const file = pickPastedImage(e.clipboardData);
-          if (!file) return;
+          if (!accepts) return;
+          const files = onFiles ? pastedFiles(e.clipboardData) : [pickPastedImage(e.clipboardData)].filter((f): f is File => !!f);
+          if (!files.length) return;
           e.preventDefault();
-          void addImage(file);
+          take(files);
         }}
         onDragOver={(e) => {
-          if (!allowImages || !Array.from(e.dataTransfer.types).includes("Files")) return;
+          if (!accepts || !Array.from(e.dataTransfer.types).includes("Files")) return;
           e.preventDefault();
           setDragging(true);
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => {
-          if (!allowImages) return;
+          if (!accepts) return;
           e.preventDefault();
           setDragging(false);
-          const file = e.dataTransfer.files[0];
-          if (file) void addImage(file);
+          take(Array.from(e.dataTransfer.files));
         }}
         className={cn(
           "relative z-[1] flex flex-col gap-1 rounded-3xl border border-border bg-card p-2 shadow-xs transition-[border-color,box-shadow] duration-150",
@@ -158,17 +202,34 @@ export function ChatInput({
         )}
       >
         {attachments.length > 0 ? (
-          <ul className="flex flex-wrap gap-2 px-2 pt-1.5" aria-label="Attached images">
+          <ul data-slot="attachments" className="flex flex-wrap gap-2 px-2 pt-1.5" aria-label="Attachments">
             {attachments.map((a) => (
-              <li key={a.id} className="group relative">
-                <img src={a.previewUrl} alt={a.name || "Pasted image"} className="size-14 rounded-xl object-cover ring-1 ring-border" />
+              <li
+                key={a.id}
+                data-slot="attachment"
+                data-status={a.status ?? "ready"}
+                className={cn("flex max-w-[240px] items-center gap-2 rounded-xl bg-foreground/[0.05] py-1.5 ps-2 pe-1", a.status === "error" && "ring-1 ring-destructive/50")}
+              >
+                {a.isImage && a.previewUrl ? (
+                  <img src={a.previewUrl} alt={a.name || "Pasted image"} className="size-8 shrink-0 rounded-lg object-cover ring-1 ring-border" />
+                ) : (
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-foreground/[0.06] text-muted-foreground">
+                    {a.isImage ? <ImageIcon /> : <FileIcon />}
+                  </span>
+                )}
+                <span className="min-w-0 leading-tight">
+                  <span className="block truncate text-[12.5px] font-medium text-strong" title={a.name}>{a.name}</span>
+                  <span className={cn("block truncate text-[11px]", a.status === "error" ? "text-destructive" : "text-muted-foreground")} title={a.error}>
+                    {a.status === "uploading" ? "Uploading…" : a.status === "error" ? (a.error ?? "Could not attach") : a.isImage ? "Image" : "File"}
+                  </span>
+                </span>
                 <button
                   type="button"
-                  aria-label={`Remove ${a.name || "image"}`}
-                  onClick={() => setAttachments(attachments.filter((x) => x.id !== a.id))}
-                  className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background ring-2 ring-card transition-colors hover:bg-destructive hover:text-white"
+                  aria-label={`Remove ${a.name || "attachment"}`}
+                  onClick={() => (onRemoveAttachment ? onRemoveAttachment(a.id) : setAttachments(attachments.filter((x) => x.id !== a.id)))}
+                  className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <X size={10} weight="bold" />
+                  <X size={11} weight="bold" />
                 </button>
               </li>
             ))}
@@ -181,6 +242,11 @@ export function ChatInput({
           disabled={disabled}
           placeholder={placeholder}
           aria-label="Message Neko"
+          role={menuState ? "combobox" : undefined}
+          aria-expanded={menuState ? true : undefined}
+          aria-controls={menuState?.id}
+          aria-activedescendant={menuState?.activeId}
+          aria-autocomplete={menuState ? "list" : undefined}
           onChange={(e) => onTextChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) e.preventDefault();
@@ -189,36 +255,39 @@ export function ChatInput({
           className="block max-h-[220px] min-h-6 w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pt-2 pb-1 text-[14px] leading-[1.625] text-strong outline-none placeholder:text-muted-foreground/70 disabled:opacity-60"
         />
         <div className="flex items-center gap-2 px-1 pb-0.5">
-          {allowImages ? (
+          {accepts ? (
             <>
               <input
                 ref={fileInput}
                 type="file"
-                accept={IMAGE_TYPES.join(",")}
+                multiple={Boolean(onFiles)}
+                accept={onFiles ? undefined : IMAGE_TYPES.join(",")}
                 className="hidden"
-                aria-label="Attach image"
+                tabIndex={-1}
+                aria-label="Choose files to attach"
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
+                  const files = Array.from(e.target.files ?? []);
                   e.target.value = "";
-                  if (file) void addImage(file);
+                  take(files);
                 }}
               />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button type="button" variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground" onClick={() => fileInput.current?.click()}>
-                    <ImageIcon />
-                    <span className="sr-only">Attach image</span>
+                    <Paperclip />
+                    <span className="sr-only">Attach files</span>
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="top">Attach image</TooltipContent>
+                <TooltipContent side="top">Attach images or files; you can also paste or drop them</TooltipContent>
               </Tooltip>
             </>
           ) : null}
           {leading}
+          {controls}
           <span className="flex-1" />
           {nearLimit ? (
             <span aria-live="polite" className={cn("text-xs tabular-nums", tooLong ? "text-destructive" : "text-muted-foreground")}>
-              {trimmed.length.toLocaleString()} / {maxLength.toLocaleString()}
+              {sizeUsed.toLocaleString()} / {limit.toLocaleString()}
             </span>
           ) : null}
           {showStop ? (
@@ -240,11 +309,12 @@ export function ChatInput({
               data-slot="send"
               data-mode={isGenerating ? "queue" : "send"}
               size="icon"
-              aria-label={isGenerating ? "Queue message" : "Send"}
-              disabled={!hasContent || disabled || sending || tooLong}
+              aria-label={sending ? "Sending" : isGenerating ? "Queue message" : "Send"}
+              title={isGenerating ? "Queue message (⌘↵ interrupts and sends)" : "Send (↵)"}
+              disabled={!canSend}
               className="shrink-0 rounded-full"
             >
-              {sending ? <CircleNotch className="animate-spin" /> : <ArrowUp weight="bold" />}
+              {sending || uploading ? <CircleNotch className="animate-spin" /> : <ArrowUp weight="bold" />}
             </Button>
           )}
         </div>

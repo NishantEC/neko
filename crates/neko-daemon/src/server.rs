@@ -1104,6 +1104,7 @@ pub fn spawn_web_bridge(state: Arc<AppState>) {
         token,
         web_root: crate::web::default_web_root(),
         plugins_dir: dir.join("plugins"),
+        attachments_dir: dir.join("attachments"),
     };
     eprintln!("neko-daemon: web UI on http://127.0.0.1:{port}/ (token in {})", dir.join("web-token").display());
     std::thread::spawn(move || crate::web::serve(listener, config, Arc::new(WebBackend(state))));

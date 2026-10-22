@@ -16,7 +16,7 @@
 // "@/chat" (conversation pieces). See docs/design/web-ui-from-hushbacks.md.
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { Brain, Gauge } from "@phosphor-icons/react";
-import { Clock, Eye, Gear, GitPullRequest, House, ListChecks, Palette, Stack, TreeStructure, Users, Wrench, type Icon } from "@/ui/icons";
+import { Clock, Eye, Gear, GitPullRequest, House, ListChecks, Palette, PuzzlePiece, Stack, TreeStructure, Users, Wrench, type Icon } from "@/ui/icons";
 import { HOME } from "@/router";
 import Home from "@/pages/Home";
 
@@ -64,6 +64,14 @@ export const pages: PageDef[] = [
     keywords: ["design", "components", "primitives", "storybook"],
     group: "system",
     load: () => import("@/pages/Gallery"),
+  }),
+  page({
+    id: "plugins",
+    title: "Plugins",
+    icon: PuzzlePiece,
+    keywords: ["extend", "extensions", "build", "agents", "self-evolving"],
+    group: "system",
+    load: () => import("@/pages/plugins/Plugins"),
   }),
 ];
 
