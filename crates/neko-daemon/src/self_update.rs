@@ -117,6 +117,30 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>) -> Resu
     let snapshot = store::load(&state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
     let su = snapshot.self_update.clone();
 
+    if su.roll_back_web {
+        // Needs no checkout: it only moves the `web-live` link back.
+        let outcome = core::roll_back_web(data);
+        let summary = match &outcome {
+            Ok(()) => "Rolled the web UI back to the previous version.".to_owned(),
+            Err(error) => format!("Couldn't roll the web UI back: {error}"),
+        };
+        let ok = outcome.is_ok();
+        with_snapshot(state, |s| {
+            s.self_update.roll_back_web = false;
+            s.self_update.status.clear();
+            if ok {
+                let from = s.self_update.web_commit.take().unwrap_or_default();
+                s.self_update.last_rollback = Some(record(&from, &summary));
+            } else {
+                s.self_update.last_failure = Some(record("", &summary));
+            }
+        })?;
+        if ok {
+            crate::server::broadcast_event(state, &Event::WebUpdated { commit: "previous".into() });
+        }
+        tell(state, None, &summary, false);
+    }
+
     if let Some(installing) = &su.installing {
         if store::now_ms() - installing.at_ms > INSTALL_DEADLINE_MS {
             let summary = "The reinstall never reported back; check self-update/install.log in Neko's data folder.";
@@ -536,5 +560,35 @@ mod tests {
         tick_with(&state, data.path(), None).unwrap();
         assert_eq!(snapshot(&state).self_update.applied_through.as_deref(), Some(doc.as_str()));
         assert!(store::apply(&state.db.lock().unwrap(), Command::ApplyPendingUpdate).is_err(), "nothing waiting");
+    }
+
+    #[test]
+    fn rolling_back_the_web_ui_needs_no_checkout_and_is_recorded() {
+        let data = tempfile::tempdir().unwrap();
+        let state = Arc::new(AppState::with_test_providers(
+            Db::open_in_memory().unwrap(), vec![], Some(neko_core::files::FileProvider::empty()),
+            neko_core::settings::SettingsProvider::with_panes(Vec::new()),
+            neko_core::permissions::PermissionsProvider::disabled(),
+        ));
+        // Two builds, the second live and the first kept as the previous one.
+        let builds = data.path().join("web-builds");
+        for name in ["one", "two"] {
+            std::fs::create_dir_all(builds.join(name)).unwrap();
+            std::fs::write(builds.join(name).join("index.html"), name).unwrap();
+        }
+        std::os::unix::fs::symlink("web-builds/two", data.path().join("web-live")).unwrap();
+        std::os::unix::fs::symlink("web-builds/one", data.path().join("web-live.prev")).unwrap();
+        with_snapshot(&state, |s| s.self_update.web_commit = Some("abc123".into())).unwrap();
+        store::apply(&state.db.lock().unwrap(), Command::RollBackWebUi).unwrap();
+        assert!(snapshot(&state).self_update.roll_back_web);
+        tick_with(&state, data.path(), None).unwrap();
+        let su = snapshot(&state).self_update;
+        assert!(!su.roll_back_web && su.status.is_empty());
+        assert_eq!(su.web_commit, None);
+        let record = su.last_rollback.expect("recorded");
+        assert_eq!(record.commit, "abc123");
+        assert!(record.summary.contains("previous version"));
+        assert_eq!(std::fs::read_link(data.path().join("web-live")).unwrap().to_string_lossy(), "web-builds/one");
+        assert!(!data.path().join("web-live.prev").exists(), "nothing left to roll back to");
     }
 }

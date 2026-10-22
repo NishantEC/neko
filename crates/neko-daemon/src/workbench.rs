@@ -284,7 +284,7 @@ impl Controller {
             }
             Command::SendMessage { text, workspace_id } => self.send_message(text, workspace_id, false),
             Command::InterruptAndSendMessage { text, workspace_id } => self.send_message(text, workspace_id, true),
-            command @ (Command::UpdateNekoNow | Command::ApplyPendingUpdate | Command::SetSelfUpdate { .. }) => {
+            command @ (Command::UpdateNekoNow | Command::ApplyPendingUpdate | Command::RollBackWebUi | Command::SetSelfUpdate { .. }) => {
                 let result = store::apply(&self.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner), command);
                 crate::self_update::wake();
                 result
