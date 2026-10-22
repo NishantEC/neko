@@ -63,6 +63,13 @@ fn main() {
         eprintln!("web-harness: cannot open the database: {e}");
         std::process::exit(1);
     });
+    // First run is finished unless a check asks for it (`NEKO_WEB_ONBOARDING=1`),
+    // so the first-run screen does not sit over every other page's checks.
+    let first_run = std::env::var_os("NEKO_WEB_ONBOARDING").is_some_and(|v| v == "1");
+    if let Err(e) = neko_core::onboarding::set_onboarding_completed(&db, !first_run) {
+        eprintln!("web-harness: cannot set the onboarding state: {e}");
+        std::process::exit(1);
+    }
     if let Some(seed) = std::env::var_os("NEKO_WEB_SEED") {
         if let Err(e) = seed_from(&db, Path::new(&seed)) {
             eprintln!("web-harness: seeding failed: {e}");
