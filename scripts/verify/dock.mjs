@@ -72,6 +72,25 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   const dockBox = await box(page.locator("[data-slot='dock']"));
   const paneWidth = (await box(page.locator("[data-slot='dock'] .dv-groupview").first())).width;
   check(Math.abs(paneWidth / dockBox.width - 0.35) < 0.06, `Chat takes about 35% of the width (${Math.round((paneWidth / dockBox.width) * 100)}%)`);
+  // fused tabs: the active tab is the pane's own surface, 40px tall, with concave feet; inactive tabs are recessed 36px
+  const fused = await page.evaluate(() => {
+    const out = [];
+    for (const g of document.querySelectorAll("[data-slot='dock'] .dv-groupview")) {
+      const act = g.querySelector(".dv-tab.dv-active-tab");
+      const idle = g.querySelector(".dv-tab.dv-inactive-tab");
+      const pane = getComputedStyle(g.querySelector(".dv-content-container")).backgroundColor;
+      out.push({
+        same: getComputedStyle(act).backgroundColor === pane,
+        bg: [getComputedStyle(act).backgroundColor, pane],
+        h: Math.round(act.getBoundingClientRect().height),
+        idleH: idle ? Math.round(idle.getBoundingClientRect().height) : 36,
+        feet: getComputedStyle(act.querySelector(".dock-tab"), "::before").backgroundImage.includes("radial-gradient") && getComputedStyle(act.querySelector(".dock-tab"), "::after").backgroundImage.includes("radial-gradient"),
+        idleFeet: idle ? getComputedStyle(idle.querySelector(".dock-tab"), "::before").backgroundImage === "none" : true,
+      });
+    }
+    return out;
+  });
+  check(fused.length > 0 && fused.every((f) => f.same && f.h === 40 && f.idleH === 36 && f.feet && f.idleFeet), `every active tab is fused into its pane (card colour, 40px, concave feet; inactive 36px, flat) ${JSON.stringify(fused)}`);
   await both("dock-default");
 
   // keyboard: arrow keys move between the tabs of a group, Enter activates
@@ -115,6 +134,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await drag(tab("plan"), { x: target.x + 8, y: target.y + target.height / 2 });
   now = await groups();
   check(now.length === before + 1 && now.some((g) => g.panels.length === 1 && g.panels[0] === "plan"), `dropping a tab on a pane's edge splits it (${JSON.stringify(now)})`);
+  check(await page.evaluate(() => [...document.querySelectorAll("[data-slot='dock'] .dv-tabs-container")].filter((e) => e.clientWidth > 330).every((e) => e.scrollWidth <= e.clientWidth + 1)), "the tab strips of wide panes do not overflow when their tabs fit (the concave feet do not start a scrollbar)")
   await both("dock-split");
 
   // ===== (d) the layout survives a reload ================================================
