@@ -26,6 +26,9 @@ mod codex;
 #[path = "../mcp_host.rs"]
 mod mcp_host;
 #[allow(dead_code)]
+#[path = "../self_update.rs"]
+mod self_update;
+#[allow(dead_code)]
 #[path = "../server.rs"]
 mod server;
 #[allow(dead_code)]

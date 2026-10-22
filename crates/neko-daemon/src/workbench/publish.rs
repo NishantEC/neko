@@ -21,6 +21,11 @@ pub(super) fn in_flight_now(task_id: &str) -> bool {
     in_flight().lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(task_id)
 }
 
+/// How many pushes or landings are happening right now.
+pub(super) fn in_flight_count() -> usize {
+    in_flight().lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()
+}
+
 fn publishable(status: TaskStatus) -> bool {
     matches!(status, TaskStatus::ReadyForReview | TaskStatus::Completed)
 }

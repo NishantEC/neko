@@ -71,8 +71,11 @@ pub trait Backend: Send + Sync + 'static {
 pub struct Config {
     /// The secret every request must carry.
     pub token: String,
-    /// The built web app (`index.html` and assets).
+    /// The built web app (`index.html` and assets) the app shipped with.
     pub web_root: PathBuf,
+    /// Neko's data folder, when a web UI Neko rebuilt itself
+    /// (`<data>/web-live`, see `neko_core::self_update`) may be preferred.
+    pub live_web: Option<PathBuf>,
     /// `<data dir>/plugins`, read again on every listing.
     pub plugins_dir: PathBuf,
     /// `<data dir>/attachments`: where files attached in the web composer are
@@ -450,7 +453,7 @@ fn route(mut stream: TcpStream, req: Req, config: &Config, backend: &dyn Backend
     } else if !get {
         Reply::text(405, "Method Not Allowed")
     } else {
-        serve_static(&config.web_root, path)
+        serve_static(&web_roots(config), path)
     };
     write_reply(&mut stream, reply);
 }
@@ -557,15 +560,34 @@ fn file_reply(file: &Path) -> Reply {
     }
 }
 
-fn serve_static(root: &Path, path: &str) -> Reply {
+/// Where static files come from, in order: the live UI Neko rebuilt itself,
+/// the one before it (a page still holding the old `index.html` can load the
+/// chunks it names), then the UI the app shipped with. Read per request, so a
+/// swap takes effect at once and a removed live UI falls back to the bundle.
+pub fn web_roots(config: &Config) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(data) = &config.live_web {
+        roots.extend(neko_core::self_update::live_web_root(data));
+        if !roots.is_empty() {
+            roots.extend(neko_core::self_update::previous_web_root(data));
+        }
+    }
+    roots.push(config.web_root.clone());
+    roots
+}
+
+fn serve_static(roots: &[PathBuf], path: &str) -> Reply {
     let Some(relative) = safe_relative(path) else { return Reply::text(400, "Bad Request") };
     let wanted = if relative.as_os_str().is_empty() { PathBuf::from("index.html") } else { relative.clone() };
-    if let Some(file) = contained_file(root, &wanted) {
+    // The page itself always comes from the first root, so a tab never mixes
+    // an old shell with new chunks; other files may come from any of them.
+    let searched = if wanted == Path::new("index.html") { &roots[..roots.len().min(1)] } else { roots };
+    if let Some(file) = searched.iter().find_map(|root| contained_file(root, &wanted)) {
         return file_reply(&file);
     }
     // A client-side route (no extension) falls back to the app shell.
     if relative.extension().is_none() {
-        if let Some(index) = contained_file(root, Path::new("index.html")) {
+        if let Some(index) = roots.first().and_then(|root| contained_file(root, Path::new("index.html"))) {
             return file_reply(&index);
         }
         return Reply::text(404, "The web app is not built. Run `pnpm build` in web/.");

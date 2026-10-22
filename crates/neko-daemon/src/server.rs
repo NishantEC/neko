@@ -124,7 +124,7 @@ impl AppState {
     /// `file_provider: None` means "the real one" — built from the shared
     /// `Db` below so its scope follows the persisted Search Folders setting.
     /// Tests pass `Some(FileProvider::empty())` to stay hermetic.
-    fn with_test_providers(
+    pub(crate) fn with_test_providers(
         db: Db,
         apps: Vec<AppEntry>,
         file_provider: Option<neko_core::files::FileProvider>,
@@ -1048,6 +1048,11 @@ fn broadcast(state: &AppState, event: &Event) {
 /// client that already has a search response with blank `icon_path`s finds
 /// out there's something new to ask for. See `Event::IconsUpdated`'s own
 /// doc comment for why this push exists at all.
+/// Sends one event to every socket client and open web page.
+pub fn broadcast_event(state: &AppState, event: &Event) {
+    broadcast(state, event);
+}
+
 pub fn notify_icons_updated(state: &AppState) {
     broadcast(state, &Event::IconsUpdated);
 }
@@ -1103,6 +1108,7 @@ pub fn spawn_web_bridge(state: Arc<AppState>) {
     let config = crate::web::Config {
         token,
         web_root: crate::web::default_web_root(),
+        live_web: Some(dir.clone()),
         plugins_dir: dir.join("plugins"),
         attachments_dir: dir.join("attachments"),
     };
