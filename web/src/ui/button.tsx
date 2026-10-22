@@ -1,4 +1,4 @@
-// from hushbacks packages/ui/src/components/button.tsx
+// from hushbacks packages/ui/src/components/button.tsx @da20dfaeb
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -16,19 +16,17 @@ const buttonVariants = cva(
     },
     variants: {
       size: {
-        // Sizes follow hushbacks' running app (Sky layer: control 40, row 36, xs 32), not the
-        // raw shadcn defaults (32/28/24). Same at every breakpoint: no sm: shrink.
-        default: "h-10 px-4",
-        icon: "size-10",
-        "icon-lg": "size-10",
-        "icon-sm": "size-9",
-        "icon-xl": "size-11 [&_svg:not([class*='size-'])]:size-5",
+        default: "h-9 px-[calc(--spacing(3)-1px)] sm:h-8",
+        icon: "size-9 sm:size-8",
+        "icon-lg": "size-10 sm:size-9",
+        "icon-sm": "size-8 sm:size-7",
+        "icon-xl": "size-11 sm:size-10 [&_svg:not([class*='size-'])]:size-5 sm:[&_svg:not([class*='size-'])]:size-4.5",
         "icon-xs":
-          "size-7 rounded-md before:rounded-[inherit] not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-4",
-        lg: "h-10 px-4",
-        sm: "h-9 gap-1.5 px-3.5",
-        xl: "h-11 px-[calc(--spacing(4.5)-1px)] text-base [&_svg:not([class*='size-'])]:size-5",
-        xs: "h-8 gap-1 rounded-md px-2.5 text-sm before:rounded-[inherit] [&_svg:not([class*='size-'])]:size-4",
+          "size-7 rounded-md before:rounded-[inherit] sm:size-6 not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-4 sm:not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-10 px-[calc(--spacing(3.5)-1px)] sm:h-9",
+        sm: "h-8 gap-1.5 px-[calc(--spacing(2.5)-1px)] sm:h-7",
+        xl: "h-11 px-[calc(--spacing(4)-1px)] text-lg sm:h-10 sm:text-base [&_svg:not([class*='size-'])]:size-5 sm:[&_svg:not([class*='size-'])]:size-4.5",
+        xs: "h-7 gap-1 rounded-md px-[calc(--spacing(2)-1px)] text-sm before:rounded-[inherit] sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5",
       },
       variant: {
         default:

@@ -1,0 +1,536 @@
+/* from hushbacks apps/spa/src/components/Sky/sky-materials.css @da20dfaeb
+ *
+ * The control layer hushbacks' app shell puts on <body class="sky">: control,
+ * row and pill sizes, the pebble (secondary) and well (input) materials, status
+ * pills, segmented controls, and the radii of dialogs and menus.
+ *
+ * Adapted for Neko (see web/src/ui/NOTICE.md):
+ * - Colours come from Neko's tokens. The pebble, ink and well were raw hex
+ *   gradients; here they are flat mixes of --foreground into --card/--background,
+ *   and the status/LED greens and ambers are --success / --warning.
+ * - Not taken (decorative): the sky scene, its gradient and grain, the glass
+ *   backdrop blur, the tinted sidebar gradient, swatches, the builder-shell hues,
+ *   rocket-publish, and the composer overrides (the chat composer is its own area).
+ * - `data-variant="default"` buttons keep Neko's blue --primary (Send, Approve)
+ *   instead of becoming pebbles; outline and secondary become pebbles as upstream.
+ */
+
+.sky {
+  --sky-sheet-radius: 26px;
+  font-family: "Inter Variable", Inter, system-ui, sans-serif;
+}
+
+.sky:not(body) {
+  position: relative;
+  isolation: isolate;
+}
+
+.sky {
+  --sky-well: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --sky-well-inset: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+  --sky-drop: 0 24px 60px -18px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.05);
+  --sky-headline: var(--foreground);
+}
+
+.dark .sky {
+  --sky-well-inset: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  --sky-drop: 0 24px 60px -18px rgba(0, 0, 0, 0.65), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.sky [data-slot="sidebar-container"] [data-slot="sidebar-inner"] {
+  background: var(--sidebar);
+  box-shadow: var(--sky-drop);
+}
+
+.sky .sky-well {
+  background: var(--sky-well);
+  box-shadow: var(--sky-well-inset);
+}
+
+.sky .sky-led {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--success);
+}
+
+.sky .sky-led[data-state="draft"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+  opacity: 0.7;
+}
+
+.sky .sky-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding-inline: 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--sky-pebble-fg);
+  background: var(--sky-pebble);
+  box-shadow: var(--sky-pebble-shadow);
+}
+
+.sky .sky-headline {
+  color: var(--sky-headline);
+}
+
+.sky {
+  --sky-pebble: color-mix(in oklab, var(--foreground) 6%, var(--card));
+  --sky-pebble-fg: var(--foreground);
+  --sky-ink: var(--foreground);
+  --sky-ink-fg: var(--background);
+  --sky-ink-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+  --sky-pebble-shadow: inset 0 1px 0 #ffffff;
+}
+
+.dark .sky {
+  --sky-pebble: color-mix(in oklab, var(--foreground) 9%, var(--background));
+  --sky-ink-shadow: inset 0 1px 0 #ffffff, inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  --sky-pebble-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.sky .sky-pebble {
+  border-color: transparent;
+  color: var(--sky-pebble-fg);
+  background: var(--sky-pebble);
+  box-shadow: var(--sky-pebble-shadow);
+  transition: transform var(--motion-quick) var(--ease-out);
+}
+
+.sky .sky-ink {
+  border-color: transparent;
+  color: var(--sky-ink-fg);
+  background: var(--sky-ink);
+  box-shadow: var(--sky-ink-shadow);
+  transition: transform var(--motion-quick) var(--ease-out);
+}
+
+.sky :is(.sky-ink, .sky-pebble):active:not(:disabled) {
+  transform: scale(var(--motion-scale-anchored));
+  transition-duration: 100ms;
+}
+
+.sky .sky-ink:focus-visible,
+.sky .sky-pebble:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@layer base {
+  .sky :is(button, a):is(.sky-ink, .sky-pebble) {
+    position: relative;
+  }
+}
+
+@media (pointer: fine) and (forced-colors: none) {
+  .sky :is(button, a):is(.sky-ink, .sky-pebble)::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: inherit;
+    box-shadow: 0 0 0 2px var(--ring);
+    opacity: 0;
+    scale: var(--motion-scale-centred);
+    pointer-events: none;
+    transition: opacity var(--motion-quick) var(--ease-out), scale var(--motion-quick) var(--ease-out);
+  }
+
+  .sky :is(button, a):is(.sky-ink, .sky-pebble):focus-visible {
+    outline: none;
+  }
+
+  .sky :is(button, a):is(.sky-ink, .sky-pebble):focus-visible::after {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sky :is(.sky-ink, .sky-pebble):active {
+    transform: none;
+  }
+}
+
+.sky .sky-tabs [data-slot="tabs-list"] {
+  background: var(--sky-well);
+  box-shadow: var(--sky-well-inset);
+}
+
+.sky .sky-tabs [data-slot="tab-indicator"] {
+  background: var(--sky-pebble);
+  box-shadow: var(--sky-pebble-shadow);
+}
+
+.sky {
+  --sky-control-height: 40px;
+  --sky-row-height: 36px;
+  --sky-control-radius: 24px;
+}
+
+.sky .sky-control {
+  height: var(--sky-control-height);
+  border-radius: var(--sky-control-radius);
+}
+
+.sky .sky-tile {
+  border-radius: calc(var(--sky-control-radius) - 10px);
+}
+
+.sky .sky-control-square {
+  width: var(--sky-control-height);
+  padding: 0;
+}
+
+.sky .sky-row {
+  height: var(--sky-row-height);
+  border-radius: var(--sky-control-radius);
+}
+
+.sky .sky-tabs [data-slot="tabs-list"] {
+  height: var(--sky-control-height);
+  padding: 3px;
+  border-radius: var(--sky-control-radius);
+}
+
+.sky .sky-tabs [data-slot="tab-indicator"],
+.sky .sky-tabs [data-slot="tabs-tab"] {
+  border-radius: calc(var(--sky-control-radius) - 3px);
+}
+
+.sky .sky-tabs [data-slot="tabs-tab"] {
+  height: calc(var(--sky-control-height) - 6px);
+  padding-inline: 14px;
+}
+
+.sky .sky-tabs [data-slot="tabs-list"],
+.sky .sky-tabs [data-slot="tabs-tab"],
+.sky .sky-tabs [data-slot="tab-indicator"] {
+  corner-shape: squircle;
+}
+
+.sky [data-slot="sidebar-container"] [data-slot="sidebar-inner"] {
+  border-radius: 22px;
+}
+
+.sky .sky-tabs [data-slot="tab-indicator"] {
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sky .sky-status {
+  --tint: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding-inline: 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: color-mix(in oklab, var(--tint) 85%, var(--foreground));
+  background: color-mix(in oklab, var(--tint) 14%, transparent);
+  corner-shape: round;
+}
+
+.sky .sky-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--tint);
+}
+
+.sky .sky-status[data-state="on"] {
+  --tint: var(--success);
+}
+
+.sky .sky-status[data-state="error"] {
+  --tint: var(--destructive);
+}
+
+.sky .sky-status[data-state="warn"] {
+  --tint: var(--warning);
+}
+
+.sky .sky-status[data-state="off"]::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--tint);
+}
+
+.sky .sky-status[data-state="pending"]::before {
+  opacity: 0.5;
+}
+
+.sky .sky-status[data-icon]::before {
+  display: none;
+}
+
+.sky .sky-status::before,
+.sky .sky-led {
+  corner-shape: round;
+}
+
+.sky[data-slot="sidebar"][data-mobile="true"] {
+  position: fixed;
+  border: 0;
+  border-radius: 0 22px 22px 0;
+  background: var(--sidebar);
+  box-shadow: var(--sky-drop);
+}
+
+.sky-skel {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+}
+
+.sky-skel.sky-skel-soft {
+  background: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+}
+
+.sky-skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  translate: -100% 0;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--foreground) 6%, transparent), transparent);
+  animation: sky-skel-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes sky-skel-sweep {
+  to {
+    translate: 100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sky-skel::after {
+    display: none;
+  }
+}
+
+.sky .sky-segment {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--sky-control-height);
+  margin: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--sky-control-radius);
+  background: var(--sky-well);
+  box-shadow: var(--sky-well-inset);
+}
+
+.sky .sky-segment > :is(button, [role="radio"]) {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: calc(var(--sky-control-height) - 6px);
+  min-width: 0;
+  padding-inline: 14px;
+  border-radius: calc(var(--sky-control-radius) - 3px);
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sky .sky-segment > :is(button, [role="radio"]):hover {
+  color: var(--foreground);
+}
+
+.sky .sky-segment > :is([aria-pressed="true"], [aria-checked="true"]) {
+  color: var(--sky-pebble-fg);
+  background: var(--sky-pebble);
+  box-shadow: var(--sky-pebble-shadow);
+}
+
+.sky .sky-segment > :is(button, [role="radio"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.sky .sky-segment,
+.sky .sky-segment > :is(button, [role="radio"]) {
+  corner-shape: squircle;
+}
+
+/* Neko: `default` is left out of this list so it keeps --primary. */
+.sky
+  :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"]):is(
+    [data-variant="outline"],
+    [data-variant="secondary"],
+    :not([data-variant])
+  ) {
+  border-color: transparent;
+  color: var(--sky-pebble-fg);
+  background: var(--sky-pebble);
+  box-shadow: var(--sky-pebble-shadow);
+}
+
+.sky
+  :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"]):is(
+    [data-variant="outline"],
+    [data-variant="secondary"],
+    :not([data-variant])
+  )::before {
+  display: none;
+}
+
+.sky
+  :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"], [data-slot="alert-dialog-action"]):is(
+    [data-variant="default"],
+    [data-variant="outline"],
+    [data-variant="secondary"],
+    :not([data-variant])
+  ) {
+  border-radius: var(--sky-control-radius);
+}
+
+.sky
+  :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"], [data-slot="alert-dialog-action"]):is(
+    [data-variant="default"],
+    [data-variant="outline"],
+    [data-variant="secondary"],
+    :not([data-variant])
+  ):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.sky
+  :is(:is(button, a)[data-variant][data-size], [data-slot="alert-dialog-cancel"], [data-slot="alert-dialog-action"]):is(
+    [data-variant="default"],
+    [data-variant="outline"],
+    [data-variant="secondary"],
+    :not([data-variant])
+  ):disabled {
+  opacity: 0.5;
+}
+
+.sky :is(button, a)[data-variant]:is([data-size="default"], [data-size="lg"]) {
+  height: var(--sky-control-height);
+  padding-inline: 16px;
+}
+
+.sky :is(button, a)[data-variant][data-size="xl"] {
+  height: 44px;
+  padding-inline: 18px;
+}
+
+.sky :is(button, a)[data-variant][data-size="sm"] {
+  height: var(--sky-row-height);
+  padding-inline: 14px;
+}
+
+.sky :is(button, a)[data-variant][data-size="xs"] {
+  height: 32px;
+  padding-inline: 10px;
+  border-radius: 16px;
+}
+
+.sky :is(button, a)[data-variant]:is([data-size="icon"], [data-size="icon-lg"]) {
+  width: var(--sky-control-height);
+  height: var(--sky-control-height);
+}
+
+.sky :is(button, a)[data-variant][data-size="icon-sm"] {
+  width: var(--sky-row-height);
+  height: var(--sky-row-height);
+}
+
+.sky :is(button, a)[data-variant][data-size="icon-xs"] {
+  width: 28px;
+  height: 28px;
+}
+
+.sky :is(button, a)[data-variant]:is([data-size^="icon"]) {
+  border-radius: var(--sky-control-radius);
+}
+
+.sky
+  :is([data-slot="input"], [data-slot="select-trigger"]):not(
+    [data-appearance="respondent"],
+    [data-embedded],
+    .bg-transparent
+  ) {
+  height: var(--sky-control-height);
+  padding-inline: 14px;
+  border-color: transparent;
+  border-radius: var(--sky-control-radius);
+  corner-shape: squircle;
+  background: var(--sky-well);
+  box-shadow: var(--sky-well-inset);
+}
+
+.sky
+  [data-slot="select-trigger"][data-size="sm"]:not([data-appearance="respondent"], [data-embedded], .bg-transparent) {
+  height: var(--sky-row-height);
+}
+
+.sky [data-slot="textarea"]:not([data-appearance="respondent"], [data-embedded], .bg-transparent) {
+  border-color: transparent;
+  border-radius: 18px;
+  background: var(--sky-well);
+  box-shadow: var(--sky-well-inset);
+}
+
+.sky
+  :is([data-slot="input"], [data-slot="select-trigger"], [data-slot="textarea"]):not(
+    [data-appearance="respondent"],
+    [data-embedded]
+  ):focus-visible {
+  outline: none;
+  box-shadow: var(--sky-well-inset), 0 0 0 2px var(--ring);
+}
+
+.sky
+  :is([data-slot="input"], [data-slot="select-trigger"], [data-slot="textarea"])[aria-invalid="true"]:not(
+    [data-appearance="respondent"],
+    [data-embedded]
+  ) {
+  box-shadow: var(--sky-well-inset), 0 0 0 2px color-mix(in oklab, var(--destructive) 55%, transparent);
+}
+
+.sky :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]):not(.rounded-none) {
+  border-radius: var(--sky-sheet-radius, 26px);
+}
+
+.sky [data-slot="sheet-content"][data-variant="flush"][data-side="bottom"]:not(.rounded-none) {
+  border-radius: 24px 24px 0 0;
+}
+
+.sky [data-slot="sheet-content"][data-variant="flush"][data-side="right"]:not(.rounded-none) {
+  border-radius: 24px 0 0 24px;
+}
+
+.sky :is([data-slot="popover-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"]) {
+  border-radius: 16px;
+}
+
+.sky [data-slot="tooltip-content"] {
+  border-radius: 10px;
+}
+
+.sky
+  :is(
+    [data-slot="dialog-content"],
+    [data-slot="alert-dialog-content"],
+    [data-slot="popover-content"],
+    [data-slot="dropdown-menu-content"],
+    [data-slot="dropdown-menu-sub-content"]
+  ) {
+  border-color: transparent;
+  box-shadow: var(--sky-drop);
+}
