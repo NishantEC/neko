@@ -141,7 +141,7 @@ function TaskRows() {
             return (
               <SidebarMenuItem key={task.id}>
                 <SidebarMenuButton
-                  data-slot="task-row"
+                  data-slot="sidebar-task"
                   data-stage={stage}
                   title={`${taskTitle(task)} · ${STAGE_TITLES[stage]}`}
                   render={<a href={taskHref(task.id)} />}
