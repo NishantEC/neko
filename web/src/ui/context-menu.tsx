@@ -35,8 +35,12 @@ function ContextMenuTrigger({
   );
 }
 
+// Base UI's group label throws outside a group (error #31). The group marks
+// itself, and a label outside one renders as a plain heading instead.
+const InGroup = React.createContext(false);
+
 function ContextMenuGroup(props: React.ComponentProps<typeof ContextMenuPrimitive.Group>) {
-  return <ContextMenuPrimitive.Group data-slot="context-menu-group" {...props} />;
+  return <InGroup.Provider value={true}>{<ContextMenuPrimitive.Group data-slot="context-menu-group" {...props} />}</InGroup.Provider>;
 }
 
 function ContextMenuPortal(props: React.ComponentProps<typeof ContextMenuPrimitive.Portal>) {
@@ -232,14 +236,12 @@ function ContextMenuLabel({
   inset,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.GroupLabel> & { inset?: boolean }) {
-  return (
-    <ContextMenuPrimitive.GroupLabel
-      data-slot="context-menu-label"
-      data-inset={inset}
-      className={cn("px-2 py-1.5 text-xs font-medium text-muted-foreground data-inset:pl-8", className)}
-      {...props}
-    />
-  );
+  const inGroup = React.useContext(InGroup);
+  const classes = cn("px-2 py-1.5 text-xs font-medium text-muted-foreground data-inset:pl-8", className);
+  if (!inGroup) {
+    return <div role="presentation" data-slot="context-menu-label" data-inset={inset} className={classes} {...(props as React.ComponentProps<"div">)} />;
+  }
+  return <ContextMenuPrimitive.GroupLabel data-slot="context-menu-label" data-inset={inset} className={classes} {...props} />;
 }
 
 function ContextMenuSeparator({ className, ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Separator>) {
