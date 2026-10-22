@@ -15,9 +15,8 @@
 @import "@fontsource-variable/fraunces/opsz-italic.css";
 @import "./component-surfaces.css";
 @import "./motion.css";
-
-/* Streamdown ships its own Tailwind classes (tables, code blocks). */
-@source "../../node_modules/streamdown/dist/*.js";
+/* T3 Code's chat tokens, live-activity shimmer and .chat-markdown rules. */
+@import "../chat/t3/t3-chat.css";
 
 @theme {
   --shadow-xs: var(--smooth-shadow-xs);

@@ -23,9 +23,10 @@ import { hrefFor } from "@/router";
 import { Changes } from "@/work/Changes";
 import { PlanBlock } from "@/work/Thread";
 import { STAGE_TONE, StatusLabel, Tag } from "@/work/tone";
-import { conversationState, friendlyStatus, pullRequestNumber, repositoryOf, stageOf, taskTitle, threadRows, type Task } from "@/work/model";
+import { conversationState, friendlyStatus, pullRequestNumber, repositoryOf, stageOf, taskTitle, type Task } from "@/work/model";
 import type { TaskAction, Ui } from "@/work/taskActions";
-import { Composer, Details, TaskActions, TaskThread } from "@/work/TaskDetail";
+import { Details, TaskActions } from "@/work/TaskDetail";
+import { TaskComposer, TaskConversation } from "@/chat/TaskConversation";
 import { BuilderPanelTabs, type BuilderPanelTab } from "@/work/builder/BuilderPanelTabs";
 import { BuilderViewTabs, type BuilderViewTabItem } from "@/work/builder/BuilderViewTabs";
 import { BUILDER_HEADER_SLOT } from "@/work/builder/builderHeaderLayout";
@@ -91,9 +92,7 @@ export interface TaskBuilderProps {
   snapshot: any;
   ui: Ui;
   actions: TaskAction[];
-  rows: ReturnType<typeof threadRows>;
   state: ReturnType<typeof conversationState>;
-  hasPlanBlock: boolean;
   onClose: () => void;
   onToggleFull: () => void;
   onOpenTask: (id: string) => void;
@@ -112,7 +111,7 @@ function StageView({ children, slot }: { children: ReactNode; slot?: string }) {
 }
 
 export function TaskBuilder({
-  task, snapshot, ui, actions, rows, state, hasPlanBlock, onClose, onToggleFull, onOpenTask, copied, onCopyLink, headingRef,
+  task, snapshot, ui, actions, state, onClose, onToggleFull, onOpenTask, copied, onCopyLink, headingRef,
 }: TaskBuilderProps) {
   const reduceMotion = useReducedMotion();
   const [chatCollapsed, setChatCollapsedState] = useState(readCollapsed);
@@ -240,9 +239,9 @@ export function TaskBuilder({
                 className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-xl rounded-b-4xl bg-[var(--builder-panel)] p-1"
               >
                 <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-t-lg rounded-b-[28px] bg-card">
-                  <TaskThread task={task} rows={rows} state={state} hasPlanBlock={hasPlanBlock} />
+                  <TaskConversation task={task} />
                   <div className="w-full shrink-0 px-3 pt-1 pb-3">
-                    <Composer task={task} ui={ui} />
+                    <TaskComposer task={task} ui={ui} />
                   </div>
                 </div>
               </div>
