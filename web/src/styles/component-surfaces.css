@@ -1,0 +1,80 @@
+/* from hushbacks packages/ui/src/styles/component-surfaces.css */
+/* Component defaults stay below utilities so form themes and sizing overrides win. */
+@layer components {
+  .ui-inset-surface {
+    background: color-mix(in oklch, var(--card) 96%, var(--foreground));
+  }
+  .ui-inset-control {
+    border-radius: 10px;
+    border-color: transparent;
+    background: color-mix(in oklch, var(--card) 96%, var(--foreground));
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.035);
+    transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  }
+  .ui-inset-control:hover:not(:disabled, [data-disabled]) {
+    border-color: color-mix(in oklch, var(--foreground) 12%, transparent);
+  }
+  .ui-inset-control:focus-visible {
+    background: var(--card);
+    border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 18%, transparent);
+  }
+  .ui-inset-control[aria-invalid="true"] {
+    border-color: var(--destructive);
+    background: color-mix(in oklch, var(--destructive) 4%, var(--card));
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--destructive) 9%, transparent);
+  }
+  .ui-popup-surface {
+    border: 1px solid color-mix(in oklch, var(--foreground) 12%, transparent);
+    border-radius: 14px;
+    box-shadow: 0 2px 3px rgb(0 0 0 / 0.035), 0 12px 28px -8px rgb(0 0 0 / 0.16);
+  }
+  .ui-panel-surface {
+    border-radius: 20px;
+    box-shadow: 0 2px 3px rgb(0 0 0 / 0.02), 0 12px 32px -16px rgb(0 0 0 / 0.12);
+  }
+  .ui-tab-indicator {
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.1), 0 0 0 1px rgb(0 0 0 / 0.025);
+  }
+  .ui-switch {
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.08);
+  }
+  .ui-switch[data-checked] {
+    background-image: linear-gradient(to bottom, color-mix(in oklch, var(--primary) 80%, white), var(--primary));
+  }
+  .ui-switch-thumb {
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 0 1px rgb(0 0 0 / 0.15);
+  }
+  .ui-status {
+    background: color-mix(in oklch, var(--card) 96%, var(--foreground));
+    color: var(--muted-foreground);
+  }
+  .ui-status[data-tone="success"] {
+    background: color-mix(in oklch, var(--success) 11%, var(--card));
+    color: var(--success-foreground);
+  }
+  .ui-status[data-tone="warning"] {
+    background: color-mix(in oklch, var(--warning) 12%, var(--card));
+    color: var(--warning-foreground);
+  }
+  .ui-status[data-tone="error"] {
+    background: color-mix(in oklch, var(--destructive) 9%, var(--card));
+    color: var(--destructive);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ui-inset-control,
+    .ui-popup-surface,
+    .ui-tab-indicator {
+      transition: none;
+    }
+  }
+}
+
+/* Explicitly opt these materials out of the app's universal squircle rule. */
+.ui-inset-control,
+.ui-popup-surface,
+.ui-panel-surface,
+.ui-round {
+  /* biome-ignore lint/correctness/noUnknownProperty: progressive enhancement in Chromium. */
+  corner-shape: round;
+}

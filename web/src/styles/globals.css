@@ -1,0 +1,380 @@
+/*
+ * Neko's tokens, in hushbacks' structure (packages/ui/src/styles/globals.css):
+ * the same token names, smooth shadows, component surfaces and motion, with
+ * Neko's own dark-neutral palette and purple user bubble. Colour is a token
+ * here and nowhere else; components never carry raw hex.
+ *
+ * `.dark` / `.light` is set on <html> by src/theme.ts and follows the system
+ * preference unless the owner picked one.
+ */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadow-plugin";
+@import "@fontsource-variable/inter/opsz.css";
+@import "@fontsource-variable/fraunces/opsz.css";
+@import "@fontsource-variable/fraunces/opsz-italic.css";
+@import "./component-surfaces.css";
+@import "./motion.css";
+
+/* Streamdown ships its own Tailwind classes (tables, code blocks). */
+@source "../../node_modules/streamdown/dist/*.js";
+
+@theme {
+  --shadow-xs: var(--smooth-shadow-xs);
+  --shadow-sm: var(--smooth-shadow-sm);
+  --shadow-md: var(--smooth-shadow-md);
+  --shadow-lg: var(--smooth-shadow-lg);
+  --shadow-xl: var(--smooth-shadow-xl);
+  --shadow-2xl: var(--smooth-shadow-2xl);
+}
+
+:root {
+  --smooth-ring-color: rgba(0, 0, 0, 0.06);
+}
+
+.dark {
+  --smooth-ring-color: rgba(255, 255, 255, 0.12);
+}
+
+.light,
+.light * {
+  --smooth-ring-color: rgba(0, 0, 0, 0.06);
+}
+
+/* Dark variants fire inside any `.dark` ancestor unless a nearer `.light` shadows it. */
+@custom-variant dark (&:is(.dark *):not(.light *));
+
+/* ------------------------------------------------------------------ light */
+:root {
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.27 0 0);
+  --strong: oklch(0.16 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.27 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.27 0 0);
+  /* Neko's accent: the blue of the send button and the Approve action. */
+  --primary: oklch(0.571 0.21 264);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: --alpha(var(--color-black) / 4%);
+  --secondary-foreground: oklch(0.27 0 0);
+  --muted: --alpha(var(--color-black) / 4%);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: --alpha(var(--color-black) / 4%);
+  --accent-foreground: oklch(0.27 0 0);
+  --destructive: oklch(0.6 0.22 22);
+  --destructive-foreground: oklch(0.5 0.2 22);
+  --border: --alpha(var(--color-black) / 8%);
+  --input: --alpha(var(--color-black) / 10%);
+  --ring: oklch(0.571 0.21 264 / 55%);
+  --info: oklch(0.6 0.17 250);
+  --info-foreground: oklch(0.48 0.17 255);
+  --success: oklch(0.66 0.16 160);
+  --success-foreground: oklch(0.5 0.13 160);
+  --warning: oklch(0.74 0.15 75);
+  --warning-foreground: oklch(0.5 0.12 70);
+  --chart-1: oklch(0.571 0.21 264);
+  --chart-2: oklch(0.66 0.16 160);
+  --chart-3: oklch(0.74 0.15 75);
+  --chart-4: oklch(0.55 0.15 300);
+  --chart-5: oklch(0.6 0.22 22);
+  --sidebar: oklch(0.965 0 0);
+  --sidebar-foreground: oklch(0.45 0 0);
+  --sidebar-primary: oklch(0.27 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: --alpha(var(--color-black) / 6%);
+  --sidebar-accent-foreground: oklch(0.2 0 0);
+  --sidebar-border: --alpha(var(--color-black) / 7%);
+  --sidebar-ring: oklch(0.571 0.21 264 / 55%);
+  --code: oklch(0.975 0 0);
+  --code-foreground: var(--foreground);
+  /* The user's own message: Neko's purple. */
+  --bubble: oklch(0.92 0.045 300);
+  --bubble-foreground: oklch(0.24 0.06 300);
+  --radius: 1.25rem;
+  /* Editorial surface tokens */
+  --panel: oklch(100% 0 0 / 0.7);
+  --panel-border: oklch(0% 0 0 / 0.06);
+  --panel-highlight: oklch(100% 0 0 / 0.6);
+  --glow-violet: oklch(0.571 0.21 264 / 0.1);
+  --glow-sky: oklch(70% 0.18 230 / 0.1);
+  --glow-amber: oklch(75% 0.16 80 / 0.1);
+  --glow-emerald: oklch(70% 0.16 160 / 0.1);
+  --glow-rose: oklch(70% 0.18 320 / 0.1);
+  --scrollbar-size: 12px;
+  --scrollbar-thumb: --alpha(var(--color-black) / 18%);
+  --scrollbar-thumb-hover: --alpha(var(--color-black) / 32%);
+  color-scheme: light;
+}
+
+/* ------------------------------------------------------------------- dark */
+/* Neko's dark neutral: #0f0f0f canvas, #121212 sidebar, hairlines at 6% white. */
+.dark {
+  --background: #0f0f0f;
+  --foreground: oklch(0.88 0 0);
+  --strong: oklch(0.975 0 0);
+  --card: #151515;
+  --card-foreground: oklch(0.88 0 0);
+  --popover: #181818;
+  --popover-foreground: oklch(0.88 0 0);
+  --primary: oklch(0.571 0.21 264);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: --alpha(var(--color-white) / 5%);
+  --secondary-foreground: oklch(0.9 0 0);
+  --muted: --alpha(var(--color-white) / 4%);
+  --muted-foreground: #8f8f8f;
+  --accent: --alpha(var(--color-white) / 6%);
+  --accent-foreground: oklch(0.95 0 0);
+  --destructive: #e5484d;
+  --destructive-foreground: #f2777b;
+  --border: --alpha(var(--color-white) / 7%);
+  --input: --alpha(var(--color-white) / 9%);
+  --ring: oklch(0.65 0.18 264 / 65%);
+  --info: oklch(0.65 0.17 250);
+  --info-foreground: #8ab4ff;
+  --success: #4cc38a;
+  --success-foreground: #4cc38a;
+  --warning: #e0a042;
+  --warning-foreground: #e0a042;
+  --chart-1: oklch(0.65 0.18 264);
+  --chart-2: #4cc38a;
+  --chart-3: #e0a042;
+  --chart-4: oklch(0.65 0.14 300);
+  --chart-5: #e5484d;
+  --sidebar: #121212;
+  --sidebar-foreground: oklch(0.7 0 0);
+  --sidebar-primary: oklch(0.95 0 0);
+  --sidebar-primary-foreground: oklch(0.2 0 0);
+  --sidebar-accent: --alpha(var(--color-white) / 7%);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
+  --sidebar-border: --alpha(var(--color-white) / 6%);
+  --sidebar-ring: oklch(0.65 0.18 264 / 65%);
+  --code: #131313;
+  --code-foreground: var(--foreground);
+  --bubble: oklch(0.36 0.07 300);
+  --bubble-foreground: oklch(0.975 0 0);
+  --radius: 1.25rem;
+  --panel: oklch(20.5% 0 0 / 0.55);
+  --panel-border: oklch(100% 0 0 / 0.1);
+  --panel-highlight: oklch(100% 0 0 / 0.06);
+  --glow-violet: oklch(0.65 0.18 264 / 0.2);
+  --glow-sky: oklch(75% 0.18 230 / 0.2);
+  --glow-amber: oklch(80% 0.16 80 / 0.18);
+  --glow-emerald: oklch(75% 0.16 160 / 0.18);
+  --glow-rose: oklch(75% 0.18 320 / 0.2);
+  --scrollbar-thumb: --alpha(var(--color-white) / 16%);
+  --scrollbar-thumb-hover: --alpha(var(--color-white) / 30%);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-display: var(--font-sans);
+  --font-body: var(--font-sans);
+  --font-serif: "Fraunces Variable", "Fraunces", Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.76, 0, 0.24, 1);
+  --color-panel: var(--panel);
+  --color-panel-border: var(--panel-border);
+  --color-panel-highlight: var(--panel-highlight);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-strong: var(--strong);
+  --color-background: var(--background);
+  --color-code: var(--code);
+  --color-code-foreground: var(--code-foreground);
+  --color-bubble: var(--bubble);
+  --color-bubble-foreground: var(--bubble-foreground);
+
+  /* Graduated radius scale (see hushbacks' globals.css for why a flat radius fails). */
+  --radius-sm: calc(var(--radius) - 14px);
+  --radius-md: calc(var(--radius) - 10px);
+  --radius-lg: calc(var(--radius) - 6px);
+  --radius-xl: var(--radius);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 16px);
+  --radius-4xl: calc(var(--radius) + 24px);
+
+  --animate-shimmer-text: shimmer-text 1.8s linear infinite;
+  --animate-sweep-once: sweep-once 1s cubic-bezier(0.2, 0, 0, 1) 0.08s 1 both;
+
+  @keyframes shimmer-text {
+    0% {
+      background-position: 200% center;
+    }
+    100% {
+      background-position: -200% center;
+    }
+  }
+  @keyframes sweep-once {
+    from {
+      transform: translateX(-130%);
+    }
+    to {
+      transform: translateX(130%);
+    }
+  }
+  @keyframes spinner-fade {
+    0%,
+    39%,
+    100% {
+      opacity: 0;
+    }
+    40% {
+      opacity: 1;
+    }
+  }
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(0.5);
+      opacity: 0.5;
+    }
+  }
+}
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    background-clip: content-box;
+    border: 4px solid transparent;
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+    border-width: 3px;
+  }
+  *::-webkit-scrollbar-button {
+    display: none;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.625;
+    -webkit-font-smoothing: antialiased;
+  }
+  input,
+  textarea,
+  select,
+  button {
+    font-family: inherit;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  code,
+  pre,
+  kbd {
+    font-family: var(--font-mono);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Inside the native window the page shows the window's own canvas. */
+html[data-shell="native"] body,
+html[data-shell="native"] [data-slot="sidebar-inner"] {
+  background: transparent;
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Plugins written before the design system (web/plugins/*) use this class. */
+.muted {
+  color: var(--muted-foreground);
+}
+
+/* Continuous corners: progressive enhancement, circles keep a true arc. */
+@supports (corner-shape: squircle) {
+  *,
+  *::before,
+  *::after {
+    corner-shape: squircle;
+  }
+  [class*="rounded-full"],
+  [class*="rounded-[50%]"],
+  [style*="border-radius: 50%"],
+  [style*="border-radius: 9999px"] {
+    &,
+    &::before,
+    &::after {
+      corner-shape: round;
+    }
+  }
+}
