@@ -2335,7 +2335,7 @@ mod tests {
         assert_eq!(apply(&db, Command::SetMaxRunningTickets { limit: Some(1) }).unwrap().max_running_tickets, Some(1));
         assert!(apply(&db, Command::SetMaxRunningTickets { limit: Some(0) }).is_err());
         assert_eq!(apply(&db, Command::SetMaxRunningTickets { limit: None }).unwrap().max_running_tickets, None);
-        assert_eq!(apply(&db, Command::SetMaxWritablePerRepository { limit: None }).unwrap().writable_per_repository(), 4, "four writing tickets per repository by default");
+        assert_eq!(apply(&db, Command::SetMaxWritablePerRepository { limit: None }).unwrap().writable_per_repository(), 2, "two writing tickets per repository by default");
         assert_eq!(apply(&db, Command::SetMaxWritablePerRepository { limit: Some(2) }).unwrap().writable_per_repository(), 2);
         assert!(apply(&db, Command::SetMaxWritablePerRepository { limit: Some(0) }).is_err());
         assert!(!state.start_without_approval, "tickets wait for approval unless you opt in");

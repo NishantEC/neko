@@ -335,7 +335,9 @@ pub struct RuntimeSelection {
 
 /// Default per-repository cap on tickets holding a writable run. 84 tickets
 /// once made 72 worktrees in one repository, 48 of them in a day.
-pub const DEFAULT_WRITABLE_PER_REPOSITORY: u32 = 4;
+/// Lowered to 2 on 2026-10-22: the owner wants the Mac comfortable (cool
+/// keyboard and lap, quiet fans), not only safe.
+pub const DEFAULT_WRITABLE_PER_REPOSITORY: u32 = 2;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Snapshot {
@@ -615,6 +617,10 @@ pub struct MachineHealth {
     pub kernel_task_cpu: f64,
     /// 01:00–06:00 local: one heavy job at a time.
     pub night: bool,
+    /// `~/.agents/bin/machine-ok`'s WAIT reason, when that shared check exists
+    /// on this Mac and says to wait. Every agent here obeys the same check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comfort_wait: Option<String>,
     /// Why no new agent work starts right now, in plain words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub holding: Option<String>,

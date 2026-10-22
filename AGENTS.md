@@ -97,7 +97,7 @@ Repositories listed in `Snapshot::land_on_main` (per checkout, toggled in a task
 fast-forward local `main` with nothing pushed: a moved `main` is rebased onto, a conflict or an overwrite of
 local edits is refused, and the ticket records `landed_commit`. The `neko` repo itself is set to land on main.
 Every eligible ticket starts its own worker without a fixed global cap, but at
-most 4 tickets per repository hold a writable run at once
+most 2 tickets per repository hold a writable run at once
 (`Snapshot::max_writable_per_repository`, read-only phases uncounted; see
 "Resource limits"), and new workers are paced (`workbench/admission.rs`): a burst of
 six, then one every ten seconds, and none while the one-minute load average is
@@ -371,7 +371,7 @@ Completed tickets changed nothing, and 12 of 18 Failed tickets never started.
   runs before load pacing: per repository (`root_for`), active workers whose
   ticket `writes()` (Building/Reviewing/AwaitingApproval, or Queued that will
   build directly) count against `Snapshot::writable_per_repository()`
-  (default 4, `SetMaxWritablePerRepository`, Settings → Budget). Over-cap
+  (default 2 since 2026-10-22, was 4; `SetMaxWritablePerRepository`, Settings → Budget). Over-cap
   candidates stay queued; read-only candidates (planning, read-only asks,
   pending splits) always pass. Keep `writes()` in step with
   `execute_with_worktree`'s `work_directly`.
@@ -432,7 +432,9 @@ pressure, compressed memory, swap, free disk, kernel_task and RAM per kind of
 agent every 15 s. `apply_policy` turns that into `holding` (disk under 15 GB,
 memory critical, load 20+, or night load over 12; nothing new starts) or `cap`
 (01:00–06:00 or memory warning: one agent at a time). Admission obeys it; the
-sidebar strip shows it. `neko-daemon --machine-check [--hook]` gives agents
+sidebar strip shows it. Since 2026-10-22 it also asks the shared
+`~/.agents/bin/machine-ok` each reading (`comfort_wait`): its WAIT holds new
+work, because the owner wants the Mac cool and quiet, not only safe. `neko-daemon --machine-check [--hook]` gives agents
 outside Neko the same answer (exit 1 / a PreToolUse deny while held). The
 hook also caps test runners at 2 workers (rewrites the command in
 `bypassPermissions` sessions, otherwise refuses with the capped command, never
