@@ -70,6 +70,11 @@ export async function loadChat(conversation: string): Promise<void> {
       const following = [...chat.messages].reverse().find((m) => m.role === "assistant");
       if (following && log.messages.some((m) => m.id === following.id)) {
         chat.messages = log.messages.map((m) => (m.id === following.id ? following : m));
+      } else if (following) {
+        // The reply this window follows is not in the log (yet): keep it, and
+        // still take everything else from the log, so a message queued behind
+        // it that was edited or removed leaves the tray.
+        chat.messages = [...log.messages.filter((m) => m.id !== following.id), following];
       }
       return;
     }
