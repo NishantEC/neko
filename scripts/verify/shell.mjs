@@ -141,7 +141,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   check(/^\(\d+\) Neko$/.test(title), `the document title carries the count when something needs you: "${title}"`);
   const bar = page.locator("[data-slot='status-bar']");
   const barText = (await bar.innerText()).replace(/\s+/g, " ");
-  check(/New work is on hold/.test(barText) && /waiting on you|Working/.test(barText), `the status bar shows the machine hold and what waits on you: "${barText}"`);
+  check(/New work is on hold/.test(barText) && /waiting on you|Working/.test(barText), `the sidebar status shows the machine hold and what waits on you: "${barText}"`);
+  check((await page.locator("[data-slot='theme-menu']").count()) === 1 && (await page.locator(".sky-segment").count()) === 0, "the theme is one menu button in the sidebar, not a segmented switch");
   check((await page.locator("[data-slot='machine']").getAttribute("data-level")) === "holding", "the machine entry reports the hold level");
   await page.locator("[data-slot='machine']").click();
   await page.waitForSelector("[data-slot='popover-content']", { timeout: 3000 });
