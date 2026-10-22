@@ -13,6 +13,7 @@ struct PaletteTheme {
             "neutral": (false, 0x0d0d0d, 0.64, 0x2f2f2f, 0xe8e8e8),
             "ember": (false, 0x350915, 0.86, 0x7b3820, 0xf9eee0),
             "catnap": (false, 0x4b115b, 0.9, 0xa0186f, 0xfff2fd),
+            "glass": (false, 0x0f1a2b, 0.64, 0x2e4466, 0xf2f6fc),
             "catppuccin-mocha": (false, 0x1e1e2e, 0.84, 0x45475a, 0xcdd6f4),
             "catppuccin-macchiato": (false, 0x24273a, 0.84, 0x494d64, 0xcad3f5),
             "catppuccin-frappe": (false, 0x303446, 0.86, 0x51576d, 0xc6d0f5),

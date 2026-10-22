@@ -3,7 +3,7 @@ import { request } from "@/api";
 import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
 import { Kbd } from "@/ui/kbd";
-import { CircleHalf, Moon, Sun } from "@/ui/icons";
+import { CircleHalf, Moon, Sparkle, Sun } from "@/ui/icons";
 import { Panel } from "@/setup/kit";
 import { getTheme, setTheme, subscribeTheme, type ThemeChoice } from "@/theme";
 import { ErrorNote, Section, SettingRow, Toggle } from "@/setup/kit";
@@ -18,7 +18,7 @@ export function GeneralSection() {
   const { run, busy, error, clear } = useRun();
 
   const login = preferences.data?.find((r) => r.id === "launch-at-login");
-  const choices: [ThemeChoice, string, typeof Sun][] = [["system", "System", CircleHalf], ["light", "Light", Sun], ["dark", "Dark", Moon]];
+  const choices: [ThemeChoice, string, typeof Sun][] = [["system", "System", CircleHalf], ["light", "Light", Sun], ["dark", "Dark", Moon], ["glass", "Glass", Sparkle]];
   const combo = hotkey.data;
   const keys = combo && Object.keys(combo).length
     ? [...(Array.isArray(combo.modifiers) ? combo.modifiers : []).map((m: string) => MODIFIERS[m] ?? m), str(combo.key).replace(/^Key/, "")]

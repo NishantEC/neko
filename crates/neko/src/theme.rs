@@ -53,10 +53,11 @@
 //!
 //! # Where the colours came from
 //!
-//! Three palettes are this project's own work: `neutral` (the shipped default,
+//! Four palettes are this project's own work: `neutral` (the shipped default,
 //! byte-for-byte what `theme.rs` held before this file became a table — nobody's
-//! app changes appearance on upgrade), and `ember`/`catnap` from
-//! `data/neko-cozy-theme/mockups/`. The rest are vendored from upstream
+//! app changes appearance on upgrade), `ember`/`catnap` from
+//! `data/neko-cozy-theme/mockups/`, and `glass` (glassmorphism; see
+//! `docs/evidence/glass-theme-report.md`). The rest are vendored from upstream
 //! projects, every one of them MIT, each verified from its own source rather
 //! than assumed — see `AGENTS.md`'s "Themes" section for the licence table with
 //! links, and `docs/evidence/themes-report.md` for the full per-theme contrast
@@ -376,7 +377,7 @@ const fn theme(s: Spec) -> Theme {
 }
 
 /// Every built-in theme, in the order the `Themes` mode lists them: neko's own
-/// three first (the default leading), then the vendored families.
+/// four first (the default leading), then the vendored families.
 pub const THEMES: &[Theme] = &[
     // neko's own.
     theme(Spec {
@@ -446,6 +447,33 @@ pub const THEMES: &[Theme] = &[
         hairline_alpha: 0.14,
         icon_socket: 0xfffafe,
         icon_socket_alpha: 0.22,
+    }),
+    // neko's own. Glassmorphism: the lowest fill of any dark theme beside
+    // `neutral`, so the native material's blur carries the surface; a cool
+    // navy tint for the frosted wash and bright hairlines for the thin light
+    // edges. `panel_alpha` 0.64 is the floor that keeps `text_primary` at AA
+    // over a white wallpaper (`every_theme_stays_legible_over_the_worst_wallpaper_it_can_sit_on`).
+    theme(Spec {
+        id: "glass",
+        name: "Glass",
+        appearance: Appearance::Dark,
+        surface_panel: 0x0f1a2b,
+        panel_alpha: 0.64,
+        surface_raised: 0x1b2a40,
+        menu_tint_alpha: 0.52,
+        surface_input: 0x0a1220,
+        surface_selected: 0x2e4466,
+        text_primary: 0xf2f6fc,
+        text_secondary: 0xbecbdd,
+        text_tertiary: 0x9aabc2,
+        text_on_light: 0x0b1220,
+        keycap_shell_bg: 0x22344f,
+        state_success: 0x63d6a4,
+        state_danger: 0xff8a94,
+        hairline: 0xf2f6fc,
+        hairline_alpha: 0.14,
+        icon_socket: 0xf2f6fc,
+        icon_socket_alpha: 0.1,
     }),
     // Catppuccin (MIT) — catppuccin/palette `palette.json`.
     theme(Spec {
