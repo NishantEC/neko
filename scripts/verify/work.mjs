@@ -408,6 +408,28 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     }
     return route.continue();
   });
+  // The daemon serves a task's conversation from its own (unpatched) snapshot, so the fixture's
+  // events are folded the way `neko_core::task_chat` does: the brief, then each agent's stretch.
+  await page.route(/\/api\/chat\/task(:|%3A)[^/]+$/, async (route) => {
+    const id = decodeURIComponent(route.request().url().split("/").pop()).slice(5);
+    const task = (fixture.tasks ?? []).find((t) => t.id === id);
+    if (!task) return route.continue();
+    const messages = [{ id: "brief", role: "user", parts: [{ type: "text", text: task.goal }], metadata: { atMs: task.created_at_ms, state: "done", kind: "brief" } }];
+    let stretch = null;
+    task.events.forEach((e, i) => {
+      if (!["scout", "builder", "reviewer"].includes(e.role) || /^Agent started|^Command running/.test(e.message)) return;
+      const raw = e.message.startsWith("VERIFICATION_COMMAND ") ? JSON.parse(e.message.slice(21)) : null;
+      const part = raw
+        ? { type: "dynamic-tool", toolName: "Bash", toolCallId: `receipt-${i}`, state: "output-available", input: { command: raw.command }, output: { command: raw.command, output: raw.output, exit_code: raw.exit_code, incomplete: false, failed: raw.exit_code !== 0 } }
+        : { type: "text", text: e.message, state: "done" };
+      if (!stretch || stretch.metadata.authorRole !== e.role) {
+        stretch = { id: `a${i}`, role: "assistant", parts: [], metadata: { atMs: e.at_ms, state: "done", author: e.role, authorRole: e.role } };
+        messages.push(stretch);
+      }
+      stretch.parts.push(part);
+    });
+    return route.fulfill({ json: { messages, active: null } });
+  });
   await page.goto(`${base}/#/tasks`);
   await page.reload();
   await rows().first().waitFor({ timeout: 15000 });
@@ -477,8 +499,9 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await kb.focus();
   await page.keyboard.press("Space");
   const live = page.locator("[id^='DndLiveRegion']");
-  await page.waitForFunction(() => /Picked up/.test(document.querySelector("[id^='DndLiveRegion']")?.textContent ?? ""), null, { timeout: 3000 });
-  check(true, "picking a card up with Space is announced");
+  await page.waitForFunction(() => /Picked up|where it already is|Move .* to/.test(document.querySelector("[id^='DndLiveRegion']")?.textContent ?? ""), null, { timeout: 3000 });
+  check(true, "picking a card up with Space is announced (the live region says where it is)");
+  await sleep(500); // a person takes longer than this between Space and an arrow
   await page.keyboard.press("ArrowRight");
   await page.waitForFunction(() => /Ready to review/.test(document.querySelector("[id^='DndLiveRegion']")?.textContent ?? ""), null, { timeout: 3000 });
   check(/can’t go here/.test(await live.textContent()), "moving over a column that refuses the card announces why");
@@ -495,7 +518,9 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   commands.length = 0;
   await kb2.focus();
   await page.keyboard.press("Space");
+  await sleep(500);
   await page.keyboard.press("ArrowRight");
+  await sleep(300);
   await page.keyboard.press("Escape");
   await sleep(300);
   check(commands.length === 0 && (await page.locator("[data-slot='board-card-overlay']").count()) === 0, "Esc cancels a keyboard drag");

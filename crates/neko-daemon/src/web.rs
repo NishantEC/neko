@@ -366,7 +366,7 @@ fn write_head(stream: &mut TcpStream, status: u16, reason: &str, content_type: &
     }
     // Pages and plugins change under the user's feet by design; never cache.
     head.push_str("Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Frame-Options: SAMEORIGIN\r\n");
-    head.push_str("Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'\r\n");
+    head.push_str("Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'\r\n");
     for (name, value) in extra {
         head.push_str(&format!("{name}: {value}\r\n"));
     }

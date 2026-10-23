@@ -162,7 +162,7 @@ try {
   context = await browser.newContext({ viewport: { width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
   const page = await context.newPage();
   const problems = [];
-  page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${m.text()}`); });
+  page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${JSON.stringify(m.text())} @${m.location().url}`); });
   page.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`));
   page.on("requestfailed", (r) => { if (!r.url().includes("/api/events") && !r.url().includes("/api/request")) problems.push(`request failed: ${r.url()} (${r.failure()?.errorText ?? "?"})`); });
   page.on("response", (r) => { if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`); });
@@ -229,6 +229,7 @@ try {
   await shot("home-queue");
   await page.locator("[data-slot='queue-row'] button[aria-label='Edit queued message']").click();
   await page.waitForFunction((t) => document.querySelector("textarea").value === t, message, { timeout: 5000 });
+  await page.waitForFunction(() => document.querySelectorAll("[data-slot='queue-row']").length === 0, null, { timeout: 5000 }).catch(() => {});
   check((await page.locator("[data-slot='queue-row']").count()) === 0, "editing takes the message back out of the queue into the composer");
   await page.locator("textarea").press("Enter");
   await page.locator("[data-slot='queue-row']", { hasText: message }).waitFor({ timeout: 10000 });
