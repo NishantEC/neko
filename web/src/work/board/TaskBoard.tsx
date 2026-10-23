@@ -56,7 +56,7 @@ const columnCoordinates: KeyboardCoordinateGetter = (event, { context: { droppab
   const at = origin >= 0 ? origin : Math.max(0, home);
   const next = columns[Math.min(columns.length - 1, Math.max(0, at + step))];
   event.preventDefault();
-  return next ? { x: next.rect.left + 16, y: next.rect.top + 64 } : currentCoordinates;
+  return next ? { x: next.rect.left + 16, y: currentCoordinates.y } : currentCoordinates;
 };
 
 const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;

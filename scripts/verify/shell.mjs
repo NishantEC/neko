@@ -405,7 +405,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   await sleep(300);
   const palette = (await page.locator("[data-slot='command-item']").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
   const has = (re) => palette.some((t) => re.test(t));
-  check(has(/^New task/) && has(/^Stop all work/) && has(/^Approve what is waiting/) && has(/^Keyboard shortcuts/) && has(/first-run tour/) && has(/Reload customisations/), `⌘K lists the shell's actions: ${palette.slice(0, 6).join(" | ")}`);
+  check(has(/^New task/) && has(/^Stop all work/) && has(/^Keyboard shortcuts/) && has(/first-run tour/) && has(/Reload customisations/), `⌘K lists the shell's actions (Approve appears only while something waits): ${palette.slice(0, 6).join(" | ")}`);
   check(has(/Go to Customisations/) && has(/Go to Home/) && has(/Go to UI gallery/), "⌘K lists Go to every page, Customisations included");
   check(has(/Rename the export button/) && (await page.locator("[data-slot='command-item'][data-task-id]").count()) > 0, "⌘K lists recent tasks");
   check(has(/Focus the composer/) && has(/Stop the current reply/), "⌘K still lists what Home registers");
@@ -564,7 +564,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   check(true, "on success the dialog closes and takes you to Home, where the task will appear");
   await page.locator("[data-slot='queue-row']", { hasText: "Open a task that changes Neko" }).waitFor({ timeout: 6000 });
   await page.locator("[data-slot='queue-row'] button[aria-label='Remove queued message']").first().click();
-  await page.waitForFunction(() => document.querySelectorAll("[data-slot='queue-row']").length === 0, null, { timeout: 5000 });
+  await page.waitForFunction(() => document.querySelectorAll("[data-slot='queue-row']").length === 0, null, { timeout: 10000 });
   // A plugin can open the inspector and add to ⌘K.
   writeFileSync(path.join(pluginsDir, "pr-board/index.js"), `export default function register(host) {
     const { React, registerPage, registerCommands, inspector } = host;

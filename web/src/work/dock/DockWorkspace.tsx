@@ -533,7 +533,14 @@ export function DockWorkspace({
 
   return (
     <PanelsContext.Provider value={nextDefs}>
-      <div className={cn("neko-dock-host", className)} data-slot="dock" data-narrow={narrow ? "true" : undefined}>
+      <div
+        className={cn("neko-dock-host", className)} data-slot="dock" data-narrow={narrow ? "true" : undefined}
+        // The drop target is drawn as a ghost of what is being dragged; its label is the tab's title.
+        onDragStartCapture={(e) => {
+          const title = (e.target as HTMLElement).closest?.(".dv-tab")?.querySelector(".dock-tab-title")?.textContent ?? "";
+          e.currentTarget.style.setProperty("--dock-ghost-label", JSON.stringify(title));
+        }}
+      >
         <DockviewReact
           theme={DOCK_THEME}
           components={COMPONENTS}

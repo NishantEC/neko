@@ -61,10 +61,10 @@
   --dv-tabs-container-scrollbar-color: color-mix(in srgb, var(--foreground) 25%, transparent);
 
   /* where a dragged tab will land: the primary colour at low alpha */
-  --dv-drag-over-background-color: color-mix(in srgb, var(--primary) 16%, transparent);
-  --dv-drag-over-border-color: var(--primary);
-  --dv-drag-over-border: 2px solid color-mix(in srgb, var(--primary) 70%, transparent);
-  --dv-edge-dock-indicator-color: var(--primary);
+  --dv-drag-over-background-color: transparent;
+  --dv-drag-over-border-color: transparent;
+  --dv-drag-over-border: 0;
+  --dv-edge-dock-indicator-color: color-mix(in srgb, var(--foreground) 35%, transparent);
 
   /* the splitter: invisible at rest, primary while it is being dragged */
   --dv-sash-color: transparent;
@@ -115,6 +115,7 @@
 }
 .neko-dock .dv-groupview .dv-content-container {
   background: var(--builder-pane);
+  border: 1px solid var(--border);
   border-radius: var(--dock-tab-radius);
   overflow: hidden;
   transition: border-top-left-radius var(--dock-slide) var(--dock-ease);
@@ -311,15 +312,35 @@
   color: var(--foreground);
 }
 
-/* Drop targets: soft fill, rounded to match the cards. */
-.neko-dock .dv-drop-target-anchor {
-  border-radius: 8px;
-}
-.neko-dock .dv-drop-target-anchor.dv-drop-target-content {
-  border-radius: var(--dv-border-radius);
-}
+/* Drop targets: a ghost of the dragged tab's card, where it will land (no blue fill or frame). */
+.neko-dock .dv-drop-target-anchor,
 .neko-dock .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection {
+  background: color-mix(in srgb, var(--builder-pane) 45%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--foreground) 28%, transparent);
   border-radius: var(--dv-border-radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.neko-dock .dv-drop-target-anchor.dv-drop-target-content { border-radius: var(--dv-border-radius); }
+/* A tab-strip drop is a ghost tab pill, not a card. */
+.neko-dock .dv-drop-target-anchor:not(.dv-drop-target-content) { border-radius: 8px; }
+.neko-dock .dv-drop-target-anchor::before,
+.neko-dock .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection::before {
+  content: var(--dock-ghost-label, "");
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  max-width: calc(100% - 16px);
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--builder-chrome);
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: .85;
 }
 
 /* Splitters sit in the 6px gap; widen the hit area, draw nothing until used. */
