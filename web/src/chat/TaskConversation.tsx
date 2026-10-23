@@ -137,14 +137,21 @@ export function TaskTimeline({ messages, status }: { messages: NekoUIMessage[]; 
 export function TaskConversation({ task, className }: { task: Task; className?: string }) {
   const { messages } = useNekoChat(`task:${task.id}`, taskSignature(task));
   const state = conversationState(task);
+  // A saved result from an earlier attempt belongs where that attempt ended: what you and the agents
+  // said since comes after it, not above it.
+  const stale = state.outcome === "stopped" || state.outcome === "previous";
+  const lastReply = stale ? messages.findLastIndex((m) => m.role === "user" && m.metadata?.kind !== "brief") : -1;
+  const before = lastReply > 0 ? messages.slice(0, lastReply) : messages;
+  const after = lastReply > 0 ? messages.slice(lastReply) : [];
   const hasPlanBlock = String(task.plan ?? "").trim() !== "" && (state.showsPlan || state.outcome === "previous");
   return (
     <Conversation className={cn("min-h-0 flex-1", className)}>
       <ConversationContent className="mx-auto w-full max-w-(--chat-content-max-width) gap-0 px-5 pt-1 pb-6">
-        <TaskTimeline messages={messages} status={task.status} />
+        <TaskTimeline messages={before} status={task.status} />
         {hasPlanBlock ? <PlanBlock title={state.showsPlan ? state.planTitle : "Plan"} text={task.plan} /> : null}
         {String(task.result ?? "") !== "" ? <ResultBlock task={task} outcome={state.outcome} reviewIsCurrent={state.reviewIsCurrent} /> : null}
         <DeliveryCard task={task} />
+        {after.length ? <TaskTimeline messages={after} status={task.status} /> : null}
         {messages.length === 0 && !hasPlanBlock && !task.result ? (
           <p className="mt-10 text-center text-[13px] text-muted-foreground">Nothing has happened on this task yet.</p>
         ) : null}

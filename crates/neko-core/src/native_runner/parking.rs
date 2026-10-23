@@ -85,8 +85,9 @@ pub fn restore_worktree(repository: &Path, path: &Path, parked: &Parked, cancel:
         return Err(format!("Cannot restore: {} already exists", path.display()));
     }
     let repository = repository.canonicalize().map_err(|e| format!("Repository unavailable: {e}"))?;
-    git_output(&repository, &["rev-parse", "--verify", &format!("refs/heads/{}^{{commit}}", parked.branch)], cancel)
-        .map_err(|_| format!("Cannot restore: branch {} is gone", parked.branch))?;
+    // A branch that was deleted (merged and cleaned up by hand, say) is not a reason to fail the
+    // task: its work is wherever it went, so the task starts again from the current HEAD.
+    let has_branch = git_output(&repository, &["rev-parse", "--verify", &format!("refs/heads/{}^{{commit}}", parked.branch)], cancel).is_ok();
     let checkout = checkout_lock(&repository, cancel)?;
     let guard = wait_for_checkout(&checkout, cancel)?;
     let _ = git_output(&repository, &["worktree", "prune"], cancel);
@@ -94,13 +95,17 @@ pub fn restore_worktree(repository: &Path, path: &Path, parked: &Parked, cancel:
         fs::create_dir_all(parent).map_err(|e| format!("Cannot create task worktree directory: {e}"))?;
     }
     let mut add = filterless_checkout(&repository, cancel)?;
-    add.args(["worktree", "add"]).arg(path).arg(&parked.branch);
+    if has_branch {
+        add.args(["worktree", "add"]).arg(path).arg(&parked.branch);
+    } else {
+        add.args(["worktree", "add", "-b", &parked.branch]).arg(path).arg("HEAD");
+    }
     let output = execute(add, &[], cancel, Duration::from_secs(120), |_| Ok(()))?;
     if !output.status.success() {
         return Err(format!("Restoring the worktree failed: {}", bounded_text(&output.stderr, MAX_EVENT)));
     }
     drop(guard);
-    if parked.wip {
+    if parked.wip && has_branch {
         let subject = git_output(path, &["log", "-1", "--format=%s"], cancel)?;
         if subject.trim() == PARK_SUBJECT {
             git_output(path, &["reset", "--quiet", "--mixed", "HEAD~1"], cancel)?;
@@ -218,6 +223,17 @@ mod tests {
         assert_eq!(fs::read_to_string(worktree.join("new.txt")).unwrap(), "brand new\n");
         assert_eq!(head(&worktree, &cancel).unwrap(), base, "the saved work is uncommitted again");
         assert!(!worktree.join("node_modules/dep.js").exists(), "ignored output is not carried");
+    }
+
+    #[test]
+    fn restoring_a_task_whose_branch_was_deleted_starts_again_from_head() {
+        let (_dir, repo, worktree) = fixture();
+        let cancel = AtomicBool::new(false);
+        let parked = park_worktree(&worktree, &cancel).unwrap();
+        git(&repo, &["branch", "-D", &parked.branch]);
+        restore_worktree(&repo, &worktree, &parked, &cancel).unwrap();
+        assert_eq!(fs::read_to_string(worktree.join("a.txt")).unwrap(), "one\n");
+        assert_eq!(head(&worktree, &cancel).unwrap(), head(&repo, &cancel).unwrap());
     }
 
     #[test]
