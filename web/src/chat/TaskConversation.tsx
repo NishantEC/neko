@@ -134,7 +134,7 @@ export function TaskTimeline({ messages, status }: { messages: NekoUIMessage[]; 
 }
 
 /** The whole conversation, scrolling, sticking to the end as the agent writes. */
-export function TaskConversation({ task, className }: { task: Task; className?: string }) {
+export function TaskConversation({ task, className, showResult = true }: { task: Task; className?: string; showResult?: boolean }) {
   const { messages } = useNekoChat(`task:${task.id}`, taskSignature(task));
   const state = conversationState(task);
   // A saved result from an earlier attempt belongs where that attempt ended: what you and the agents
@@ -149,8 +149,8 @@ export function TaskConversation({ task, className }: { task: Task; className?: 
       <ConversationContent className="mx-auto w-full max-w-(--chat-content-max-width) gap-0 px-5 pt-1 pb-6">
         <TaskTimeline messages={before} status={task.status} />
         {hasPlanBlock ? <PlanBlock title={state.showsPlan ? state.planTitle : "Plan"} text={task.plan} /> : null}
-        {String(task.result ?? "") !== "" ? <ResultBlock task={task} outcome={state.outcome} reviewIsCurrent={state.reviewIsCurrent} /> : null}
-        <DeliveryCard task={task} />
+        {showResult && String(task.result ?? "") !== "" ? <ResultBlock task={task} outcome={state.outcome} reviewIsCurrent={state.reviewIsCurrent} /> : null}
+        {showResult ? <DeliveryCard task={task} /> : null}
         {after.length ? <TaskTimeline messages={after} status={task.status} /> : null}
         {messages.length === 0 && !hasPlanBlock && !task.result ? (
           <p className="mt-10 text-center text-[13px] text-muted-foreground">Nothing has happened on this task yet.</p>

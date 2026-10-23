@@ -75,6 +75,7 @@
   --dv-border-radius: 14px;
   --dv-tab-border-radius: 8px;
   --dock-tab-radius: 14px;
+  --dock-line: color-mix(in srgb, var(--foreground) 16%, transparent);
   --dock-tab-foot: 12px;
   --dv-sash-border-radius: 3px;
   --dv-dropdown-border-radius: 10px;
@@ -115,10 +116,20 @@
 }
 .neko-dock .dv-groupview .dv-content-container {
   background: var(--builder-pane);
-  border: 1px solid var(--border);
+  position: relative;
   border-radius: var(--dock-tab-radius);
   overflow: hidden;
   transition: border-top-left-radius var(--dock-slide) var(--dock-ease);
+}
+/* The card's outline: an overlay, so nothing inside can paint over it. */
+.neko-dock .dv-groupview .dv-content-container::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  border: 1px solid var(--dock-line);
+  border-radius: inherit;
 }
 /* The card's top-left corner is square when the first tab is the active one: the tab's foot meets it. */
 .neko-dock .dv-groupview[data-dock-first-active] .dv-content-container {
@@ -181,24 +192,29 @@
 .dv-tab-ghost-drag .dock-tab::before,
 .dock-indicator::before {
   left: calc(var(--dock-tab-foot, 12px) * -1);
-  background: radial-gradient(circle 12px at 0 0, transparent 11.5px, var(--builder-pane, var(--card)) 12px);
+  background: radial-gradient(circle 12px at 0 0, transparent 10.5px, var(--dock-line) 11px, var(--dock-line) 11.5px, var(--builder-pane, var(--card)) 12px);
 }
 .dv-tab-ghost-drag .dock-tab::after,
 .dock-indicator::after {
   right: calc(var(--dock-tab-foot, 12px) * -1);
-  background: radial-gradient(circle 12px at 100% 0, transparent 11.5px, var(--builder-pane, var(--card)) 12px);
+  background: radial-gradient(circle 12px at 100% 0, transparent 10.5px, var(--dock-line) 11px, var(--dock-line) 11.5px, var(--builder-pane, var(--card)) 12px);
 }
 
 /* The per-group sliding indicator (hushbacks useFusedTabIndicator: 0.34s, ease [0.22,1,0.36,1]).
  * Placed by script with transform/width; it transitions only when the active tab changes. */
 .neko-dock .dv-tabs-and-actions-container {
   position: relative;
+  z-index: 2;
 }
 .dock-indicator {
   position: absolute;
   left: 0;
-  bottom: 0;
-  height: 40px;
+  /* one pixel into the card, so the tab and the card are one outline */
+  bottom: -1px;
+  height: 41px;
+  box-sizing: border-box;
+  border: 1px solid var(--dock-line);
+  border-bottom: 0;
   width: 0;
   z-index: 0;
   pointer-events: none;

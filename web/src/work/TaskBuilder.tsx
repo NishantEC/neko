@@ -12,7 +12,7 @@
 // grouped on the right. One layout is kept for the person, not per task.
 import { type ReactNode, type RefObject } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { GitDiff } from "@phosphor-icons/react";
+import { GitDiff, ShieldCheck } from "@phosphor-icons/react";
 import { ArrowLeft, ArrowsOutSimple, ArrowCounterClockwise, ChatCircle, Check, GitPullRequest, Info, Layout, Link as LinkIcon, ListChecks, SquareHalf } from "@/ui/icons";
 import { Button } from "@/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/ui/dropdown-menu";
@@ -20,7 +20,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import { hrefFor } from "@/router";
 import { useRegisterCommands } from "@/shell/commands";
 import { Changes } from "@/work/Changes";
-import { PlanBlock } from "@/work/Thread";
+import { MessageResponse } from "@/chat/message";
+import { DeliveryCard, PlanBlock, ResultBlock } from "@/work/Thread";
 import { STAGE_TONE, StatusLabel, Tag } from "@/work/tone";
 import { conversationState, friendlyStatus, pullRequestNumber, repositoryOf, stageOf, taskTitle, type Task } from "@/work/model";
 import type { TaskAction, Ui } from "@/work/taskActions";
@@ -36,6 +37,7 @@ export const TASK_DOCK_KEY = "neko:dock:task";
 /** The panels a task page offers, in the order the View menu lists them. */
 const PANELS = [
   { id: "chat", title: "Chat", icon: ChatCircle },
+  { id: "result", title: "Result", icon: ShieldCheck },
   { id: "changes", title: "Changes", icon: GitDiff },
   { id: "plan", title: "Plan", icon: ListChecks },
   { id: "details", title: "Details", icon: Info },
@@ -44,8 +46,39 @@ const PANELS = [
 // Chat opens wider than hushbacks' form chat (35%, not 25%): a task conversation carries work logs and tables.
 const DEFAULT_LAYOUT: DockGroupSpec[] = [
   { panels: ["chat"], size: 0.35, minWidth: 320 },
-  { panels: ["changes", "plan", "details"], active: "changes", of: 0, direction: "right" },
+  { panels: ["result", "changes", "plan", "details"], active: "changes", of: 0, direction: "right" },
 ];
+
+/**
+ * The task's one result. While the task works again there is no final result: what was saved is
+ * shown as the previous one, and says so. Whatever the agent writes there is Markdown with the
+ * reply blocks (tables, charts, files, plans), so it can shape its own result.
+ */
+function ResultPane({ task, state }: { task: Task; state: ReturnType<typeof conversationState> }) {
+  const has = String(task.result ?? "").trim() !== "";
+  const working = ["Queued", "Planning", "Building"].includes(task.status);
+  if (has) {
+    return (
+      <>
+        {working ? <p data-slot="result-working" className="mb-2 text-[12.5px] text-muted-foreground">The agent is working again, so this is the previous result.</p> : null}
+        <ResultBlock task={task} outcome={working ? "previous" : state.outcome} reviewIsCurrent={!working && state.reviewIsCurrent} />
+        <DeliveryCard task={task} />
+      </>
+    );
+  }
+  // No saved result yet: never a blank pane. Show what the agents have said so far.
+  const said = (task.events ?? [])
+    .filter((e: any) => ["scout", "builder", "reviewer", "supervisor", "coordinator"].includes(e.role))
+    .map((e: any) => String(e.message ?? "").trim())
+    .filter((m: string) => m.length > 40 && !/^(VERIFICATION_COMMAND|USAGE|\{)/.test(m) && !/^Command (running|completed)/.test(m));
+  const latest = said[said.length - 1];
+  return (
+    <section data-slot="result-progress">
+      <p className="mb-2 text-[12.5px] text-muted-foreground">{working ? "No final result yet. This is what the agent has said so far." : "No result was saved. This is the agent's last message."}</p>
+      {latest ? <div data-slot="prose" className="text-[14px] leading-[1.625]"><MessageResponse>{latest}</MessageResponse></div> : <p className="mt-10 text-center text-[13px] text-muted-foreground">Nothing to summarise yet.</p>}
+    </section>
+  );
+}
 
 export interface TaskBuilderProps {
   task: Task;
@@ -104,11 +137,21 @@ export function TaskBuilder({
       icon: ChatCircle,
       render: () => (
         <div data-slot="dock-chat" className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-card">
-          <TaskConversation task={task} />
+          <TaskConversation task={task} showResult={false} />
           <div className="w-full shrink-0 px-3 pt-1 pb-3">
             <TaskComposer task={task} ui={ui} />
           </div>
         </div>
+      ),
+    },
+    {
+      id: "result",
+      title: "Result",
+      icon: ShieldCheck,
+      render: () => (
+        <StageView>
+          <ResultPane task={task} state={state} />
+        </StageView>
       ),
     },
     {

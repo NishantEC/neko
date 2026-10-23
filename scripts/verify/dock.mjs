@@ -42,7 +42,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     }, KEY);
   const saved = () => page.evaluate((k) => localStorage.getItem(k), KEY);
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  const DEFAULT = [{ panels: ["chat"], active: "chat" }, { panels: ["changes", "plan", "details"], active: "changes" }];
+  const DEFAULT = [{ panels: ["chat"], active: "chat" }, { panels: ["result", "changes", "plan", "details"], active: "changes" }];
   const tab = (id) => page.locator(`[data-slot='dock'] .dv-tab:has([data-panel='${id}'])`);
   const box = async (loc) => (await loc.boundingBox());
   /** A real mouse drag: down, a few steps so dockview sees the drag begin, up. */
@@ -95,7 +95,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     }
     return out;
   });
-  check(fused.length > 0 && fused.every((f) => f.n === 1 && f.same && f.h === 40 && f.aligned && f.strip === 52 && f.idleH === 36 && f.feet), `every group has its own fused indicator under its active tab (card colour, 40px, feet; 52px strip; idle tabs 36px) ${JSON.stringify(fused)}`);
+  check(fused.length > 0 && fused.every((f) => f.n === 1 && f.same && f.h === 41 && f.aligned && f.strip === 52 && f.idleH === 36 && f.feet), `every group has its own fused indicator under its active tab (card colour, 40px, feet; 52px strip; idle tabs 36px) ${JSON.stringify(fused)}`);
 
   // the indicator SLIDES: click another tab in the group and sample its box twice inside the transition
   const ind = page.locator("[data-slot='dock'] .dv-groupview").nth(1).locator(".dock-indicator");
@@ -260,7 +260,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     await openFull();
     const g = await groups();
     const all = g.flatMap((x) => x.panels).sort().join(",");
-    check(all === "changes,chat,details,plan" && g.length >= 1, `a corrupted saved layout (#${i + 1}) never leaves the view empty (${JSON.stringify(g)})`);
+    check(all === "changes,chat,details,plan,result" && g.length >= 1, `a corrupted saved layout (#${i + 1}) never leaves the view empty (${JSON.stringify(g)})`);
     check(same(g, DEFAULT) || i === 2, `…and falls back to the default (#${i + 1})`);
   }
   // an unknown panel in an otherwise valid layout is dropped; a missing one is put back
@@ -278,14 +278,14 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   }, KEY);
   await openFull();
   const healed = (await groups()).flatMap((x) => x.panels).sort().join(",");
-  check(healed === "changes,chat,details,plan", `an unknown panel id is dropped and a missing one is put back (${healed})`);
+  check(healed === "changes,chat,details,plan,result", `an unknown panel id is dropped and a missing one is put back (${healed})`);
 
   // ===== narrow: one tabbed group, no splitting ===========================================
   await page.evaluate((k) => localStorage.removeItem(k), KEY);
   await page.setViewportSize({ width: 760, height: 900 });
   await openFull();
   const narrow = await groups();
-  check(narrow.length === 1 && narrow[0].panels.length === 4, `below 900px the dock is one tabbed group (${JSON.stringify(narrow)})`);
+  check(narrow.length === 1 && narrow[0].panels.length === 5, `below 900px the dock is one tabbed group (${JSON.stringify(narrow)})`);
   await both("dock-narrow");
   await page.setViewportSize({ width: 1440, height: 900 });
   await sleep(800);
