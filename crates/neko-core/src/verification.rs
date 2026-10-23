@@ -190,12 +190,22 @@ pub const STANDALONE_CHECKS: &str = "Run every check as its own shell command, e
 /// A receipt's command with harmless leading steps removed: `uptime`/`pwd`
 /// (agents told to check machine load first) and `cd` into the reviewed
 /// worktree itself. A `cd` anywhere else is kept, so a check run in another
-/// directory never proves one claimed for this worktree.
+/// directory never proves one claimed for this worktree. A `cd` into a folder
+/// *inside* the worktree reads as the relative `cd web`, which is how the
+/// approved checks are written.
 fn without_benign_prefix(command: &str, worktree: Option<&str>) -> String {
     let worktree = worktree.map(|w| w.trim_end_matches('/'));
     let mut rest = command.trim();
     while let Some((head, tail)) = rest.split_once("&&") {
         let head = head.trim();
+        let inside = head.strip_prefix("cd ").and_then(|target| {
+            let target = target.trim().trim_matches(|c| c == '"' || c == '\'').trim_end_matches('/');
+            let sub = target.strip_prefix(worktree?)?.strip_prefix('/')?;
+            (!sub.is_empty() && !sub.split('/').any(|part| part == ".." || part == ".")).then(|| sub.to_owned())
+        });
+        if let Some(sub) = inside {
+            return format!("cd {sub} && {}", tail.trim());
+        }
         let benign = matches!(head, "uptime" | "pwd" | "true")
             || head.strip_prefix("cd ").is_some_and(|target| {
                 let target = target.trim().trim_matches(|c| c == '"' || c == '\'').trim_end_matches('/');
@@ -290,6 +300,13 @@ mod tests {
         let wt = "/Users/x/task-worktrees/abc";
         for ran in [r#"cd "/Users/x/task-worktrees/abc" && uptime && cargo test"#, "cd /Users/x/task-worktrees/abc/ && cargo test", "pwd && cargo test"] {
             assert!(accept_in(&answer(), &files, &files, &receipt(ran), &[], Some(wt)).is_ok(), "{ran}");
+        }
+        let verdict = serde_json::json!({"passed":true,"findings":[],"files":["src/a.rs"],"tests":["cd web && npx tsc --noEmit"],"summary":"Verified boundary"}).to_string();
+        for ran in [r#"cd "/Users/x/task-worktrees/abc/web" && npx tsc --noEmit"#, "uptime && cd /Users/x/task-worktrees/abc/web/ && npx tsc --noEmit"] {
+            assert!(accept_in(&verdict, &files, &files, &receipt(ran), &[], Some(wt)).is_ok(), "{ran}");
+        }
+        for ran in ["cd /Users/x/task-worktrees/abc/../abc2/web && npx tsc --noEmit", "cd /Users/x/task-worktrees/abcd/web && npx tsc --noEmit", "cd /tmp/web && npx tsc --noEmit"] {
+            assert!(accept_in(&verdict, &files, &files, &receipt(ran), &[], Some(wt)).is_err(), "{ran}");
         }
         for ran in ["cd /tmp/elsewhere && cargo test", "cargo build && cargo test", "rm -rf x && cargo test"] {
             assert!(accept_in(&answer(), &files, &files, &receipt(ran), &[], Some(wt)).is_err(), "{ran}");
