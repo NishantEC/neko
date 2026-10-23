@@ -413,9 +413,14 @@ export function DockWorkspace({
           for (const p of [...api.panels]) if (!defs.current.has(p.id)) api.removePanel(p);
           for (const g of [...api.groups]) if (g.panels.length === 0) api.removeGroup(g);
           if (api.panels.length > 0 && api.groups.length > 0) {
+            const ids = [...defs.current.keys()];
             for (const def of defs.current.values()) {
               if (api.getPanel(def.id) || saved.closed.includes(def.id)) continue;
-              addPanelTo(api, def.id, { referenceGroup: api.groups[0], direction: "within" }, true);
+              // A panel added after the person saved their layout joins its neighbour in the
+              // declared order (Result beside Changes), not the first group (Chat).
+              const at = ids.indexOf(def.id);
+              const near = [...ids.slice(0, at).reverse(), ...ids.slice(at + 1)].map((id) => api.getPanel(id)).find(Boolean);
+              addPanelTo(api, def.id, { referenceGroup: near?.group ?? api.groups[0], direction: "within" }, true);
             }
             for (const p of api.panels) {
               const def = defs.current.get(p.id)!;

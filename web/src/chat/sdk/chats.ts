@@ -75,6 +75,9 @@ export async function loadChat(conversation: string): Promise<void> {
         // still take everything else from the log, so a message queued behind
         // it that was edited or removed leaves the tray.
         chat.messages = [...log.messages.filter((m) => m.id !== following.id), following];
+      } else {
+        // Nothing of the reply has arrived here yet: the log is the whole truth.
+        chat.messages = log.messages;
       }
       return;
     }
