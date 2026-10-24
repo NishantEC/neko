@@ -270,7 +270,7 @@ export default function Tasks() {
       data-slot="tasks-page"
       data-layout={layout}
       onFocus={(e) => { const row = (e.target as HTMLElement).closest<HTMLElement>("[data-slot='task-row']"); if (row) setFocusedId(row.dataset.taskId ?? null); }}
-      className="flex min-h-0 flex-1 flex-col"
+      className="relative flex min-h-0 flex-1 flex-col"
     >
       <WorkHeader eyebrow="Work" title={title} subtitle={subtitle} actions={headerActions}>{controls}</WorkHeader>
       {!connected && snapshot ? <p role="status" className="px-6 pb-2 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p> : null}
@@ -281,7 +281,7 @@ export default function Tasks() {
             id={taskId}
             order={visible.map((t: any) => t.id)}
             ui={ui}
-            container={dock ? detailStage : undefined}
+            container={dock ? page : undefined}
             onSelect={open}
             onClose={close}
             onToggleFull={toggleFull}
