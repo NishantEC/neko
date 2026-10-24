@@ -206,15 +206,23 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await sleep(500);
   await both("work-task-detail-side");
 
-  // the side sheet (hushbacks' response details sheet): previous / next, Esc closes
+  // the side sheet: title is the heading, actions beside it, no previous/next buttons or footer;
+  // it spans the whole page (header included); ← → still move between tasks
   check(await page.locator("[data-slot='sheet-content'] [data-slot='task-detail']").count() === 1, "the task opens in a side sheet");
-  const footer = () => page.locator("[data-slot='sheet-footer']").innerText();
-  check(/Task 1 of \d+/.test(await footer()), "the sheet says where the task sits in the list");
-  await page.getByRole("button", { name: "Next task" }).click();
+  check((await page.getByRole("button", { name: "Next task" }).count()) === 0 && (await page.locator("[data-slot='sheet-footer']").count()) === 0 && !(await page.locator("[data-slot='sheet-content']").innerText()).includes("Task details"), "no previous/next buttons, no footer and no “Task details” heading");
+  const sheetBox = await page.locator("[data-slot='sheet-content']").boundingBox();
+  const headerBox = await page.locator("[data-slot='work-header']").boundingBox();
+  check(sheetBox && headerBox && sheetBox.y <= headerBox.y + 16, `the sheet spans the page from the top (sheet y ${Math.round(sheetBox?.y ?? -1)}, header y ${Math.round(headerBox?.y ?? -1)})`);
+  const titleRow = await page.locator("[data-slot='task-detail'] [data-slot='task-title']").boundingBox();
+  const actionsBox = await page.getByRole("toolbar", { name: "Task actions" }).boundingBox();
+  check(titleRow && actionsBox && Math.abs(actionsBox.y - titleRow.y) < 24, "the task's actions sit beside its title");
+  const tabsBox = await page.getByRole("tablist", { name: "Task sections" }).boundingBox();
+  const statusBox = await page.locator("[data-slot='task-detail'] [data-slot='task-status']").boundingBox();
+  check(tabsBox && statusBox && Math.abs(tabsBox.y + tabsBox.height / 2 - (statusBox.y + statusBox.height / 2)) < 8 && statusBox.x > tabsBox.x + tabsBox.width, "the tabs are on the left and the status on the right of one row");
+  await page.locator("[data-slot='task-detail'] [data-slot='task-title']").click();
+  await page.keyboard.press("ArrowRight");
   await page.waitForFunction((id) => !location.hash.includes(`task=${id}`), first, { timeout: 3000 });
-  await page.waitForFunction(() => /Task 2 of/.test(document.querySelector("[data-slot='sheet-footer']")?.textContent ?? ""), null, { timeout: 3000 }).catch(() => {});
-  check(/Task 2 of \d+/.test(await footer()), `Next task moves to the next task in the list (${await footer()})`);
-  await page.locator("[data-slot='sheet-footer']").click();
+  check(true, "→ moves to the next task");
   await page.keyboard.press("ArrowLeft");
   await page.waitForFunction((id) => location.hash.includes(`task=${id}`), first, { timeout: 3000 });
   check(true, "← moves back to the previous task");

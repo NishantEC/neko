@@ -8,17 +8,23 @@
 // exit and swap fade. Added for Neko: copy link and full page in the header, the
 // task's actions under the meta row, and the reply box above the footer.
 // The full-page task is TaskBuilder (see TaskDetail).
-import { type KeyboardEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+// Neko's own shape since 2026-10-25 (owner): no "Task details" heading, the task's title
+// is the heading; its actions, copy link and full page sit beside it; the tabs share a
+// row with the status and meta; no previous/next buttons or footer (← → still move);
+// and the sheet spans the whole page, header included.
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkbench } from "@/useStore";
 import { useOpenAfterMount } from "@/hooks/useOpenAfterMount";
-import { ArrowsOutSimple, CaretLeft, CaretRight, Check, Link as LinkIcon, X } from "@/ui/icons";
+import { ArrowsOutSimple, Check, Link as LinkIcon, X } from "@/ui/icons";
 import { Button } from "@/ui/button";
-import { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetTitle } from "@/ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/ui/empty";
 import { cn } from "@/ui/lib/utils";
 import { taskActions, type Ui } from "@/work/taskActions";
 import { taskTitle, type Task } from "@/work/model";
+import { TaskActions } from "@/work/TaskDetail";
+import { repositoryOf } from "@/work/model";
 import { TaskSheetBody } from "./TaskSheet.helperComponents";
 import { useSwapFade } from "./TaskSheet.hooks";
 import { TaskSheetSkeleton } from "./TaskSheet.skeletons";
@@ -62,7 +68,11 @@ export function TaskSheet({ id, order: list, ui, container, onSelect, onClose, o
     setTimeout(() => setCopied(false), 1200);
   }, [id]);
 
-  const moveWithArrows = (event: KeyboardEvent<HTMLDivElement>) => {
+  // ← → move between tasks while the sheet is open, wherever focus is (a swap re-renders the
+  // title, so focus can leave the sheet); typing in a field or on a tab is left alone.
+  const move = useRef<(event: globalThis.KeyboardEvent) => void>(() => {});
+  move.current = (event) => {
+    if (event.defaultPrevented) return;
     if (event.target instanceof HTMLElement && event.target.closest(IGNORE_ARROWS_IN)) return;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if ((event.key === "ArrowLeft" || event.key === "k") && index > 0) {
@@ -74,6 +84,11 @@ export function TaskSheet({ id, order: list, ui, container, onSelect, onClose, o
       select(index + 1);
     }
   };
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => move.current(event);
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, []);
 
   return (
     <Sheet
@@ -91,13 +106,20 @@ export function TaskSheet({ id, order: list, ui, container, onSelect, onClose, o
         container={container}
         initialFocus={closeButton}
         showCloseButton={false}
-        onKeyDown={moveWithArrows}
-        className={cn("app-sheet", container ? "w-[520px] max-w-[50%] sm:max-w-[50%]" : "sm:max-w-xl")}
+        className={cn("app-sheet", container ? "w-[600px] max-w-[60%] sm:max-w-[60%]" : "sm:max-w-2xl")}
       >
-        <div data-slot="task-detail" data-task-id={id} className="flex min-h-0 flex-1 flex-col">
-          <div className="flex h-16 shrink-0 items-center justify-between gap-2 px-6 pt-1">
-            <SheetTitle>Task details</SheetTitle>
-            <div className="flex items-center gap-1.5">
+        <div data-slot="task-detail" data-task-id={id} className="@container/sheet flex min-h-0 flex-1 flex-col">
+          {/* One row: the task's title, then everything you do with it. */}
+          <div className="flex shrink-0 items-start gap-3 px-6 pt-5 pb-3">
+            <SheetTitle
+              key={id}
+              data-slot="task-title"
+              className={cn("line-clamp-2 min-w-0 flex-1 pt-1 text-lg font-semibold tracking-tight break-words", swapFade)}
+            >
+              {task ? taskTitle(task) : "Task"}
+            </SheetTitle>
+            <div className="flex shrink-0 items-center gap-1">
+              {task ? <TaskActions task={task} snapshot={snapshot} actions={actions} ui={ui} repo={repositoryOf(snapshot, task)} className="flex-nowrap" /> : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Copy a link to this task" onClick={copyLink}>
@@ -108,27 +130,21 @@ export function TaskSheet({ id, order: list, ui, container, onSelect, onClose, o
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" className="me-1 text-muted-foreground" aria-label="Open as a full page" onClick={onToggleFull}>
+                  <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Open as a full page" onClick={onToggleFull}>
                     <ArrowsOutSimple size={16} />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Full page</TooltipContent>
               </Tooltip>
-              <Button variant="ghost" size="icon-sm" className="sky-pebble" aria-label="Previous task" disabled={index <= 0} onClick={() => select(index - 1)}>
-                <CaretLeft size={16} />
-              </Button>
-              <Button variant="ghost" size="icon-sm" className="sky-pebble" aria-label="Next task" disabled={index >= count - 1} onClick={() => select(index + 1)}>
-                <CaretRight size={16} />
-              </Button>
               <SheetClose asChild>
-                <Button ref={closeButton} variant="ghost" size="icon-sm" className="ms-1 text-muted-foreground" aria-label="Close task">
+                <Button ref={closeButton} variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Close task">
                   <X size={16} />
                 </Button>
               </SheetClose>
             </div>
           </div>
           <SheetDescription className="sr-only">
-            Read the conversation, the changes and the details, reply to the agent, or move between tasks.
+            Read the conversation, the changes and the details, or reply to the agent. The left and right arrow keys move between tasks.
           </SheetDescription>
           {!snapshot ? (
             <TaskSheetSkeleton />
@@ -137,7 +153,6 @@ export function TaskSheet({ id, order: list, ui, container, onSelect, onClose, o
               task={task}
               snapshot={snapshot}
               ui={ui}
-              actions={actions}
               tab={tab}
               onTab={setTab}
               onOpenTask={onOpenTask}
@@ -151,12 +166,6 @@ export function TaskSheet({ id, order: list, ui, container, onSelect, onClose, o
               </EmptyHeader>
             </Empty>
           )}
-          <SheetFooter className="mt-0 flex-nowrap">
-            <span className="whitespace-nowrap tabular-nums" aria-live="polite">
-              Task {index + 1} of {count}
-            </span>
-            <span className="hidden lg:inline">← → to move between tasks</span>
-          </SheetFooter>
         </div>
       </SheetContent>
     </Sheet>

@@ -9,9 +9,9 @@ import { useTaskTabs } from "@/extensions";
 import { cn } from "@/ui/lib/utils";
 import { TaskComposer, TaskConversation } from "@/chat/TaskConversation";
 import { Changes } from "@/work/Changes";
-import { Details, TaskActions } from "@/work/TaskDetail";
-import type { TaskAction, Ui } from "@/work/taskActions";
-import { friendlyStatus, pullRequestNumber, relative, repositoryOf, stageOf, taskTitle, type Task } from "@/work/model";
+import { Details } from "@/work/TaskDetail";
+import type { Ui } from "@/work/taskActions";
+import { friendlyStatus, pullRequestNumber, relative, repositoryOf, stageOf, type Task } from "@/work/model";
 
 // The sky status pill's states (`on`, `warn`, `error`, `off`, `pending`) plus a tint
 // for the two stages hushbacks has no state for.
@@ -36,44 +36,37 @@ type TaskSheetBodyProps = {
   task: Task;
   snapshot: any;
   ui: Ui;
-  actions: TaskAction[];
   tab: string;
   onTab: (tab: string) => void;
   onOpenTask: (id: string) => void;
   swapFade: string | undefined;
 };
 
-export function TaskSheetBody({ task, snapshot, ui, actions, tab, onTab, onOpenTask, swapFade }: TaskSheetBodyProps) {
+export function TaskSheetBody({ task, snapshot, ui, tab, onTab, onOpenTask, swapFade }: TaskSheetBodyProps) {
   const extraTabs = useTaskTabs(); // tabs a page added with host.addTab
   const repo = repositoryOf(snapshot, task);
   const prNumber = pullRequestNumber(task);
   return (
     <>
-      <div className="shrink-0 space-y-2 px-6 pt-2 pb-5">
-        <h3 key={task.id} data-slot="task-title" className={cn("break-words text-lg font-semibold tracking-tight", swapFade)}>
-          {taskTitle(task)}
-        </h3>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <TaskStatusPill status={task.status} />
-          {repo ? <span>{repo}</span> : null}
-          {prNumber ? (
-            <a href={task.pull_request.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-sm tabular-nums outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-              <GitPullRequest size={13} aria-hidden /> {prNumber}
-            </a>
-          ) : null}
-          <span className="tabular-nums">Updated {relative(task.updated_at_ms) || "—"}</span>
-          <span className="tabular-nums">NEK-{String(task.id).slice(0, 4).toUpperCase()}</span>
-        </div>
-        <TaskActions task={task} snapshot={snapshot} actions={actions} ui={ui} repo={repo} className="pt-2" />
-      </div>
       <Tabs value={tab} onValueChange={(v: string) => onTab(v)} className="sky-tabs min-h-0 flex-1 gap-0">
-        <div className="shrink-0 px-6 pb-2">
+        {/* Sections on the left; where the task stands on the right. */}
+        <div className="flex shrink-0 items-center gap-3 px-6 pb-3">
           <TabsList aria-label="Task sections">
             <TabsTab value="conversation">Conversation</TabsTab>
             <TabsTab value="changes">Changes</TabsTab>
             <TabsTab value="details">Details</TabsTab>
             {extraTabs.map((t) => <TabsTab key={t.id} value={t.id}>{t.title}</TabsTab>)}
           </TabsList>
+          <div className="ms-auto flex min-w-0 items-center justify-end gap-x-3 text-xs text-muted-foreground">
+            <TaskStatusPill status={task.status} />
+            {repo ? <span className="hidden truncate @md/sheet:inline">{repo}</span> : null}
+            {prNumber ? (
+              <a href={task.pull_request.url} target="_blank" rel="noreferrer" className="hidden items-center gap-1 rounded-sm tabular-nums outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring @lg/sheet:inline-flex">
+                <GitPullRequest size={13} aria-hidden /> {prNumber}
+              </a>
+            ) : null}
+            <span className="hidden whitespace-nowrap tabular-nums @xl/sheet:inline" title={`NEK-${String(task.id).slice(0, 4).toUpperCase()}`}>Updated {relative(task.updated_at_ms) || "—"}</span>
+          </div>
         </div>
         <TabsPanel value="conversation" className="flex min-h-0 flex-col">
           <div key={task.id} className={cn("flex min-h-0 flex-1 flex-col", swapFade)}>
@@ -98,7 +91,7 @@ export function TaskSheetBody({ task, snapshot, ui, actions, tab, onTab, onOpenT
           </TabsPanel>
         ))}
       </Tabs>
-      <div className="shrink-0 px-4 pt-1">
+      <div className="shrink-0 px-4 pt-1 pb-4">
         <TaskComposer task={task} ui={ui} />
       </div>
     </>
