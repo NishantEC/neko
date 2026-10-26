@@ -67,6 +67,7 @@ index 7c1d9aa..e41b6f0 100644
 /** Carries a card with the pointer in small steps (dnd-kit wants a real gesture). `hold` leaves the button down. */
 async function mouseDrag(page, from, to, { hold = false } = {}) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  await from.scrollIntoViewIfNeeded();
   const a = await from.boundingBox();
   const b = await to.boundingBox();
   await page.mouse.move(a.x + a.width / 2, a.y + 24);
