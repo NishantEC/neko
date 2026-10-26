@@ -180,7 +180,6 @@ function GroupIndicator({ group }: IDockviewHeaderActionsProps) {
 
   useLayoutEffect(() => {
     const indicator = ref.current;
-    const root = group.element as HTMLElement;
     const strip = host?.querySelector<HTMLElement>(".dv-tabs-container");
     if (!host || !strip || !indicator) return;
     let last: { id: string; ids: string } | null = null;
@@ -216,7 +215,6 @@ function GroupIndicator({ group }: IDockviewHeaderActionsProps) {
       indicator.style.transform = `translateX(${left}px)`;
       indicator.style.width = `${width}px`;
       if (!slide) { void indicator.offsetWidth; indicator.style.transition = ""; }
-      root.toggleAttribute("data-dock-first-active", tabs[0] === active);
     };
     const schedule = () => { if (!raf) raf = requestAnimationFrame(measure); };
 
