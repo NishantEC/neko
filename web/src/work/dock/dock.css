@@ -1,12 +1,14 @@
 /* dockview, on Neko's tokens. Every colour is a CSS variable the app already
  * switches with `.dark` / `.light`, so there is no per-theme code here.
  *
- * Shape: hushbacks' "fused tab" (apps/spa Builder: BuilderViewTabs / BuilderPanelTabs
- * @da20dfaeb, recovered from this repo's web/src/work/builder before fd8f4e7). A quiet
- * chrome behind; each pane is a rounded card; the tab strip sits on the chrome. The
- * active tab is the card's own colour, 40px tall, rounded 14px on top, with a 12px
- * concave connector at each foot, so it reads as the card's tab rather than a button
- * on it. Inactive tabs are recessed 36px pills on the chrome, tinted on hover.
+ * Shape: hushbacks' "fused tab" (apps/spa Builder: BuilderViewTabs / BuilderPanelTabs /
+ * useFusedTabIndicator on origin/main). A quiet chrome behind; each pane is a card of
+ * one flat fill, rounded 12px on top and 32px below, with NO border, ring or shadow:
+ * the card and its tab are told apart from the chrome by colour alone. The active tab
+ * is the card's own colour, 40px tall, rounded 14px on top, with a 12px concave foot
+ * each side, so it reads as the card's tab rather than a button on it. Inactive tabs
+ * are recessed 36px pills on the chrome, tinted on hover. Panes sit 12px from the
+ * window edges and 6px apart (hushbacks: pl-3 / pr-0.5 + 1px handle + pl-[3px] / pr-3 pb-3).
  * The active tab is a per-group sliding indicator (GroupIndicator in DockWorkspace.tsx),
  * as in the original, one per pane. Plain sans throughout. */
 /* the page behind the cards (from hushbacks builder-shell, on Neko tokens) */
@@ -75,7 +77,10 @@
   --dv-border-radius: 14px;
   --dv-tab-border-radius: 8px;
   --dock-tab-radius: 14px;
-  --dock-line: color-mix(in srgb, var(--foreground) 16%, transparent);
+  /* the card (hushbacks: rounded-t-xl rounded-b-4xl p-1; inner rounded-t-lg rounded-b-[28px]) */
+  --dock-card-top: 12px;
+  --dock-card-bottom: 32px;
+  --dock-card-inset: 4px;
   --dock-tab-foot: 12px;
   --dv-sash-border-radius: 3px;
   --dv-dropdown-border-radius: 10px;
@@ -101,7 +106,7 @@
 .neko-dock .dv-groupview {
   box-sizing: border-box;
   border: 3px solid var(--builder-chrome, var(--sidebar));
-  border-radius: calc(var(--dv-border-radius) + 3px);
+  border-radius: calc(var(--dock-card-top) + 3px) calc(var(--dock-card-top) + 3px) calc(var(--dock-card-bottom) + 3px) calc(var(--dock-card-bottom) + 3px);
   background: var(--builder-chrome, var(--sidebar));
   color: var(--foreground);
 }
@@ -109,31 +114,20 @@
   padding: 0 6px 0 0;
   background: var(--builder-chrome);
 }
-/* room either side for the end tabs' concave feet (the strip clips overflow, and a foot past the end would start a scrollbar) */
+/* The strip starts 24px in (hushbacks pl-6), so the first tab's foot lands on the card's
+ * straight top edge, past its 12px corner; the right pad is room for the last tab's foot
+ * (the strip clips overflow, and a foot past the end would start a scrollbar). */
 .neko-dock .dv-groupview .dv-tabs-container {
-  padding-left: var(--dock-tab-foot);
+  padding-left: calc(var(--dock-tab-foot) * 2);
   padding-right: var(--dock-tab-foot);
 }
 .neko-dock .dv-groupview .dv-content-container {
   background: var(--builder-pane);
   position: relative;
-  border-radius: var(--dock-tab-radius);
+  box-sizing: border-box;
+  padding: var(--dock-card-inset);
+  border-radius: var(--dock-card-top) var(--dock-card-top) var(--dock-card-bottom) var(--dock-card-bottom);
   overflow: hidden;
-  transition: border-top-left-radius var(--dock-slide) var(--dock-ease);
-}
-/* The card's outline: an overlay, so nothing inside can paint over it. */
-.neko-dock .dv-groupview .dv-content-container::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  pointer-events: none;
-  border: 1px solid var(--dock-line);
-  border-radius: inherit;
-}
-/* The card's top-left corner is square when the first tab is the active one: the tab's foot meets it. */
-.neko-dock .dv-groupview[data-dock-first-active] .dv-content-container {
-  border-top-left-radius: 0;
 }
 
 /* Tabs. dockview owns the outer .dv-tab (draggable, role=tab); .dock-tab is ours.
@@ -192,12 +186,12 @@
 .dv-tab-ghost-drag .dock-tab::before,
 .dock-indicator::before {
   left: calc(var(--dock-tab-foot, 12px) * -1);
-  background: radial-gradient(circle 12px at 0 0, transparent 10.5px, var(--dock-line) 11px, var(--dock-line) 11.5px, var(--builder-pane, var(--card)) 12px);
+  background: radial-gradient(circle 12px at 0 0, transparent 11.5px, var(--builder-pane, var(--card)) 12px);
 }
 .dv-tab-ghost-drag .dock-tab::after,
 .dock-indicator::after {
   right: calc(var(--dock-tab-foot, 12px) * -1);
-  background: radial-gradient(circle 12px at 100% 0, transparent 10.5px, var(--dock-line) 11px, var(--dock-line) 11.5px, var(--builder-pane, var(--card)) 12px);
+  background: radial-gradient(circle 12px at 100% 0, transparent 11.5px, var(--builder-pane, var(--card)) 12px);
 }
 
 /* The per-group sliding indicator (hushbacks useFusedTabIndicator: 0.34s, ease [0.22,1,0.36,1]).
@@ -209,12 +203,8 @@
 .dock-indicator {
   position: absolute;
   left: 0;
-  /* one pixel into the card, so the tab and the card are one outline */
-  bottom: -1px;
-  height: 41px;
-  box-sizing: border-box;
-  border: 1px solid var(--dock-line);
-  border-bottom: 0;
+  bottom: 0;
+  height: 40px;
   width: 0;
   z-index: 0;
   pointer-events: none;
@@ -317,9 +307,11 @@
   outline: 2px solid var(--ring);
 }
 
-/* The panel body fills its card. */
+/* The panel body fills its card, inside the card's 4px inset, on the inner radii. */
 .dock-panel-body {
   height: 100%;
+  border-radius: calc(var(--dock-card-top) - var(--dock-card-inset)) calc(var(--dock-card-top) - var(--dock-card-inset)) calc(var(--dock-card-bottom) - var(--dock-card-inset)) calc(var(--dock-card-bottom) - var(--dock-card-inset));
+  overflow: hidden;
   min-height: 0;
   min-width: 0;
   display: flex;

@@ -95,7 +95,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     }
     return out;
   });
-  check(fused.length > 0 && fused.every((f) => f.n === 1 && f.same && f.h === 41 && f.aligned && f.strip === 52 && f.idleH === 36 && f.feet), `every group has its own fused indicator under its active tab (card colour, 40px, feet; 52px strip; idle tabs 36px) ${JSON.stringify(fused)}`);
+  check(fused.length > 0 && fused.every((f) => f.n === 1 && f.same && f.h === 40 && f.aligned && f.strip === 52 && f.idleH === 36 && f.feet), `every group has its own fused indicator under its active tab (card colour, 40px, feet; 52px strip; idle tabs 36px) ${JSON.stringify(fused)}`);
 
   // the indicator SLIDES: click another tab in the group and sample its box twice inside the transition
   const ind = page.locator("[data-slot='dock'] .dv-groupview").nth(1).locator(".dock-indicator");
