@@ -56,9 +56,13 @@ export function TaskSheet({ id, order: list, ui, container, onSelect, onClose, o
   const order = list.includes(id) ? list : [id];
   const index = order.indexOf(id);
   const count = order.length;
+  // The task a key press moves from: set the moment a move is asked for, so a second press
+  // before the sheet re-renders moves on from the new task, not the old one again.
+  const at = useRef(id);
+  useEffect(() => { at.current = id; }, [id]);
   const select = (next: number) => {
     const target = order[next];
-    if (target) onSelect(target);
+    if (target) { at.current = target; onSelect(target); }
   };
 
   const [copied, setCopied] = useState(false);
@@ -75,13 +79,14 @@ export function TaskSheet({ id, order: list, ui, container, onSelect, onClose, o
     if (event.defaultPrevented) return;
     if (event.target instanceof HTMLElement && event.target.closest(IGNORE_ARROWS_IN)) return;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if ((event.key === "ArrowLeft" || event.key === "k") && index > 0) {
+    const from = order.indexOf(at.current) >= 0 ? order.indexOf(at.current) : index;
+    if ((event.key === "ArrowLeft" || event.key === "k") && from > 0) {
       event.preventDefault();
-      select(index - 1);
+      select(from - 1);
     }
-    if ((event.key === "ArrowRight" || event.key === "j") && index < count - 1) {
+    if ((event.key === "ArrowRight" || event.key === "j") && from < count - 1) {
       event.preventDefault();
-      select(index + 1);
+      select(from + 1);
     }
   };
   useEffect(() => {
