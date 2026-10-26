@@ -13,7 +13,9 @@
 .builder-shell,
 .neko-dock-host {
   --builder-chrome: var(--sidebar);
-  --builder-pane: var(--card);
+  /* the tab and its frame: the page colour (hushbacks' light builder panel), so the white
+   * content inside reads as a second tone */
+  --builder-pane: var(--background);
 }
 .dark .builder-shell,
 .dark .neko-dock-host {
@@ -113,9 +115,12 @@
   padding-left: var(--dock-tab-foot);
   padding-right: var(--dock-tab-foot);
 }
+/* Two tones, as the first copy had (hushbacks builder panel): the card is a frame in the
+ * tab's colour, 4px wide, round 12px on top and 32px below; the content sits inside on
+ * --card, round 8px / 28px, so the tab and frame read as one and the content as another. */
 .neko-dock .dv-groupview .dv-content-container {
   background: var(--builder-pane);
-  border-radius: var(--dock-tab-radius);
+  border-radius: 12px 12px 32px 32px;
   overflow: hidden;
   transition: border-top-left-radius var(--dock-slide) var(--dock-ease);
 }
@@ -300,14 +305,19 @@
   outline: 2px solid var(--ring);
 }
 
-/* The panel body fills its card. */
+/* The panel body sits 4px inside its card (dockview draws panels in an overlay over the
+ * card, so the inset is here, not padding on the card). */
 .dock-panel-body {
-  height: 100%;
+  box-sizing: border-box;
+  margin: 4px;
+  height: calc(100% - 8px);
   min-height: 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--builder-pane, var(--card));
+  background: var(--card);
+  border-radius: 8px 8px 28px 28px;
+  overflow: hidden;
   color: var(--foreground);
 }
 
