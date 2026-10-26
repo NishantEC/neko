@@ -142,6 +142,10 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   const acme-apiPanel = page.locator("[data-slot='workspace'][data-workspace='acme-api']");
   check((await acme-apiPanel.innerText()).includes("1 active"), "acme-api shows its watch summary (1 active, 1 paused)");
   await both("workspaces", "[data-slot='workspace']", "Workspaces");
+  // Sync now with a paused watch beside an active one: the paused one is skipped, not an error.
+  await acme-apiPanel.getByRole("button", { name: "Sync now" }).click();
+  await sleep(1500);
+  check(!/Couldn.t sync/.test(await acme-apiPanel.innerText()), "Sync now wakes the active watches and skips the paused one");
   await page.getByRole("button", { name: "Add workspace" }).first().click();
   await dialog().waitFor();
   await dialog().getByLabel("Name", { exact: true }).fill("scratch");

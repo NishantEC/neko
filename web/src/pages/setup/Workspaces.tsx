@@ -128,10 +128,20 @@ function WorkspacePanel({ snapshot, workspace, onEdit }: { snapshot: Json; works
   const failing = watches.some((w) => (w.failures ?? 0) > 0);
   const broken = tools.filter((c) => c.enabled && str(c.error));
 
+  // Wakes the active watches only (a paused or suggested one is refused by the daemon), and
+  // one that fails does not stop the rest; the error names the ones that did.
   const syncNow = () =>
     run(async () => {
       let last: Json = null;
-      for (const w of watches) last = await mcp("Wake", { responsibility_id: w.id });
+      const failed: string[] = [];
+      for (const w of watches.filter((w) => w.enabled)) {
+        try {
+          last = await mcp("Wake", { responsibility_id: w.id });
+        } catch (e) {
+          failed.push(`${str(w.name) || "A watch"}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (failed.length) throw new Error(failed.join("\n"));
       return last;
     });
 
@@ -144,7 +154,7 @@ function WorkspacePanel({ snapshot, workspace, onEdit }: { snapshot: Json; works
           {open > 0 ? <Badge variant="outline" className="font-mono text-[11px] font-normal text-muted-foreground">{open} open</Badge> : null}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void syncNow()} disabled={watches.length === 0 || busy} loading={busy} title={watches.length === 0 ? "Add something to watch first" : "Check everything this workspace watches"}>
+          <Button variant="outline" size="sm" onClick={() => void syncNow()} disabled={active === 0 || busy} loading={busy} title={active === 0 ? "Nothing here is being watched right now" : "Check everything this workspace watches"}>
             <ArrowsClockwise /> Sync now
           </Button>
           <Button variant="outline" size="sm" onClick={onEdit}><PencilSimple /> Edit</Button>
