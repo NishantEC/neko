@@ -116,6 +116,14 @@ ago follow rules written today. The daemon publishes those rules to
 `agent-rules.md` in the data dir; Neko's own runs also get Vitest/pytest
 worker-cap env, and at night over load 12 the steward renices build and test
 processes to 10 (nothing is stopped).
+**The daemon's own memory (2026-10-27).** Its live heap is ~25 MB (`heap`),
+yet RSS ran 280-550 MB and it used ~13-20% of a core while idle: each held
+`WorkbenchIfChanged` request (one per open page) reloaded the 6.5 MB snapshot
+from SQLite and serialized it to hash every 2 s even when nothing changed,
+and the allocator keeps the freed multi-megabyte buffers. Stored changes bump
+`data_revision`, which wakes the wait at once, so the timed reload is now a
+15 s safety net (`IDLE_SNAPSHOT_RELOAD`). Measure with `ps -o time=` over
+two minutes and `footprint`/`heap`, not RSS alone.
 **Web-only changes ship without a reinstall** (2026-10-27): commit `web/`,
 then `bash scripts/ship-web.sh` (~1 min; `--rollback` undoes). It swaps
 `<data>/web-live`, which the running daemon serves per request; anything

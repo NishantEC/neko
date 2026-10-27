@@ -2318,6 +2318,10 @@ const MAX_CHANGE_WAIT: std::time::Duration = std::time::Duration::from_secs(25);
 /// stored value changed, plus every two seconds for anything held in memory,
 /// the cadence the app used to poll at; between those it sleeps without the
 /// database lock.
+/// How long a held snapshot request waits between reloads when no stored
+/// value changed.
+const IDLE_SNAPSHOT_RELOAD: std::time::Duration = std::time::Duration::from_secs(15);
+
 fn wait_for_change(state: &AppState, digest: String, wait_ms: u64, web: bool) -> Response {
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms).min(MAX_CHANGE_WAIT);
     loop {
@@ -2327,7 +2331,13 @@ fn wait_for_change(state: &AppState, digest: String, wait_ms: u64, web: bool) ->
             Err(message) => return Response::Error { message },
         };
         if snapshot.digest != digest { return Response::Workbench(snapshot); }
-        let reload_by = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        // Every stored change bumps `data_revision`, which wakes this at once;
+        // the timed reload is only a safety net for a write it cannot see
+        // (another process). At 2 s each open page reloaded and hashed the
+        // whole multi-megabyte snapshot every 2 s while nothing changed: most
+        // of an idle daemon's CPU and its 300-480 MB of churned allocations
+        // (2026-10-27).
+        let reload_by = std::time::Instant::now() + IDLE_SNAPSHOT_RELOAD;
         loop {
             if std::time::Instant::now() >= deadline { return Response::WorkbenchUnchanged { digest }; }
             if neko_core::db::data_revision() != seen || std::time::Instant::now() >= reload_by { break; }
