@@ -51,21 +51,21 @@ export function TaskSheetBody({ task, snapshot, ui, tab, onTab, onOpenTask, swap
       <Tabs value={tab} onValueChange={(v: string) => onTab(v)} className="sky-tabs min-h-0 flex-1 gap-0">
         {/* Sections on the left; where the task stands on the right. */}
         <div className="flex shrink-0 items-center gap-3 px-6 pb-3">
-          <TabsList aria-label="Task sections">
+          <TabsList aria-label="Task sections" className="shrink-0">
             <TabsTab value="conversation">Conversation</TabsTab>
             <TabsTab value="changes">Changes</TabsTab>
             <TabsTab value="details">Details</TabsTab>
             {extraTabs.map((t) => <TabsTab key={t.id} value={t.id}>{t.title}</TabsTab>)}
           </TabsList>
-          <div className="ms-auto flex min-w-0 items-center justify-end gap-x-3 text-xs text-muted-foreground">
-            <TaskStatusPill status={task.status} />
-            {repo ? <span className="hidden truncate @md/sheet:inline">{repo}</span> : null}
+          <div className="ms-auto flex min-w-0 shrink items-center justify-end gap-x-3 overflow-hidden text-xs text-muted-foreground">
+            <span className="shrink-0"><TaskStatusPill status={task.status} /></span>
+            {repo ? <span className="hidden truncate @xl/sheet:inline">{repo}</span> : null}
             {prNumber ? (
-              <a href={task.pull_request.url} target="_blank" rel="noreferrer" className="hidden items-center gap-1 rounded-sm tabular-nums outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring @lg/sheet:inline-flex">
+              <a href={task.pull_request.url} target="_blank" rel="noreferrer" className="hidden items-center gap-1 rounded-sm tabular-nums outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring @2xl/sheet:inline-flex">
                 <GitPullRequest size={13} aria-hidden /> {prNumber}
               </a>
             ) : null}
-            <span className="hidden whitespace-nowrap tabular-nums @xl/sheet:inline" title={`NEK-${String(task.id).slice(0, 4).toUpperCase()}`}>Updated {relative(task.updated_at_ms) || "—"}</span>
+            <span className="hidden whitespace-nowrap tabular-nums @3xl/sheet:inline" title={`NEK-${String(task.id).slice(0, 4).toUpperCase()}`}>Updated {relative(task.updated_at_ms) || "—"}</span>
           </div>
         </div>
         <TabsPanel value="conversation" className="flex min-h-0 flex-col">
