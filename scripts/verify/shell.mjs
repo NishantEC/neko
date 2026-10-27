@@ -135,7 +135,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   check(chips.length === 1 && /^Tasks\d+$/.test(chips[0].row.replace(/\s+/g, "")) && chips[0].tone === "amber", `the only badge is the Tasks row's amber count of what waits on you (${chips.map((c) => c.row).join(" | ")})`);
   const daily = await page.locator("[data-slot='sidebar-daily'] [data-slot='nav-item']").allInnerTexts();
   const setupRows = await page.locator("[data-slot='sidebar-setup'] [data-slot='nav-item']").allInnerTexts();
-  check(["Home", "Tasks", "Pull requests", "Agent tree", "Watching"].every((t, i) => daily[i]?.trim().startsWith(t)), `the daily pages lead the sidebar: ${daily.map((t) => t.trim()).join(", ")}`);
+  check(["Home", "Tasks", "Pull requests", "Watching"].every((t, i) => daily[i]?.trim().startsWith(t)), `the daily pages lead the sidebar: ${daily.map((t) => t.trim()).join(", ")}`);
   check(["Schedules", "Memory", "Profiles", "Tools & skills", "Settings", "Usage & machine"].every((t) => setupRows.some((r) => r.trim() === t)) && ![...daily, ...setupRows].some((t) => t.trim() === "Workspaces"), `the pages you set up once sit at the bottom, and Workspaces lives in the switcher: ${setupRows.join(", ")}`);
   const title = await page.title();
   check(/^\(\d+\) Neko$/.test(title), `the document title carries the count when something needs you: "${title}"`);

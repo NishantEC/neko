@@ -5,7 +5,7 @@
 // owner picked (2026-10-28): an inset, icon-collapsible sidebar; a header with
 // the mark, a "/" and hushbacks' workspace switcher (shell/workspace.ts, which
 // Home, Tasks, Pull requests and the Agent tree follow); ⌘K search; the daily
-// pages under a hairline (Home, Tasks, Pull requests, Agent tree, Watching,
+// pages under a hairline (Home, Tasks, Pull requests, Watching,
 // then pages of yours and plugins: one registry, no marks); the pages you set
 // up once in smaller rows at the bottom (nothing expands: Settings' sections
 // are a rail on its own page); a footer that is one status line and a gear. No task list:
@@ -49,11 +49,11 @@ export function Mark({ className }: { className?: string }) {
 // ---------------------------------------------------------------------------
 
 /** The daily pages, in this order; pages of yours and plugins follow them. */
-const TOP = [HOME, "tasks", "prs", "tree", "watching"];
+const TOP = [HOME, "tasks", "prs", "watching"];
 /** The pages you set up once, smaller, at the bottom; other system pages (Customisations, UI gallery) follow them. */
 const BOTTOM = ["schedules", "memory", "profiles", "tools", "settings", "usage"];
-/** Reached from the switcher's "Manage workspaces…", not listed. */
-const HIDDEN = ["workspaces"];
+/** Not listed: Workspaces is the switcher's "Manage workspaces…"; the agent tree is the Tasks page's Tree view (and ⌘K). */
+const HIDDEN = ["workspaces", "tree"];
 
 function place(pages: PageDef[]): { top: PageDef[]; bottom: PageDef[] } {
   const known = (ids: string[]) => ids.map((id) => pages.find((p) => p.id === id)).filter((p): p is PageDef => !!p);

@@ -65,7 +65,7 @@ export default function register(host) {
   await nav("My notes").waitFor({ timeout: 12000 });
   check(!(await nav("My notes").innerText()).includes("yours"), "a page of yours sits in the normal sidebar, unmarked: one registry");
   const workGroup = await page.locator("[data-slot='nav-item']").evaluateAll((els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
-  check(workGroup.indexOf("My notes") > workGroup.findIndex((t) => /^Agent tree/.test(t)) && workGroup.indexOf("My notes") < workGroup.findIndex((t) => /^Settings/.test(t)), `the manifest's group puts it with the Work pages: ${workGroup.join(" | ")}`);
+  check(workGroup.indexOf("My notes") > workGroup.findIndex((t) => /^Watching/.test(t)) && workGroup.indexOf("My notes") < workGroup.findIndex((t) => /^Settings/.test(t)), `the manifest's group puts it with the Work pages: ${workGroup.join(" | ")}`);
 
   // ---- host.storage round trip -------------------------------------------------------------
   await nav("My notes").click();
