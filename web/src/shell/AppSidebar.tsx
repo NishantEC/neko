@@ -7,12 +7,12 @@
 // Home, Tasks, Pull requests and the Agent tree follow); ⌘K search; the daily
 // pages under a hairline (Home, Tasks, Pull requests, Agent tree, Watching,
 // then pages of yours and plugins: one registry, no marks); the pages you set
-// up once in smaller rows at the bottom, Settings' sub-navigation revealed
-// under its row; a footer that is one status line and a gear. No task list:
+// up once in smaller rows at the bottom (nothing expands: Settings' sections
+// are a rail on its own page); a footer that is one status line and a gear. No task list:
 // New task is ⌘N, ⌘K and the Tasks page. The only badge is the Tasks count of
 // what waits on you; the status line says the rest.
 import { useEffect, useState, type ComponentProps, type MouseEvent } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarTrigger, useSidebar,
 } from "@/ui/sidebar";
@@ -25,8 +25,6 @@ import { CaretUpDown, Check, Command as CommandIcon, Gear, MagnifyingGlass, Stac
 import { cn } from "@/ui/lib/utils";
 import "@/pages";
 import { usePages, type PageDef } from "@/registry";
-import { useSettingsSections } from "@/extensions";
-import { SECTIONS } from "@/pages/setup/settings/registry";
 import { hrefFor, HOME, navigate } from "@/router";
 import { usePlugins } from "@/plugins";
 import neko from "@/assets/neko-mark.svg";
@@ -34,7 +32,6 @@ import { openPalette } from "@/shell/CommandPalette";
 import { SidebarStatus } from "@/shell/StatusBar";
 import { useShellStatus } from "@/shell/status";
 import { useSelectedWorkspace } from "@/shell/workspace";
-import { requestSettings, useCurrentSettingsSection } from "@/setup/settingsNav";
 import { CollapseWhenNarrow, EASE_OUT, NavItem, shellAlreadyPainted } from "@/shell/AppSidebar.parts";
 
 export function Mark({ className }: { className?: string }) {
@@ -135,84 +132,6 @@ function WorkspaceSwitcher() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Settings' sub-navigation: hushbacks' SubNavItem / SubReveal
-// ---------------------------------------------------------------------------
-
-function SubNavItem({ label, active, layoutId, reduce = false, onClick }: {
-  label: string;
-  active: boolean;
-  layoutId: string;
-  reduce?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-current={active ? "page" : undefined}
-      className={cn(
-        "group/sub relative flex w-full items-center gap-2.5 rounded-md py-1.5 pl-3 pr-2 text-start text-[13px] transition-colors duration-150",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-        active ? "font-medium text-foreground" : "text-foreground/55 hover:text-foreground",
-      )}
-    >
-      {active ? (
-        <motion.span
-          aria-hidden
-          layoutId={layoutId}
-          transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 42 }}
-          style={{ borderRadius: 6 }}
-          className="absolute inset-0 border border-border/40 bg-background/70"
-        />
-      ) : (
-        <span aria-hidden className="absolute inset-0 rounded-md transition-colors duration-150 group-hover/sub:bg-foreground/[0.04]" />
-      )}
-      <span className="relative z-10 truncate">{label}</span>
-    </button>
-  );
-}
-
-function SettingsSubReveal({ open, reduce }: { open: boolean; reduce: boolean }) {
-  const current = useCurrentSettingsSection();
-  const { state } = useSidebar();
-  const extra = useSettingsSections();
-  const sections = [...SECTIONS.map((s) => ({ id: s.id as string, title: s.title })), ...extra.map((s) => ({ id: s.id, title: s.title }))];
-  const layoutId = "settings-sub-active";
-  return (
-    <AnimatePresence initial={false}>
-      {open && state !== "collapsed" ? (
-        <motion.div
-          key={layoutId}
-          initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
-          animate={reduce ? { opacity: 1 } : { height: "auto", opacity: 1 }}
-          exit={
-            reduce
-              ? { opacity: 0, transition: { duration: 0.1 } }
-              : { height: 0, opacity: 0, transition: { duration: 0.22, ease: EASE_OUT } }
-          }
-          transition={reduce ? { duration: 0.12 } : { duration: 0.3, ease: EASE_OUT }}
-          className="overflow-hidden group-data-[collapsible=icon]:hidden"
-        >
-          <nav aria-label="Settings sections" data-slot="settings-nav" className="mt-1 ml-[1.15rem] flex flex-col gap-0.5 border-l border-border/60 pl-3">
-            {sections.map((s, si) => (
-              <motion.div
-                key={s.id}
-                initial={reduce ? undefined : { opacity: 0, x: -5 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.24, ease: EASE_OUT, delay: reduce ? 0 : 0.05 + si * 0.03 }}
-              >
-                <SubNavItem label={s.title} active={current === s.id} layoutId={layoutId} reduce={reduce} onClick={() => requestSettings({ section: s.id })} />
-              </motion.div>
-            ))}
-          </nav>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
-  );
-}
-
-
 /** ⌘K: the same row shape as a nav item, so it lines up with them. */
 function SearchItem() {
   const { state } = useSidebar();
@@ -284,7 +203,6 @@ export function AppSidebar({ route }: { route: string }) {
         small={small}
         trailing={p.id === "tasks" ? <NeedsYouCount /> : undefined}
       />
-      {p.id === "settings" ? <SettingsSubReveal open={route === "settings"} reduce={reduce} /> : null}
     </motion.div>
   );
 

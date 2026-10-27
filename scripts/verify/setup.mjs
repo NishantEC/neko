@@ -298,6 +298,33 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   // ---- Settings -----------------------------------------------------------------
   await open("settings", "[data-slot='settings-nav']");
   await both("settings-general", "[data-slot='settings-section'][data-section='general']", "Settings · General");
+  // The sections are a rail on the page (nothing in the sidebar expands), kept in the address.
+  check((await page.locator("[data-slot='settings-nav']").count()) === 1 && (await page.locator("[data-slot='settings-rail'] [data-slot='settings-nav']").count()) === 1, "Settings' sections are a rail on the page, not in the sidebar");
+  check((await page.locator("[data-slot='settings-rail'] input[aria-label='Find a setting']").count()) === 1, "the settings search sits at the top of the rail");
+  await page.locator("[data-slot='settings-nav']").getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await page.waitForSelector("[data-slot='settings-section'][data-section='diagnostics']");
+  check(/section=diagnostics/.test(await page.evaluate(() => location.hash)), "choosing a section puts it in the address (#/settings?section=diagnostics)");
+  await page.locator("[data-slot='settings-nav']").getByRole("button", { name: "Diagnostics", exact: true }).focus();
+  await page.keyboard.press("ArrowDown");
+  check((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Neko updates", "arrow keys move along the rail");
+  await page.goto(`${origin}/#/settings?section=permissions`);
+  await page.waitForSelector("[data-slot='settings-section'][data-section='permissions']", { timeout: 15000 });
+  check((await page.locator("[data-slot='settings-nav'] [aria-current='page']").innerText()).trim() === "Permissions", "a link to #/settings?section=permissions opens that section, marked in the rail");
+  {
+    const size = page.viewportSize();
+    await page.setViewportSize({ width: 760, height: 900 });
+    await sleep(400);
+    check((await page.locator("[data-slot='settings-nav']").evaluate((el) => getComputedStyle(el).flexDirection)) === "row", "below 900px the rail is a strip of sections across the top");
+    for (const scheme of ["dark", "light"]) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await sleep(300);
+      await shot(`setup-settings-narrow-${scheme}`);
+    }
+    await page.setViewportSize(size);
+  }
+  await page.goto(`${origin}/#/settings?section=general`);
+  await page.waitForSelector("[data-slot='settings-section'][data-section='general']", { timeout: 15000 });
+  await sleep(300);
   await page.keyboard.press("Meta+f");
   check(await page.evaluate(() => document.activeElement?.getAttribute("aria-label") === "Find a setting"), "⌘F focuses the settings search");
   await page.getByLabel("Find a setting").fill("budget");
