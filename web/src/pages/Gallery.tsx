@@ -72,6 +72,7 @@ import { NekoTurn, UserTurn } from "@/chat/turns";
 import { ToolFailed, ToolFold, ToolLine, WorkLog } from "@/chat/work-log";
 import { splitTurn } from "@/chat/sdk/parts";
 import { cn } from "@/ui/lib/utils";
+import { SidebarOptions } from "@/pages/gallery/SidebarOptions";
 import { finishedReply, prRows, queued, runningReply, sampleArgs, structuredReply, usage, userMessage } from "@/pages/gallery-sample";
 
 function Section({ id, eyebrow, title, children }: { id: string; eyebrow: string; title: React.ReactNode; children: React.ReactNode }) {
@@ -602,6 +603,17 @@ function WorkspaceSection() {
   );
 }
 
+function SidebarSection() {
+  return (
+    <Section id="sidebar" eyebrow="Sidebar" title={<>Four ways to tidy the sidebar.</>}>
+      <p className="max-w-2xl text-[13.5px] text-muted-foreground">
+        Proposals only, drawn from sample data; the real sidebar is unchanged. Each keeps Neko&rsquo;s mark, ⌘K and the task rail, and takes its spacing from hushbacks&rsquo; sidebar.
+      </p>
+      <SidebarOptions />
+    </Section>
+  );
+}
+
 export default function Gallery() {
   return (
     <div data-slot="gallery" className="min-h-0 flex-1 overflow-y-auto">
@@ -619,6 +631,7 @@ export default function Gallery() {
         <Editorial />
         <ChatSection />
         <WorkspaceSection />
+        <SidebarSection />
       </div>
     </div>
   );
