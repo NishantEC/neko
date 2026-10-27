@@ -2333,10 +2333,9 @@ fn wait_for_change(state: &AppState, digest: String, wait_ms: u64, web: bool) ->
         if snapshot.digest != digest { return Response::Workbench(snapshot); }
         // Every stored change bumps `data_revision`, which wakes this at once;
         // the timed reload is only a safety net for a write it cannot see
-        // (another process). At 2 s each open page reloaded and hashed the
-        // whole multi-megabyte snapshot every 2 s while nothing changed: most
-        // of an idle daemon's CPU and its 300-480 MB of churned allocations
-        // (2026-10-27).
+        // (another process). It was 2 s: each open page reloaded and hashed
+        // the whole multi-megabyte snapshot every 2 s even when nothing was
+        // stored (see AGENTS.md, "The daemon's own memory").
         let reload_by = std::time::Instant::now() + IDLE_SNAPSHOT_RELOAD;
         loop {
             if std::time::Instant::now() >= deadline { return Response::WorkbenchUnchanged { digest }; }
