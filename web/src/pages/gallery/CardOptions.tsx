@@ -9,7 +9,7 @@
 // slab holding an inset well for the content, then a slim status row under it
 // with a dot, the label, the time and a ⋯ menu.
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, Clock, DotsThree, FolderSimple, GitPullRequest, Hash, WarningCircle } from "@/ui/icons";
+import { DotsThree, GitPullRequest } from "@/ui/icons";
 import { Button } from "@/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { cn } from "@/ui/lib/utils";
@@ -53,8 +53,9 @@ const KINDS: Kind[] = ["stopped", "asks", "approve", "review", "running", "done"
 const LABEL: Record<Kind, string> = { stopped: "Stopped", asks: "Asks you", approve: "Needs approval", review: "Ready to review", running: "Running", done: "Done" };
 const TONE: Record<Kind, Tone> = { stopped: "failed", asks: "attention", approve: "attention", review: "review", running: "running", done: "done" };
 const ACTION: Partial<Record<Kind, string>> = { stopped: "Start again", asks: "Answer", approve: "Approve" };
-/** The 3px edge and the reason well, by state. */
-const EDGE: Record<Tone, string> = { failed: "bg-destructive", attention: "bg-warning", review: "bg-info", running: "bg-primary", done: "bg-success", neutral: "bg-muted-foreground/50" };
+/** The reason well in option 4, by state. */
+/** The well's light tint while a task waits on you (5a). */
+const WELL_TINT: Partial<Record<Tone, string>> = { failed: "bg-destructive/[0.06]", attention: "bg-warning/[0.08]" };
 const WELL: Partial<Record<Tone, string>> = { failed: "bg-destructive/[0.07] ring-destructive/15", attention: "bg-warning/[0.09] ring-warning/20" };
 
 const age = (m: number) => (m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`);
@@ -142,69 +143,6 @@ function SpaciousCard({ t, m, live }: { t: Task; m: Mock; live?: boolean }) {
   );
 }
 
-/** 2. Header, body, footer: a quiet state row, the title, then hairline-separated slots. */
-function SlottedCard({ t, m }: { t: Task; m: Mock }) {
-  const tone = TONE[t.kind];
-  const on = m.selected === t.id;
-  const slots = [
-    { key: "repo", icon: <FolderSimple size={13} aria-hidden />, text: t.repo },
-    t.source ? { key: "source", icon: t.source === "Sentry" ? <WarningCircle size={13} aria-hidden /> : <Hash size={13} aria-hidden />, text: t.source } : null,
-    t.pr ? { key: "pr", icon: <GitPullRequest size={13} aria-hidden />, text: String(t.pr) } : null,
-  ].filter(Boolean) as { key: string; icon: ReactNode; text: string }[];
-  return (
-    <div data-slot="card" data-kind={t.kind} data-selected={on ? "" : undefined} className={cn(SHELL, "overflow-hidden rounded-xl border bg-card shadow-xs", ring(on))}>
-      <Handle t={t} m={m} />
-      <span className="pointer-events-none flex h-9 items-center gap-2 px-3.5 text-[12.5px]">
-        <span aria-hidden className={cn("size-2 rounded-full", TONE_DOT[tone])} />
-        <span className={cn("font-medium", TONE_TEXT[tone])}>{LABEL[t.kind]}</span>
-        <span className="flex-1" />
-        <span className="tabular-nums text-muted-foreground">{t.step ? clock(t.step.seconds) : age(t.age)}</span>
-      </span>
-      <span className="flex flex-col gap-1.5 px-3.5 pb-3.5">
-        <span className="pointer-events-none line-clamp-2 text-[14.5px] font-medium leading-[1.4] text-strong">{t.title}</span>
-        {t.reason ? <span className="pointer-events-none text-[13px] leading-[1.45] text-muted-foreground">{t.reason}</span> : null}
-        {t.step ? <LiveText t={t} className="pointer-events-none text-[13px]" /> : null}
-        {ACTION[t.kind] ? <span className="pt-1.5"><Action t={t} m={m} /></span> : null}
-      </span>
-      <span className="pointer-events-none flex h-9 items-stretch divide-x divide-border/70 border-t border-border/70 text-[12.5px] text-muted-foreground">
-        {slots.map((s) => (
-          <span key={s.key} className={cn("flex items-center gap-1.5 px-3", s.key === "repo" ? "min-w-0 flex-1 ps-3.5" : "shrink-0")}>
-            {s.icon}<span className="truncate tabular-nums">{s.text}</span>
-          </span>
-        ))}
-      </span>
-    </div>
-  );
-}
-
-/** 3. Accent edge: colour on a 3px edge instead of chips; meta as icon + text pairs. */
-function EdgeCard({ t, m }: { t: Task; m: Mock }) {
-  const on = m.selected === t.id;
-  return (
-    <div data-slot="card" data-kind={t.kind} data-selected={on ? "" : undefined} className={cn(SHELL, "gap-2 rounded-xl border bg-card py-3.5 ps-5 pe-4 shadow-xs", ring(on))}>
-      <Handle t={t} m={m} />
-      <span aria-hidden className={cn("pointer-events-none absolute inset-y-3 start-2 w-[3px] rounded-full", EDGE[TONE[t.kind]])} />
-      <span className="sr-only">{LABEL[t.kind]}</span>
-      <span className="pointer-events-none line-clamp-2 text-[14.5px] font-medium leading-[1.4] text-strong">{t.title}</span>
-      {t.reason ? <span className="pointer-events-none text-[13px] leading-[1.5] text-muted-foreground">{t.reason}</span> : null}
-      {t.step ? <LiveText t={t} className="pointer-events-none text-[13px]" /> : null}
-      <span className="pointer-events-none flex flex-wrap items-center gap-x-3.5 gap-y-1 pt-0.5 text-[12.5px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5"><FolderSimple size={13} aria-hidden />{t.repo}</span>
-        {t.source ? <span className="inline-flex items-center gap-1.5">{t.source === "Sentry" ? <WarningCircle size={13} aria-hidden /> : <Hash size={13} aria-hidden />}{t.source}</span> : null}
-        <Pr n={t.pr} />
-        <span className="inline-flex items-center gap-1.5 tabular-nums"><Clock size={13} aria-hidden />{age(t.age)}</span>
-      </span>
-      {ACTION[t.kind] ? (
-        <span className="-ms-2 pt-0.5">
-          <Button variant="ghost" size="xs" data-slot="card-action" className="relative z-10 text-foreground" onClick={() => m.act(t.id)}>
-            {ACTION[t.kind]}<ArrowRight aria-hidden />
-          </Button>
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
 /** 5. hushbacks' form tile: an outer slab, an inset well for the content, a slim status row with a menu. */
 function SlabCard({ t, m }: { t: Task; m: Mock }) {
   const tone = TONE[t.kind];
@@ -240,6 +178,165 @@ function SlabCard({ t, m }: { t: Task; m: Mock }) {
   );
 }
 
+// --- 5a-5c: developing the slab ------------------------------------------------------------
+// hushbacks' tile values: the inner surface is 16px round inside the slab
+// (rounded-[16px], p-5 for its content), the slab lifts 3px on hover over
+// 0.4s cubic-bezier(0.22, 1, 0.36, 1), and state reads as a pill with a 6px LED.
+
+const SLAB = "rounded-[22px] border bg-card p-1.5 shadow-xs";
+const LIFT = "transition-[transform,border-color,box-shadow] duration-[400ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-[3px] hover:shadow-md motion-reduce:transition-none motion-reduce:hover:translate-y-0";
+
+function StateMark({ t, withAge = true }: { t: Task; withAge?: boolean }) {
+  const tone = TONE[t.kind];
+  return (
+    <span className="pointer-events-none flex min-w-0 items-center gap-2 text-[12.5px]">
+      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[tone])} />
+      <span className={cn("truncate font-medium", TONE_TEXT[tone])}>{LABEL[t.kind]}</span>
+      {withAge ? <span className="shrink-0 tabular-nums text-muted-foreground">{t.step ? clock(t.step.seconds) : age(t.age)}</span> : null}
+    </span>
+  );
+}
+
+function More({ t, m }: { t: Task; m: Mock }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`More for ${t.key}`} className="relative z-10 shrink-0" />}>
+        <DotsThree weight="bold" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => m.select(t.id)}>Open {t.key}</DropdownMenuItem>
+        {ACTION[t.kind] ? <DropdownMenuItem onClick={() => m.act(t.id)}>{ACTION[t.kind]}</DropdownMenuItem> : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** A light state tint over the well, while the task waits on you. */
+function Tint({ t }: { t: Task }) {
+  const tint = WELL_TINT[TONE[t.kind]];
+  return tint ? <span aria-hidden className={cn("absolute inset-0 rounded-[inherit]", tint)} /> : null;
+}
+
+/** A thin progress line along the slab's bottom edge (the slab clips it to its corners). */
+function EdgeProgress({ t }: { t: Task }) {
+  if (!t.step) return null;
+  return (
+    <span role="progressbar" aria-label={`Step ${t.step.at} of ${t.step.of}`} aria-valuenow={t.step.at} aria-valuemin={0} aria-valuemax={t.step.of} className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-primary/12">
+      <span className="absolute inset-y-0 left-0 bg-primary transition-[width] duration-500" style={{ width: `${(t.step.at / t.step.of) * 100}%` }} />
+    </span>
+  );
+}
+
+function PrChip({ n }: { n?: number }) {
+  if (!n) return null;
+  return (
+    <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-foreground/[0.06] px-2 text-[11.5px] font-medium tabular-nums text-foreground/75">
+      <GitPullRequest size={11} aria-hidden />{n}
+    </span>
+  );
+}
+
+/** 5a. The slab, live: the status row carries the running step; a waiting task tints the well. */
+function SlabLiveCard({ t, m }: { t: Task; m: Mock }) {
+  const on = m.selected === t.id;
+  return (
+    <div data-slot="card" data-kind={t.kind} data-selected={on ? "" : undefined} className={cn(SHELL, SLAB, "gap-1 overflow-hidden", ring(on))}>
+      <Handle t={t} m={m} />
+      <div className="sky-pebble pointer-events-none relative flex flex-col gap-2 rounded-[16px] px-3.5 pt-3 pb-3.5">
+        <Tint t={t} />
+        <span className="line-clamp-2 text-[14.5px] font-medium leading-[1.4] text-strong">{t.title}</span>
+        {t.reason ? <span className="text-[13px] leading-[1.45] text-foreground/75">{t.reason}</span> : null}
+        <span className="truncate text-[12.5px] text-muted-foreground">
+          {t.repo}{t.source ? <> · {t.source}</> : null}{t.pr ? <> · #{t.pr}</> : null}
+        </span>
+      </div>
+      {t.step ? (
+        <span data-slot="card-live" className="flex h-9 items-center gap-2 ps-2.5 pe-1 text-[12.5px]">
+          <span aria-hidden className="pointer-events-none size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" />
+          <LiveText t={t} className="pointer-events-none flex-1" />
+          <span className="pointer-events-none shrink-0 tabular-nums text-muted-foreground">{t.step.at} of {t.step.of}</span>
+          <More t={t} m={m} />
+          <EdgeProgress t={t} />
+        </span>
+      ) : (
+        <span className="flex h-9 items-center gap-2 ps-2.5 pe-1">
+          <StateMark t={t} />
+          <span className="flex-1" />
+          <Action t={t} m={m} variant="ghost" className="text-foreground" />
+          <More t={t} m={m} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** 5b. A richer, roomier well (hushbacks' tile spacing); the status row splits state left, actions right. */
+function SlabRichCard({ t, m }: { t: Task; m: Mock }) {
+  const on = m.selected === t.id;
+  return (
+    <div data-slot="card" data-kind={t.kind} data-selected={on ? "" : undefined} className={cn(SHELL, SLAB, LIFT, "gap-1.5", ring(on))}>
+      <Handle t={t} m={m} />
+      <div className="sky-pebble pointer-events-none flex flex-col gap-2.5 rounded-[16px] p-4">
+        <span className="line-clamp-2 text-[15px] font-medium leading-[1.4] text-strong">{t.title}</span>
+        {t.reason ? <span className="text-[13px] leading-[1.5] text-foreground/70">{t.reason}</span> : null}
+        <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate">{t.repo}{t.source ? <> · {t.source}</> : null}</span>
+          <PrChip n={t.pr} />
+        </span>
+      </div>
+      <span className="flex h-9 items-center gap-2 ps-3 pe-1">
+        <StateMark t={t} />
+        <span className="flex-1" />
+        <Action t={t} m={m} variant="ghost" className="text-foreground" />
+        <More t={t} m={m} />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * 5c. The fused tab: the state hangs off the well as a tab of the same surface, joined by
+ * a concave corner (the owner's fused-tab work), so content and state read as one object.
+ * Running, the tab carries the live step and the slab's edge the progress.
+ */
+function SlabTabCard({ t, m }: { t: Task; m: Mock }) {
+  const on = m.selected === t.id;
+  return (
+    <div data-slot="card" data-kind={t.kind} data-selected={on ? "" : undefined} className={cn(SHELL, SLAB, LIFT, "overflow-hidden", ring(on))}>
+      <Handle t={t} m={m} />
+      <div className="pointer-events-none flex flex-col gap-2.5 rounded-[16px] rounded-bl-none bg-[var(--sky-pebble)] p-4">
+        <span className="line-clamp-2 text-[15px] font-medium leading-[1.4] text-strong">{t.title}</span>
+        {t.reason ? <span className="text-[13px] leading-[1.5] text-foreground/70">{t.reason}</span> : null}
+        <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate">{t.repo}{t.source ? <> · {t.source}</> : null}</span>
+          <PrChip n={t.pr} />
+        </span>
+      </div>
+      <span className="flex h-9 items-stretch gap-2 pe-1">
+        <span
+          data-slot={t.step ? "card-live" : "card-tab"}
+          className={cn("pointer-events-none relative flex min-w-0 items-center gap-2 rounded-b-[12px] bg-[var(--sky-pebble)] ps-3 pe-3", t.step && "flex-1")}
+        >
+          {/* the concave corner that fuses the tab's right side to the well above */}
+          <span aria-hidden className="absolute top-0 left-full size-3 bg-[radial-gradient(circle_at_100%_100%,transparent_11.5px,var(--sky-pebble)_12px)]" />
+          {t.step ? (
+            <>
+              <span aria-hidden className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" />
+              <LiveText t={t} className="text-[12.5px]" />
+            </>
+          ) : <StateMark t={t} />}
+        </span>
+        {t.step ? null : <span className="flex-1" />}
+        <span className="flex items-center gap-1">
+          <Action t={t} m={m} variant="ghost" className="text-foreground" />
+          <More t={t} m={m} />
+        </span>
+      </span>
+      <EdgeProgress t={t} />
+    </div>
+  );
+}
+
 /** One option's card, with its own selection; acting on it sends every card to Running. */
 function OptionCard({ task, onAct, render }: { task: Task; onAct: () => void; render: (t: Task, m: Mock) => ReactNode }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -249,34 +346,34 @@ function OptionCard({ task, onAct, render }: { task: Task; onAct: () => void; re
 
 const OPTIONS: { id: string; name: string; caption: string; render: (t: Task, m: Mock) => ReactNode }[] = [
   {
-    id: "spacious",
-    name: "1. Spacious",
-    caption: "18px of room, a 15px title, then one footer: where it lives on the left, age and PR on the right. A task that needs you gets a tinted well with the reason and its one action, so the ask is the loudest thing on the card. The column names every other state.",
-    render: (t, m) => <SpaciousCard t={t} m={m} />,
-  },
-  {
-    id: "slotted",
-    name: "2. Header, body, footer",
-    caption: "Linear’s issue card: a quiet header with the state and its age, the title as the body, and a footer of hairline-divided slots (repo, source, PR) that always sit in the same place.",
-    render: (t, m) => <SlottedCard t={t} m={m} />,
-  },
-  {
-    id: "edge",
-    name: "3. Accent edge",
-    caption: "The calmest: no chips, the state is a 3px coloured edge (and read out for screen readers). Meta is small icon and text pairs; the reason is a plain second paragraph; the action is a quiet link.",
-    render: (t, m) => <EdgeCard t={t} m={m} />,
-  },
-  {
     id: "live",
-    name: "4. Live-aware",
-    caption: "Option 1, plus a live strip on running cards: the current step shimmering, its clock ticking, and how far through the run it is. Shows a card can carry what an agent is doing without opening it.",
+    name: "4. Live-aware (reference)",
+    caption: "Unchanged: a roomy card with a tinted reason well, and on running tasks a live strip with the current step shimmering, its clock and how far through the run it is.",
     render: (t, m) => <SpaciousCard t={t} m={m} live />,
   },
   {
     id: "slab",
-    name: "5. Slab and well",
-    caption: "hushbacks’ form tile: an outer slab holding an inset well for what the task is, and a slim status row under it for where it stands (dot, state, time, action, ⋯ menu). Two clear slots, nothing competing.",
+    name: "5. Slab and well (base)",
+    caption: "Unchanged: hushbacks’ form tile. An outer slab holds an inset well for what the task is; a slim status row under it says where it stands.",
     render: (t, m) => <SlabCard t={t} m={m} />,
+  },
+  {
+    id: "slab-live",
+    name: "5a. Slab and well + live",
+    caption: "5 with 4’s live strip folded into the status row: running, it shows the step shimmering, the clock and a 2px progress line along the slab’s bottom edge. A task waiting on you tints the well lightly by state; the action stays in the row.",
+    render: (t, m) => <SlabLiveCard t={t} m={m} />,
+  },
+  {
+    id: "slab-rich",
+    name: "5b. Slab and well, richer well",
+    caption: "Roomier, on hushbacks’ tile values: a 16px well inside a 6px slab, 15px title, repo and source key with the PR as a small chip. State, dot and age sit left in the row; the action and ⋯ right. Lifts 3px on hover.",
+    render: (t, m) => <SlabRichCard t={t} m={m} />,
+  },
+  {
+    id: "slab-tab",
+    name: "5c. The state is a fused tab",
+    caption: "5b’s well, with the state hanging off it as a tab of the same surface, joined by a concave corner like the fused tabs, so what the task is and where it stands read as one object. Running, the tab widens to carry the live step.",
+    render: (t, m) => <SlabTabCard t={t} m={m} />,
   },
 ];
 

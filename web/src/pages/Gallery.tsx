@@ -618,9 +618,9 @@ function SidebarSection() {
 
 function CardSection() {
   return (
-    <Section id="cards" eyebrow="Task card" title={<>Five ways to draw one task.</>}>
+    <Section id="cards" eyebrow="Task card" title={<>Slab and well, developed.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        One task drawn five ways, side by side. The switcher above puts it in a state on every card at once (use ← → once it has focus), so you compare like with like. Click a card to select it; its action button sends the task to Running. The real card is unchanged.
+        Live-aware (4) as the reference and Slab and well (5) as the base, then three ways to develop 5 with 4’s live strip. One task on every card; the switcher puts it in a state on all of them at once (← → once it has focus). Click a card to select it; its action sends the task to Running. The real card is unchanged.
       </p>
       <CardOptions />
     </Section>
