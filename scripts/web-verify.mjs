@@ -342,25 +342,31 @@ try {
         await section.screenshot({ path: path.join(OUT, `gallery-cards-${tag}-${theme}.png`) });
       }
     };
-    check((await section.locator("[data-slot='card']").count()) === 5 && (await section.locator("[data-slot='card'][data-kind='stopped']").count()) === 5, "each card option shows one card, all in the switcher's state (Stopped)");
+    const n = await section.locator("[data-card-option]").count();
+    check(n === 5 && (await section.locator("[data-slot='card'][data-kind='stopped']").count()) === n, `each of the ${n} card options shows one card, all in the switcher's state (Stopped)`);
     await shoot("stopped");
     await state("Stopped").focus();
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Enter");
     await sleep(200);
-    check((await section.locator("[data-slot='card'][data-kind='asks']").count()) === 5, "the state switcher moves with the arrow keys and switches every card (Asks you)");
+    check((await section.locator("[data-slot='card'][data-kind='asks']").count()) === n, "the state switcher moves with the arrow keys and switches every card (Asks you)");
     await state("Running").click();
     await sleep(300);
-    check((await option("live").locator("[data-slot='card-live'] [role='progressbar']").count()) === 1, "switching to Running shows the live strip on option 4");
+    const live = [];
+    for (const id of ["live", "slab-live", "slab-tab"]) if ((await option(id).locator("[data-slot='card-live']").count()) === 1 && (await option(id).locator("[role='progressbar']").count()) === 1) live.push(id);
+    check(live.length === 3, `switching to Running shows a live step and progress on 4, 5a and 5c (${live.join(", ")})`);
     await shoot("running");
+    await state("Ready to review").click();
+    await sleep(200);
+    await shoot("ready");
     await state("Done").click();
     await sleep(200);
     check((await section.locator("[data-slot='card-action']").count()) === 0, "switching to Done hides the action buttons");
     await state("Stopped").click();
-    await option("spacious").locator("[data-slot='card-action']").click();
+    await option("live").locator("[data-slot='card-action']").click();
     await sleep(200);
-    check((await section.locator("[data-slot='card'][data-kind='running']").count()) === 5, "a card's Start again sends every card to Running");
-    const card = option("slotted").locator("[data-slot='card']");
+    check((await section.locator("[data-slot='card'][data-kind='running']").count()) === n, "a card's Start again sends every card to Running");
+    const card = option("slab-rich").locator("[data-slot='card']");
     await card.locator("button").first().click();
     check((await card.getAttribute("data-selected")) === "", "clicking a card selects it");
   }
