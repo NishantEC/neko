@@ -32,7 +32,6 @@ import * as kbd from "@/ui/kbd";
 import * as alert from "@/ui/alert";
 import * as scrollArea from "@/ui/scroll-area";
 import * as editorial from "@/editorial";
-import * as icons from "@/ui/icons";
 import { toast } from "@/ui/sonner";
 import { cn } from "@/ui/lib/utils";
 
@@ -46,4 +45,17 @@ for (const module of modules) {
   }
 }
 
-export const pluginIcons: Record<string, unknown> = Object.fromEntries(Object.entries(icons).filter(([name]) => /^[A-Z]/.test(name)));
+/**
+ * Every icon in `ui/icons`, by name. Filled by `loadPluginIcons()` before a
+ * plugin's module runs (`plugins.tsx`): the full set is ~450 KB the app's own
+ * first paint does not need, so it lives in its own chunk (`ui/allIcons.ts`,
+ * only ever imported dynamically). The object is the same one throughout, so
+ * a host handed out earlier sees the icons once they are in.
+ */
+export const pluginIcons: Record<string, unknown> = {};
+let iconsLoading: Promise<void> | null = null;
+export function loadPluginIcons(): Promise<void> {
+  return (iconsLoading ??= import("@/ui/allIcons").then((icons) => {
+    for (const [name, value] of Object.entries(icons)) if (/^[A-Z]/.test(name)) pluginIcons[name] = value;
+  }));
+}

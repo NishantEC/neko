@@ -16,6 +16,7 @@
 import { Component, useEffect, useSyncExternalStore, type ReactNode } from "react";
 import type { Json } from "./api";
 import { createUserHost, type UserHost } from "./host";
+import { loadPluginIcons } from "./pluginKit";
 import { clearUserPages, loadResetOverrides, setUserPages, type PageGroup } from "./registry";
 
 export interface PluginListing {
@@ -91,6 +92,7 @@ async function load(listing: Listing) {
   const user = createUserHost(listing.id, listing.group);
   hosts.set(listing.id, user);
   try {
+    await loadPluginIcons();
     // `?v=` is the module file's mtime: an edit is a new URL, so the browser
     // imports the new code instead of the module it already holds.
     const module = await import(/* @vite-ignore */ `${listing.entry}?v=${listing.version}`);
