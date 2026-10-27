@@ -238,6 +238,15 @@ pub fn changed_paths(checkout: &Path, from: &str, to: &str) -> Result<Vec<String
         .lines().map(str::to_owned).filter(|l| !l.is_empty()).collect())
 }
 
+/// The full commit a build label (a short hex commit) names, if the checkout
+/// knows it. Anything that is not hex is not a commit label.
+pub fn resolve_commit(checkout: &Path, label: &str) -> Option<String> {
+    if label.len() < 7 || !label.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    git(checkout, &["rev-parse", "--verify", "--quiet", &format!("{label}^{{commit}}")]).ok().filter(|c| !c.is_empty())
+}
+
 /// Whether `ancestor` is reachable from `descendant`.
 pub fn is_ancestor(checkout: &Path, ancestor: &str, descendant: &str) -> bool {
     git(checkout, &["merge-base", "--is-ancestor", ancestor, descendant]).is_ok()
@@ -277,6 +286,15 @@ pub fn web_paths(data_dir: &Path) -> WebPaths {
 pub fn live_web_root(data_dir: &Path) -> Option<PathBuf> {
     let live = web_paths(data_dir).live;
     live.join("index.html").is_file().then_some(live)
+}
+
+/// The folder name `web-live` points at (`web-builds/<label>`), when a live UI
+/// is served. Both the updater and `scripts/ship-web.sh` label a build with
+/// the short commit it was built from.
+pub fn live_web_label(data_dir: &Path) -> Option<String> {
+    live_web_root(data_dir)?;
+    let target = fs::read_link(web_paths(data_dir).live).ok()?;
+    target.file_name().map(|n| n.to_string_lossy().into_owned())
 }
 
 /// The previous web UI, kept so a page still holding the old `index.html`

@@ -174,8 +174,19 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>) -> Resu
         Some(applied) if core::is_ancestor(&checkout, applied, &head) => applied.clone(),
         _ => bundle.clone().filter(|b| core::is_ancestor(&checkout, b, &head)).unwrap_or_else(|| head.clone()),
     };
+    // A build swapped in outside this thread (`scripts/ship-web.sh`, or its
+    // `--rollback`) is adopted: its folder is labelled with its commit.
+    let mut web_commit = su.web_commit.clone();
+    let live_label = core::live_web_label(data);
+    let adopted = match &live_label {
+        Some(label) if web_commit.as_deref().map(core::short) != Some(label.as_str()) => {
+            core::resolve_commit(&checkout, label).inspect(|commit| web_commit = Some(commit.clone()))
+        }
+        None if web_commit.is_some() => { web_commit = None; None }
+        _ => None,
+    };
     // A newer app (installed by hand) outranks an older live web UI.
-    let stale_web = match (&su.web_commit, &bundle) {
+    let stale_web = match (&web_commit, &bundle) {
         (Some(web), Some(bundle)) => web == bundle || !core::is_ancestor(&checkout, bundle, web),
         _ => false,
     };
@@ -187,12 +198,19 @@ fn tick_with(state: &Arc<AppState>, data: &Path, bundle: Option<String>) -> Resu
         u.checkout = Some(checkout_text.clone());
         u.applied_through = Some(applied.clone());
         if bundle.is_some() { u.native_commit = bundle.clone(); }
-        if stale_web { u.web_commit = None; }
+        u.web_commit = if stale_web { None } else { web_commit.clone() };
+        if let Some(commit) = adopted.as_ref().filter(|_| !stale_web) {
+            let summary = format!("The web UI at {} went live (shipped by hand).", core::short(commit));
+            u.last_update = Some(record(commit, &summary));
+        }
         // Pending only because auto-update was off: go once it is on again.
         if u.queued.is_none() && u.pending.as_ref().is_some_and(|p| core::releasable(p, u)) {
             u.queued = u.pending.take();
         }
     })?;
+    if let Some(commit) = adopted.filter(|_| !stale_web) {
+        crate::server::broadcast_event(state, &Event::WebUpdated { commit });
+    }
 
     plan(state, &checkout, &head, &applied, bundle.as_deref())?;
     apply(state, &checkout, data, bundle.as_deref())
@@ -560,6 +578,40 @@ mod tests {
         tick_with(&state, data.path(), None).unwrap();
         assert_eq!(snapshot(&state).self_update.applied_through.as_deref(), Some(doc.as_str()));
         assert!(store::apply(&state.db.lock().unwrap(), Command::ApplyPendingUpdate).is_err(), "nothing waiting");
+    }
+
+    #[test]
+    fn a_web_build_shipped_by_hand_is_adopted_and_outranked_by_a_newer_app() {
+        let repo = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let dir = repo.path().canonicalize().unwrap();
+        run(&dir, &["init", "-q", "-b", "main"]);
+        commit(&dir, "crates/neko-daemon/Cargo.toml", "[package]");
+        let app = commit(&dir, "web/package.json", "{}");
+        let shipped = commit(&dir, "web/src/a.css", "a{}");
+        let state = Arc::new(AppState::with_test_providers(
+            Db::open_in_memory().unwrap(), vec![], Some(neko_core::files::FileProvider::empty()),
+            neko_core::settings::SettingsProvider::with_panes(Vec::new()),
+            neko_core::permissions::PermissionsProvider::disabled(),
+        ));
+        with_snapshot(&state, |s| { s.land_on_main.insert(dir.to_string_lossy().into()); }).unwrap();
+        // What `scripts/ship-web.sh` leaves: a build labelled with its commit.
+        let build = data.path().join("web-builds").join(core::short(&shipped));
+        std::fs::create_dir_all(&build).unwrap();
+        std::fs::write(build.join("index.html"), "x").unwrap();
+        std::os::unix::fs::symlink(Path::new("web-builds").join(core::short(&shipped)), data.path().join("web-live")).unwrap();
+
+        tick_with(&state, data.path(), Some(app.clone())).unwrap();
+        let su = snapshot(&state).self_update;
+        assert_eq!(su.web_commit.as_deref(), Some(shipped.as_str()));
+        assert!(su.last_update.unwrap().summary.contains("shipped by hand"));
+        assert!(core::live_web_root(data.path()).is_some(), "the older app does not outrank it");
+        assert!(su.queued.is_none() && su.pending.is_none(), "a hand commit is not applied by the thread");
+
+        // The app is then installed at the shipped commit: its own UI is served again.
+        tick_with(&state, data.path(), Some(shipped.clone())).unwrap();
+        assert_eq!(snapshot(&state).self_update.web_commit, None);
+        assert!(core::live_web_root(data.path()).is_none());
     }
 
     #[test]
