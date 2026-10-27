@@ -329,7 +329,8 @@ try {
     await option("quiet").getByRole("button", { name: "Expand sidebar" }).click();
     await option("setup-folds").locator("[data-slot='mock-setup']").click();
   }
-  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) === 2, "the gallery's Task card section shows the fused card in its two action styles");
+  const LAYOUTS = ["chin", "twin", "well", "split"];
+  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) === LAYOUTS.length, "the gallery's Task card section shows the fused card's four action layouts");
   {
     const section = page.locator("[data-gallery-section='cards']");
     const option = (id) => section.locator(`[data-card-option='${id}']`);
@@ -345,47 +346,47 @@ try {
         await section.screenshot({ path: path.join(OUT, `gallery-cards-${tag}-${theme}.png`) });
       }
     };
-    /** The action and the tab share a centre line, and the action's right edge is the well's. */
+    /** The action is centred on its row; in twin tabs and the chin it also ends at the well's right edge. */
     const aligned = async (id) => option(id).locator("[data-slot='card']").evaluate((card) => {
-      const tab = card.querySelector("[data-slot='card-tab']").getBoundingClientRect();
+      const row = card.querySelector("[data-slot='action-row']").getBoundingClientRect();
       const act = card.querySelector("[data-slot='card-action']").getBoundingClientRect();
       const well = card.getBoundingClientRect();
-      return { dy: Math.abs((tab.top + tab.height / 2) - (act.top + act.height / 2)), dx: Math.abs(well.right - act.right), h: act.height };
+      return { dy: Math.abs((row.top + row.height / 2) - (act.top + act.height / 2)), right: well.right - act.right, h: act.height };
     });
     const col = section.locator("[data-slot='fused-column'] [data-slot='card']");
     check((await col.evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")).join(","))) === "stopped,running,review,done", "the sample column stacks Stopped, Running, Ready and Done");
-    check((await section.locator("[data-slot='fused-column'] [data-slot='card-action']").getAttribute("data-style")) === "ghost", "the sample column uses the ghost action");
-    check((await cards.count()) === 2 && (await section.locator("[data-card-option] [data-slot='card'][data-kind='stopped']").count()) === 2, "both styles show the one task in the switcher's state (Stopped)");
-    check((await actions.count()) === 2 && (await actions.evaluateAll((els) => els.every((e) => e.innerText.includes("Start again") && getComputedStyle(e).opacity === "1"))), "Stopped: Start again is always visible on both");
-    for (const id of ["ghost", "pill"]) {
+    check((await cards.count()) === LAYOUTS.length && (await section.locator("[data-card-option] [data-slot='card'][data-kind='stopped']").count()) === LAYOUTS.length, "every layout shows the one task in the switcher's state (Stopped)");
+    check((await actions.count()) === LAYOUTS.length && (await actions.evaluateAll((els) => els.every((e) => e.innerText.includes("Start again") && e.checkVisibility({ opacityProperty: true, visibilityProperty: true })))), "Stopped: Start again is visible on every layout");
+    for (const id of LAYOUTS) {
       const a = await aligned(id);
-      check(a.dy <= 0.5 && a.dx <= 0.5 && a.h === 28, `(${id}) the action is 28px, centred on the tab (off by ${a.dy}px) and flush with the well's right edge (off by ${a.dx}px)`);
+      const flush = id === "twin" ? a.right >= 0 && a.right <= 4.5 : true;
+      check(a.dy === 0 && a.h === 28 && flush, `(${id}) the 28px action is centred on its row (off by ${a.dy}px), ${a.right}px in from the well's right edge`);
     }
     await shoot("stopped");
     await state("Stopped").focus();
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Enter");
     await sleep(200);
-    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='asks']").count()) === 2 && (await actions.first().innerText()).includes("Answer"), "the switcher moves with the arrow keys; Asks you shows Answer");
+    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='asks']").count()) === LAYOUTS.length && (await actions.count()) === LAYOUTS.length && (await actions.first().innerText()).includes("Answer"), "the switcher moves with the arrow keys; Asks you shows Answer on every layout");
     await shoot("asks");
-    for (const [name, kind] of [["Ready to review", "review"], ["Running", "running"], ["Done", "done"]]) {
+    for (const name of ["Ready to review", "Running", "Done"]) {
       await state(name).click();
       await sleep(150);
-      check((await actions.count()) === 0, `${name}: no action, the space beside the tab stays empty`);
+      check((await actions.count()) === 0, `${name}: no action on any layout`);
     }
     await state("Running").click();
     await sleep(300);
-    const live = await section.locator("[data-card-option] [data-slot='card-live']").first().innerText();
-    check(/^Running tests · \d+m \d\ds$/.test(live.trim()), `Running: the tab is only the shimmering step and its clock (${live.trim()})`);
+    const live = await section.locator("[data-card-option] [data-slot='card-live']").evaluateAll((els) => els.map((e) => e.innerText.trim()));
+    check(live.length === LAYOUTS.length && live.every((x) => /^Running tests · \d+m \d\ds$/.test(x)), `Running: each tab or chin is only the shimmering step and its clock (${live[0]})`);
     await shoot("running");
     await state("Done").click();
     await sleep(150);
-    check((await section.locator("[data-card-option] [data-slot='card-tab'], [data-card-option] [data-slot='card-live']").count()) === 0, "Done: no tab, just the well");
+    check((await section.locator("[data-card-option] [data-slot='card-tab'], [data-card-option] [data-slot='card-live']").count()) === 0, "Done: no tab or chin, just the well");
     await state("Stopped").click();
-    await option("pill").locator("[data-slot='card-action']").click();
+    await option("twin").locator("[data-slot='card-action']").click();
     await sleep(200);
-    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='running']").count()) === 2, "the action works (Start again sends the task to Running)");
-    const card = option("ghost").locator("[data-slot='card']");
+    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='running']").count()) === LAYOUTS.length, "the twin action tab does the action (Start again sends the task to Running)");
+    const card = option("chin").locator("[data-slot='card']");
     await card.locator("button").first().click();
     check((await card.getAttribute("data-selected")) === "", "clicking a card selects it");
   }

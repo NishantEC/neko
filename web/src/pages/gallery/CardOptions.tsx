@@ -1,9 +1,8 @@
 // The gallery's "Task card" section. The owner chose the fused-tab card: the card is a
 // well (what the task is) with a state tab hanging off its bottom-left, joined by a
-// concave corner. A task that waits on you keeps its action, always visible, in the space
-// beside the tab (below the well, outside the fused shape). The section shows that card
-// with two styles of the action side by side, one task in every state (the switcher above
-// drives both), and a sample column.
+// concave corner. A task that waits on you keeps its action, always visible. The section shows
+// four places for it side by side (a full-width chin, twin tabs, in the well, inside the
+// tab), one task in every state (the switcher above drives all of them), and a sample column.
 //
 // The card's rules, settled with the owner:
 // - Done has no tab: just the well, with the age and PR in its meta line.
@@ -60,8 +59,8 @@ const clock = (s: number) => `${Math.floor(s / 60)}m ${String(s % 60).padStart(2
 const FOCUS = "outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
 
 type Mock = { selected: string | null; select: (id: string) => void; act: (id: string) => void };
-/** How the action beside the tab is drawn. */
-type Variant = "ghost" | "pill";
+/** Where the action lives on the card. */
+type Variant = "chin" | "twin" | "well" | "split";
 
 function label(t: Task) {
   return `${t.title}. ${LABEL[t.kind]}${t.reason ? `: ${t.reason}` : ""}. ${t.repo}${t.source ? `, ${t.source}` : ""}, ${age(t.age)} ago${t.pr ? `, pull request ${t.pr}` : ""}. Opens the task.`;
@@ -100,80 +99,101 @@ function StateMark({ t }: { t: Task }) {
   );
 }
 
-/** (1)'s ghost button. */
-const GHOST = "text-foreground/85 hover:bg-foreground/[0.07] hover:text-foreground active:bg-foreground/[0.1]";
-/** (2)'s pill, tinted by state. */
-const PILL: Partial<Record<Tone, string>> = {
-  failed: "bg-destructive/12 text-destructive-foreground hover:bg-destructive/18 active:bg-destructive/24",
-  attention: "bg-warning/14 text-warning-foreground hover:bg-warning/20 active:bg-warning/26",
-};
+/** A quiet ghost button: icon and word, no fill until hover. 28px. */
+const GHOST = "inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-medium leading-none text-foreground/85 transition-colors duration-150 hover:bg-foreground/[0.07] hover:text-foreground active:bg-foreground/[0.1]";
 
 /**
- * The action, in the space beside the tab: always visible when the task waits on you,
- * 28px tall and centred in the tab's 36px row (so their centres match), its right edge
- * on the well's right edge.
+ * The action as an element. In the surface copy it is an inert, invisible twin (same
+ * size, so both copies lay out alike); in the front copy it is the real button.
  */
-function CavityAction({ t, m, variant }: { t: Task; m: Mock; variant: Variant }) {
+function ActionButton({ t, m, surface, className, tone }: { t: Task; m: Mock; surface?: boolean; className?: string; tone?: boolean }) {
   const verb = ACTION[t.kind];
   if (!verb) return null;
   const Icon = ACTION_ICON[t.kind as keyof typeof ACTION_ICON];
+  const inner = <><Icon size={13} weight="bold" aria-hidden />{verb}</>;
+  const cls = cn(GHOST, tone && cn(TONE_TEXT[TONE[t.kind]], "hover:text-current"), className);
+  if (surface) return <span aria-hidden className={cls}>{inner}</span>;
   return (
-    <span className="absolute end-0 bottom-0 flex h-9 items-center">
-      <button
-        type="button"
-        data-slot="card-action"
-        data-style={variant}
-        onClick={() => m.act(t.id)}
-        className={cn(
-          "relative z-10 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium leading-none transition-colors duration-150",
-          variant === "pill" ? PILL[TONE[t.kind]] : GHOST,
-          FOCUS,
-        )}
-      >
-        <Icon size={13} weight="bold" aria-hidden />
-        {verb}
-      </button>
-    </span>
+    <button type="button" data-slot="card-action" onClick={() => m.act(t.id)} className={cn(cls, "pointer-events-auto relative z-10", FOCUS)}>
+      {inner}
+    </button>
   );
 }
 
-/** The tab's contents: the state, or (running) the shimmering step and its clock. */
+/** The tab's state: the dot, label and age, or (running) the shimmering step and its clock. */
 function TabContent({ t }: { t: Task }) {
   return t.step ? <LiveText t={t} /> : <StateMark t={t} />;
 }
 
-/** The card's layout. `surface`: paint the well, tab and corner, with the contents invisible. */
-function FusedBody({ t, surface }: { t: Task; surface?: boolean }) {
+/** A concave corner joining a tab's side to the well above: surface colour with a transparent quarter-circle. */
+function Corner({ side }: { side: "right" | "left" }) {
+  return side === "right"
+    ? <span data-corner className="absolute top-0 left-full size-3 bg-[radial-gradient(circle_at_100%_100%,transparent_11.5px,var(--fuse)_12px)]" />
+    : <span data-corner className="absolute top-0 right-full size-3 bg-[radial-gradient(circle_at_0%_100%,transparent_11.5px,var(--fuse)_12px)]" />;
+}
+
+/**
+ * The card's layout, one per variant. `surface`: paint the well, tabs and corners with
+ * every content invisible (the filter goes on this copy); otherwise draw the contents.
+ */
+function FusedBody({ t, m, variant, surface }: { t: Task; m: Mock; variant: Variant; surface?: boolean }) {
   const done = t.kind === "done";
-  const bg = surface ? "bg-[var(--fuse)] transition-colors duration-150 [&>*:not([data-corner])]:invisible" : "";
+  const hasAction = !!ACTION[t.kind];
+  const paint = surface ? "bg-[var(--fuse)] transition-colors duration-150 [&>*:not([data-corner])]:invisible" : "";
+  const tabSlot = surface ? undefined : t.step ? "card-live" : "card-tab";
+  const meta = (
+    <span className="min-w-0 flex-1 truncate">
+      {t.repo}{t.source ? <> · {t.source}</> : null}{done ? <> · {age(t.age)}</> : null}
+    </span>
+  );
+  // 3: the action is the well's last line, beside the meta.
+  const actionInWell = variant === "well" && hasAction;
+  const wellRound = done ? "rounded-[16px]"
+    : variant === "chin" ? "rounded-t-[16px]"
+    : variant === "twin" && hasAction ? "rounded-t-[16px]"
+    : "rounded-[16px] rounded-bl-none";
   return (
     <div className="flex flex-col">
-      <div className={cn("flex flex-col gap-2.5 rounded-[16px] p-4", !done && "rounded-bl-none", bg)}>
+      <div className={cn("flex flex-col gap-2.5 p-4", wellRound, actionInWell && "pb-3", paint)}>
         <span className="line-clamp-2 text-[15px] font-medium leading-[1.4] text-strong">{t.title}</span>
         {t.reason ? <span className="text-[13px] leading-[1.5] text-foreground/70">{t.reason}</span> : null}
-        <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
-          <span className="min-w-0 flex-1 truncate">
-            {t.repo}{t.source ? <> · {t.source}</> : null}{done ? <> · {age(t.age)}</> : null}
-          </span>
+        <span data-slot={actionInWell && !surface ? "action-row" : undefined} className={cn("flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground", actionInWell && "-me-1.5")}>
+          {meta}
           <PrChip n={t.pr} />
+          {actionInWell ? <ActionButton t={t} m={m} surface={surface} /> : null}
         </span>
       </div>
-      {done ? null : (
-        <span className="flex h-9">
-          <span
-            data-slot={surface ? undefined : t.step ? "card-live" : "card-tab"}
-            className={cn("relative flex min-w-0 items-center gap-2 rounded-b-[12px] ps-3.5 pe-3", ACTION[t.kind] ? "max-w-[58%]" : "max-w-[85%]", bg)}
-          >
-            {/* the concave corner: surface colour with a transparent quarter-circle, so the curve cuts into the background */}
-            {surface ? <span data-corner className="absolute top-0 left-full size-3 bg-[radial-gradient(circle_at_100%_100%,transparent_11.5px,var(--fuse)_12px)]" /> : null}
+      {done ? null : variant === "chin" ? (
+        // 1: one chin the whole width of the well, a hairline under the well.
+        <span data-slot={surface ? undefined : "action-row"} className={cn("flex h-10 items-center gap-2 rounded-b-[16px] ps-4 pe-1.5", paint, !surface && "shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_7%,transparent)]")}>
+          <span data-slot={tabSlot} className="flex min-w-0 flex-1 items-center"><TabContent t={t} /></span>
+          <ActionButton t={t} m={m} surface={surface} />
+        </span>
+      ) : (
+        <span data-slot={surface ? undefined : "action-row"} className="flex h-9 justify-between">
+          <span data-slot={tabSlot} className={cn("relative flex min-w-0 items-center gap-2 rounded-b-[12px] ps-3.5", variant === "split" && hasAction ? "pe-1" : "pe-3", hasAction && variant === "twin" ? "max-w-[52%]" : "max-w-[85%]", paint)}>
+            {surface ? <Corner side="right" /> : null}
             <TabContent t={t} />
+            {variant === "split" && hasAction ? (
+              // 4: the action joins the state inside the tab, past a hairline.
+              <>
+                <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-foreground/[0.12]" />
+                <ActionButton t={t} m={m} surface={surface} />
+              </>
+            ) : null}
           </span>
+          {variant === "twin" && hasAction ? (
+            // 2: a second tab, bottom-right, that is the action.
+            <span className={cn("relative flex items-center rounded-b-[12px] px-1", paint)}>
+              {surface ? <Corner side="left" /> : null}
+              <ActionButton t={t} m={m} surface={surface} tone />
+            </span>
+          ) : null}
         </span>
       )}
     </div>
   );
 }
-
 
 /**
  * The chosen card. No outer slab: the well and its tab are the card. One `--fuse` colour
@@ -208,12 +228,11 @@ function FusedCard({ t, m, variant }: { t: Task; m: Mock; variant: Variant }) {
               : "[filter:drop-shadow(0_0_0.5px_rgb(0_0_0/0.14))_drop-shadow(0_1px_2px_rgb(0_0_0/0.06))] dark:[filter:none]",
           )}
         >
-          <FusedBody t={t} surface />
+          <FusedBody t={t} m={m} variant={variant} surface />
         </div>
         {/* positioned, so it paints above the filtered surface */}
-        <div className="relative [grid-area:1/1]"><FusedBody t={t} /></div>
+        <div className="relative [grid-area:1/1]"><FusedBody t={t} m={m} variant={variant} /></div>
       </div>
-      <CavityAction t={t} m={m} variant={variant} />
     </div>
   );
 }
@@ -224,19 +243,29 @@ function FusedCard({ t, m, variant }: { t: Task; m: Mock; variant: Variant }) {
 
 const VARIANTS: { id: Variant; name: string; caption: string }[] = [
   {
-    id: "ghost",
-    name: "(1) Ghost button with an icon",
-    caption: "The action sits in the space beside the tab, always there when the task waits on you: icon and word, no fill until you hover. Quiet enough that the tab’s colour still says the state.",
+    id: "chin",
+    name: "1. Full-width chin",
+    caption: "The tab spans the well’s whole width and becomes a footer chin under a hairline: state on the left, the action as a ghost button on the right. No cavity; every card has the same silhouette. Done has no chin.",
   },
   {
-    id: "pill",
-    name: "(2) Soft pill tinted by state",
-    caption: "The same place and size, as a soft pill in the state’s colour (red for Stopped, amber for Asks you and Approve). Easier to spot down a long column; a little louder.",
+    id: "twin",
+    name: "2. Twin tabs",
+    caption: "Two tabs hang off the well, each joined by a concave corner: the state bottom-left, the action bottom-right in the state’s colour. The gap between them is deliberate. With no action, only the state tab.",
+  },
+  {
+    id: "well",
+    name: "3. Action in the well",
+    caption: "The action moves up into the well as the last line’s end, beside repo and key. The tab below stays narrow and only says the state; nothing sits in the space beside it.",
+  },
+  {
+    id: "split",
+    name: "4. The tab holds both",
+    caption: "One tab at its natural width holds the state and, past a hairline, the action. They read as one sentence (“Stopped 18m | ↻ Start again”), and the space beside it is the card’s own edge, not a gap waiting for something.",
   },
 ];
 
-/** The column uses (1), the ghost button. */
-const COLUMN_VARIANT: Variant = "ghost";
+/** The column uses 2, twin tabs: it keeps the narrow fused tab the owner chose and balances the row. */
+const COLUMN_VARIANT: Variant = "twin";
 
 function VariantCard({ task, onAct, variant }: { task: Task; onAct: () => void; variant: Variant }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -295,7 +324,7 @@ export function CardOptions() {
         <figure className="m-0 flex w-[316px] flex-col gap-3">
           <FusedColumn seconds={seconds} />
           <figcaption className="flex flex-col gap-1 px-1">
-            <span className="text-sm font-semibold text-foreground">In a column, with (1)</span>
+            <span className="text-sm font-semibold text-foreground">In a column, with 2</span>
             <span className="text-[13px] leading-snug text-muted-foreground">Stopped, running, ready to review and done, stacked on a board column’s background. Only the stopped card has an action; the others leave the space empty. Click a card to select it.</span>
           </figcaption>
         </figure>

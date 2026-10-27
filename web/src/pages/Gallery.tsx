@@ -618,9 +618,9 @@ function SidebarSection() {
 
 function CardSection() {
   return (
-    <Section id="cards" eyebrow="Task card" title={<>The fused card, with its action beside the tab.</>}>
+    <Section id="cards" eyebrow="Task card" title={<>The fused card: where its action goes.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        The chosen card: a well with its state as a fused tab, and, when the task waits on you, its action always visible in the space beside the tab. No tab once done; running, the tab is just the step and its clock. Two styles of the action side by side; the switcher puts the one task in a state on both (← → once it has focus). Click a card to select it. The real card is unchanged.
+        The chosen card: a well with its state as a fused tab; no tab once done, and running, the tab is just the step and its clock. A task that waits on you always shows its action; here are four places for it, side by side. The switcher puts the one task in a state on all of them (← → once it has focus). Click a card to select it. The real card is unchanged.
       </p>
       <CardOptions />
     </Section>
