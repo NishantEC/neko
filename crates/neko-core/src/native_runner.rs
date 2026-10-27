@@ -2584,13 +2584,19 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{
         assert!(!args.contains("mcp_servers"));
         assert!(args.contains("extends=\":read-only\""));
         assert!(!args.contains("--dangerously-bypass-approvals-and-sandbox"));
-        let (_temp, executable, spec) = fixture(
+        let (_temp, executable, mut spec) = fixture(
             r#"
 cat >/dev/null
 printf '%s\n' '{"type":"item.started","item":{"type":"command_execution","command":"forbidden"}}'
-sleep 10
+sleep 120
 "#,
         );
+        // The agent stays up for two minutes after the forbidden tool call;
+        // the run must stop it at once, not wait it out. The bound is wide so
+        // a loaded machine cannot fail it, and still far below 120 s. The
+        // run's own time limit is longer than both, so only the tool-call
+        // check can end it early.
+        spec.timeout = Duration::from_secs(300);
         let started = Instant::now();
         assert!(
             run_configured_mode(
@@ -2604,7 +2610,7 @@ sleep 10
             .unwrap_err()
             .contains("tool call")
         );
-        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(60), "the run waited for the agent: {:?}", started.elapsed());
     }
 
     #[test]

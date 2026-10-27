@@ -1352,7 +1352,9 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (mut stream, _) = peer.accept().unwrap();
             let _ = read_frame(&mut stream);
-            let _ = wait.recv_timeout(Duration::from_secs(3));
+            // Silent for a minute unless released: a probe that waited for
+            // it instead of keeping its own 1 s deadline would take that long.
+            let _ = wait.recv_timeout(Duration::from_secs(60));
         });
         let start = std::time::Instant::now();
         let result = bind_singleton(&socket.0);
@@ -1360,8 +1362,9 @@ mod tests {
         let _ = finish.send(());
         server.join().unwrap();
         assert!(result.is_err());
+        // Generous, so a loaded machine cannot fail it; still far below 60 s.
         assert!(
-            elapsed < Duration::from_secs(2),
+            elapsed < Duration::from_secs(30),
             "silent peer exceeded the probe deadline: {elapsed:?}"
         );
         assert_eq!(std::fs::metadata(&socket.0).unwrap().ino(), inode);
@@ -1406,7 +1409,9 @@ mod tests {
         let start = std::time::Instant::now();
         let result = bind_singleton(&socket.0);
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::WouldBlock);
-        assert!(start.elapsed() < Duration::from_millis(200));
+        // The lock is held until after this, so a contender that waited for
+        // it would never return; the bound only has to beat "never".
+        assert!(start.elapsed() < Duration::from_secs(10));
         assert_eq!(std::fs::metadata(&socket.0).unwrap().ino(), inode);
         drop(owner);
         assert!(bind_singleton(&socket.0).unwrap().is_some());
@@ -1467,10 +1472,14 @@ mod tests {
         // path check; the live server handles each until the final Ping lands.
         let listener = listeners.into_iter().next().unwrap();
         listener.set_nonblocking(true).unwrap();
+        let answered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done = answered.clone();
         let peer = std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            // Serves until the client has its answer (or a minute passes),
+            // so a loaded machine cannot run the server out of time.
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
             let mut connections = Vec::new();
-            while std::time::Instant::now() < deadline {
+            while std::time::Instant::now() < deadline && !done.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         // Darwin can reject socket options on already-closed
@@ -1505,7 +1514,8 @@ mod tests {
                 }
             }
         });
-        let result = ping(&mut client);
+        let result = ping_with_timeout(&mut client, Duration::from_secs(30));
+        answered.store(true, Ordering::Relaxed);
         drop(client);
         peer.join().unwrap();
         result.expect("pathname must still connect to the sole winning listener");
@@ -1545,8 +1555,11 @@ mod tests {
         let (mut client, mut server) = UnixStream::pair().unwrap();
         let peer = std::thread::spawn(move || {
             let _ = read_frame(&mut server);
-            server.write_all(&100u32.to_le_bytes()).unwrap();
-            for _ in 0..100 {
+            // A 4000-byte frame, one byte every 10 ms: 40 s to finish if
+            // each read extended the deadline. It stops when the client
+            // hangs up.
+            server.write_all(&4000u32.to_le_bytes()).unwrap();
+            for _ in 0..4000 {
                 if server.write_all(b" ").is_err() {
                     break;
                 }
@@ -1559,8 +1572,10 @@ mod tests {
         drop(client);
         peer.join().unwrap();
         assert!(result.is_err());
+        // Generous for a loaded machine; a deadline the trickle extended
+        // would run to 40 s.
         assert!(
-            elapsed < Duration::from_millis(500),
+            elapsed < Duration::from_secs(10),
             "trickled reads extended deadline: {elapsed:?}"
         );
     }

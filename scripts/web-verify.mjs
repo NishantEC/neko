@@ -34,7 +34,14 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.NEKO_WEB_PORT ?? 4748);
 const DATA = process.env.NEKO_WEB_VERIFY_DATA ?? "/tmp/neko-web-data";
 const OUT = process.env.NEKO_WEB_SHOTS ?? "/tmp/neko-web";
-const SEED = process.env.NEKO_WEB_SEED ?? "/tmp/neko-real-snap.json";
+// The made-up snapshot in scripts/fixtures/web-seed.mjs unless NEKO_WEB_SEED
+// names another (a saved live snapshot, unwrapped). Every area reads the same.
+const SEED = process.env.NEKO_WEB_SEED ?? path.join(DATA + "-seed.json");
+if (!process.env.NEKO_WEB_SEED) {
+  const { webSeed } = await import(pathToFileURL(path.join(repo, "scripts/fixtures/web-seed.mjs")).href);
+  writeFileSync(SEED, JSON.stringify(webSeed()));
+  process.env.NEKO_WEB_SEED = SEED;
+}
 const TARGET = process.env.CARGO_TARGET_DIR ?? "/Users/nish/Documents/neko/target";
 const HARNESS = process.env.NEKO_WEB_HARNESS ?? path.join(TARGET, "debug/web_harness");
 const LEASE = process.env.NEKO_WEB_LEASE ?? "neko-web-foundation";
@@ -83,7 +90,7 @@ function startDaemon() {
       PATH: process.env.PATH, HOME: DATA,
       NEKO_DATA_DIR: DATA, NEKO_WEB_PORT: String(PORT),
       NEKO_WEB_DIR: path.join(repo, "web/dist"), NEKO_WEB_STREAM: "1",
-      ...(existsSync(SEED) ? { NEKO_WEB_SEED: SEED } : {}),
+      NEKO_WEB_SEED: SEED,
     },
     stdio: ["ignore", "inherit", "inherit"],
   });

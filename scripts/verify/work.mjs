@@ -78,9 +78,16 @@ async function mouseDrag(page, from, to, { hold = false } = {}) {
   if (!hold) await page.mouse.up();
 }
 
-/** A richer snapshot built from the saved real one, with the states the test daemon's data lacks. */
-function richSnapshot() {
-  const base = JSON.parse(readFileSync(SEED, "utf8"));
+/**
+ * A richer snapshot built from the seed, with the states the test daemon's data
+ * lacks. `daemon` is the test daemon's own snapshot: it supplies every field a
+ * seed leaves out (the made-up seed holds only workspaces, tasks and chat).
+ */
+function richSnapshot(daemon) {
+  const seed = JSON.parse(readFileSync(SEED, "utf8"));
+  const { fixture_mcp: watches, ...rest } = seed;
+  const base = { ...daemon, ...rest, mcp: { ...daemon.mcp, ...rest.mcp, ...watches } };
+  base.task_roots ??= {};
   const now = Date.now();
   const s = structuredClone(base);
   s.digest = "work-fixture-1";
@@ -394,7 +401,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     console.log(`skip rich pass: ${SEED} is missing`);
     return;
   }
-  const fixture = richSnapshot();
+  const daemon = (await page.evaluate(async () => (await fetch("/api/request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ Workbench: "Snapshot" }) })).json())).Workbench;
+  const fixture = richSnapshot(daemon);
   const ids = fixture.__ids;
   delete fixture.__ids;
   const commands = [];
@@ -442,8 +450,9 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await page.goto(`${base}/#/tasks`);
   await page.reload();
   await rows().first().waitFor({ timeout: 15000 });
-  await page.waitForFunction(() => document.querySelectorAll("[data-slot='task-row']").length > 100, null, { timeout: 15000 });
-  check(true, "the rich snapshot loads (106 tasks)");
+  // Only the rich snapshot has a task that is building.
+  await page.waitForFunction(() => document.querySelector("[data-slot='task-row'][data-status='Building']"), null, { timeout: 15000 });
+  check(true, `the rich snapshot loads (${await rows().count()} task rows)`);
 
   // list with running tasks
   await page.getByLabel("List", { exact: true }).click();
@@ -563,9 +572,11 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await both("work-rich-tree");
   const splitParent = page.locator("[data-slot='tree-row'][data-kind='task']", { hasText: "Split" });
   void splitParent;
+  const collapsedRows = await page.locator("[data-slot='tree-row']").count();
   await page.getByRole("button", { name: "Expand all" }).click();
   await sleep(300);
-  check((await page.locator("[data-slot='tree-row']").count()) > 30, "Expand all opens every branch");
+  const expandedRows = await page.locator("[data-slot='tree-row']").count();
+  check(expandedRows > collapsedRows, `Expand all opens every branch (${collapsedRows} -> ${expandedRows} rows)`);
   await page.evaluate(() => document.querySelector("[data-slot='agent-tree']").closest(".overflow-y-auto").scrollTo({ top: 0 }));
   await shot("work-rich-tree-expanded");
   await page.getByRole("button", { name: "Collapse all" }).click();
@@ -600,7 +611,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await page.locator("[data-slot='result']").scrollIntoViewIfNeeded();
   await page.getByRole("button", { name: "More task actions" }).click();
   await page.getByRole("menu").waitFor({ timeout: 3000 });
-  check((await page.getByRole("menuitemcheckbox", { name: /Land on main in athena/ }).count()) === 1, "the ⋯ menu has the land-on-main switch for the task's repository");
+  const readyRepo = String(fixture.task_roots?.[ids.ready] ?? "").split("/").pop();
+  check((await page.getByRole("menuitemcheckbox", { name: `Land on main in ${readyRepo}` }).count()) === 1, "the ⋯ menu has the land-on-main switch for the task's repository");
   check((await page.getByRole("menuitem", { name: "Rename…" }).count()) === 1 && (await page.getByRole("menuitem", { name: "Cancel task" }).count()) === 1, "the ⋯ menu offers Rename and Cancel task");
   await page.keyboard.press("Escape");
   await both("work-rich-task-ready");
@@ -634,7 +646,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await both("work-rich-prs");
   await page.getByRole("button", { name: "Pull request options" }).click();
   await page.getByRole("menu").waitFor({ timeout: 3000 });
-  check((await page.getByRole("menuitemcheckbox", { name: "athena" }).count()) === 1, "merge without review is a per-repository switch");
+  const prRepo = String(fixture.task_roots?.[fixture.tasks.find((t) => t.pull_request)?.id] ?? "").split("/").pop();
+  check((await page.getByRole("menuitemcheckbox", { name: prRepo, exact: true }).count()) === 1, "merge without review is a per-repository switch");
   await shot("work-rich-prs-options");
   await page.keyboard.press("Escape");
 
