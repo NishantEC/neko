@@ -311,15 +311,13 @@ try {
     await option("setup-folds").locator("[data-slot='mock-setup']").click();
     await sleep(450);
     check(await option("setup-folds").getByRole("button", { name: "Workspaces" }).isVisible(), "the gallery's option D: clicking Setup reveals Workspaces under it");
-    await option("two-levels").getByRole("button", { name: "Setup", exact: true }).click();
-    check((await option("two-levels").locator("[data-slot='panel-title']").innerText()).trim() === "Setup", "the gallery's option B: clicking the Setup rail makes the panel Setup's");
+    await option("top-and-bottom").getByRole("button", { name: "Memory" }).click();
+    check((await option("top-and-bottom").getByRole("button", { name: "Memory" }).getAttribute("aria-current")) === "page", "the gallery's option E: clicking a page makes it the current one");
     await option("quiet").getByRole("button", { name: "Collapse sidebar" }).click();
-    await option("tasks-first").getByRole("button", { name: /Running/ }).click();
     await sleep(450);
     await page.locator("[data-gallery-section='sidebar']").screenshot({ path: path.join(OUT, "gallery-sidebar-interactive.png") });
     await option("quiet").getByRole("button", { name: "Expand sidebar" }).click();
-    await option("tasks-first").getByRole("button", { name: /Running/ }).click();
-    await option("two-levels").getByRole("button", { name: "Work", exact: true }).click();
+    await option("setup-folds").locator("[data-slot='mock-setup']").click();
   }
   const blocks = await page.locator("[data-slot='reply-blocks'] [data-slot='reply-block']").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
   check(["choices", "plan", "chart", "form"].every((k) => blocks.includes(k)), `a reply's neko-* blocks are drawn, not shown as code (${blocks.join(", ") || "none"})`);
