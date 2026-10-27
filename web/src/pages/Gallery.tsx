@@ -618,9 +618,9 @@ function SidebarSection() {
 
 function CardSection() {
   return (
-    <Section id="cards" eyebrow="Task card" title={<>The card with a carved notch.</>}>
+    <Section id="cards" eyebrow="Task card" title={<>The notched card, at three densities.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        The fused tab, inverted: the card is one solid surface, and a notch carved from its bottom edge shows the background through it. A task that waits on you always shows its action; done cards have no notch. Two variations side by side; the switcher puts the one task in a state on both (← → once it has focus). Click a card to select it. The real card is unchanged.
+        The chosen card: one solid surface with a notch carved from its bottom-left, the state sitting in it, and the action on the card when the task waits on you. Done cards have no notch. Three densities side by side (the board uses Compact); the switcher puts the one task in a state on all of them (← → once it has focus). Below: a column at the board’s density, and four ideas for what could come next.
       </p>
       <CardOptions />
     </Section>
