@@ -1,8 +1,9 @@
 // The gallery's "Task card" section. The owner chose the fused-tab card: the card is a
 // well (what the task is) with a state tab hanging off its bottom-left, joined by a
-// concave corner. A task that waits on you keeps its action, always visible. The section shows
-// four places for it side by side (a full-width chin, twin tabs, in the well, inside the
-// tab), one task in every state (the switcher above drives all of them), and a sample column.
+// concave corner. The tab is inverted: the card is one solid surface with a notch carved from
+// its bottom edge (the fused-tab curves as negative space), the background showing through.
+// Two variations side by side, one task in every state (the switcher drives both), and a
+// sample column.
 //
 // The card's rules, settled with the owner:
 // - Done has no tab: just the well, with the age and PR in its meta line.
@@ -59,8 +60,8 @@ const clock = (s: number) => `${Math.floor(s / 60)}m ${String(s % 60).padStart(2
 const FOCUS = "outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
 
 type Mock = { selected: string | null; select: (id: string) => void; act: (id: string) => void };
-/** Where the action lives on the card. */
-type Variant = "chin" | "twin" | "well" | "split";
+/** Which corner the notch is carved from. */
+type Variant = "left" | "right";
 
 function label(t: Task) {
   return `${t.title}. ${LABEL[t.kind]}${t.reason ? `: ${t.reason}` : ""}. ${t.repo}${t.source ? `, ${t.source}` : ""}, ${age(t.age)} ago${t.pr ? `, pull request ${t.pr}` : ""}. Opens the task.`;
@@ -125,67 +126,66 @@ function TabContent({ t }: { t: Task }) {
   return t.step ? <LiveText t={t} /> : <StateMark t={t} />;
 }
 
-/** A concave corner joining a tab's side to the well above: surface colour with a transparent quarter-circle. */
-function Corner({ side }: { side: "right" | "left" }) {
-  return side === "right"
-    ? <span data-corner className="absolute top-0 left-full size-3 bg-[radial-gradient(circle_at_100%_100%,transparent_11.5px,var(--fuse)_12px)]" />
-    : <span data-corner className="absolute top-0 right-full size-3 bg-[radial-gradient(circle_at_0%_100%,transparent_11.5px,var(--fuse)_12px)]" />;
+/**
+ * The notch's concave corner, at its top inner corner: card colour with a transparent
+ * quarter-circle, so the notch's corner is rounded. `at`: which side of the card piece it
+ * sits on (the notch is on that side).
+ */
+function NotchCorner({ at }: { at: "left" | "right" }) {
+  return at === "left"
+    ? <span data-corner className="absolute top-0 right-full size-3 bg-[radial-gradient(circle_at_0%_100%,transparent_11.5px,var(--fuse)_12px)] shadow-[0_-1px_0_var(--fuse)]" />
+    : <span data-corner className="absolute top-0 left-full size-3 bg-[radial-gradient(circle_at_100%_100%,transparent_11.5px,var(--fuse)_12px)] shadow-[0_-1px_0_var(--fuse)]" />;
 }
 
 /**
- * The card's layout, one per variant. `surface`: paint the well, tabs and corners with
- * every content invisible (the filter goes on this copy); otherwise draw the contents.
+ * The card's layout. The card is one surface with a notch carved out of its bottom edge:
+ * the top piece (rounded top, a convex 12px corner where the notch begins), and beside the
+ * notch a bottom piece (the card's bottom corner, a convex 12px corner at the notch, and a
+ * concave corner at the notch's top). The bottom piece paints 1px up into the top piece,
+ * so a fractional height can never leave a hairline seam between them.
+ * `surface`: paint the pieces with every content invisible (the filter goes on this copy).
  */
 function FusedBody({ t, m, variant, surface }: { t: Task; m: Mock; variant: Variant; surface?: boolean }) {
   const done = t.kind === "done";
   const hasAction = !!ACTION[t.kind];
   const paint = surface ? "bg-[var(--fuse)] transition-colors duration-150 [&>*:not([data-corner])]:invisible" : "";
-  const tabSlot = surface ? undefined : t.step ? "card-live" : "card-tab";
-  const meta = (
-    <span className="min-w-0 flex-1 truncate">
-      {t.repo}{t.source ? <> · {t.source}</> : null}{done ? <> · {age(t.age)}</> : null}
-    </span>
-  );
-  // 3: the action is the well's last line, beside the meta.
-  const actionInWell = variant === "well" && hasAction;
-  const wellRound = done ? "rounded-[16px]"
-    : variant === "chin" ? "rounded-t-[16px]"
-    : variant === "twin" && hasAction ? "rounded-t-[16px]"
-    : "rounded-[16px] rounded-bl-none";
+  const stateSlot = surface ? undefined : t.step ? "card-live" : "card-tab";
+  // (b) only carves a notch when there is an action to put in it.
+  const notched = !done && (variant === "left" || hasAction);
+  const top = done ? "rounded-[16px]"
+    : !notched ? "rounded-t-[16px]"
+    : variant === "left" ? "rounded-t-[16px] rounded-bl-[12px]" : "rounded-t-[16px] rounded-br-[12px]";
+  const piece = cn("relative flex min-w-0 flex-1 items-center", surface && "shadow-[0_-1px_0_var(--fuse)]", paint);
   return (
     <div className="flex flex-col">
-      <div className={cn("flex flex-col gap-2.5 p-4", wellRound, actionInWell && "pb-3", paint)}>
+      <div className={cn("flex flex-col gap-2.5 p-4", !done && "pb-2.5", top, paint)}>
         <span className="line-clamp-2 text-[15px] font-medium leading-[1.4] text-strong">{t.title}</span>
         {t.reason ? <span className="text-[13px] leading-[1.5] text-foreground/70">{t.reason}</span> : null}
-        <span data-slot={actionInWell && !surface ? "action-row" : undefined} className={cn("flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground", actionInWell && "-me-1.5")}>
-          {meta}
+        <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate">
+            {t.repo}{t.source ? <> · {t.source}</> : null}{done ? <> · {age(t.age)}</> : null}
+          </span>
           <PrChip n={t.pr} />
-          {actionInWell ? <ActionButton t={t} m={m} surface={surface} /> : null}
         </span>
       </div>
-      {done ? null : variant === "chin" ? (
-        // 1: one chin the whole width of the well, a hairline under the well.
-        <span data-slot={surface ? undefined : "action-row"} className={cn("flex h-10 items-center gap-2 rounded-b-[16px] ps-4 pe-1.5", paint, !surface && "shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_7%,transparent)]")}>
-          <span data-slot={tabSlot} className="flex min-w-0 flex-1 items-center"><TabContent t={t} /></span>
-          <ActionButton t={t} m={m} surface={surface} />
+      {done ? null : variant === "left" ? (
+        // (a) the notch bottom-left holds the state; the card beside it holds the action.
+        <span data-slot={surface ? undefined : "action-row"} className="flex h-10">
+          <span data-slot={stateSlot} data-notch={surface ? undefined : ""} className="flex min-w-0 max-w-[62%] shrink-0 items-center ps-3.5 pe-3"><TabContent t={t} /></span>
+          <span className={cn(piece, "justify-end rounded-b-[16px] rounded-bl-[12px] pe-2")}>
+            {surface ? <NotchCorner at="left" /> : null}
+            <ActionButton t={t} m={m} surface={surface} />
+          </span>
         </span>
       ) : (
-        <span data-slot={surface ? undefined : "action-row"} className="flex h-9 justify-between">
-          <span data-slot={tabSlot} className={cn("relative flex min-w-0 items-center gap-2 rounded-b-[12px] ps-3.5", variant === "split" && hasAction ? "pe-1" : "pe-3", hasAction && variant === "twin" ? "max-w-[52%]" : "max-w-[85%]", paint)}>
-            {surface ? <Corner side="right" /> : null}
-            <TabContent t={t} />
-            {variant === "split" && hasAction ? (
-              // 4: the action joins the state inside the tab, past a hairline.
-              <>
-                <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-foreground/[0.12]" />
-                <ActionButton t={t} m={m} surface={surface} />
-              </>
-            ) : null}
+        // (b) the state sits on the card; the notch bottom-right holds the action.
+        <span data-slot={surface ? undefined : "action-row"} className="flex h-10">
+          <span className={cn(piece, notched ? "rounded-b-[16px] rounded-br-[12px]" : "rounded-b-[16px]", "ps-4 pe-2")}>
+            {surface && notched ? <NotchCorner at="right" /> : null}
+            <span data-slot={stateSlot} className="flex min-w-0 items-center"><TabContent t={t} /></span>
           </span>
-          {variant === "twin" && hasAction ? (
-            // 2: a second tab, bottom-right, that is the action.
-            <span className={cn("relative flex items-center rounded-b-[12px] px-1", paint)}>
-              {surface ? <Corner side="left" /> : null}
+          {notched ? (
+            <span data-notch={surface ? undefined : ""} className="flex shrink-0 items-center ps-2 pe-0.5">
               <ActionButton t={t} m={m} surface={surface} tone />
             </span>
           ) : null}
@@ -196,11 +196,11 @@ function FusedBody({ t, m, variant, surface }: { t: Task; m: Mock; variant: Vari
 }
 
 /**
- * The chosen card. No outer slab: the well and its tab are the card. One `--fuse` colour
- * paints well, tab and corner, so hover and selection change them together. In light the
- * surface is white with a shadow that follows the shape (grey vanished on a grey column);
- * selected, four 1px drop-shadows outline the joined shape. The filter sits on a surface
- * copy behind the text, since on the text it would fringe every glyph.
+ * The card: one surface with a notch carved from its bottom edge. One `--fuse` colour paints
+ * every piece, so hover and selection change them together. In light the surface is white
+ * with a shadow that follows the shape, notch included; selected, four 1px drop-shadows
+ * outline it. The filter sits on a surface copy behind the text, since on the text it
+ * would fringe every glyph.
  */
 function FusedCard({ t, m, variant }: { t: Task; m: Mock; variant: Variant }) {
   const on = m.selected === t.id;
@@ -243,29 +243,19 @@ function FusedCard({ t, m, variant }: { t: Task; m: Mock; variant: Variant }) {
 
 const VARIANTS: { id: Variant; name: string; caption: string }[] = [
   {
-    id: "chin",
-    name: "1. Full-width chin",
-    caption: "The tab spans the well’s whole width and becomes a footer chin under a hairline: state on the left, the action as a ghost button on the right. No cavity; every card has the same silhouette. Done has no chin.",
+    id: "left",
+    name: "(a) State in the notch, action on the card",
+    caption: "A notch carved from the bottom-left shows the column through it, and the state sits in it: off the card, like a stamp on the ticket. The action stays on the card at the right, always there when the task waits on you; otherwise that corner is just card.",
   },
   {
-    id: "twin",
-    name: "2. Twin tabs",
-    caption: "Two tabs hang off the well, each joined by a concave corner: the state bottom-left, the action bottom-right in the state’s colour. The gap between them is deliberate. With no action, only the state tab.",
-  },
-  {
-    id: "well",
-    name: "3. Action in the well",
-    caption: "The action moves up into the well as the last line’s end, beside repo and key. The tab below stays narrow and only says the state; nothing sits in the space beside it.",
-  },
-  {
-    id: "split",
-    name: "4. The tab holds both",
-    caption: "One tab at its natural width holds the state and, past a hairline, the action. They read as one sentence (“Stopped 18m | ↻ Start again”), and the space beside it is the card’s own edge, not a gap waiting for something.",
+    id: "right",
+    name: "(b) Action in the notch, state on the card",
+    caption: "The mirror: the state is the card’s last line, and when the task waits on you a notch is carved bottom-right to hold the action, in the state’s colour. With no action there is no notch, so only cards that need you change shape.",
   },
 ];
 
-/** The column uses 2, twin tabs: it keeps the narrow fused tab the owner chose and balances the row. */
-const COLUMN_VARIANT: Variant = "twin";
+/** The column uses (a): every live card shares one silhouette, and the state reads at the same place down the column. */
+const COLUMN_VARIANT: Variant = "left";
 
 function VariantCard({ task, onAct, variant }: { task: Task; onAct: () => void; variant: Variant }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -324,8 +314,8 @@ export function CardOptions() {
         <figure className="m-0 flex w-[316px] flex-col gap-3">
           <FusedColumn seconds={seconds} />
           <figcaption className="flex flex-col gap-1 px-1">
-            <span className="text-sm font-semibold text-foreground">In a column, with 2</span>
-            <span className="text-[13px] leading-snug text-muted-foreground">Stopped, running, ready to review and done, stacked on a board column’s background. Only the stopped card has an action; the others leave the space empty. Click a card to select it.</span>
+            <span className="text-sm font-semibold text-foreground">In a column, with (a)</span>
+            <span className="text-[13px] leading-snug text-muted-foreground">Stopped, running, ready to review and done, stacked on a board column’s background. Only the stopped card has an action; the others keep that corner as plain card. Done has no notch. Click a card to select it.</span>
           </figcaption>
         </figure>
       </div>

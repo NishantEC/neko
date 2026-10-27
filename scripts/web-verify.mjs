@@ -329,13 +329,14 @@ try {
     await option("quiet").getByRole("button", { name: "Expand sidebar" }).click();
     await option("setup-folds").locator("[data-slot='mock-setup']").click();
   }
-  const LAYOUTS = ["chin", "twin", "well", "split"];
-  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) === LAYOUTS.length, "the gallery's Task card section shows the fused card's four action layouts");
+  const NOTCHES = ["left", "right"];
+  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) === NOTCHES.length, "the gallery's Task card section shows the notched card's two variations");
   {
     const section = page.locator("[data-gallery-section='cards']");
     const option = (id) => section.locator(`[data-card-option='${id}']`);
     const cards = section.locator("[data-card-option] [data-slot='card']");
     const actions = section.locator("[data-card-option] [data-slot='card-action']");
+    const notches = section.locator("[data-card-option] [data-notch]");
     const state = (name) => section.locator("[data-slot='segmented-control']").getByRole("button", { name, exact: true });
     const shoot = async (tag) => {
       for (const theme of ["dark", "light"]) {
@@ -346,49 +347,58 @@ try {
         await section.screenshot({ path: path.join(OUT, `gallery-cards-${tag}-${theme}.png`) });
       }
     };
-    /** The action is centred on its row; in twin tabs and the chin it also ends at the well's right edge. */
+    /** The action and the state are centred on the bottom row. */
     const aligned = async (id) => option(id).locator("[data-slot='card']").evaluate((card) => {
       const row = card.querySelector("[data-slot='action-row']").getBoundingClientRect();
+      const mid = (r) => r.top + r.height / 2;
       const act = card.querySelector("[data-slot='card-action']").getBoundingClientRect();
-      const well = card.getBoundingClientRect();
-      return { dy: Math.abs((row.top + row.height / 2) - (act.top + act.height / 2)), right: well.right - act.right, h: act.height };
+      const st = card.querySelector("[data-slot='card-tab']").getBoundingClientRect();
+      return { a: Math.abs(mid(row) - mid(act)), s: Math.abs(mid(row) - mid(st)), h: act.height };
     });
     const col = section.locator("[data-slot='fused-column'] [data-slot='card']");
     check((await col.evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")).join(","))) === "stopped,running,review,done", "the sample column stacks Stopped, Running, Ready and Done");
-    check((await cards.count()) === LAYOUTS.length && (await section.locator("[data-card-option] [data-slot='card'][data-kind='stopped']").count()) === LAYOUTS.length, "every layout shows the one task in the switcher's state (Stopped)");
-    check((await actions.count()) === LAYOUTS.length && (await actions.evaluateAll((els) => els.every((e) => e.innerText.includes("Start again") && e.checkVisibility({ opacityProperty: true, visibilityProperty: true })))), "Stopped: Start again is visible on every layout");
-    for (const id of LAYOUTS) {
+    check((await section.locator("[data-slot='fused-column'] [data-notch]").count()) === 3, "the sample column (variation a) notches every card but the done one");
+    check((await cards.count()) === NOTCHES.length && (await section.locator("[data-card-option] [data-slot='card'][data-kind='stopped']").count()) === NOTCHES.length, "both variations show the one task in the switcher's state (Stopped)");
+    check((await actions.count()) === NOTCHES.length && (await actions.evaluateAll((els) => els.every((e) => e.innerText.includes("Start again") && e.checkVisibility({ opacityProperty: true, visibilityProperty: true })))), "Stopped: Start again is visible on both");
+    check((await notches.count()) === 2, "Stopped: both variations carve a notch");
+    for (const id of NOTCHES) {
       const a = await aligned(id);
-      const flush = id === "twin" ? a.right >= 0 && a.right <= 4.5 : true;
-      check(a.dy === 0 && a.h === 28 && flush, `(${id}) the 28px action is centred on its row (off by ${a.dy}px), ${a.right}px in from the well's right edge`);
+      check(a.a === 0 && a.s === 0 && a.h === 28, `(${id}) the 28px action and the state are centred on the bottom row (off by ${a.a}px and ${a.s}px)`);
     }
     await shoot("stopped");
     await state("Stopped").focus();
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Enter");
     await sleep(200);
-    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='asks']").count()) === LAYOUTS.length && (await actions.count()) === LAYOUTS.length && (await actions.first().innerText()).includes("Answer"), "the switcher moves with the arrow keys; Asks you shows Answer on every layout");
-    await shoot("asks");
+    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='asks']").count()) === NOTCHES.length && (await actions.first().innerText()).includes("Answer"), "the switcher moves with the arrow keys; Asks you shows Answer");
     for (const name of ["Ready to review", "Running", "Done"]) {
       await state(name).click();
       await sleep(150);
-      check((await actions.count()) === 0, `${name}: no action on any layout`);
+      check((await actions.count()) === 0, `${name}: no action`);
     }
     await state("Running").click();
     await sleep(300);
     const live = await section.locator("[data-card-option] [data-slot='card-live']").evaluateAll((els) => els.map((e) => e.innerText.trim()));
-    check(live.length === LAYOUTS.length && live.every((x) => /^Running tests · \d+m \d\ds$/.test(x)), `Running: each tab or chin is only the shimmering step and its clock (${live[0]})`);
+    check(live.length === NOTCHES.length && live.every((x) => /^Running tests · \d+m \d\ds$/.test(x)), `Running: the state is only the shimmering step and its clock (${live[0]})`);
+    check((await option("left").locator("[data-notch]").count()) === 1 && (await option("right").locator("[data-notch]").count()) === 0, "Running: (a) keeps its notch for the state; (b) has no action, so no notch");
     await shoot("running");
     await state("Done").click();
     await sleep(150);
-    check((await section.locator("[data-card-option] [data-slot='card-tab'], [data-card-option] [data-slot='card-live']").count()) === 0, "Done: no tab or chin, just the well");
+    check((await notches.count()) === 0 && (await section.locator("[data-card-option] [data-slot='card-tab'], [data-card-option] [data-slot='card-live']").count()) === 0, "Done: no notch, a plain card");
+    await shoot("done");
     await state("Stopped").click();
-    await option("twin").locator("[data-slot='card-action']").click();
+    await option("right").locator("[data-slot='card-action']").click();
     await sleep(200);
-    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='running']").count()) === LAYOUTS.length, "the twin action tab does the action (Start again sends the task to Running)");
-    const card = option("chin").locator("[data-slot='card']");
+    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='running']").count()) === NOTCHES.length, "the action works (Start again sends the task to Running)");
+    const card = option("left").locator("[data-slot='card']");
     await card.locator("button").first().click();
     check((await card.getAttribute("data-selected")) === "", "clicking a card selects it");
+    await page.mouse.move(0, 0);
+    for (const theme of ["dark", "light"]) {
+      await page.emulateMedia({ colorScheme: theme });
+      await sleep(300);
+      await section.locator("[data-slot='fused-column']").screenshot({ path: path.join(OUT, `gallery-cards-column-${theme}.png`) });
+    }
   }
   check((await page.locator("[data-gallery-section='board'] [data-board-option]").count()) >= 3, "the gallery's Board section shows the board options");
   {
