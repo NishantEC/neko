@@ -330,7 +330,7 @@ try {
     await option("setup-folds").locator("[data-slot='mock-setup']").click();
   }
   const DENSITIES = ["comfortable", "compact", "dense"];
-  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) === DENSITIES.length, "the gallery's Task card section shows the notched card at three densities");
+  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) === DENSITIES.length, "the gallery's Task card section shows the chosen card (b) at three densities");
   {
     const section = page.locator("[data-gallery-section='cards']");
     const option = (id) => section.locator(`[data-card-option='${id}']`);
@@ -372,7 +372,7 @@ try {
     await state("Running").click();
     await sleep(300);
     const live = await section.locator("[data-card-option] [data-slot='card-live']").evaluateAll((els) => els.map((e) => e.innerText.trim()));
-    check(live.length === DENSITIES.length && live.every((x) => /^Running tests · \d+m \d\ds$/.test(x)), `Running: the notch is only the shimmering step and its clock (${live[0]})`);
+    check(live.length === DENSITIES.length && live.every((x) => /^Running tests · \d+m \d\ds$/.test(x)), `Running: the state line is only the shimmering step and its clock (${live[0]})`);
     await shoot("running");
     await state("Done").click();
     await sleep(150);

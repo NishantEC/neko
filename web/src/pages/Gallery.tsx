@@ -620,7 +620,7 @@ function CardSection() {
   return (
     <Section id="cards" eyebrow="Task card" title={<>The notched card, at three densities.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        The chosen card: one solid surface with a notch carved from its bottom-left, the state sitting in it, and the action on the card when the task waits on you. Done cards have no notch. Three densities side by side (the board uses Compact); the switcher puts the one task in a state on all of them (← → once it has focus). Below: a column at the board’s density, and four ideas for what could come next.
+        The chosen card, variant (b): one solid surface whose last line is the state; when the task waits on you, a notch carved from its bottom-right holds the action in the state’s colour. No action, no notch. Three densities side by side (the board uses Compact); the switcher puts the one task in a state on all of them (← → once it has focus). Below: a column at the board’s density, and four ideas for what could come next.
       </p>
       <CardOptions />
     </Section>
