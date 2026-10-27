@@ -73,6 +73,7 @@ import { ToolFailed, ToolFold, ToolLine, WorkLog } from "@/chat/work-log";
 import { splitTurn } from "@/chat/sdk/parts";
 import { cn } from "@/ui/lib/utils";
 import { SidebarOptions } from "@/pages/gallery/SidebarOptions";
+import { BoardOptions } from "@/pages/gallery/BoardOptions";
 import { finishedReply, prRows, queued, runningReply, sampleArgs, structuredReply, usage, userMessage } from "@/pages/gallery-sample";
 
 function Section({ id, eyebrow, title, children }: { id: string; eyebrow: string; title: React.ReactNode; children: React.ReactNode }) {
@@ -614,6 +615,17 @@ function SidebarSection() {
   );
 }
 
+function BoardSection() {
+  return (
+    <Section id="board" eyebrow="Board" title={<>Four ways to calm the Tasks board.</>}>
+      <p className="max-w-2xl text-[13.5px] text-muted-foreground">
+        Proposals drawn from a sample day like the owner&rsquo;s (Needs you 45, Ready to review 8, nothing running or queued, Done 81). Click a card to select it, drag it to another column (or Space, then the arrow keys), and open or fold columns. The real board is unchanged.
+      </p>
+      <BoardOptions />
+    </Section>
+  );
+}
+
 export default function Gallery() {
   return (
     <div data-slot="gallery" className="min-h-0 flex-1 overflow-y-auto">
@@ -632,6 +644,7 @@ export default function Gallery() {
         <ChatSection />
         <WorkspaceSection />
         <SidebarSection />
+        <BoardSection />
       </div>
     </div>
   );
