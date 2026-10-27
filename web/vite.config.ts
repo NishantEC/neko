@@ -9,6 +9,20 @@ import tailwindcss from "@tailwindcss/vite";
 //
 // The daemon's Content-Security-Policy is `default-src 'self'`, which refuses
 // `data:` fonts: nothing may be inlined into the CSS (assetsInlineLimit 0).
+// Libraries every first paint loads get chunks of their own, so shipping a UI
+// change (scripts/ship-web.sh) leaves their hashes, and the browser's cached
+// copies, alone. Only packages the main chunk already holds belong here: a
+// library only lazy pages use (recharts, dockview, shiki) must stay with them.
+const VENDOR: [string, RegExp][] = [
+  ["react", /\/node_modules\/(react|react-dom|scheduler)\//],
+  ["base-ui", /\/node_modules\/@(base-ui|floating-ui)\//],
+  ["ai-sdk", /\/node_modules\/(ai|@ai-sdk\/[^/]+|zod|@standard-schema\/[^/]+)\//],
+  ["motion", /\/node_modules\/(motion|motion-dom|motion-utils|framer-motion)\//],
+];
+function vendorChunk(id: string): string | undefined {
+  return VENDOR.find(([, test]) => test.test(id))?.[0];
+}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -17,5 +31,12 @@ export default defineConfig({
       mermaid: fileURLToPath(new URL("./src/stubs/mermaid.ts", import.meta.url)),
     },
   },
-  build: { outDir: "dist", emptyOutDir: true, sourcemap: true, target: "es2022", assetsInlineLimit: 0 },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    sourcemap: true,
+    target: "es2022",
+    assetsInlineLimit: 0,
+    rollupOptions: { output: { manualChunks: vendorChunk } },
+  },
 });
