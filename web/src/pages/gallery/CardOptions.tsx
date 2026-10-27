@@ -8,7 +8,7 @@
 // copies hushbacks' form tile (Dashboard/Gallery/GalleryFormCard): an outer
 // slab holding an inset well for the content, then a slim status row under it
 // with a dot, the label, the time and a ⋯ menu.
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { DotsThree, GitPullRequest } from "@/ui/icons";
 import { Button } from "@/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
@@ -294,17 +294,14 @@ function SlabRichCard({ t, m }: { t: Task; m: Mock }) {
   );
 }
 
-/**
- * 5c. The fused tab: the state hangs off the well as a tab of the same surface, joined by
- * a concave corner (the owner's fused-tab work), so content and state read as one object.
- * Running, the tab carries the live step and the slab's edge the progress.
- */
-function SlabTabCard({ t, m }: { t: Task; m: Mock }) {
-  const on = m.selected === t.id;
+/** The chosen card's layout. `surface`: paint the well, tab and corner, with the text invisible. */
+function FusedBody({ t, surface }: { t: Task; surface?: boolean }) {
+  const live = !!t.step;
+  // The surface copy hides its contents (they still size it) but keeps its own background and the corner.
+  const bg = surface ? "bg-[var(--fuse)] transition-colors duration-150 [&>*:not([data-corner])]:invisible" : "";
   return (
-    <div data-slot="card" data-kind={t.kind} data-selected={on ? "" : undefined} className={cn(SHELL, SLAB, LIFT, "overflow-hidden", ring(on))}>
-      <Handle t={t} m={m} />
-      <div className="pointer-events-none flex flex-col gap-2.5 rounded-[16px] rounded-bl-none bg-[var(--sky-pebble)] p-4">
+    <div className="flex flex-col">
+      <div className={cn("flex flex-col gap-2.5 rounded-[16px] rounded-bl-none p-4", bg)}>
         <span className="line-clamp-2 text-[15px] font-medium leading-[1.4] text-strong">{t.title}</span>
         {t.reason ? <span className="text-[13px] leading-[1.5] text-foreground/70">{t.reason}</span> : null}
         <span className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
@@ -312,39 +309,115 @@ function SlabTabCard({ t, m }: { t: Task; m: Mock }) {
           <PrChip n={t.pr} />
         </span>
       </div>
-      <span className="flex h-9 items-stretch gap-2 pe-1">
+      <span className="flex h-9">
         <span
-          data-slot={t.step ? "card-live" : "card-tab"}
-          className={cn("pointer-events-none relative flex min-w-0 items-center gap-2 rounded-b-[12px] bg-[var(--sky-pebble)] ps-3 pe-3", t.step && "flex-1")}
+          data-slot={surface ? undefined : live ? "card-live" : "card-tab"}
+          className={cn("relative flex min-w-0 items-center gap-2 rounded-b-[12px] ps-3.5 pe-3", bg, live ? "me-9 flex-1" : "max-w-[60%]")}
         >
-          {/* the concave corner that fuses the tab's right side to the well above */}
-          <span aria-hidden className="absolute top-0 left-full size-3 bg-[radial-gradient(circle_at_100%_100%,transparent_11.5px,var(--sky-pebble)_12px)]" />
-          {t.step ? (
+          {/* the concave corner: surface colour with a transparent quarter-circle, so the curve cuts into the background */}
+          {surface ? <span data-corner className="absolute top-0 left-full size-3 bg-[radial-gradient(circle_at_100%_100%,transparent_11.5px,var(--fuse)_12px)]" /> : null}
+          {live ? (
             <>
-              <span aria-hidden className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" />
+              <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none" />
               <LiveText t={t} className="text-[12.5px]" />
+              <span className="ms-auto shrink-0 text-[12px] tabular-nums text-muted-foreground">{t.step!.at} of {t.step!.of}</span>
+              {/* the progress line along the tab's bottom edge, clipped to its corners */}
+              {surface ? null : <span className="absolute inset-0 overflow-hidden rounded-b-[12px]"><EdgeProgress t={t} /></span>}
             </>
           ) : <StateMark t={t} />}
         </span>
-        {t.step ? null : <span className="flex-1" />}
-        <span className="flex items-center gap-1">
-          <Action t={t} m={m} variant="ghost" className="text-foreground" />
-          <More t={t} m={m} />
-        </span>
       </span>
-      <EdgeProgress t={t} />
+    </div>
+  );
+}
+
+/**
+ * 5c, chosen. The card is the well and its state tab, nothing else: no outer slab, border
+ * or padding. The tab hangs off the well's bottom-left, joined by a concave corner that is
+ * the surface colour with a transparent quarter-circle, so its curve cuts into whatever lies
+ * behind (page or column). One `--fuse` colour paints well, tab and corner, so hover and
+ * selection change all three together; selection also outlines the joined shape with four
+ * 1px drop-shadows (a filter follows the shape's outline, corner included, where a border
+ * or ring on each piece would draw seams).
+ */
+function SlabTabCard({ t, m }: { t: Task; m: Mock }) {
+  const on = m.selected === t.id;
+  return (
+    <div
+      data-slot="card"
+      data-kind={t.kind}
+      data-selected={on ? "" : undefined}
+      className={cn(
+        "group/card relative flex w-full flex-col text-start",
+        // Light: a white surface (the pebble grey vanishes on a column's grey); dark: the pebble.
+        "[--fuse-base:var(--card)] dark:[--fuse-base:var(--sky-pebble)]",
+        "[--fuse:var(--fuse-base)] hover:[--fuse:color-mix(in_oklab,var(--foreground)_3%,var(--fuse-base))]",
+        on && "[--fuse:color-mix(in_oklab,var(--primary)_7%,var(--fuse-base))] hover:[--fuse:color-mix(in_oklab,var(--primary)_10%,var(--fuse-base))]",
+        "transition-transform duration-[400ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:-translate-y-[3px] motion-reduce:transition-none motion-reduce:hover:translate-y-0",
+      )}
+    >
+      <Handle t={t} m={m} className="rounded-[16px]" />
+      {/* Two copies of one layout in the same grid cell: the back one paints the surface (its
+          text invisible but still sizing it) and carries the filter; the front one carries the
+          text, positioned so it paints above the filtered layer. A drop-shadow on the text would fringe every glyph. */}
+      <div data-slot="card-shape" className="pointer-events-none grid">
+        <div
+          aria-hidden
+          className={cn(
+            "[grid-area:1/1] transition-[filter] duration-150",
+            // A soft shadow that follows the joined shape in light; selected, a 1px primary outline.
+            on
+              ? "[filter:drop-shadow(1px_0_0_var(--primary))_drop-shadow(-1px_0_0_var(--primary))_drop-shadow(0_1px_0_var(--primary))_drop-shadow(0_-1px_0_var(--primary))]"
+              : "[filter:drop-shadow(0_0_0.5px_rgb(0_0_0/0.14))_drop-shadow(0_1px_2px_rgb(0_0_0/0.06))] dark:[filter:none]",
+          )}
+        >
+          <FusedBody t={t} surface />
+        </div>
+        <div className="relative [grid-area:1/1]"><FusedBody t={t} /></div>
+      </div>
+      <span className="absolute end-0 bottom-0 flex h-9 items-center gap-1">
+        <Action t={t} m={m} variant="ghost" className="text-foreground" />
+        <More t={t} m={m} />
+      </span>
+    </div>
+  );
+}
+
+/** Three chosen cards stacked in a board column, to see how they sit together. */
+function FusedColumn({ seconds }: { seconds: number }) {
+  const [kinds, setKinds] = useState<Kind[]>(["stopped", "running", "review"]);
+  const [selected, setSelected] = useState<string | null>(null);
+  return (
+    <div data-slot="fused-column" className="flex flex-col gap-1 rounded-2xl bg-foreground/[0.03] p-1.5">
+      <div className="flex h-8 items-center gap-2 px-2">
+        <span className="text-[13px] font-semibold text-strong">A column</span>
+        <span className="text-[12px] tabular-nums text-muted-foreground">3</span>
+      </div>
+      <div className="flex flex-col gap-2.5 px-0.5 pb-1">
+        {kinds.map((k, i) => {
+          const t = { ...taskIn(k, seconds), id: `col-${i}` };
+          const m: Mock = { selected, select: (id) => setSelected((s) => (s === id ? null : id)), act: () => setKinds((ks) => ks.map((x, j) => (j === i ? "running" : x))) };
+          return <SlabTabCard key={t.id} t={t} m={m} />;
+        })}
+      </div>
     </div>
   );
 }
 
 /** One option's card, with its own selection; acting on it sends every card to Running. */
-function OptionCard({ task, onAct, render }: { task: Task; onAct: () => void; render: (t: Task, m: Mock) => ReactNode }) {
+function OptionCard({ task, onAct, render, bare }: { task: Task; onAct: () => void; render: (t: Task, m: Mock) => ReactNode; bare?: boolean }) {
   const [selected, setSelected] = useState<string | null>(null);
   const m: Mock = { selected, select: (id) => setSelected((s) => (s === id ? null : id)), act: onAct };
-  return <div data-slot="card-stage" className="rounded-2xl bg-foreground/[0.03] p-2">{render(task, m)}</div>;
+  return <div data-slot="card-stage" className={bare ? "p-2" : "rounded-2xl bg-foreground/[0.03] p-2"}>{render(task, m)}</div>;
 }
 
 const OPTIONS: { id: string; name: string; caption: string; render: (t: Task, m: Mock) => ReactNode }[] = [
+  {
+    id: "slab-tab",
+    name: "Chosen: fused tab",
+    caption: "The card is the well and its state tab, nothing else: no outer frame. The tab hangs off the well’s bottom-left, joined by a concave corner that cuts into whatever is behind. Running, the tab carries the live step and a progress line; selected, the shape gets a primary outline and a faint tint. In light the surface is white with a shadow that follows the shape, since grey on a grey column disappears. Shown here on the page; the column beside it shows three stacked.",
+    render: (t, m) => <SlabTabCard t={t} m={m} />,
+  },
   {
     id: "live",
     name: "4. Live-aware (reference)",
@@ -369,12 +442,6 @@ const OPTIONS: { id: string; name: string; caption: string; render: (t: Task, m:
     caption: "Roomier, on hushbacks’ tile values: a 16px well inside a 6px slab, 15px title, repo and source key with the PR as a small chip. State, dot and age sit left in the row; the action and ⋯ right. Lifts 3px on hover.",
     render: (t, m) => <SlabRichCard t={t} m={m} />,
   },
-  {
-    id: "slab-tab",
-    name: "5c. The state is a fused tab",
-    caption: "5b’s well, with the state hanging off it as a tab of the same surface, joined by a concave corner like the fused tabs, so what the task is and where it stands read as one object. Running, the tab widens to carry the live step.",
-    render: (t, m) => <SlabTabCard t={t} m={m} />,
-  },
 ];
 
 export function CardOptions() {
@@ -394,14 +461,25 @@ export function CardOptions() {
         {KINDS.map((k) => <SegmentedControlItem key={k} value={k}>{LABEL[k]}</SegmentedControlItem>)}
       </SegmentedControl>
       <div className="flex flex-wrap items-start gap-x-5 gap-y-10">
-        {OPTIONS.map((o) => (
-          <figure key={o.id} data-card-option={o.id} className="m-0 flex w-[316px] flex-col gap-3">
-            <OptionCard task={task} onAct={() => show("running")} render={o.render} />
-            <figcaption className="flex flex-col gap-1 px-1">
-              <span className="text-sm font-semibold text-foreground">{o.name}</span>
-              <span className="text-[13px] leading-snug text-muted-foreground">{o.caption}</span>
-            </figcaption>
-          </figure>
+        {OPTIONS.map((o, i) => (
+          <Fragment key={o.id}>
+            <figure data-card-option={o.id} className="m-0 flex w-[316px] flex-col gap-3">
+              <OptionCard task={task} onAct={() => show("running")} render={o.render} bare={o.id === "slab-tab"} />
+              <figcaption className="flex flex-col gap-1 px-1">
+                <span className="text-sm font-semibold text-foreground">{o.name}</span>
+                <span className="text-[13px] leading-snug text-muted-foreground">{o.caption}</span>
+              </figcaption>
+            </figure>
+            {i === 0 ? (
+              <figure className="m-0 flex w-[316px] flex-col gap-3">
+                <FusedColumn seconds={seconds} />
+                <figcaption className="flex flex-col gap-1 px-1">
+                  <span className="text-sm font-semibold text-foreground">Chosen, in a column</span>
+                  <span className="text-[13px] leading-snug text-muted-foreground">Stopped, running and ready to review, stacked on a board column’s background. Click to select; Start again sets that one running.</span>
+                </figcaption>
+              </figure>
+            ) : null}
+          </Fragment>
         ))}
       </div>
     </div>
