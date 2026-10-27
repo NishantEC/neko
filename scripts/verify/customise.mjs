@@ -130,7 +130,7 @@ export default function register(host) {
   await page.waitForSelector("[data-slot='settings-nav']", { timeout: 10000 });
   await page.locator("[data-slot='settings-nav'] button", { hasText: "Hello section" }).click();
   await page.locator("[data-testid='hello-section']").waitFor({ timeout: 4000 });
-  check(true, "host.addSection adds a section to Settings, in its sub-navigation");
+  check(true, "host.addSection adds a section to Settings, in its rail");
 
   // ---- Roll back the web UI ------------------------------------------------------------------
   const captured = [];
