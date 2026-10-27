@@ -329,6 +329,28 @@ try {
     await option("quiet").getByRole("button", { name: "Expand sidebar" }).click();
     await option("setup-folds").locator("[data-slot='mock-setup']").click();
   }
+  check((await page.locator("[data-gallery-section='board'] [data-board-option]").count()) >= 3, "the gallery's Board section shows the board options");
+  {
+    const option = (id) => page.locator(`[data-gallery-section='board'] [data-board-option='${id}']`);
+    for (const theme of ["dark", "light"]) {
+      await page.emulateMedia({ colorScheme: theme });
+      await sleep(400);
+      for (const id of ["compact", "fit", "lanes", "inbox"]) {
+        await option(id).scrollIntoViewIfNeeded();
+        await option(id).screenshot({ path: path.join(OUT, `gallery-board-${id}-${theme}.png`) });
+      }
+    }
+    check((await option("fit").locator("[data-slot='mock-strip']").count()) === 2, "the gallery's board option B folds the two empty columns to strips");
+    await option("fit").locator("[data-slot='mock-strip'][data-stage='running']").click();
+    check((await option("fit").locator("[data-slot='mock-column'][data-stage='running']").count()) === 1, "the gallery's board option B: clicking a strip opens the column");
+    const first = option("compact").locator("[data-slot='mock-card']").first();
+    await first.locator("button").first().click();
+    check((await first.getAttribute("data-selected")) === "", "the gallery's board option A: clicking a card selects it");
+    const before = await option("lanes").locator("[data-slot='mock-column'][data-stage='running'] [data-slot='mock-card']").count();
+    await option("lanes").locator("[data-slot='mock-card-action']").filter({ hasText: "Answer" }).first().click();
+    check((await option("lanes").locator("[data-slot='mock-column'][data-stage='running'] [data-slot='mock-card']").count()) === before + 1, "the gallery's board option C: Answer moves the card to Running");
+    await page.locator("[data-gallery-section='board']").screenshot({ path: path.join(OUT, "gallery-board-interactive.png") });
+  }
   const blocks = await page.locator("[data-slot='reply-blocks'] [data-slot='reply-block']").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
   check(["choices", "plan", "chart", "form"].every((k) => blocks.includes(k)), `a reply's neko-* blocks are drawn, not shown as code (${blocks.join(", ") || "none"})`);
   check((await page.locator("[data-slot='reply-blocks'] [data-slot='reply-block'][data-kind='choices'] [role='radio']").count()) === 2, "the question offers its two options as radio choices");
