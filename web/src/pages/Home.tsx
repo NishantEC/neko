@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { accept, command } from "@/api";
 import { useWorkbench } from "@/useStore";
+import { useSelectedWorkspace } from "@/shell/workspace";
 import { CaretDown, ChatCircle, Stop } from "@/ui/icons";
 import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from "@/chat/conversation";
 import { Suggestion, Suggestions } from "@/chat/suggestion";
@@ -29,7 +30,8 @@ export default function Home() {
   const queued = all.filter((m) => m.role === "user" && m.metadata?.state === "queued");
   const pendingTurn = [...all].reverse().find((m) => m.metadata?.state === "pending");
   const decisions = useMemo(() => decisionsFromParts(all, snapshot?.tasks ?? []), [all, snapshot?.tasks]);
-  const workspaceId: string | null = null;
+  // The sidebar's workspace switcher: the chat runs in that workspace, or none for all.
+  const workspaceId: string | null = useSelectedWorkspace().id || null;
 
   // Actions the ⌘K palette offers while Home is open.
   useEffect(

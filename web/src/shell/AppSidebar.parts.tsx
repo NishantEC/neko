@@ -1,10 +1,9 @@
 // from hushbacks apps/spa/src/components/UnifiedAppSidebar/UnifiedAppSidebar.parts.tsx @da20dfaeb
 // Neko: TanStack's <Link> is a plain hash <a href>, the nav item carries
-// `data-slot="nav-item"` and a right-hand slot for live chips (`trailing`), and
-// the recent-forms skeleton is the task rail's. The active pill is the same
+// `data-slot="nav-item"` and a right-hand slot (`trailing`, the Tasks count),
+// and a `small` row for the pages you set up once. The active pill is the same
 // motion layout pebble.
 import { useSidebar } from "@/ui/sidebar";
-import { Skeleton } from "@/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import type { Icon } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
@@ -23,6 +22,7 @@ export function NavItem({
   trailing,
   title,
   className,
+  small = false,
 }: {
   item: NavEntry;
   active: boolean;
@@ -31,6 +31,8 @@ export function NavItem({
   trailing?: ReactNode;
   title?: string;
   className?: string;
+  /** The quieter row for the pages you set up once: 32px, 13px, a 14px icon. */
+  small?: boolean;
 }) {
   const ItemIcon = item.icon;
   const { state } = useSidebar();
@@ -41,10 +43,11 @@ export function NavItem({
       data-slot="nav-item"
       aria-current={active ? "page" : undefined}
       className={cn(
-        "sky-control group/nav relative flex items-center gap-3 text-sm transition-colors duration-150",
+        "group/nav relative flex items-center transition-colors duration-150",
+        small ? "h-8 gap-2.5 rounded-[16px] text-[13px]" : "sky-control gap-3 text-sm",
         "px-3 group-data-[collapsible=icon]:px-2 group-data-[collapsible=icon]:justify-center",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-        active ? "text-foreground" : "text-foreground/65 hover:text-foreground hover:bg-foreground/[0.04]",
+        active ? "text-foreground" : cn(small ? "text-foreground/55" : "text-foreground/65", "hover:text-foreground hover:bg-foreground/[0.04]"),
         className,
       )}
     >
@@ -53,12 +56,12 @@ export function NavItem({
           aria-hidden
           layoutId={indicatorId}
           transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 480, damping: 40 }}
-          style={{ borderRadius: 24 }}
+          style={{ borderRadius: small ? 16 : 24 }}
           className="sky-pebble absolute inset-0"
         />
       ) : null}
       <ItemIcon
-        size={16}
+        size={small ? 14 : 16}
         weight={active ? "fill" : "regular"}
         className="relative z-10 shrink-0 transition-transform duration-150 group-active/nav:scale-90"
       />
@@ -90,21 +93,6 @@ export function CollapseWhenNarrow() {
     return () => narrow.removeEventListener("change", collapse);
   }, []);
   return null;
-}
-
-const SKELETON_WIDTHS = ["w-4/5", "w-3/5", "w-2/3"];
-
-export function RecentTasksSkeleton() {
-  return (
-    <div className="flex flex-col gap-0.5" aria-hidden>
-      {SKELETON_WIDTHS.map((width) => (
-        <div key={width} className="sky-row flex items-center gap-2.5 px-3">
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-foreground/15" />
-          <Skeleton className={cn("h-3", width)} />
-        </div>
-      ))}
-    </div>
-  );
 }
 
 let shellPainted = false;

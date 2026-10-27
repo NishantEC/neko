@@ -1,43 +1,41 @@
 // from hushbacks apps/spa/src/components/UnifiedAppSidebar/index.tsx @da20dfaeb
-// (+ AccountFooter.tsx's ThemeSwitch and MobileTopBar.tsx)
+// (+ WorkspaceSwitcher, AccountFooter.tsx and MobileTopBar.tsx)
 //
-// Same structure, classes and motion as hushbacks' sidebar: an inset, icon-
-// collapsible sidebar; a header with the mark, a "/" and the product name; a
-// recent rail (hushbacks' Forms, Neko's live Tasks with their stage chips); the
-// nav under a hairline with the sliding pebble and Settings' sub-navigation
-// revealed under it; a footer with the theme segment.
-//
-// Neko's own content, kept: Home and every registered page by group (yours sit
-// in the same groups, marked "yours"), the live
-// chips (Working / Needs you / counts), load problems of your pages, the
-// Connected indicator, ⌘K search. Adapted: TanStack links are hash links, the
-// workspace switcher is the product name (Neko has no active workspace), the
-// account row is the connection row, the usage well and notification bell are
-// not taken. Colours are Neko's tokens; the pebble comes from sky-materials.css.
-import { useEffect, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
+// Option E of the gallery's sidebar proposals (#/ui, "Sidebar"), the one the
+// owner picked (2026-10-28): an inset, icon-collapsible sidebar; a header with
+// the mark, a "/" and hushbacks' workspace switcher (shell/workspace.ts, which
+// Home, Tasks, Pull requests and the Agent tree follow); ⌘K search; the daily
+// pages under a hairline (Home, Tasks, Pull requests, Agent tree, Watching,
+// then pages of yours and plugins: one registry, no marks); the pages you set
+// up once in smaller rows at the bottom, Settings' sub-navigation revealed
+// under its row; a footer that is one status line and a gear. No task list:
+// New task is ⌘N, ⌘K and the Tasks page. The only badge is the Tasks count of
+// what waits on you; the status line says the rest.
+import { useEffect, useState, type ComponentProps, type MouseEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarTrigger, useSidebar,
 } from "@/ui/sidebar";
-import { Button } from "@/ui/button";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/ui/dropdown-menu";
 import { Kbd } from "@/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
-import { Command as CommandIcon, MagnifyingGlass, Plus, Warning } from "@/ui/icons";
+import { CaretUpDown, Check, Command as CommandIcon, Gear, MagnifyingGlass, Stack, Warning } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
 import "@/pages";
-import { usePages, type PageGroup } from "@/registry";
+import { usePages, type PageDef } from "@/registry";
 import { useSettingsSections } from "@/extensions";
 import { SECTIONS } from "@/pages/setup/settings/registry";
-import { hrefFor, HOME } from "@/router";
+import { hrefFor, HOME, navigate } from "@/router";
 import { usePlugins } from "@/plugins";
-import { useWorkbench } from "@/useStore";
 import neko from "@/assets/neko-mark.svg";
 import { openPalette } from "@/shell/CommandPalette";
 import { SidebarStatus } from "@/shell/StatusBar";
-import { newTask } from "@/shell/actions";
-import { elapsed, STAGE_TITLES, taskHref, taskTitle, useNow, useShellStatus, type Stage } from "@/shell/status";
+import { useShellStatus } from "@/shell/status";
+import { useSelectedWorkspace } from "@/shell/workspace";
 import { requestSettings, useCurrentSettingsSection } from "@/setup/settingsNav";
-import { CollapseWhenNarrow, EASE_OUT, NavItem, RecentTasksSkeleton, shellAlreadyPainted } from "@/shell/AppSidebar.parts";
+import { CollapseWhenNarrow, EASE_OUT, NavItem, shellAlreadyPainted } from "@/shell/AppSidebar.parts";
 
 export function Mark({ className }: { className?: string }) {
   return (
@@ -50,153 +48,90 @@ export function Mark({ className }: { className?: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Live state in a row's right-hand slot (Neko's own)
+// Where each page sits
 // ---------------------------------------------------------------------------
 
-type Tone = "amber" | "sky" | "primary" | "muted";
-const TONES: Record<Tone, string> = {
-  amber: "bg-warning/15 text-warning-foreground",
-  sky: "bg-info/15 text-info-foreground",
-  primary: "bg-primary/15 text-primary",
-  muted: "bg-foreground/[0.06] text-muted-foreground",
-};
+/** The daily pages, in this order; pages of yours and plugins follow them. */
+const TOP = [HOME, "tasks", "prs", "tree", "watching"];
+/** The pages you set up once, smaller, at the bottom; other system pages (Customisations, UI gallery) follow them. */
+const BOTTOM = ["schedules", "memory", "profiles", "tools", "settings", "usage"];
+/** Reached from the switcher's "Manage workspaces…", not listed. */
+const HIDDEN = ["workspaces"];
 
-function Chip({ tone, children, label }: { tone: Tone; children: ReactNode; label?: string }) {
+function place(pages: PageDef[]): { top: PageDef[]; bottom: PageDef[] } {
+  const known = (ids: string[]) => ids.map((id) => pages.find((p) => p.id === id)).filter((p): p is PageDef => !!p);
+  const rest = pages.filter((p) => ![...TOP, ...BOTTOM, ...HIDDEN].includes(p.id));
+  return {
+    top: [...known(TOP), ...rest.filter((p) => p.group !== "system")],
+    bottom: [...known(BOTTOM), ...rest.filter((p) => p.group === "system")],
+  };
+}
+
+/** The one badge: how many tasks wait on you, a plain amber number. */
+function NeedsYouCount() {
+  const { waitingOnYou } = useShellStatus();
+  if (waitingOnYou <= 0) return null;
   return (
-    <span data-slot="state-chip" data-tone={tone} aria-label={label} className={cn("ms-auto shrink-0 rounded-full px-1.5 py-px text-[11px] font-medium leading-4 tabular-nums", TONES[tone])}>
-      {children}
+    <span data-slot="state-chip" data-tone="amber" aria-label={`${waitingOnYou} waiting on you`} className="ms-auto shrink-0 text-xs font-medium tabular-nums text-warning-foreground">
+      {waitingOnYou}
     </span>
   );
 }
 
-function WorkingChip({ since }: { since: number }) {
-  const now = useNow(1000);
-  return <Chip tone="primary" label={`Working ${elapsed(now - since)}`}>Working {elapsed(now - since)}</Chip>;
-}
-
-const STAGE_CHIP: Record<Stage, { tone: Tone; text: string } | null> = {
-  needsYou: { tone: "amber", text: "Needs you" },
-  review: { tone: "sky", text: "Review" },
-  running: { tone: "primary", text: "Working" },
-  upNext: { tone: "muted", text: "Next" },
-  done: null,
-};
-const STAGE_DOT: Record<Stage, string> = {
-  needsYou: "bg-warning",
-  review: "bg-info",
-  running: "bg-primary animate-pulse motion-reduce:animate-none",
-  upNext: "bg-muted-foreground/50",
-  done: "bg-success",
-};
-
-/** "yours" on a page you wrote, "Customised" on a built-in you replaced; nothing on Neko's own. */
-function OwnerMark({ source, customised }: { source: "builtin" | "user"; customised?: boolean }) {
-  if (customised) return <Chip tone="primary" label="You replaced this page">Customised</Chip>;
-  if (source === "user") return <Chip tone="muted" label="A page you added">yours</Chip>;
-  return null;
-}
-
-/** The live chip for a page row, from the snapshot (null when there is nothing to say). */
-function PageChip({ id }: { id: string }) {
-  const status = useShellStatus();
-  if (id === HOME) {
-    if (status.working) return <WorkingChip since={status.working.startedMs} />;
-    if (status.approvals > 0) return <Chip tone="amber" label={`${status.approvals} waiting for your approval`}>Needs you{status.approvals > 1 ? ` · ${status.approvals}` : ""}</Chip>;
-    return null;
-  }
-  if (id === "tasks" && status.waitingOnYou > 0) {
-    return <Chip tone="amber" label={`${status.waitingOnYou} tasks waiting on you`}>{status.waitingOnYou}</Chip>;
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
-// The recent rail: hushbacks' FormsRail / FormRailItem, listing live tasks
+// The workspace switcher: hushbacks' WorkspaceSwitcher, over Neko's workspaces
 // ---------------------------------------------------------------------------
 
-/** How many tasks of each stage the rail lists; the rest are one click away. */
-const SHOWN_PER_STAGE: Record<Stage, number> = { needsYou: 3, review: 2, running: 3, upNext: 1, done: 0 };
-
-const RAIL_ROW =
-  "sky-row group/form flex items-center gap-2.5 px-3 text-[13px] text-foreground/70 transition-colors duration-150 hover:bg-foreground/[0.04] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
-
-function TaskRailItem({ task, stage, index, reduce }: { task: any; stage: Stage; index: number; reduce: boolean }) {
-  const chip = STAGE_CHIP[stage];
-  const title = taskTitle(task);
+function WorkspaceAvatar({ name }: { name: string }) {
   return (
-    <motion.div
-      initial={reduce ? undefined : { opacity: 0, x: -6 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.3, ease: EASE_OUT, delay: reduce ? 0 : 0.12 + index * 0.04 }}
-    >
-      <a href={taskHref(task.id)} data-slot="sidebar-task" data-stage={stage} title={`${title} · ${STAGE_TITLES[stage]}`} className={RAIL_ROW}>
-        <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", STAGE_DOT[stage])} />
-        <span className="min-w-0 flex-1 truncate">{title}</span>
-        {chip ? <Chip tone={chip.tone} label={STAGE_TITLES[stage]}>{chip.text}</Chip> : null}
-      </a>
-    </motion.div>
+    <span aria-hidden className="sky-pebble flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold">
+      {name.trim().charAt(0).toUpperCase() || "N"}
+    </span>
   );
 }
 
-function TasksRail({ reduce }: { reduce: boolean }) {
-  const status = useShellStatus();
-  const { snapshot } = useWorkbench();
-  const { setOpenMobile } = useSidebar();
-  const order: Stage[] = ["needsYou", "review", "running", "upNext"];
-  const shown = order.flatMap((stage) => status.tasks[stage].slice(0, SHOWN_PER_STAGE[stage]).map((task) => ({ task, stage })));
-  const total = order.reduce((n, s) => n + status.tasks[s].length, 0);
+const MENU_ROW = "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-sm";
 
+function WorkspaceSwitcher() {
+  const { id, current, workspaces, select } = useSelectedWorkspace();
+  const name = current?.name ?? "All workspaces";
   return (
-    <div data-slot="sidebar-tasks" className="flex max-h-[40%] min-h-24 shrink-0 flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
-      <motion.div
-        initial={reduce ? undefined : { opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, ease: EASE_OUT, delay: reduce ? 0 : 0.08 }}
-        className="flex shrink-0 items-center justify-between pb-1 pl-3 pr-1.5 pt-1"
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        data-slot="workspace-switcher"
+        aria-label={`Workspace: ${name}`}
+        className={cn(
+          "flex h-8 w-full min-w-0 items-center gap-1 rounded-[12px] px-1 text-start text-sm font-medium text-foreground transition-colors duration-150",
+          "hover:bg-foreground/[0.04] data-[popup-open]:bg-foreground/[0.06]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+        )}
       >
-        <span className="text-xs font-medium text-muted-foreground">Tasks</span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label="New task"
-              className="group/plus -my-1 text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
-              onClick={() => {
-                setOpenMobile(false);
-                newTask();
-              }}
-            >
-              <Plus
-                size={12}
-                weight="bold"
-                className="transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/plus:rotate-90 motion-reduce:transform-none"
-              />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">New task (⌘N)</TooltipContent>
-        </Tooltip>
-      </motion.div>
-
-      {!snapshot ? (
-        <RecentTasksSkeleton />
-      ) : shown.length > 0 ? (
-        <div className="no-scrollbar flex min-h-0 flex-col gap-0.5 overflow-y-auto">
-          {shown.map(({ task, stage }, i) => (
-            <TaskRailItem key={task.id} task={task} stage={stage} index={i} reduce={reduce} />
+        <span className="min-w-0 flex-1 truncate">{name}</span>
+        <CaretUpDown size={14} weight="bold" className="shrink-0 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent data-slot="workspace-menu" align="start" sideOffset={6} className="w-64 p-1">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">Workspaces</DropdownMenuLabel>
+          {workspaces.map((w) => (
+            <DropdownMenuItem key={w.id} onClick={() => select(w.id)} className={MENU_ROW}>
+              <WorkspaceAvatar name={w.name} />
+              <span className="min-w-0 flex-1 truncate">{w.name}</span>
+              {w.id === id ? <Check size={14} weight="bold" className="shrink-0" aria-label="current" /> : null}
+            </DropdownMenuItem>
           ))}
-          {total > shown.length ? (
-            <a href={hrefFor("tasks")} className={cn(RAIL_ROW, "text-muted-foreground")}>
-              <span className="min-w-0 flex-1 truncate ps-4">Show all {total}</span>
-            </a>
-          ) : null}
-        </div>
-      ) : (
-        <p className="px-3 py-1.5 text-[12px] leading-snug text-foreground/45">
-          Nothing in progress. Press + to start a task.
-        </p>
-      )}
-    </div>
+          <DropdownMenuItem onClick={() => select("")} className={MENU_ROW}>
+            <Stack size={15} className="text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate">All workspaces</span>
+            {id === "" ? <Check size={14} weight="bold" className="shrink-0" aria-label="current" /> : null}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator className="my-1" />
+        <DropdownMenuItem onClick={() => navigate("workspaces")} className={MENU_ROW}>
+          <Gear size={15} className="text-muted-foreground" />
+          Manage workspaces…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -277,42 +212,6 @@ function SettingsSubReveal({ open, reduce }: { open: boolean; reduce: boolean })
   );
 }
 
-// ---------------------------------------------------------------------------
-// The footer: hushbacks' AccountFooter ThemeSwitch, then the connection row
-// ---------------------------------------------------------------------------
-
-
-
-// ---------------------------------------------------------------------------
-
-function QuickCreate() {
-  const { state, setOpenMobile } = useSidebar();
-  const button = (
-    <Button
-      data-slot="button"
-      size="icon"
-      aria-label="New task"
-      className="group/create"
-      onClick={() => {
-        setOpenMobile(false);
-        newTask();
-      }}
-    >
-      <Plus
-        size={14}
-        weight="bold"
-        className="transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover/create:rotate-90 motion-reduce:transform-none"
-      />
-    </Button>
-  );
-  if (state !== "collapsed") return button;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side="right">New task</TooltipContent>
-    </Tooltip>
-  );
-}
 
 /** ⌘K: the same row shape as a nav item, so it lines up with them. */
 function SearchItem() {
@@ -358,22 +257,12 @@ function NavContent(props: ComponentProps<typeof SidebarContent>) {
   return <SidebarContent {...props} onClick={closeOnLinkClick} />;
 }
 
-function GroupLabel({ children }: { children: ReactNode }) {
-  return <span className="block pb-1 pl-3 pr-1.5 pt-3 text-xs font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">{children}</span>;
-}
-
-const GROUPS: { id: PageGroup; label: string | null }[] = [
-  { id: "main", label: null },
-  { id: "work", label: "Work" },
-  { id: "system", label: "System" },
-];
-
 export function AppSidebar({ route }: { route: string }) {
   const reduce = useReducedMotion() ?? false;
   const [settled] = useState(shellAlreadyPainted);
   const still = reduce || settled;
   const { problems } = usePlugins();
-  const pages = usePages();
+  const { top, bottom } = place(usePages());
 
   let step = 0;
   const cascade = () => {
@@ -386,6 +275,18 @@ export function AppSidebar({ route }: { route: string }) {
           transition: { duration: 0.35, ease: EASE_OUT, delay: 0.05 + i * 0.045 },
         };
   };
+  const row = (p: PageDef, small = false) => (
+    <motion.div key={p.id} {...cascade()} className="flex flex-col">
+      <NavItem
+        item={{ label: p.title, icon: p.icon, href: hrefFor(p.id) }}
+        active={route === p.id}
+        reduce={reduce}
+        small={small}
+        trailing={p.id === "tasks" ? <NeedsYouCount /> : undefined}
+      />
+      {p.id === "settings" ? <SettingsSubReveal open={route === "settings"} reduce={reduce} /> : null}
+    </motion.div>
+  );
 
   return (
     <>
@@ -393,11 +294,11 @@ export function AppSidebar({ route }: { route: string }) {
       <CollapseWhenNarrow />
       <Sidebar variant="inset" collapsible="icon" mobileClassName="sky">
         <SidebarHeader className="gap-2 px-3 pt-3 pb-2 group-data-[collapsible=icon]:px-2">
-          <div className="flex h-9 items-center gap-1.5 group-data-[collapsible=icon]:justify-center">
+          <div className="flex h-9 items-center gap-1 group-data-[collapsible=icon]:h-auto group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-2">
             <a
               href={hrefFor(HOME)}
               title="Neko"
-              className="sky-pebble flex size-7 shrink-0 items-center justify-center rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 group-data-[collapsible=icon]:hidden"
+              className="sky-pebble flex size-7 shrink-0 items-center justify-center rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               <Mark className="size-3.5" />
               <span className="sr-only">Neko</span>
@@ -405,51 +306,31 @@ export function AppSidebar({ route }: { route: string }) {
             <span aria-hidden className="text-lg font-light text-muted-foreground/40 group-data-[collapsible=icon]:hidden">
               /
             </span>
-            <div className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground group-data-[collapsible=icon]:hidden">Neko</div>
+            <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+              <WorkspaceSwitcher />
+            </div>
             <SidebarTrigger className="size-7 shrink-0 text-muted-foreground hover:text-foreground" />
           </div>
-          <motion.div
-            {...cascade()}
-            className="hidden group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center"
-          >
-            <QuickCreate />
-          </motion.div>
           <SearchItem />
         </SidebarHeader>
 
-        <NavContent className="px-3 py-1 group-data-[collapsible=icon]:px-2">
-          <TasksRail reduce={still} />
-
-          <div className="mt-5 flex shrink-0 flex-col gap-1 border-t border-border/50 pt-3 group-data-[collapsible=icon]:mt-2 group-data-[collapsible=icon]:border-t-0 group-data-[collapsible=icon]:pt-0">
-            {GROUPS.map(({ id, label }) => {
-              const list = pages.filter((p) => p.group === id);
-              if (!list.length) return null;
-              return (
-                <div key={id} className="flex flex-col gap-1">
-                  {label ? <GroupLabel>{label}</GroupLabel> : null}
-                  {list.map((p) => (
-                    <motion.div key={p.id} {...cascade()} className="flex flex-col">
-                      <NavItem item={{ label: p.title, icon: p.icon, href: hrefFor(p.id) }} active={route === p.id} reduce={reduce} trailing={<><PageChip id={p.id} /><OwnerMark source={p.source} customised={p.customised} /></>} />
-                      {p.id === "settings" ? <SettingsSubReveal open={route === "settings"} reduce={reduce} /> : null}
-                    </motion.div>
-                  ))}
-                </div>
-              );
-            })}
-            {problems.length > 0 ? (
-              <div className="flex flex-col gap-1">
-                {problems.map((p) => (
-                  <NavItem
-                    key={p.plugin}
-                    item={{ label: p.plugin, icon: Warning, href: hrefFor(`problem:${p.plugin}`) }}
-                    active={route === `problem:${p.plugin}`}
-                    reduce={reduce}
-                    title={p.message}
-                    className="text-warning-foreground"
-                  />
-                ))}
-              </div>
-            ) : null}
+        <NavContent className="px-3 pt-1 pb-2 group-data-[collapsible=icon]:px-2">
+          <div aria-hidden className="mx-3 mb-2 h-px shrink-0 bg-border/60 group-data-[collapsible=icon]:mx-1" />
+          <div data-slot="sidebar-daily" className="flex shrink-0 flex-col gap-1">
+            {top.map((p) => row(p))}
+            {problems.map((p) => (
+              <NavItem
+                key={p.plugin}
+                item={{ label: p.plugin, icon: Warning, href: hrefFor(`problem:${p.plugin}`) }}
+                active={route === `problem:${p.plugin}`}
+                reduce={reduce}
+                title={p.message}
+                className="text-warning-foreground"
+              />
+            ))}
+          </div>
+          <div data-slot="sidebar-setup" className="mt-auto flex shrink-0 flex-col gap-0.5 pt-6">
+            {bottom.map((p) => row(p, true))}
           </div>
         </NavContent>
 

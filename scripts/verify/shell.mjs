@@ -116,6 +116,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
       task("t-next", "Update the CLI help text", "Queued", 30000),
       ...(snap.tasks ?? []),
     ];
+    const named = (id, name) => ({ id, name, repository: "", instructions: "", away_enabled: false });
+    snap.workspaces = [...(snap.workspaces ?? []).filter((w) => w.id !== "w" && w.id !== "w2"), named("w", "Atlas"), named("w2", "Borealis")];
     snap.machine = {
       at_ms: Date.now(), load: 17.4, cores: 14, free_disk_gb: 96, compressed_gb: 2.3, swap_used_gb: 1.2, swap_total_gb: 4,
       pressure: "warning", kernel_task_cpu: 12, night: false, holding: "Memory pressure is high: no new agents start.", cap: 1, slowed: 2, agents: [],
@@ -124,28 +126,26 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   await page.goto(`${base}/#/`);
   await page.reload();
   await page.waitForSelector("[data-slot='composer'] textarea", { timeout: 15000 });
-  await page.waitForSelector("[data-slot='sidebar-task']", { timeout: 10000 });
+  await page.waitForSelector("[data-slot='workspace-switcher']", { timeout: 10000 });
   await sleep(600);
 
-  const chips = await page.locator("[data-slot='nav-item'] [data-slot='state-chip']").allInnerTexts();
-  check(chips.some((c) => /^Working \d+[ms]/.test(c.trim())), `Home's sidebar row shows a live "Working Ns" chip (${chips.join(" | ")})`);
-  const tasksChip = await page.locator("[data-slot='nav-item']", { hasText: "Home" }).first().innerText();
-  check(/Working/.test(tasksChip), "the chip sits in the row's right-hand slot");
-  const rows = await page.locator("[data-slot='sidebar-task']").evaluateAll((els) => els.map((e) => ({ stage: e.getAttribute("data-stage"), text: e.textContent.trim() })));
-  check(rows.length >= 4, `the sidebar lists live tasks (${rows.length}): ${rows.map((r) => r.stage).join(", ")}`);
-  check(rows[0].stage === "needsYou" && /Needs you/.test(rows[0].text), `a task that needs you leads, with an amber "Needs you" chip: "${rows[0].text}"`);
-  const amber = await page.locator("[data-slot='sidebar-task'][data-stage='needsYou'] [data-slot='state-chip']").first().getAttribute("data-tone");
-  check(amber === "amber", "the Needs-you chip is the amber tone");
-  check(rows.some((r) => r.stage === "review" && /Review/.test(r.text)) && rows.some((r) => r.stage === "running" && /Working/.test(r.text)), "review and running tasks carry their own chips");
+  // The sidebar is the gallery's option E: no task list, one badge (the Tasks count).
+  check((await page.locator("[data-slot='sidebar-task']").count()) === 0, "the sidebar has no task list");
+  const chips = await page.locator("[data-slot='nav-item'] [data-slot='state-chip']").evaluateAll((els) => els.map((e) => ({ row: e.closest("[data-slot='nav-item']").textContent.trim(), tone: e.dataset.tone })));
+  check(chips.length === 1 && /^Tasks\d+$/.test(chips[0].row.replace(/\s+/g, "")) && chips[0].tone === "amber", `the only badge is the Tasks row's amber count of what waits on you (${chips.map((c) => c.row).join(" | ")})`);
+  const daily = await page.locator("[data-slot='sidebar-daily'] [data-slot='nav-item']").allInnerTexts();
+  const setupRows = await page.locator("[data-slot='sidebar-setup'] [data-slot='nav-item']").allInnerTexts();
+  check(["Home", "Tasks", "Pull requests", "Agent tree", "Watching"].every((t, i) => daily[i]?.trim().startsWith(t)), `the daily pages lead the sidebar: ${daily.map((t) => t.trim()).join(", ")}`);
+  check(["Schedules", "Memory", "Profiles", "Tools & skills", "Settings", "Usage & machine"].every((t) => setupRows.some((r) => r.trim() === t)) && ![...daily, ...setupRows].some((t) => t.trim() === "Workspaces"), `the pages you set up once sit at the bottom, and Workspaces lives in the switcher: ${setupRows.join(", ")}`);
   const title = await page.title();
   check(/^\(\d+\) Neko$/.test(title), `the document title carries the count when something needs you: "${title}"`);
   const bar = page.locator("[data-slot='status-bar']");
   const barText = (await bar.innerText()).replace(/\s+/g, " ");
-  check(/New work is on hold/.test(barText) && /waiting on you|Working/.test(barText), `the sidebar status shows the machine hold and what waits on you: "${barText}"`);
+  check(/New work is on hold · \d+ need you/.test(barText), `the sidebar status is one line, the machine hold and what waits on you: "${barText}"`);
   check((await page.locator("[data-slot='theme-menu']").count()) === 1 && (await page.locator(".sky-segment").count()) === 0, "the theme is one menu button in the sidebar, not a segmented switch");
   await page.locator("[data-slot='theme-menu']").click();
   await page.getByRole("menuitemradio", { name: "Light" }).waitFor({ timeout: 3000 });
-  check((await page.getByRole("menuitemradio").count()) === 4, "the theme menu opens with System, Light, Dark and Glass");
+  check((await page.getByRole("menuitemradio").count()) === 4 && (await page.getByRole("menuitem", { name: /Keyboard shortcuts/ }).count()) === 1, "the footer's gear opens the theme (System, Light, Dark, Glass) and the keyboard shortcuts");
   await page.getByRole("menuitemradio", { name: "Glass" }).click();
   await page.waitForFunction(() => document.documentElement.classList.contains("glass") && document.documentElement.classList.contains("dark"), null, { timeout: 3000 });
   check(true, "choosing Glass sets html.dark.glass");
@@ -170,6 +170,50 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
     await a11y(`shell sidebar + status bar (${theme})`);
   }
   await setTheme("dark");
+
+  // The workspace switcher: every workspace, All workspaces and Manage; the choice scopes Tasks.
+  const switcher = page.locator("[data-slot='workspace-switcher']");
+  const pick = async (name) => {
+    await switcher.click();
+    await page.getByRole("menuitem", { name }).waitFor({ timeout: 3000 });
+    await page.getByRole("menuitem", { name }).click();
+    await sleep(250);
+  };
+  await pick(/All workspaces/);
+  check(/All workspaces/.test(await switcher.innerText()), "the switcher reads All workspaces when none is chosen");
+  await switcher.click();
+  await page.getByRole("menuitem", { name: "Atlas", exact: true }).waitFor({ timeout: 3000 });
+  check((await page.getByRole("menuitem", { name: /Manage workspaces/ }).count()) === 1 && (await page.getByRole("menuitem", { name: /Borealis/ }).count()) === 1, "the switcher lists every workspace, All workspaces and Manage workspaces…");
+  for (const theme of themes) {
+    await setTheme(theme);
+    await shot(`shell-switcher-open-${theme}`, { clip: { x: 0, y: 0, width: 420, height: 420 } });
+  }
+  await setTheme("dark");
+  await page.getByRole("menuitem", { name: "Atlas", exact: true }).click();
+  await sleep(250);
+  check(/Atlas/.test(await switcher.innerText()), "choosing a workspace shows its name next to the mark");
+  await page.goto(`${base}/#/tasks`);
+  await page.waitForFunction(() => /Atlas ·/.test(document.body.innerText), null, { timeout: 8000 }).catch(() => {});
+  check(/Atlas ·/.test(await page.locator("body").innerText()), "the Tasks page follows the switcher (Atlas · N tasks)");
+  for (const theme of themes) {
+    await setTheme(theme);
+    await shot(`shell-tasks-${theme}`);
+  }
+  await setTheme("dark");
+  await pick(/All workspaces/);
+  await page.goto(`${base}/#/`);
+  await page.waitForSelector("[data-slot='composer'] textarea", { timeout: 15000 });
+  // The collapsed rail: the mark, the trigger and the icons.
+  await page.locator("[data-slot='sidebar-trigger']").first().click();
+  await sleep(500);
+  check((await page.locator("[data-slot='workspace-switcher']").isVisible()) === false, "collapsed, the sidebar shows the mark, not the switcher");
+  for (const theme of themes) {
+    await setTheme(theme);
+    await shot(`shell-sidebar-collapsed-${theme}`);
+  }
+  await setTheme("dark");
+  await page.locator("[data-slot='sidebar-trigger']").first().click();
+  await sleep(400);
 
   // Something that newly needs you raises a toast (nothing toasts for what was already waiting at load).
   check((await page.getByText("A task is ready to review").count()) === 0, "no toast for what was already waiting when the page opened");

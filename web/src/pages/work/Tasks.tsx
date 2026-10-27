@@ -31,6 +31,7 @@ import { taskActions } from "@/work/taskActions";
 import { TaskBoard, TaskList } from "@/work/TaskViews";
 import { TreeView } from "@/work/TreeView";
 import { useLocal } from "@/work/useLocal";
+import { useSelectedWorkspace } from "@/shell/workspace";
 import { buildTree, STAGE_TITLE, taskCount, taskTitle, type Stage } from "@/work/model";
 import { navigate } from "@/router";
 
@@ -60,7 +61,7 @@ export default function Tasks() {
   const [layoutRaw, setLayout] = useLocal("neko.work.layout", "list");
   const layout: Layout = isLayout(layoutRaw) ? layoutRaw : "list";
   const [doneOpen, setDoneOpenRaw] = useLocal("neko.board.doneExpanded", "false");
-  const [workspace, setWorkspace] = useLocal("neko.work.workspace", "");
+  const { id: workspace, select: setWorkspace } = useSelectedWorkspace();
   const [includeStoppedRaw, setIncludeStopped] = useLocal("neko.work.includeStopped", "true");
   const [stage, setStage] = useState<Stage | "all">("all");
   const [search, setSearch] = useState("");

@@ -2,6 +2,7 @@
 // below it, and the agent runs under each task (AgentTreeView.swift). The same
 // tree is a layout inside Tasks; this page is that layout on its own.
 import { useMemo, useState } from "react";
+import { useSelectedWorkspace } from "@/shell/workspace";
 import { useWorkbench } from "@/useStore";
 import { MagnifyingGlass, TreeStructure } from "@/ui/icons";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/ui/input-group";
@@ -17,7 +18,7 @@ import { byStage, flatten } from "@/work/filters";
 export default function Tree() {
   const { snapshot, error } = useWorkbench();
   const [search, setSearch] = useState("");
-  const [workspace, setWorkspace] = useState("");
+  const { id: workspace, select: setWorkspace } = useSelectedWorkspace();
   const workspaces: { id: string; name: string }[] = snapshot?.workspaces ?? [];
 
   const tree = useMemo(() => {
