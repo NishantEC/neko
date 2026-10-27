@@ -618,9 +618,9 @@ function SidebarSection() {
 
 function CardSection() {
   return (
-    <Section id="cards" eyebrow="Task card" title={<>Slab and well, developed.</>}>
+    <Section id="cards" eyebrow="Task card" title={<>The fused card: where the action lives.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        Live-aware (4) as the reference and Slab and well (5) as the base, then three ways to develop 5 with 4’s live strip. One task on every card; the switcher puts it in a state on all of them at once (← → once it has focus). Click a card to select it; its action sends the task to Running. The real card is unchanged.
+        The chosen card: a well with its state as a fused tab (no tab once done; running, the tab is just the step and its clock). Three places its action could live, side by side; the switcher puts the one task in a state on every card (← → once it has focus). Click a card to select it. The real card is unchanged.
       </p>
       <CardOptions />
     </Section>
