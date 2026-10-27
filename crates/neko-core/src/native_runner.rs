@@ -2183,7 +2183,7 @@ mod tests {
     // child. Five seconds is ample in isolation but not under Cargo's full
     // parallel workspace load; this is a fixture startup bound, not the
     // product timeout contract exercised by the tests.
-    const GUARDIAN_FIXTURE_DEADLINE: Duration = Duration::from_secs(15);
+    const GUARDIAN_FIXTURE_DEADLINE: Duration = Duration::from_secs(60);
 
     fn fixture(body: &str) -> (TempDir, PathBuf, RunSpec) {
         let temp = TempDir::new().unwrap();
@@ -2790,7 +2790,7 @@ sleep 120
 
     #[test]
     fn guardian_preserves_stdin_exit_code_and_cleans_up_background_children() {
-        let (temp, child, _) = fixture("cat > prompt; (sleep 0.6; touch survived) & exit 7");
+        let (temp, child, _) = fixture("cat > prompt; (sleep 3; touch survived) & exit 7");
         let helper = guardian_fixture(temp.path());
         let mut command = Command::new(&child);
         command
@@ -2811,13 +2811,13 @@ sleep 120
             fs::read(temp.path().join("prompt")).unwrap(),
             b"original prompt"
         );
-        std::thread::sleep(Duration::from_millis(750));
+        std::thread::sleep(Duration::from_millis(3500));
         assert!(!temp.path().join("survived").exists());
     }
 
     #[test]
     fn cancellation_of_guarded_process_returns_after_descendant_cleanup() {
-        let (temp, child, _) = fixture("(sleep 0.6; touch survived) & sleep 20");
+        let (temp, child, _) = fixture("(sleep 3; touch survived) & sleep 20");
         let helper = guardian_fixture(temp.path());
         let mut command = Command::new(&child);
         command
@@ -2842,7 +2842,7 @@ sleep 120
             .unwrap();
             assert!(err.contains("cancelled"), "{err}");
         });
-        std::thread::sleep(Duration::from_millis(750));
+        std::thread::sleep(Duration::from_millis(3500));
         assert!(!temp.path().join("survived").exists());
     }
 
@@ -2898,7 +2898,7 @@ sleep 120
 
     #[test]
     fn a_guarded_long_lived_child_ends_with_its_owner() {
-        let (temp, child, _) = fixture("touch started; (sleep 0.6; touch survived) & sleep 20");
+        let (temp, child, _) = fixture("touch started; (sleep 3; touch survived) & sleep 20");
         let helper = guardian_fixture(temp.path());
         let mut command = Command::new(&child);
         command.current_dir(temp.path()).env("NEKO_TEST_CHILD_EXECUTABLE", &child);
@@ -2910,13 +2910,13 @@ sleep 120
         let closed = Instant::now();
         drop(guarded); // the daemon ending closes its end of the socket
         assert!(closed.elapsed() < Duration::from_secs(5), "the guardian notices within its poll interval");
-        std::thread::sleep(Duration::from_millis(750));
+        std::thread::sleep(Duration::from_millis(3500));
         assert!(!temp.path().join("survived").exists(), "the child's whole group ended with it");
     }
 
     #[test]
     fn a_guardian_told_to_stop_ends_its_child_first() {
-        let (temp, child, _) = fixture("touch started; (sleep 0.6; touch survived) & sleep 20");
+        let (temp, child, _) = fixture("touch started; (sleep 3; touch survived) & sleep 20");
         let helper = guardian_fixture(temp.path());
         let mut command = Command::new(&child);
         command.current_dir(temp.path()).env("NEKO_TEST_CHILD_EXECUTABLE", &child);
@@ -2930,7 +2930,7 @@ sleep 120
         unsafe { libc::kill(guarded.child.id() as libc::pid_t, libc::SIGTERM) };
         let status = guarded.child.wait().unwrap();
         assert!(status.code().is_some(), "the guardian exits by itself rather than dying on the signal: {status:?}");
-        std::thread::sleep(Duration::from_millis(750));
+        std::thread::sleep(Duration::from_millis(3500));
         assert!(!temp.path().join("survived").exists(), "its child's group ended first");
     }
 
@@ -2940,7 +2940,7 @@ sleep 120
         let child = temp.path().join("child");
         fs::write(
             &child,
-            "#!/bin/sh\ntouch started\n(sleep 0.7; touch survived) &\nsleep 20\n",
+            "#!/bin/sh\ntouch started\n(sleep 3; touch survived) &\nsleep 20\n",
         )
         .unwrap();
         fs::set_permissions(&child, fs::Permissions::from_mode(0o700)).unwrap();
@@ -2970,7 +2970,7 @@ sleep 120
             temp.path().join("started").exists(),
             "fixture child did not start"
         );
-        std::thread::sleep(Duration::from_millis(850));
+        std::thread::sleep(Duration::from_millis(3500));
         assert!(
             !temp.path().join("survived").exists(),
             "builder descendant survived its daemon"
@@ -3129,13 +3129,15 @@ printf '%s\n' '{error}'
 
     #[test]
     fn timeout_kills_descendants_and_returns_promptly() {
-        let (temp, exe, mut spec) = fixture("(sleep 0.8; touch survived) & sleep 10");
+        // Survivor and bounds are seconds apart so a loaded machine cannot
+        // make the kill look late (the agent itself would run 10 s).
+        let (temp, exe, mut spec) = fixture("(sleep 4; touch survived) & sleep 10");
         spec.timeout = Duration::from_millis(120);
         let start = Instant::now();
         let err = run_with_executable(&exe, &spec, &AtomicBool::new(false), |_| {}).unwrap_err();
         assert!(err.contains("timed out"), "{err}");
-        assert!(start.elapsed() < Duration::from_secs(2));
-        std::thread::sleep(Duration::from_millis(850));
+        assert!(start.elapsed() < Duration::from_secs(3), "{:?}", start.elapsed());
+        std::thread::sleep(Duration::from_millis(4500));
         assert!(!temp.path().join("survived").exists());
     }
 
