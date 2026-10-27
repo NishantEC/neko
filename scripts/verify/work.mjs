@@ -285,6 +285,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await page.locator("[data-slot='command']").waitFor({ timeout: 3000 });
   const entries = (await page.locator("[data-slot='command-item']").allInnerTexts()).join(" | ");
   check(/Rename selected task/.test(entries) && /Show tasks as a board/.test(entries), "⌘K offers actions for the selected task and the layouts");
+  // Escape belongs to the palette once its input has focus; wait for that, as a person would.
+  await page.waitForFunction(() => document.activeElement?.getAttribute("data-slot") === "command-input", null, { timeout: 3000 });
   await page.keyboard.press("Escape");
   await sleep(300);
   check(new URL(page.url()).hash.includes("task="), "Esc closes the palette and leaves the task open");
@@ -553,6 +555,45 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await page.waitForFunction(() => !location.hash.includes("task="), null, { timeout: 3000 });
   await page.getByRole("button", { name: "Done options" }).click();
   await page.getByRole("menuitem", { name: "Fold into a rail" }).click();
+
+  // the notched card: the state in the notch, the action on the card, running live, done plain
+  {
+    const card = (status) => page.locator(`[data-slot='task-board'] [data-slot='board-card'][data-status='${status}']`).first();
+    const notch = async (status) => (await card(status).locator("[data-notch]").innerText()).replace(/\s+/g, " ").trim();
+    check((await card("Building").getAttribute("data-density")) === "compact", "board cards are the compact notched card");
+    const live = await notch("Building");
+    check(/^Preparing a fix · \d+m \d\ds$/.test(live), `a running card's notch is its live step and clock (${live})`);
+    check((await card("Building").locator("[data-slot='card-action']").count()) === 0, "a running card has no action");
+    const ready = await notch("ReadyForReview");
+    check(/^Ready to review/.test(ready) && (await card("ReadyForReview").locator("[data-slot='card-action']").count()) === 0, `a ready card says so in its notch and has no action (${ready})`);
+    const waiting = page.locator("[data-slot='task-board'] [data-slot='board-card'][data-status='AwaitingApproval']");
+    const states = await waiting.evaluateAll((els) => els.map((e) => [e.querySelector("[data-notch]")?.innerText.split(/\s/)[0] ?? "", e.querySelector("[data-slot='card-action']")?.innerText.trim() ?? ""]));
+    check(states.length > 0 && states.every(([s, a]) => (s === "Asks" && a === "Answer") || (s === "Needs" && a === "Approve")), `waiting cards say Asks you with Answer, or Needs approval with Approve (${states.map(([s, a]) => `${s}/${a}`).join(", ")})`);
+    const approve = waiting.filter({ has: page.locator("[data-slot='card-action']", { hasText: "Approve" }) }).first();
+    if (await approve.count()) {
+      const id = await approve.locator("[data-slot='task-row']").getAttribute("data-task-id");
+      commands.length = 0;
+      await approve.locator("[data-slot='card-action']").click();
+      await sleep(400);
+      check(commands.length === 1 && commands[0].ApproveTask?.task_id === id && !new URL(page.url()).hash.includes("task="), `a card's Approve sends ApproveTask for that task and does not open it (${JSON.stringify(commands)})`);
+    }
+    const failed = card("Failed");
+    if (await failed.count()) {
+      check(/^Stopped/.test(await notch("Failed")) && (await failed.locator("[data-slot='card-action']").innerText()).includes("Start again"), "a stopped card says Stopped in its notch and offers Start again");
+      const id = await failed.locator("[data-slot='task-row']").getAttribute("data-task-id");
+      commands.length = 0;
+      await failed.locator("[data-slot='card-action']").click();
+      await sleep(400);
+      check(commands.length === 1 && commands[0].StartTask?.task_id === id, `a card's Start again sends StartTask (${JSON.stringify(commands)})`);
+    }
+    await page.locator("[data-slot='done-rail']").click();
+    await page.locator("[data-slot='board-column'][data-stage='done']").waitFor({ timeout: 3000 });
+    const doneCards = page.locator("[data-slot='board-column'][data-stage='done'] [data-slot='board-card']");
+    check((await doneCards.count()) > 0 && (await doneCards.locator("[data-notch]").count()) === 0, "done cards have no notch");
+    await both("work-rich-board-cards");
+    await page.getByRole("button", { name: "Done options" }).click();
+    await page.getByRole("menuitem", { name: "Fold into a rail" }).click();
+  }
 
 
   // tree: expand the watch, the split parent, the running task's runs

@@ -131,12 +131,12 @@ function Body(props: NotchCardProps & { surface?: boolean }) {
           <span
             data-notch={surface ? undefined : ""}
             data-slot={surface ? undefined : live ? "card-live" : "card-tab"}
-            className="flex min-w-0 max-w-[68%] shrink-0 items-center ps-3 pe-2.5"
+            className={cn("flex min-w-0 shrink items-center ps-3 pe-2.5", action || pr ? "max-w-[64%]" : "max-w-[84%]")}
           >
             <NotchState state={state} live={live} tone={tone} lead={notchLead} />
           </span>
           <span
-            className={cn("relative flex min-w-0 flex-1 items-center justify-end rounded-b-[16px] pe-1.5", surface && "shadow-[0_-1px_0_var(--fuse)]", paint)}
+            className={cn("relative flex flex-1 shrink-0 items-center justify-end rounded-b-[16px] ps-2.5 pe-1.5", surface && "shadow-[0_-1px_0_var(--fuse)]", paint)}
             style={{ borderBottomLeftRadius: r }}
           >
             {surface ? (
