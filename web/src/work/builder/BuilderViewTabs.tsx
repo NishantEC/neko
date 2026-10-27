@@ -91,7 +91,7 @@ export function BuilderViewTabs<V extends string>({
         ref={tabListRef}
         role="tablist"
         aria-label="Task views"
-        className="relative flex h-[52px] shrink-0 items-end gap-0.5 pl-6 [scrollbar-width:none] @max-[38rem]/header:min-w-0 @max-[38rem]/header:shrink @max-[38rem]/header:overflow-x-auto @max-[38rem]/header:overflow-y-hidden @max-[38rem]/header:pl-2 @min-[56rem]/header:absolute @min-[56rem]/header:bottom-0 @min-[56rem]/header:left-1/2 @min-[56rem]/header:-translate-x-[calc(50%+12px)]"
+        className="relative flex h-[52px] shrink-0 items-end gap-0.5 pl-3 [scrollbar-width:none] @max-[38rem]/header:min-w-0 @max-[38rem]/header:shrink @max-[38rem]/header:overflow-x-auto @max-[38rem]/header:overflow-y-hidden @max-[38rem]/header:pl-2"
       >
         {activeTabPosition ? (
           <motion.div
