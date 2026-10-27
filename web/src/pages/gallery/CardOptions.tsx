@@ -1,10 +1,10 @@
 // The gallery's "Task card" section: ways to draw one task on the Tasks board
-// (work/board/BoardCard.tsx), decided before the columns. Each option draws the
-// same six sample tasks, one per state the owner sees, as a single 300px column.
-// Everything is local state: cards select, the action moves a task on (Start
-// again, Answer and Approve set it running), the ⋯ menu acts on the copy.
+// (work/board/BoardCard.tsx), decided before the columns. One card per option,
+// 300px wide, side by side; a segmented control above puts the same task in one
+// state on every card at once. Everything is local state: cards select, and the
+// action (Start again, Answer, Approve) switches every card to Running.
 //
-// Owner's brief: spacious, slotted, tidy, plain sans, Neko colours. Option E
+// Owner's brief: spacious, slotted, tidy, plain sans, Neko colours. Option 5
 // copies hushbacks' form tile (Dashboard/Gallery/GalleryFormCard): an outer
 // slab holding an inset well for the content, then a slim status row under it
 // with a dot, the label, the time and a ⋯ menu.
@@ -13,6 +13,7 @@ import { ArrowRight, Clock, DotsThree, FolderSimple, GitPullRequest, Hash, Warni
 import { Button } from "@/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { cn } from "@/ui/lib/utils";
+import { SegmentedControl, SegmentedControlItem } from "@/ui/segmented-control";
 import { TONE_DOT, TONE_TEXT, type Tone } from "@/work/tone";
 
 type Kind = "stopped" | "asks" | "approve" | "review" | "running" | "done";
@@ -33,14 +34,21 @@ type Task = {
   step?: { label: string; at: number; of: number; seconds: number };
 };
 
-const SAMPLE: Task[] = [
-  { id: "t1", key: "NEK-5AFF", kind: "stopped", title: "Fix TypeError in meal logging when portion is null", repo: "athena", source: "Sentry", age: 18, reason: "Actual changed files exceed verified or approved scope." },
-  { id: "t2", key: "NEK-31C2", kind: "asks", title: "Coach chat drops messages after reconnect", repo: "athena", source: "HEA-3004", age: 64, reason: "Should reconnects replay every unread message, or only the last one?" },
-  { id: "t3", key: "NEK-8E07", kind: "approve", title: "Bump expo-notifications to 0.29 and fix the iOS badge count", repo: "navihealth", source: "HEA-2987", pr: 4649, age: 125, reason: "The plan touches 14 files across two packages." },
-  { id: "t4", key: "NEK-C410", kind: "review", title: "Cache food search results for 10 minutes", repo: "athena", source: "HEA-2975", pr: 4641, age: 35 },
-  { id: "t5", key: "NEK-0B9D", kind: "running", title: "Rate-limit the /v2/insights endpoint per user", repo: "athena", source: "Sentry", age: 2, step: { label: "Running tests", at: 3, of: 5, seconds: 128 } },
-  { id: "t6", key: "NEK-77A1", kind: "done", title: "Drop the unused analytics SDK", repo: "navihealth", pr: 4602, age: 250 },
-];
+/** One task, drawn in whichever state the switcher picks, so the options compare like for like. */
+const BASE = { id: "t1", key: "NEK-8E07", title: "Bump expo-notifications to 0.29 and fix the iOS badge count", repo: "navihealth", source: "HEA-2987" };
+const IN_STATE: Record<Kind, Omit<Task, keyof typeof BASE | "kind">> = {
+  stopped: { age: 18, reason: "Actual changed files exceed verified or approved scope." },
+  asks: { age: 64, reason: "Should the badge count include muted coach threads, or only unmuted ones?" },
+  approve: { age: 125, pr: 4649, reason: "The plan touches 14 files across two packages." },
+  review: { age: 35, pr: 4649 },
+  running: { age: 2, step: { label: "Running tests", at: 3, of: 5, seconds: 128 } },
+  done: { age: 250, pr: 4649 },
+};
+const taskIn = (kind: Kind, seconds: number): Task => {
+  const t: Task = { ...BASE, kind, ...IN_STATE[kind] };
+  return t.step ? { ...t, step: { ...t.step, seconds: t.step.seconds + seconds } } : t;
+};
+const KINDS: Kind[] = ["stopped", "asks", "approve", "review", "running", "done"];
 
 const LABEL: Record<Kind, string> = { stopped: "Stopped", asks: "Asks you", approve: "Needs approval", review: "Ready to review", running: "Running", done: "Done" };
 const TONE: Record<Kind, Tone> = { stopped: "failed", asks: "attention", approve: "attention", review: "review", running: "running", done: "done" };
@@ -54,29 +62,10 @@ const clock = (s: number) => `${Math.floor(s / 60)}m ${String(s % 60).padStart(2
 const FOCUS = "outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
 
 // ---------------------------------------------------------------------------
-// State per option: the six tasks, the selected one, the action, a ticking clock.
+// Per card: the selected state; acting on it is lifted to the switcher.
 // ---------------------------------------------------------------------------
 
-type Mock = { tasks: Task[]; selected: string | null; select: (id: string) => void; act: (id: string) => void };
-
-function useCards(): Mock {
-  const [tasks, setTasks] = useState(SAMPLE);
-  const [selected, setSelected] = useState<string | null>(null);
-  useEffect(() => {
-    // The live card's clock: one tick a second, only while something runs.
-    if (!tasks.some((t) => t.kind === "running")) return;
-    const id = setInterval(() => setTasks((all) => all.map((t) => (t.step ? { ...t, step: { ...t.step, seconds: t.step.seconds + 1 } } : t))), 1000);
-    return () => clearInterval(id);
-  }, [tasks.some((t) => t.kind === "running")]); // eslint-disable-line react-hooks/exhaustive-deps
-  return {
-    tasks, selected,
-    select: (id) => setSelected((s) => (s === id ? null : id)),
-    act: (id) => setTasks((all) => all.map((t) => (t.id === id
-      ? { ...t, kind: "running", age: 0, reason: undefined, step: { label: t.kind === "asks" ? "Reading your answer" : "Planning", at: 1, of: 5, seconds: 0 } }
-      : t))),
-  };
-}
-
+type Mock = { selected: string | null; select: (id: string) => void; act: (id: string) => void };
 function label(t: Task) {
   return `${t.title}. ${LABEL[t.kind]}${t.reason ? `: ${t.reason}` : ""}. ${t.repo}${t.source ? `, ${t.source}` : ""}, ${age(t.age)} ago${t.pr ? `, pull request ${t.pr}` : ""}`;
 }
@@ -251,13 +240,11 @@ function SlabCard({ t, m }: { t: Task; m: Mock }) {
   );
 }
 
-function Column({ render }: { render: (t: Task, m: Mock) => ReactNode }) {
-  const m = useCards();
-  return (
-    <div data-slot="card-column" className="flex flex-col gap-2.5 rounded-2xl bg-foreground/[0.03] p-2">
-      {m.tasks.map((t) => <div key={t.id}>{render(t, m)}</div>)}
-    </div>
-  );
+/** One option's card, with its own selection; acting on it sends every card to Running. */
+function OptionCard({ task, onAct, render }: { task: Task; onAct: () => void; render: (t: Task, m: Mock) => ReactNode }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const m: Mock = { selected, select: (id) => setSelected((s) => (s === id ? null : id)), act: onAct };
+  return <div data-slot="card-stage" className="rounded-2xl bg-foreground/[0.03] p-2">{render(task, m)}</div>;
 }
 
 const OPTIONS: { id: string; name: string; caption: string; render: (t: Task, m: Mock) => ReactNode }[] = [
@@ -294,17 +281,32 @@ const OPTIONS: { id: string; name: string; caption: string; render: (t: Task, m:
 ];
 
 export function CardOptions() {
+  const [kind, setKind] = useState<Kind>("stopped");
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    // The live card's clock: one tick a second, only while Running is shown.
+    if (kind !== "running") return;
+    const id = setInterval(() => setSeconds((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [kind]);
+  const task = taskIn(kind, seconds);
+  const show = (k: Kind) => { setKind(k); setSeconds(0); };
   return (
-    <div className="flex flex-wrap items-start gap-x-6 gap-y-10">
-      {OPTIONS.map((o) => (
-        <figure key={o.id} data-card-option={o.id} className="m-0 flex w-[316px] flex-col gap-3">
-          <Column render={o.render} />
-          <figcaption className="flex flex-col gap-1 px-1">
-            <span className="text-sm font-semibold text-foreground">{o.name}</span>
-            <span className="text-[13px] leading-snug text-muted-foreground">{o.caption}</span>
-          </figcaption>
-        </figure>
-      ))}
+    <div className="flex flex-col gap-6">
+      <SegmentedControl aria-label="Task state shown on every card" value={kind} onValueChange={(v) => show(v as Kind)} className="self-start">
+        {KINDS.map((k) => <SegmentedControlItem key={k} value={k}>{LABEL[k]}</SegmentedControlItem>)}
+      </SegmentedControl>
+      <div className="flex flex-wrap items-start gap-x-5 gap-y-10">
+        {OPTIONS.map((o) => (
+          <figure key={o.id} data-card-option={o.id} className="m-0 flex w-[316px] flex-col gap-3">
+            <OptionCard task={task} onAct={() => show("running")} render={o.render} />
+            <figcaption className="flex flex-col gap-1 px-1">
+              <span className="text-sm font-semibold text-foreground">{o.name}</span>
+              <span className="text-[13px] leading-snug text-muted-foreground">{o.caption}</span>
+            </figcaption>
+          </figure>
+        ))}
+      </div>
     </div>
   );
 }
