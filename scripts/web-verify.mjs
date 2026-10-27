@@ -343,13 +343,26 @@ try {
       }
     };
     const n = await section.locator("[data-card-option]").count();
-    check(n === 5 && (await section.locator("[data-slot='card'][data-kind='stopped']").count()) === n, `each of the ${n} card options shows one card, all in the switcher's state (Stopped)`);
+    check((await section.locator("[data-card-option]").first().getAttribute("data-card-option")) === "slab-tab", "the chosen fused-tab card comes first");
+    {
+      const col = section.locator("[data-slot='fused-column']");
+      await col.locator("[data-slot='card']").nth(1).locator("button").first().click();
+      check((await col.locator("[data-slot='card']").nth(1).getAttribute("data-selected")) === "", "clicking a fused-tab card in the column selects it");
+      for (const theme of ["dark", "light"]) {
+        await page.emulateMedia({ colorScheme: theme });
+        await sleep(300);
+        await page.mouse.move(0, 0);
+        await col.screenshot({ path: path.join(OUT, `gallery-cards-column-selected-${theme}.png`) });
+      }
+    }
+    check((await section.locator("[data-slot='fused-column'] [data-slot='card']").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")).join(","))) === "stopped,running,review", "the sample column stacks three fused-tab cards (Stopped, Running, Ready)");
+    check(n === 5 && (await section.locator("[data-card-option] [data-slot='card'][data-kind='stopped']").count()) === n, `each of the ${n} card options shows one card, all in the switcher's state (Stopped)`);
     await shoot("stopped");
     await state("Stopped").focus();
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Enter");
     await sleep(200);
-    check((await section.locator("[data-slot='card'][data-kind='asks']").count()) === n, "the state switcher moves with the arrow keys and switches every card (Asks you)");
+    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='asks']").count()) === n, "the state switcher moves with the arrow keys and switches every card (Asks you)");
     await state("Running").click();
     await sleep(300);
     const live = [];
@@ -361,11 +374,11 @@ try {
     await shoot("ready");
     await state("Done").click();
     await sleep(200);
-    check((await section.locator("[data-slot='card-action']").count()) === 0, "switching to Done hides the action buttons");
+    check((await section.locator("[data-card-option] [data-slot='card-action']").count()) === 0, "switching to Done hides the action buttons");
     await state("Stopped").click();
     await option("live").locator("[data-slot='card-action']").click();
     await sleep(200);
-    check((await section.locator("[data-slot='card'][data-kind='running']").count()) === n, "a card's Start again sends every card to Running");
+    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='running']").count()) === n, "a card's Start again sends every card to Running");
     const card = option("slab-rich").locator("[data-slot='card']");
     await card.locator("button").first().click();
     check((await card.getAttribute("data-selected")) === "", "clicking a card selects it");
