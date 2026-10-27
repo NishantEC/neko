@@ -61,7 +61,7 @@ function cardProps(t: Task, density: Density, act: () => void): NotchCardProps {
     tone: TONE[t.kind],
     title: t.title,
     density,
-    state: done ? null : { label: LABEL[t.kind], age: age(t.age), detail: density === "comfortable" ? undefined : t.repo },
+    state: done ? null : { label: LABEL[t.kind], age: age(t.age), detail: density === "comfortable" || verb || t.pr ? undefined : t.repo },
     live: t.step ? { step: t.step.label, clock: clock(t.step.seconds) } : null,
     reason: t.reason,
     meta: <>{t.repo}{t.source ? <> · {t.source}</> : null}{done ? <> · {age(t.age)}</> : null}</>,
@@ -103,7 +103,7 @@ function useHeight() {
 
 const DENSITIES: { id: Density; name: string; caption: string }[] = [
   { id: "comfortable", name: "Comfortable", caption: "Today’s card: 16px padding, a 15px title over two lines, the full reason, a meta line, and a 40px notch row with 12px curves." },
-  { id: "compact", name: "Compact (the board)", caption: "12px padding, a 14px title over two lines, the reason on one line, and repo folded into the 26px notch with 10px curves." },
+  { id: "compact", name: "Compact (the board)", caption: "12px padding, a 14px title over two lines, the reason on one line, and the repo folded into the 26px notch (when no action or PR needs the room), with 10px curves." },
   { id: "dense", name: "Dense", caption: "The title on one line and the notch row. The reason shows in a tooltip on hover or focus." },
 ];
 
