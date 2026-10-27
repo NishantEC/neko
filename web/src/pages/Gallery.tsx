@@ -620,7 +620,7 @@ function CardSection() {
   return (
     <Section id="cards" eyebrow="Task card" title={<>Five ways to draw one task.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        The same six tasks in each option, one per state you see on the board: stopped, asking, waiting for approval, ready to review, running and done. Click a card to select it; the action button moves the task on (it starts running). The real card is unchanged.
+        One task drawn five ways, side by side. The switcher above puts it in a state on every card at once (use ← → once it has focus), so you compare like with like. Click a card to select it; its action button sends the task to Running. The real card is unchanged.
       </p>
       <CardOptions />
     </Section>

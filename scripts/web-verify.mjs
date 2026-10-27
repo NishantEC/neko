@@ -332,22 +332,37 @@ try {
   check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) >= 4, "the gallery's Task card section shows the card options");
   {
     const section = page.locator("[data-gallery-section='cards']");
-    for (const theme of ["dark", "light"]) {
-      await page.emulateMedia({ colorScheme: theme });
-      await sleep(400);
-      await page.setViewportSize({ width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 3400 });
-      await section.scrollIntoViewIfNeeded();
-      await section.screenshot({ path: path.join(OUT, `gallery-cards-${theme}.png`) });
-      await page.setViewportSize({ width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 2600 });
-    }
     const option = (id) => section.locator(`[data-card-option='${id}']`);
-    check((await option("spacious").locator("[data-slot='card']").count()) === 6, "each card option draws the six sample tasks");
-    await option("spacious").locator("[data-kind='stopped'] [data-slot='card-action']").click();
-    check((await option("spacious").locator("[data-slot='card'][data-kind='running']").count()) === 2, "a card's Start again sets the task running");
-    const review = option("slotted").locator("[data-kind='review']");
-    await review.locator("button").first().click();
-    check((await review.getAttribute("data-selected")) === "", "clicking a card selects it");
-    check((await option("live").locator("[data-slot='card-live'] [role='progressbar']").count()) === 1, "the live-aware option shows the running card's step and progress");
+    const state = (name) => section.locator("[data-slot='segmented-control']").getByRole("button", { name, exact: true });
+    const shoot = async (tag) => {
+      for (const theme of ["dark", "light"]) {
+        await page.emulateMedia({ colorScheme: theme });
+        await sleep(400);
+        await section.scrollIntoViewIfNeeded();
+        await section.screenshot({ path: path.join(OUT, `gallery-cards-${tag}-${theme}.png`) });
+      }
+    };
+    check((await section.locator("[data-slot='card']").count()) === 5 && (await section.locator("[data-slot='card'][data-kind='stopped']").count()) === 5, "each card option shows one card, all in the switcher's state (Stopped)");
+    await shoot("stopped");
+    await state("Stopped").focus();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await sleep(200);
+    check((await section.locator("[data-slot='card'][data-kind='asks']").count()) === 5, "the state switcher moves with the arrow keys and switches every card (Asks you)");
+    await state("Running").click();
+    await sleep(300);
+    check((await option("live").locator("[data-slot='card-live'] [role='progressbar']").count()) === 1, "switching to Running shows the live strip on option 4");
+    await shoot("running");
+    await state("Done").click();
+    await sleep(200);
+    check((await section.locator("[data-slot='card-action']").count()) === 0, "switching to Done hides the action buttons");
+    await state("Stopped").click();
+    await option("spacious").locator("[data-slot='card-action']").click();
+    await sleep(200);
+    check((await section.locator("[data-slot='card'][data-kind='running']").count()) === 5, "a card's Start again sends every card to Running");
+    const card = option("slotted").locator("[data-slot='card']");
+    await card.locator("button").first().click();
+    check((await card.getAttribute("data-selected")) === "", "clicking a card selects it");
   }
   check((await page.locator("[data-gallery-section='board'] [data-board-option]").count()) >= 3, "the gallery's Board section shows the board options");
   {
