@@ -329,8 +329,8 @@ try {
     await option("quiet").getByRole("button", { name: "Expand sidebar" }).click();
     await option("setup-folds").locator("[data-slot='mock-setup']").click();
   }
-  const NOTCHES = ["left", "right"];
-  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) === NOTCHES.length, "the gallery's Task card section shows the notched card's two variations");
+  const DENSITIES = ["comfortable", "compact", "dense"];
+  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) === DENSITIES.length, "the gallery's Task card section shows the notched card at three densities");
   {
     const section = page.locator("[data-gallery-section='cards']");
     const option = (id) => section.locator(`[data-card-option='${id}']`);
@@ -338,39 +338,32 @@ try {
     const actions = section.locator("[data-card-option] [data-slot='card-action']");
     const notches = section.locator("[data-card-option] [data-notch]");
     const state = (name) => section.locator("[data-slot='segmented-control']").getByRole("button", { name, exact: true });
+    const heights = async () => Object.fromEntries(await Promise.all(DENSITIES.map(async (id) => [id, Math.round((await option(id).locator("[data-slot='card']").boundingBox()).height)])));
     const shoot = async (tag) => {
       for (const theme of ["dark", "light"]) {
         await page.emulateMedia({ colorScheme: theme });
         await sleep(400);
         await page.mouse.move(0, 0);
-        await section.scrollIntoViewIfNeeded();
-        await section.screenshot({ path: path.join(OUT, `gallery-cards-${tag}-${theme}.png`) });
+        await section.locator("[data-slot='card-densities']").scrollIntoViewIfNeeded();
+        await section.locator("[data-slot='card-densities']").screenshot({ path: path.join(OUT, `gallery-cards-${tag}-${theme}.png`) });
       }
     };
-    /** The action and the state are centred on the bottom row. */
-    const aligned = async (id) => option(id).locator("[data-slot='card']").evaluate((card) => {
-      const row = card.querySelector("[data-slot='action-row']").getBoundingClientRect();
-      const mid = (r) => r.top + r.height / 2;
-      const act = card.querySelector("[data-slot='card-action']").getBoundingClientRect();
-      const st = card.querySelector("[data-slot='card-tab']").getBoundingClientRect();
-      return { a: Math.abs(mid(row) - mid(act)), s: Math.abs(mid(row) - mid(st)), h: act.height };
-    });
-    const col = section.locator("[data-slot='fused-column'] [data-slot='card']");
-    check((await col.evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")).join(","))) === "stopped,running,review,done", "the sample column stacks Stopped, Running, Ready and Done");
-    check((await section.locator("[data-slot='fused-column'] [data-notch]").count()) === 3, "the sample column (variation a) notches every card but the done one");
-    check((await cards.count()) === NOTCHES.length && (await section.locator("[data-card-option] [data-slot='card'][data-kind='stopped']").count()) === NOTCHES.length, "both variations show the one task in the switcher's state (Stopped)");
-    check((await actions.count()) === NOTCHES.length && (await actions.evaluateAll((els) => els.every((e) => e.innerText.includes("Start again") && e.checkVisibility({ opacityProperty: true, visibilityProperty: true })))), "Stopped: Start again is visible on both");
-    check((await notches.count()) === 2, "Stopped: both variations carve a notch");
-    for (const id of NOTCHES) {
-      const a = await aligned(id);
-      check(a.a === 0 && a.s === 0 && a.h === 28, `(${id}) the 28px action and the state are centred on the bottom row (off by ${a.a}px and ${a.s}px)`);
-    }
+    check((await cards.count()) === DENSITIES.length && (await section.locator("[data-card-option] [data-slot='card'][data-kind='stopped']").count()) === DENSITIES.length, "every density shows the one task in the switcher's state (Stopped)");
+    check((await actions.count()) === DENSITIES.length && (await notches.count()) === DENSITIES.length, "Stopped: each density has its notch and its Start again");
+    const hs = await heights();
+    check(hs.comfortable > hs.compact && hs.compact > hs.dense, `the densities step down in height (Stopped: ${DENSITIES.map((d) => `${d} ${hs[d]}px`).join(", ")})`);
+    const captions = await section.locator("[data-slot='card-height']").allInnerTexts();
+    check(captions.every((c) => /about \d+px/.test(c)), `each density's caption gives its height (${captions.join(" ")})`);
     await shoot("stopped");
+    await option("dense").locator("[data-slot='card'] button").first().hover();
+    await page.getByRole("tooltip").or(page.locator("[data-slot='tooltip-content']")).first().waitFor({ timeout: 3000 }).catch(() => {});
+    check(/Actual changed files/.test(await page.locator("[data-slot='tooltip-content'], [role='tooltip']").first().innerText().catch(() => "")), "Dense: the reason shows in a tooltip on hover");
+    await page.mouse.move(0, 0);
     await state("Stopped").focus();
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Enter");
     await sleep(200);
-    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='asks']").count()) === NOTCHES.length && (await actions.first().innerText()).includes("Answer"), "the switcher moves with the arrow keys; Asks you shows Answer");
+    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='asks']").count()) === DENSITIES.length && (await actions.first().innerText()).includes("Answer"), "the switcher moves with the arrow keys; Asks you shows Answer");
     for (const name of ["Ready to review", "Running", "Done"]) {
       await state(name).click();
       await sleep(150);
@@ -379,26 +372,31 @@ try {
     await state("Running").click();
     await sleep(300);
     const live = await section.locator("[data-card-option] [data-slot='card-live']").evaluateAll((els) => els.map((e) => e.innerText.trim()));
-    check(live.length === NOTCHES.length && live.every((x) => /^Running tests · \d+m \d\ds$/.test(x)), `Running: the state is only the shimmering step and its clock (${live[0]})`);
-    check((await option("left").locator("[data-notch]").count()) === 1 && (await option("right").locator("[data-notch]").count()) === 0, "Running: (a) keeps its notch for the state; (b) has no action, so no notch");
+    check(live.length === DENSITIES.length && live.every((x) => /^Running tests · \d+m \d\ds$/.test(x)), `Running: the notch is only the shimmering step and its clock (${live[0]})`);
     await shoot("running");
     await state("Done").click();
     await sleep(150);
-    check((await notches.count()) === 0 && (await section.locator("[data-card-option] [data-slot='card-tab'], [data-card-option] [data-slot='card-live']").count()) === 0, "Done: no notch, a plain card");
+    check((await notches.count()) === 0, "Done: no notch, a plain card");
+    const doneH = await heights();
     await shoot("done");
     await state("Stopped").click();
-    await option("right").locator("[data-slot='card-action']").click();
+    await option("compact").locator("[data-slot='card-action']").click();
     await sleep(200);
-    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='running']").count()) === NOTCHES.length, "the action works (Start again sends the task to Running)");
-    const card = option("left").locator("[data-slot='card']");
+    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='running']").count()) === DENSITIES.length, "the action works (Start again sends the task to Running)");
+    const card = option("comfortable").locator("[data-slot='card']");
     await card.locator("button").first().click();
     check((await card.getAttribute("data-selected")) === "", "clicking a card selects it");
-    await page.mouse.move(0, 0);
+    const col = section.locator("[data-slot='fused-column'] [data-slot='card']");
+    check((await col.evaluateAll((els) => els.map((e) => e.getAttribute("data-kind") + ":" + e.getAttribute("data-density")).join(","))) === "stopped:compact,running:compact,review:compact,done:compact", "the sample column stacks Stopped, Running, Ready and Done at compact density");
+    check((await section.locator("[data-card-idea]").count()) === 4, "four 'what more' specimens: source glyph, agent mark, PR checks dot, hover Open");
+    const ideas = section.locator("[data-slot='card-ideas']");
+    await ideas.scrollIntoViewIfNeeded();
     for (const theme of ["dark", "light"]) {
       await page.emulateMedia({ colorScheme: theme });
       await sleep(300);
-      await section.locator("[data-slot='fused-column']").screenshot({ path: path.join(OUT, `gallery-cards-column-${theme}.png`) });
+      await section.locator("[data-slot='card-ideas']").locator("..").screenshot({ path: path.join(OUT, `gallery-cards-column-ideas-${theme}.png`) });
     }
+    console.log(`     card heights, Stopped: ${JSON.stringify(hs)}; Done: ${JSON.stringify(doneH)}`);
   }
   check((await page.locator("[data-gallery-section='board'] [data-board-option]").count()) >= 3, "the gallery's Board section shows the board options");
   {
