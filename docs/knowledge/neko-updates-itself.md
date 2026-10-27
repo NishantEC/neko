@@ -66,3 +66,31 @@ update commands and otherwise every 10 s. State is `Snapshot::self_update`.
   keeps the UI). `NEKO_SELF_UPDATE=0` switches the thread off. The install,
   relaunch and rollback were never run for real here (they replace
   `/Applications/Neko.app`); only the script's refusal path was exercised.
+
+### Shipping a web change by hand (2026-10-27)
+
+Why a web-only commit never went live on its own: the updater acts only on a
+task's `landed_commit` or the owner's **Update Neko now**; a commit made by
+hand (how the owner and his agents work on Neko) is never applied by itself,
+and "Update now" is the owner's approval (it lets safety-critical paths
+through and also reinstalls an app that is behind), so a script must not send
+it. Each `install-native.sh` then dropped `web-live` (the app it installs is
+newer), so after a week of hand commits `web-live` did not exist and every CSS
+fix cost a ~10-minute reinstall.
+
+`bash scripts/ship-web.sh` (after committing `web/`) is the path now, ~1 min:
+it refuses unless everything changed since the installed app
+(`NekoGitCommit`) is under `web/` or docs (`--force` overrides when the UI is
+known not to need the new daemon code), waits for `machine-ok`, builds into
+`<data>/web-live.ship`, smoke checks it like `smoke_check`, moves it to
+`web-builds/<short sha>` and swaps `web-live` by one rename (`mv -fh`),
+keeping the old target as `web-live.prev`; then it `curl`s `/` with the token
+cookie and fails if the served script is not the new one. `--rollback` points
+`web-live` back at `web-live.prev`. The daemon serves `web-live` per request,
+so no restart; its self-update tick (≤10 s) **adopts** a build it did not make
+(`core::live_web_label` → `resolve_commit`), records it as `web_commit` and
+"went live (shipped by hand)", and sends `Event::WebUpdated` so open pages
+reload. Adoption is what keeps the "newer app outranks the live UI" rule
+working for hand-shipped builds. Nothing here touches `SENSITIVE` paths: the
+script ships only `web/`, which has none, and changes to the daemon still
+need an install (or the owner's "Apply update").

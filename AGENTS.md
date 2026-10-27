@@ -116,6 +116,11 @@ ago follow rules written today. The daemon publishes those rules to
 `agent-rules.md` in the data dir; Neko's own runs also get Vitest/pytest
 worker-cap env, and at night over load 12 the steward renices build and test
 processes to 10 (nothing is stopped).
+**Web-only changes ship without a reinstall** (2026-10-27): commit `web/`,
+then `bash scripts/ship-web.sh` (~1 min; `--rollback` undoes). It swaps
+`<data>/web-live`, which the running daemon serves per request; anything
+outside `web/` since the installed app still needs `install-native.sh`. See
+`docs/knowledge/neko-updates-itself.md`.
 ## Native design system and the check gate (2026-10-14)
 
 `native/NekoKit/Sources/NekoNative/DesignSystem/` owns every visual value
