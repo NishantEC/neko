@@ -329,6 +329,26 @@ try {
     await option("quiet").getByRole("button", { name: "Expand sidebar" }).click();
     await option("setup-folds").locator("[data-slot='mock-setup']").click();
   }
+  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) >= 4, "the gallery's Task card section shows the card options");
+  {
+    const section = page.locator("[data-gallery-section='cards']");
+    for (const theme of ["dark", "light"]) {
+      await page.emulateMedia({ colorScheme: theme });
+      await sleep(400);
+      await page.setViewportSize({ width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 3400 });
+      await section.scrollIntoViewIfNeeded();
+      await section.screenshot({ path: path.join(OUT, `gallery-cards-${theme}.png`) });
+      await page.setViewportSize({ width: Number(process.env.NEKO_WEB_WIDTH ?? 1440), height: 2600 });
+    }
+    const option = (id) => section.locator(`[data-card-option='${id}']`);
+    check((await option("spacious").locator("[data-slot='card']").count()) === 6, "each card option draws the six sample tasks");
+    await option("spacious").locator("[data-kind='stopped'] [data-slot='card-action']").click();
+    check((await option("spacious").locator("[data-slot='card'][data-kind='running']").count()) === 2, "a card's Start again sets the task running");
+    const review = option("slotted").locator("[data-kind='review']");
+    await review.locator("button").first().click();
+    check((await review.getAttribute("data-selected")) === "", "clicking a card selects it");
+    check((await option("live").locator("[data-slot='card-live'] [role='progressbar']").count()) === 1, "the live-aware option shows the running card's step and progress");
+  }
   check((await page.locator("[data-gallery-section='board'] [data-board-option]").count()) >= 3, "the gallery's Board section shows the board options");
   {
     const option = (id) => page.locator(`[data-gallery-section='board'] [data-board-option='${id}']`);
