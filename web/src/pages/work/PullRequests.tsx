@@ -4,6 +4,7 @@
 // (`neko_core::pull_requests`); merging and closing wait for your click.
 import { useEffect, useMemo, useState } from "react";
 import { useWorkbench } from "@/useStore";
+import { useSelectedWorkspace } from "@/shell/workspace";
 import { registerCommands } from "@/shell/commands";
 import { ArrowDown, ArrowSquareOut, ArrowsClockwise, GitBranch, CheckCircle, Clock, DotsThree, GitPullRequest, Hammer, XCircle, type Icon } from "@/ui/icons";
 import { GitMerge, HandPalm } from "@/work/icons";
@@ -117,8 +118,13 @@ export default function PullRequests() {
   const [showFinished, setShowFinished] = useState(false);
   const [confirm, setConfirm] = useState<"recheck" | "merge" | null>(null);
 
+  const { id: workspaceId } = useSelectedWorkspace();
   const tasks = snapshot?.tasks;
-  const rows = useMemo(() => (snapshot ? pullRequestRows(snapshot, tasks ?? []) : []), [snapshot, tasks]);
+  // The sidebar's workspace switcher scopes the board; "" is every workspace.
+  const rows = useMemo(
+    () => (snapshot ? pullRequestRows(snapshot, (tasks ?? []).filter((t: any) => !workspaceId || t.workspace_id === workspaceId)) : []),
+    [snapshot, tasks, workspaceId],
+  );
   const ready = rows.filter((r) => r.verdict === "ready");
   const reviewable = rows.filter((r) => r.verdict === "ready" || r.verdict === "close").length;
   const repositories = useMemo(() => {

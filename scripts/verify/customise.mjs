@@ -63,9 +63,9 @@ export default function register(host) {
   host.addSection({ id: "hello", title: "Hello section", component: () => h("div", { "data-testid": "hello-section" }, "section from a page") });
 }`);
   await nav("My notes").waitFor({ timeout: 12000 });
-  check((await nav("My notes").innerText()).includes("yours"), "a page of yours sits in the normal sidebar with a small “yours” mark");
+  check(!(await nav("My notes").innerText()).includes("yours"), "a page of yours sits in the normal sidebar, unmarked: one registry");
   const workGroup = await page.locator("[data-slot='nav-item']").evaluateAll((els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
-  check(workGroup.indexOf("My notesyours") > workGroup.findIndex((t) => /^Agent tree/.test(t)) && workGroup.indexOf("My notesyours") < workGroup.findIndex((t) => /^Settings/.test(t)), `the manifest's group puts it with the Work pages: ${workGroup.join(" | ")}`);
+  check(workGroup.indexOf("My notes") > workGroup.findIndex((t) => /^Agent tree/.test(t)) && workGroup.indexOf("My notes") < workGroup.findIndex((t) => /^Settings/.test(t)), `the manifest's group puts it with the Work pages: ${workGroup.join(" | ")}`);
 
   // ---- host.storage round trip -------------------------------------------------------------
   await nav("My notes").click();
@@ -82,7 +82,7 @@ export default function register(host) {
 
   // ---- a user page with a built-in's id replaces it, visibly, and can be reset --------------
   await nav("Usage").waitFor();
-  check((await nav("Usage").innerText()).includes("Customised"), "the replaced built-in is marked Customised in the sidebar");
+  check(!(await nav("Usage").innerText()).includes("Customised"), "the replaced built-in keeps its plain sidebar row (the page itself says Customised)");
   await page.goto(`${base}/#/usage`);
   await page.locator("[data-testid='my-usage']").waitFor({ timeout: 8000 });
   await page.locator("[data-slot='customised-strip']").waitFor();
