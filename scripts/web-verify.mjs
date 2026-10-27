@@ -306,6 +306,21 @@ try {
   }
   check((await page.locator("[data-gallery-section='workspace'] .dv-tab").count()) >= 4, "the gallery's Workspace section shows the dock with its four tabs");
   check((await page.locator("[data-gallery-section='sidebar'] [data-sidebar-option]").count()) >= 3, "the gallery's Sidebar section shows the sidebar options side by side");
+  {
+    const option = (id) => page.locator(`[data-gallery-section='sidebar'] [data-sidebar-option='${id}']`);
+    await option("setup-folds").locator("[data-slot='mock-setup']").click();
+    await sleep(450);
+    check(await option("setup-folds").getByRole("button", { name: "Workspaces" }).isVisible(), "the gallery's option D: clicking Setup reveals Workspaces under it");
+    await option("two-levels").getByRole("button", { name: "Setup", exact: true }).click();
+    check((await option("two-levels").locator("[data-slot='panel-title']").innerText()).trim() === "Setup", "the gallery's option B: clicking the Setup rail makes the panel Setup's");
+    await option("quiet").getByRole("button", { name: "Collapse sidebar" }).click();
+    await option("tasks-first").getByRole("button", { name: /Running/ }).click();
+    await sleep(450);
+    await page.locator("[data-gallery-section='sidebar']").screenshot({ path: path.join(OUT, "gallery-sidebar-interactive.png") });
+    await option("quiet").getByRole("button", { name: "Expand sidebar" }).click();
+    await option("tasks-first").getByRole("button", { name: /Running/ }).click();
+    await option("two-levels").getByRole("button", { name: "Work", exact: true }).click();
+  }
   const blocks = await page.locator("[data-slot='reply-blocks'] [data-slot='reply-block']").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
   check(["choices", "plan", "chart", "form"].every((k) => blocks.includes(k)), `a reply's neko-* blocks are drawn, not shown as code (${blocks.join(", ") || "none"})`);
   check((await page.locator("[data-slot='reply-blocks'] [data-slot='reply-block'][data-kind='choices'] [role='radio']").count()) === 2, "the question offers its two options as radio choices");

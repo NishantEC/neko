@@ -607,7 +607,7 @@ function SidebarSection() {
   return (
     <Section id="sidebar" eyebrow="Sidebar" title={<>Four ways to tidy the sidebar.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        Proposals only, drawn from sample data; the real sidebar is unchanged. Each keeps Neko&rsquo;s mark, ⌘K and the task rail, and takes its spacing from hushbacks&rsquo; sidebar.
+        Proposals drawn from sample data: click, fold and collapse each one to try it. The real sidebar is unchanged. Each keeps Neko&rsquo;s mark, ⌘K and the task rail, and takes its spacing from hushbacks&rsquo; sidebar.
       </p>
       <SidebarOptions />
     </Section>
