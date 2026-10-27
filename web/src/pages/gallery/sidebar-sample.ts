@@ -26,4 +26,12 @@ export const PAGE = {
   usage: P("usage", "Usage & machine", Gauge),
 } as const;
 
+/** The workspaces the switcher lists; the first is the one shown. */
+export const SAMPLE_WORKSPACES = [
+  { id: "w-asha", name: "Asha" },
+  { id: "w-neko", name: "neko" },
+  { id: "w-acme-api", name: "acme-api" },
+  { id: "w-acme-app", name: "acme-app" },
+];
+
 export const SAMPLE_MACHINE = { level: "ok" as const, title: "Mac OK", detail: "load 4" };
