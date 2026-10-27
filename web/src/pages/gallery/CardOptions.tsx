@@ -1,5 +1,6 @@
-// The gallery's "Task card" section. The owner chose the notched card (state in a notch
-// carved from the bottom-left, action on the card), drawn by work/board/NotchCard.tsx,
+// The gallery's "Task card" section. The owner chose the notched card, variant (b): the
+// state is the card's last line, and a notch carved from the bottom-right holds the action
+// when the task waits on you. Drawn by work/board/NotchCard.tsx,
 // the same component the board uses. This section shows it at three densities side by
 // side, one task in every state (the switcher drives all of them), a sample column at the
 // board's density (compact), and four small specimens of what could come next.
@@ -102,9 +103,9 @@ function useHeight() {
 }
 
 const DENSITIES: { id: Density; name: string; caption: string }[] = [
-  { id: "comfortable", name: "Comfortable", caption: "Today’s card: 16px padding, a 15px title over two lines, the full reason, a meta line, and a 40px notch row with 12px curves." },
-  { id: "compact", name: "Compact (the board)", caption: "12px padding, a 14px title over two lines, the reason on one line, and the repo folded into the 26px notch (when no action or PR needs the room), with 10px curves." },
-  { id: "dense", name: "Dense", caption: "The title on one line and the notch row. The reason shows in a tooltip on hover or focus." },
+  { id: "comfortable", name: "Comfortable", caption: "16px padding, a 15px title over two lines, the full reason, a meta line, and a 40px state line; the notch has 12px curves." },
+  { id: "compact", name: "Compact (the board)", caption: "12px padding, a 14px title over two lines, the reason on one line, and a 26px state line (the repo folded in when no action or PR needs the room); the notch, when there is one, has 10px curves." },
+  { id: "dense", name: "Dense", caption: "The title on one line and the state line. The reason shows in a tooltip on hover or focus." },
 ];
 
 function DensityFigure({ d, task, onAct }: { d: (typeof DENSITIES)[number]; task: Task; onAct: () => void }) {
@@ -153,7 +154,7 @@ function LinearGlyph() {
 const IDEAS: { id: string; name: string; render: () => ReactNode }[] = [
   {
     id: "source-glyph",
-    name: "The source as a glyph in the notch (Linear, Sentry, GitHub) instead of its name.",
+    name: "The source as a glyph leading the state line (Linear, Sentry, GitHub) instead of its name.",
     render: () => (
       <div className="flex flex-col gap-2">
         <SampleCard t={taskIn("stopped", 0)} density="compact" onAct={() => {}} extra={{ notchLead: <LinearGlyph />, state: { label: "Stopped", age: "18m", detail: "navihealth" } }} />
@@ -226,7 +227,7 @@ export function CardOptions() {
           <SampleColumn seconds={seconds} />
           <figcaption className="flex flex-col gap-1 px-1">
             <span className="text-sm font-semibold text-foreground">In a column, compact</span>
-            <span className="text-[13px] leading-snug text-muted-foreground">Stopped, running, ready to review and done, as the board draws them. Only the stopped card has an action; done has no notch.</span>
+            <span className="text-[13px] leading-snug text-muted-foreground">Stopped, running, ready to review and done, as the board draws them. Only the stopped card has an action, so only it has a notch; done ends on its meta line.</span>
           </figcaption>
         </figure>
         <div data-slot="card-ideas" className="flex min-w-0 flex-1 flex-col gap-4">
