@@ -4,7 +4,9 @@
 // list in the sidebar (the Tasks page keeps its needs-you count), and no
 // two-level rail. Every option works on local state only: rows select, Setup
 // folds, the collapse button shrinks it to an icon rail. Nothing navigates and
-// nothing reaches the daemon; Search opens the real ⌘K and the theme controls
+// nothing reaches the daemon; the workspace switcher at the top picks from
+// sample workspaces (Workspaces is no longer a row: "Manage workspaces…"
+// covers it); Search opens the real ⌘K and the theme controls
 // set the real theme.
 //
 // The measures are hushbacks' (enform) UnifiedAppSidebar: 40px rows on a 24px
@@ -12,7 +14,7 @@
 // that is one row plus the theme control.
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { CaretDown, Command as CommandIcon, Desktop, Gear, House, MagnifyingGlass, Moon, SidebarSimple, Sparkle, Sun, type Icon } from "@/ui/icons";
+import { CaretDown, CaretUpDown, Check, Command as CommandIcon, Desktop, Gear, House, MagnifyingGlass, Moon, SidebarSimple, Sparkle, Stack, Sun, type Icon } from "@/ui/icons";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup,
   DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -22,7 +24,7 @@ import { cn } from "@/ui/lib/utils";
 import { Mark } from "@/shell/AppSidebar";
 import { openPalette } from "@/shell/CommandPalette";
 import { getTheme, setTheme, subscribeTheme, type ThemeChoice } from "@/theme";
-import { PAGE, SAMPLE_MACHINE, SAMPLE_NEEDS_YOU, type SamplePage } from "@/pages/gallery/sidebar-sample";
+import { PAGE, SAMPLE_MACHINE, SAMPLE_NEEDS_YOU, SAMPLE_WORKSPACES, type SamplePage } from "@/pages/gallery/sidebar-sample";
 
 // ---------------------------------------------------------------------------
 // One piece of state per option: the selected page and whether it is
@@ -72,6 +74,57 @@ function CollapseButton() {
   );
 }
 
+const MENU_ROW = "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-sm";
+
+function WorkspaceAvatar({ name }: { name: string }) {
+  return (
+    <span aria-hidden className="sky-pebble flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold">
+      {name.trim().charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+/** hushbacks' WorkspaceSwitcher: the current workspace's name and a chevron; the menu picks one (local state). */
+function WorkspaceSwitcher() {
+  const { select } = useMock();
+  const [id, setId] = useState(SAMPLE_WORKSPACES[0].id);
+  const name = SAMPLE_WORKSPACES.find((w) => w.id === id)?.name ?? "All workspaces";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        data-slot="mock-workspace-switcher"
+        aria-label={`Workspace: ${name}`}
+        className={cn("flex h-8 w-full min-w-0 items-center gap-2 rounded-[12px] px-1.5 text-start text-sm font-semibold text-foreground data-[popup-open]:bg-foreground/[0.06]", HOVER, FOCUS)}
+      >
+        <span className="min-w-0 flex-1 truncate">{name}</span>
+        <CaretUpDown size={14} weight="bold" className="shrink-0 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" sideOffset={6} className="w-60 p-1">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">Workspaces</DropdownMenuLabel>
+          {SAMPLE_WORKSPACES.map((w) => (
+            <DropdownMenuItem key={w.id} onClick={() => setId(w.id)} className={MENU_ROW}>
+              <WorkspaceAvatar name={w.name} />
+              <span className="min-w-0 flex-1 truncate">{w.name}</span>
+              {w.id === id ? <Check size={14} weight="bold" className="shrink-0" /> : null}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuItem onClick={() => setId("")} className={MENU_ROW}>
+            <Stack size={15} className="text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate">All workspaces</span>
+            {id === "" ? <Check size={14} weight="bold" className="shrink-0" /> : null}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator className="my-1" />
+        <DropdownMenuItem onClick={() => select(PAGE.workspaces.id)} className={MENU_ROW}>
+          <Gear size={15} className="text-muted-foreground" />
+          Manage workspaces…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function Brand() {
   const { collapsed } = useMock();
   const mark = (
@@ -84,7 +137,7 @@ function Brand() {
     <div className="flex h-9 shrink-0 items-center gap-1.5">
       {mark}
       <span aria-hidden className="text-lg font-light text-muted-foreground/40">/</span>
-      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">Neko</span>
+      <div className="min-w-0 flex-1"><WorkspaceSwitcher /></div>
       <CollapseButton />
     </div>
   );
@@ -277,7 +330,7 @@ function OptionQuiet() {
       <div className={cn(SCROLL, "gap-1")}>
         <Row page={PAGE.home} />
         <Row page={PAGE.tasks} trailing={<NeedsYou />} />
-        {[PAGE.prs, PAGE.tree, PAGE.watching, PAGE.schedules, PAGE.health, PAGE.workspaces, PAGE.memory, PAGE.profiles, PAGE.tools].map((p) => <Row key={p.id} page={p} />)}
+        {[PAGE.prs, PAGE.tree, PAGE.watching, PAGE.schedules, PAGE.health, PAGE.memory, PAGE.profiles, PAGE.tools].map((p) => <Row key={p.id} page={p} />)}
       </div>
       <StatusFooter menu={[PAGE.settings, PAGE.usage]} />
     </Frame>
@@ -301,7 +354,7 @@ function OptionSetupFolds() {
         <Row page={PAGE.tree} />
         <Row page={PAGE.watching} />
         <Row page={PAGE.health} />
-        <SetupFold pages={[PAGE.workspaces, PAGE.schedules, PAGE.memory, PAGE.profiles, PAGE.tools, PAGE.settings]} />
+        <SetupFold pages={[PAGE.schedules, PAGE.memory, PAGE.profiles, PAGE.tools, PAGE.settings]} />
       </div>
       <div className="flex shrink-0 flex-col gap-2 pt-1">
         <Hairline />
@@ -343,7 +396,7 @@ function OptionTopAndBottom() {
         <Row page={PAGE.watching} />
         <Row page={PAGE.health} />
         <div data-slot="mock-setup-pages" className="mt-auto flex flex-col gap-0.5 pt-6">
-          {[PAGE.workspaces, PAGE.schedules, PAGE.memory, PAGE.profiles, PAGE.tools].map((p) => <Row key={p.id} page={p} small />)}
+          {[PAGE.schedules, PAGE.memory, PAGE.profiles, PAGE.tools].map((p) => <Row key={p.id} page={p} small />)}
         </div>
       </div>
       <StatusFooter menu={[PAGE.settings, PAGE.usage]} />
