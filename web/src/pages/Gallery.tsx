@@ -74,6 +74,7 @@ import { splitTurn } from "@/chat/sdk/parts";
 import { cn } from "@/ui/lib/utils";
 import { SidebarOptions } from "@/pages/gallery/SidebarOptions";
 import { BoardOptions } from "@/pages/gallery/BoardOptions";
+import { CardOptions } from "@/pages/gallery/CardOptions";
 import { finishedReply, prRows, queued, runningReply, sampleArgs, structuredReply, usage, userMessage } from "@/pages/gallery-sample";
 
 function Section({ id, eyebrow, title, children }: { id: string; eyebrow: string; title: React.ReactNode; children: React.ReactNode }) {
@@ -615,11 +616,22 @@ function SidebarSection() {
   );
 }
 
+function CardSection() {
+  return (
+    <Section id="cards" eyebrow="Task card" title={<>Five ways to draw one task.</>}>
+      <p className="max-w-2xl text-[13.5px] text-muted-foreground">
+        The same six tasks in each option, one per state you see on the board: stopped, asking, waiting for approval, ready to review, running and done. Click a card to select it; the action button moves the task on (it starts running). The real card is unchanged.
+      </p>
+      <CardOptions />
+    </Section>
+  );
+}
+
 function BoardSection() {
   return (
     <Section id="board" eyebrow="Board" title={<>Four ways to calm the Tasks board.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        Proposals drawn from a sample day like the owner&rsquo;s (Needs you 45, Ready to review 8, nothing running or queued, Done 81). Click a card to select it, drag it to another column (or Space, then the arrow keys), and open or fold columns. The real board is unchanged.
+        Proposals drawn from a sample day like the owner&rsquo;s (Needs you 45, Ready to review 8, nothing running or queued, Done 81). These are about the columns; the card is decided separately (Task card, above). Click a card to select it, drag it to another column (or Space, then the arrow keys), and open or fold columns. The real board is unchanged.
       </p>
       <BoardOptions />
     </Section>
@@ -644,6 +656,7 @@ export default function Gallery() {
         <ChatSection />
         <WorkspaceSection />
         <SidebarSection />
+        <CardSection />
         <BoardSection />
       </div>
     </div>
