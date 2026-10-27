@@ -35,7 +35,10 @@ state_dir="$data_dir/self-update"
 result="$state_dir/result.json"
 lock="$state_dir/lock"
 mkdir -p "$state_dir"
-export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin:$HOME/Library/pnpm:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+# The daemon runs this without a login shell, so nvm's node and pnpm are not on PATH:
+# take the newest installed nvm node (pnpm lives beside it), as ship-web.sh does.
+nvm_bin="$(/bin/ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | /usr/bin/sort -V | /usr/bin/tail -1)"
+export PATH="${nvm_bin:+$nvm_bin:}/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin:$HOME/Library/pnpm:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 export CARGO_BUILD_JOBS=2 TURBO_DAEMON=false
 
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
