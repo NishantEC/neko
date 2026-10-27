@@ -2,24 +2,11 @@
 // Shaped like what the owner's real sidebar shows on a normal day; never live.
 import { Brain, Gauge, Heartbeat } from "@phosphor-icons/react";
 import { Clock, Eye, Gear, GitPullRequest, House, ListChecks, Stack, TreeStructure, Users, Wrench, type Icon } from "@/ui/icons";
-import type { Stage } from "@/shell/status";
 
-export type SampleTask = { id: string; title: string; stage: Stage; meta?: string };
 export type SamplePage = { id: string; title: string; icon: Icon; plugin?: boolean };
 
-export const SAMPLE_TASKS: SampleTask[] = [
-  { id: "t1", title: "Approve the workbench_tasks migration", stage: "needsYou" },
-  { id: "t2", title: "HEA-3006: Sentry spike in checkout", stage: "needsYou" },
-  { id: "t3", title: "Recreate missing worktrees on resume", stage: "running", meta: "52s" },
-  { id: "t4", title: "Index Linear comments for search", stage: "running", meta: "4m" },
-  { id: "t5", title: "Cap Vitest workers at two", stage: "review" },
-  { id: "t6", title: "Collapse the sidebar on narrow windows", stage: "review" },
-  { id: "t7", title: "Prune node_modules at review", stage: "upNext" },
-];
-/** Everything open, including what the sidebar does not list. */
-export const SAMPLE_TASK_TOTAL = 14;
-export const SAMPLE_UP_NEXT = 8;
-export const SAMPLE_NEEDS_YOU = SAMPLE_TASKS.filter((t) => t.stage === "needsYou").length;
+/** Tasks waiting on you: the one number the sidebar keeps. */
+export const SAMPLE_NEEDS_YOU = 2;
 
 const P = (id: string, title: string, icon: Icon, plugin?: boolean): SamplePage => ({ id, title, icon, plugin });
 

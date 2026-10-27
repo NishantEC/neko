@@ -605,9 +605,9 @@ function WorkspaceSection() {
 
 function SidebarSection() {
   return (
-    <Section id="sidebar" eyebrow="Sidebar" title={<>Four ways to tidy the sidebar.</>}>
+    <Section id="sidebar" eyebrow="Sidebar" title={<>Three ways to tidy the sidebar.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        Proposals drawn from sample data: click, fold and collapse each one to try it. The real sidebar is unchanged. Each keeps Neko&rsquo;s mark, ⌘K and the task rail, and takes its spacing from hushbacks&rsquo; sidebar.
+        Proposals drawn from sample data, with no task list (the Tasks page keeps its needs-you count): click, fold and collapse each one to try it. The real sidebar is unchanged. Each keeps Neko&rsquo;s mark and ⌘K, and takes its spacing from hushbacks&rsquo; sidebar.
       </p>
       <SidebarOptions />
     </Section>
