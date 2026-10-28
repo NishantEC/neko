@@ -35,6 +35,7 @@ import UserNotifications
         let after = known ?? 0
         guard let reply = try? await client.request(.object(["RoutineNotifications": .object(["after": .number(Double(after))])])) else { return }
         let body = reply["RoutineNotifications"]
+        guard body != .null else { return }
         let latest = body["latest"].int
         defer { defaults.set(max(latest, after), forKey: Self.seqKey) }
         guard known != nil else { return }

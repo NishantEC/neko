@@ -15,6 +15,8 @@ use std::sync::{Arc, MutexGuard};
 use std::time::Duration;
 
 static BUSY: AtomicBool = AtomicBool::new(false);
+/// Held through seeding, so the runner and a page load never both create scopes.
+static SEEDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const TICK: Duration = Duration::from_secs(30);
 const RUN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const KEEP_TEXT: usize = 4000;
@@ -52,16 +54,10 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
         proposal.workspace_id = match existing {
             Some(id) => Some(id),
             None if create => {
-                let workspace = Workspace {
-                    id: neko_core::workbench::new_id(),
-                    name: proposal.name.clone(),
-                    repository: folder.clone(),
-                    instructions: String::new(),
-                    away_enabled: false,
-                };
-                let id = workspace.id.clone();
-                snapshot = state.workbench.command(Command::SaveWorkspaceWithFolders { workspace, folders: vec![folder] })?;
-                Some(id)
+                // An empty id asks the workbench for a new workspace.
+                let workspace = Workspace { id: String::new(), name: proposal.name.clone(), repository: folder.clone(), instructions: String::new(), away_enabled: false };
+                snapshot = state.workbench.command(Command::SaveWorkspaceWithFolders { workspace, folders: vec![folder.clone()] })?;
+                snapshot.workspaces.iter().find(|w| folders_of(&snapshot, &w.id, &w.repository).contains(&folder)).map(|w| w.id.clone())
             }
             None => None,
         };
@@ -83,6 +79,7 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
 
 /// Creates the scopes' workspaces and their three routines once.
 fn ensure_seeded(state: &AppState) -> Result<(), String> {
+    let _seeding = SEEDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if core::load(&db(state))?.seeded {
         return Ok(());
     }
@@ -133,6 +130,23 @@ pub(crate) fn pick_due(store: &Store, states: &[(String, RoutineState)], now_ms:
         .map(|(_, id)| id)
 }
 
+/// Clears `BUSY` however the run ends, a panic included.
+struct BusyGuard;
+
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        BUSY.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The newest runs, plus any older run that still has an item open, so an
+/// unhandled item never drops off the page.
+pub(crate) fn runs_for_view(mut runs: Vec<RoutineRun>) -> Vec<RoutineRun> {
+    let older = runs.split_off(runs.len().min(VIEW_RUNS));
+    runs.extend(older.into_iter().filter(|run| run.needs_you.iter().any(|item| !item.done)));
+    runs
+}
+
 pub fn spawn(state: Arc<AppState>) {
     if let Err(error) = clear_stale_running(&db(&state)) {
         eprintln!("routines: {error}");
@@ -175,11 +189,10 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
     BUSY.store(true, Ordering::SeqCst);
     let state = state.clone();
     std::thread::spawn(move || {
-        let result = run_one(&state, &routine, scope);
-        if let Err(error) = result {
+        let _busy = BusyGuard;
+        if let Err(error) = run_one(&state, &routine, scope) {
             eprintln!("routine {}: {error}", routine.id);
         }
-        BUSY.store(false, Ordering::SeqCst);
     });
     Ok(())
 }
@@ -298,8 +311,7 @@ fn views(state: &AppState) -> Result<Response, String> {
     let store = core::load(&db)?;
     let mut routines = Vec::new();
     for routine in &store.routines {
-        let mut runs = core::load_runs(&db, &routine.id)?;
-        runs.truncate(VIEW_RUNS);
+        let runs = runs_for_view(core::load_runs(&db, &routine.id)?);
         routines.push(RoutineView { routine: routine.clone(), state: core::load_state(&db, &routine.id)?, runs });
     }
     let mut orders = store.standing_orders.clone();
@@ -312,12 +324,17 @@ fn views(state: &AppState) -> Result<Response, String> {
 }
 
 fn notifications(state: &AppState, after: u64) -> Result<Response, String> {
+    // The common answer, "nothing new", costs one small row read.
+    let latest = core::latest_seq(&db(state))?;
+    if after >= latest {
+        return Ok(Response::RoutineNotifications { items: Vec::new(), latest });
+    }
     let scopes = scopes(state, false)?;
     let db = db(state);
     let store = core::load(&db)?;
     let latest = core::latest_seq(&db)?;
     let mut items = Vec::new();
-    if after < latest {
+    {
         for routine in &store.routines {
             let scope = scopes.iter().find(|s| s.workspace_id.as_deref() == Some(routine.workspace_id.as_str())).map(|s| s.name.clone()).unwrap_or_default();
             for run in core::load_runs(&db, &routine.id)? {
@@ -404,6 +421,29 @@ mod tests {
         // A routine with no state yet is due now; a running one is skipped.
         let states = vec![("a".into(), due(Some(0), true))];
         assert_eq!(pick_due(&store, &states, 1).as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn busy_guard_clears_on_panic() {
+        BUSY.store(true, Ordering::SeqCst);
+        let _ = std::panic::catch_unwind(|| {
+            let _busy = BusyGuard;
+            panic!("run failed");
+        });
+        assert!(!BUSY.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn view_keeps_old_runs_with_open_items() {
+        let run = |id: usize, open: bool| RoutineRun {
+            id: id.to_string(), routine_id: "r".into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![],
+            needs_you: if open { vec![neko_protocol::routines::NeedsYou { seq: id as u64, title: "t".into(), detail: String::new(), link: None, done: false }] } else { vec![] },
+            error: None, text: String::new(),
+        };
+        let runs: Vec<_> = (0..30).map(|i| run(i, i == 25)).collect();
+        let shown = runs_for_view(runs);
+        assert_eq!(shown.len(), VIEW_RUNS + 1);
+        assert_eq!(shown.last().unwrap().id, "25");
     }
 
     #[test]

@@ -160,7 +160,8 @@ Working folder: {folder}. Scope-level connections here: {servers}. Claude connec
 Now (UTC): {now_iso}\n\n\
 {instruction}\n\n\
 Standing orders from Asha:\n{orders}\n\n\
-What you asked to remember last run (JSON): {memory}\n\n\
+What you asked to remember last run (JSON): {memory}\n\
+A previous run may have acted and then failed to report. Before replying to or acting on anything, check whether you already did (for example your own reply in the thread), and never do it twice.\n\n\
 End your reply with exactly one fenced json block and nothing after it:\n\
 ```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what Asha must do and why\", \"link\": \"https://...\"}}], \"memory\": {{}}}}\n```\n\
 quiet is true only when nothing new happened and you did nothing; then did and needs_you are empty. memory is handed back to you next run: keep it small (timestamps, ids, who you are waiting on).",
