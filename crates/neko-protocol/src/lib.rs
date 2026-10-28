@@ -14,6 +14,7 @@ pub mod agent_profiles;
 pub mod agent_models;
 pub mod decision_context;
 pub mod mcp_host;
+pub mod routines;
 pub mod scheduled_plans;
 pub mod setup_import;
 pub mod skills;
@@ -596,6 +597,36 @@ pub enum Request {
     RemoveTheme {
         id: String,
     },
+    /// Routines with their state and recent runs, the standing orders per
+    /// workspace, and the scopes found on disk (`neko_core::scopes`).
+    Routines,
+    /// Creates or replaces a routine by id.
+    SaveRoutine {
+        routine: routines::Routine,
+    },
+    /// Makes the routine due now; the runner starts it within 30 seconds.
+    RunRoutineNow {
+        id: String,
+    },
+    SetRoutineEnabled {
+        id: String,
+        enabled: bool,
+    },
+    /// Marks one needs-you item handled.
+    ClearNeedsYou {
+        routine_id: String,
+        run_id: String,
+        seq: u64,
+    },
+    /// Plain-language rules every routine in this workspace follows.
+    SetStandingOrders {
+        workspace_id: String,
+        text: String,
+    },
+    /// Needs-you items newer than `after`, for native notifications.
+    RoutineNotifications {
+        after: u64,
+    },
 }
 
 /// One valid user theme file (see `neko_core::appearance::validate_theme`).
@@ -683,6 +714,15 @@ pub enum Response {
         dir: String,
         themes: Vec<UserTheme>,
         problems: Vec<ThemeProblem>,
+    },
+    Routines {
+        routines: Vec<routines::RoutineView>,
+        standing_orders: std::collections::BTreeMap<String, String>,
+        scopes: Vec<routines::ScopeProposal>,
+    },
+    RoutineNotifications {
+        items: Vec<routines::RoutineNotice>,
+        latest: u64,
     },
     Error {
         message: String,

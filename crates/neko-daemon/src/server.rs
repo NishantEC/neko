@@ -751,6 +751,13 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         Request::WorkbenchIfChanged { digest, wait_ms } => wait_for_change(state, digest, wait_ms, false),
         Request::MachineHealth => Response::MachineHealth(neko_core::machine::latest()),
         Request::Ping => Response::Pong,
+        request @ (Request::Routines
+        | Request::SaveRoutine { .. }
+        | Request::RunRoutineNow { .. }
+        | Request::SetRoutineEnabled { .. }
+        | Request::ClearNeedsYou { .. }
+        | Request::SetStandingOrders { .. }
+        | Request::RoutineNotifications { .. }) => crate::routines::handle(state, request),
         Request::AgentModels { refresh } => {
             Response::AgentModels(neko_core::agent_catalog::catalog(refresh))
         }
