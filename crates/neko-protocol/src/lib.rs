@@ -190,6 +190,11 @@ pub const BUILTIN_THEMES: &[BuiltinTheme] = &[
         name: "Everforest Dark",
         description: "Dark · Everforest · translucent",
     },
+    BuiltinTheme {
+        id: "neutral-light",
+        name: "Neko Light",
+        description: "Light · neutral grey · translucent",
+    },
 ];
 
 /// The theme a fresh install renders, and the fallback for a persisted id that
@@ -571,6 +576,41 @@ pub enum Request {
     /// every other provider's result, so the `Themes` mode needed no
     /// theme-specific write request at all.
     GetTheme,
+    /// The web UI's appearance: `mode` (system, light or dark) and which theme
+    /// shows in light and in dark (`neko_core::appearance`). The daemon stores
+    /// the choice, so every browser and the native window agree.
+    GetAppearance,
+    /// Saves whichever parts are given; replies `Appearance` and broadcasts
+    /// `AppearanceChanged` to the other clients.
+    SetAppearance {
+        mode: Option<String>,
+        light: Option<String>,
+        dark: Option<String>,
+    },
+    /// The themes in `<data dir>/themes/*.json` that passed validation, and a
+    /// note for each file that did not. The page polls this to pick up a theme
+    /// file that was added, changed or removed.
+    ListThemes,
+    /// Deletes `<data dir>/themes/<id>.json` and replies with the new listing.
+    /// A built-in has no file there, so it cannot be removed this way.
+    RemoveTheme {
+        id: String,
+    },
+}
+
+/// One valid user theme file (see `neko_core::appearance::validate_theme`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserTheme {
+    pub id: String,
+    pub file: String,
+    pub theme: serde_json::Value,
+}
+
+/// A file in the themes folder that was skipped, and why.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThemeProblem {
+    pub file: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -629,6 +669,20 @@ pub enum Response {
     },
     Theme {
         id: String,
+    },
+    /// `stored` is false until a choice was ever saved, so the first browser
+    /// to connect can seed it from its own old setting.
+    Appearance {
+        mode: String,
+        light: String,
+        dark: String,
+        stored: bool,
+    },
+    Themes {
+        /// The folder to put theme files in.
+        dir: String,
+        themes: Vec<UserTheme>,
+        problems: Vec<ThemeProblem>,
     },
     Error {
         message: String,
@@ -707,6 +761,13 @@ pub enum Event {
     /// preview means it was applied before the round-trip even started).
     ThemeChanged {
         id: String,
+    },
+    /// The web appearance (mode and the light and dark theme) was saved by
+    /// another client.
+    AppearanceChanged {
+        mode: String,
+        light: String,
+        dark: String,
     },
     /// How many agents are stopped, waiting for a person — broadcast when
     /// the number *changes*, not on every poll.

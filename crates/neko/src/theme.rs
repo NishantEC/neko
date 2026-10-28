@@ -808,6 +808,30 @@ pub const THEMES: &[Theme] = &[
         icon_socket: 0xd3c6aa,
         icon_socket_alpha: 0.09,
     }),
+    // Neko's own light, the web UI's default light theme (web/src/themes/builtin/
+    // neutral-light.json): neutral greys, not vendored from anywhere.
+    theme(Spec {
+        id: "neutral-light",
+        name: "Neko Light",
+        appearance: Appearance::Light,
+        surface_panel: 0xfafafa,
+        panel_alpha: 0.9,
+        surface_raised: 0xffffff,
+        menu_tint_alpha: 0.7,
+        surface_input: 0xf0f0f0,
+        surface_selected: 0xd8d8d8,
+        text_primary: 0x262626,
+        text_secondary: 0x4a4a4a,
+        text_tertiary: 0x636363,
+        text_on_light: 0xfafafa,
+        keycap_shell_bg: 0xe8e8e8,
+        state_success: 0x1f7a4d,
+        state_danger: 0xc4243a,
+        hairline: 0x000000,
+        hairline_alpha: 0.1,
+        icon_socket: 0x000000,
+        icon_socket_alpha: 0.07,
+    }),
 ];
 
 /// The shipped default — the exact palette `theme.rs` held before it became a

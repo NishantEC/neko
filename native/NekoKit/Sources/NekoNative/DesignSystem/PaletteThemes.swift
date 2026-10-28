@@ -27,7 +27,8 @@ struct PaletteTheme {
             "rose-pine": (false, 0x191724, 0.86, 0x403d52, 0xe0def4),
             "rose-pine-dawn": (true, 0xfaf4ed, 0.9, 0xcecacd, 0x555076),
             "dracula": (false, 0x282a36, 0.85, 0x44475a, 0xf8f8f2),
-            "everforest-dark": (false, 0x2d353b, 0.86, 0x3d484d, 0xd3c6aa)
+            "everforest-dark": (false, 0x2d353b, 0.86, 0x3d484d, 0xd3c6aa),
+            "neutral-light": (true, 0xfafafa, 0.9, 0xd8d8d8, 0x262626)
         ]
         let value = values[id] ?? values["neutral"]!
         func color(_ hex: UInt32) -> Color { Color.adaptive(light: hex, dark: hex) }
