@@ -7,8 +7,8 @@ import type { ComponentProps, ReactNode } from "react";
 /**
  * Standard page container for every `_app/*` route.
  *
- * Locks horizontal rhythm (max-w-[1200px], px-6 md:px-10) and the
- * default vertical rhythm (pt-12 md:pt-16, pb-24) so dashboard,
+ * Locks horizontal rhythm (max-w-[1200px], px-7) and the
+ * default vertical rhythm (pt-6, pb-24: the Tasks page's 28px sides and 24px top) so dashboard,
  * forms, settings, etc. all sit on the same column. Use the
  * `padding="hero"` variant for the dashboard's taller hero gutter.
  */
@@ -31,12 +31,12 @@ export function PageContainer({
    *  manage their own scroll. */
   scroll?: boolean;
 } & Omit<ComponentProps<"div">, "children" | "className">) {
-  const padY = padding === "hero" ? "pt-16 md:pt-24 pb-32" : padding === "none" ? "" : "pt-12 md:pt-16 pb-24";
+  const padY = padding === "hero" ? "pt-16 md:pt-24 pb-32" : padding === "none" ? "" : "pt-6 pb-24";
 
   return (
     <div {...rest} className={cn("flex-1 h-full bg-background relative overflow-x-hidden", scroll && "overflow-y-auto")}>
       {backdrop}
-      <div className={cn("relative z-10 mx-auto w-full max-w-[1200px] px-6 md:px-10", padY, className)}>{children}</div>
+      <div className={cn("relative z-10 mx-auto w-full max-w-[1200px] px-7", padY, className)}>{children}</div>
     </div>
   );
 }

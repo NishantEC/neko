@@ -6,7 +6,6 @@ import { useSelectedWorkspace } from "@/shell/workspace";
 import { useWorkbench } from "@/useStore";
 import { MagnifyingGlass, TreeStructure } from "@/ui/icons";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/ui/input-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/ui/empty";
 import { Button } from "@/ui/button";
 import { navigate } from "@/router";
@@ -18,7 +17,7 @@ import { byStage, flatten } from "@/work/filters";
 export default function Tree() {
   const { snapshot, error } = useWorkbench();
   const [search, setSearch] = useState("");
-  const { id: workspace, select: setWorkspace } = useSelectedWorkspace();
+  const { id: workspace } = useSelectedWorkspace();
   const workspaces: { id: string; name: string }[] = snapshot?.workspaces ?? [];
 
   const tree = useMemo(() => {
@@ -44,15 +43,6 @@ export default function Tree() {
               <InputGroupAddon><MagnifyingGlass aria-hidden /></InputGroupAddon>
               <InputGroupInput value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks" aria-label="Search tasks" />
             </InputGroup>
-            {workspaces.length > 1 ? (
-              <Select value={workspace || "all"} onValueChange={(v) => setWorkspace(v === "all" ? "" : v)}>
-                <SelectTrigger size="sm" className="w-44" aria-label="Workspace"><SelectValue>{label}</SelectValue></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All workspaces</SelectItem>
-                  {workspaces.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            ) : null}
             <Button variant="outline" size="sm" asChild><a href="#/tasks">Open Tasks</a></Button>
           </>
         }

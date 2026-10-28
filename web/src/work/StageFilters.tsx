@@ -40,9 +40,9 @@ export function StageTabs({ stage, counts, total, onChange }: { stage: Stage | "
     <div data-slot="stage-filters">
       <Tabs value={stage} onValueChange={(v) => onChange(v as Stage | "all")} className="sky-tabs">
         <TabsList aria-label="Show tasks in">
-          <TabsTab value="all" aria-label={`All tasks, ${total}`}>All<span className="text-xs tabular-nums text-muted-foreground">{total}</span></TabsTab>
+          <TabsTab value="all" className="!px-2" aria-label={`All tasks, ${total}`}>All<span className="text-xs tabular-nums text-muted-foreground">{total}</span></TabsTab>
           {STAGES.map((s) => (
-            <TabsTab key={s} value={s} aria-label={`${STAGE_TITLE[s]}, ${counts[s]}`}>
+            <TabsTab key={s} value={s} className="!px-2" aria-label={`${STAGE_TITLE[s]}, ${counts[s]}`}>
               {STAGE_TITLE[s]}<span className="text-xs tabular-nums text-muted-foreground">{counts[s]}</span>
             </TabsTab>
           ))}
