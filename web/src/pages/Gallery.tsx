@@ -72,9 +72,7 @@ import { NekoTurn, UserTurn } from "@/chat/turns";
 import { ToolFailed, ToolFold, ToolLine, WorkLog } from "@/chat/work-log";
 import { splitTurn } from "@/chat/sdk/parts";
 import { cn } from "@/ui/lib/utils";
-import { SidebarOptions } from "@/pages/gallery/SidebarOptions";
-import { ColumnOptions } from "@/pages/gallery/ColumnOptions";
-import { CardOptions } from "@/pages/gallery/CardOptions";
+import { TaskSpecimens } from "@/pages/gallery/TaskSpecimens";
 import { finishedReply, prRows, queued, runningReply, sampleArgs, structuredReply, usage, userMessage } from "@/pages/gallery-sample";
 
 function Section({ id, eyebrow, title, children }: { id: string; eyebrow: string; title: React.ReactNode; children: React.ReactNode }) {
@@ -605,35 +603,13 @@ function WorkspaceSection() {
   );
 }
 
-function SidebarSection() {
-  return (
-    <Section id="sidebar" eyebrow="Sidebar" title={<>Three ways to tidy the sidebar.</>}>
-      <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        Proposals drawn from sample data, with no task list (the Tasks page keeps its needs-you count): click, fold and collapse each one to try it. The real sidebar is unchanged. Each has the workspace switcher next to Neko&rsquo;s mark (it replaces the Workspaces row) and ⌘K, and takes its spacing from hushbacks&rsquo; sidebar.
-      </p>
-      <SidebarOptions />
-    </Section>
-  );
-}
-
 function CardSection() {
   return (
-    <Section id="cards" eyebrow="Task card" title={<>The notched card, at three densities.</>}>
+    <Section id="cards" eyebrow="Task card" title={<>The notched card and the board column.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        The chosen card, variant (b): one solid surface whose last line is the state; when the task waits on you, a notch carved from its bottom-right holds the action in the state’s colour. No action, no notch. Three densities side by side (the board uses Compact); the switcher puts the one task in a state on all of them (← → once it has focus). Below: a column at the board’s density, and four ideas for what could come next.
+        The real card (work/board/NotchCard.tsx) in each state it takes on the board: one surface whose last line is the state; when the task waits on you, a notch at the bottom-right holds the action in the state&rsquo;s colour. Below it, the real column header.
       </p>
-      <CardOptions />
-    </Section>
-  );
-}
-
-function BoardSection() {
-  return (
-    <Section id="board" eyebrow="Board columns" title={<>Four ways to lay out the Tasks board.</>}>
-      <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        Full page mocks (header, filters and board) with the chosen card as it is. Switch the sample day to see empty columns and a long Done, or every column busy. Click a card to select it, drag it to another column (or Space, then the arrow keys, then Space), act from its notch, fold and open columns, and filter by stage or search. Light and dark follow the sidebar. The real page is unchanged; none of them has the workspace dropdown, which the sidebar&rsquo;s switcher now covers.
-      </p>
-      <ColumnOptions />
+      <TaskSpecimens />
     </Section>
   );
 }
@@ -655,9 +631,7 @@ export default function Gallery() {
         <Editorial />
         <ChatSection />
         <WorkspaceSection />
-        <SidebarSection />
         <CardSection />
-        <BoardSection />
       </div>
     </div>
   );

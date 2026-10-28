@@ -305,164 +305,18 @@ try {
     await a11y(`gallery (${theme})`);
   }
   check((await page.locator("[data-gallery-section='workspace'] .dv-tab").count()) >= 4, "the gallery's Workspace section shows the dock with its four tabs");
-  check((await page.locator("[data-gallery-section='sidebar'] [data-sidebar-option]").count()) >= 3, "the gallery's Sidebar section shows the sidebar options side by side");
-  {
-    const option = (id) => page.locator(`[data-gallery-section='sidebar'] [data-sidebar-option='${id}']`);
-    await option("setup-folds").locator("[data-slot='mock-setup']").click();
-    await sleep(450);
-    check(await option("setup-folds").getByRole("button", { name: "Schedules" }).isVisible(), "the gallery's option D: clicking Setup reveals Schedules under it");
-    await option("top-and-bottom").getByRole("button", { name: "Memory" }).click();
-    check((await option("top-and-bottom").getByRole("button", { name: "Memory" }).getAttribute("aria-current")) === "page", "the gallery's option E: clicking a page makes it the current one");
-    const switcher = option("top-and-bottom").locator("[data-slot='mock-workspace-switcher']");
-    check(/Nishant/.test(await switcher.innerText()), "the gallery's options show the current workspace next to the mark");
-    await switcher.click();
-    await page.getByRole("menuitem", { name: /athena/ }).waitFor({ timeout: 3000 });
-    check((await page.getByRole("menuitem", { name: /All workspaces/ }).count()) === 1 && (await page.getByRole("menuitem", { name: /Manage workspaces/ }).count()) === 1, "the switcher lists the workspaces, All workspaces and Manage workspaces…");
-    await sleep(300);
-    await page.locator("[data-gallery-section='sidebar']").screenshot({ path: path.join(OUT, "gallery-sidebar-switcher.png") });
-    await page.getByRole("menuitem", { name: /athena/ }).click();
-    await sleep(200);
-    check(/athena/.test(await switcher.innerText()), "choosing a workspace in the switcher shows its name");
-    await option("quiet").getByRole("button", { name: "Collapse sidebar" }).click();
-    await sleep(450);
-    await page.locator("[data-gallery-section='sidebar']").screenshot({ path: path.join(OUT, "gallery-sidebar-interactive.png") });
-    await option("quiet").getByRole("button", { name: "Expand sidebar" }).click();
-    await option("setup-folds").locator("[data-slot='mock-setup']").click();
-  }
-  const DENSITIES = ["comfortable", "compact", "dense"];
-  check((await page.locator("[data-gallery-section='cards'] [data-card-option]").count()) === DENSITIES.length, "the gallery's Task card section shows the chosen card (b) at three densities");
   {
     const section = page.locator("[data-gallery-section='cards']");
-    const option = (id) => section.locator(`[data-card-option='${id}']`);
-    const cards = section.locator("[data-card-option] [data-slot='card']");
-    const actions = section.locator("[data-card-option] [data-slot='card-action']");
-    const notches = section.locator("[data-card-option] [data-notch]");
-    const state = (name) => section.locator("[data-slot='segmented-control']").getByRole("button", { name, exact: true });
-    const heights = async () => Object.fromEntries(await Promise.all(DENSITIES.map(async (id) => [id, Math.round((await option(id).locator("[data-slot='card']").boundingBox()).height)])));
-    const shoot = async (tag) => {
-      for (const theme of ["dark", "light"]) {
-        await page.emulateMedia({ colorScheme: theme });
-        await sleep(400);
-        await page.mouse.move(0, 0);
-        await section.locator("[data-slot='card-densities']").scrollIntoViewIfNeeded();
-        await section.locator("[data-slot='card-densities']").screenshot({ path: path.join(OUT, `gallery-cards-${tag}-${theme}.png`) });
-      }
-    };
-    check((await cards.count()) === DENSITIES.length && (await section.locator("[data-card-option] [data-slot='card'][data-kind='stopped']").count()) === DENSITIES.length, "every density shows the one task in the switcher's state (Stopped)");
-    check((await actions.count()) === DENSITIES.length && (await notches.count()) === DENSITIES.length, "Stopped: each density has its notch and its Start again");
-    const hs = await heights();
-    check(hs.comfortable > hs.compact && hs.compact > hs.dense, `the densities step down in height (Stopped: ${DENSITIES.map((d) => `${d} ${hs[d]}px`).join(", ")})`);
-    const captions = await section.locator("[data-slot='card-height']").allInnerTexts();
-    check(captions.every((c) => /about \d+px/.test(c)), `each density's caption gives its height (${captions.join(" ")})`);
-    await shoot("stopped");
-    await option("dense").locator("[data-slot='card'] button").first().hover();
-    await page.getByRole("tooltip").or(page.locator("[data-slot='tooltip-content']")).first().waitFor({ timeout: 3000 }).catch(() => {});
-    check(/Actual changed files/.test(await page.locator("[data-slot='tooltip-content'], [role='tooltip']").first().innerText().catch(() => "")), "Dense: the reason shows in a tooltip on hover");
-    await page.mouse.move(0, 0);
-    await state("Stopped").focus();
-    await page.keyboard.press("ArrowRight");
-    await page.keyboard.press("Enter");
-    await sleep(200);
-    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='asks']").count()) === DENSITIES.length && (await actions.first().innerText()).includes("Answer"), "the switcher moves with the arrow keys; Asks you shows Answer");
-    for (const name of ["Ready to review", "Running", "Done"]) {
-      await state(name).click();
-      await sleep(150);
-      check((await actions.count()) === 0, `${name}: no action`);
-    }
-    await state("Running").click();
-    await sleep(300);
-    const live = await section.locator("[data-card-option] [data-slot='card-live']").evaluateAll((els) => els.map((e) => e.innerText.trim()));
-    check(live.length === DENSITIES.length && live.every((x) => /^Running tests · \d+m \d\ds$/.test(x)), `Running: the state line is only the shimmering step and its clock (${live[0]})`);
-    await shoot("running");
-    await state("Done").click();
-    await sleep(150);
-    check((await notches.count()) === 0, "Done: no notch, a plain card");
-    const doneH = await heights();
-    await shoot("done");
-    await state("Stopped").click();
-    await option("compact").locator("[data-slot='card-action']").click();
-    await sleep(200);
-    check((await section.locator("[data-card-option] [data-slot='card'][data-kind='running']").count()) === DENSITIES.length, "the action works (Start again sends the task to Running)");
-    const card = option("comfortable").locator("[data-slot='card']");
-    await card.locator("button").first().click();
-    check((await card.getAttribute("data-selected")) === "", "clicking a card selects it");
-    const col = section.locator("[data-slot='fused-column'] [data-slot='card']");
-    check((await col.evaluateAll((els) => els.map((e) => e.getAttribute("data-kind") + ":" + e.getAttribute("data-density")).join(","))) === "stopped:compact,running:compact,review:compact,done:compact", "the sample column stacks Stopped, Running, Ready and Done at compact density");
-    check((await section.locator("[data-card-idea]").count()) === 4, "four 'what more' specimens: source glyph, agent mark, PR checks dot, hover Open");
-    const ideas = section.locator("[data-slot='card-ideas']");
-    await ideas.scrollIntoViewIfNeeded();
-    for (const theme of ["dark", "light"]) {
-      await page.emulateMedia({ colorScheme: theme });
-      await sleep(300);
-      await section.locator("[data-slot='card-ideas']").locator("..").screenshot({ path: path.join(OUT, `gallery-cards-column-ideas-${theme}.png`) });
-    }
-    console.log(`     card heights, Stopped: ${JSON.stringify(hs)}; Done: ${JSON.stringify(doneH)}`);
-  }
-  check((await page.locator("[data-gallery-section='board'] [data-column-option]").count()) === 4, "the gallery's Board columns section shows four page mocks");
-  {
-    const section = page.locator("[data-gallery-section='board']");
-    const option = (id) => section.locator(`[data-column-option='${id}']`);
-    const ids = ["calm", "fitted", "lane", "rows"];
-    for (const theme of ["dark", "light"]) {
-      await page.emulateMedia({ colorScheme: theme });
-      await sleep(400);
-      for (const id of ids) {
-        await option(id).scrollIntoViewIfNeeded();
-        await option(id).screenshot({ path: path.join(OUT, `gallery-columns-${id}-${theme}.png`) });
-      }
-    }
-    check((await section.getByRole("combobox", { name: "Workspace" }).count()) === 0, "no board mock has the workspace dropdown");
-    // A: empty columns shrink, Done shows five, then all 81; ⋯ waits for hover
-    const calm = option("calm");
-    const slim = await calm.locator("[data-slot='col'][data-empty]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
-    check(slim.length === 2 && slim.every((w) => w < 200), `option A: the two empty columns shrink to a slim width (${slim.join(", ")}px)`);
-    const doneCards = () => calm.locator("[data-slot='col'][data-stage='done'] [data-slot='col-card']").count();
-    check((await doneCards()) === 5, "option A: Done shows its latest five");
-    await calm.locator("[data-slot='show-all']").click();
-    check((await doneCards()) === 81, "option A: “Show all 81” opens the rest");
-    const menuHidden = await calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-menu']").evaluate((e) => getComputedStyle(e).opacity);
-    await calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-header']").hover();
-    await sleep(250);
-    const menuShown = await calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-menu']").evaluate((e) => getComputedStyle(e).opacity);
-    check(menuHidden === "0" && menuShown === "1", `option A: a column's ⋯ shows on hover only (${menuHidden} → ${menuShown})`);
-    // A: drag with the keyboard, Needs you → Ready to review
-    const reviewCount = () => calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-card']").count();
-    const before = await reviewCount();
-    await calm.locator("[data-slot='col'][data-stage='needsYou'] [data-slot='col-card'] button[aria-roledescription]").first().focus();
-    await page.keyboard.press("Space");
-    await sleep(150);
-    await page.keyboard.press("ArrowRight");
-    await sleep(150);
-    await page.keyboard.press("Space");
-    await sleep(350);
-    check((await reviewCount()) === before + 1, "option A: Space, → and Space carry a card from Needs you to Ready to review");
-    await calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-card'] button[aria-roledescription]").nth(1).click();
-    check((await calm.locator("[data-slot='col-card'][data-selected]").count()) === 1, "option A: clicking a card selects it");
-    // B: strips for the empty columns and Done; a strip opens
-    const fitted = option("fitted");
-    check((await fitted.locator("[data-slot='col-strip']").count()) === 3, "option B: Running, Up next and Done start folded to strips");
-    await fitted.locator("[data-slot='col-strip'][data-stage='done']").click();
-    check((await fitted.locator("[data-slot='col'][data-stage='done']").count()) === 1, "option B: clicking the Done strip opens the column");
-    // C: Done is a drawer; Answer moves a card to Running
-    const lane = option("lane");
-    await lane.locator("[data-slot='done-drawer-tab']").click();
-    check((await lane.locator("[data-slot='done-drawer'] [data-slot='col-card']").count()) === 12, "option C: the Done drawer opens with its latest twelve");
-    const running = () => lane.locator("[data-slot='col'][data-stage='running'] [data-slot='col-card']").count();
-    const r0 = await running();
-    await lane.locator("[data-slot='card-action']").filter({ hasText: "Answer" }).first().click();
-    check((await running()) === r0 + 1, "option C: Answer moves the card to Running");
-    // D: the shelf scrolls sideways; the busy day fills every column
-    const rows = option("rows");
-    check((await rows.locator("[data-slot='shelf'] [data-slot='col-card']").count()) === 7, "option D: Needs you sits on the shelf");
-    await section.getByRole("button", { name: /A busy day/ }).click();
-    await sleep(300);
-    check((await calm.locator("[data-slot='col'][data-empty]").count()) === 0, "the busy day: no column is empty");
-    check((await rows.locator("[data-slot='col'][data-stage='running'] [data-slot='card-live']").count()) === 3, "the busy day: Running shows three live cards");
-    for (const id of ids) {
-      await option(id).scrollIntoViewIfNeeded();
-      await option(id).screenshot({ path: path.join(OUT, `gallery-columns-${id}-busy-light.png`) });
-    }
-    await section.getByRole("button", { name: /A quiet day/ }).click();
+    const kinds = await section.locator("[data-card-state]").evaluateAll((els) => els.map((e) => e.getAttribute("data-card-state")));
+    check(["stopped", "asks", "approve", "review", "running", "done"].every((k) => kinds.includes(k)), `the gallery's Task card section shows the real card in every state (${kinds.join(", ")})`);
+    const notched = await section.locator("[data-slot='card'] [data-notch]").evaluateAll((els) => els.map((e) => e.closest("[data-slot='card']").getAttribute("data-kind")));
+    check(notched.length === 3 && notched.every((k) => ["stopped", "asks", "approve"].includes(k)), `only the three cards that wait on you have a notch (${notched.join(", ")})`);
+    check((await section.locator("[data-slot='card-live']").innerText()).includes("Running tests"), "the running card shows its live step and clock");
+    check((await section.locator("[data-slot='column-header-specimen'] [data-slot='group-header'], [data-slot='column-header-specimen'] [data-slot='mock-column-header']").count()) === 1, "the real board column header is shown");
+    const card = section.locator("[data-card-state='asks'] button[aria-label]").first();
+    await card.click();
+    check((await card.getAttribute("aria-current")) === "true", "clicking a specimen card selects it");
+    await card.click();
   }
   const blocks = await page.locator("[data-slot='reply-blocks'] [data-slot='reply-block']").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
   check(["choices", "plan", "chart", "form"].every((k) => blocks.includes(k)), `a reply's neko-* blocks are drawn, not shown as code (${blocks.join(", ") || "none"})`);
