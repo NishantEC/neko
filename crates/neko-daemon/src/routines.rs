@@ -89,8 +89,12 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
     let scopes = scopes(state, true)?;
     let db = db(state);
     let mut store = core::load(&db)?;
+    let now = neko_core::workbench::now_ms();
     for routine in core::seeds(&scopes) {
         if !store.routines.iter().any(|r| r.id == routine.id) {
+            // First runs follow the cadence, so seeding never starts a burst.
+            let first = RoutineState { next_due_ms: Some(core::next_due_local(&routine.cadence, 0, now)), ..Default::default() };
+            core::save_state(&db, &routine.id, &first)?;
             store.routines.push(routine);
         }
     }
