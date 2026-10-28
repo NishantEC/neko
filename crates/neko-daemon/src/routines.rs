@@ -277,23 +277,34 @@ fn run_one(state: &AppState, routine: &neko_protocol::routines::Routine, scope: 
     Ok(())
 }
 
-/// Pauses the Paseo schedule this routine replaces, found by name.
+/// The id of an active schedule called `name` in `paseo schedule ls --json`.
+pub(crate) fn active_schedule_id(listing: &str, name: &str) -> Option<String> {
+    let schedules: Vec<serde_json::Value> = serde_json::from_str(listing).ok()?;
+    schedules
+        .iter()
+        .find(|s| s["name"] == name && s["status"] == "active")
+        .and_then(|s| s["id"].as_str().map(str::to_string))
+}
+
+/// Pauses the Paseo schedule this routine replaces, found by name in Paseo's
+/// live list (its schedule files can outlive a deleted schedule).
 fn pause_paseo(name: &str) -> Result<String, String> {
-    let dir = home().join(".paseo/schedules");
-    let id = std::fs::read_dir(&dir)
-        .map_err(|e| format!("Paseo schedules unreadable: {e}"))?
-        .flatten()
-        .find_map(|entry| {
-            let value: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(entry.path()).ok()?).ok()?;
-            (value["name"] == name && value["status"] == "active").then(|| value["id"].as_str().map(str::to_string)).flatten()
-        });
-    let Some(id) = id else { return Ok(format!("Paseo schedule {name} was not active")) };
     let paseo = ["/.local/bin/paseo", "/.npm-global/bin/paseo"]
         .iter()
         .map(|p| PathBuf::from(format!("{}{p}", home().display())))
         .find(|p| p.exists())
         .unwrap_or_else(|| PathBuf::from("paseo"));
-    let output = std::process::Command::new(paseo)
+    let listing = std::process::Command::new(&paseo)
+        .args(["schedule", "ls", "--json"])
+        .output()
+        .map_err(|e| format!("Could not list Paseo schedules: {e}"))?;
+    if !listing.status.success() {
+        return Err(format!("Could not list Paseo schedules: {}", String::from_utf8_lossy(&listing.stderr).trim()));
+    }
+    let Some(id) = active_schedule_id(&String::from_utf8_lossy(&listing.stdout), name) else {
+        return Ok(format!("Paseo schedule {name} is not running; Neko runs this now"));
+    };
+    let output = std::process::Command::new(&paseo)
         .args(["schedule", "pause", &id])
         .output()
         .map_err(|e| format!("Could not pause Paseo schedule {name}: {e}"))?;
@@ -444,6 +455,15 @@ mod tests {
         let shown = runs_for_view(runs);
         assert_eq!(shown.len(), VIEW_RUNS + 1);
         assert_eq!(shown.last().unwrap().id, "25");
+    }
+
+    #[test]
+    fn active_schedule_is_found_by_name_in_paseo_listing() {
+        let listing = r#"[{"id":"a95bb666","name":"daily-work-digest","status":"active"},{"id":"x","name":"weekly-pr-sweep","status":"paused"}]"#;
+        assert_eq!(active_schedule_id(listing, "daily-work-digest").as_deref(), Some("a95bb666"));
+        assert_eq!(active_schedule_id(listing, "weekly-pr-sweep"), None);
+        assert_eq!(active_schedule_id(listing, "message-watch-adaptive"), None);
+        assert_eq!(active_schedule_id("not json", "daily-work-digest"), None);
     }
 
     #[test]
