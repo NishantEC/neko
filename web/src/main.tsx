@@ -4,10 +4,12 @@ import { App } from "./App";
 import { watchForNewBuild } from "./api";
 import { initTheme } from "./theme";
 import "./styles/globals.css";
+import "./themes/builtin.generated.css";
 import "./styles/sky-materials.css";
 import "./styles/app-sheet.css";
 
-// Light or dark before the first paint (the daemon's CSP forbids an inline script).
+// The theme is already on <html> (public/theme-boot.js ran before first paint, the daemon's CSP
+// forbids an inline script); this keeps it current and talks to the daemon.
 initTheme();
 
 // An agent that rebuilds the app (`pnpm watch`) sees the change without a click.

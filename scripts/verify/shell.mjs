@@ -145,17 +145,20 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   check((await page.locator("[data-slot='theme-menu']").count()) === 1 && (await page.locator(".sky-segment").count()) === 0, "the theme is one menu button in the sidebar, not a segmented switch");
   await page.locator("[data-slot='theme-menu']").click();
   await page.getByRole("menuitemradio", { name: "Light" }).waitFor({ timeout: 3000 });
-  check((await page.getByRole("menuitemradio").count()) === 4 && (await page.getByRole("menuitem", { name: /Keyboard shortcuts/ }).count()) === 1, "the footer's gear opens the theme (System, Light, Dark, Glass) and the keyboard shortcuts");
+  check((await page.getByRole("menuitemradio").count()) === 3 && (await page.getByRole("menuitem", { name: /Keyboard shortcuts/ }).count()) === 1 && (await page.locator("[data-slot='theme-menu-light'], [data-slot='theme-menu-dark']").count()) === 2, "the footer's gear opens the mode (System, Light, Dark), the light and dark themes, and the keyboard shortcuts");
+  await page.locator("[data-slot='theme-menu-dark']").hover();
   await page.getByRole("menuitemradio", { name: "Glass" }).click();
-  await page.waitForFunction(() => document.documentElement.classList.contains("glass") && document.documentElement.classList.contains("dark"), null, { timeout: 3000 });
-  check(true, "choosing Glass sets html.dark.glass");
+  await page.waitForFunction(() => document.documentElement.dataset.nekoTheme === "glass" && document.documentElement.hasAttribute("data-backdrop") && document.documentElement.classList.contains("dark"), null, { timeout: 3000 });
+  check(true, "choosing Glass for dark sets data-neko-theme=glass with a backdrop, on the dark class");
   await sleep(400);
   await shot("shell-glass");
   await a11y("shell (glass)");
-  // a radio item keeps the menu open: choose System from the same menu
-  await page.getByRole("menuitemradio", { name: "System" }).click();
-  await page.waitForFunction(() => !document.documentElement.classList.contains("glass"), null, { timeout: 3000 });
+  // choose the default dark theme again from the same menu
+  await page.getByRole("menuitemradio", { name: "Neko Dark" }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.nekoTheme === "neutral" && !document.documentElement.hasAttribute("data-backdrop"), null, { timeout: 3000 });
+  await page.keyboard.press("Escape"); // closes the submenu, then the menu
   await page.keyboard.press("Escape");
+  await page.locator("[data-slot='dropdown-menu-content']").waitFor({ state: "detached", timeout: 3000 });
   check((await page.locator("[data-slot='machine']").getAttribute("data-level")) === "holding", "the machine entry reports the hold level");
   await page.locator("[data-slot='machine']").click();
   await page.waitForSelector("[data-slot='popover-content']", { timeout: 3000 });

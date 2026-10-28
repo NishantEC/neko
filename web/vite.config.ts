@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { writeBuiltinCss } from "./scripts/themes.mjs";
 
 // The daemon serves `dist/` (see crates/neko-daemon/src/web.rs), so the app is
 // built with relative-free absolute asset paths and no dev server is needed:
@@ -24,7 +25,12 @@ function vendorChunk(id: string): string | undefined {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    // The built-in themes are data (src/themes/builtin/*.json); their stylesheet is derived from it on every build.
+    { name: "neko-builtin-themes", buildStart: () => void writeBuiltinCss() },
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
