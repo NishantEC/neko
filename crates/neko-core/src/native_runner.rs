@@ -1154,6 +1154,21 @@ pub fn head(directory: &Path, cancel: &AtomicBool) -> Result<String, String> {
         .into())
 }
 
+/// The branch the repository's own work lands on: what `origin/HEAD` points at, else `main` or
+/// `master` when the remote has one, else empty. Used to measure a task that has no pull request
+/// yet the way one with a pull request is measured.
+pub fn default_base_branch(directory: &Path, cancel: &AtomicBool) -> String {
+    if let Ok(head) = git_output(directory, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], cancel) {
+        if let Some(name) = head.trim().strip_prefix("origin/") { return name.to_owned(); }
+    }
+    for name in ["main", "master"] {
+        if git_output(directory, &["rev-parse", "--verify", "--quiet", &format!("refs/remotes/origin/{name}")], cancel).is_ok() {
+            return name.to_owned();
+        }
+    }
+    String::new()
+}
+
 /// Where a pull request's change now starts. When a run brings newer work
 /// from the base branch in (resolving a conflict, or fast-forwarding to a
 /// branch someone updated with main), measuring from where the run began
@@ -2894,6 +2909,11 @@ sleep 120
         assert_eq!(now, moved, "measured from the main it merged");
         assert_eq!(changed_files(dir, &now, &cancel).unwrap(), ["fix"], "only the PR's own file, not main's five");
         assert_eq!(pull_request_base(dir, &base, "--evil", &cancel), base);
+        // With no pull request to name the branch, the repository's default branch does.
+        assert_eq!(default_base_branch(dir, &cancel), "main", "origin/main exists, origin/HEAD does not");
+        assert_eq!(pull_request_base(dir, &base, &default_base_branch(dir, &cancel), &cancel), moved);
+        git(&["update-ref", "-d", "refs/remotes/origin/main"]);
+        assert_eq!(default_base_branch(dir, &cancel), "", "no remote branch to measure from");
     }
 
     #[test]
