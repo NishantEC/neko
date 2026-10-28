@@ -73,7 +73,7 @@ import { ToolFailed, ToolFold, ToolLine, WorkLog } from "@/chat/work-log";
 import { splitTurn } from "@/chat/sdk/parts";
 import { cn } from "@/ui/lib/utils";
 import { SidebarOptions } from "@/pages/gallery/SidebarOptions";
-import { BoardOptions } from "@/pages/gallery/BoardOptions";
+import { ColumnOptions } from "@/pages/gallery/ColumnOptions";
 import { CardOptions } from "@/pages/gallery/CardOptions";
 import { finishedReply, prRows, queued, runningReply, sampleArgs, structuredReply, usage, userMessage } from "@/pages/gallery-sample";
 
@@ -629,11 +629,11 @@ function CardSection() {
 
 function BoardSection() {
   return (
-    <Section id="board" eyebrow="Board" title={<>Four ways to calm the Tasks board.</>}>
+    <Section id="board" eyebrow="Board columns" title={<>Four ways to lay out the Tasks board.</>}>
       <p className="max-w-2xl text-[13.5px] text-muted-foreground">
-        Proposals drawn from a sample day like the owner&rsquo;s (Needs you 45, Ready to review 8, nothing running or queued, Done 81). These are about the columns; the card is decided separately (Task card, above). Click a card to select it, drag it to another column (or Space, then the arrow keys), and open or fold columns. The real board is unchanged.
+        Full page mocks (header, filters and board) with the chosen card as it is. Switch the sample day to see empty columns and a long Done, or every column busy. Click a card to select it, drag it to another column (or Space, then the arrow keys, then Space), act from its notch, fold and open columns, and filter by stage or search. Light and dark follow the sidebar. The real page is unchanged; none of them has the workspace dropdown, which the sidebar&rsquo;s switcher now covers.
       </p>
-      <BoardOptions />
+      <ColumnOptions />
     </Section>
   );
 }
