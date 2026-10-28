@@ -147,7 +147,7 @@ inconsistent with the page.
   `catppuccin-mocha`, `gruvbox-dark`, `solarized-dark`, `nord`, `tokyo-night`,
   `rose-pine`.
 
-All eleven non-Neko ones already exist natively, MIT-vendored, with tuned hex
+The ten themes besides the two Neko ones already exist natively, MIT-vendored, with tuned hex
 to start from (port the `Spec` values; web needs extra pairs checked, see
 below). Held back for a second batch, already native: `rose-pine-dawn`,
 `dracula`, `everforest-dark`, `catppuccin-{macchiato,frappe}`, `ember`,
