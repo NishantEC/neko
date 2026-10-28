@@ -1298,7 +1298,11 @@ impl Controller {
                 // A pull request whose run merged newer base-branch work is
                 // reviewed (and later described) from where it now branches,
                 // not from where the run began.
-                let pr_base_branch = task.pull_request.as_ref().and_then(|p| p.status.as_ref()).map(|s| s.base.clone()).unwrap_or_default();
+                // A task with no pull request yet (a watch's fix, say) is measured the same way,
+                // from the repository's default branch: a run that fast-forwards to origin/main
+                // must not read as touching every file main changed ("exceed approved scope").
+                let mut pr_base_branch = task.pull_request.as_ref().and_then(|p| p.status.as_ref()).map(|s| s.base.clone()).unwrap_or_default();
+                if pr_base_branch.is_empty() { pr_base_branch = native_runner::default_base_branch(&directory, cancel); }
                 let review_base = if split.is_none() && !pr_base_branch.is_empty() {
                     native_runner::pull_request_base(&directory, &base, &pr_base_branch, cancel)
                 } else { base.clone() };
