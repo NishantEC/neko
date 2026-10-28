@@ -365,6 +365,16 @@ impl Db {
     /// value for the same key is superseded by this one; if it equals this
     /// one, the caller changed nothing on top of it and it stays deferred.
     pub fn set_setting(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        self.set_setting_with(key, value, true)
+    }
+
+    /// `set_setting` for rows outside the workbench snapshot (routines):
+    /// held `WorkbenchIfChanged` requests are not woken for them.
+    pub fn set_setting_quiet(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        self.set_setting_with(key, value, false)
+    }
+
+    fn set_setting_with(&self, key: &str, value: &str, notify: bool) -> rusqlite::Result<()> {
         if self.pending.borrow().get(key).is_some_and(|(v, _)| v == value) {
             return Ok(());
         }
@@ -380,7 +390,9 @@ impl Db {
             return Err(error);
         }
         self.setting_writes.set(self.setting_writes.get() + 1);
-        data_changed();
+        if notify {
+            data_changed();
+        }
         self.written
             .borrow_mut()
             .insert(key.to_owned(), value.to_owned());

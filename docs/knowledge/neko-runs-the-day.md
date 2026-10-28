@@ -30,7 +30,23 @@ and "there is no restriction. It can do whatever it wants". Design:
   `routine_runs_v1:<id>` (last 50) and `routine_seq_v1`. None of them is in the
   workbench snapshot. The runner wakes every 30 s, runs one at a time, skips
   while the machine steward holds, and has a 15-minute timeout. Seeding
-  schedules first runs by cadence (no burst at install).
+  schedules first runs by cadence (no burst at install), and runs per
+  workspace (`Store::seeded_workspaces`), so a scope folder added later gets
+  its routines. A repeating routine never starts outside its hours (a night
+  wake waits for 08:00); Run now (`run_requested`) runs even a paused
+  routine, or queues behind a run in flight. A run's writes use
+  `Db::set_setting_quiet`, so they do not wake `WorkbenchIfChanged`.
+- **Failures reach the owner:** a Daily routine's first failure, or a
+  repeating one's second in a row, becomes a needs-you item (so a
+  notification). A failed Daily routine retries once after 30 min. Whatever
+  fails, `run_one` never leaves a routine marked running. `memory` over 16 KB
+  is not kept, and instructions (16 KB) and standing orders (8 KB) are
+  bounded, so the prompt cannot outgrow `MAX_PROMPT`. Runs with open items
+  are kept past the 50-run trim.
+- **Polling is cheap:** scopes read only workspaces and folders
+  (`workbench::load_workspaces`), and discovery is cached on the mtimes of
+  `~/.claude.json` and `~/Documents` (10 min at most). A half-written
+  `~/.claude.json` keeps the previous result.
 - **Standing orders** are per workspace. The default
   (`DEFAULT_STANDING_ORDERS`) is "act without asking, report after". They go
   into every run's prompt.

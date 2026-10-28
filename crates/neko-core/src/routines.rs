@@ -7,7 +7,7 @@ use chrono::{Datelike, Duration, TimeZone, Timelike};
 use neko_protocol::routines::{Cadence, NeedsYou, Routine, RoutineKind, RoutineRun, RoutineState, ScopeProposal};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const DEFAULT_STANDING_ORDERS: &str = "You act for Asha without asking. Reply, send, post, review, rebase, merge, close and archive when it is the right call, and say what you did. Put something in needs_you only when it truly requires Asha: a decision only he can make, a credential or sign-in, money, or something you tried and could not do.";
 
@@ -17,6 +17,10 @@ const KEEP_RUNS: usize = 50;
 const MAX_DID: usize = 30;
 const MAX_NEEDS: usize = 10;
 const MAX_LINE: usize = 600;
+/// Memory beyond this is not kept: it would grow the prompt every run.
+pub const MAX_MEMORY: usize = 16 * 1024;
+pub const MAX_INSTRUCTION: usize = 16 * 1024;
+pub const MAX_ORDERS: usize = 8 * 1024;
 /// Quiet runs stretch an `Every` interval up to this many times.
 const MAX_BACKOFF_SHIFT: u32 = 2;
 
@@ -26,6 +30,9 @@ pub struct Store {
     /// Workspace id → standing orders. Missing means the default.
     pub standing_orders: BTreeMap<String, String>,
     pub seeded: bool,
+    /// Workspaces that already got their routines; a new scope gets them once.
+    #[serde(default)]
+    pub seeded_workspaces: BTreeSet<String>,
 }
 
 impl Store {
@@ -55,7 +62,8 @@ fn read<T: for<'de> Deserialize<'de> + Default>(db: &crate::Db, key: &str) -> Re
 
 fn write<T: Serialize>(db: &crate::Db, key: &str, value: &T) -> Result<(), String> {
     let text = serde_json::to_string(value).map_err(|e| e.to_string())?;
-    db.set_setting(key, &text).map_err(|e| e.to_string())
+    // Not part of the workbench snapshot: no reason to wake its pollers.
+    db.set_setting_quiet(key, &text).map_err(|e| e.to_string())
 }
 
 pub fn load(db: &crate::Db) -> Result<Store, String> {
@@ -83,11 +91,41 @@ pub fn save_runs(db: &crate::Db, id: &str, runs: &[RoutineRun]) -> Result<(), St
     write(db, &runs_key(id), &runs)
 }
 
+/// Keeps the newest `KEEP_RUNS`, and any older run with an item still open.
 pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String> {
     let mut runs = load_runs(db, id)?;
     runs.insert(0, run);
-    runs.truncate(KEEP_RUNS);
+    let older = runs.split_off(runs.len().min(KEEP_RUNS));
+    runs.extend(older.into_iter().filter(|run| run.needs_you.iter().any(|item| !item.done)));
     save_runs(db, id, &runs)
+}
+
+pub fn memory_fits(memory: &Value) -> bool {
+    memory.to_string().len() <= MAX_MEMORY
+}
+
+/// Whether an `Every` routine may run at this moment; `Daily` always may.
+pub fn in_window<Tz: TimeZone>(cadence: &Cadence, now_ms: i64, tz: &Tz) -> bool {
+    let Cadence::Every { from_hour, to_hour, .. } = cadence else { return true };
+    let (from, to) = ((*from_hour).min(23), (*to_hour).min(24));
+    if from == to {
+        return true;
+    }
+    let hour = tz.timestamp_millis_opt(now_ms).single().map(|t| t.hour()).unwrap_or(from);
+    if from < to { hour >= from && hour < to } else { hour >= from || hour < to }
+}
+
+pub fn in_window_local(cadence: &Cadence, now_ms: i64) -> bool {
+    in_window(cadence, now_ms, &chrono::Local)
+}
+
+/// Whether this failure should reach the owner: a daily routine's first, or
+/// a repeating one's second in a row (one blip is not worth a notification).
+pub fn failure_alerts(cadence: &Cadence, failures: u32) -> bool {
+    match cadence {
+        Cadence::Daily { .. } => failures == 1,
+        Cadence::Every { .. } => failures == 2,
+    }
 }
 
 /// The highest sequence number handed out so far.
@@ -382,6 +420,36 @@ mod tests {
         // A scope that is neither known nor home gets no personal routines.
         let other = seeds(&[scope("Side project", Some("w3"))], "/Users/n");
         assert!(other.iter().all(|r| r.paseo_schedule.is_none() && !r.instruction.contains("Gmail")));
+    }
+
+    #[test]
+    fn open_items_survive_trimming() {
+        let db = crate::Db::open_in_memory().unwrap();
+        let item = NeedsYou { seq: 1, title: "t".into(), detail: String::new(), link: None, done: false };
+        let run = |i: i64, open: bool| RoutineRun { id: i.to_string(), routine_id: "r".into(), started_ms: i, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: if open { vec![item.clone()] } else { vec![] }, error: None, text: String::new() };
+        push_run(&db, "r", run(0, true)).unwrap();
+        for i in 1..80 {
+            push_run(&db, "r", run(i, false)).unwrap();
+        }
+        let runs = load_runs(&db, "r").unwrap();
+        assert_eq!(runs.len(), 51);
+        assert_eq!(runs.last().unwrap().id, "0");
+    }
+
+    #[test]
+    fn window_and_failure_rules() {
+        let every = Cadence::Every { minutes: 20, from_hour: 8, to_hour: 23 };
+        assert!(in_window(&every, at(10, 0), &ist()));
+        assert!(!in_window(&every, at(4, 46), &ist()));
+        assert!(!in_window(&every, at(23, 0), &ist()));
+        assert!(in_window(&Cadence::Daily { hour: 10, minute: 30 }, at(4, 0), &ist()));
+        assert!(in_window(&Cadence::Every { minutes: 20, from_hour: 0, to_hour: 0 }, at(3, 0), &ist()));
+        assert!(failure_alerts(&Cadence::Daily { hour: 1, minute: 0 }, 1));
+        assert!(!failure_alerts(&every, 1));
+        assert!(failure_alerts(&every, 2));
+        assert!(!failure_alerts(&every, 3));
+        assert!(memory_fits(&serde_json::json!({"a": 1})));
+        assert!(!memory_fits(&serde_json::json!({"a": "x".repeat(MAX_MEMORY)})));
     }
 
     #[test]

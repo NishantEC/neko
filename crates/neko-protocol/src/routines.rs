@@ -53,6 +53,9 @@ pub struct RoutineState {
     /// "Run now": runs once even if paused, or again right after a run in flight.
     #[serde(default)]
     pub run_requested: bool,
+    /// Failed runs in a row; reset by a good one.
+    #[serde(default)]
+    pub failures: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

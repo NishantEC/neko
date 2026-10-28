@@ -242,6 +242,21 @@ fn bump_revision() {
     REVISION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 }
 
+/// Just the workspaces and their folders, without assembling tasks, events
+/// or connections: for callers that poll (routines).
+pub fn load_workspaces(db: &Db) -> Result<(Vec<neko_protocol::workbench::Workspace>, std::collections::BTreeMap<String, Vec<String>>), String> {
+    #[derive(serde::Deserialize, Default)]
+    struct Part {
+        #[serde(default)]
+        workspaces: Vec<neko_protocol::workbench::Workspace>,
+        #[serde(default)]
+        workspace_folders: std::collections::BTreeMap<String, Vec<String>>,
+    }
+    let Some(json) = db.get_setting(SETTING).map_err(|e| e.to_string())? else { return Ok(Default::default()) };
+    let part: Part = serde_json::from_str(&json).map_err(|e| format!("Cannot read workbench storage: {e}"))?;
+    Ok((part.workspaces, part.workspace_folders))
+}
+
 pub fn load(db: &Db) -> Result<Snapshot, String> {
     let mut snapshot = if let Some(json) = db.get_setting(SETTING).map_err(|e| e.to_string())? {
         if json.len() > MAX_SNAPSHOT_BYTES {

@@ -238,7 +238,9 @@ pub fn run(
     cancel: &AtomicBool,
     on_event: impl FnMut(String),
 ) -> Result<String, String> {
-    run_with_executable(&resolve_codex()?, spec, cancel, on_event)
+    // Claude Code and OpenCode runs never use the Codex binary.
+    let executable = if cli_workers::Agent::for_provider(&spec.runtime.provider).is_some() { PathBuf::new() } else { resolve_codex()? };
+    run_with_executable(&executable, spec, cancel, on_event)
 }
 
 fn run_with_executable(

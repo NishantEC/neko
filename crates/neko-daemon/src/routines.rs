@@ -6,7 +6,7 @@
 //! `RoutineRun`. See docs/knowledge/neko-runs-the-day.md.
 use crate::server::AppState;
 use neko_core::routines::{self as core, Store};
-use neko_protocol::routines::{Routine, RoutineNotice, RoutineRun, RoutineState, RoutineView, ScopeProposal};
+use neko_protocol::routines::{Cadence, NeedsYou, Routine, RoutineNotice, RoutineRun, RoutineState, RoutineView, ScopeProposal};
 use neko_protocol::workbench::{AgentRuntime, Command, Workspace};
 use neko_protocol::{Request, Response};
 use std::path::{Path, PathBuf};
@@ -22,6 +22,8 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const KEEP_TEXT: usize = 4000;
 const VIEW_RUNS: usize = 10;
 const PASEO_TIMEOUT: Duration = Duration::from_secs(20);
+const DISCOVERY_MAX_AGE: Duration = Duration::from_secs(600);
+const DAILY_RETRY_MS: i64 = 30 * 60 * 1000;
 
 fn db(state: &AppState) -> MutexGuard<'_, neko_core::Db> {
     state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -36,40 +38,59 @@ fn claude_json(home: &Path) -> Option<serde_json::Value> {
     serde_json::from_str(&text).ok()
 }
 
+/// Discovery walks ~/Documents and parses ~/.claude.json (which Claude Code
+/// rewrites often): reuse the last result while neither changed, for at most
+/// ten minutes. A half-written ~/.claude.json keeps the previous result.
+fn discover_cached(home: &Path) -> Vec<ScopeProposal> {
+    type Cache = Option<(Option<std::time::SystemTime>, Option<std::time::SystemTime>, std::time::Instant, Vec<ScopeProposal>)>;
+    static CACHE: std::sync::Mutex<Cache> = std::sync::Mutex::new(None);
+    let mtime = |path: PathBuf| std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    let (config, documents) = (mtime(home.join(".claude.json")), mtime(home.join("Documents")));
+    let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((c, d, at, scopes)) = cache.as_ref() {
+        if *c == config && *d == documents && at.elapsed() < DISCOVERY_MAX_AGE {
+            return scopes.clone();
+        }
+    }
+    let parsed = claude_json(home);
+    if parsed.is_none() && home.join(".claude.json").exists() {
+        if let Some((_, _, _, scopes)) = cache.as_ref() {
+            return scopes.clone();
+        }
+    }
+    let scopes = neko_core::scopes::discover(home, parsed.as_ref());
+    *cache = Some((config, documents, std::time::Instant::now(), scopes.clone()));
+    scopes
+}
+
 /// Scopes on disk matched to workspaces, plus every other workspace as a
 /// scope of its own. With `create`, a scope without a workspace gets one.
 fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> {
-    let home = home();
-    let mut proposals = neko_core::scopes::discover(&home, claude_json(&home).as_ref());
-    let mut snapshot = neko_core::workbench::load(&db(state))?;
-    let folders_of = |snapshot: &neko_protocol::workbench::Snapshot, id: &str, repository: &str| {
-        snapshot.workspace_folders.get(id).cloned().unwrap_or_else(|| vec![repository.to_string()])
-    };
+    let mut proposals = discover_cached(&home());
+    let (mut workspaces, mut folders) = neko_core::workbench::load_workspaces(&db(state))?;
+    let folders_of = |folders: &std::collections::BTreeMap<String, Vec<String>>, w: &Workspace| folders.get(&w.id).cloned().unwrap_or_else(|| vec![w.repository.clone()]);
     for proposal in &mut proposals {
         let folder = proposal.folders[0].clone();
-        let existing = snapshot
-            .workspaces
-            .iter()
-            .find(|w| folders_of(&snapshot, &w.id, &w.repository).contains(&folder))
-            .map(|w| w.id.clone());
+        let existing = workspaces.iter().find(|w| folders_of(&folders, w).contains(&folder)).map(|w| w.id.clone());
         proposal.workspace_id = match existing {
             Some(id) => Some(id),
             None if create => {
                 // An empty id asks the workbench for a new workspace.
                 let workspace = Workspace { id: String::new(), name: proposal.name.clone(), repository: folder.clone(), instructions: String::new(), away_enabled: false };
-                snapshot = state.workbench.command(Command::SaveWorkspaceWithFolders { workspace, folders: vec![folder.clone()] })?;
-                snapshot.workspaces.iter().find(|w| folders_of(&snapshot, &w.id, &w.repository).contains(&folder)).map(|w| w.id.clone())
+                let snapshot = state.workbench.command(Command::SaveWorkspaceWithFolders { workspace, folders: vec![folder.clone()] })?;
+                (workspaces, folders) = (snapshot.workspaces, snapshot.workspace_folders);
+                workspaces.iter().find(|w| folders_of(&folders, w).contains(&folder)).map(|w| w.id.clone())
             }
             None => None,
         };
     }
-    for workspace in &snapshot.workspaces {
+    for workspace in &workspaces {
         if proposals.iter().any(|p| p.workspace_id.as_deref() == Some(workspace.id.as_str())) {
             continue;
         }
         proposals.push(ScopeProposal {
             name: workspace.name.clone(),
-            folders: folders_of(&snapshot, &workspace.id, &workspace.repository),
+            folders: folders_of(&folders, workspace),
             servers: Vec::new(),
             problems: Vec::new(),
             workspace_id: Some(workspace.id.clone()),
@@ -78,17 +99,26 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
     Ok(proposals)
 }
 
-/// Creates the scopes' workspaces and their three routines once.
+/// Gives every scope its workspace and, once per workspace, its routines,
+/// so a scope folder added later is picked up too.
 fn ensure_seeded(state: &AppState) -> Result<(), String> {
     let _seeding = SEEDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if core::load(&db(state))?.seeded {
-        return Ok(());
-    }
     let scopes = scopes(state, true)?;
     let db = db(state);
     let mut store = core::load(&db)?;
+    // Stores from before per-workspace seeding: what exists counts as seeded.
+    if store.seeded && store.seeded_workspaces.is_empty() {
+        store.seeded_workspaces = store.routines.iter().map(|r| r.workspace_id.clone()).collect();
+    }
+    let fresh: Vec<ScopeProposal> = scopes
+        .into_iter()
+        .filter(|s| s.workspace_id.as_ref().is_some_and(|id| !store.seeded_workspaces.contains(id)))
+        .collect();
+    if fresh.is_empty() && store.seeded {
+        return Ok(());
+    }
     let now = neko_core::workbench::now_ms();
-    for routine in core::seeds(&scopes, &home().to_string_lossy()) {
+    for routine in core::seeds(&fresh, &home().to_string_lossy()) {
         if !store.routines.iter().any(|r| r.id == routine.id) {
             // First runs follow the cadence, so seeding never starts a burst.
             let first = RoutineState { next_due_ms: Some(core::next_due_local(&routine.cadence, 0, now)), ..Default::default() };
@@ -96,6 +126,7 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
             store.routines.push(routine);
         }
     }
+    store.seeded_workspaces.extend(fresh.into_iter().filter_map(|s| s.workspace_id));
     store.seeded = true;
     core::save_definitions(&db, &store)
 }
@@ -113,8 +144,10 @@ fn clear_stale_running(db: &neko_core::Db) -> Result<(), String> {
     Ok(())
 }
 
-/// The enabled routine that is most overdue, if any is due.
-pub(crate) fn pick_due(store: &Store, states: &[(String, RoutineState)], now_ms: i64) -> Option<String> {
+/// The enabled routine that is most overdue, if any is due. A "Run now"
+/// comes first; a repeating routine waits for its hours (`may_run`), so a
+/// wake at night does not fire it.
+pub(crate) fn pick_due(store: &Store, states: &[(String, RoutineState)], now_ms: i64, may_run: &dyn Fn(&Cadence) -> bool) -> Option<String> {
     store
         .routines
         .iter()
@@ -127,7 +160,7 @@ pub(crate) fn pick_due(store: &Store, states: &[(String, RoutineState)], now_ms:
                 return Some((i64::MIN, r.id.clone()));
             }
             let due = state.and_then(|s| s.next_due_ms).unwrap_or(0);
-            (r.enabled && due <= now_ms).then_some((due, r.id.clone()))
+            (r.enabled && due <= now_ms && may_run(&r.cadence)).then_some((due, r.id.clone()))
         })
         .min()
         .map(|(_, id)| id)
@@ -206,7 +239,7 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
             .iter()
             .map(|r| Ok((r.id.clone(), core::load_state(&db(state), &r.id)?)))
             .collect::<Result<Vec<_>, String>>()?;
-        let Some(id) = pick_due(&store, &states, now) else { return Ok(()) };
+        let Some(id) = pick_due(&store, &states, now, &|cadence| core::in_window_local(cadence, now)) else { return Ok(()) };
         let routine = store.routines.iter().find(|r| r.id == id).cloned().ok_or("Routine vanished")?;
         let scope = scopes(state, false)?.into_iter().find(|s| s.workspace_id.as_deref() == Some(routine.workspace_id.as_str()));
         (routine, scope)
@@ -229,22 +262,41 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
     Ok(())
 }
 
-fn run_one(state: &AppState, routine: &neko_protocol::routines::Routine, scope: Option<ScopeProposal>) -> Result<(), String> {
+/// Runs the routine; whatever happens, the routine is not left "running".
+fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -> Result<(), String> {
+    let result = run_body(state, routine, scope);
+    if let Err(error) = &result {
+        let db = db(state);
+        let mut routine_state = core::load_state(&db, &routine.id).unwrap_or_default();
+        if routine_state.running {
+            let now = neko_core::workbench::now_ms();
+            routine_state.running = false;
+            routine_state.failures = routine_state.failures.saturating_add(1);
+            routine_state.last_run_ms = Some(now);
+            routine_state.next_due_ms = Some(core::next_due_local(&routine.cadence, routine_state.quiet_streak, now));
+            routine_state.note = Some(format!("Last run could not be saved: {error}"));
+            core::save_state(&db, &routine.id, &routine_state)?;
+        }
+    }
+    result
+}
+
+fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -> Result<(), String> {
     let started = neko_core::workbench::now_ms();
     let (orders, memory) = {
         let db = db(state);
         (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), core::load_state(&db, &routine.id)?.memory)
     };
-    let outcome: Result<(String, core::Parsed), (String, String)> = match scope {
+    let outcome: Result<core::Parsed, (String, String)> = match scope.as_ref().and_then(|s| s.folders.first().map(|f| (s, f))) {
         None => Err(("This routine's workspace no longer exists".into(), String::new())),
-        Some(scope) => {
-            let folder = PathBuf::from(&scope.folders[0]);
+        Some((scope, folder)) => {
+            let folder = PathBuf::from(folder);
             if !folder.is_dir() {
                 Err((format!("Scope folder missing: {}", folder.display()), String::new()))
             } else {
                 let spec = neko_core::native_runner::RunSpec {
                     directory: folder,
-                    prompt: core::build_prompt(routine, &scope, &orders, &memory, &core::now_iso()),
+                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso()),
                     writable: true,
                     timeout: RUN_TIMEOUT,
                     runtime: AgentRuntime {
@@ -255,10 +307,7 @@ fn run_one(state: &AppState, routine: &neko_protocol::routines::Routine, scope: 
                 };
                 let cancel = AtomicBool::new(false);
                 match neko_core::native_runner::run(&spec, &cancel, |_| {}) {
-                    Ok(text) => match core::parse_reply(&text) {
-                        Ok(parsed) => Ok((text, parsed)),
-                        Err(error) => Err((error, text)),
-                    },
+                    Ok(text) => core::parse_reply(&text).map_err(|error| (error, text)),
                     Err(error) => Err((error, String::new())),
                 }
             }
@@ -266,9 +315,12 @@ fn run_one(state: &AppState, routine: &neko_protocol::routines::Routine, scope: 
     };
     let finished = neko_core::workbench::now_ms();
     let db = db(state);
+    // The definition as it is now: an edit made during the run applies.
+    let current = core::load(&db)?.routines.into_iter().find(|r| r.id == routine.id).unwrap_or_else(|| routine.clone());
     let mut routine_state = core::load_state(&db, &routine.id)?;
+    let mut next_due = None;
     let run = match outcome {
-        Ok((_, parsed)) => {
+        Ok(parsed) => {
             let mut needs_you = parsed.needs_you;
             if !needs_you.is_empty() {
                 let first = core::reserve_seq(&db, needs_you.len() as u64)?;
@@ -277,8 +329,15 @@ fn run_one(state: &AppState, routine: &neko_protocol::routines::Routine, scope: 
                 }
             }
             routine_state.quiet_streak = if parsed.quiet { routine_state.quiet_streak.saturating_add(1) } else { 0 };
-            routine_state.memory = parsed.memory;
-            routine_state.note = None;
+            if core::memory_fits(&parsed.memory) {
+                routine_state.memory = parsed.memory;
+            } else {
+                routine_state.note = Some(format!("The run asked to remember more than {} KB; its previous memory was kept.", core::MAX_MEMORY / 1024));
+            }
+            if routine_state.failures > 0 {
+                routine_state.failures = 0;
+                routine_state.note = None;
+            }
             RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: true, quiet: parsed.quiet, did: parsed.did, needs_you, error: None, text: String::new() }
         }
         Err((error, text)) => {
@@ -286,18 +345,33 @@ fn run_one(state: &AppState, routine: &neko_protocol::routines::Routine, scope: 
             while !text.is_char_boundary(end) {
                 end -= 1;
             }
-            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: false, quiet: false, did: Vec::new(), needs_you: Vec::new(), error: Some(error), text: text[..end].to_string() }
+            routine_state.failures = routine_state.failures.saturating_add(1);
+            let mut needs_you = Vec::new();
+            if core::failure_alerts(&current.cadence, routine_state.failures) {
+                needs_you.push(NeedsYou {
+                    seq: core::reserve_seq(&db, 1)?,
+                    title: format!("{} failed", current.name),
+                    detail: format!("{error} Neko will try again{}.", if matches!(current.cadence, Cadence::Daily { .. }) { " in 30 minutes" } else { " on schedule" }),
+                    link: None,
+                    done: false,
+                });
+            }
+            // A daily routine that failed once gets one more try soon.
+            if matches!(current.cadence, Cadence::Daily { .. }) && routine_state.failures == 1 {
+                next_due = Some(finished + DAILY_RETRY_MS);
+            }
+            RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: false, quiet: false, did: Vec::new(), needs_you, error: Some(error), text: text[..end].to_string() }
         }
     };
     let ok = run.ok;
     core::push_run(&db, &routine.id, run)?;
     routine_state.running = false;
     routine_state.last_run_ms = Some(finished);
-    routine_state.next_due_ms = Some(core::next_due_local(&routine.cadence, routine_state.quiet_streak, finished));
+    routine_state.next_due_ms = Some(next_due.unwrap_or_else(|| core::next_due_local(&current.cadence, routine_state.quiet_streak, finished)));
     core::save_state(&db, &routine.id, &routine_state)?;
     drop(db);
     if ok && !routine_state.paseo_paused {
-        if let Some(name) = &routine.paseo_schedule {
+        if let Some(name) = &current.paseo_schedule {
             let note = pause_paseo(name);
             let db = self::db(state);
             let mut routine_state = core::load_state(&db, &routine.id)?;
@@ -397,6 +471,9 @@ fn edit(state: &AppState, request: Request) -> Result<(), String> {
             if routine.id.trim().is_empty() || routine.name.trim().is_empty() || routine.instruction.trim().is_empty() {
                 return Err("A routine needs a name and an instruction".into());
             }
+            if routine.instruction.len() > core::MAX_INSTRUCTION {
+                return Err(format!("Keep the instruction under {} KB", core::MAX_INSTRUCTION / 1024));
+            }
             match store.routines.iter_mut().find(|r| r.id == routine.id) {
                 Some(existing) => {
                     let rescheduled = existing.cadence != routine.cadence;
@@ -428,6 +505,9 @@ fn edit(state: &AppState, request: Request) -> Result<(), String> {
             core::save_definitions(&db, &store)
         }
         Request::SetStandingOrders { workspace_id, text } => {
+            if text.len() > core::MAX_ORDERS {
+                return Err(format!("Keep standing orders under {} KB", core::MAX_ORDERS / 1024));
+            }
             store.standing_orders.insert(workspace_id, text);
             core::save_definitions(&db, &store)
         }
@@ -471,21 +551,32 @@ mod tests {
     fn pick_due_chooses_most_overdue_enabled() {
         let store = Store { routines: vec![routine("a", true), routine("b", true), routine("c", false), routine("d", true)], ..Default::default() };
         let states = vec![("a".into(), due(Some(50), false)), ("b".into(), due(Some(10), false)), ("c".into(), due(Some(0), false)), ("d".into(), due(Some(500), false))];
-        assert_eq!(pick_due(&store, &states, 100).as_deref(), Some("b"));
-        assert_eq!(pick_due(&store, &states, 5), None);
+        assert_eq!(pick_due(&store, &states, 100, &|_| true).as_deref(), Some("b"));
+        assert_eq!(pick_due(&store, &states, 5, &|_| true), None);
         // A routine with no state yet is due now; a running one is skipped.
         let states = vec![("a".into(), due(Some(0), true))];
-        assert_eq!(pick_due(&store, &states, 1).as_deref(), Some("b"));
+        assert_eq!(pick_due(&store, &states, 1, &|_| true).as_deref(), Some("b"));
     }
 
     #[test]
     fn run_now_runs_a_paused_routine_first() {
         let store = Store { routines: vec![routine("a", true), routine("b", false)], ..Default::default() };
         let states = vec![("a".into(), due(Some(0), false)), ("b".into(), RoutineState { next_due_ms: Some(i64::MAX), run_requested: true, ..Default::default() })];
-        assert_eq!(pick_due(&store, &states, 100).as_deref(), Some("b"));
+        assert_eq!(pick_due(&store, &states, 100, &|_| true).as_deref(), Some("b"));
         // While it runs, the request waits for the run to end.
         let states = vec![("a".into(), due(Some(i64::MAX), false)), ("b".into(), RoutineState { running: true, run_requested: true, ..Default::default() })];
-        assert_eq!(pick_due(&store, &states, 100), None);
+        assert_eq!(pick_due(&store, &states, 100, &|_| true), None);
+    }
+
+    #[test]
+    fn repeating_routine_waits_for_its_hours() {
+        let every = Routine { cadence: Cadence::Every { minutes: 20, from_hour: 8, to_hour: 23 }, ..routine("m", true) };
+        let store = Store { routines: vec![every], ..Default::default() };
+        let states = vec![("m".into(), due(Some(0), false))];
+        assert_eq!(pick_due(&store, &states, 100, &|_| false), None);
+        // Run now still runs it at night.
+        let states = vec![("m".into(), RoutineState { run_requested: true, ..Default::default() })];
+        assert_eq!(pick_due(&store, &states, 100, &|_| false).as_deref(), Some("m"));
     }
 
     #[test]

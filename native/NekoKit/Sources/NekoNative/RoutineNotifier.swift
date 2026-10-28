@@ -11,11 +11,13 @@ import UserNotifications
     private static let seqKey = "neko.routineNotificationSeq"
     private static let perPoll = 5
     private var task: Task<Void, Never>?
+    private weak var model: AppModel?
 
     /// Only an installed app bundle may use the notification centre.
     private var canNotify: Bool { Bundle.main.bundleURL.pathExtension == "app" && Bundle.main.bundleIdentifier != nil }
 
-    func start() {
+    func start(model: AppModel) {
+        self.model = model
         guard task == nil, canNotify else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
@@ -37,7 +39,8 @@ import UserNotifications
         let body = reply["RoutineNotifications"]
         guard body != .null else { return }
         let latest = body["latest"].int
-        defer { defaults.set(max(latest, after), forKey: Self.seqKey) }
+        // A daemon whose list starts over (new data folder) is followed down.
+        defer { defaults.set(latest, forKey: Self.seqKey) }
         guard known != nil else { return }
         let items = body["items"].array
         for notice in items.prefix(Self.perPoll) {
@@ -61,6 +64,7 @@ import UserNotifications
         await MainActor.run {
             if OpenNeko.usesBrowser, OpenNeko.inBrowser(route: "inbox") { return }
             WebHomeRoute.open("inbox")
+            model?.requestedPage = .homeWeb
             NotificationCenter.default.post(name: .nekoOpenWorkspace, object: nil)
         }
     }
