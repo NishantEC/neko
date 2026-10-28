@@ -148,7 +148,7 @@ export default function Tasks() {
   const toolbar = (
     <div className="mt-5 flex flex-wrap items-center gap-3" role="search" aria-label="Filter tasks">
       <StageTabs stage={stage} counts={counts} total={total} onChange={setStage} />
-      <InputGroup className="sky-well sky-control ms-auto w-52 border-transparent bg-transparent shadow-none">
+      <InputGroup className="sky-well sky-control ms-auto min-w-0 max-w-52 grow basis-32 border-transparent bg-transparent shadow-none">
         <InputGroupAddon><MagnifyingGlass aria-hidden /></InputGroupAddon>
         <InputGroupInput
           ref={searchBox} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks" aria-label="Search tasks"

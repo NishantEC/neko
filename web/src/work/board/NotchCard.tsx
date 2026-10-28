@@ -71,12 +71,17 @@ function NotchState({ state, live, tone, lead }: Pick<NotchCardProps, "state" | 
     );
   }
   if (!state) return null;
+  // When the row is tight the detail truncates first; then the age wraps onto a second line
+  // that is clipped (so it hides whole, never half a number); then the label truncates. The
+  // action notch beside this is shrink-0 and is never overlapped.
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       {lead ?? <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[tone])} />}
-      <span className={cn("shrink-0 font-medium", TONE_TEXT[tone])}>{state.label}</span>
-      {state.age ? <span className="shrink-0 tabular-nums text-muted-foreground">{state.age}</span> : null}
-      {state.detail ? <span className="min-w-0 truncate text-muted-foreground">· {state.detail}</span> : null}
+      <span data-slot="card-state" className="flex max-h-[1lh] min-w-0 shrink flex-wrap items-center gap-x-1.5 overflow-hidden">
+        <span className={cn("min-w-0 max-w-full truncate font-medium", TONE_TEXT[tone])}>{state.label}</span>
+        {state.age ? <span data-slot="card-age" className="shrink-0 tabular-nums text-muted-foreground">{state.age}</span> : null}
+      </span>
+      {state.detail ? <span className="min-w-0 shrink-[999] truncate text-muted-foreground">· {state.detail}</span> : null}
     </span>
   );
 }

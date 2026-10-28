@@ -578,6 +578,12 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     const waiting = page.locator("[data-slot='task-board'] [data-slot='board-card'][data-status='AwaitingApproval']");
     const states = await waiting.evaluateAll((els) => els.map((e) => [e.querySelector("[data-slot='card-tab']")?.innerText.split(/\s/)[0] ?? "", e.querySelector("[data-notch] [data-slot='card-action']")?.innerText.trim() ?? ""]));
     check(states.length > 0 && states.every(([s, a]) => (s === "Asks" && a === "Answer") || (s === "Needs" && a === "Approve")), `waiting cards say Asks you with Answer, or Needs approval with Approve, the action in the notch (${states.map(([s, a]) => `${s}/${a}`).join(", ")})`);
+    const clash = await page.locator("[data-slot='task-board'] [data-slot='board-card']:has([data-notch])").evaluateAll((els) => els.filter((e) => {
+      const notch = e.querySelector("[data-notch]").getBoundingClientRect();
+      const parts = [...e.querySelectorAll("[data-slot='card-tab'] *")].map((n) => n.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0 && r.top < notch.bottom && r.bottom > notch.top);
+      return parts.some((r) => r.right > notch.left + 0.5);
+    }).length);
+    check(clash === 0, `nothing on a card's state line reaches into its action notch (${clash} cards overlap)`);
     const notched = await page.locator("[data-slot='task-board'] [data-slot='board-card']:has([data-notch])").evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute("data-status")))]);
     check(notched.length > 0 && notched.every((s) => ["AwaitingApproval", "Failed"].includes(s)), `only cards that wait on you have a notch (${notched.join(", ")})`);
     const approve = waiting.filter({ has: page.locator("[data-slot='card-action']", { hasText: "Approve" }) }).first();
