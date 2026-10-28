@@ -151,6 +151,7 @@ enum OpenNeko: String, CaseIterable, Identifiable {
         started = true
         PreviousAppContext.shared.start()
         PresenceController.shared.start(model: model)
+        RoutineNotifier.shared.start()
         await model.start()
         await PaletteController.shared.configure(model: model)
     }
