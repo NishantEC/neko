@@ -13,13 +13,13 @@ import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, Comma
 import { Kbd } from "@/ui/kbd";
 import { Keyboard } from "@phosphor-icons/react";
 import {
-  ArrowRight, ArrowsClockwise, CheckCircle, CircleHalf, Copy, Moon, Plus, Rocket, Sparkle, Sun, Stop,
+  ArrowRight, ArrowsClockwise, CheckCircle, CircleHalf, Copy, Moon, Palette, Plus, Rocket, Sun, Stop,
 } from "@/ui/icons";
 import "@/pages";
 import { usePages } from "@/registry";
 import { navigate } from "@/router";
 import { refreshPlugins } from "@/plugins";
-import { setTheme } from "@/theme";
+import { setMode, setSlot, useThemes } from "@/theme";
 import { useCommands, type PaletteCommand } from "@/shell/commands";
 import { approveFirstDecision, copyText, newTask, stopAllWork } from "@/shell/actions";
 import { openShortcuts } from "@/shell/shortcuts";
@@ -42,6 +42,7 @@ export function CommandPalette() {
   const registered = useCommands();
   const { snapshot } = useWorkbench();
   const status = useShellStatus();
+  const { choice, themes, appearance } = useThemes();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -164,18 +165,31 @@ export function CommandPalette() {
             </CommandGroup>
           ) : null}
           <CommandGroup heading="Appearance">
-            <CommandItem value="Theme: light" keywords={["appearance", "bright"]} onSelect={run(() => setTheme("light"))}>
-              <Sun /> Light theme
+            <CommandItem value="Mode: system" keywords={["appearance", "auto", "follow", "theme"]} onSelect={run(() => setMode("system"))}>
+              <CircleHalf /> Mode: follow the system
             </CommandItem>
-            <CommandItem value="Theme: dark" keywords={["appearance"]} onSelect={run(() => setTheme("dark"))}>
-              <Moon /> Dark theme
+            <CommandItem value="Mode: light" keywords={["appearance", "bright", "theme"]} onSelect={run(() => setMode("light"))}>
+              <Sun /> Mode: always light
             </CommandItem>
-            <CommandItem value="Theme: glass" keywords={["appearance", "frosted", "translucent", "blur"]} onSelect={run(() => setTheme("glass"))}>
-              <Sparkle /> Glass theme
+            <CommandItem value="Mode: dark" keywords={["appearance", "theme"]} onSelect={run(() => setMode("dark"))}>
+              <Moon /> Mode: always dark
             </CommandItem>
-            <CommandItem value="Theme: system" keywords={["appearance", "auto"]} onSelect={run(() => setTheme("system"))}>
-              <CircleHalf /> Follow the system theme
-            </CommandItem>
+            {themes.map((theme) => (
+              <CommandItem
+                key={theme.id}
+                value={`Theme: ${theme.name}`}
+                keywords={["appearance", "theme", theme.family, theme.appearance, ...(theme.data.backdrop ? ["frosted", "translucent", "blur"] : [])]}
+                onSelect={run(() => {
+                  // Picking a theme sets its slot, and shows it: if the other appearance is on screen the mode follows.
+                  setSlot(theme.appearance, theme.id);
+                  if (choice.mode !== "system" && choice.mode !== theme.appearance) setMode(theme.appearance);
+                  else if (choice.mode === "system" && appearance !== theme.appearance) setMode(theme.appearance);
+                })}
+              >
+                <Palette /> Theme: {theme.name}
+                <CommandShortcut>{theme.appearance}</CommandShortcut>
+              </CommandItem>
+            ))}
           </CommandGroup>
         </CommandList>
         <div data-slot="palette-footer" className="flex items-center gap-3 border-t border-border/70 px-3 py-2 text-[11.5px] text-muted-foreground">

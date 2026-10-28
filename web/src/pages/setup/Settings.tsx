@@ -25,6 +25,7 @@ import "@/pages/setup/settings/settings-surface.css";
 import { SECTIONS, searchSettings, type SectionId } from "@/pages/setup/settings/registry";
 import { useSettingsSections } from "@/extensions";
 import { GeneralSection } from "@/pages/setup/settings/General";
+import { AppearanceSection } from "@/pages/setup/settings/Appearance";
 import { AiSection } from "@/pages/setup/settings/Ai";
 import { RulebookSection } from "@/pages/setup/settings/Rulebook";
 import { AboutSection, DiagnosticsSection, PermissionsSection, SearchSection, UpdatesSection } from "@/pages/setup/settings/System";
@@ -33,6 +34,7 @@ const STORAGE = "neko.web.settings.section";
 
 const RENDER: Record<SectionId, () => React.ReactElement> = {
   general: () => <GeneralSection />,
+  appearance: () => <AppearanceSection />,
   ai: () => <AiSection />,
   rulebook: () => <RulebookSection />,
   search: () => <SearchSection />,

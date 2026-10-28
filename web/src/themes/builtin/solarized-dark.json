@@ -1,0 +1,19 @@
+{
+  "id": "solarized-dark",
+  "name": "Solarized Dark",
+  "appearance": "dark",
+  "family": "Solarized",
+  "colors": {
+    "background": "#002b36",
+    "sidebar": "#001f28",
+    "foreground": "#eee8d5",
+    "strong": "#fdf6e3",
+    "mutedForeground": "#93a1a1",
+    "border": "#93a1a1",
+    "primary": "#268bd2",
+    "destructive": "#e56663",
+    "success": "#859900",
+    "warning": "#b58900",
+    "info": "#2aa198"
+  }
+}

@@ -2,13 +2,14 @@
 // that search can open. Ranking is the native app's (SettingsSearch.swift):
 // title prefix, a word in the title, a keyword, then a substring.
 
-export type SectionId = "general" | "ai" | "rulebook" | "search" | "permissions" | "diagnostics" | "updates" | "about";
+export type SectionId = "general" | "appearance" | "ai" | "rulebook" | "search" | "permissions" | "diagnostics" | "updates" | "about";
 
 export interface SectionDef { id: SectionId; title: string; summary: string; group: string; keywords: string[] }
 export interface SettingDef { id: string; section: SectionId; title: string; keywords: string[] }
 
 export const SECTIONS: SectionDef[] = [
-  { id: "general", title: "General", group: "Neko", summary: "Make Neko fit the way you use your Mac.", keywords: ["preferences", "appearance", "shortcut", "hotkey", "login"] },
+  { id: "general", title: "General", group: "Neko", summary: "Make Neko fit the way you use your Mac.", keywords: ["preferences", "shortcut", "hotkey", "login"] },
+  { id: "appearance", title: "Appearance", group: "Neko", summary: "Light and dark themes, and your own.", keywords: ["theme", "dark", "light", "mode", "colour", "color", "glass", "gruvbox", "nord", "catppuccin"] },
   { id: "ai", title: "AI & agents", group: "Neko", summary: "Choose the runtime and model for new work, and what a task may cost.", keywords: ["model", "runtime", "codex", "claude", "budget", "agents"] },
   { id: "rulebook", title: "Rulebook", group: "Neko", summary: "The rules Neko and every agent it hands work to follow.", keywords: ["rules", "standards", "engineering", "review", "instructions", "policy"] },
   { id: "search", title: "Quick panel", group: "This Mac", summary: "Choose which folders appear in the quick panel.", keywords: ["quick panel", "palette", "folders", "files", "spotlight"] },
@@ -19,7 +20,10 @@ export const SECTIONS: SectionDef[] = [
 ];
 
 export const SETTINGS: SettingDef[] = [
-  { id: "appearance", section: "general", title: "Appearance", keywords: ["dark", "light", "theme", "mode", "colour", "color"] },
+  { id: "appearance", section: "appearance", title: "Mode", keywords: ["dark", "light", "system", "theme", "appearance", "colour", "color"] },
+  { id: "light-theme", section: "appearance", title: "Light theme", keywords: ["theme", "colour", "color", "gruvbox", "latte", "solarized"] },
+  { id: "dark-theme", section: "appearance", title: "Dark theme", keywords: ["theme", "colour", "color", "glass", "nord", "tokyo", "catppuccin", "mocha"] },
+  { id: "make-theme", section: "appearance", title: "Make me a theme", keywords: ["theme", "custom", "create", "your own", "remove theme"] },
   { id: "launch-at-login", section: "general", title: "Launch at login", keywords: ["startup", "start", "boot", "open at login"] },
   { id: "summon-shortcut", section: "general", title: "Summon shortcut", keywords: ["hotkey", "keyboard", "global"] },
   { id: "runtime", section: "ai", title: "Agent runtime", keywords: ["codex", "claude", "opencode", "provider", "runner"] },

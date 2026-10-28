@@ -1,24 +1,18 @@
-import { useSyncExternalStore } from "react";
 import { request } from "@/api";
-import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
 import { Kbd } from "@/ui/kbd";
-import { CircleHalf, Moon, Sparkle, Sun } from "@/ui/icons";
 import { Panel } from "@/setup/kit";
-import { getTheme, setTheme, subscribeTheme, type ThemeChoice } from "@/theme";
 import { ErrorNote, Section, SettingRow, Toggle } from "@/setup/kit";
 import { activate, providerRows, rec, str, useLoad, useRun } from "@/setup/lib";
 
 const MODIFIERS: Record<string, string> = { Cmd: "⌘", Alt: "⌥", Ctrl: "⌃", Shift: "⇧" };
 
 export function GeneralSection() {
-  const theme = useSyncExternalStore(subscribeTheme, getTheme);
   const preferences = useLoad((signal) => providerRows("preference", signal));
   const hotkey = useLoad(async (signal) => rec((await request("GetHotkey", signal))?.Hotkey?.config?.combo));
   const { run, busy, error, clear } = useRun();
 
   const login = preferences.data?.find((r) => r.id === "launch-at-login");
-  const choices: [ThemeChoice, string, typeof Sun][] = [["system", "System", CircleHalf], ["light", "Light", Sun], ["dark", "Dark", Moon], ["glass", "Glass", Sparkle]];
   const combo = hotkey.data;
   const keys = combo && Object.keys(combo).length
     ? [...(Array.isArray(combo.modifiers) ? combo.modifiers : []).map((m: string) => MODIFIERS[m] ?? m), str(combo.key).replace(/^Key/, "")]
@@ -26,19 +20,6 @@ export function GeneralSection() {
 
   return (
     <div className="flex flex-col gap-8">
-      <Section eyebrow="Look" title="Appearance">
-        <Panel>
-          <SettingRow id="appearance" title="Appearance" description="System follows your Mac’s light or dark appearance. This changes the web app only; the native app has its own switch.">
-            <div role="radiogroup" aria-label="Appearance" className="flex gap-1.5">
-              {choices.map(([value, label, Icon]) => (
-                <Button key={value} role="radio" aria-checked={theme === value} variant={theme === value ? "secondary" : "outline"} size="sm" onClick={() => setTheme(value)}>
-                  <Icon /> {label}
-                </Button>
-              ))}
-            </div>
-          </SettingRow>
-        </Panel>
-      </Section>
       <Section eyebrow="Quick access" title="Summon & startup">
         <Panel>
           <div className="divide-y divide-border/70">

@@ -4,9 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/check-themes.mjs && tsc --noEmit && vite build",
     "watch": "vite build --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "themes": "node scripts/themes.mjs",
+    "themes:check": "node scripts/check-themes.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.152",

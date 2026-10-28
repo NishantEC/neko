@@ -1,0 +1,19 @@
+{
+  "id": "nord",
+  "name": "Nord",
+  "appearance": "dark",
+  "family": "Nord",
+  "colors": {
+    "background": "#2e3440",
+    "sidebar": "#272c36",
+    "foreground": "#e5e9f0",
+    "strong": "#eceff4",
+    "mutedForeground": "#b0b9c9",
+    "border": "#eceff4",
+    "primary": "#88c0d0",
+    "destructive": "#bf616a",
+    "success": "#a3be8c",
+    "warning": "#ebcb8b",
+    "info": "#81a1c1"
+  }
+}

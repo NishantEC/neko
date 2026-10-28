@@ -2,12 +2,14 @@
 // what the Mac can take and what waits on you (StatusSummary.swift), which opens
 // the same facts MachineStrip.swift shows; then a gear with the theme and the
 // keyboard shortcuts.
-import { useSyncExternalStore } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "@/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { Keyboard } from "@phosphor-icons/react";
-import { Desktop, Gear, Moon, Sparkle, Sun, type Icon } from "@/ui/icons";
-import { getTheme, setTheme, subscribeTheme, type ThemeChoice } from "@/theme";
+import { Desktop, Gear, Moon, Palette, Sun, type Icon } from "@/ui/icons";
+import { setMode, setSlot, useThemes, type Mode, type ThemeInfo } from "@/theme";
+import { ThemeSwatch } from "@/themes/ThemePicker";
+import { navigate } from "@/router";
+import { requestSettings } from "@/setup/settingsNav";
 import { useWorkbench } from "@/useStore";
 import { cn } from "@/ui/lib/utils";
 import { openShortcuts } from "@/shell/shortcuts";
@@ -16,35 +18,66 @@ import { elapsed, useNow, useShellStatus } from "@/shell/status";
 const DOT = { ok: "bg-success", limited: "bg-warning", holding: "bg-destructive" } as const;
 const TEXT = { ok: "text-muted-foreground", limited: "text-warning-foreground", holding: "text-destructive-foreground" } as const;
 
-const THEMES: { value: ThemeChoice; label: string; icon: Icon }[] = [
+const MODES: { value: Mode; label: string; icon: Icon }[] = [
   { value: "system", label: "System", icon: Desktop },
   { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
-  { value: "glass", label: "Glass", icon: Sparkle },
 ];
 
 const ICON_BUTTON = "flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
 
-/** The footer's gear: the theme (System, Light, Dark or Glass) and the keyboard shortcuts. */
+/** A theme's two-tone dot: its page colour with its accent inside. */
+function Dot({ theme }: { theme: ThemeInfo }) {
+  return <ThemeSwatch theme={theme} className="h-4 w-6 shrink-0 rounded-[4px] border-0 ring-1 ring-border [&>span:first-child]:hidden [&>span:last-child]:hidden" />;
+}
+
+function ThemeSubmenu({ label, slot, themes, value }: { label: string; slot: "light" | "dark"; themes: ThemeInfo[]; value: string }) {
+  const shown = themes.find((t) => t.id === value) ?? themes[0];
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger data-slot={`theme-menu-${slot}`}>
+        {shown ? <Dot theme={shown} /> : null} {label}
+        <span className="ms-1 truncate text-[12px] text-muted-foreground">{shown?.name}</span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="max-h-80 min-w-48 overflow-y-auto">
+        <DropdownMenuRadioGroup value={shown?.id} onValueChange={(id) => setSlot(slot, id as string)}>
+          {themes.map((theme) => (
+            <DropdownMenuRadioItem key={theme.id} value={theme.id} data-theme-id={theme.id}>
+              <Dot theme={theme} /> {theme.name}
+              {theme.source === "user" ? <span className="ms-1 text-[11px] text-muted-foreground">yours</span> : null}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
+/** The footer's gear: the mode, the light and dark themes, and the keyboard shortcuts. */
 export function ThemeMenu() {
-  const theme = useSyncExternalStore(subscribeTheme, getTheme);
-  const current = THEMES.find((t) => t.value === theme) ?? THEMES[0];
+  const { choice, themes, active, appearance } = useThemes();
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger data-slot="theme-menu" aria-label={`Theme and shortcuts (theme: ${current.label})`} title="Theme and shortcuts" className={ICON_BUTTON}>
+      <DropdownMenuTrigger data-slot="theme-menu" aria-label={`Theme and shortcuts (theme: ${active.name}, ${choice.mode === "system" ? "following the system" : appearance})`} title={`${active.name}${choice.mode === "system" ? " (system)" : ""}`} className={ICON_BUTTON}>
         <Gear size={15} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="end" className="min-w-44">
+      <DropdownMenuContent side="top" align="end" className="min-w-52">
         <DropdownMenuGroup>
-          <DropdownMenuLabel>Theme</DropdownMenuLabel>
-          <DropdownMenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as ThemeChoice)}>
-            {THEMES.map(({ value, label, icon: ItemIcon }) => (
+          <DropdownMenuLabel>Appearance</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={choice.mode} onValueChange={(value) => setMode(value as Mode)}>
+            {MODES.map(({ value, label, icon: ItemIcon }) => (
               <DropdownMenuRadioItem key={value} value={value}>
                 <ItemIcon size={14} /> {label}
               </DropdownMenuRadioItem>
             ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <ThemeSubmenu label="Light theme" slot="light" themes={themes.filter((t) => t.appearance === "light")} value={choice.light} />
+        <ThemeSubmenu label="Dark theme" slot="dark" themes={themes.filter((t) => t.appearance === "dark")} value={choice.dark} />
+        <DropdownMenuItem onClick={() => { navigate("settings"); requestSettings({ section: "appearance" }); }}>
+          <Palette size={14} /> All appearance settings
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={openShortcuts}>
           <Keyboard size={14} /> Keyboard shortcuts <DropdownMenuShortcut>?</DropdownMenuShortcut>

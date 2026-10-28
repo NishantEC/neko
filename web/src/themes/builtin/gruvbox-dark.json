@@ -1,0 +1,19 @@
+{
+  "id": "gruvbox-dark",
+  "name": "Gruvbox Dark",
+  "appearance": "dark",
+  "family": "Gruvbox",
+  "colors": {
+    "background": "#282828",
+    "sidebar": "#1d2021",
+    "foreground": "#ebdbb2",
+    "strong": "#fbf1c7",
+    "mutedForeground": "#bdae93",
+    "border": "#ebdbb2",
+    "primary": "#83a598",
+    "destructive": "#fb4934",
+    "success": "#b8bb26",
+    "warning": "#fabd2f",
+    "info": "#7daea3"
+  }
+}

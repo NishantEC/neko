@@ -1,0 +1,18 @@
+{
+  "id": "solarized-light",
+  "name": "Solarized Light",
+  "appearance": "light",
+  "family": "Solarized",
+  "colors": {
+    "background": "#fdf6e3",
+    "sidebar": "#eee8d5",
+    "foreground": "#073642",
+    "mutedForeground": "#586e75",
+    "border": "#586e75",
+    "primary": "#268bd2",
+    "destructive": "#dc322f",
+    "success": "#859900",
+    "warning": "#b58900",
+    "info": "#2aa198"
+  }
+}

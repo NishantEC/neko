@@ -1,0 +1,18 @@
+{
+  "id": "rose-pine",
+  "name": "Rosé Pine",
+  "appearance": "dark",
+  "family": "Rosé Pine",
+  "colors": {
+    "background": "#191724",
+    "sidebar": "#13111d",
+    "foreground": "#e0def4",
+    "mutedForeground": "#948fb0",
+    "border": "#e0def4",
+    "primary": "#c4a7e7",
+    "destructive": "#eb6f92",
+    "success": "#9ccfd8",
+    "warning": "#f6c177",
+    "info": "#569fba"
+  }
+}

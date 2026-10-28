@@ -1,11 +1,12 @@
 /*
  * Neko's tokens, in hushbacks' structure (packages/ui/src/styles/globals.css):
  * the same token names, smooth shadows, component surfaces and motion, with
- * Neko's own dark-neutral palette and purple user bubble. Colour is a token
- * here and nowhere else; components never carry raw hex.
+ * Neko's own palettes and purple user bubble. Colour is a token here and
+ * nowhere else; components never carry raw hex. The tokens' values are theme
+ * data (src/themes), not written in this file.
  *
- * `.dark` / `.light` is set on <html> by src/theme.ts and follows the system
- * preference unless the owner picked one.
+ * `.dark` / `.light` and `data-neko-theme` are set on <html> by src/themes/theme.ts
+ * (and, before first paint, public/theme-boot.js).
  */
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -27,14 +28,8 @@
   --shadow-2xl: var(--smooth-shadow-2xl);
 }
 
-:root {
-  --smooth-ring-color: rgba(0, 0, 0, 0.06);
-}
-
-.dark {
-  --smooth-ring-color: rgba(255, 255, 255, 0.12);
-}
-
+/* The ring colour per theme is derived (themes/derive.js); this keeps a
+ * `.light` subtree inside a dark theme correct. */
 .light,
 .light * {
   --smooth-ring-color: rgba(0, 0, 0, 0.06);
@@ -43,187 +38,43 @@
 /* Dark variants fire inside any `.dark` ancestor unless a nearer `.light` shadows it. */
 @custom-variant dark (&:is(.dark *):not(.light *));
 
-/* ------------------------------------------------------------------ light */
+/* ------------------------------------------------------------------ theme */
+/* Colour is data now: every theme (the built-ins in src/themes/builtin/*.json
+ * and the ones in <data dir>/themes/) is turned into custom properties by
+ * src/themes/derive.js and applied as `html[data-neko-theme="<id>"]` inside
+ * `@layer neko-theme` (builtin.generated.css, plus a <style> the page adds for
+ * the person's own). The whole layer loses to any unlayered rule, so
+ * custom.css and plugin styles still win on every variable. Nothing below
+ * names a theme: a theme with a `backdrop` in its data gets `data-backdrop`
+ * on <html>, and these rules paint it. */
 :root {
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.27 0 0);
-  --strong: oklch(0.16 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.27 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.27 0 0);
-  /* Neko's accent: the blue of the send button and the Approve action. */
-  --primary: oklch(0.571 0.21 264);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: --alpha(var(--color-black) / 4%);
-  --secondary-foreground: oklch(0.27 0 0);
-  --muted: --alpha(var(--color-black) / 4%);
-  --muted-foreground: oklch(0.5 0 0);
-  --accent: --alpha(var(--color-black) / 4%);
-  --accent-foreground: oklch(0.27 0 0);
-  --destructive: oklch(0.6 0.22 22);
-  --destructive-foreground: oklch(0.5 0.2 22);
-  --border: --alpha(var(--color-black) / 8%);
-  --input: --alpha(var(--color-black) / 10%);
-  --ring: oklch(0.571 0.21 264 / 55%);
-  --info: oklch(0.6 0.17 250);
-  --info-foreground: oklch(0.48 0.17 255);
-  --success: oklch(0.66 0.16 160);
-  --success-foreground: oklch(0.5 0.13 160);
-  --warning: oklch(0.74 0.15 75);
-  --warning-foreground: oklch(0.5 0.12 70);
-  --chart-1: oklch(0.571 0.21 264);
-  --chart-2: oklch(0.66 0.16 160);
-  --chart-3: oklch(0.74 0.15 75);
-  --chart-4: oklch(0.55 0.15 300);
-  --chart-5: oklch(0.6 0.22 22);
-  --sidebar: oklch(0.965 0 0);
-  --sidebar-foreground: oklch(0.45 0 0);
-  --sidebar-primary: oklch(0.27 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: --alpha(var(--color-black) / 6%);
-  --sidebar-accent-foreground: oklch(0.2 0 0);
-  --sidebar-border: --alpha(var(--color-black) / 7%);
-  --sidebar-ring: oklch(0.571 0.21 264 / 55%);
-  --code: oklch(0.975 0 0);
-  --code-foreground: var(--foreground);
-  /* The user's own message: Neko's purple. */
-  --bubble: oklch(0.92 0.045 300);
-  --bubble-foreground: oklch(0.24 0.06 300);
   --radius: 1.25rem;
-  /* Editorial surface tokens */
-  --panel: oklch(100% 0 0 / 0.7);
-  --panel-border: oklch(0% 0 0 / 0.06);
-  --panel-highlight: oklch(100% 0 0 / 0.6);
-  --glow-violet: oklch(0.571 0.21 264 / 0.1);
-  --glow-sky: oklch(70% 0.18 230 / 0.1);
-  --glow-amber: oklch(75% 0.16 80 / 0.1);
-  --glow-emerald: oklch(70% 0.16 160 / 0.1);
-  --glow-rose: oklch(70% 0.18 320 / 0.1);
   --scrollbar-size: 12px;
-  --scrollbar-thumb: --alpha(var(--color-black) / 18%);
-  --scrollbar-thumb-hover: --alpha(var(--color-black) / 32%);
-  color-scheme: light;
 }
 
-/* ------------------------------------------------------------------- dark */
-/* Neko's dark neutral: #0f0f0f canvas, #121212 sidebar, hairlines at 6% white. */
-.dark {
-  --background: #0f0f0f;
-  --foreground: oklch(0.88 0 0);
-  --strong: oklch(0.975 0 0);
-  --card: #151515;
-  --card-foreground: oklch(0.88 0 0);
-  --popover: #181818;
-  --popover-foreground: oklch(0.88 0 0);
-  --primary: oklch(0.571 0.21 264);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: --alpha(var(--color-white) / 5%);
-  --secondary-foreground: oklch(0.9 0 0);
-  --muted: --alpha(var(--color-white) / 4%);
-  --muted-foreground: #8f8f8f;
-  --accent: --alpha(var(--color-white) / 6%);
-  --accent-foreground: oklch(0.95 0 0);
-  --destructive: #e5484d;
-  --destructive-foreground: #f2777b;
-  --border: --alpha(var(--color-white) / 7%);
-  --input: --alpha(var(--color-white) / 9%);
-  --ring: oklch(0.65 0.18 264 / 65%);
-  --info: oklch(0.65 0.17 250);
-  --info-foreground: #8ab4ff;
-  --success: #4cc38a;
-  --success-foreground: #4cc38a;
-  --warning: #e0a042;
-  --warning-foreground: #e0a042;
-  --chart-1: oklch(0.65 0.18 264);
-  --chart-2: #4cc38a;
-  --chart-3: #e0a042;
-  --chart-4: oklch(0.65 0.14 300);
-  --chart-5: #e5484d;
-  --sidebar: #121212;
-  --sidebar-foreground: oklch(0.7 0 0);
-  --sidebar-primary: oklch(0.95 0 0);
-  --sidebar-primary-foreground: oklch(0.2 0 0);
-  --sidebar-accent: --alpha(var(--color-white) / 7%);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: --alpha(var(--color-white) / 6%);
-  --sidebar-ring: oklch(0.65 0.18 264 / 65%);
-  --code: #131313;
-  --code-foreground: var(--foreground);
-  --bubble: oklch(0.36 0.07 300);
-  --bubble-foreground: oklch(0.975 0 0);
-  --radius: 1.25rem;
-  --panel: oklch(20.5% 0 0 / 0.55);
-  --panel-border: oklch(100% 0 0 / 0.1);
-  --panel-highlight: oklch(100% 0 0 / 0.06);
-  --glow-violet: oklch(0.65 0.18 264 / 0.2);
-  --glow-sky: oklch(75% 0.18 230 / 0.2);
-  --glow-amber: oklch(80% 0.16 80 / 0.18);
-  --glow-emerald: oklch(75% 0.16 160 / 0.18);
-  --glow-rose: oklch(75% 0.18 320 / 0.2);
-  --scrollbar-thumb: --alpha(var(--color-white) / 16%);
-  --scrollbar-thumb-hover: --alpha(var(--color-white) / 30%);
-  color-scheme: dark;
+/* A backdrop (Glass): a wash behind everything, translucent frosted surfaces
+ * that blur it, thin light hairlines and soft shadows. The surface colours in the
+ * theme's data are the solid fallback; derive.js emits them translucent. Text
+ * is checked against the brightest point the wash can composite to
+ * (themes/derive.js contrastPairs), not against the solid colour. */
+html[data-backdrop]:not([data-shell="native"]) body {
+  background: var(--backdrop-wash) fixed;
 }
 
-/* ------------------------------------------------------------------ glass */
-/* Glassmorphism, layered on `.dark` (src/theme.ts sets both classes): a navy
- * and violet wash behind everything, translucent frosted surfaces that blur
- * it, thin light hairlines and soft shadows. Only `html.glass` reaches these
- * rules, so every other theme renders exactly as before. Text tokens are
- * chosen against the brightest point the wash can composite to (see
- * docs/evidence/glass-theme-report.md): all clear WCAG AA 4.5:1. */
-html.glass {
-  --background: rgb(13 22 38 / 0.42);
-  --foreground: #e8eef8;
-  --strong: #f6f9fe;
-  --card: rgb(28 42 66 / 0.48);
-  --card-foreground: #e8eef8;
-  --popover: rgb(20 32 52 / 0.78);
-  --popover-foreground: #e8eef8;
-  --secondary: --alpha(var(--color-white) / 8%);
-  --secondary-foreground: #edf2fa;
-  --muted: --alpha(var(--color-white) / 6%);
-  --muted-foreground: #a9b8cd;
-  --accent: --alpha(var(--color-white) / 10%);
-  --accent-foreground: #f6f9fe;
-  --border: --alpha(var(--color-white) / 14%);
-  --input: --alpha(var(--color-white) / 16%);
-  --sidebar: rgb(15 26 43 / 0.46);
-  --sidebar-foreground: #c3cfdf;
-  --sidebar-accent: --alpha(var(--color-white) / 10%);
-  --sidebar-accent-foreground: #f6f9fe;
-  --sidebar-border: --alpha(var(--color-white) / 14%);
-  --code: rgb(8 14 26 / 0.62);
-  --panel: rgb(28 42 66 / 0.42);
-  --panel-border: --alpha(var(--color-white) / 16%);
-  --panel-highlight: --alpha(var(--color-white) / 10%);
-  --smooth-ring-color: rgba(255, 255, 255, 0.16);
-  --glass-wash:
-    radial-gradient(ellipse 70% 60% at 12% 0%, oklch(0.42 0.13 285 / 0.55), transparent 70%),
-    radial-gradient(ellipse 60% 55% at 100% 100%, oklch(0.42 0.09 215 / 0.5), transparent 70%),
-    linear-gradient(160deg, #0b1424 0%, #101a30 55%, #0c1626 100%);
-  --glass-frost: blur(22px) saturate(160%);
+html[data-backdrop] .bg-background,
+html[data-backdrop] .bg-card,
+html[data-backdrop] .bg-popover,
+html[data-backdrop] .bg-sidebar,
+html[data-backdrop] .ui-popup-surface,
+html[data-backdrop] .ui-panel-surface {
+  -webkit-backdrop-filter: var(--backdrop-frost);
+  backdrop-filter: var(--backdrop-frost);
 }
 
-html.glass:not([data-shell="native"]) body {
-  background: var(--glass-wash) fixed;
-}
-
-html.glass .bg-background,
-html.glass .bg-card,
-html.glass .bg-popover,
-html.glass .bg-sidebar,
-html.glass .ui-popup-surface,
-html.glass .ui-panel-surface {
-  -webkit-backdrop-filter: var(--glass-frost);
-  backdrop-filter: var(--glass-frost);
-}
-
-html.glass .ui-popup-surface,
-html.glass .ui-panel-surface,
-html.glass [data-slot="card"] {
-  border-color: --alpha(var(--color-white) / 14%);
+html[data-backdrop] .ui-popup-surface,
+html[data-backdrop] .ui-panel-surface,
+html[data-backdrop] [data-slot="card"] {
+  border-color: var(--border);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.08),
     0 8px 32px -12px rgb(0 0 0 / 0.45);
@@ -231,21 +82,11 @@ html.glass [data-slot="card"] {
 
 /* StatusGlyph (src/work/tone.tsx) knocks its check and "!" out of a filled
  * circle with `var(--background)`. A translucent mark would blend into the
- * circle (about 2:1), so in Glass the glyph sees the solid fallback value. */
-html.glass svg[data-status] {
-  --background: #0d1626;
+ * circle (about 2:1), so with a backdrop the glyph sees the solid colour. */
+html[data-backdrop] svg[data-status] {
+  --background: var(--backdrop-solid);
 }
 
-/* Without backdrop-filter a translucent surface over the wash would leave
- * text sitting on an unblurred gradient; fall back to solid fills. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  html.glass {
-    --background: #0d1626;
-    --card: #1a2740;
-    --popover: #16233a;
-    --sidebar: #0f1a2b;
-  }
-}
 
 @theme inline {
   --font-sans: "Inter Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;

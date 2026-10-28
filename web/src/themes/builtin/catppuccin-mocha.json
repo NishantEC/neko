@@ -1,0 +1,18 @@
+{
+  "id": "catppuccin-mocha",
+  "name": "Catppuccin Mocha",
+  "appearance": "dark",
+  "family": "Catppuccin",
+  "colors": {
+    "background": "#1e1e2e",
+    "sidebar": "#181825",
+    "foreground": "#cdd6f4",
+    "mutedForeground": "#a6adc8",
+    "border": "#cdd6f4",
+    "primary": "#cba6f7",
+    "destructive": "#f38ba8",
+    "success": "#a6e3a1",
+    "warning": "#f9e2af",
+    "info": "#89b4fa"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "neutral-light",
+  "name": "Neko Light",
+  "appearance": "light",
+  "family": "Neko",
+  "colors": {
+    "background": "#fafafa",
+    "card": "#ffffff",
+    "popover": "#ffffff",
+    "sidebar": "#f3f3f3",
+    "foreground": "#262626",
+    "strong": "#0d0d0d",
+    "mutedForeground": "#636363",
+    "border": "#000000",
+    "primary": "#346bf1",
+    "primaryForeground": "#fcfcfc",
+    "destructive": "#e6293f",
+    "success": "#00af6f",
+    "warning": "#e19b1b",
+    "info": "#0083e0",
+    "bubble": "#e9deff",
+    "bubbleForeground": "#241737"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "gruvbox-light",
+  "name": "Gruvbox Light",
+  "appearance": "light",
+  "family": "Gruvbox",
+  "colors": {
+    "background": "#fbf1c7",
+    "sidebar": "#f2e5bc",
+    "foreground": "#282828",
+    "mutedForeground": "#665c54",
+    "border": "#3c3836",
+    "primary": "#076678",
+    "destructive": "#9d0006",
+    "success": "#79740e",
+    "warning": "#b57614",
+    "info": "#458588"
+  }
+}

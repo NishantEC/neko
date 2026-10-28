@@ -1,0 +1,18 @@
+{
+  "id": "catppuccin-latte",
+  "name": "Catppuccin Latte",
+  "appearance": "light",
+  "family": "Catppuccin",
+  "colors": {
+    "background": "#eff1f5",
+    "sidebar": "#e6e9ef",
+    "foreground": "#4c4f69",
+    "mutedForeground": "#676a7f",
+    "border": "#4c4f69",
+    "primary": "#8839ef",
+    "destructive": "#d20f39",
+    "success": "#40a02b",
+    "warning": "#df8e1d",
+    "info": "#1e66f5"
+  }
+}

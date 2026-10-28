@@ -1,0 +1,24 @@
+{
+  "id": "neutral",
+  "name": "Neko Dark",
+  "appearance": "dark",
+  "family": "Neko",
+  "colors": {
+    "background": "#0f0f0f",
+    "card": "#151515",
+    "popover": "#181818",
+    "sidebar": "#121212",
+    "foreground": "#d7d7d7",
+    "strong": "#f7f7f7",
+    "mutedForeground": "#8f8f8f",
+    "border": "#ffffff",
+    "primary": "#346bf1",
+    "primaryForeground": "#fcfcfc",
+    "destructive": "#e5484d",
+    "success": "#4cc38a",
+    "warning": "#e0a042",
+    "info": "#2393f1",
+    "bubble": "#43345c",
+    "bubbleForeground": "#f7f7f7"
+  }
+}

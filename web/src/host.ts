@@ -17,6 +17,7 @@
 //   inspector                        the resizable panel on the right
 //   ui, icons                        Neko's components and Phosphor icons
 //   storage                          get/set/delete/list JSON, kept by the daemon
+//   theme                            get() the theme on screen, subscribe(fn) to changes
 //   navigation                       navigate(route), hrefFor(route), useRoute()
 //   addSection / addTab              add to Settings / to the task sheet
 import * as React from "react";
@@ -28,6 +29,7 @@ import { pluginIcons, pluginUi } from "@/pluginKit";
 import { addSettingsSection, addTaskTab, type SettingsSectionExt, type TaskTabExt } from "@/extensions";
 import { HOME, hrefFor, navigate, useRoute } from "@/router";
 import { storageFor, type PageStorage } from "@/storage";
+import { getThemeState, subscribeTheme } from "@/theme";
 import { PuzzlePiece, type Icon } from "@/ui/icons";
 import { registerBuiltin, type PageComponent, type PageGroup, type UserRegistration } from "@/registry";
 
@@ -65,6 +67,8 @@ export interface Host {
   icons: Record<string, any>;
   /** JSON values kept by the daemon, one namespace per plugin. */
   storage: PageStorage;
+  /** The theme on screen: `get()` is `{ mode, appearance, id, name }`; `subscribe(fn)` runs on any change and returns an unsubscribe. Read colours with `var(--background)` etc.; this is for code that cannot (a canvas, a chart). */
+  theme: { get: typeof getThemeState; subscribe: typeof subscribeTheme };
   navigation: { navigate: typeof navigate; hrefFor: typeof hrefFor; useRoute: typeof useRoute; HOME: string };
   /** Adds a section to Settings. */
   addSection(section: SettingsSectionExt): void;
@@ -85,6 +89,7 @@ function shared(id: string, source: Host["source"], storage: PageStorage) {
     ui: pluginUi,
     icons: pluginIcons,
     storage,
+    theme: { get: getThemeState, subscribe: subscribeTheme },
     navigation: { navigate, hrefFor, useRoute, HOME },
   };
 }

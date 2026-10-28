@@ -1,0 +1,50 @@
+{
+  "id": "glass",
+  "name": "Glass",
+  "appearance": "dark",
+  "family": "Neko",
+  "colors": {
+    "background": "#0d1626",
+    "card": "#1c2a42",
+    "popover": "#142034",
+    "sidebar": "#0f1a2b",
+    "foreground": "#e8eef8",
+    "strong": "#f6f9fe",
+    "mutedForeground": "#a9b8cd",
+    "border": "#ffffff",
+    "primary": "#346bf1",
+    "primaryForeground": "#fcfcfc",
+    "destructive": "#e5484d",
+    "success": "#4cc38a",
+    "warning": "#e0a042",
+    "info": "#2393f1",
+    "bubble": "#43345c",
+    "bubbleForeground": "#f7f7f7"
+  },
+  "backdrop": {
+    "blur": 22,
+    "base": [
+      "#0b1424",
+      "#101a30",
+      "#0c1626"
+    ],
+    "glows": [
+      {
+        "color": "#483e90",
+        "alpha": 0.55,
+        "x": 12,
+        "y": 0,
+        "width": 70,
+        "height": 60
+      },
+      {
+        "color": "#00586b",
+        "alpha": 0.5,
+        "x": 100,
+        "y": 100,
+        "width": 60,
+        "height": 55
+      }
+    ]
+  }
+}
