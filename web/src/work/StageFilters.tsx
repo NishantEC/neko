@@ -1,6 +1,7 @@
 // The stage filter as chips (BoardUI's Chip, used as a toggle): All, then one per stage with its
 // count. One is on at a time; pressing the one that is on goes back to All.
 import { cn } from "@/ui/lib/utils";
+import { Tabs, TabsList, TabsTab } from "@/ui/tabs";
 import { STAGE_TITLE, STAGES, type Stage } from "@/work/model";
 import { STAGE_TONE, TONE_DOT } from "@/work/tone";
 
@@ -26,6 +27,27 @@ export function StageFilters({ stage, counts, onChange }: { stage: Stage | "all"
           <span className="tabular-nums text-muted-foreground">{counts[s]}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The stage filter as hushbacks' pill tabs (the Tasks toolbar, 2026-10-28): All, then one per
+ * stage with its count. Same contract as the chips: one is on at a time.
+ */
+export function StageTabs({ stage, counts, total, onChange }: { stage: Stage | "all"; counts: Record<Stage, number>; total: number; onChange: (stage: Stage | "all") => void }) {
+  return (
+    <div data-slot="stage-filters">
+      <Tabs value={stage} onValueChange={(v) => onChange(v as Stage | "all")} className="sky-tabs">
+        <TabsList aria-label="Show tasks in">
+          <TabsTab value="all" aria-label={`All tasks, ${total}`}>All<span className="text-xs tabular-nums text-muted-foreground">{total}</span></TabsTab>
+          {STAGES.map((s) => (
+            <TabsTab key={s} value={s} aria-label={`${STAGE_TITLE[s]}, ${counts[s]}`}>
+              {STAGE_TITLE[s]}<span className="text-xs tabular-nums text-muted-foreground">{counts[s]}</span>
+            </TabsTab>
+          ))}
+        </TabsList>
+      </Tabs>
     </div>
   );
 }

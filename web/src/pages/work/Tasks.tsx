@@ -10,9 +10,9 @@ import { DotsThree, ListChecks, MagnifyingGlass, Plus, TreeStructure, X } from "
 import { Kanban, Rows } from "@/work/icons";
 import { Button } from "@/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/ui/input-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import { SegmentedControl, SegmentedControlItem } from "@/ui/segmented-control";
-import { StageFilters } from "@/work/StageFilters";
+import { StageTabs } from "@/work/StageFilters";
+import { EditorialHeading } from "@/editorial";
 import { isBoardDragging } from "@/work/board/moves";
 import { Kbd } from "@/ui/kbd";
 import {
@@ -24,7 +24,7 @@ import { run } from "@/work/actions";
 import { useDialogs } from "@/work/dialogs";
 import { byStage, flatten, stageCounts, type Filters } from "@/work/filters";
 import { setHashParams, useHashParams } from "@/work/location";
-import { WorkHeader, WorkSkeleton } from "@/work/PageFrame";
+import { WorkSkeleton } from "@/work/PageFrame";
 import { TaskDetail } from "@/work/TaskDetail";
 import { TaskSheet } from "@/work/TaskSheet";
 import { taskActions } from "@/work/taskActions";
@@ -32,12 +32,13 @@ import { TaskBoard, TaskList } from "@/work/TaskViews";
 import { TreeView } from "@/work/TreeView";
 import { useLocal } from "@/work/useLocal";
 import { useSelectedWorkspace } from "@/shell/workspace";
-import { buildTree, STAGE_TITLE, taskCount, taskTitle, type Stage } from "@/work/model";
+import { buildTree, taskCount, taskTitle, type Stage } from "@/work/model";
 import { navigate } from "@/router";
 
 type Layout = "list" | "board" | "tree";
 const isLayout = (v: string): v is Layout => v === "list" || v === "board" || v === "tree";
 const ROUTE = "tasks";
+const COUNTED: Stage[] = ["needsYou", "review", "running", "upNext", "done"];
 
 // hushbacks docks the sheet in the list's stage on a wide window and floats it over the page otherwise.
 const DOCK_QUERY = "(min-width: 1024px)";
@@ -60,7 +61,8 @@ export default function Tasks() {
 
   const [layoutRaw, setLayout] = useLocal("neko.work.layout", "list");
   const layout: Layout = isLayout(layoutRaw) ? layoutRaw : "list";
-  const [doneOpen, setDoneOpenRaw] = useLocal("neko.board.doneExpanded", "false");
+  const [doneAll, setDoneAllRaw] = useLocal("neko.board.doneShowAll", "false");
+  // The sidebar's workspace switcher is the only workspace filter (shell/workspace.ts).
   const { id: workspace, select: setWorkspace } = useSelectedWorkspace();
   const [includeStoppedRaw, setIncludeStopped] = useLocal("neko.work.includeStopped", "true");
   const [stage, setStage] = useState<Stage | "all">("all");
@@ -79,7 +81,7 @@ export default function Tasks() {
   const visible = useMemo(() => flatten(grouped), [grouped]);
   const counts = useMemo(() => stageCounts(snapshot, filters), [snapshot, workspaceId, search, includeStoppedRaw]); // eslint-disable-line react-hooks/exhaustive-deps
   const inWorkspace = workspaceId ? allTasks.filter((t) => t.workspace_id === workspaceId).length : allTasks.length;
-  const workspaceLabel = workspaces.find((w) => w.id === workspaceId)?.name ?? "All workspaces";
+  const workspaceName = workspaces.find((w) => w.id === workspaceId)?.name ?? null;
   const planFirst = snapshot?.plan_first === true;
 
   const open = useCallback((id: string) => setHashParams(ROUTE, { task: id }), []);
@@ -138,16 +140,15 @@ export default function Tasks() {
   const isEmpty = !!snapshot && allTasks.length === 0;
   const noMatches = !!snapshot && allTasks.length > 0 && visible.length === 0;
   const filtered = search !== "" || stage !== "all" || workspaceId !== "" || includeStoppedRaw === "false";
-  const subtitle = snapshot
-    ? `${workspaceLabel} · ${visible.length === inWorkspace ? taskCount(inWorkspace) : `${visible.length} of ${taskCount(inWorkspace)}`}`
-    : "Loading…";
-  const title = stage === "all" ? <>All tasks</> : <>{STAGE_TITLE[stage]}</>;
+  // "24", or "12 of 24" while a filter is on; the workspace's name when the sidebar has one chosen.
+  const total = COUNTED.reduce((n, s) => n + counts[s], 0);
+  const countText = !snapshot ? "" : visible.length === inWorkspace ? `${inWorkspace}` : `${visible.length} of ${inWorkspace}`;
+  const countLabel = !snapshot ? "Loading" : `${visible.length === inWorkspace ? taskCount(inWorkspace) : `${visible.length} of ${taskCount(inWorkspace)}`}${workspaceName ? ` in ${workspaceName}` : ""}`;
 
-  const controls = (
-    <div className="mt-4 flex flex-wrap items-center gap-2" role="search" aria-label="Filter tasks">
-      <StageFilters stage={stage} counts={counts} onChange={setStage} />
-      <span className="flex-1" />
-      <InputGroup className="h-8 w-56">
+  const toolbar = (
+    <div className="mt-5 flex flex-wrap items-center gap-3" role="search" aria-label="Filter tasks">
+      <StageTabs stage={stage} counts={counts} total={total} onChange={setStage} />
+      <InputGroup className="sky-well sky-control ms-auto w-52 border-transparent bg-transparent shadow-none">
         <InputGroupAddon><MagnifyingGlass aria-hidden /></InputGroupAddon>
         <InputGroupInput
           ref={searchBox} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tasks" aria-label="Search tasks"
@@ -159,25 +160,16 @@ export default function Tasks() {
           </InputGroupAddon>
         ) : <InputGroupAddon align="inline-end"><Kbd>/</Kbd></InputGroupAddon>}
       </InputGroup>
-      {workspaces.length > 1 ? (
-        <Select value={workspaceId || "all"} onValueChange={(v) => setWorkspace(v === "all" ? "" : v)}>
-          <SelectTrigger size="sm" className="w-44" aria-label="Workspace"><SelectValue>{workspaceLabel}</SelectValue></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All workspaces</SelectItem>
-            {workspaces.map((w) => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      ) : null}
+      <SegmentedControl value={layout} onValueChange={(v) => isLayout(v) && setLayout(v)} aria-label="Layout">
+        <SegmentedControlItem value="list" aria-label="List" title="Show tasks as a list"><Rows /></SegmentedControlItem>
+        <SegmentedControlItem value="board" aria-label="Board" title="Show tasks as a board"><Kanban /></SegmentedControlItem>
+        <SegmentedControlItem value="tree" aria-label="Tree" title="Show which agent started each task"><TreeStructure /></SegmentedControlItem>
+      </SegmentedControl>
     </div>
   );
 
   const headerActions = (
     <>
-      <SegmentedControl value={layout} onValueChange={(v) => isLayout(v) && setLayout(v)} aria-label="Layout">
-        <SegmentedControlItem value="list" aria-label="List" title="Show tasks as a list"><Rows /> List</SegmentedControlItem>
-        <SegmentedControlItem value="board" aria-label="Board" title="Show tasks as a board"><Kanban /> Board</SegmentedControlItem>
-        <SegmentedControlItem value="tree" aria-label="Tree" title="Show which agent started each task"><TreeStructure /> Tree</SegmentedControlItem>
-      </SegmentedControl>
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Work options" title="Work options" />}><DotsThree weight="bold" /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-72">
@@ -247,7 +239,7 @@ export default function Tasks() {
   ) : layout === "board" ? (
     <TaskBoard
       snapshot={snapshot} byStage={grouped} selectedId={taskId} onOpen={open} ui={ui}
-      doneOpen={doneOpen === "true"} setDoneOpen={(v) => setDoneOpenRaw(v ? "true" : "false")}
+      doneAll={doneAll === "true"} setDoneAll={(v) => setDoneAllRaw(v ? "true" : "false")} only={stage === "all" ? null : stage}
       onShowOnly={setStage} onNewTask={() => navigate("home")}
     />
   ) : layout === "tree" && tree ? (
@@ -273,8 +265,18 @@ export default function Tasks() {
       onFocus={(e) => { const row = (e.target as HTMLElement).closest<HTMLElement>("[data-slot='task-row']"); if (row) setFocusedId(row.dataset.taskId ?? null); }}
       className="relative flex min-h-0 flex-1 flex-col"
     >
-      <WorkHeader eyebrow="Work" title={title} subtitle={subtitle} actions={headerActions}>{controls}</WorkHeader>
-      {!connected && snapshot ? <p role="status" className="px-6 pb-2 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p> : null}
+      {/* The Tasks header: tighter than WorkHeader (24px top, 28px sides), title and count on one line, then one toolbar row. */}
+      <header data-slot="work-header" className="shrink-0 px-7 pt-6 pb-4">
+        <div className="flex items-center gap-3">
+          <EditorialHeading as="h1" className="text-[22px]">Tasks</EditorialHeading>
+          <span data-slot="work-subtitle" aria-label={countLabel} className="text-[13.5px] tabular-nums text-muted-foreground">
+            {countText}{workspaceName ? <> · {workspaceName}</> : null}
+          </span>
+          <div className="ms-auto flex items-center gap-2">{headerActions}</div>
+        </div>
+        {toolbar}
+      </header>
+      {!connected && snapshot ? <p role="status" className="px-7 pb-2 text-[13px] text-destructive">Can’t reach the Neko daemon. Showing the last known state.</p> : null}
       <div ref={detailStage} data-slot="tasks-stage" className="relative flex min-h-0 flex-1">
         <div className={cn("h-full min-w-0 flex-1", layout === "board" ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto")}>{body}</div>
         {taskId ? (

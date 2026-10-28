@@ -424,15 +424,15 @@ function CalmHeader() {
   const m = useMock();
   const total = m.tasks.length;
   return (
-    <header data-slot="mock-header" className="shrink-0 px-10 pt-10 pb-6">
-      <div className="flex items-baseline gap-3">
+    <header data-slot="mock-header" className="shrink-0 px-7 pt-6 pb-4">
+      <div className="flex items-center gap-3">
         <EditorialHeading as="h3" className="text-[22px]">Tasks</EditorialHeading>
         <span className="text-[13.5px] tabular-nums text-muted-foreground">{total}</span>
         <span className="flex-1" />
         <MoreButton />
         <NewTask />
       </div>
-      <div className="mt-6 flex items-center gap-3" role="search" aria-label="Filter tasks">
+      <div className="mt-5 flex items-center gap-3" role="search" aria-label="Filter tasks">
         <Tabs value={m.stage} onValueChange={(v) => m.setStage(v as Stage | "all")} className="sky-tabs">
           <TabsList aria-label="Show tasks in">
             <TabsTab value="all">All<span className="text-xs tabular-nums text-muted-foreground">{total}</span></TabsTab>
@@ -461,13 +461,13 @@ function CalmColumn({ stage }: { stage: Stage }) {
       data-empty={empty ? "" : undefined}
       aria-label={`${STAGE_TITLE[stage]}, ${cards.length}`}
       className={cn(
-        "group/col -mx-2 flex min-h-0 flex-col rounded-2xl px-2 transition-[background-color,box-shadow] duration-150",
-        empty ? "w-[132px] shrink-0" : "min-w-[208px] flex-1",
+        "group/col -mx-1.5 flex min-h-0 flex-col rounded-2xl px-1.5 transition-[background-color,box-shadow] duration-150",
+        empty ? "w-[144px] shrink-0" : "min-w-[208px] flex-1",
         isOver && DROP_RING,
       )}
     >
       <ColHeader stage={stage} count={cards.length} className="px-0.5">{empty ? null : <ColMenu stage={stage} hover />}</ColHeader>
-      <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-1 pt-1.5 pb-6">
+      <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-1 pt-1.5 pb-4">
         <CardList stage={stage} cap={stage === "done" ? 5 : undefined} />
       </div>
     </section>
@@ -481,7 +481,7 @@ function OptionCalm({ scenario }: { scenario: Scenario }) {
     <MockDnd mock={mock}>
       <Frame>
         <CalmHeader />
-        <div className="flex min-h-0 flex-1 gap-7 overflow-x-auto px-10">
+        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-7 pt-1">
           {shown.map((s) => <CalmColumn key={s} stage={s} />)}
         </div>
       </Frame>
@@ -755,7 +755,7 @@ const OPTIONS: { id: string; name: string; caption: string; render: (s: Scenario
   {
     id: "calm",
     name: "A. Calm columns",
-    caption: "No panels, just space between columns; empty ones shrink to a slim note, Done shows its latest five, and one toolbar row (stage tabs left, search and view right) under a roomier header.",
+    caption: "Chosen, and built into the Tasks page with tighter spacing (12px gutters, 28px sides, 24px top). No panels, just space between columns; empty ones shrink to a slim note, Done shows its latest five, and one toolbar row (stage tabs left, search and view right) under a roomier header.",
     render: (s) => <OptionCalm scenario={s} />,
   },
   {

@@ -164,8 +164,14 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   const total = await rows().count();
   check(total > 5, `Tasks (list) renders ${total} dense rows`);
   check((await page.locator("[data-slot='group-header']").count()) >= 2, "tasks are grouped by stage with counts");
-  const subtitle = (await page.locator("[data-slot='work-subtitle']").innerText()).replace(/\s+/g, " ");
-  check(/\d+ tasks?/.test(subtitle), `the header counts them: "${subtitle}"`);
+  const subtitle = await page.locator("[data-slot='work-subtitle']").getAttribute("aria-label");
+  check(/\d+ tasks?/.test(subtitle) && /^\d+/.test((await page.locator("[data-slot='work-subtitle']").innerText()).trim()), `the title row counts them: "${subtitle}"`);
+  check((await page.locator("[data-slot='work-header']").getByRole("combobox", { name: "Workspace" }).count()) === 0, "the header has no workspace dropdown (the sidebar's switcher is the filter)");
+  const toolbar = await page.locator("[data-slot='work-header'] [role='search']").evaluate((el) => {
+    const y = (sel) => { const r = el.querySelector(sel)?.getBoundingClientRect(); return r ? Math.round(r.top + r.height / 2) : null; };
+    return [y("[data-slot='stage-filters']"), y("input[aria-label='Search tasks']"), y("[data-slot='segmented-control']")];
+  });
+  check(toolbar.every((v) => v !== null && Math.abs(v - toolbar[0]) <= 4), `stage tabs, search and the layout switch share one toolbar row (${toolbar.join(", ")})`);
   check((await page.locator("[data-slot='nav-item']", { hasText: "Tasks" }).count()) === 1 && (await page.locator("[data-slot='nav-item']", { hasText: "Pull requests" }).count()) === 1, "Tasks and Pull requests are in the sidebar's Work group");
   await both("work-tasks-list");
   await page.getByRole("button", { name: "Work options" }).click();
@@ -188,15 +194,14 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await page.getByLabel("Clear search").click();
 
   // stage filter
-  const chip = page.getByRole("radio").or(page.locator("[data-slot='toggle-group-item']")).filter({ hasText: /^Needs you/ }).first();
-  if (await chip.count()) {
-    await chip.click();
-    await sleep(300);
-    const statuses = await rows().evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute("data-status")))]);
-    check(statuses.every((s) => ["AwaitingApproval", "Failed"].includes(s)), `the Needs you filter keeps only waiting or stopped tasks (${statuses.join(", ")})`);
-    await chip.click();
-    await sleep(200);
-  }
+  const tab = (name) => page.locator("[data-slot='stage-filters'] [role='tab']").filter({ hasText: name }).first();
+  await tab(/^Needs you/).click();
+  await sleep(300);
+  const statuses = await rows().evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute("data-status")))]);
+  check(statuses.length > 0 && statuses.every((s) => ["AwaitingApproval", "Failed"].includes(s)), `the Needs you tab keeps only waiting or stopped tasks (${statuses.join(", ")})`);
+  await tab(/^All/).click();
+  await sleep(200);
+  check((await rows().count()) === total, "the All tab brings every task back");
 
   // keyboard: j / k move focus, Enter opens
   await page.locator("[data-slot='tasks-page']").click({ position: { x: 4, y: 4 } });
@@ -301,9 +306,12 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await page.getByLabel("Board", { exact: true }).first().click();
   await page.locator("[data-slot='task-board']").waitFor({ timeout: 5000 });
   const columns = await page.locator("[data-slot='board-column']").count();
-  check(columns === 4 && (await page.locator("[data-slot='done-rail']").count()) === 1, `the board fits ${columns} columns and folds Done into a rail`);
+  check(columns === 5, `the board shows all ${columns} columns, Done included`);
   const counts = await page.locator("[data-slot='board-column']").evaluateAll((els) => els.map((e) => [e.dataset.stage, Number(e.querySelector("[data-slot='column-count']").textContent), e.querySelectorAll("[data-card='board-card']").length]));
-  check(counts.every(([, n, cards]) => n === cards), `each column's count matches its cards (${counts.map(([k, n]) => `${k} ${n}`).join(", ")})`);
+  check(counts.every(([stage, n, cards]) => (stage === "done" ? cards === Math.min(n, 5) : n === cards)), `each column's count matches its cards, Done showing its latest five (${counts.map(([k, n, c]) => `${k} ${n}/${c}`).join(", ")})`);
+  const look = await page.locator("[data-slot='board-column']").evaluateAll((els) => els.map((e) => ({ empty: e.hasAttribute("data-empty"), width: Math.round(e.getBoundingClientRect().width), bg: getComputedStyle(e).backgroundColor })));
+  check(look.every((c) => c.bg === "rgba(0, 0, 0, 0)" || c.bg === "transparent"), "columns have no panel background");
+  check(look.filter((c) => c.empty).every((c) => c.width <= 160), `empty columns shrink to a slim note (${look.map((c) => c.width).join(", ")}px)`);
   const overflow = await page.locator("[data-slot='task-board']").evaluate((el) => el.scrollWidth <= el.parentElement.clientWidth + 1);
   check(overflow || Number(process.env.NEKO_WEB_WIDTH ?? 1440) < 1300, "the board's columns fit the width without scrolling sideways (at desktop width)");
   await both("work-tasks-board");
@@ -344,12 +352,16 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => !location.hash.includes("task="), null, { timeout: 3000 });
   }
-  await page.locator("[data-slot='done-rail']").click();
-  await page.locator("[data-slot='board-column'][data-stage='done']").waitFor({ timeout: 3000 });
-  check(true, "the Done rail opens into a column");
-  await shot("work-tasks-board-done");
-  await page.getByRole("button", { name: "Done options" }).click();
-  await page.getByRole("menuitem", { name: "Fold into a rail" }).click();
+  const showAll = page.locator("[data-slot='board-column'][data-stage='done'] [data-slot='show-all']");
+  if (await showAll.count()) {
+    const doneN = Number(await page.locator("[data-slot='board-column'][data-stage='done'] [data-slot='column-count']").innerText());
+    check((await showAll.innerText()).trim() === `Show all ${doneN}`, `Done offers “Show all ${doneN}”`);
+    await showAll.click();
+    check((await page.locator("[data-slot='board-column'][data-stage='done'] [data-card='board-card']").count()) === doneN, "“Show all” opens every Done card inline");
+    await shot("work-tasks-board-done");
+    await showAll.click();
+    check((await page.locator("[data-slot='board-column'][data-stage='done'] [data-card='board-card']").count()) === 5, "“Show fewer” folds Done back to five");
+  }
 
   // tree layout
   await page.getByLabel("Tree", { exact: true }).click();
@@ -482,7 +494,6 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   check(commands.length === 1 && commands[0].StartTask?.task_id === approvalId, `Needs you → Running sends StartTask for that task (${JSON.stringify(commands)})`);
 
   // Ready to review → Done marks it done (and Done opens first, as a drop target)
-  await page.locator("[data-slot='done-rail']").click();
   await col("done").waitFor({ timeout: 3000 });
   const ready = cardIn("review", "ReadyForReview");
   const readyId = await ready.getAttribute("data-task-id");
@@ -553,8 +564,6 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   await a11y("board with the sheet open");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !location.hash.includes("task="), null, { timeout: 3000 });
-  await page.getByRole("button", { name: "Done options" }).click();
-  await page.getByRole("menuitem", { name: "Fold into a rail" }).click();
 
   // the card (variant b): the state is its last line; a notch bottom-right holds the action, only when there is one
   {
@@ -593,13 +602,10 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     await sleep(450);
     check(Math.abs((await card("Building").boundingBox()).y - lift) < 0.5, "hovering a card does not move it");
     await page.mouse.move(0, 0);
-    await page.locator("[data-slot='done-rail']").click();
     await page.locator("[data-slot='board-column'][data-stage='done']").waitFor({ timeout: 3000 });
     const doneCards = page.locator("[data-slot='board-column'][data-stage='done'] [data-slot='board-card']");
     check((await doneCards.count()) > 0 && (await doneCards.locator("[data-notch], [data-slot='card-tab']").count()) === 0, "done cards have no notch and no state line");
     await both("work-rich-board-cards");
-    await page.getByRole("button", { name: "Done options" }).click();
-    await page.getByRole("menuitem", { name: "Fold into a rail" }).click();
   }
 
 

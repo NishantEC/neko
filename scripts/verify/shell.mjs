@@ -193,8 +193,8 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
   await sleep(250);
   check(/Atlas/.test(await switcher.innerText()), "choosing a workspace shows its name next to the mark");
   await page.goto(`${base}/#/tasks`);
-  await page.waitForFunction(() => /Atlas ·/.test(document.body.innerText), null, { timeout: 8000 }).catch(() => {});
-  check(/Atlas ·/.test(await page.locator("body").innerText()), "the Tasks page follows the switcher (Atlas · N tasks)");
+  await page.waitForFunction(() => /· Atlas/.test(document.querySelector("[data-slot='work-subtitle']")?.textContent ?? ""), null, { timeout: 8000 }).catch(() => {});
+  check(/^\d+ · Atlas$/.test((await page.locator("[data-slot='work-subtitle']").innerText()).trim()), "the Tasks page follows the switcher (N · Atlas next to the title)");
   for (const theme of themes) {
     await setTheme(theme);
     await shot(`shell-tasks-${theme}`);

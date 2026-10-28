@@ -80,7 +80,7 @@ function GroupHeader({ stage, count, spaced }: { stage: Stage; count: number; sp
 export function TaskList(props: ViewProps) {
   const shown = COLUMNS.filter((c) => props.byStage[c.id].length > 0);
   return (
-    <div data-slot="task-list" role="list" aria-label="Tasks" className="@container w-full px-6 pt-1 pb-12 md:px-8 xl:px-10">
+    <div data-slot="task-list" role="list" aria-label="Tasks" className="@container w-full px-4 pt-1 pb-12">
       {shown.map((column, i) => (
         <section key={column.id} role="listitem" aria-label={STAGE_TITLE[column.id]}>
           <GroupHeader stage={column.id} count={props.byStage[column.id].length} spaced={i > 0} />
