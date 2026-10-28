@@ -398,27 +398,71 @@ try {
     }
     console.log(`     card heights, Stopped: ${JSON.stringify(hs)}; Done: ${JSON.stringify(doneH)}`);
   }
-  check((await page.locator("[data-gallery-section='board'] [data-board-option]").count()) >= 3, "the gallery's Board section shows the board options");
+  check((await page.locator("[data-gallery-section='board'] [data-column-option]").count()) === 4, "the gallery's Board columns section shows four page mocks");
   {
-    const option = (id) => page.locator(`[data-gallery-section='board'] [data-board-option='${id}']`);
+    const section = page.locator("[data-gallery-section='board']");
+    const option = (id) => section.locator(`[data-column-option='${id}']`);
+    const ids = ["calm", "fitted", "lane", "rows"];
     for (const theme of ["dark", "light"]) {
       await page.emulateMedia({ colorScheme: theme });
       await sleep(400);
-      for (const id of ["compact", "fit", "lanes", "inbox"]) {
+      for (const id of ids) {
         await option(id).scrollIntoViewIfNeeded();
-        await option(id).screenshot({ path: path.join(OUT, `gallery-board-${id}-${theme}.png`) });
+        await option(id).screenshot({ path: path.join(OUT, `gallery-columns-${id}-${theme}.png`) });
       }
     }
-    check((await option("fit").locator("[data-slot='mock-strip']").count()) === 2, "the gallery's board option B folds the two empty columns to strips");
-    await option("fit").locator("[data-slot='mock-strip'][data-stage='running']").click();
-    check((await option("fit").locator("[data-slot='mock-column'][data-stage='running']").count()) === 1, "the gallery's board option B: clicking a strip opens the column");
-    const first = option("compact").locator("[data-slot='mock-card']").first();
-    await first.locator("button").first().click();
-    check((await first.getAttribute("data-selected")) === "", "the gallery's board option A: clicking a card selects it");
-    const before = await option("lanes").locator("[data-slot='mock-column'][data-stage='running'] [data-slot='mock-card']").count();
-    await option("lanes").locator("[data-slot='mock-card-action']").filter({ hasText: "Answer" }).first().click();
-    check((await option("lanes").locator("[data-slot='mock-column'][data-stage='running'] [data-slot='mock-card']").count()) === before + 1, "the gallery's board option C: Answer moves the card to Running");
-    await page.locator("[data-gallery-section='board']").screenshot({ path: path.join(OUT, "gallery-board-interactive.png") });
+    check((await section.getByRole("combobox", { name: "Workspace" }).count()) === 0, "no board mock has the workspace dropdown");
+    // A: empty columns shrink, Done shows five, then all 81; ⋯ waits for hover
+    const calm = option("calm");
+    const slim = await calm.locator("[data-slot='col'][data-empty]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+    check(slim.length === 2 && slim.every((w) => w < 200), `option A: the two empty columns shrink to a slim width (${slim.join(", ")}px)`);
+    const doneCards = () => calm.locator("[data-slot='col'][data-stage='done'] [data-slot='col-card']").count();
+    check((await doneCards()) === 5, "option A: Done shows its latest five");
+    await calm.locator("[data-slot='show-all']").click();
+    check((await doneCards()) === 81, "option A: “Show all 81” opens the rest");
+    const menuHidden = await calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-menu']").evaluate((e) => getComputedStyle(e).opacity);
+    await calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-header']").hover();
+    await sleep(250);
+    const menuShown = await calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-menu']").evaluate((e) => getComputedStyle(e).opacity);
+    check(menuHidden === "0" && menuShown === "1", `option A: a column's ⋯ shows on hover only (${menuHidden} → ${menuShown})`);
+    // A: drag with the keyboard, Needs you → Ready to review
+    const reviewCount = () => calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-card']").count();
+    const before = await reviewCount();
+    await calm.locator("[data-slot='col'][data-stage='needsYou'] [data-slot='col-card'] button[aria-roledescription]").first().focus();
+    await page.keyboard.press("Space");
+    await sleep(150);
+    await page.keyboard.press("ArrowRight");
+    await sleep(150);
+    await page.keyboard.press("Space");
+    await sleep(350);
+    check((await reviewCount()) === before + 1, "option A: Space, → and Space carry a card from Needs you to Ready to review");
+    await calm.locator("[data-slot='col'][data-stage='review'] [data-slot='col-card'] button[aria-roledescription]").nth(1).click();
+    check((await calm.locator("[data-slot='col-card'][data-selected]").count()) === 1, "option A: clicking a card selects it");
+    // B: strips for the empty columns and Done; a strip opens
+    const fitted = option("fitted");
+    check((await fitted.locator("[data-slot='col-strip']").count()) === 3, "option B: Running, Up next and Done start folded to strips");
+    await fitted.locator("[data-slot='col-strip'][data-stage='done']").click();
+    check((await fitted.locator("[data-slot='col'][data-stage='done']").count()) === 1, "option B: clicking the Done strip opens the column");
+    // C: Done is a drawer; Answer moves a card to Running
+    const lane = option("lane");
+    await lane.locator("[data-slot='done-drawer-tab']").click();
+    check((await lane.locator("[data-slot='done-drawer'] [data-slot='col-card']").count()) === 12, "option C: the Done drawer opens with its latest twelve");
+    const running = () => lane.locator("[data-slot='col'][data-stage='running'] [data-slot='col-card']").count();
+    const r0 = await running();
+    await lane.locator("[data-slot='card-action']").filter({ hasText: "Answer" }).first().click();
+    check((await running()) === r0 + 1, "option C: Answer moves the card to Running");
+    // D: the shelf scrolls sideways; the busy day fills every column
+    const rows = option("rows");
+    check((await rows.locator("[data-slot='shelf'] [data-slot='col-card']").count()) === 7, "option D: Needs you sits on the shelf");
+    await section.getByRole("button", { name: /A busy day/ }).click();
+    await sleep(300);
+    check((await calm.locator("[data-slot='col'][data-empty]").count()) === 0, "the busy day: no column is empty");
+    check((await rows.locator("[data-slot='col'][data-stage='running'] [data-slot='card-live']").count()) === 3, "the busy day: Running shows three live cards");
+    for (const id of ids) {
+      await option(id).scrollIntoViewIfNeeded();
+      await option(id).screenshot({ path: path.join(OUT, `gallery-columns-${id}-busy-light.png`) });
+    }
+    await section.getByRole("button", { name: /A quiet day/ }).click();
   }
   const blocks = await page.locator("[data-slot='reply-blocks'] [data-slot='reply-block']").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
   check(["choices", "plan", "chart", "form"].every((k) => blocks.includes(k)), `a reply's neko-* blocks are drawn, not shown as code (${blocks.join(", ") || "none"})`);
