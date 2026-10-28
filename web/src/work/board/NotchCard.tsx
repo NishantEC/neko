@@ -1,17 +1,10 @@
-// The task card: one solid surface whose last line is the state. When the task waits on
-// you, a notch is carved from its bottom-right edge, the column showing through it (the
-// owner's "ticket with a bite taken out"), and the action sits in it in the state's
-// colour. No action, no notch; done cards end on their meta line. Drawn once here for the board (BoardCard) and the
-// gallery's specimens, so the two can never drift.
-//
-// How it is built: two copies of one layout share a grid cell. The back copy paints the
-// pieces (the top piece, and the state line beside the notch with the concave corner) with
-// its text invisible, and carries the filter: a 1px border (four drop-shadows) that follows
-// the shape, notch included, grey at rest, primary when selected, the ring colour on focus
-// (a border on each piece would draw seams; a filter on the text would fringe every glyph). The
-// front copy carries the text and the action. The bottom piece paints 1px up into the top
-// one, so a fractional height never leaves a hairline seam. One `--fuse` colour paints
-// every piece, so hover and selection change them together.
+// The task card: a thin frame around a rounded rectangle, and inside it a surface whose
+// last line is the state. When the task waits on you, the surface leaves a notch at the
+// bottom-right that the frame flows in to fill, and the action sits there on the frame
+// colour, fused with the border (the owner's "ticket with a bite taken out", the bite the
+// frame's own material). No action, no notch: just the frame. Done cards end on their meta
+// line. Drawn once here for the board (BoardCard) and the gallery's specimens, so the two
+// can never drift.
 import type { CSSProperties, ReactNode } from "react";
 import { GitPullRequest, type Icon } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
@@ -103,22 +96,23 @@ function PrMark({ n, checks }: { n: string | number; checks?: "passing" | "faili
   );
 }
 
-/** The action's inert twin in the surface copy: the same size as the button. */
-function SurfaceAction({ action, className, size }: { action: NotchAction; className: string; size: number }) {
-  const Icon = action.icon;
-  return <span className={cn("inline-flex items-center gap-1.5 font-medium", className)}><Icon size={size} weight="bold" />{action.label}</span>;
-}
-
-function Body(props: NotchCardProps & { surface?: boolean }) {
-  const { title, state, live, reason, meta, pr, prChecks, action, tone, notchLead, surface } = props;
+/**
+ * The card's inside. The surface (`--fuse`) is the top piece and, below it, the state line;
+ * with an action, the state line stops short and a notch is left at the bottom-right, which
+ * shows the frame behind it. The concave corner at the notch's top-left is surface colour
+ * with a transparent quarter-circle, so the frame shows through the curve. The state line
+ * paints 1px up into the top piece, so a fractional height never leaves a seam.
+ */
+function Body(props: NotchCardProps) {
+  const { title, state, live, reason, meta, pr, prChecks, action, tone, notchLead, selected } = props;
   const d = DENSITY[props.density ?? "compact"];
   const done = !(state || live);
   const notched = !done && !!action;
-  const paint = surface ? "bg-[var(--fuse)] transition-colors duration-150 [&>*:not([data-corner])]:invisible" : "";
   const r = d.r;
+  const surface = "bg-[var(--fuse)] transition-colors duration-150";
   return (
-    <div className="flex flex-col">
-      <div className={cn("flex flex-col", d.pad, d.gap, done ? "rounded-[16px] pb-3" : "rounded-t-[16px]", paint)}>
+    <div className="flex min-w-0 flex-col">
+      <div className={cn("flex min-w-0 flex-col", d.pad, d.gap, done ? "rounded-[14.5px] pb-3" : "rounded-t-[14.5px]", surface)}>
         <span className={cn("font-medium leading-[1.4] text-strong", d.title)}>{title}</span>
         {reason && props.density !== "dense" ? (
           <span className={cn("text-[13px] leading-[1.45] text-foreground/70", props.density === "compact" && "truncate text-[12.5px]")}>{reason}</span>
@@ -131,46 +125,42 @@ function Body(props: NotchCardProps & { surface?: boolean }) {
         ) : null}
       </div>
       {done ? null : (
-        // The state is the card's last line; with an action, a notch is carved bottom-right to hold it.
-        <span data-slot={surface ? undefined : "notch-row"} className={cn("flex", d.text)} style={{ height: d.row }}>
+        <span data-slot="notch-row" className={cn("flex min-w-0", d.text)} style={{ height: d.row }}>
           <span
-            className={cn("relative flex min-w-0 flex-1 items-center justify-between gap-2 ps-3 pe-3", notched ? "rounded-bl-[16px]" : "rounded-b-[16px]", surface && "shadow-[0_-1px_0_var(--fuse)]", paint)}
+            className={cn("relative flex min-w-0 flex-1 items-center justify-between gap-2 ps-3 pe-3 shadow-[0_-1px_0_var(--fuse)]", notched ? "rounded-bl-[14.5px]" : "rounded-b-[14.5px]", surface)}
             style={notched ? { borderBottomRightRadius: r } : undefined}
           >
-            {surface && notched ? (
-              // the notch's top-left corner: card colour with a transparent quarter-circle
+            {notched ? (
+              // the notch's top-left curve: surface colour with a transparent quarter-circle, the frame showing through
               <span
-                data-corner
-                className="absolute top-0 left-full shadow-[0_-1px_0_var(--fuse)]"
+                aria-hidden
+                className="absolute top-0 left-full shadow-[0_-1px_0_var(--fuse)] transition-colors duration-150"
                 style={{ width: r, height: r, background: `radial-gradient(circle at 100% 100%, transparent ${r - 0.5}px, var(--fuse) ${r}px)` }}
               />
             ) : null}
-            <span data-slot={surface ? undefined : live ? "card-live" : "card-tab"} className="flex min-w-0 items-center">
+            <span data-slot={live ? "card-live" : "card-tab"} className="flex min-w-0 items-center">
               <NotchState state={state} live={live} tone={tone} lead={notchLead} />
             </span>
             {!notched && pr ? <PrMark n={pr} checks={prChecks} /> : null}
           </span>
           {notched ? (
-            <span data-notch={surface ? undefined : ""} className="flex shrink-0 items-center ps-1.5 pe-0.5">
-              {surface ? (
-                // the same size as the button, so both copies lay out alike
-                <SurfaceAction action={action!} className={d.act} size={d.icon} />
-              ) : (
-                <button
-                  type="button"
-                  data-slot="card-action"
-                  onClick={(e) => { e.stopPropagation(); action!.onClick(); }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  className={cn(
-                    "pointer-events-auto relative z-10 inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full font-medium leading-none transition-colors duration-150",
-                    "hover:bg-foreground/[0.07] active:bg-foreground/[0.1] outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-                    TONE_TEXT[tone], d.act,
-                  )}
-                >
-                  <action.icon size={d.icon} weight="bold" aria-hidden />{action.label}
-                </button>
-              )}
+            <span data-notch="" className="flex shrink-0 items-center ps-1.5 pe-[3px]">
+              <button
+                type="button"
+                data-slot="card-action"
+                onClick={(e) => { e.stopPropagation(); action!.onClick(); }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                className={cn(
+                  "pointer-events-auto relative z-10 inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full font-medium leading-none transition-colors duration-150",
+                  "hover:bg-foreground/[0.08] active:bg-foreground/[0.12] outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                  // on a selected (blue) frame the action reads in the primary's own foreground
+                  selected ? "text-primary-foreground hover:bg-white/15" : TONE_TEXT[tone],
+                  d.act,
+                )}
+              >
+                <action.icon size={d.icon} weight="bold" aria-hidden />{action.label}
+              </button>
             </span>
           ) : null}
         </span>
@@ -179,11 +169,14 @@ function Body(props: NotchCardProps & { surface?: boolean }) {
   );
 }
 
-// The border is four 1px drop-shadows in `--edge`, so it follows the whole notched shape,
-// concave curves included, and the two pieces never draw a line where they meet. Written
-// out in full: Tailwind only generates classes it can read in the source.
-const EDGE = "[filter:drop-shadow(1px_0_0_var(--edge))_drop-shadow(-1px_0_0_var(--edge))_drop-shadow(0_1px_0_var(--edge))_drop-shadow(0_-1px_0_var(--edge))]";
-
+/**
+ * The card: a thin frame wrapping the whole rounded rectangle, and, when the task waits on
+ * you, the same frame flowing in to fill the notch at the bottom-right, where the action
+ * sits (frame and notch are one material, like the fused tabs). The frame is a lifted grey a
+ * step darker than the surface in light and lighter in dark, so it reads apart from both
+ * the surface and the column. Selected, the frame turns primary; keyboard focus adds the
+ * ring around the rectangle; hover brightens the frame. Nothing moves.
+ */
 export function NotchCard(props: NotchCardProps) {
   const { selected, ghost, lifted, handle, corner, className, style, density = "compact", ...rest } = props;
   const data = Object.fromEntries(Object.entries(rest).filter(([k]) => k.startsWith("data-")));
@@ -194,34 +187,22 @@ export function NotchCard(props: NotchCardProps) {
       data-selected={selected ? "" : undefined}
       style={style}
       className={cn(
-        "group/card relative flex w-full flex-col text-start",
-        "[--fuse-base:var(--card)] dark:[--fuse-base:var(--sky-pebble)]",
-        // the border is Neko's --border grey; hover lightens the surface and darkens the border, nothing moves
-        "[--fuse:var(--fuse-base)] [--edge:var(--border)]",
-        !ghost && !lifted && "hover:[--fuse:color-mix(in_oklab,var(--foreground)_3%,var(--fuse-base))] hover:[--edge:color-mix(in_oklab,var(--foreground)_22%,var(--border))]",
-        // selected: the primary colour replaces the grey border, and the surface takes a faint tint
-        selected && "[--edge:var(--primary)] hover:[--edge:var(--primary)] [--fuse:color-mix(in_oklab,var(--primary)_7%,var(--fuse-base))] hover:[--fuse:color-mix(in_oklab,var(--primary)_10%,var(--fuse-base))]",
-        // keyboard focus anywhere in the card: the ring colour
-        "has-[:focus-visible]:[--edge:var(--ring)]",
+        "group/card relative flex w-full flex-col rounded-[16px] p-[1.5px] text-start transition-[background-color,box-shadow] duration-150",
+        "[--fuse-base:var(--card)] dark:[--fuse-base:var(--sky-pebble)] [--fuse:var(--fuse-base)]",
+        "[--frame:color-mix(in_oklab,var(--foreground)_11%,var(--card))] dark:[--frame:color-mix(in_oklab,var(--foreground)_17%,var(--background))]",
+        !ghost && !lifted && !selected && "hover:[--frame:color-mix(in_oklab,var(--foreground)_17%,var(--card))] dark:hover:[--frame:color-mix(in_oklab,var(--foreground)_24%,var(--background))]",
+        selected && "[--frame:var(--primary)] dark:[--frame:var(--primary)] [--fuse:color-mix(in_oklab,var(--primary)_6%,var(--fuse-base))]",
+        "bg-[var(--frame)]",
+        "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-1 has-[:focus-visible]:ring-offset-background",
+        lifted && "shadow-[0_10px_24px_-6px_rgb(0_0_0/0.28)]",
         ghost && "opacity-40",
         className,
       )}
     >
       {handle}
-      <div className="pointer-events-none grid min-w-0 grid-cols-[minmax(0,1fr)]">
-        <div
-          aria-hidden
-          className={cn(
-            "[grid-area:1/1] transition-[filter] duration-150",
-            lifted ? "[filter:drop-shadow(0_0_0.5px_rgb(0_0_0/0.2))_drop-shadow(0_10px_20px_rgb(0_0_0/0.22))]" : EDGE,
-          )}
-        >
-          <Body {...props} density={density} surface />
-        </div>
-        {/* positioned, so it paints above the filtered surface; the action re-enables its own pointer events */}
-        <div className="relative [grid-area:1/1]">
-          <Body {...props} density={density} />
-        </div>
+      {/* positioned, so it paints above the handle; the action re-enables its own pointer events */}
+      <div className="pointer-events-none relative">
+        <Body {...props} density={density} />
       </div>
       {corner ? (
         <span className="pointer-events-none absolute top-2 end-2 z-10 opacity-0 transition-opacity duration-150 group-hover/card:pointer-events-auto group-hover/card:opacity-100 group-has-[:focus-visible]/card:pointer-events-auto group-has-[:focus-visible]/card:opacity-100 motion-reduce:transition-none">
