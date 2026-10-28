@@ -1,6 +1,7 @@
 # Themes for the web UI: research and proposal
 
-Status: proposal, nothing built (2026-10-28). Research read from the installed
+Status: built on the web (2026-10-28), see section 8 for what shipped and where it differs from the
+proposal below. Research read from the installed
 Paseo (`/Applications/Paseo.app`, bundle `app-dist/_expo/static/js/web/index-*.js`,
 read only) and from Neko's source.
 
@@ -134,7 +135,7 @@ colours, sidebar, builder chrome/pane":
 | Hover | none | `--secondary`, `--muted`, `--accent`, `--sidebar-accent` = foreground at 4-7% |
 | Status | `destructive`, `success`, `warning`, `info` | the `-foreground` text twin of each, lightened or darkened until it clears 4.5:1 on `card` |
 | Chat | `bubble`, `bubbleForeground` | none |
-| Builder | none | `--builder-chrome` = light ? `sidebar` : `background`; `--builder-pane` = light ? `card` : `background` mixed 4% toward white. This is today's rule, so the tabs look the same. |
+| Builder | none | `--builder-chrome` = light ? `sidebar` : `background`; `--builder-pane` = light ? `card` : `background` mixed 4% toward white. This is today's rule, so the tabs look the same. (As built these stay in `BuilderViewTabs.css` / `dock.css`, written in terms of the theme tokens, so they follow every theme without being emitted.) |
 
 Because the builder tokens stay derived, a theme cannot make the tabs
 inconsistent with the page.
@@ -156,8 +157,7 @@ variants of near-neutral surfaces; Neko Dark and Nord cover them). Pure Black
 (OLED) is a cheap add later.
 
 **Contrast rules**, reusing the native test's shape. A node script
-`web/scripts/verify/themes.mjs` (the web has no unit-test runner; the other
-checks are `scripts/verify/*.mjs`) runs the real `derive` function over every
+`web/scripts/check-themes.mjs` (`pnpm themes:check`, also the first step of `pnpm build`; the web has no unit-test runner) runs the real `derive` function over every
 theme and fails under **4.5:1** for text pairs, composited over the surface
 first when a colour has alpha:
 
@@ -278,13 +278,10 @@ and still will not. Additions, all optional:
 - `host.theme`: `get()` returns `{ mode, appearance, id, name }`, `subscribe`
   fires on any change, so a canvas or chart can redraw. Needs a line in the
   `host` doc header (`web/src/host.ts`).
-- `host.registerTheme(spec)`: a plugin contributes a theme in the §3 schema.
-  Strict like Paseo's: unknown keys rejected, hex only, ids namespaced as
-  `<plugin>/<id>` so they cannot shadow a built-in, injected as a runtime
-  `<style>` using the same `derive` (allowed by `style-src 'unsafe-inline'`) and
-  inside `@layer neko-theme`. A theme that fails validation is skipped with a
-  note on the Customisations page. Removing the plugin removes its theme; if it
-  was selected, that slot falls back to the default and the owner is not asked.
+- `host.registerTheme(spec)` was proposed and **not built**: user theme files
+  (section 8) already let a plugin ship a theme by writing one file, and a
+  namespaced plugin id (`<plugin>/<id>`) cannot be stored in the daemon's
+  light/dark slots, which only take file-safe ids.
 - `scripts/verify/customise.mjs` gains a case: a plugin with `custom.css`
   overriding `--primary` under every built-in theme still wins.
 
@@ -313,7 +310,7 @@ touch Rust or Swift and need `install-native.sh`.
 
 1. **Data, derive, generator, contrast script.** `themes.json` with Neko Light,
    Neko Dark and Glass reproduced from today's CSS, `derive`, `pnpm themes`,
-   `verify/themes.mjs`, and the layered `themes.css`. Done when Neko Light/Dark
+   `check-themes.mjs`, and the layered `themes.css`. Done when Neko Light/Dark
    screenshots match today's within rounding. ~4 h.
 2. **Nine more themes**, ported from the native `Spec`s, tuned to AA. ~4 h (the
    native hex is already tuned for text-on-panel; the extra web pairs and
@@ -355,9 +352,126 @@ Web total about 2.5 days (steps 1 to 7, 9); native about 1 more.
   keeps the solid fallback when `backdrop-filter` is missing.
 - **Boot script drift.** `theme-boot.js` duplicates a little of `theme.ts`
   (resolve mode and set attributes). Keep it under 40 lines and verify it
-  against `theme.ts` in `verify/themes.mjs`.
+  against `theme.ts` in `check-themes.mjs`.
 - **Licensing.** Every added palette needs its MIT row in
   `docs/evidence/themes-report.md`; the native ones already have it.
 - **Not in scope:** code-block syntax colours (Paseo's second picker). Neko's
   chat code blocks could take a per-theme palette later; it needs its own
   contrast pass.
+
+## 8. As built
+
+Shipped 2026-10-28 (web and daemon; the native app only gained `neutral-light`).
+Where this differs from sections 3 to 7:
+
+**Themes are data, and Neko can add and remove them.** Built-ins are
+`web/src/themes/builtin/<id>.json` (the 12). A person's own are
+`<data dir>/themes/<id>.json`; the daemon lists and validates them and the page
+polls every 3 s while visible (the plugins loader's mechanism), so a file that
+is added, edited or deleted shows up without a rebuild or reload. A file with a
+built-in's id replaces it; deleting the file brings the built-in back. The daemon
+exposes this through the existing authorised request channel
+(`ListThemes`, `RemoveTheme { id }`), not new HTTP routes, so the web bridge's
+access control (`web.rs`, a `SENSITIVE` path) is untouched. The settings are
+`GetAppearance` / `SetAppearance` (`appearance.mode`, `appearance.light`,
+`appearance.dark` in the `settings` table) and the `AppearanceChanged` event.
+`neko_core::appearance` owns the validator and the file listing.
+
+**Glass is a theme like the rest.** `glass.json` is dark with a `backdrop`
+object (a wash and a blur). Nothing in `theme.ts` or `globals.css` names Glass:
+a theme with a backdrop gets `data-backdrop` on `<html>`, one generic rule
+paints the wash and frosts the surfaces, and `derive.js` emits the surface
+colours translucent (the colours in the file are the opaque fallback). The old
+`html.glass` class and its CSS were deleted; `?theme=glass` survives as an alias
+for the legacy value.
+
+**Schema** (one JSON object per file; anything else is rejected). Checked by the
+daemon (`validate_theme`), the page (`derive.js` `validateTheme`) and
+`pnpm themes:check`, which also fails if the colour-key lists drift:
+
+```json
+{
+  "id": "ocean",
+  "name": "Ocean",
+  "appearance": "dark",
+  "family": "Mine",
+  "colors": {
+    "background": "#0b1f2a",
+    "foreground": "#d7e9f0",
+    "primary": "#3ab0d0",
+    "card": "#102a37", "popover": "#13303e", "sidebar": "#08171f",
+    "strong": "#ffffff", "mutedForeground": "#9ab8c4", "border": "#d7e9f0",
+    "primaryForeground": "#06141a",
+    "destructive": "#e5484d", "success": "#4cc38a", "warning": "#e0a042", "info": "#5b9cf5",
+    "bubble": "#1c3d52", "bubbleForeground": "#ffffff"
+  },
+  "backdrop": {
+    "blur": 22,
+    "base": ["#0b1424", "#101a30"],
+    "glows": [{ "color": "#483e90", "alpha": 0.5, "x": 12, "y": 0, "width": 70, "height": 60 }]
+  }
+}
+```
+
+- Required: `id` (equals the file name without `.json`; lowercase letters, digits,
+  hyphens, 1 to 48), `name` (1 to 60 characters), `appearance` (`light` or
+  `dark`: which picker lists it), `colors.background`, `colors.foreground`,
+  `colors.primary`. Optional: `family` (1 to 40), every other colour, `backdrop`.
+- Colours are hex only (`#rgb`, `#rrggbb`, `#rrggbbaa`). No other key, no CSS,
+  no URLs, no fonts. A file is at most 32 KiB, a plain file (a link or folder is
+  skipped), and at most 64 files are read.
+- `backdrop`: `blur` 0 to 60, `base` 1 to 4 hex colours (one is solid, more make a
+  160 degree gradient), `glows` up to 4 of `{ color, alpha 0..1, x, y (percent),
+  width, height (1..200) }`. Optional.
+- Colours left out are derived (`derive.js`). An authored colour is used as
+  written: a text pair under 4.5:1 is reported, never silently changed.
+
+**Bad files never break anything.** A file that fails validation is skipped, the
+daemon names it and the reason (`problems`), and Appearance lists it under "Your
+themes". A theme that is valid but has a text pair under 4.5:1 loads and shows a
+"Low contrast" chip on its card (the failing pairs are in the chip's tooltip).
+
+**Adding a theme (Neko).** Appearance has a "Make me a theme" button that opens a
+dialog; the text sent is `THEME_PROMPT` (`web/src/themes/prompt.ts`, shown in the
+dialog before sending, under the 4096-byte message limit). It tells an agent to
+write one validated file into `<data dir>/themes/`, gives the schema and the
+contrast rule, and to open Appearance to check the result. Change Neko's own
+prompt (`pages/customisations/prompt.ts`) was left alone. The same files can be
+written by hand.
+
+**Removing a theme.** On a card marked "Yours", the Remove button (visible on
+hover or focus) asks first, then `RemoveTheme` deletes the file. Built-ins have
+no button, and the daemon refuses an id that has no file ("built-in themes cannot
+be removed") or a path. Removing the theme in use falls back to the default for
+that appearance without changing the stored choice.
+
+**Other differences**
+
+- Per-theme CSS for the 12 built-ins is generated at build time
+  (`web/scripts/themes.mjs`, run by the vite build, committed as
+  `builtin.generated.css` and checked for staleness). A user theme's CSS is
+  derived in the page and injected as one `<style id="neko-user-themes">` inside
+  `@layer neko-theme` with doubled specificity, so it beats a built-in of the
+  same id and still loses to `custom.css`.
+- `public/theme-boot.js` also migrates the old `neko-theme` value, and reads
+  `neko-theme-boot`, a small cache of the CSS and backdrop flag for the light and
+  dark theme, which is how a user theme paints on the first frame. The first
+  browser to arrive offers its migrated value to a daemon that has no choice yet.
+- The sidebar gear has the mode, "Light theme" and "Dark theme" submenus, and a
+  link to Appearance. ⌘K has "Mode: ..." and one "Theme: <name>" per theme.
+- Native: `neutral-light` ("Neko Light") was added to `BUILTIN_THEMES`,
+  `theme.rs` and `PaletteThemes.swift` so all 12 web ids exist natively (19
+  there). The native app still has one theme setting and ignores
+  `AppearanceChanged`; making it follow the light/dark pair is the remaining step.
+
+**Skipped:** `host.registerTheme` (see section 6); the native light/dark pair;
+syntax-highlight themes (Paseo's second picker); Pure Black.
+
+**Checks:** `pnpm themes:check` (schema, 4.5:1 on every pair, flat-surface rule,
+stale CSS, web/native parity, key lists, boot script, a self-test that a bad
+theme fails), the Rust tests in `neko_core::appearance`, and
+`scripts/verify/appearance.mjs` in `web-verify` (light and dark picked separately
+under emulated light and dark Macs, a user theme file appearing, changing and
+disappearing live, an override and its restore, Remove with confirm, bad files
+skipped with a warning, a low-contrast chip, first-paint with no flash, the daemon
+as source of truth, the legacy migration, the gear and ⌘K).

@@ -19,3 +19,9 @@ the neko checkout (live through self-update, previous UI kept; Settings → Neko
 updates has **Roll back the web UI**, `RollBackWebUi`). User pages keep the
 authority they had (a browser page with the bridge token); the daemon gained
 storage and the stylesheet only. `scripts/verify/customise.mjs` checks all of it.
+
+**Themes are files too (2026-10-28).** `<data dir>/themes/<id>.json` is a colour
+theme (schema in `docs/design/themes.md` section 8): the daemon validates and
+lists them (`ListThemes`), the Appearance page shows them in the light or dark
+picker, and the "Make me a theme" button asks Neko to write one. `custom.css`
+still wins over them (they live in `@layer neko-theme`).

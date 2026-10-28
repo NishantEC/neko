@@ -44,10 +44,10 @@ put an atomic refcount increment there, both for no correctness gain. **Do not
 "harden" this to `SeqCst` or a lock** without a concrete reason the doc comment
 does not already answer.
 
-### The eighteen built-ins, and the licence rule they live under
+### The nineteen built-ins, and the licence rule they live under
 
 `neutral` (the default — byte-identical to the pre-`fm/neko-themes` palette, so
-nobody's app changes appearance on upgrade), `ember` and `catnap` (this
+nobody's app changes appearance on upgrade), `neutral-light` (2026-10-28, the web UI's default light, one Spec, not vendored), `ember` and `catnap` (this
 project's own, from `data/neko-cozy-theme/mockups/`), `glass` (this project's
 own glassmorphism; on the web it is a fourth Appearance choice that sets
 `html.dark.glass`, see `docs/evidence/glass-theme-report.md`), plus Catppuccin ×4,
@@ -200,3 +200,11 @@ stepping on each other's palette (confirmed the hard way — this task shipped t
 mutexes first and chased the resulting flake). Same discipline
 `text_field::tests::pasteboard_test_lock` established for the systemwide
 `NSPasteboard`.
+
+### The web UI has its own, data-driven theme system (2026-10-28)
+
+Light theme, dark theme and a mode, stored in the daemon; themes are JSON
+(`web/src/themes/builtin/`, and the person's own in `<data dir>/themes/`).
+Read `docs/design/themes.md` section 8 before touching it. The 12 web built-ins
+share their ids with these native ones (`pnpm themes:check` enforces it); the
+native app does not yet follow the web's light/dark pair.
