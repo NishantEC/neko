@@ -174,7 +174,7 @@ function SettingsBody() {
           <SettingsRail current={query.trim() ? null : section} sections={sections} onOpen={open} />
         </aside>
         <div data-slot="setup-page" className="settings-surface min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[52rem] px-6 pt-8 pb-24">
+          <div className="mx-auto w-full max-w-[52rem] px-7 pt-6 pb-24">
             <div className="settings-stack flex flex-col">
               {query.trim() ? (
                 <section aria-label="Search results" data-slot="settings-results" className="flex flex-col gap-3">

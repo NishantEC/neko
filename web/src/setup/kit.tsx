@@ -23,8 +23,7 @@ import { useWorkbench } from "@/useStore";
 import type { Tone } from "@/setup/lib";
 
 /**
- * The page frame: hushbacks' PageContainer column (max 1200px, px-6 md:px-10,
- * pt-12 md:pt-16 pb-24) with its PageHeader and the page actions beside it.
+ * The page frame: hushbacks' PageContainer column (max 1200px, px-7, pt-6, pb-24: the Tasks page's rhythm) with its PageHeader and the page actions beside it.
  * `width` narrows the column for pages that are a single list.
  */
 export function SetupPage({
@@ -40,7 +39,7 @@ export function SetupPage({
 }) {
   return (
     <PageContainer data-slot="setup-page" className={cn("flex flex-col gap-8", width)}>
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <PageHeader eyebrow={eyebrow} title={title} subtitle={subtitle} />
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>

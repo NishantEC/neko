@@ -12,10 +12,10 @@ export interface PageHeaderProps {
 export function PageHeader({ title, subtitle }: PageHeaderProps) {
   return (
     <div className="flex flex-col gap-2">
-      <EditorialHeading as="h1" className="text-[clamp(1.75rem,2.5vw+0.5rem,2.5rem)] tracking-[-0.015em] leading-[1.08]">
+      <EditorialHeading as="h1" className="text-[22px]">
         {title}
       </EditorialHeading>
-      {subtitle ? <p className="text-muted-foreground">{subtitle}</p> : null}
+      {subtitle ? <p className="text-[13.5px] text-muted-foreground">{subtitle}</p> : null}
     </div>
   );
 }
