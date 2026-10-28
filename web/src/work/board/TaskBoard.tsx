@@ -68,7 +68,7 @@ const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(pre
 
 // --- parts ----------------------------------------------------------------------------------
 
-function ColumnHeader({ stage, count, children }: { stage: Stage; count: number; children?: React.ReactNode }) {
+export function ColumnHeader({ stage, count, children }: { stage: Stage; count: number; children?: React.ReactNode }) {
   return (
     <div data-slot="group-header" data-stage={stage} className="flex h-8 shrink-0 items-center gap-1.5 px-0.5">
       <span aria-hidden className={cn("size-2 shrink-0 rounded-full", TONE_DOT[STAGE_TONE[stage]])} />
