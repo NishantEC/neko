@@ -231,18 +231,19 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
 }
 
 /// Where each scope's work lives, so seeded instructions can be specific.
-fn scope_hint(scope: &str) -> &'static str {
+fn scope_hint(scope: &str, personal: bool) -> &'static str {
     match scope {
         "Client A" => "Slack is slack-client-a. Jira is project KAN (atlassian). GitHub org client-a-ai (repos triage, support-fe, triage-admin, BFF); Asha's GitHub login is NishantEC.",
         "Acme" => "Slack is slack-work. Issues are in Linear team HEA and Asana. GitHub org Acme; Asha's GitHub login is NishantEC.",
         "Client B" => "Issues are in Linear (linear-b). GitHub: the org that owns the repos in this folder (check `git remote -v`); Asha's GitHub login is NishantEC.",
         "Sibling app" => "This is Asha's own product, Sibling app (ui-kit). Issues are in Linear (linear). GitHub repo is the one in this folder.",
-        _ => "Personal: Gmail and Google Calendar (Claude connectors), GitHub user NishantEC, Linear (linear-personal).",
+        _ if personal => "Personal: Gmail and Google Calendar (Claude connectors), GitHub user NishantEC, Linear (linear-personal).",
+        _ => "Use the connections configured for this folder; find the GitHub org with `git remote -v` in its repos. Asha's GitHub login is NishantEC.",
     }
 }
 
-fn instruction(kind: RoutineKind, scope: &str) -> String {
-    let hint = scope_hint(scope);
+fn instruction(kind: RoutineKind, scope: &str, personal: bool) -> String {
+    let hint = scope_hint(scope, personal);
     match kind {
         RoutineKind::Messages => format!(
             "Check everything that came in for Asha in this scope since memory.last_check (if missing, the last 24 hours): direct messages and mentions, email, issue-tracker comments and mentions, and review comments on his pull requests. {hint}\n\
@@ -251,7 +252,7 @@ Handle each one yourself: reply, answer, acknowledge, look things up in code or 
         RoutineKind::Digest => {
             let extra = match scope {
                 "Sibling app" => " Also check docs/marketing/blog/PUBLISHED.md on origin/main for yesterday's and today's posts; if a day has none, find out why and fix it.",
-                "Client A" | "Acme" | "Client B" => "",
+                _ if !personal => "",
                 _ => " Also one line on the machine: free disk (df -h /System/Volumes/Data), load (uptime), and the size of ~/Library/Application Support/neko/task-worktrees.",
             };
             format!(
@@ -268,12 +269,14 @@ Act on what you can first: answer review comments, fix or re-run failing CI, reb
 }
 
 /// Three routines per scope with a workspace: messages, digest, PR sweep.
-pub fn seeds(scopes: &[ScopeProposal]) -> Vec<Routine> {
+/// The scope whose folder is `home` is the personal one: Gmail, Calendar and
+/// the old Paseo digest and sweep.
+pub fn seeds(scopes: &[ScopeProposal], home: &str) -> Vec<Routine> {
     let mut routines = Vec::new();
     for scope in scopes {
         let Some(workspace_id) = scope.workspace_id.clone() else { continue };
         let busy = matches!(scope.name.as_str(), "Client A" | "Acme");
-        let personal = !matches!(scope.name.as_str(), "Client A" | "Acme" | "Client B" | "Sibling app");
+        let personal = scope.folders.iter().any(|folder| folder.trim_end_matches('/') == home.trim_end_matches('/'));
         let specs = [
             (RoutineKind::Messages, "Messages", Cadence::Every { minutes: if busy { 20 } else { 60 }, from_hour: 8, to_hour: 23 }),
             (RoutineKind::Digest, "Morning brief", Cadence::Daily { hour: 10, minute: 30 }),
@@ -291,7 +294,7 @@ pub fn seeds(scopes: &[ScopeProposal]) -> Vec<Routine> {
                 workspace_id: workspace_id.clone(),
                 kind,
                 name: name.into(),
-                instruction: instruction(kind, &scope.name),
+                instruction: instruction(kind, &scope.name, personal),
                 cadence,
                 enabled: true,
                 model: "sonnet".into(),
@@ -365,7 +368,9 @@ mod tests {
     #[test]
     fn seeds_three_per_scope() {
         let scope = |name: &str, id: Option<&str>| ScopeProposal { name: name.into(), folders: vec!["/x".into()], servers: vec![], problems: vec![], workspace_id: id.map(str::to_string) };
-        let routines = seeds(&[scope("Client A", Some("w1")), scope("Asha", Some("w2")), scope("Loose", None)]);
+        let mut asha = scope("Asha", Some("w2"));
+        asha.folders = vec!["/Users/n".into()];
+        let routines = seeds(&[scope("Client A", Some("w1")), asha, scope("Loose", None)], "/Users/n/");
         assert_eq!(routines.len(), 6);
         assert_eq!(routines[0].paseo_schedule.as_deref(), Some("message-watch-adaptive"));
         assert_eq!(routines[0].cadence, Cadence::Every { minutes: 20, from_hour: 8, to_hour: 23 });
@@ -373,6 +378,10 @@ mod tests {
         assert_eq!(routines[4].paseo_schedule.as_deref(), Some("daily-work-digest"));
         assert_eq!(routines[5].paseo_schedule.as_deref(), Some("weekly-pr-sweep"));
         assert!(routines.iter().all(|r| r.id.starts_with(&r.workspace_id)));
+        assert!(routines[3].instruction.contains("Gmail"));
+        // A scope that is neither known nor home gets no personal routines.
+        let other = seeds(&[scope("Side project", Some("w3"))], "/Users/n");
+        assert!(other.iter().all(|r| r.paseo_schedule.is_none() && !r.instruction.contains("Gmail")));
     }
 
     #[test]

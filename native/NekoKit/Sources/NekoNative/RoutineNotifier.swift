@@ -60,6 +60,7 @@ import UserNotifications
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         await MainActor.run {
             if OpenNeko.usesBrowser, OpenNeko.inBrowser(route: "inbox") { return }
+            WebHomeRoute.open("inbox")
             NotificationCenter.default.post(name: .nekoOpenWorkspace, object: nil)
         }
     }

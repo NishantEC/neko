@@ -63,6 +63,8 @@ struct DaemonRecoveryBackoff {
 extension Notification.Name {
     static let nekoOpenWorkspace = Notification.Name("neko.openWorkspace")
     static let nekoOpenPreferences = Notification.Name("neko.openPreferences")
+    /// Show a web route (such as "inbox") in the native window's web view.
+    static let nekoOpenWebRoute = Notification.Name("neko.openWebRoute")
     /// Put the cursor in Home's composer (New task).
     static let nekoFocusComposer = Notification.Name("neko.focusComposer")
 }

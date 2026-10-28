@@ -55,6 +55,17 @@ struct WebHomeView: View {
     }
 }
 
+/// A route asked for before the native web view existed; it loads with it.
+@MainActor enum WebHomeRoute {
+    static var pending: String?
+
+    /// Opens `route` in the native window's web view, now or when it appears.
+    static func open(_ route: String) {
+        pending = route
+        NotificationCenter.default.post(name: .nekoOpenWebRoute, object: route)
+    }
+}
+
 private struct WebHomeRepresentable: NSViewRepresentable {
     let url: URL
     @Binding var failure: String?
@@ -71,7 +82,13 @@ private struct WebHomeRepresentable: NSViewRepresentable {
         view.uiDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         view.allowsMagnification = false
-        view.load(URLRequest(url: url))
+        var start = url
+        if let route = WebHomeRoute.pending, let routed = URL(string: url.absoluteString + "#/" + route) {
+            start = routed
+            WebHomeRoute.pending = nil
+        }
+        view.load(URLRequest(url: start))
+        context.coordinator.observeRoutes(of: view)
         return view
     }
 
@@ -79,7 +96,23 @@ private struct WebHomeRepresentable: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         @Binding var failure: String?
+        private weak var view: WKWebView?
         init(failure: Binding<String?>) { _failure = failure }
+
+        /// A route opened while the view is up moves the page there in place.
+        /// (A selector observer is removed by Foundation when this goes away.)
+        @MainActor func observeRoutes(of view: WKWebView) {
+            self.view = view
+            NotificationCenter.default.addObserver(self, selector: #selector(openRoute(_:)), name: .nekoOpenWebRoute, object: nil)
+        }
+
+        @MainActor @objc private func openRoute(_ note: Notification) {
+            guard let route = note.object as? String, !route.isEmpty,
+                  route.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "/" }),
+                  let view else { return }
+            WebHomeRoute.pending = nil
+            view.evaluateJavaScript("location.hash = '#/\(route)'")
+        }
 
         /// Only the daemon's own address loads here; everything else opens in the browser.
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {

@@ -6,7 +6,7 @@
 //! `RoutineRun`. See docs/knowledge/neko-runs-the-day.md.
 use crate::server::AppState;
 use neko_core::routines::{self as core, Store};
-use neko_protocol::routines::{RoutineNotice, RoutineRun, RoutineState, RoutineView, ScopeProposal};
+use neko_protocol::routines::{Routine, RoutineNotice, RoutineRun, RoutineState, RoutineView, ScopeProposal};
 use neko_protocol::workbench::{AgentRuntime, Command, Workspace};
 use neko_protocol::{Request, Response};
 use std::path::{Path, PathBuf};
@@ -21,6 +21,7 @@ const TICK: Duration = Duration::from_secs(30);
 const RUN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const KEEP_TEXT: usize = 4000;
 const VIEW_RUNS: usize = 10;
+const PASEO_TIMEOUT: Duration = Duration::from_secs(20);
 
 fn db(state: &AppState) -> MutexGuard<'_, neko_core::Db> {
     state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -87,7 +88,7 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
     let db = db(state);
     let mut store = core::load(&db)?;
     let now = neko_core::workbench::now_ms();
-    for routine in core::seeds(&scopes) {
+    for routine in core::seeds(&scopes, &home().to_string_lossy()) {
         if !store.routines.iter().any(|r| r.id == routine.id) {
             // First runs follow the cadence, so seeding never starts a burst.
             let first = RoutineState { next_due_ms: Some(core::next_due_local(&routine.cadence, 0, now)), ..Default::default() };
@@ -117,17 +118,47 @@ pub(crate) fn pick_due(store: &Store, states: &[(String, RoutineState)], now_ms:
     store
         .routines
         .iter()
-        .filter(|r| r.enabled)
         .filter_map(|r| {
             let state = states.iter().find(|(id, _)| id == &r.id).map(|(_, s)| s);
             if state.is_some_and(|s| s.running) {
                 return None;
             }
+            if state.is_some_and(|s| s.run_requested) {
+                return Some((i64::MIN, r.id.clone()));
+            }
             let due = state.and_then(|s| s.next_due_ms).unwrap_or(0);
-            (due <= now_ms).then_some((due, r.id.clone()))
+            (r.enabled && due <= now_ms).then_some((due, r.id.clone()))
         })
         .min()
         .map(|(_, id)| id)
+}
+
+/// An edit changes what the routine does and when; whether it is on, where
+/// it runs and which Paseo job it replaces stay as the daemon has them, so a
+/// dialog opened before a Pause cannot undo it.
+pub(crate) fn merge_edit(existing: &Routine, edit: Routine) -> Routine {
+    Routine { id: existing.id.clone(), workspace_id: existing.workspace_id.clone(), kind: existing.kind, enabled: existing.enabled, paseo_schedule: existing.paseo_schedule.clone(), ..edit }
+}
+
+/// Runs a short helper command, killing it after `limit`.
+fn output_within(mut command: std::process::Command, limit: Duration) -> Result<std::process::Output, String> {
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(_) => return child.wait_with_output().map_err(|e| e.to_string()),
+            None if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("timed out after {}s", limit.as_secs()));
+            }
+            None => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
 }
 
 /// Clears `BUSY` however the run ends, a panic included.
@@ -184,6 +215,7 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
         let db = db(state);
         let mut routine_state = core::load_state(&db, &routine.id)?;
         routine_state.running = true;
+        routine_state.run_requested = false;
         core::save_state(&db, &routine.id, &routine_state)?;
     }
     BUSY.store(true, Ordering::SeqCst);
@@ -294,20 +326,18 @@ fn pause_paseo(name: &str) -> Result<String, String> {
         .map(|p| PathBuf::from(format!("{}{p}", home().display())))
         .find(|p| p.exists())
         .unwrap_or_else(|| PathBuf::from("paseo"));
-    let listing = std::process::Command::new(&paseo)
-        .args(["schedule", "ls", "--json"])
-        .output()
-        .map_err(|e| format!("Could not list Paseo schedules: {e}"))?;
+    let mut list = std::process::Command::new(&paseo);
+    list.args(["schedule", "ls", "--json"]);
+    let listing = output_within(list, PASEO_TIMEOUT).map_err(|e| format!("Could not list Paseo schedules: {e}"))?;
     if !listing.status.success() {
         return Err(format!("Could not list Paseo schedules: {}", String::from_utf8_lossy(&listing.stderr).trim()));
     }
     let Some(id) = active_schedule_id(&String::from_utf8_lossy(&listing.stdout), name) else {
         return Ok(format!("Paseo schedule {name} is not running; Neko runs this now"));
     };
-    let output = std::process::Command::new(&paseo)
-        .args(["schedule", "pause", &id])
-        .output()
-        .map_err(|e| format!("Could not pause Paseo schedule {name}: {e}"))?;
+    let mut pause = std::process::Command::new(&paseo);
+    pause.args(["schedule", "pause", &id]);
+    let output = output_within(pause, PASEO_TIMEOUT).map_err(|e| format!("Could not pause Paseo schedule {name}: {e}"))?;
     if output.status.success() {
         Ok(format!("Paused Paseo schedule {name}; Neko runs it now"))
     } else {
@@ -368,14 +398,28 @@ fn edit(state: &AppState, request: Request) -> Result<(), String> {
                 return Err("A routine needs a name and an instruction".into());
             }
             match store.routines.iter_mut().find(|r| r.id == routine.id) {
-                Some(existing) => *existing = routine,
+                Some(existing) => {
+                    let rescheduled = existing.cadence != routine.cadence;
+                    *existing = merge_edit(existing, routine);
+                    if rescheduled {
+                        let mut routine_state = core::load_state(&db, &existing.id)?;
+                        if !routine_state.running {
+                            let now = neko_core::workbench::now_ms();
+                            routine_state.next_due_ms = Some(core::next_due_local(&existing.cadence, routine_state.quiet_streak, now));
+                            core::save_state(&db, &existing.id, &routine_state)?;
+                        }
+                    }
+                }
                 None => store.routines.push(routine),
             }
             core::save_definitions(&db, &store)
         }
         Request::RunRoutineNow { id } => {
+            if !store.routines.iter().any(|r| r.id == id) {
+                return Err("No such routine".into());
+            }
             let mut routine_state = core::load_state(&db, &id)?;
-            routine_state.next_due_ms = Some(0);
+            routine_state.run_requested = true;
             core::save_state(&db, &id, &routine_state)
         }
         Request::SetRoutineEnabled { id, enabled } => {
@@ -413,7 +457,7 @@ pub fn handle(state: &AppState, request: Request) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neko_protocol::routines::{Cadence, Routine, RoutineKind};
+    use neko_protocol::routines::{Cadence, RoutineKind};
 
     fn routine(id: &str, enabled: bool) -> Routine {
         Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: id.into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled, model: String::new(), paseo_schedule: None }
@@ -432,6 +476,40 @@ mod tests {
         // A routine with no state yet is due now; a running one is skipped.
         let states = vec![("a".into(), due(Some(0), true))];
         assert_eq!(pick_due(&store, &states, 1).as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn run_now_runs_a_paused_routine_first() {
+        let store = Store { routines: vec![routine("a", true), routine("b", false)], ..Default::default() };
+        let states = vec![("a".into(), due(Some(0), false)), ("b".into(), RoutineState { next_due_ms: Some(i64::MAX), run_requested: true, ..Default::default() })];
+        assert_eq!(pick_due(&store, &states, 100).as_deref(), Some("b"));
+        // While it runs, the request waits for the run to end.
+        let states = vec![("a".into(), due(Some(i64::MAX), false)), ("b".into(), RoutineState { running: true, run_requested: true, ..Default::default() })];
+        assert_eq!(pick_due(&store, &states, 100), None);
+    }
+
+    #[test]
+    fn edit_keeps_enabled_and_placement() {
+        let existing = Routine { enabled: false, paseo_schedule: Some("p".into()), ..routine("a", false) };
+        let edit = Routine { enabled: true, workspace_id: "other".into(), paseo_schedule: None, instruction: "new".into(), cadence: Cadence::Daily { hour: 7, minute: 0 }, ..routine("a", true) };
+        let merged = merge_edit(&existing, edit);
+        assert!(!merged.enabled);
+        assert_eq!(merged.workspace_id, "w");
+        assert_eq!(merged.paseo_schedule.as_deref(), Some("p"));
+        assert_eq!(merged.instruction, "new");
+        assert_eq!(merged.cadence, Cadence::Daily { hour: 7, minute: 0 });
+    }
+
+    #[test]
+    fn helper_command_is_killed_after_its_limit() {
+        let mut sleep = std::process::Command::new("/bin/sleep");
+        sleep.arg("5");
+        let started = std::time::Instant::now();
+        assert!(output_within(sleep, Duration::from_millis(300)).unwrap_err().starts_with("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let mut echo = std::process::Command::new("/bin/echo");
+        echo.arg("hi");
+        assert_eq!(String::from_utf8_lossy(&output_within(echo, Duration::from_secs(5)).unwrap().stdout).trim(), "hi");
     }
 
     #[test]

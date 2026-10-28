@@ -50,6 +50,9 @@ pub struct RoutineState {
     pub paseo_paused: bool,
     #[serde(default)]
     pub note: Option<String>,
+    /// "Run now": runs once even if paused, or again right after a run in flight.
+    #[serde(default)]
+    pub run_requested: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
