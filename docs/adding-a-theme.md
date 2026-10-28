@@ -1,6 +1,6 @@
 # Adding a theme
 
-Eighteen ship. Adding a nineteenth is four edits and one test run, and the
+Nineteen ship. Adding a twentieth is four edits and one test run, and the
 tests will tell you what is wrong.
 
 Everything is in `crates/neko/src/theme.rs` and

@@ -727,6 +727,17 @@ fn search_concurrently<'a>(
     })
 }
 
+/// `<data dir>/themes`: the theme files a person (or Neko) adds.
+fn themes_dir() -> std::path::PathBuf {
+    neko_protocol::support_dir().join("themes")
+}
+
+fn themes_listing() -> Response {
+    let dir = themes_dir();
+    let listing = neko_core::appearance::list_user_themes(&dir);
+    Response::Themes { dir: dir.to_string_lossy().into_owned(), themes: listing.themes, problems: listing.problems }
+}
+
 fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> Response {
     match request {
         Request::McpBridge(request) => match state.workbench.mcp.bridge(request) {
@@ -975,6 +986,35 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
                 Err(e) => error_response(e),
             }
         }
+
+        Request::GetAppearance => {
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match neko_core::appearance::get_appearance(&db) {
+                Ok(a) => Response::Appearance { mode: a.mode, light: a.light, dark: a.dark, stored: a.stored },
+                Err(e) => error_response(e),
+            }
+        }
+
+        Request::SetAppearance { mode, light, dark } => {
+            let saved = {
+                let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                neko_core::appearance::set_appearance(&db, mode.as_deref(), light.as_deref(), dark.as_deref())
+            };
+            match saved {
+                Ok(a) => {
+                    broadcast(state, &Event::AppearanceChanged { mode: a.mode.clone(), light: a.light.clone(), dark: a.dark.clone() });
+                    Response::Appearance { mode: a.mode, light: a.light, dark: a.dark, stored: a.stored }
+                }
+                Err(message) => Response::Error { message },
+            }
+        }
+
+        Request::ListThemes => themes_listing(),
+
+        Request::RemoveTheme { id } => match neko_core::appearance::remove_user_theme(&themes_dir(), &id) {
+            Ok(()) => themes_listing(),
+            Err(message) => Response::Error { message },
+        },
 
         Request::GetClipboardHistoryEnabled => {
             let db = state

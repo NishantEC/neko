@@ -15,6 +15,7 @@ pub mod machine;
 pub mod agent_catalog;
 pub mod answers;
 pub mod agents;
+pub mod appearance;
 pub mod apps;
 pub mod ask;
 pub mod cancel;
