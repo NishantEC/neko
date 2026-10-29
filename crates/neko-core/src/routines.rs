@@ -113,7 +113,8 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
         let count: usize = dropped
             .iter()
             .map(|r| match r.id.starts_with("dropped-") {
-                true if r.needs_you.iter().any(|i| !i.done) => r.text.parse().unwrap_or(1),
+                // Summaries from before the count was kept say it in the title.
+                true if r.needs_you.iter().any(|i| !i.done) => r.text.parse().ok().or_else(|| r.needs_you[0].title.split(' ').next()?.parse().ok()).unwrap_or(1),
                 true => 0,
                 false => r.needs_you.iter().filter(|i| !i.done).count(),
             })

@@ -292,7 +292,11 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
                 // blocking every routine.
                 let mut saved = match core::load_state(&db, &r.id) {
                     Ok(saved) => saved,
-                    Err(error) if error.starts_with("Cannot read") => RoutineState::default(),
+                    Err(error) if error.starts_with("Cannot read") => {
+                        let fresh = RoutineState::default();
+                        core::save_state(&db, &r.id, &fresh)?;
+                        fresh
+                    }
                     Err(error) => return Err(error),
                 };
                 if saved.running {
@@ -351,13 +355,10 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
         };
         let now = neko_core::workbench::now_ms();
         routine_state.running = false;
-        if let Some(ok) = pushed {
-            // The run (and any alert in it) is recorded; only its state was
-            // lost. Count it the way run_body did, without a second alert.
-            routine_state.failures = if ok { 0 } else { routine_state.failures.saturating_add(1) };
-            routine_state.last_run_ms = Some(now);
-            routine_state.next_due_ms = Some(retry_or_next(&routine.cadence, &routine_state, now));
-            core::save_state(&db, &routine.id, &routine_state)?;
+        if let Some(intended) = pushed {
+            // The run (and any alert in it) is recorded; only saving its
+            // state failed. Save what the run meant to: memory, counts, due.
+            core::save_state(&db, &routine.id, &intended)?;
             return result;
         }
         routine_state.failures = routine_state.failures.saturating_add(1);
@@ -376,8 +377,9 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
     result
 }
 
-/// `pushed` becomes `Some(ok)` once the run's row is saved.
-fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, pushed: &mut Option<bool>) -> Result<(), String> {
+/// Once the run's row is saved, `pushed` holds the state the run is about to
+/// save, so a failed save can be retried by `run_one` as it was meant.
+fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, pushed: &mut Option<RoutineState>) -> Result<(), String> {
     let started = neko_core::workbench::now_ms();
     let (orders, memory) = {
         let db = db(state);
@@ -458,10 +460,10 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
     };
     let ok = run.ok;
     core::push_run(&db, &routine.id, run)?;
-    *pushed = Some(ok);
     routine_state.running = false;
     routine_state.last_run_ms = Some(finished);
     routine_state.next_due_ms = Some(next_due.unwrap_or_else(|| core::next_due_local(&current.cadence, routine_state.quiet_streak, finished)));
+    *pushed = Some(routine_state.clone());
     core::save_state(&db, &routine.id, &routine_state)?;
     drop(db);
     if ok && !routine_state.paseo_paused {
