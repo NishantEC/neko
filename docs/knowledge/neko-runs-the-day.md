@@ -55,6 +55,15 @@ and "there is no restriction. It can do whatever it wants". Design:
   (`workbench::load_workspaces`), and discovery is cached on the mtimes of
   `~/.claude.json` and `~/Documents` (10 min at most). A half-written
   `~/.claude.json` keeps the previous result.
+- **What the first day showed (2026-10-30):** the personal scope reported
+  work-org PRs (its "my PRs" crossed orgs), so its hint now limits it to
+  repositories NishantEC owns; two routines raised the same item, so an item
+  whose title matches an open one in the same workspace is dropped
+  (`open_titles`); the PR sweep listed conflicts instead of rebasing, so it
+  is told to work in a /tmp worktree, resolve clear conflicts, test, push and
+  request reviewers from history. Briefs and sweeps get 30 minutes
+  (`LONG_RUN_TIMEOUT`). Seeded instructions are versioned
+  (`INSTRUCTIONS_VERSION`) and rewritten when it rises.
 - **Standing orders** are per workspace. The default
   (`DEFAULT_STANDING_ORDERS`) is "act without asking, report after". They go
   into every run's prompt.

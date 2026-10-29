@@ -316,7 +316,7 @@ fn scope_hint(scope: &str, personal: bool) -> &'static str {
         "Acme" => "Slack is slack-work. Email and calendar are Gmail and Google Calendar through google-work. Issues are in Linear team HEA and Asana. GitHub org Acme; Asha's GitHub login is NishantEC.",
         "Client B" => "Issues are in Linear (linear-b). GitHub: the org that owns the repos in this folder (check `git remote -v`); Asha's GitHub login is NishantEC.",
         "Sibling app" => "This is Asha's own product, Sibling app (ui-kit). Issues are in Linear (linear). GitHub repo is the one in this folder.",
-        _ if personal => "Personal: Gmail and Google Calendar through google-personal, GitHub user NishantEC, Linear (linear-personal).",
+        _ if personal => "Personal: Gmail and Google Calendar through google-personal, Linear (linear-personal), and only GitHub repositories owned by NishantEC himself. Work in the Acme and client-a-ai organizations (and any other employer or client org) belongs to its own scope: never report or act on it here.",
         _ => "Use the connections configured for this folder; find the GitHub org with `git remote -v` in its repos. Asha's GitHub login is NishantEC.",
     }
 }
@@ -327,7 +327,7 @@ pub fn seed_instruction(kind: RoutineKind, scope: &str, personal: bool) -> Strin
 }
 
 /// Bumped when seeded instructions change; older ones are rewritten once.
-pub const INSTRUCTIONS_VERSION: u32 = 2;
+pub const INSTRUCTIONS_VERSION: u32 = 3;
 
 fn instruction(kind: RoutineKind, scope: &str, personal: bool) -> String {
     let hint = scope_hint(scope, personal);
@@ -349,7 +349,8 @@ Act on what you can first: answer review comments, fix or re-run failing CI, reb
             )
         }
         RoutineKind::PrSweep => format!(
-            "Pull request and branch sweep. {hint} Go through Asha's open pull requests and his remote branches: rebase stale ones on their base, fix failing CI when the fix is clear, address review comments, nudge reviewers on PRs waiting more than two days, and close PRs and delete branches that are merged elsewhere, superseded or dead. Do it, then report each action in did."
+            "Pull request and branch sweep. {hint} Go through Asha's open pull requests and his remote branches: rebase stale ones on their base, fix failing CI when the fix is clear, address review comments, nudge reviewers on PRs waiting more than two days, and close PRs and delete branches that are merged elsewhere, superseded or dead.\n\
+Do the work, do not just list it. Work in a temporary git worktree (`git worktree add` under /tmp, removed when done) so Asha's checkouts are never touched. Resolve conflicts yourself when the right result is clear from both sides, run the tests that cover the changed files, and push. When a PR has no reviewer, request one from CODEOWNERS or whoever reviewed that repository's recent PRs. Only a conflict whose right resolution needs a product decision goes in needs_you, with what the choice is. Report each action in did."
         ),
         RoutineKind::Custom => String::new(),
     }

@@ -19,6 +19,8 @@ static BUSY: AtomicBool = AtomicBool::new(false);
 static SEEDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const TICK: Duration = Duration::from_secs(30);
 const RUN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// Briefs and sweeps rebase, fix and test: they get longer.
+const LONG_RUN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const KEEP_TEXT: usize = 4000;
 const VIEW_RUNS: usize = 10;
 const PASEO_TIMEOUT: Duration = Duration::from_secs(20);
@@ -357,6 +359,21 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+fn title_key(title: &str) -> String {
+    title.trim().to_lowercase()
+}
+
+/// Titles of items still open anywhere in this workspace's routines.
+fn open_titles(db: &neko_core::Db, workspace_id: &str) -> Result<std::collections::HashSet<String>, String> {
+    let mut titles = std::collections::HashSet::new();
+    for routine in core::load(db)?.routines.iter().filter(|r| r.workspace_id == workspace_id) {
+        for run in core::load_runs(db, &routine.id).unwrap_or_default() {
+            titles.extend(run.needs_you.iter().filter(|i| !i.done).map(|i| title_key(&i.title)));
+        }
+    }
+    Ok(titles)
+}
+
 /// After a failure: a daily routine's first failure retries in 30 minutes,
 /// anything else follows its cadence.
 fn retry_or_next(cadence: &Cadence, state: &RoutineState, now: i64) -> i64 {
@@ -424,7 +441,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
                     directory: folder,
                     prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso()),
                     writable: true,
-                    timeout: RUN_TIMEOUT,
+                    timeout: if matches!(routine.kind, neko_protocol::routines::RoutineKind::Messages) { RUN_TIMEOUT } else { LONG_RUN_TIMEOUT },
                     runtime: AgentRuntime {
                         provider: "claude".into(),
                         model: if routine.model.is_empty() { "sonnet".into() } else { routine.model.clone() },
@@ -453,6 +470,9 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
     let run = match outcome {
         Ok(parsed) => {
             let mut needs_you = parsed.needs_you;
+            // Another routine in this scope may already have raised it.
+            let open = open_titles(&db, &routine.workspace_id)?;
+            needs_you.retain(|item| !open.contains(&title_key(&item.title)));
             if !needs_you.is_empty() {
                 let first = core::reserve_seq(&db, needs_you.len() as u64)?;
                 for (offset, item) in needs_you.iter_mut().enumerate() {
@@ -706,6 +726,21 @@ mod tests {
         // Run now still runs it at night.
         let states = vec![("m".into(), RoutineState { run_requested: true, ..Default::default() })];
         assert_eq!(pick_due(&store, &states, 100, &|_| false).as_deref(), Some("m"));
+    }
+
+    #[test]
+    fn open_titles_cover_the_whole_workspace() {
+        let db = neko_core::Db::open_in_memory().unwrap();
+        let store = Store { routines: vec![routine("a", true), routine("b", true), Routine { workspace_id: "other".into(), ..routine("c", true) }], ..Default::default() };
+        core::save_definitions(&db, &store).unwrap();
+        let item = |title: &str, done: bool| neko_protocol::routines::NeedsYou { seq: 1, title: title.into(), detail: String::new(), link: None, done };
+        let run = |rid: &str, items| RoutineRun { id: "x".into(), routine_id: rid.into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: items, error: None, text: String::new() };
+        core::push_run(&db, "a", run("a", vec![item("Gmail not signed in", false), item("Old", true)])).unwrap();
+        core::push_run(&db, "c", run("c", vec![item("Elsewhere", false)])).unwrap();
+        let titles = open_titles(&db, "w").unwrap();
+        assert!(titles.contains(&title_key("  gmail NOT signed in ")));
+        assert!(!titles.contains("old"));
+        assert!(!titles.contains("elsewhere"));
     }
 
     #[test]
