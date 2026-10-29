@@ -24,6 +24,7 @@ const VIEW_RUNS: usize = 10;
 const PASEO_TIMEOUT: Duration = Duration::from_secs(20);
 const DISCOVERY_MAX_AGE: Duration = Duration::from_secs(600);
 const DAILY_RETRY_MS: i64 = 30 * 60 * 1000;
+const GIVE_UP_FOR: Duration = Duration::from_secs(3600);
 
 fn db(state: &AppState) -> MutexGuard<'_, neko_core::Db> {
     state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -65,15 +66,18 @@ fn discover_cached(home: &Path) -> Vec<ScopeProposal> {
 
 /// Scope folders Neko could not make a workspace for, so it stops trying
 /// until the daemon restarts instead of creating one every tick.
-static GAVE_UP: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// Tried again after `GIVE_UP_FOR`, in case the error was passing.
+static GAVE_UP: std::sync::Mutex<Vec<(String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
 
 fn gave_up(folder: &str) -> bool {
-    GAVE_UP.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|f| f == folder)
+    let mut list = GAVE_UP.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    list.retain(|(_, at)| at.elapsed() < GIVE_UP_FOR);
+    list.iter().any(|(f, _)| f == folder)
 }
 
 fn give_up(folder: &str, why: &str) {
-    eprintln!("routines: not making a scope of {folder}: {why}");
-    GAVE_UP.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(folder.to_string());
+    eprintln!("routines: not making a scope of {folder} for now: {why}");
+    GAVE_UP.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((folder.to_string(), std::time::Instant::now()));
 }
 
 /// Scopes on disk matched to workspaces, plus every other workspace as a
@@ -141,10 +145,11 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
     }
     // Scope folders found on disk, and the home workspace, get routines; a
     // workspace made for ticket work does not start acting on its own.
-    let home_folder = home().to_string_lossy().trim_end_matches('/').to_string();
+    let canonical = |path: &str| std::fs::canonicalize(path).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| path.trim_end_matches('/').to_string());
+    let home_folder = canonical(&home().to_string_lossy());
     let fresh: Vec<ScopeProposal> = scopes
         .into_iter()
-        .filter(|s| s.discovered || s.folders.iter().any(|f| f.trim_end_matches('/') == home_folder))
+        .filter(|s| s.discovered || s.folders.iter().any(|f| canonical(f) == home_folder))
         .filter(|s| s.workspace_id.as_ref().is_some_and(|id| !store.seeded_workspaces.contains(id)))
         .collect();
     if fresh.is_empty() && store.seeded {
@@ -307,17 +312,27 @@ fn retry_or_next(cadence: &Cadence, state: &RoutineState, now: i64) -> i64 {
 
 /// Runs the routine; whatever happens, the routine is not left "running".
 fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -> Result<(), String> {
-    let result = run_body(state, routine, scope);
+    let mut pushed = false;
+    let result = run_body(state, routine, scope, &mut pushed);
     if let Err(error) = &result {
         let db = db(state);
-        // An unreadable row is rewritten too: nothing may stay "running".
         let mut routine_state = match core::load_state(&db, &routine.id) {
             Ok(saved) if !saved.running => return result,
             Ok(saved) => saved,
-            Err(_) => RoutineState::default(),
+            // Only a row that no longer decodes is replaced; a database that
+            // cannot be read now cannot be written either.
+            Err(read) if read.starts_with("Cannot read") => RoutineState::default(),
+            Err(_) => return result,
         };
         let now = neko_core::workbench::now_ms();
         routine_state.running = false;
+        if pushed {
+            // The run (and any alert in it) is recorded; only its state was lost.
+            routine_state.last_run_ms = Some(now);
+            routine_state.next_due_ms = Some(core::next_due_local(&routine.cadence, routine_state.quiet_streak, now));
+            core::save_state(&db, &routine.id, &routine_state)?;
+            return result;
+        }
         routine_state.failures = routine_state.failures.saturating_add(1);
         routine_state.last_run_ms = Some(now);
         routine_state.next_due_ms = Some(retry_or_next(&routine.cadence, &routine_state, now));
@@ -334,7 +349,7 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
     result
 }
 
-fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -> Result<(), String> {
+fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, pushed: &mut bool) -> Result<(), String> {
     let started = neko_core::workbench::now_ms();
     let (orders, memory) = {
         let db = db(state);
@@ -415,6 +430,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -
     };
     let ok = run.ok;
     core::push_run(&db, &routine.id, run)?;
+    *pushed = true;
     routine_state.running = false;
     routine_state.last_run_ms = Some(finished);
     routine_state.next_due_ms = Some(next_due.unwrap_or_else(|| core::next_due_local(&current.cadence, routine_state.quiet_streak, finished)));

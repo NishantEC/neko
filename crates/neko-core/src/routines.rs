@@ -99,7 +99,26 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
     runs.insert(0, run);
     let older = runs.split_off(runs.len().min(KEEP_RUNS));
     runs.extend(older.into_iter().filter(|run| run.needs_you.iter().any(|item| !item.done)));
-    runs.truncate(MAX_RUNS);
+    if runs.len() > MAX_RUNS {
+        // Never drop open items silently: one item says how many went.
+        let dropped = runs.split_off(MAX_RUNS - 1);
+        let open: Vec<&NeedsYou> = dropped.iter().flat_map(|r| r.needs_you.iter()).filter(|i| !i.done).collect();
+        if let Some(oldest) = open.iter().map(|i| i.seq).min() {
+            let last = dropped.last().map(|r| r.started_ms).unwrap_or_default();
+            runs.push(RoutineRun {
+                id: format!("dropped-{oldest}"),
+                routine_id: id.to_string(),
+                started_ms: last,
+                finished_ms: Some(last),
+                ok: true,
+                quiet: false,
+                did: Vec::new(),
+                needs_you: vec![NeedsYou { seq: oldest, title: format!("{} older items were not handled", open.len()), detail: "They were too old to keep. Check this routine's sources if any still matter.".into(), link: None, done: false }],
+                error: None,
+                text: String::new(),
+            });
+        }
+    }
     save_runs(db, id, &runs)
 }
 
@@ -441,7 +460,11 @@ mod tests {
         for i in 80..400 {
             push_run(&db, "r", run(i, true)).unwrap();
         }
-        assert_eq!(load_runs(&db, "r").unwrap().len(), MAX_RUNS);
+        let runs = load_runs(&db, "r").unwrap();
+        assert_eq!(runs.len(), MAX_RUNS);
+        let summary = runs.last().unwrap();
+        assert!(summary.needs_you[0].title.ends_with("older items were not handled"));
+        assert_eq!(summary.needs_you[0].seq, 1);
     }
 
     #[test]
