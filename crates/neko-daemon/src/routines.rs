@@ -39,6 +39,21 @@ fn claude_json(home: &Path) -> Option<serde_json::Value> {
     serde_json::from_str(&text).ok()
 }
 
+/// ~/.claude.json, retried briefly: Claude Code rewrites it often, and a run
+/// started on a half-written copy would miss its scope's servers.
+fn claude_json_settled(home: &Path) -> Option<serde_json::Value> {
+    for _ in 0..5 {
+        if let Some(value) = claude_json(home) {
+            return Some(value);
+        }
+        if !home.join(".claude.json").exists() {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    None
+}
+
 /// Discovery walks ~/Documents and parses ~/.claude.json (which Claude Code
 /// rewrites often): reuse the last result while neither changed, for at most
 /// ten minutes. A half-written ~/.claude.json keeps the previous result.
@@ -157,11 +172,24 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
     // workspace made for ticket work does not start acting on its own.
     let canonical = |path: &str| std::fs::canonicalize(path).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| path.trim_end_matches('/').to_string());
     let home_folder = canonical(&home().to_string_lossy());
+    let all = scopes.clone();
     let fresh: Vec<ScopeProposal> = scopes
         .into_iter()
         .filter(|s| s.discovered || s.folders.iter().any(|f| canonical(f) == home_folder))
         .filter(|s| s.workspace_id.as_ref().is_some_and(|id| !store.seeded_workspaces.contains(id)))
         .collect();
+    // Seeded instructions written by an older build are rewritten once,
+    // unless the owner edited them (a custom routine keeps its own).
+    if store.instructions_version < core::INSTRUCTIONS_VERSION {
+        for routine in store.routines.iter_mut().filter(|r| r.kind != neko_protocol::routines::RoutineKind::Custom) {
+            if let Some(scope) = all.iter().find(|s| s.workspace_id.as_deref() == Some(routine.workspace_id.as_str())) {
+                let personal = scope.folders.iter().any(|f| canonical(f) == home_folder);
+                routine.instruction = core::seed_instruction(routine.kind, &scope.name, personal);
+            }
+        }
+        store.instructions_version = core::INSTRUCTIONS_VERSION;
+        core::save_definitions(&db, &store)?;
+    }
     if fresh.is_empty() && store.seeded {
         return Ok(());
     }
@@ -404,7 +432,12 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
                     },
                 };
                 let cancel = AtomicBool::new(false);
-                match neko_core::native_runner::run(&spec, &cancel, |_| {}) {
+                // Only this scope's MCP servers: no claude.ai connectors and
+                // nothing configured for another scope.
+                let home = home();
+                let personal = std::fs::canonicalize(&spec.directory).ok() == std::fs::canonicalize(&home).ok();
+                let config = neko_core::scopes::mcp_config(&scope.folders, claude_json_settled(&home).as_ref(), personal);
+                match neko_core::native_runner::run_claude_scoped(&spec, &config, &cancel, |_| {}) {
                     Ok(text) => core::parse_reply(&text).map_err(|error| (error, text)),
                     Err(error) => Err((error, String::new())),
                 }

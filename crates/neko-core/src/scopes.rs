@@ -130,6 +130,37 @@ pub fn discover(home: &Path, claude_json: Option<&Value>) -> Vec<ScopeProposal> 
     scopes
 }
 
+/// The MCP servers a routine in this scope gets, as `{"mcpServers": …}`:
+/// for each folder its `.mcp.json`, then its `~/.claude.json` entry (later
+/// wins, as in Claude Code). Only the `personal` (home) scope also gets the
+/// global servers in `~/.claude.json`; other scopes never see them.
+pub fn mcp_config(folders: &[String], claude_json: Option<&Value>, personal: bool) -> Value {
+    let mut servers = serde_json::Map::new();
+    let mut take = |value: &Value| {
+        if let Some(map) = value.as_object() {
+            for (name, config) in map {
+                servers.insert(name.clone(), config.clone());
+            }
+        }
+    };
+    if personal {
+        if let Some(global) = claude_json {
+            take(&global["mcpServers"]);
+        }
+    }
+    for folder in folders {
+        if let Ok(text) = std::fs::read_to_string(Path::new(folder).join(".mcp.json")) {
+            if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                take(&value["mcpServers"]);
+            }
+        }
+        if let Some(config) = claude_json {
+            take(&config["projects"][folder.as_str()]["mcpServers"]);
+        }
+    }
+    serde_json::json!({ "mcpServers": servers })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,6 +229,25 @@ mod tests {
         let scopes = discover(home.path(), Some(&claude));
         assert_eq!(scopes.len(), 1);
         assert_eq!(scopes[0].name, "Client B");
+    }
+
+    #[test]
+    fn scope_config_has_only_its_own_servers() {
+        let home = home();
+        let clientco = home.path().join("Documents/clientco");
+        write(&clientco.join(".mcp.json"), r#"{"mcpServers":{"slack-client-a":{"type":"http"},"google-client-a":{"command":"uvx"}}}"#);
+        let claude = serde_json::json!({
+            "mcpServers": {"linear-personal": {}},
+            "projects": {clientco.to_string_lossy(): {"mcpServers": {"google-client-a": {"command": "local"}}}}
+        });
+        let folders = vec![clientco.to_string_lossy().to_string()];
+        let config = mcp_config(&folders, Some(&claude), false);
+        let servers = config["mcpServers"].as_object().unwrap();
+        assert_eq!(servers.len(), 2);
+        assert!(!servers.contains_key("linear-personal"));
+        assert_eq!(servers["google-client-a"]["command"], "local");
+        let personal = mcp_config(&folders, Some(&claude), true);
+        assert!(personal["mcpServers"].as_object().unwrap().contains_key("linear-personal"));
     }
 
     #[test]

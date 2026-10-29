@@ -35,6 +35,9 @@ pub struct Store {
     /// Workspaces that already got their routines; a new scope gets them once.
     #[serde(default)]
     pub seeded_workspaces: BTreeSet<String>,
+    /// `INSTRUCTIONS_VERSION` the seeded instructions were written with.
+    #[serde(default)]
+    pub instructions_version: u32,
 }
 
 impl Store {
@@ -232,7 +235,7 @@ pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memo
     let memory = if memory.is_null() { "{}".to_string() } else { memory.to_string() };
     format!(
         "You are Neko, Asha's chief of staff, running the \"{name}\" routine for the {scope_name} scope.\n\
-Working folder: {folder}. Scope-level connections here: {servers}. Claude connectors (Gmail, Google Calendar, Drive, Slack) may also be available.\n\
+Working folder: {folder}. Your MCP servers are exactly this scope's: {servers}. Nothing from other scopes is loaded; if a source this routine needs is missing or not signed in, say so in needs_you.\n\
 Now (UTC): {now_iso}\n\n\
 {instruction}\n\n\
 Standing orders from Asha:\n{orders}\n\n\
@@ -309,14 +312,22 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
 /// Where each scope's work lives, so seeded instructions can be specific.
 fn scope_hint(scope: &str, personal: bool) -> &'static str {
     match scope {
-        "Client A" => "Slack is slack-client-a. Jira is project KAN (atlassian). GitHub org client-a-ai (repos triage, support-fe, triage-admin, BFF); Asha's GitHub login is NishantEC.",
-        "Acme" => "Slack is slack-work. Issues are in Linear team HEA and Asana. GitHub org Acme; Asha's GitHub login is NishantEC.",
+        "Client A" => "Slack is slack-client-a. Email and calendar are Gmail and Google Calendar through google-client-a. Jira is project KAN (atlassian). GitHub org client-a-ai (repos triage, support-fe, triage-admin, BFF); Asha's GitHub login is NishantEC.",
+        "Acme" => "Slack is slack-work. Email and calendar are Gmail and Google Calendar through google-work. Issues are in Linear team HEA and Asana. GitHub org Acme; Asha's GitHub login is NishantEC.",
         "Client B" => "Issues are in Linear (linear-b). GitHub: the org that owns the repos in this folder (check `git remote -v`); Asha's GitHub login is NishantEC.",
         "Sibling app" => "This is Asha's own product, Sibling app (ui-kit). Issues are in Linear (linear). GitHub repo is the one in this folder.",
-        _ if personal => "Personal: Gmail and Google Calendar (Claude connectors), GitHub user NishantEC, Linear (linear-personal).",
+        _ if personal => "Personal: Gmail and Google Calendar through google-personal, GitHub user NishantEC, Linear (linear-personal).",
         _ => "Use the connections configured for this folder; find the GitHub org with `git remote -v` in its repos. Asha's GitHub login is NishantEC.",
     }
 }
+
+/// The instruction a seeded routine of this kind gets in this scope.
+pub fn seed_instruction(kind: RoutineKind, scope: &str, personal: bool) -> String {
+    instruction(kind, scope, personal)
+}
+
+/// Bumped when seeded instructions change; older ones are rewritten once.
+pub const INSTRUCTIONS_VERSION: u32 = 2;
 
 fn instruction(kind: RoutineKind, scope: &str, personal: bool) -> String {
     let hint = scope_hint(scope, personal);

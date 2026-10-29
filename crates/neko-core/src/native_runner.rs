@@ -252,6 +252,29 @@ fn run_with_executable(
     run_configured(executable, spec, None, cancel, on_event)
 }
 
+/// A Claude Code run with only `mcp_config`'s servers (`{"mcpServers": …}`):
+/// no claude.ai connectors and no MCP configuration from anywhere else.
+/// Routines use it so each scope sees its own connections and nothing more.
+pub fn run_claude_scoped(
+    spec: &RunSpec,
+    mcp_config: &serde_json::Value,
+    cancel: &AtomicBool,
+    mut on_event: impl FnMut(String),
+) -> Result<String, String> {
+    crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
+    if spec.runtime.provider != "claude" {
+        return Err("A scoped MCP run needs Claude Code".into());
+    }
+    if spec.prompt.trim().is_empty() || spec.prompt.len() > MAX_PROMPT {
+        return Err(format!("Task prompt must contain between 1 and {MAX_PROMPT} bytes"));
+    }
+    let directory = spec.directory.canonicalize().map_err(|e| format!("Task directory unavailable: {e}"))?;
+    if !directory.is_dir() {
+        return Err("Task directory is not a directory".into());
+    }
+    cli_workers::run_with(cli_workers::Agent::Claude, spec, &directory, None, cancel, &mut on_event, false, false, Some(mcp_config))
+}
+
 /// Extraction has no tool authority, no MCP bridge, and only supplied text.
 pub fn extract(spec: &RunSpec, cancel: &AtomicBool) -> Result<String, String> {
     run_configured_mode(&resolve_codex()?, spec, None, cancel, |_| {}, true)

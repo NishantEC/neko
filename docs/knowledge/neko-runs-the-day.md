@@ -15,12 +15,20 @@ and "there is no restriction. It can do whatever it wants". Design:
   parent's servers, so it is not a duplicate. Each scope becomes a workspace
   (created once by `routines::ensure_seeded`). Every other workspace,
   "Asha" (`/Users/example`) included, is a scope of its own.
-- **Connections are not imported.** A routine runs Claude Code with its
-  working directory in the scope folder (`native_runner::run`, `provider:
-  "claude"`, `writable: true`, so `bypassPermissions` with the owner's full
-  setup), so it gets that folder's `.mcp.json`, the existing sign-ins and the
-  claude.ai connectors. This is how the Paseo jobs worked. Nothing has to be
-  signed in again inside Neko.
+- **Connections are not imported, and each run is scoped** (2026-10-29,
+  owner: Gmail comes through an MCP server per scope, never the claude.ai
+  connectors, which are not scoped). A routine runs Claude Code in the scope
+  folder via `native_runner::run_claude_scoped`: `--strict-mcp-config` with a
+  config built by `scopes::mcp_config` (each folder's `.mcp.json`, then its
+  `~/.claude.json` project entry; the home scope alone also gets the global
+  `~/.claude.json` servers). It is written 0600 into the run's private
+  scratch folder and deleted with it. Existing sign-ins still work (verified:
+  slack-client-a loaded this way read the profile without re-auth). Email and
+  calendar are `workspace-mcp` with `--tools … gmail calendar`: `google-client-a`,
+  `google-work`, and `google-personal` (home scope, `~/.google/`, registered
+  with `claude mcp add-json -s local` from `~`). A global server such as
+  `sentry` therefore reaches only the home scope; put it in a scope's
+  `.mcp.json` for that scope's routines to use it.
 - **Routines** (`neko_core::routines`, daemon `routines.rs`): three per scope,
   seeded once: Messages (every 20 min for Client A/Acme, 60
   elsewhere, 08–23, back-off ×2/×4 while quiet), Morning brief (10:30) and PR

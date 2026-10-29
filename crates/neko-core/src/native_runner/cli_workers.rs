@@ -121,6 +121,14 @@ pub(crate) fn sandbox_profile(agent: Agent, home: &Path, temp: &Path) -> Result<
 }
 
 
+/// Writes a file only its owner can read: it may hold MCP credentials.
+fn write_private(path: &Path, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).map_err(|e| format!("Cannot write the scoped MCP config: {e}"))?;
+    file.write_all(text.as_bytes()).map_err(|e| format!("Cannot write the scoped MCP config: {e}"))
+}
+
 pub(crate) fn claude_args(spec: &RunSpec, bridge: Option<&BridgeConfig>, extraction: bool, stream_text: bool) -> Result<Vec<String>, String> {
     crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
     let mut args: Vec<String> = ["-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--permission-mode"]
@@ -400,6 +408,7 @@ fn worker_command(agent: Agent, executable: &Path, writable: bool, home: &Path, 
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run(
     agent: Agent,
     spec: &RunSpec,
@@ -409,6 +418,24 @@ pub(crate) fn run(
     on_event: &mut dyn FnMut(String),
     extraction: bool,
     stream_text: bool,
+) -> Result<String, String> {
+    run_with(agent, spec, directory, bridge, cancel, on_event, extraction, stream_text, None)
+}
+
+/// `run`, plus `scoped_mcp`: a Claude run loads exactly these MCP servers
+/// (`{"mcpServers": …}`) and none of the user's other configuration or
+/// claude.ai connectors. The file lives in the run's private scratch folder.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_with(
+    agent: Agent,
+    spec: &RunSpec,
+    directory: &Path,
+    bridge: Option<&BridgeConfig>,
+    cancel: &AtomicBool,
+    on_event: &mut dyn FnMut(String),
+    extraction: bool,
+    stream_text: bool,
+    scoped_mcp: Option<&serde_json::Value>,
 ) -> Result<String, String> {
     crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
     if extraction && (spec.writable || bridge.is_some()) {
@@ -432,6 +459,11 @@ pub(crate) fn run(
     match agent {
         Agent::Claude => {
             command.args(claude_args(spec, bridge, extraction, stream_text)?);
+            if let Some(config) = scoped_mcp {
+                let path = scratch.join("scoped-mcp.json");
+                write_private(&path, &config.to_string())?;
+                command.args(["--strict-mcp-config", "--mcp-config"]).arg(&path);
+            }
         }
         Agent::OpenCode => {
             let config = scratch.join("opencode.json");
