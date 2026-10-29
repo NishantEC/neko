@@ -95,7 +95,13 @@ pub fn save_runs(db: &crate::Db, id: &str, runs: &[RoutineRun]) -> Result<(), St
 
 /// Keeps the newest `KEEP_RUNS`, and any older run with an item still open.
 pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String> {
-    let mut runs = load_runs(db, id)?;
+    // A runs row that no longer decodes starts over instead of losing every
+    // later run (and its alerts).
+    let mut runs = match load_runs(db, id) {
+        Ok(runs) => runs,
+        Err(error) if error.starts_with("Cannot read") => Vec::new(),
+        Err(error) => return Err(error),
+    };
     runs.insert(0, run);
     let older = runs.split_off(runs.len().min(KEEP_RUNS));
     runs.extend(older.into_iter().filter(|run| run.needs_you.iter().any(|item| !item.done)));
@@ -103,6 +109,15 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
         // Never drop open items silently: one item says how many went.
         let dropped = runs.split_off(MAX_RUNS - 1);
         let open: Vec<&NeedsYou> = dropped.iter().flat_map(|r| r.needs_you.iter()).filter(|i| !i.done).collect();
+        // An earlier summary stands for its own count (kept in `text`).
+        let count: usize = dropped
+            .iter()
+            .map(|r| match r.id.starts_with("dropped-") {
+                true if r.needs_you.iter().any(|i| !i.done) => r.text.parse().unwrap_or(1),
+                true => 0,
+                false => r.needs_you.iter().filter(|i| !i.done).count(),
+            })
+            .sum();
         if let Some(oldest) = open.iter().map(|i| i.seq).min() {
             let last = dropped.last().map(|r| r.started_ms).unwrap_or_default();
             runs.push(RoutineRun {
@@ -113,9 +128,9 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
                 ok: true,
                 quiet: false,
                 did: Vec::new(),
-                needs_you: vec![NeedsYou { seq: oldest, title: format!("{} older items were not handled", open.len()), detail: "They were too old to keep. Check this routine's sources if any still matter.".into(), link: None, done: false }],
+                needs_you: vec![NeedsYou { seq: oldest, title: format!("{count} older items were not handled"), detail: "They were too old to keep. Check this routine's sources if any still matter.".into(), link: None, done: false }],
                 error: None,
-                text: String::new(),
+                text: count.to_string(),
             });
         }
     }
@@ -463,8 +478,18 @@ mod tests {
         let runs = load_runs(&db, "r").unwrap();
         assert_eq!(runs.len(), MAX_RUNS);
         let summary = runs.last().unwrap();
-        assert!(summary.needs_you[0].title.ends_with("older items were not handled"));
+        // 321 runs with an open item; 199 are kept, so 122 were dropped.
+        assert_eq!(summary.needs_you[0].title, "122 older items were not handled");
         assert_eq!(summary.needs_you[0].seq, 1);
+    }
+
+    #[test]
+    fn corrupt_runs_row_starts_over() {
+        let db = crate::Db::open_in_memory().unwrap();
+        db.set_setting(&runs_key("r"), "{not json").unwrap();
+        let run = RoutineRun { id: "1".into(), routine_id: "r".into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: vec![], error: None, text: String::new() };
+        push_run(&db, "r", run).unwrap();
+        assert_eq!(load_runs(&db, "r").unwrap().len(), 1);
     }
 
     #[test]

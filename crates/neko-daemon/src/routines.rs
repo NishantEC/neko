@@ -69,15 +69,25 @@ fn discover_cached(home: &Path) -> Vec<ScopeProposal> {
 /// Tried again after `GIVE_UP_FOR`, in case the error was passing.
 static GAVE_UP: std::sync::Mutex<Vec<(String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
 
+/// `None` means for good: retrying would only make another workspace.
+static GAVE_UP_FOR_GOOD: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
 fn gave_up(folder: &str) -> bool {
+    if GAVE_UP_FOR_GOOD.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|f| f == folder) {
+        return true;
+    }
     let mut list = GAVE_UP.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     list.retain(|(_, at)| at.elapsed() < GIVE_UP_FOR);
     list.iter().any(|(f, _)| f == folder)
 }
 
-fn give_up(folder: &str, why: &str) {
-    eprintln!("routines: not making a scope of {folder} for now: {why}");
-    GAVE_UP.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((folder.to_string(), std::time::Instant::now()));
+fn give_up(folder: &str, why: &str, for_good: bool) {
+    eprintln!("routines: not making a scope of {folder}{}: {why}", if for_good { "" } else { " for now" });
+    if for_good {
+        GAVE_UP_FOR_GOOD.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(folder.to_string());
+    } else {
+        GAVE_UP.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((folder.to_string(), std::time::Instant::now()));
+    }
 }
 
 /// Scopes on disk matched to workspaces, plus every other workspace as a
@@ -103,12 +113,12 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
                         (workspaces, folders) = (snapshot.workspaces, snapshot.workspace_folders);
                         let found = find(&workspaces, &folders);
                         if found.is_none() {
-                            give_up(&folder, "its workspace was created but cannot be matched");
+                            give_up(&folder, "its workspace was created but cannot be matched", true);
                         }
                         found
                     }
                     Err(error) => {
-                        give_up(&folder, &error);
+                        give_up(&folder, &error, false);
                         None
                     }
                 }
@@ -275,7 +285,22 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
         let states = store
             .routines
             .iter()
-            .map(|r| Ok((r.id.clone(), core::load_state(&db(state), &r.id)?)))
+            .map(|r| {
+                let db = db(state);
+                // BUSY is false, so nothing is running: a set flag is stale.
+                // A row that no longer decodes starts over rather than
+                // blocking every routine.
+                let mut saved = match core::load_state(&db, &r.id) {
+                    Ok(saved) => saved,
+                    Err(error) if error.starts_with("Cannot read") => RoutineState::default(),
+                    Err(error) => return Err(error),
+                };
+                if saved.running {
+                    saved.running = false;
+                    core::save_state(&db, &r.id, &saved)?;
+                }
+                Ok((r.id.clone(), saved))
+            })
             .collect::<Result<Vec<_>, String>>()?;
         let Some(id) = pick_due(&store, &states, now, &|cadence| core::in_window_local(cadence, now)) else { return Ok(()) };
         let routine = store.routines.iter().find(|r| r.id == id).cloned().ok_or("Routine vanished")?;
@@ -312,7 +337,7 @@ fn retry_or_next(cadence: &Cadence, state: &RoutineState, now: i64) -> i64 {
 
 /// Runs the routine; whatever happens, the routine is not left "running".
 fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -> Result<(), String> {
-    let mut pushed = false;
+    let mut pushed = None;
     let result = run_body(state, routine, scope, &mut pushed);
     if let Err(error) = &result {
         let db = db(state);
@@ -326,10 +351,12 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
         };
         let now = neko_core::workbench::now_ms();
         routine_state.running = false;
-        if pushed {
-            // The run (and any alert in it) is recorded; only its state was lost.
+        if let Some(ok) = pushed {
+            // The run (and any alert in it) is recorded; only its state was
+            // lost. Count it the way run_body did, without a second alert.
+            routine_state.failures = if ok { 0 } else { routine_state.failures.saturating_add(1) };
             routine_state.last_run_ms = Some(now);
-            routine_state.next_due_ms = Some(core::next_due_local(&routine.cadence, routine_state.quiet_streak, now));
+            routine_state.next_due_ms = Some(retry_or_next(&routine.cadence, &routine_state, now));
             core::save_state(&db, &routine.id, &routine_state)?;
             return result;
         }
@@ -349,7 +376,8 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
     result
 }
 
-fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, pushed: &mut bool) -> Result<(), String> {
+/// `pushed` becomes `Some(ok)` once the run's row is saved.
+fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, pushed: &mut Option<bool>) -> Result<(), String> {
     let started = neko_core::workbench::now_ms();
     let (orders, memory) = {
         let db = db(state);
@@ -430,7 +458,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
     };
     let ok = run.ok;
     core::push_run(&db, &routine.id, run)?;
-    *pushed = true;
+    *pushed = Some(ok);
     routine_state.running = false;
     routine_state.last_run_ms = Some(finished);
     routine_state.next_due_ms = Some(next_due.unwrap_or_else(|| core::next_due_local(&current.cadence, routine_state.quiet_streak, finished)));
