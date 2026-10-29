@@ -77,18 +77,19 @@ function useRoutines() {
 }
 
 /** The first `SHORT` items, and a toggle for the rest. */
-function ShortList<T>({ items, render, noun }: { items: T[]; render: (item: T) => ReactNode; noun: string }) {
+function ShortList<T>({ items, render, noun, inList = false }: { items: T[]; render: (item: T) => ReactNode; noun: string; inList?: boolean }) {
+  const More = inList ? "li" : "div";
   const [all, setAll] = useState(false);
   const shown = all ? items : items.slice(0, SHORT);
   return (
     <>
       {shown.map(render)}
       {items.length > SHORT ? (
-        <div className="px-6 py-2">
+        <More className="list-none px-6 py-2">
           <Button variant="ghost" size="sm" aria-expanded={all} onClick={() => setAll(!all)}>
             {all ? "Show fewer" : `Show ${items.length - SHORT} more ${noun}`}
           </Button>
-        </div>
+        </More>
       ) : null}
     </>
   );
@@ -328,6 +329,7 @@ function InboxBody() {
                       <ShortList
                         items={did}
                         noun="actions"
+                        inList
                         render={(d) => <li key={d.key} className="px-6 py-1 text-[13px] text-foreground/90"><span className="me-2 text-muted-foreground">{relativeTime(d.at, now)} · {d.name}</span>{d.line}</li>}
                       />
                     </ul>

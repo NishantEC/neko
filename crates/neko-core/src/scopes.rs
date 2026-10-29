@@ -123,6 +123,7 @@ pub fn discover(home: &Path, claude_json: Option<&Value>) -> Vec<ScopeProposal> 
             servers,
             problems,
             workspace_id: None,
+            discovered: true,
         });
     }
     scopes.sort_by(|a, b| a.name.cmp(&b.name));

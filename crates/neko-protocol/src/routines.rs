@@ -105,6 +105,9 @@ pub struct ScopeProposal {
     pub problems: Vec<String>,
     #[serde(default)]
     pub workspace_id: Option<String>,
+    /// Found on disk by `neko_core::scopes`, not just an existing workspace.
+    #[serde(default)]
+    pub discovered: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

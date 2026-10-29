@@ -14,6 +14,8 @@ pub const DEFAULT_STANDING_ORDERS: &str = "You act for Asha without asking. Repl
 const DEFINITIONS: &str = "routines_v1";
 const SEQ: &str = "routine_seq_v1";
 const KEEP_RUNS: usize = 50;
+/// Runs kept for their open items still stop somewhere.
+const MAX_RUNS: usize = 200;
 const MAX_DID: usize = 30;
 const MAX_NEEDS: usize = 10;
 const MAX_LINE: usize = 600;
@@ -97,6 +99,7 @@ pub fn push_run(db: &crate::Db, id: &str, run: RoutineRun) -> Result<(), String>
     runs.insert(0, run);
     let older = runs.split_off(runs.len().min(KEEP_RUNS));
     runs.extend(older.into_iter().filter(|run| run.needs_you.iter().any(|item| !item.done)));
+    runs.truncate(MAX_RUNS);
     save_runs(db, id, &runs)
 }
 
@@ -405,7 +408,7 @@ mod tests {
 
     #[test]
     fn seeds_three_per_scope() {
-        let scope = |name: &str, id: Option<&str>| ScopeProposal { name: name.into(), folders: vec!["/x".into()], servers: vec![], problems: vec![], workspace_id: id.map(str::to_string) };
+        let scope = |name: &str, id: Option<&str>| ScopeProposal { name: name.into(), folders: vec!["/x".into()], servers: vec![], problems: vec![], workspace_id: id.map(str::to_string), discovered: true };
         let mut asha = scope("Asha", Some("w2"));
         asha.folders = vec!["/Users/n".into()];
         let routines = seeds(&[scope("Client A", Some("w1")), asha, scope("Loose", None)], "/Users/n/");
@@ -434,6 +437,11 @@ mod tests {
         let runs = load_runs(&db, "r").unwrap();
         assert_eq!(runs.len(), 51);
         assert_eq!(runs.last().unwrap().id, "0");
+        // Open items everywhere still stop at MAX_RUNS.
+        for i in 80..400 {
+            push_run(&db, "r", run(i, true)).unwrap();
+        }
+        assert_eq!(load_runs(&db, "r").unwrap().len(), MAX_RUNS);
     }
 
     #[test]

@@ -63,23 +63,51 @@ fn discover_cached(home: &Path) -> Vec<ScopeProposal> {
     scopes
 }
 
+/// Scope folders Neko could not make a workspace for, so it stops trying
+/// until the daemon restarts instead of creating one every tick.
+static GAVE_UP: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn gave_up(folder: &str) -> bool {
+    GAVE_UP.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().any(|f| f == folder)
+}
+
+fn give_up(folder: &str, why: &str) {
+    eprintln!("routines: not making a scope of {folder}: {why}");
+    GAVE_UP.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(folder.to_string());
+}
+
 /// Scopes on disk matched to workspaces, plus every other workspace as a
 /// scope of its own. With `create`, a scope without a workspace gets one.
 fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> {
     let mut proposals = discover_cached(&home());
     let (mut workspaces, mut folders) = neko_core::workbench::load_workspaces(&db(state))?;
     let folders_of = |folders: &std::collections::BTreeMap<String, Vec<String>>, w: &Workspace| folders.get(&w.id).cloned().unwrap_or_else(|| vec![w.repository.clone()]);
+    // Workspaces store canonical paths; compare like with like.
+    let canonical = |path: &str| std::fs::canonicalize(path).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_string());
     for proposal in &mut proposals {
-        let folder = proposal.folders[0].clone();
-        let existing = workspaces.iter().find(|w| folders_of(&folders, w).contains(&folder)).map(|w| w.id.clone());
-        proposal.workspace_id = match existing {
+        let folder = canonical(&proposal.folders[0]);
+        let find = |workspaces: &[Workspace], folders: &std::collections::BTreeMap<String, Vec<String>>| {
+            workspaces.iter().find(|w| folders_of(folders, w).iter().any(|f| canonical(f) == folder)).map(|w| w.id.clone())
+        };
+        proposal.workspace_id = match find(&workspaces, &folders) {
             Some(id) => Some(id),
-            None if create => {
+            None if create && !gave_up(&folder) => {
                 // An empty id asks the workbench for a new workspace.
                 let workspace = Workspace { id: String::new(), name: proposal.name.clone(), repository: folder.clone(), instructions: String::new(), away_enabled: false };
-                let snapshot = state.workbench.command(Command::SaveWorkspaceWithFolders { workspace, folders: vec![folder.clone()] })?;
-                (workspaces, folders) = (snapshot.workspaces, snapshot.workspace_folders);
-                workspaces.iter().find(|w| folders_of(&folders, w).contains(&folder)).map(|w| w.id.clone())
+                match state.workbench.command(Command::SaveWorkspaceWithFolders { workspace, folders: vec![folder.clone()] }) {
+                    Ok(snapshot) => {
+                        (workspaces, folders) = (snapshot.workspaces, snapshot.workspace_folders);
+                        let found = find(&workspaces, &folders);
+                        if found.is_none() {
+                            give_up(&folder, "its workspace was created but cannot be matched");
+                        }
+                        found
+                    }
+                    Err(error) => {
+                        give_up(&folder, &error);
+                        None
+                    }
+                }
             }
             None => None,
         };
@@ -94,6 +122,7 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
             servers: Vec::new(),
             problems: Vec::new(),
             workspace_id: Some(workspace.id.clone()),
+            discovered: false,
         });
     }
     Ok(proposals)
@@ -110,8 +139,12 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
     if store.seeded && store.seeded_workspaces.is_empty() {
         store.seeded_workspaces = store.routines.iter().map(|r| r.workspace_id.clone()).collect();
     }
+    // Scope folders found on disk, and the home workspace, get routines; a
+    // workspace made for ticket work does not start acting on its own.
+    let home_folder = home().to_string_lossy().trim_end_matches('/').to_string();
     let fresh: Vec<ScopeProposal> = scopes
         .into_iter()
+        .filter(|s| s.discovered || s.folders.iter().any(|f| f.trim_end_matches('/') == home_folder))
         .filter(|s| s.workspace_id.as_ref().is_some_and(|id| !store.seeded_workspaces.contains(id)))
         .collect();
     if fresh.is_empty() && store.seeded {
@@ -262,21 +295,41 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// After a failure: a daily routine's first failure retries in 30 minutes,
+/// anything else follows its cadence.
+fn retry_or_next(cadence: &Cadence, state: &RoutineState, now: i64) -> i64 {
+    if matches!(cadence, Cadence::Daily { .. }) && state.failures == 1 {
+        now + DAILY_RETRY_MS
+    } else {
+        core::next_due_local(cadence, state.quiet_streak, now)
+    }
+}
+
 /// Runs the routine; whatever happens, the routine is not left "running".
 fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -> Result<(), String> {
     let result = run_body(state, routine, scope);
     if let Err(error) = &result {
         let db = db(state);
-        let mut routine_state = core::load_state(&db, &routine.id).unwrap_or_default();
-        if routine_state.running {
-            let now = neko_core::workbench::now_ms();
-            routine_state.running = false;
-            routine_state.failures = routine_state.failures.saturating_add(1);
-            routine_state.last_run_ms = Some(now);
-            routine_state.next_due_ms = Some(core::next_due_local(&routine.cadence, routine_state.quiet_streak, now));
-            routine_state.note = Some(format!("Last run could not be saved: {error}"));
-            core::save_state(&db, &routine.id, &routine_state)?;
+        // An unreadable row is rewritten too: nothing may stay "running".
+        let mut routine_state = match core::load_state(&db, &routine.id) {
+            Ok(saved) if !saved.running => return result,
+            Ok(saved) => saved,
+            Err(_) => RoutineState::default(),
+        };
+        let now = neko_core::workbench::now_ms();
+        routine_state.running = false;
+        routine_state.failures = routine_state.failures.saturating_add(1);
+        routine_state.last_run_ms = Some(now);
+        routine_state.next_due_ms = Some(retry_or_next(&routine.cadence, &routine_state, now));
+        routine_state.note = Some(format!("Last run could not be saved: {error}"));
+        if core::failure_alerts(&routine.cadence, routine_state.failures) {
+            if let Ok(seq) = core::reserve_seq(&db, 1) {
+                let alert = NeedsYou { seq, title: format!("{} failed", routine.name), detail: format!("Neko could not save this run: {error}"), link: None, done: false };
+                let run = RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: now, finished_ms: Some(now), ok: false, quiet: false, did: Vec::new(), needs_you: vec![alert], error: Some(error.clone()), text: String::new() };
+                let _ = core::push_run(&db, &routine.id, run);
+            }
         }
+        core::save_state(&db, &routine.id, &routine_state)?;
     }
     result
 }
@@ -329,14 +382,14 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -
                 }
             }
             routine_state.quiet_streak = if parsed.quiet { routine_state.quiet_streak.saturating_add(1) } else { 0 };
+            if routine_state.failures > 0 {
+                routine_state.failures = 0;
+                routine_state.note = None;
+            }
             if core::memory_fits(&parsed.memory) {
                 routine_state.memory = parsed.memory;
             } else {
                 routine_state.note = Some(format!("The run asked to remember more than {} KB; its previous memory was kept.", core::MAX_MEMORY / 1024));
-            }
-            if routine_state.failures > 0 {
-                routine_state.failures = 0;
-                routine_state.note = None;
             }
             RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: true, quiet: parsed.quiet, did: parsed.did, needs_you, error: None, text: String::new() }
         }
@@ -356,10 +409,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) -
                     done: false,
                 });
             }
-            // A daily routine that failed once gets one more try soon.
-            if matches!(current.cadence, Cadence::Daily { .. }) && routine_state.failures == 1 {
-                next_due = Some(finished + DAILY_RETRY_MS);
-            }
+            next_due = Some(retry_or_next(&current.cadence, &routine_state, finished));
             RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: started, finished_ms: Some(finished), ok: false, quiet: false, did: Vec::new(), needs_you, error: Some(error), text: text[..end].to_string() }
         }
     };
@@ -577,6 +627,15 @@ mod tests {
         // Run now still runs it at night.
         let states = vec![("m".into(), RoutineState { run_requested: true, ..Default::default() })];
         assert_eq!(pick_due(&store, &states, 100, &|_| false).as_deref(), Some("m"));
+    }
+
+    #[test]
+    fn daily_retries_once_then_follows_cadence() {
+        let daily = Cadence::Daily { hour: 10, minute: 30 };
+        let first = RoutineState { failures: 1, ..Default::default() };
+        assert_eq!(retry_or_next(&daily, &first, 1_000), 1_000 + DAILY_RETRY_MS);
+        let second = RoutineState { failures: 2, ..Default::default() };
+        assert!(retry_or_next(&daily, &second, 1_000) > 1_000 + DAILY_RETRY_MS);
     }
 
     #[test]
