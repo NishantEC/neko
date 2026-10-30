@@ -419,7 +419,7 @@ pub(crate) fn run(
     extraction: bool,
     stream_text: bool,
 ) -> Result<String, String> {
-    run_with(agent, spec, directory, bridge, cancel, on_event, extraction, stream_text, None)
+    run_with(agent, spec, directory, bridge, cancel, on_event, extraction, stream_text, None, false)
 }
 
 /// `run`, plus `scoped_mcp`: a Claude run loads exactly these MCP servers
@@ -436,6 +436,7 @@ pub(crate) fn run_with(
     extraction: bool,
     stream_text: bool,
     scoped_mcp: Option<&serde_json::Value>,
+    chrome: bool,
 ) -> Result<String, String> {
     crate::agent_catalog::validate_runtime_shape(&spec.runtime)?;
     if extraction && (spec.writable || bridge.is_some()) {
@@ -463,6 +464,11 @@ pub(crate) fn run_with(
                 let path = scratch.join("scoped-mcp.json");
                 write_private(&path, &config.to_string())?;
                 command.args(["--strict-mcp-config", "--mcp-config"]).arg(&path);
+            }
+            // The owner's own Chrome through Claude in Chrome; it is loaded
+            // alongside a strict MCP config.
+            if chrome && !extraction {
+                command.arg("--chrome");
             }
         }
         Agent::OpenCode => {

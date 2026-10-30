@@ -454,7 +454,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
                 let home = home();
                 let personal = std::fs::canonicalize(&spec.directory).ok() == std::fs::canonicalize(&home).ok();
                 let config = neko_core::scopes::mcp_config(&scope.folders, claude_json_settled(&home).as_ref(), personal);
-                match neko_core::native_runner::run_claude_scoped(&spec, &config, &cancel, |_| {}) {
+                match neko_core::native_runner::run_claude_scoped(&spec, &config, routine.browser, &cancel, |_| {}) {
                     Ok(text) => core::parse_reply(&text).map_err(|error| (error, text)),
                     Err(error) => Err((error, String::new())),
                 }
@@ -689,7 +689,7 @@ mod tests {
     use neko_protocol::routines::{Cadence, RoutineKind};
 
     fn routine(id: &str, enabled: bool) -> Routine {
-        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: id.into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled, model: String::new(), paseo_schedule: None }
+        Routine { id: id.into(), workspace_id: "w".into(), kind: RoutineKind::Custom, name: id.into(), instruction: "x".into(), cadence: Cadence::Daily { hour: 9, minute: 0 }, enabled, model: String::new(), paseo_schedule: None, browser: true }
     }
 
     fn due(ms: Option<i64>, running: bool) -> RoutineState {

@@ -258,6 +258,7 @@ fn run_with_executable(
 pub fn run_claude_scoped(
     spec: &RunSpec,
     mcp_config: &serde_json::Value,
+    chrome: bool,
     cancel: &AtomicBool,
     mut on_event: impl FnMut(String),
 ) -> Result<String, String> {
@@ -272,7 +273,7 @@ pub fn run_claude_scoped(
     if !directory.is_dir() {
         return Err("Task directory is not a directory".into());
     }
-    cli_workers::run_with(cli_workers::Agent::Claude, spec, &directory, None, cancel, &mut on_event, false, false, Some(mcp_config))
+    cli_workers::run_with(cli_workers::Agent::Claude, spec, &directory, None, cancel, &mut on_event, false, false, Some(mcp_config), chrome)
 }
 
 /// Extraction has no tool authority, no MCP bridge, and only supplied text.

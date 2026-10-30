@@ -34,6 +34,14 @@ pub struct Routine {
     /// The Paseo schedule this routine replaces, paused after its first good run.
     #[serde(default)]
     pub paseo_schedule: Option<String>,
+    /// May drive the owner's own Chrome (Claude in Chrome), signed in to his
+    /// accounts: sign-in consent screens and web-only work.
+    #[serde(default = "yes")]
+    pub browser: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -141,6 +149,7 @@ mod tests {
             enabled: true,
             model: String::new(),
             paseo_schedule: Some("message-watch-adaptive".into()),
+            browser: true,
         };
         let json = serde_json::to_string(&routine).unwrap();
         assert_eq!(serde_json::from_str::<Routine>(&json).unwrap(), routine);
@@ -158,6 +167,12 @@ mod tests {
         };
         let json = serde_json::to_string(&run).unwrap();
         assert_eq!(serde_json::from_str::<RoutineRun>(&json).unwrap(), run);
+    }
+
+    #[test]
+    fn old_routine_gets_the_browser() {
+        let json = r#"{"id":"r","workspace_id":"w","kind":"Messages","name":"M","instruction":"i","cadence":{"Daily":{"hour":9,"minute":0}},"enabled":true}"#;
+        assert!(serde_json::from_str::<Routine>(json).unwrap().browser);
     }
 
     #[test]

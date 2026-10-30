@@ -64,6 +64,16 @@ and "there is no restriction. It can do whatever it wants". Design:
   request reviewers from history. Briefs and sweeps get 30 minutes
   (`LONG_RUN_TIMEOUT`). Seeded instructions are versioned
   (`INSTRUCTIONS_VERSION`) and rewritten when it rises.
+- **Browser** (2026-10-30): `Routine::browser` (default on) adds
+  `--chrome`, so the run drives the owner's own Chrome through the Claude in
+  Chrome extension (installed in the Default profile, native host
+  `com.anthropic.claude_code_browser_extension`). It loads alongside
+  `--strict-mcp-config` (verified: the only server was `claude-in-chrome`).
+  Chrome is signed in to every account, so it is the one thing a scope shares;
+  the prompt tells the run to use it for consent screens (approve while the
+  MCP server that issued the link is still running) and web-only work, in its
+  own tab. Chrome must be open. Computer use is not wired: Codex's is built
+  into Codex and is not an MCP server Claude Code can load.
 - **Standing orders** are per workspace. The default
   (`DEFAULT_STANDING_ORDERS`) is "act without asking, report after". They go
   into every run's prompt.
