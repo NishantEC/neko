@@ -85,7 +85,12 @@ and "there is no restriction. It can do whatever it wants". Design:
   munim-computer-use, mac-computer-use, macos-computer-use, macpilot-mcp and
   mac-use-mcp (all far smaller); Codex's own computer use cannot be loaded by
   Claude Code. The prompt prefers MCP, CLI or browser first, and background
-  actions on a snapshotted window.
+  actions on a snapshotted window. **Never credentials:** the first live use
+  (enabling the Gmail API in Dia) met the wrong Google account; Peekaboo's
+  clicks errored and one submitted an empty password and opened the locked
+  Passwords app. Both browser and computer notes now forbid touching password,
+  sign-in, two-factor or security dialogs (stop and report the account
+  instead) and blind retries after a tool error.
 - **Standing orders** are per workspace. The default
   (`DEFAULT_STANDING_ORDERS`) is "act without asking, report after". They go
   into every run's prompt.
