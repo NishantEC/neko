@@ -38,6 +38,10 @@ pub struct Routine {
     /// accounts: sign-in consent screens and web-only work.
     #[serde(default = "yes")]
     pub browser: bool,
+    /// May see and operate Mac apps through Peekaboo (screenshots, the
+    /// accessibility tree, clicks and typing, in the background when it can).
+    #[serde(default = "yes")]
+    pub computer: bool,
 }
 
 fn yes() -> bool {
@@ -150,6 +154,7 @@ mod tests {
             model: String::new(),
             paseo_schedule: Some("message-watch-adaptive".into()),
             browser: true,
+            computer: true,
         };
         let json = serde_json::to_string(&routine).unwrap();
         assert_eq!(serde_json::from_str::<Routine>(&json).unwrap(), routine);
@@ -172,7 +177,8 @@ mod tests {
     #[test]
     fn old_routine_gets_the_browser() {
         let json = r#"{"id":"r","workspace_id":"w","kind":"Messages","name":"M","instruction":"i","cadence":{"Daily":{"hour":9,"minute":0}},"enabled":true}"#;
-        assert!(serde_json::from_str::<Routine>(json).unwrap().browser);
+        let routine = serde_json::from_str::<Routine>(json).unwrap();
+        assert!(routine.browser && routine.computer);
     }
 
     #[test]

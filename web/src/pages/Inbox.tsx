@@ -110,12 +110,14 @@ function RoutineEditor({ routine, onClose, send }: { routine: Json | null; onClo
   const [toHour, setToHour] = useState("23");
   const [time, setTime] = useState("10:30");
   const [browser, setBrowser] = useState(true);
+  const [computer, setComputer] = useState(true);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!routine) return;
     setInstruction(routine.instruction ?? "");
     setModel(routine.model ?? "");
     setBrowser(routine.browser ?? true);
+    setComputer(routine.computer ?? true);
     const c = routine.cadence ?? {};
     setMode(c.Every ? "every" : "daily");
     if (c.Every) { setMinutes(String(c.Every.minutes)); setFromHour(String(c.Every.from_hour)); setToHour(String(c.Every.to_hour)); }
@@ -130,7 +132,7 @@ function RoutineEditor({ routine, onClose, send }: { routine: Json | null; onClo
       ? { Every: { minutes: clampInt(minutes, 5, 720, 20), from_hour: from, to_hour: to } }
       : { Daily: { hour, minute } };
     setBusy(true);
-    const ok = await send({ SaveRoutine: { routine: { ...routine, instruction: instruction.trim(), model: model.trim(), cadence, browser } } }, "Routine saved");
+    const ok = await send({ SaveRoutine: { routine: { ...routine, instruction: instruction.trim(), model: model.trim(), cadence, browser, computer } } }, "Routine saved");
     setBusy(false);
     if (ok) onClose();
   };
@@ -168,6 +170,13 @@ function RoutineEditor({ routine, onClose, send }: { routine: Json | null; onClo
                 <p className="text-[13px] text-muted-foreground">Lets this routine work in your own Chrome, where you are signed in: approving a sign-in it needs, or work only a website allows. Chrome has to be open.</p>
               </div>
               <Toggle checked={browser} label="Use my Chrome" onChange={setBrowser} />
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">Use my Mac’s apps</p>
+                <p className="text-[13px] text-muted-foreground">Lets this routine see and operate Mac apps through Peekaboo, in the background where it can, for work that only lives in an app.</p>
+              </div>
+              <Toggle checked={computer} label="Use my Mac’s apps" onChange={setComputer} />
             </div>
             <FormField label="Model" htmlFor="rt-model" hint="A Claude Code model alias such as sonnet or opus. Empty means sonnet.">
               <Input id="rt-model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="sonnet" />

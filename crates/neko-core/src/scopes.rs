@@ -161,6 +161,20 @@ pub fn mcp_config(folders: &[String], claude_json: Option<&Value>, personal: boo
     serde_json::json!({ "mcpServers": servers })
 }
 
+/// Where Peekaboo, the computer-use MCP server, is installed, if it is.
+pub fn peekaboo() -> Option<std::path::PathBuf> {
+    ["/opt/homebrew/bin/peekaboo", "/usr/local/bin/peekaboo"].iter().map(std::path::PathBuf::from).find(|path| path.is_file())
+}
+
+/// Adds the computer-use server to a scope's config. It is a capability of
+/// the Mac, not a data source, so every scope may have it.
+pub fn with_computer_use(mut config: Value, peekaboo: &Path) -> Value {
+    if let Some(servers) = config["mcpServers"].as_object_mut() {
+        servers.insert("peekaboo".into(), serde_json::json!({"type": "stdio", "command": peekaboo, "args": ["mcp"]}));
+    }
+    config
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,6 +262,14 @@ mod tests {
         assert_eq!(servers["google-client-a"]["command"], "local");
         let personal = mcp_config(&folders, Some(&claude), true);
         assert!(personal["mcpServers"].as_object().unwrap().contains_key("linear-personal"));
+    }
+
+    #[test]
+    fn computer_use_is_added_beside_scope_servers() {
+        let config = serde_json::json!({"mcpServers": {"slack-client-a": {}}});
+        let config = with_computer_use(config, Path::new("/opt/homebrew/bin/peekaboo"));
+        assert_eq!(config["mcpServers"]["peekaboo"]["args"][0], "mcp");
+        assert!(config["mcpServers"]["slack-client-a"].is_object());
     }
 
     #[test]

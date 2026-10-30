@@ -230,6 +230,8 @@ pub fn now_iso() -> String {
 
 const BROWSER_NOTE: &str = "You can use Asha's own Chrome through the claude-in-chrome tools (load them with ToolSearch first). It is signed in to his accounts. Use it when a source needs a sign-in or consent screen (open the link an MCP server gives you and approve it while that server is still running), or for work only a website allows. Work in your own tab and never close his.\n\n";
 
+const COMPUTER_NOTE: &str = "You can see and operate Mac apps through the peekaboo tools (screenshots, the accessibility tree, clicks, typing, menus). Prefer an MCP server, a CLI or the browser when one can do the job; use the desktop only for work that lives in an app. Asha may be using the Mac: act in the background on the exact window you snapshotted, do not bring apps forward or take the keyboard unless the task needs it, and leave every app as you found it.\n\n";
+
 pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memory: &Value, now_iso: &str) -> String {
     let mut servers: Vec<&str> = scope.servers.iter().filter(|s| s.level == "scope").map(|s| s.name.as_str()).collect();
     servers.dedup();
@@ -241,7 +243,7 @@ Working folder: {folder}. Your MCP servers are exactly this scope's: {servers}. 
 Now (UTC): {now_iso}\n\n\
 {instruction}\n\n\
 Standing orders from Asha:\n{orders}\n\n\
-{browser}What you asked to remember last run (JSON): {memory}\n\
+{browser}{computer}What you asked to remember last run (JSON): {memory}\n\
 A previous run may have acted and then failed to report. Before replying to or acting on anything, check whether you already did (for example your own reply in the thread), and never do it twice.\n\n\
 End your reply with exactly one fenced json block and nothing after it:\n\
 ```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what Asha must do and why\", \"link\": \"https://...\"}}], \"memory\": {{}}}}\n```\n\
@@ -251,6 +253,7 @@ quiet is true only when nothing new happened and you did nothing; then did and n
         folder = scope.folders.first().map(String::as_str).unwrap_or("~"),
         instruction = routine.instruction.trim(),
         browser = if routine.browser { BROWSER_NOTE } else { "" },
+        computer = if routine.computer { COMPUTER_NOTE } else { "" },
     )
 }
 
@@ -391,6 +394,7 @@ pub fn seeds(scopes: &[ScopeProposal], home: &str) -> Vec<Routine> {
                 model: "sonnet".into(),
                 paseo_schedule: paseo.map(str::to_string),
                 browser: true,
+                computer: true,
             });
         }
     }

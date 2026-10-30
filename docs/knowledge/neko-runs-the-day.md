@@ -72,8 +72,20 @@ and "there is no restriction. It can do whatever it wants". Design:
   Chrome is signed in to every account, so it is the one thing a scope shares;
   the prompt tells the run to use it for consent screens (approve while the
   MCP server that issued the link is still running) and web-only work, in its
-  own tab. Chrome must be open. Computer use is not wired: Codex's is built
-  into Codex and is not an MCP server Claude Code can load.
+  own tab. Chrome must be open. The owner's everyday browser is Dia, so his
+  logins mostly live there, not in Chrome.
+- **Computer use** (2026-10-30): `Routine::computer` (default on) adds
+  Peekaboo (openclaw/Peekaboo, MIT, `brew install openclaw/tap/peekaboo`,
+  4.9.7) to the run's scoped config as `peekaboo mcp`
+  (`scopes::with_computer_use`). It is a capability of the Mac, not a data
+  source, so every scope may have it. Permissions (Screen Recording,
+  Accessibility, Event Synthesizing) are held by Peekaboo's Bridge app, so
+  Neko needs no grants of its own. Verified from a strict-config run:
+  permissions read, apps listed, front window read. Chosen over
+  munim-computer-use, mac-computer-use, macos-computer-use, macpilot-mcp and
+  mac-use-mcp (all far smaller); Codex's own computer use cannot be loaded by
+  Claude Code. The prompt prefers MCP, CLI or browser first, and background
+  actions on a snapshotted window.
 - **Standing orders** are per workspace. The default
   (`DEFAULT_STANDING_ORDERS`) is "act without asking, report after". They go
   into every run's prompt.
