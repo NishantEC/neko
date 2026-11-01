@@ -1326,6 +1326,25 @@ mod tests {
     use neko_core::clipboard::ClipboardContentKind;
     use neko_protocol::SearchItem;
 
+    /// Leaves a socket file with no listener. Tests run as threads of one
+    /// process while others start child processes, and a child that forks in
+    /// that instant holds a copy of the listener until it execs, so the dead
+    /// socket can briefly still accept. Wait until it refuses.
+    fn stale_socket(path: &std::path::Path) {
+        drop(UnixListener::bind(path).unwrap());
+        wait_until(|| matches!(UnixStream::connect(path), Err(error) if error.kind() == io::ErrorKind::ConnectionRefused));
+    }
+
+    fn wait_until(mut done: impl FnMut() -> bool) {
+        for _ in 0..100 {
+            if done() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        panic!("condition never held");
+    }
+
     struct ProbeSocket(std::path::PathBuf);
     impl ProbeSocket {
         fn new() -> Self {
@@ -1421,7 +1440,7 @@ mod tests {
     #[test]
     fn singleton_disconnected_stale_socket_can_be_replaced() {
         let socket = ProbeSocket::new();
-        drop(UnixListener::bind(&socket.0).unwrap());
+        stale_socket(&socket.0);
         let listener = bind_singleton(&socket.0)
             .unwrap()
             .expect("stale socket is recoverable");
@@ -1432,7 +1451,7 @@ mod tests {
     fn singleton_rejects_symlinked_startup_lock_without_touching_socket() {
         use std::os::unix::fs::{MetadataExt, symlink};
         let socket = ProbeSocket::new();
-        drop(UnixListener::bind(&socket.0).unwrap());
+        stale_socket(&socket.0);
         let inode = std::fs::metadata(&socket.0).unwrap().ino();
         let mut name = socket.0.as_os_str().to_os_string();
         name.push(".startup.lock");
@@ -1450,7 +1469,7 @@ mod tests {
     fn singleton_lock_contender_stands_down_without_unlinking_stale_socket() {
         use std::os::unix::fs::MetadataExt;
         let socket = ProbeSocket::new();
-        drop(UnixListener::bind(&socket.0).unwrap());
+        stale_socket(&socket.0);
         let inode = std::fs::metadata(&socket.0).unwrap().ino();
         let owner = lock_startup(&socket.0).unwrap();
         let start = std::time::Instant::now();
@@ -1461,7 +1480,16 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(10));
         assert_eq!(std::fs::metadata(&socket.0).unwrap().ino(), inode);
         drop(owner);
-        assert!(bind_singleton(&socket.0).unwrap().is_some());
+        // A child forked while the lock was held keeps it until it execs.
+        let mut bound = bind_singleton(&socket.0);
+        for _ in 0..100 {
+            if !matches!(&bound, Err(error) if error.kind() == io::ErrorKind::WouldBlock) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(30));
+            bound = bind_singleton(&socket.0);
+        }
+        assert!(bound.unwrap().is_some());
     }
     #[test]
     fn singleton_startup_lock_rejects_shared_permissions_and_hard_links() {
@@ -1488,7 +1516,7 @@ mod tests {
     #[test]
     fn singleton_concurrent_stale_recovery_keeps_one_reachable_listener() {
         let socket = ProbeSocket::new();
-        drop(UnixListener::bind(&socket.0).unwrap());
+        stale_socket(&socket.0);
         let barrier = Arc::new(std::sync::Barrier::new(8));
         let listeners = std::thread::scope(|threads| {
             let workers: Vec<_> = (0..8)
