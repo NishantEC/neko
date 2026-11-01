@@ -27,6 +27,8 @@ const PASEO_TIMEOUT: Duration = Duration::from_secs(20);
 const DISCOVERY_MAX_AGE: Duration = Duration::from_secs(600);
 const DAILY_RETRY_MS: i64 = 30 * 60 * 1000;
 const GIVE_UP_FOR: Duration = Duration::from_secs(3600);
+/// The open items listed in a run's prompt.
+const MAX_OPEN_IN_PROMPT: usize = 40;
 
 fn db(state: &AppState) -> MutexGuard<'_, neko_core::Db> {
     state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -359,6 +361,39 @@ fn tick(state: &Arc<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Open item titles in this workspace, oldest first, without repeats.
+fn open_items(db: &neko_core::Db, workspace_id: &str) -> Result<Vec<String>, String> {
+    let mut items: Vec<(u64, String)> = Vec::new();
+    for routine in core::load(db)?.routines.iter().filter(|r| r.workspace_id == workspace_id) {
+        for run in core::load_runs(db, &routine.id).unwrap_or_default() {
+            items.extend(run.needs_you.into_iter().filter(|i| !i.done).map(|i| (i.seq, i.title)));
+        }
+    }
+    items.sort();
+    let mut seen = std::collections::HashSet::new();
+    Ok(items.into_iter().filter(|(_, t)| seen.insert(title_key(t))).map(|(_, t)| t).take(MAX_OPEN_IN_PROMPT).collect())
+}
+
+/// Marks done every open item in the workspace whose title a run resolved.
+fn resolve_items(db: &neko_core::Db, workspace_id: &str, titles: &[String]) -> Result<(), String> {
+    if titles.is_empty() {
+        return Ok(());
+    }
+    let keys: std::collections::HashSet<String> = titles.iter().map(|t| title_key(t)).collect();
+    for routine in core::load(db)?.routines.iter().filter(|r| r.workspace_id == workspace_id) {
+        let mut runs = core::load_runs(db, &routine.id).unwrap_or_default();
+        let mut changed = false;
+        for item in runs.iter_mut().flat_map(|r| r.needs_you.iter_mut()).filter(|i| !i.done && keys.contains(&title_key(&i.title))) {
+            item.done = true;
+            changed = true;
+        }
+        if changed {
+            core::save_runs(db, &routine.id, &runs)?;
+        }
+    }
+    Ok(())
+}
+
 fn title_key(title: &str) -> String {
     title.trim().to_lowercase()
 }
@@ -426,9 +461,9 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
 /// save, so a failed save can be retried by `run_one` as it was meant.
 fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, pushed: &mut Option<RoutineState>) -> Result<(), String> {
     let started = neko_core::workbench::now_ms();
-    let (orders, memory) = {
+    let (orders, memory, open) = {
         let db = db(state);
-        (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), core::load_state(&db, &routine.id)?.memory)
+        (core::load(&db)?.orders_for(&routine.workspace_id).to_string(), core::load_state(&db, &routine.id)?.memory, open_items(&db, &routine.workspace_id)?)
     };
     let outcome: Result<core::Parsed, (String, String)> = match scope.as_ref().and_then(|s| s.folders.first().map(|f| (s, f))) {
         None => Err(("This routine's workspace no longer exists".into(), String::new())),
@@ -439,7 +474,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             } else {
                 let spec = neko_core::native_runner::RunSpec {
                     directory: folder,
-                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso()),
+                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso(), &open),
                     writable: true,
                     timeout: if matches!(routine.kind, neko_protocol::routines::RoutineKind::Messages) { RUN_TIMEOUT } else { LONG_RUN_TIMEOUT },
                     runtime: AgentRuntime {
@@ -474,6 +509,7 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
     let mut next_due = None;
     let run = match outcome {
         Ok(parsed) => {
+            resolve_items(&db, &routine.workspace_id, &parsed.resolved)?;
             let mut needs_you = parsed.needs_you;
             // Another routine in this scope may already have raised it.
             let open = open_titles(&db, &routine.workspace_id)?;
@@ -746,6 +782,20 @@ mod tests {
         assert!(titles.contains(&title_key("  gmail NOT signed in ")));
         assert!(!titles.contains("old"));
         assert!(!titles.contains("elsewhere"));
+    }
+
+    #[test]
+    fn resolved_titles_close_items_across_the_workspace() {
+        let db = neko_core::Db::open_in_memory().unwrap();
+        let store = Store { routines: vec![routine("a", true), routine("b", true)], ..Default::default() };
+        core::save_definitions(&db, &store).unwrap();
+        let item = |seq, title: &str| neko_protocol::routines::NeedsYou { seq, title: title.into(), detail: String::new(), link: None, done: false };
+        let run = |rid: &str, items| RoutineRun { id: rid.into(), routine_id: rid.into(), started_ms: 0, finished_ms: None, ok: true, quiet: false, did: vec![], needs_you: items, error: None, text: String::new() };
+        core::push_run(&db, "a", run("a", vec![item(2, "Gmail API not enabled"), item(3, "Sam")])).unwrap();
+        core::push_run(&db, "b", run("b", vec![item(1, "gmail api NOT enabled")])).unwrap();
+        assert_eq!(open_items(&db, "w").unwrap(), vec!["gmail api NOT enabled", "Sam"]);
+        resolve_items(&db, "w", &["Gmail API not enabled".into()]).unwrap();
+        assert_eq!(open_items(&db, "w").unwrap(), vec!["Sam"]);
     }
 
     #[test]

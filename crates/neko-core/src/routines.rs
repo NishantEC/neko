@@ -232,7 +232,17 @@ const BROWSER_NOTE: &str = "You can use Asha's own Chrome through the claude-in-
 
 const COMPUTER_NOTE: &str = "You can see and operate Mac apps through the peekaboo tools (screenshots, the accessibility tree, clicks, typing, menus). Prefer an MCP server, a CLI or the browser when one can do the job; use the desktop only for work that lives in an app. Asha may be using the Mac: act in the background on the exact window you snapshotted, do not bring apps forward or take the keyboard unless the task needs it, and leave every app as you found it. Never type into, submit or click on a password field, a sign-in or account-switch form, a two-factor prompt, or the Passwords, Keychain or any security dialog: if a task reaches one, stop and put it in needs_you with the account it wants. After any click whose result you did not see, look again before the next action; if a tool reports an error, do not retry blindly.\n\n";
 
-pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memory: &Value, now_iso: &str) -> String {
+/// `open` is what this scope's routines already reported and Asha has not
+/// cleared: the run must not report it again, and says when one is handled.
+pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memory: &Value, now_iso: &str, open: &[String]) -> String {
+    let open = if open.is_empty() {
+        "Nothing is waiting on Asha in this scope right now.".to_string()
+    } else {
+        format!(
+            "Already waiting on Asha in this scope (reported by this or another routine). Never report any of these again, even in other words. If you find one is no longer true (done, fixed, signed in, merged), put its exact title in resolved:\n{}",
+            open.iter().map(|t| format!("- {t}")).collect::<Vec<_>>().join("\n")
+        )
+    };
     let mut servers: Vec<&str> = scope.servers.iter().filter(|s| s.level == "scope").map(|s| s.name.as_str()).collect();
     servers.dedup();
     let servers = if servers.is_empty() { "the MCP servers and connectors your setup loads here".to_string() } else { servers.join(", ") };
@@ -243,10 +253,11 @@ Working folder: {folder}. Your MCP servers are exactly this scope's: {servers}. 
 Now (UTC): {now_iso}\n\n\
 {instruction}\n\n\
 Standing orders from Asha:\n{orders}\n\n\
-{browser}{computer}What you asked to remember last run (JSON): {memory}\n\
+{browser}{computer}{open}\n\n\
+What you asked to remember last run (JSON): {memory}\n\
 A previous run may have acted and then failed to report. Before replying to or acting on anything, check whether you already did (for example your own reply in the thread), and never do it twice.\n\n\
 End your reply with exactly one fenced json block and nothing after it:\n\
-```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what Asha must do and why\", \"link\": \"https://...\"}}], \"memory\": {{}}}}\n```\n\
+```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what Asha must do and why\", \"link\": \"https://...\"}}], \"resolved\": [\"exact title of an item above that is no longer true\"], \"memory\": {{}}}}\n```\n\
 quiet is true only when nothing new happened and you did nothing; then did and needs_you are empty. memory is handed back to you next run: keep it small (timestamps, ids, who you are waiting on).",
         name = routine.name,
         scope_name = scope.name,
@@ -263,6 +274,8 @@ pub struct Parsed {
     pub did: Vec<String>,
     /// `seq` is 0 until the daemon assigns one.
     pub needs_you: Vec<NeedsYou>,
+    /// Titles of open items the run found no longer true.
+    pub resolved: Vec<String>,
     pub memory: Value,
 }
 
@@ -312,7 +325,12 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
         .unwrap_or_default();
     let quiet = object.get("quiet").and_then(Value::as_bool).unwrap_or(false) && did.is_empty() && needs_you.is_empty();
     let memory = object.get("memory").cloned().filter(Value::is_object).unwrap_or_else(|| serde_json::json!({}));
-    Ok(Parsed { quiet, did, needs_you, memory })
+    let resolved = object
+        .get("resolved")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).take(MAX_DID).collect())
+        .unwrap_or_default();
+    Ok(Parsed { quiet, did, needs_you, resolved, memory })
 }
 
 /// Where each scope's work lives, so seeded instructions can be specific.
@@ -445,6 +463,9 @@ mod tests {
         assert_eq!(parsed.needs_you.len(), 1);
         assert_eq!(parsed.needs_you[0].link.as_deref(), Some("https://x"));
         assert_eq!(parsed.memory["last_check"], "t");
+        assert!(parsed.resolved.is_empty());
+        let parsed = parse_reply("```json\n{\"quiet\": true, \"resolved\": [\"Gmail API not enabled\", \"\"]}\n```").unwrap();
+        assert_eq!(parsed.resolved, vec!["Gmail API not enabled"]);
     }
 
     #[test]

@@ -64,6 +64,12 @@ and "there is no restriction. It can do whatever it wants". Design:
   request reviewers from history. Briefs and sweeps get 30 minutes
   (`LONG_RUN_TIMEOUT`). Seeded instructions are versioned
   (`INSTRUCTIONS_VERSION`) and rewritten when it rises.
+- **Open items in the prompt** (2026-11-01): exact-title dedupe let the same
+  problem through in other words ("Enable Gmail API" three ways, Jira twice;
+  35 open items, 13 repeats or stale). Each run's prompt now lists the
+  scope's open items (`open_items`, ≤40) and says never to report them again;
+  the reply's `resolved` list closes items it finds no longer true
+  (`resolve_items`, matched by title, across the workspace).
 - **Browser** (2026-10-30): `Routine::browser` (default on) adds
   `--chrome`, so the run drives the owner's own Chrome through the Claude in
   Chrome extension (installed in the Default profile, native host
