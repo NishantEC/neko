@@ -11,6 +11,33 @@ use std::sync::Arc;
 use neko_core::Db;
 use server::AppState;
 
+/// How to write a plugin (`docs/design/plugin-guide.md`), for agents on any Mac.
+const PLUGIN_GUIDE: &str = include_str!("../../../docs/design/plugin-guide.md");
+
+/// `neko-daemon --open-page <route>`: opens Neko's web app signed in at
+/// `#/<route>` in the default browser, so an agent can load what it built.
+fn open_page(route: &str) -> i32 {
+    if !route.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '/')) {
+        eprintln!("a route is letters, digits, -, _ and /");
+        return 2;
+    }
+    let token = std::fs::read_to_string(neko_protocol::support_dir().join("web-token")).unwrap_or_default();
+    let token = token.trim();
+    if token.len() != 64 || !token.chars().all(|c| c.is_ascii_hexdigit()) {
+        eprintln!("Neko's web interface has not published its address yet; is the daemon running?");
+        return 1;
+    }
+    let port = std::env::var("NEKO_WEB_PORT").ok().and_then(|p| p.trim().parse::<u16>().ok()).unwrap_or(4747);
+    let url = format!("http://127.0.0.1:{port}/?token={token}#/{route}");
+    match std::process::Command::new("/usr/bin/open").arg(&url).status() {
+        Ok(status) if status.success() => 0,
+        _ => {
+            eprintln!("could not open the browser");
+            1
+        }
+    }
+}
+
 /// `neko-daemon --protocol` prints these: every `Request`, `Response` and
 /// workbench `Command` with their fields.
 const PROTOCOL: &[(&str, &str)] = &[
@@ -39,6 +66,12 @@ fn request_if_asked() -> Option<i32> {
             }
             return Some(0);
         }
+        Some("--plugin-guide") => {
+            use std::io::Write;
+            let _ = std::io::stdout().lock().write_all(PLUGIN_GUIDE.as_bytes());
+            return Some(0);
+        }
+        Some("--open-page") => return Some(open_page(&args.next().unwrap_or_default())),
         _ => return None,
     }
     let Some(text) = args.next() else {

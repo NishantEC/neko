@@ -14,7 +14,7 @@
 // docs/design/one-registry.md. This file only fetches the list, imports the
 // modules that changed, and manages them (enable, disable, remove, reload).
 import { Component, useEffect, useSyncExternalStore, type ReactNode } from "react";
-import type { Json } from "./api";
+import { request, type Json } from "./api";
 import { createUserHost, type UserHost } from "./host";
 import { loadPluginIcons } from "./pluginKit";
 import { clearUserPages, loadResetOverrides, setUserPages, type PageGroup } from "./registry";
@@ -36,6 +36,8 @@ export interface PluginListing {
   group?: PageGroup;
   /** Why the daemon could not read the manifest or entry. */
   error?: string;
+  /** `previous/<entry>`: the version kept before the last change, loaded when this one fails. */
+  previous_entry?: string;
 }
 type Listing = PluginListing;
 
@@ -87,22 +89,46 @@ function drop(id: string) {
   clearUserPages(id);
 }
 
-async function load(listing: Listing) {
-  drop(listing.id);
+/** Tells the daemon how loading went, so the agent that wrote the plugin can see it (`PluginStatus`). */
+function report(listing: Listing, problem: string | null, rolledBack: boolean) {
+  request({ ReportPlugin: { id: listing.id, version: listing.version, problem, rolled_back: rolledBack } }).catch(() => {});
+}
+
+async function importAndRegister(listing: Listing, url: string) {
   const user = createUserHost(listing.id, listing.group);
   hosts.set(listing.id, user);
+  await loadPluginIcons();
+  const module = await import(/* @vite-ignore */ url);
+  if (typeof module.default !== "function") throw new Error("The module must export a default function register(host).");
+  await module.default(user.host);
+  setUserPages(listing.id, [...user.pages]);
+}
+
+async function load(listing: Listing) {
+  drop(listing.id);
   try {
-    await loadPluginIcons();
     // `?v=` is the module file's mtime: an edit is a new URL, so the browser
     // imports the new code instead of the module it already holds.
-    const module = await import(/* @vite-ignore */ `${listing.entry}?v=${listing.version}`);
-    if (typeof module.default !== "function") throw new Error("The module must export a default function register(host).");
-    await module.default(user.host);
-    setUserPages(listing.id, [...user.pages]);
+    await importAndRegister(listing, `${listing.entry}?v=${listing.version}`);
     problemsByPlugin.delete(listing.id);
+    report(listing, null, false);
   } catch (e) {
     drop(listing.id);
-    problemsByPlugin.set(listing.id, e instanceof Error ? e.message : String(e));
+    const problem = e instanceof Error ? e.message : String(e);
+    // A change that broke the page falls back to the version kept before it.
+    if (listing.previous_entry) {
+      try {
+        await importAndRegister(listing, `${listing.previous_entry}?v=${listing.version}`);
+        problemsByPlugin.set(listing.id, `The latest version failed (${problem}); showing the previous one.`);
+        report(listing, problem, true);
+        loaded.set(listing.id, listing.version);
+        return;
+      } catch {
+        drop(listing.id);
+      }
+    }
+    problemsByPlugin.set(listing.id, problem);
+    report(listing, problem, false);
   }
   loaded.set(listing.id, listing.version);
 }
@@ -230,6 +256,11 @@ export class PluginBoundary extends Component<{ plugin: string; children: ReactN
   state = { error: null };
   static getDerivedStateFromError(error: unknown) {
     return { error: error instanceof Error ? error.message : String(error) };
+  }
+  componentDidCatch(error: unknown) {
+    // The agent that wrote the page learns it crashed (`PluginStatus`).
+    const problem = `Crashed while rendering: ${error instanceof Error ? error.message : String(error)}`;
+    request({ ReportPlugin: { id: this.props.plugin, version: loaded.get(this.props.plugin) ?? 0, problem, rolled_back: false } }).catch(() => {});
   }
   render() {
     if (this.state.error) {

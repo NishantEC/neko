@@ -738,6 +738,13 @@ fn themes_listing() -> Response {
     Response::Themes { dir: dir.to_string_lossy().into_owned(), themes: listing.themes, problems: listing.problems }
 }
 
+/// How each plugin last loaded, as the web app reported it. Kept in memory:
+/// it describes the pages open now, not history.
+fn plugin_health() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, neko_protocol::PluginHealth>> {
+    static HEALTH: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<String, neko_protocol::PluginHealth>>> = std::sync::OnceLock::new();
+    HEALTH.get_or_init(Default::default)
+}
+
 fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> Response {
     match request {
         Request::McpBridge(request) => match state.workbench.mcp.bridge(request) {
@@ -751,6 +758,15 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         Request::WorkbenchIfChanged { digest, wait_ms } => wait_for_change(state, digest, wait_ms, false),
         Request::MachineHealth => Response::MachineHealth(neko_core::machine::latest()),
         Request::Ping => Response::Pong,
+        Request::ReportPlugin { id, version, problem, rolled_back } => {
+            let health = neko_protocol::PluginHealth { ok: problem.is_none() && !rolled_back, id: id.clone(), version, problem, rolled_back, at_ms: neko_core::workbench::now_ms() };
+            plugin_health().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id, health);
+            Response::PluginStatus { plugins: Vec::new() }
+        }
+        Request::PluginStatus { id } => {
+            let all = plugin_health().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            Response::PluginStatus { plugins: all.values().filter(|h| id.as_ref().is_none_or(|id| &h.id == id)).cloned().collect() }
+        }
         Request::SuperAgent { on } => {
             let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match on.map(|on| neko_core::neko_chat::set_super_agent(&db, on)).transpose() {

@@ -34,7 +34,7 @@ export default function register(host) {
 
 B. The app's own source in the neko checkout {{CHECKOUT}} (web/src for the UI), for what a page cannot reach: the chat, the shell, the daemon, or a fix everyone should get. Work on a branch as usual. A UI-only change that lands on main goes live by itself within minutes; the previous web UI is kept (web-live.prev) and Settings, Neko updates has "Roll back the web UI". Daemon or app changes wait for a reinstall.
 
-Choose A for anything personal and reversible, B when it should become part of Neko. Build from host.ui (PageHeader, Panel, Button, Input, Textarea, Select*, Switch, Checkbox, Badge, StatusBadge, Tabs*, Table*, Dialog*, DropdownMenu*, Tooltip*, Progress, Skeleton, Spinner, Empty*, toast), icons from host.icons, never hand-styled elements. When done, open it in the browser, fix whatever breaks, then tell me where to find it.`;
+Choose A for anything personal and reversible, B when it should become part of Neko. Build from host.ui (PageHeader, Panel, Button, Input, Textarea, Select*, Switch, Checkbox, Badge, StatusBadge, Tabs*, Table*, Dialog*, DropdownMenu*, Tooltip*, Progress, Skeleton, Spinner, Empty*, toast), icons from host.icons, never hand-styled elements. Read Neko's plugin guide first (run Neko's command line, the program you use for --request, with --plugin-guide): libraries go inside the plugin folder, the old version is kept in previous/, and you check the result with --open-page <id> and the PluginStatus request until it is ok. Then tell me where to find it.`;
 
 export const MANIFEST_EXAMPLE = `{
   "title": "PR board",

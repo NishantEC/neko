@@ -25,3 +25,16 @@ theme (schema in `docs/design/themes.md` section 8): the daemon validates and
 lists them (`ListThemes`), the Appearance page shows them in the light or dark
 picker, and the "Make me a theme" button asks Neko to write one. `custom.css`
 still wins over them (they live in `@layer neko-theme`).
+
+**Neko builds its own plugins, with a safety net (2026-11-06).** Modelled on
+DeepSeek Harness's plugin-writing loop (MIT; template, compatibility check,
+rollback, verify the live page). `neko-daemon --plugin-guide` prints
+`docs/design/plugin-guide.md` (manifest, host API, bundling libraries like
+three.js inside the plugin folder because the page CSP refuses CDNs, keeping
+`previous/`, checking). The listing carries `previous_entry` when
+`previous/<entry>` exists, and `plugins.tsx` loads it when the current version
+fails, saying so. Every load and every render crash is reported to the daemon
+(`ReportPlugin`, kept in memory) and read back with `PluginStatus`, so the
+agent that wrote a plugin learns whether it worked. `neko-daemon --open-page
+<route>` opens Neko signed in at that route. Change Neko and the full-power
+chat point the agent at the guide.

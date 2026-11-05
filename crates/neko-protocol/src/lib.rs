@@ -631,6 +631,29 @@ pub enum Request {
     SuperAgent {
         on: Option<bool>,
     },
+    /// The web app says how loading a plugin went: `problem` is None when it
+    /// loaded, `rolled_back` when its `previous/` version was loaded instead.
+    ReportPlugin {
+        id: String,
+        version: u64,
+        problem: Option<String>,
+        rolled_back: bool,
+    },
+    /// How each plugin last loaded in an open Neko page (`id` for one).
+    PluginStatus {
+        id: Option<String>,
+    },
+}
+
+/// What the web app last reported about loading one plugin.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PluginHealth {
+    pub id: String,
+    pub version: u64,
+    pub ok: bool,
+    pub problem: Option<String>,
+    pub rolled_back: bool,
+    pub at_ms: i64,
 }
 
 /// One valid user theme file (see `neko_core::appearance::validate_theme`).
@@ -730,6 +753,9 @@ pub enum Response {
     },
     SuperAgent {
         on: bool,
+    },
+    PluginStatus {
+        plugins: Vec<PluginHealth>,
     },
     Error {
         message: String,

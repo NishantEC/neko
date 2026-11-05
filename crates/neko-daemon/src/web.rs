@@ -771,6 +771,10 @@ struct PluginInfo {
     manifest_version: Option<String>,
     /// A `.disabled` marker file sits in the plugin folder: listed, not loaded.
     disabled: bool,
+    /// URL of `previous/<entry>`, the version kept before the last change:
+    /// the page loads it when the current one fails.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_entry: Option<String>,
     /// Absolute path of the plugin's folder.
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -793,7 +797,7 @@ fn list_plugins(dir: &Path) -> Vec<PluginInfo> {
         if !valid_plugin_id(&id) || !entry.path().is_dir() { continue; }
         let disabled = entry.path().join(DISABLED_MARKER).exists();
         let path = entry.path().to_string_lossy().into_owned();
-        let broken = |error: String| PluginInfo { id: id.clone(), title: id.clone(), entry: String::new(), version: 0, manifest_version: None, disabled, path: path.clone(), description: None, error: Some(error), group: None };
+        let broken = |error: String| PluginInfo { id: id.clone(), title: id.clone(), entry: String::new(), version: 0, manifest_version: None, disabled, previous_entry: None, path: path.clone(), description: None, error: Some(error), group: None };
         let manifest_path = entry.path().join("manifest.json");
         let manifest = match fs::File::open(&manifest_path).and_then(|f| {
             let mut text = String::new();
@@ -822,6 +826,8 @@ fn list_plugins(dir: &Path) -> Vec<PluginInfo> {
             title: json.get("title").and_then(|v| v.as_str()).unwrap_or(&id).to_string(),
             description: json.get("description").and_then(|v| v.as_str()).map(str::to_string),
             entry: format!("/plugins/{id}/{}", relative.to_string_lossy()),
+            previous_entry: contained_file(&entry.path(), &Path::new("previous").join(&relative))
+                .map(|_| format!("/plugins/{id}/previous/{}", relative.to_string_lossy())),
             version,
             manifest_version: json.get("version").and_then(|v| v.as_str()).map(str::to_string),
             group: json.get("group").and_then(|v| v.as_str()).filter(|g| matches!(*g, "main" | "work" | "system")).map(str::to_string),
