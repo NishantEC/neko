@@ -108,6 +108,26 @@ and "there is no restriction. It can do whatever it wants". Design:
   carries the workspace id, and `{neko}` in a routine's prompt becomes the
   daemon's path. `ensure_seeded` adds any seeded kind a scope lacks, so
   existing scopes got Reflect without reseeding.
+- **Mac care** (2026-11-06): the home scope alone gets `RoutineKind::MacCare`
+  (daily 04:00, no browser or desktop). It runs the shared
+  `~/.agents/bin/mac-care` report and applies it when free space is under 60
+  GB or a step frees over 1 GB; it clears only regenerable caches and build
+  output, lists the owner's own big items (Trash, Downloads, transcripts) in
+  one needs-you item when space stays under 30 GB, and never deletes those.
+  The disk was 94% full (26 GB free) with ~90 GB in caches when this landed.
+- **Nothing about one person is in the code** (2026-11-06, owner: a friend
+  installing Neko must be able to adopt it with little setup). Prompts name the
+  owner with `{owner}`, filled from the account's full name (`owner_name`);
+  scopes are found in any common code folder (`scopes::ROOTS`: Documents,
+  code, Projects, Developer, …) and named after the folder until the
+  workspace is renamed; a home-folder "Personal" scope is created when no
+  workspace covers home; chat-server scopes (Slack/Teams/Discord) check
+  messages every 20 min. Everything specific to a person (their Slack server
+  names, orgs, GitHub login, what a project needs) lives in the workspace's
+  own Instructions, which routines read as "scope notes". The Paseo cutover
+  is no longer seeded. `mac-care` ships in the app (`scripts/mac-care`,
+  written to `<data>/bin/mac-care`), and `neko-daemon --protocol` prints the
+  request shapes, so the full-power chat needs no source checkout.
 - **Standing orders** are per workspace. The default
   (`DEFAULT_STANDING_ORDERS`) is "act without asking, report after". They go
   into every run's prompt.

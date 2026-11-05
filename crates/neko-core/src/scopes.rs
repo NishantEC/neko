@@ -7,23 +7,28 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-/// Display names for folders whose name says little.
-const NAMES: &[(&str, &str)] = &[
-    ("work", "Acme"),
-    ("clientco", "Client A"),
-    ("web-v2", "Client B"),
-    ("ui-kit", "Sibling app"),
-];
+/// Folders people keep their code in. A scope is a folder directly inside one
+/// of these; only the ones that exist on this Mac are read.
+const ROOTS: &[&str] = &["Documents", "code", "Code", "src", "dev", "Developer", "Projects", "projects", "work", "repos", "git"];
 
 /// A repo-level server repeated this often under one scope belongs at the scope.
 const REPEATED: usize = 3;
 
+/// A scope is named after its folder until its workspace is renamed.
 pub fn display_name(folder: &str) -> String {
-    NAMES
+    folder.to_string()
+}
+
+/// The code folders that exist under `home`, each once (case-insensitive
+/// file systems make `code` and `Code` the same folder).
+pub fn roots(home: &Path) -> Vec<std::path::PathBuf> {
+    let mut seen = BTreeSet::new();
+    ROOTS
         .iter()
-        .find(|(dir, _)| *dir == folder)
-        .map(|(_, name)| (*name).to_string())
-        .unwrap_or_else(|| folder.to_string())
+        .map(|root| home.join(root))
+        .filter(|path| path.is_dir())
+        .filter(|path| seen.insert(std::fs::canonicalize(path).unwrap_or_else(|_| path.clone())))
+        .collect()
 }
 
 fn mcp_json_servers(path: &Path) -> Vec<String> {
@@ -59,7 +64,7 @@ fn visible_dirs(path: &Path) -> Vec<std::path::PathBuf> {
 
 /// Proposals sorted by name. `claude_json` is `~/.claude.json`, parsed.
 pub fn discover(home: &Path, claude_json: Option<&Value>) -> Vec<ScopeProposal> {
-    let documents = home.join("Documents");
+    let tops: Vec<std::path::PathBuf> = roots(home).iter().flat_map(|root| visible_dirs(root)).collect();
     // Servers configured for exactly one folder say that folder is its own scope.
     let mut owners: BTreeMap<String, usize> = BTreeMap::new();
     if let Some(projects) = claude_json.and_then(|value| value["projects"].as_object()) {
@@ -75,7 +80,7 @@ pub fn discover(home: &Path, claude_json: Option<&Value>) -> Vec<ScopeProposal> 
         .unwrap_or_default();
 
     let mut scopes = Vec::new();
-    for top in visible_dirs(&documents) {
+    for top in tops {
         let folder = top.file_name().unwrap_or_default().to_string_lossy().to_string();
         let mut servers = Vec::new();
         let top_file = top.join(".mcp.json");
@@ -124,6 +129,7 @@ pub fn discover(home: &Path, claude_json: Option<&Value>) -> Vec<ScopeProposal> 
             problems,
             workspace_id: None,
             discovered: true,
+            instructions: String::new(),
         });
     }
     scopes.sort_by(|a, b| a.name.cmp(&b.name));
@@ -199,7 +205,7 @@ mod tests {
         let claude = serde_json::json!({"projects": {triage.to_string_lossy(): {"mcpServers": {"expo": {}}}}});
         let scopes = discover(home.path(), Some(&claude));
         assert_eq!(scopes.len(), 1);
-        assert_eq!(scopes[0].name, "Client A");
+        assert_eq!(scopes[0].name, "clientco");
         let names: Vec<_> = scopes[0].servers.iter().map(|s| (s.name.as_str(), s.level.as_str())).collect();
         assert!(names.contains(&("slack-client-a", "scope")));
         assert!(names.contains(&("expo", "repo")));
@@ -217,8 +223,17 @@ mod tests {
         }
         let claude = serde_json::json!({ "projects": projects });
         let scopes = discover(home.path(), Some(&claude));
-        assert_eq!(scopes[0].name, "Acme");
+        assert_eq!(scopes[0].name, "work");
         assert!(scopes[0].problems.iter().any(|p| p.starts_with("ops-mcp-prod is set up separately in 3 repos under work")));
+    }
+
+    #[test]
+    fn scopes_are_found_in_any_common_code_folder() {
+        let home = home();
+        write(&home.path().join("code/acme/.mcp.json"), r#"{"mcpServers":{"slack-acme":{}}}"#);
+        write(&home.path().join("Projects/side/.mcp.json"), r#"{"mcpServers":{"linear":{}}}"#);
+        let names: Vec<_> = discover(home.path(), None).into_iter().map(|s| s.name).collect();
+        assert_eq!(names, vec!["acme", "side"]);
     }
 
     #[test]
@@ -242,7 +257,7 @@ mod tests {
         let claude = serde_json::json!({"mcpServers": {"sentry": {}}, "projects": {docs.join("web-v2").to_string_lossy(): {"mcpServers": {"linear-b": {}}}}});
         let scopes = discover(home.path(), Some(&claude));
         assert_eq!(scopes.len(), 1);
-        assert_eq!(scopes[0].name, "Client B");
+        assert_eq!(scopes[0].name, "web-v2");
     }
 
     #[test]

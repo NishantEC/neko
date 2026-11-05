@@ -11,6 +11,8 @@ pub enum RoutineKind {
     PrSweep,
     /// Learns standing orders from what the owner did with the scope's work.
     Reflect,
+    /// Keeps the Mac's disk healthy (personal scope only).
+    MacCare,
     Custom,
 }
 
@@ -122,6 +124,10 @@ pub struct ScopeProposal {
     /// Found on disk by `neko_core::scopes`, not just an existing workspace.
     #[serde(default)]
     pub discovered: bool,
+    /// The workspace's own instructions: what this scope's tools and accounts
+    /// are, in the owner's words. Routines read them as scope notes.
+    #[serde(default)]
+    pub instructions: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

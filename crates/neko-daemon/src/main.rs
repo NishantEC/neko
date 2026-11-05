@@ -11,13 +11,30 @@ use std::sync::Arc;
 use neko_core::Db;
 use server::AppState;
 
+/// `neko-daemon --protocol` prints these: every `Request`, `Response` and
+/// workbench `Command` with their fields.
+const PROTOCOL: &[(&str, &str)] = &[
+    ("neko-protocol/src/lib.rs (Request, Response, Event)", include_str!("../../neko-protocol/src/lib.rs")),
+    ("neko-protocol/src/workbench.rs (Command, Snapshot)", include_str!("../../neko-protocol/src/workbench.rs")),
+    ("neko-protocol/src/routines.rs (Routine, Cadence, RoutineRun)", include_str!("../../neko-protocol/src/routines.rs")),
+];
+
 /// `neko-daemon --request '<json>'`: sends one `Request` to the running
 /// daemon and prints its `Response` as JSON (exit 1 for an error). This is
 /// how agents, Neko's own chat included, manage Neko from a shell.
 fn request_if_asked() -> Option<i32> {
     let mut args = std::env::args().skip(1);
-    if args.next().as_deref() != Some("--request") {
-        return None;
+    match args.next().as_deref() {
+        Some("--request") => {}
+        Some("--protocol") => {
+            // The request shapes, from the sources this build was made from,
+            // so an agent on any Mac can read them without a checkout.
+            for (name, text) in PROTOCOL {
+                println!("===== {name} =====\n{text}");
+            }
+            return Some(0);
+        }
+        _ => return None,
     }
     let Some(text) = args.next() else {
         eprintln!("usage: neko-daemon --request '<json Request>'");

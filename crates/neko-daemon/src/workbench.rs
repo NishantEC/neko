@@ -1679,7 +1679,7 @@ fn converse(
     };
     let instruction = if super_on {
         let neko = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "neko-daemon".into());
-        neko_chat::super_instruction(&neko)
+        neko_chat::super_instruction(&neko, &neko_core::routines::owner_name())
     } else {
         neko_chat::INSTRUCTION.to_string()
     };

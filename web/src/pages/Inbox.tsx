@@ -361,7 +361,7 @@ function InboxBody() {
           </Section>
         );
       })}
-      {scopes.length === 0 ? <EmptyBlock icon={Tray} title="No routines yet" description="Neko creates them for each scope it finds under ~/Documents." /> : null}
+      {scopes.length === 0 ? <EmptyBlock icon={Tray} title="No routines yet" description="Neko creates them for your home folder and for each project folder with its own MCP setup in Documents, code, Projects or a similar folder." /> : null}
       <RoutineEditor routine={editing} onClose={() => setEditing(null)} send={send} />
     </>
   );

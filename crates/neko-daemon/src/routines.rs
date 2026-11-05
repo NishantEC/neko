@@ -62,10 +62,10 @@ fn claude_json_settled(home: &Path) -> Option<serde_json::Value> {
 /// rewrites often): reuse the last result while neither changed, for at most
 /// ten minutes. A half-written ~/.claude.json keeps the previous result.
 fn discover_cached(home: &Path) -> Vec<ScopeProposal> {
-    type Cache = Option<(Option<std::time::SystemTime>, Option<std::time::SystemTime>, std::time::Instant, Vec<ScopeProposal>)>;
+    type Cache = Option<(Option<std::time::SystemTime>, Vec<Option<std::time::SystemTime>>, std::time::Instant, Vec<ScopeProposal>)>;
     static CACHE: std::sync::Mutex<Cache> = std::sync::Mutex::new(None);
     let mtime = |path: PathBuf| std::fs::metadata(path).and_then(|m| m.modified()).ok();
-    let (config, documents) = (mtime(home.join(".claude.json")), mtime(home.join("Documents")));
+    let (config, documents) = (mtime(home.join(".claude.json")), neko_core::scopes::roots(home).into_iter().map(mtime).collect::<Vec<_>>());
     let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some((c, d, at, scopes)) = cache.as_ref() {
         if *c == config && *d == documents && at.elapsed() < DISCOVERY_MAX_AGE {
@@ -122,6 +122,10 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
         let find = |workspaces: &[Workspace], folders: &std::collections::BTreeMap<String, Vec<String>>| {
             workspaces.iter().find(|w| folders_of(folders, w).iter().any(|f| canonical(f) == folder)).map(|w| w.id.clone())
         };
+        if let Some(existing) = find(&workspaces, &folders).and_then(|id| workspaces.iter().find(|w| w.id == id)) {
+            // A workspace the owner named keeps its name.
+            proposal.name = existing.name.clone();
+        }
         proposal.workspace_id = match find(&workspaces, &folders) {
             Some(id) => Some(id),
             None if create && !gave_up(&folder) => {
@@ -145,6 +149,22 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
             None => None,
         };
     }
+    // Everyone has a personal scope: the home folder, unless a workspace
+    // already covers it.
+    let home_path = canonical(&home().to_string_lossy());
+    let home_covered = workspaces.iter().any(|w| folders_of(&folders, w).iter().any(|f| canonical(f) == home_path));
+    if create && !home_covered && !gave_up(&home_path) {
+        let workspace = Workspace { id: String::new(), name: "Personal".into(), repository: home_path.clone(), instructions: String::new(), away_enabled: false };
+        match state.workbench.command(Command::SaveWorkspaceWithFolders { workspace, folders: vec![home_path.clone()] }) {
+            Ok(snapshot) => (workspaces, folders) = (snapshot.workspaces, snapshot.workspace_folders),
+            Err(error) => give_up(&home_path, &error, false),
+        }
+    }
+    for proposal in &mut proposals {
+        if let Some(workspace) = workspaces.iter().find(|w| proposal.workspace_id.as_deref() == Some(w.id.as_str())) {
+            proposal.instructions = workspace.instructions.clone();
+        }
+    }
     for workspace in &workspaces {
         if proposals.iter().any(|p| p.workspace_id.as_deref() == Some(workspace.id.as_str())) {
             continue;
@@ -156,6 +176,7 @@ fn scopes(state: &AppState, create: bool) -> Result<Vec<ScopeProposal>, String> 
             problems: Vec::new(),
             workspace_id: Some(workspace.id.clone()),
             discovered: false,
+            instructions: workspace.instructions.clone(),
         });
     }
     Ok(proposals)
@@ -188,7 +209,7 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
         for routine in store.routines.iter_mut().filter(|r| r.kind != neko_protocol::routines::RoutineKind::Custom) {
             if let Some(scope) = all.iter().find(|s| s.workspace_id.as_deref() == Some(routine.workspace_id.as_str())) {
                 let personal = scope.folders.iter().any(|f| canonical(f) == home_folder);
-                routine.instruction = core::seed_instruction(routine.kind, &scope.name, personal);
+                routine.instruction = core::seed_instruction(routine.kind, personal);
             }
         }
         store.instructions_version = core::INSTRUCTIONS_VERSION;
@@ -496,8 +517,9 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             } else {
                 let spec = neko_core::native_runner::RunSpec {
                     directory: folder,
-                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso(), &open)
-                        .replace("{neko}", &std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "neko-daemon".into())),
+                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso(), &open, &core::owner_name())
+                        .replace("{neko}", &std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "neko-daemon".into()))
+                        .replace("{mac_care}", &core::install_mac_care().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "mac-care".into())),
                     writable: true,
                     timeout: if matches!(routine.kind, neko_protocol::routines::RoutineKind::Messages) { RUN_TIMEOUT } else { LONG_RUN_TIMEOUT },
                     runtime: AgentRuntime {

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const DEFAULT_STANDING_ORDERS: &str = "You act for Asha without asking. Reply, send, post, review, rebase, merge, close and archive when it is the right call, and say what you did. Put something in needs_you only when it truly requires Asha: a decision only he can make, a credential or sign-in, money, or something you tried and could not do.";
+pub const DEFAULT_STANDING_ORDERS: &str = "You act for {owner} without asking. Reply, send, post, review, rebase, merge, close and archive when it is the right call, and say what you did. Put something in needs_you only when it truly requires {owner}: a decision only {owner} can make, a credential or sign-in, money, or something you tried and could not do.";
 
 const DEFINITIONS: &str = "routines_v1";
 const SEQ: &str = "routine_seq_v1";
@@ -228,18 +228,20 @@ pub fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-const BROWSER_NOTE: &str = "You can use Asha's own Chrome through the claude-in-chrome tools (load them with ToolSearch first). It is signed in to his accounts. Use it when a source needs a consent screen for an account that is already signed in (open the link an MCP server gives you and approve it while that server is still running), or for work only a website allows. Never enter or submit passwords or one-time codes; if the right account is not signed in, put it in needs_you. Work in your own tab and never close his.\n\n";
+const BROWSER_NOTE: &str = "You can use {owner}'s own Chrome through the claude-in-chrome tools (load them with ToolSearch first). It is signed in to {owner}'s accounts. Use it when a source needs a consent screen for an account that is already signed in (open the link an MCP server gives you and approve it while that server is still running), or for work only a website allows. Never enter or submit passwords or one-time codes; if the right account is not signed in, put it in needs_you. Work in your own tab and never close {owner}'s.\n\n";
 
-const COMPUTER_NOTE: &str = "You can see and operate Mac apps through the peekaboo tools (screenshots, the accessibility tree, clicks, typing, menus). Prefer an MCP server, a CLI or the browser when one can do the job; use the desktop only for work that lives in an app. Asha may be using the Mac: act in the background on the exact window you snapshotted, do not bring apps forward or take the keyboard unless the task needs it, and leave every app as you found it. Never type into, submit or click on a password field, a sign-in or account-switch form, a two-factor prompt, or the Passwords, Keychain or any security dialog: if a task reaches one, stop and put it in needs_you with the account it wants. After any click whose result you did not see, look again before the next action; if a tool reports an error, do not retry blindly.\n\n";
+const COMPUTER_NOTE: &str = "You can see and operate Mac apps through the peekaboo tools (screenshots, the accessibility tree, clicks, typing, menus). Prefer an MCP server, a CLI or the browser when one can do the job; use the desktop only for work that lives in an app. {owner} may be using the Mac: act in the background on the exact window you snapshotted, do not bring apps forward or take the keyboard unless the task needs it, and leave every app as you found it. Never type into, submit or click on a password field, a sign-in or account-switch form, a two-factor prompt, or the Passwords, Keychain or any security dialog: if a task reaches one, stop and put it in needs_you with the account it wants. After any click whose result you did not see, look again before the next action; if a tool reports an error, do not retry blindly.\n\n";
 
-/// `open` is what this scope's routines already reported and Asha has not
+/// `open` is what this scope's routines already reported and the owner has not
 /// cleared: the run must not report it again, and says when one is handled.
-pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memory: &Value, now_iso: &str, open: &[String]) -> String {
+/// `owner` is how prompts name the person Neko works for (`owner_name`).
+#[allow(clippy::too_many_arguments)]
+pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memory: &Value, now_iso: &str, open: &[String], owner: &str) -> String {
     let open = if open.is_empty() {
-        "Nothing is waiting on Asha in this scope right now.".to_string()
+        "Nothing is waiting on {owner} in this scope right now.".to_string()
     } else {
         format!(
-            "Already waiting on Asha in this scope (reported by this or another routine). Never report any of these again, even in other words. If you find one is no longer true (done, fixed, signed in, merged), put its exact title in resolved:\n{}",
+            "Already waiting on {owner} in this scope (reported by this or another routine). Never report any of these again, even in other words. If you find one is no longer true (done, fixed, signed in, merged), put its exact title in resolved:\n{}",
             open.iter().map(|t| format!("- {t}")).collect::<Vec<_>>().join("\n")
         )
     };
@@ -248,25 +250,66 @@ pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memo
     let servers = if servers.is_empty() { "the MCP servers and connectors your setup loads here".to_string() } else { servers.join(", ") };
     let memory = if memory.is_null() { "{}".to_string() } else { memory.to_string() };
     format!(
-        "You are Neko, Asha's chief of staff, running the \"{name}\" routine for the {scope_name} scope.\n\
+        "You are Neko, {{owner}}'s chief of staff, running the \"{name}\" routine for the {scope_name} scope.\n\
 Working folder: {folder}. Workspace id: {workspace_id}. Your MCP servers are exactly this scope's: {servers}. Nothing from other scopes is loaded; if a source this routine needs is missing or not signed in, say so in needs_you.\n\
 Now (UTC): {now_iso}\n\n\
-{instruction}\n\n\
-Standing orders from Asha:\n{orders}\n\n\
+{notes}{instruction}\n\n\
+Standing orders from {{owner}}:\n{orders}\n\n\
 {browser}{computer}{open}\n\n\
 What you asked to remember last run (JSON): {memory}\n\
 A previous run may have acted and then failed to report. Before replying to or acting on anything, check whether you already did (for example your own reply in the thread), and never do it twice.\n\n\
 End your reply with exactly one fenced json block and nothing after it:\n\
-```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what Asha must do and why\", \"link\": \"https://...\"}}], \"resolved\": [\"exact title of an item above that is no longer true\"], \"memory\": {{}}}}\n```\n\
+```json\n{{\"quiet\": false, \"did\": [\"one line per thing you did, with who/where\"], \"needs_you\": [{{\"title\": \"short\", \"detail\": \"what {{owner}} must do and why\", \"link\": \"https://...\"}}], \"resolved\": [\"exact title of an item above that is no longer true\"], \"memory\": {{}}}}\n```\n\
 quiet is true only when nothing new happened and you did nothing; then did and needs_you are empty. memory is handed back to you next run: keep it small (timestamps, ids, who you are waiting on).",
         name = routine.name,
         scope_name = scope.name,
         folder = scope.folders.first().map(String::as_str).unwrap_or("~"),
         instruction = routine.instruction.trim(),
         workspace_id = routine.workspace_id,
+        notes = if scope.instructions.trim().is_empty() { String::new() } else { format!("Scope notes, in {{owner}}'s words:\n{}\n\n", scope.instructions.trim()) },
         browser = if routine.browser { BROWSER_NOTE } else { "" },
         computer = if routine.computer { COMPUTER_NOTE } else { "" },
     )
+    .replace("{owner}", owner)
+}
+
+/// Neko's disk-care script (`scripts/mac-care`), shipped inside the app so
+/// the Mac care routine works on any Mac.
+pub const MAC_CARE_SCRIPT: &str = include_str!("../../../scripts/mac-care");
+
+/// Writes the shipped script to `<data dir>/bin/mac-care` (when it differs)
+/// and returns its path.
+pub fn install_mac_care() -> std::io::Result<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = neko_protocol::support_dir().join("bin").join("mac-care");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(MAC_CARE_SCRIPT) {
+        std::fs::create_dir_all(path.parent().unwrap_or(&path))?;
+        let temp = path.with_extension("new");
+        std::fs::write(&temp, MAC_CARE_SCRIPT)?;
+        std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o755))?;
+        std::fs::rename(&temp, &path)?;
+    }
+    Ok(path)
+}
+
+/// What prompts call the person this Mac belongs to: the first word of the
+/// account's full name (System Settings › Users), else the login name.
+pub fn owner_name() -> String {
+    // SAFETY: getpwuid returns a pointer into static storage or null; the
+    // fields are read at once and copied.
+    let full = unsafe {
+        let entry = libc::getpwuid(libc::getuid());
+        if entry.is_null() || (*entry).pw_gecos.is_null() {
+            None
+        } else {
+            std::ffi::CStr::from_ptr((*entry).pw_gecos).to_str().ok().map(str::to_string)
+        }
+    };
+    full.as_deref()
+        .and_then(|name| name.split(|c: char| c.is_whitespace() || c == ',').find(|w| !w.is_empty()))
+        .map(str::to_string)
+        .or_else(|| std::env::var("USER").ok().filter(|u| !u.is_empty()))
+        .unwrap_or_else(|| "the owner".into())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -334,92 +377,77 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
     Ok(Parsed { quiet, did, needs_you, resolved, memory })
 }
 
-/// Where each scope's work lives, so seeded instructions can be specific.
-fn scope_hint(scope: &str, personal: bool) -> &'static str {
-    match scope {
-        "Client A" => "Slack is slack-client-a. Email and calendar are Gmail and Google Calendar through google-client-a. Jira is project KAN (atlassian). GitHub org client-a-ai (repos triage, support-fe, triage-admin, BFF); Asha's GitHub login is NishantEC.",
-        "Acme" => "Slack is slack-work. Email and calendar are Gmail and Google Calendar through google-work. Issues are in Linear team HEA and Asana. GitHub org Acme; Asha's GitHub login is NishantEC.",
-        "Client B" => "Issues are in Linear (linear-b). GitHub: the org that owns the repos in this folder (check `git remote -v`); Asha's GitHub login is NishantEC.",
-        "Sibling app" => "This is Asha's own product, Sibling app (ui-kit). Issues are in Linear (linear). GitHub repo is the one in this folder.",
-        _ if personal => "Personal: Gmail and Google Calendar through google-personal, Linear (linear-personal), and only GitHub repositories owned by NishantEC himself. Work in the Acme and client-a-ai organizations (and any other employer or client org) belongs to its own scope: never report or act on it here.",
-        _ => "Use the connections configured for this folder; find the GitHub org with `git remote -v` in its repos. Asha's GitHub login is NishantEC.",
-    }
-}
+/// How every seeded instruction finds the owner's accounts without knowing
+/// them: nothing about any one person or company is written into Neko.
+const FIND_ACCOUNTS: &str = "Find {owner}'s GitHub login with `gh api user --jq .login` and the organisation each repository belongs to with `git remote -v`; the scope notes and this scope's MCP servers say which chat, mail, calendar and issue tools to use.";
 
-/// The instruction a seeded routine of this kind gets in this scope.
-pub fn seed_instruction(kind: RoutineKind, scope: &str, personal: bool) -> String {
-    instruction(kind, scope, personal)
+/// The instruction a seeded routine of this kind gets.
+pub fn seed_instruction(kind: RoutineKind, personal: bool) -> String {
+    instruction(kind, personal)
 }
 
 /// Bumped when seeded instructions change; older ones are rewritten once.
-pub const INSTRUCTIONS_VERSION: u32 = 3;
+pub const INSTRUCTIONS_VERSION: u32 = 4;
 
-fn instruction(kind: RoutineKind, scope: &str, personal: bool) -> String {
-    let hint = scope_hint(scope, personal);
+fn instruction(kind: RoutineKind, personal: bool) -> String {
+    let own = if personal {
+        " This is {owner}'s personal scope: only repositories owned by {owner}'s own GitHub account, and personal mail and calendar. Work in any company or client organisation belongs to that organisation's own scope: never report or act on it here."
+    } else {
+        ""
+    };
     match kind {
         RoutineKind::Messages => format!(
-            "Check everything that came in for Asha in this scope since memory.last_check (if missing, the last 24 hours): direct messages and mentions, email, issue-tracker comments and mentions, and review comments on his pull requests. {hint}\n\
+            "Check everything that came in for {{owner}} in this scope since memory.last_check (if missing, the last 24 hours): direct messages and mentions, email, issue-tracker comments and mentions, and review comments on {{owner}}'s pull requests. {FIND_ACCOUNTS}{own}\n\
 Handle each one yourself: reply, answer, acknowledge, look things up in code or data to answer properly, fix small things, or start the work. Keep memory.last_check (UTC ISO time) and memory.expecting_reply_from (people you are waiting on) current. If a source fails because a sign-in is missing, put that in needs_you once, then remember you reported it."
         ),
-        RoutineKind::Digest => {
-            let extra = match scope {
-                "Sibling app" => " Also check docs/marketing/blog/PUBLISHED.md on origin/main for yesterday's and today's posts; if a day has none, find out why and fix it.",
-                _ if !personal => "",
-                _ => " Also one line on the machine: free disk (df -h /System/Volumes/Data), load (uptime), and the size of ~/Library/Application Support/neko/task-worktrees.",
-            };
-            format!(
-                "Morning brief for this scope. {hint} Look at: Asha's open pull requests (CI, review state, unresolved comments), pull requests waiting on his review, issues assigned to him that changed in the last 24 hours, and anything urgent from monitoring.{extra}\n\
-Act on what you can first: answer review comments, fix or re-run failing CI, rebase, review the PRs waiting on him when the change is clear. Then report: did = what you handled; needs_you = only the few things Asha must do today, each with a link. Write the brief to ~/Documents/digests/neko-{slug}-<today's date>.md as well.",
-                slug = scope.to_lowercase().replace(' ', "-")
-            )
-        }
+        RoutineKind::Digest => format!(
+            "Morning brief for this scope. {FIND_ACCOUNTS}{own} Look at: {{owner}}'s open pull requests (CI, review state, unresolved comments), pull requests waiting on {{owner}}'s review, issues assigned to {{owner}} that changed in the last 24 hours, today's calendar, and anything urgent from monitoring.{machine}\n\
+Act on what you can first: answer review comments, fix or re-run failing CI, rebase, review the PRs waiting on {{owner}} when the change is clear. Then report: did = what you handled; needs_you = only the few things {{owner}} must do today, each with a link.",
+            machine = if personal { " Also one line on the machine: free disk (df -h /System/Volumes/Data) and load (uptime)." } else { "" }
+        ),
         RoutineKind::PrSweep => format!(
-            "Pull request and branch sweep. {hint} Go through Asha's open pull requests and his remote branches: rebase stale ones on their base, fix failing CI when the fix is clear, address review comments, nudge reviewers on PRs waiting more than two days, and close PRs and delete branches that are merged elsewhere, superseded or dead.\n\
-Do the work, do not just list it. Work in a temporary git worktree (`git worktree add` under /tmp, removed when done) so Asha's checkouts are never touched. Resolve conflicts yourself when the right result is clear from both sides, run the tests that cover the changed files, and push. When a PR has no reviewer, request one from CODEOWNERS or whoever reviewed that repository's recent PRs. Only a conflict whose right resolution needs a product decision goes in needs_you, with what the choice is. Report each action in did."
+            "Pull request and branch sweep. {FIND_ACCOUNTS}{own} Go through {{owner}}'s open pull requests and remote branches: rebase stale ones on their base, fix failing CI when the fix is clear, address review comments, nudge reviewers on PRs waiting more than two days, and close PRs and delete branches that are merged elsewhere, superseded or dead.\n\
+Do the work, do not just list it. Work in a temporary git worktree (`git worktree add` under /tmp, removed when done) so {{owner}}'s checkouts are never touched. Resolve conflicts yourself when the right result is clear from both sides, run the tests that cover the changed files, and push. When a PR has no reviewer, request one from CODEOWNERS or whoever reviewed that repository's recent PRs. Only a conflict whose right resolution needs a product decision goes in needs_you, with what the choice is. Report each action in did."
         ),
-        RoutineKind::Reflect => format!(
-            "Learn Asha's standing orders for this scope from what he actually does. Neko's own command line is `'{{neko}}' --request '<json>'` (it prints the JSON reply). \
-Read this scope's routines and their recent runs with `'{{neko}}' --request '\"Routines\"'` (only routines whose workspace_id is this scope's): what Neko did, which needs_you items he marked done, which he left open for days, and the current standing_orders for this workspace. Read Home chat with `'{{neko}}' --request '{{\"Workbench\":\"Snapshot\"}}'` (the conversation) for corrections or preferences he stated about this scope's work, and the memory entries for this workspace.\n\
-When a clear pattern shows a rule he wants (he corrected how a routine acted, he always handles a kind of item himself, he keeps ignoring a kind of item, he asked for something to be done differently), update this scope's standing orders with `'{{neko}}' --request '{{\"SetStandingOrders\":{{\"workspace_id\":\"<this workspace id>\",\"text\":\"<full new text>\"}}}}'`: keep every existing sentence of his, add or adjust at most two short rules per day, and write them in his voice as plain instructions. Never loosen a rule he wrote. Put each change in did with the evidence (which runs or messages). If nothing is clear, change nothing and be quiet. {hint}"
-        ),
+        RoutineKind::Reflect => "Learn {owner}'s standing orders for this scope from what {owner} actually does. Neko's own command line is `'{neko}' --request '<json>'` (it prints the JSON reply; `'{neko}' --protocol` prints every request it accepts). \
+Read this scope's routines and their recent runs with `'{neko}' --request '\"Routines\"'` (only routines whose workspace_id is this scope's): what Neko did, which needs_you items {owner} marked done, which were left open for days, and the current standing_orders for this workspace. Read Home chat with `'{neko}' --request '{\"Workbench\":\"Snapshot\"}'` (the conversation) for corrections or preferences {owner} stated about this scope's work, and the memory entries for this workspace.\n\
+When a clear pattern shows a rule {owner} wants (a correction to how a routine acted, a kind of item {owner} always handles personally or keeps ignoring, a request to do something differently), update this scope's standing orders with `'{neko}' --request '{\"SetStandingOrders\":{\"workspace_id\":\"<this workspace id>\",\"text\":\"<full new text>\"}}'`: keep every existing sentence, add or adjust at most two short rules per day, and write them as plain instructions in {owner}'s voice. Never loosen a rule {owner} wrote. Put each change in did with the evidence (which runs or messages). If nothing is clear, change nothing and be quiet.".to_string(),
+        RoutineKind::MacCare => "Keep this Mac's disk healthy. Run `'{mac_care}'` (a report that changes nothing). If free space is under 60 GB, or any step would free more than 1 GB, run `'{mac_care}' --apply`; it clears only data that rebuilds itself. Put the GB freed in did. If free space is still under 30 GB afterwards, put one needs_you item listing its \"Yours to decide\" lines with sizes (Trash, Downloads, old agent transcripts, simulators); never delete those yourself. When there is nothing to clean and space is fine, be quiet.".to_string(),
         RoutineKind::Custom => String::new(),
     }
 }
 
-/// Three routines per scope with a workspace: messages, digest, PR sweep.
-/// The scope whose folder is `home` is the personal one: Gmail, Calendar and
-/// the old Paseo digest and sweep.
+/// Four routines per scope with a workspace (messages, morning brief, PR
+/// sweep, learning standing orders); the scope whose folder is `home` is the
+/// personal one and also gets Mac care. A scope with a chat server (Slack,
+/// Teams, Discord) checks messages every 20 minutes, others hourly.
 pub fn seeds(scopes: &[ScopeProposal], home: &str) -> Vec<Routine> {
     let mut routines = Vec::new();
     for scope in scopes {
         let Some(workspace_id) = scope.workspace_id.clone() else { continue };
-        let busy = matches!(scope.name.as_str(), "Client A" | "Acme");
+        let chatty = scope.servers.iter().any(|s| ["slack", "teams", "discord"].iter().any(|chat| s.name.to_lowercase().contains(chat)));
         let personal = scope.folders.iter().any(|folder| folder.trim_end_matches('/') == home.trim_end_matches('/'));
         let specs = [
-            (RoutineKind::Messages, "Messages", Cadence::Every { minutes: if busy { 20 } else { 60 }, from_hour: 8, to_hour: 23 }),
+            (RoutineKind::Messages, "Messages", Cadence::Every { minutes: if chatty { 20 } else { 60 }, from_hour: 8, to_hour: 23 }),
             (RoutineKind::Digest, "Morning brief", Cadence::Daily { hour: 10, minute: 30 }),
             (RoutineKind::PrSweep, "PR sweep", Cadence::Daily { hour: 11, minute: 0 }),
             (RoutineKind::Reflect, "Learn standing orders", Cadence::Daily { hour: 21, minute: 30 }),
         ];
+        let care = [(RoutineKind::MacCare, "Mac care", Cadence::Daily { hour: 4, minute: 0 })];
+        let specs: Vec<_> = specs.into_iter().chain(care.into_iter().filter(|_| personal)).collect();
         for (kind, name, cadence) in specs {
-            let paseo = match (kind, scope.name.as_str()) {
-                (RoutineKind::Messages, "Client A") => Some("message-watch-adaptive"),
-                (RoutineKind::Digest, _) if personal => Some("daily-work-digest"),
-                (RoutineKind::PrSweep, _) if personal => Some("weekly-pr-sweep"),
-                _ => None,
-            };
             routines.push(Routine {
                 id: format!("{workspace_id}-{}", format!("{kind:?}").to_lowercase()),
                 workspace_id: workspace_id.clone(),
                 kind,
                 name: name.into(),
-                instruction: instruction(kind, &scope.name, personal),
+                instruction: instruction(kind, personal),
                 cadence,
                 enabled: true,
                 model: "sonnet".into(),
-                paseo_schedule: paseo.map(str::to_string),
-                browser: kind != RoutineKind::Reflect,
-                computer: kind != RoutineKind::Reflect,
+                paseo_schedule: None,
+                browser: !matches!(kind, RoutineKind::Reflect | RoutineKind::MacCare),
+                computer: !matches!(kind, RoutineKind::Reflect | RoutineKind::MacCare),
             });
         }
     }
@@ -490,26 +518,30 @@ mod tests {
     }
 
     #[test]
-    fn seeds_three_per_scope() {
-        let scope = |name: &str, id: Option<&str>| ScopeProposal { name: name.into(), folders: vec!["/x".into()], servers: vec![], problems: vec![], workspace_id: id.map(str::to_string), discovered: true };
-        let mut asha = scope("Asha", Some("w2"));
-        asha.folders = vec!["/Users/n".into()];
-        let routines = seeds(&[scope("Client A", Some("w1")), asha, scope("Loose", None)], "/Users/n/");
-        assert_eq!(routines.len(), 8);
-        assert_eq!(routines[0].paseo_schedule.as_deref(), Some("message-watch-adaptive"));
+    fn seeds_are_about_no_one_in_particular() {
+        let scope = |name: &str, id: Option<&str>| ScopeProposal { name: name.into(), folders: vec!["/x".into()], servers: vec![], problems: vec![], workspace_id: id.map(str::to_string), discovered: true, instructions: String::new() };
+        let mut chat = scope("Work", Some("w1"));
+        chat.servers = vec![neko_protocol::routines::ScopeServer { name: "slack-work".into(), origin: "x".into(), level: "scope".into(), repo: None }];
+        let mut home = scope("Me", Some("w2"));
+        home.folders = vec!["/Users/n".into()];
+        let routines = seeds(&[chat, home, scope("Loose", None)], "/Users/n/");
+        // Four per scope; the home scope also gets Mac care.
+        assert_eq!(routines.len(), 9);
         assert_eq!(routines[0].cadence, Cadence::Every { minutes: 20, from_hour: 8, to_hour: 23 });
-        assert!(routines[0].instruction.contains("slack-client-a"));
-        assert_eq!(routines[5].paseo_schedule.as_deref(), Some("daily-work-digest"));
-        assert_eq!(routines[6].paseo_schedule.as_deref(), Some("weekly-pr-sweep"));
-        let reflect = &routines[3];
-        assert_eq!(reflect.kind, RoutineKind::Reflect);
-        assert!(reflect.instruction.contains("'{neko}' --request") && reflect.instruction.contains("SetStandingOrders"));
-        assert!(!reflect.browser && !reflect.computer);
-        assert!(routines.iter().all(|r| r.id.starts_with(&r.workspace_id)));
-        assert!(routines[4].instruction.contains("Gmail"));
-        // A scope that is neither known nor home gets no personal routines.
-        let other = seeds(&[scope("Side project", Some("w3"))], "/Users/n");
-        assert!(other.iter().all(|r| r.paseo_schedule.is_none() && !r.instruction.contains("Gmail")));
+        assert_eq!(routines[4].cadence, Cadence::Every { minutes: 60, from_hour: 8, to_hour: 23 });
+        assert_eq!(routines.iter().filter(|r| r.kind == RoutineKind::MacCare).map(|r| r.workspace_id.as_str()).collect::<Vec<_>>(), vec!["w2"]);
+        assert!(routines.iter().all(|r| r.paseo_schedule.is_none() && r.id.starts_with(&r.workspace_id)));
+        assert!(routines[4].instruction.contains("personal scope"));
+        let reflect = routines.iter().find(|r| r.kind == RoutineKind::Reflect).unwrap();
+        assert!(reflect.instruction.contains("'{neko}' --request") && !reflect.browser && !reflect.computer);
+        for r in &routines {
+            for word in ["Asha", "Acme", "Client A", "NishantEC", "slack-client-a", "/Users/example"] {
+                assert!(!r.instruction.contains(word), "{word} in {:?}", r.kind);
+            }
+        }
+        let prompt = build_prompt(&routines[0], &ScopeProposal { instructions: "Slack is slack-work.".into(), ..scope("Work", Some("w1")) }, DEFAULT_STANDING_ORDERS, &Value::Null, "now", &[], "Asha");
+        assert!(prompt.contains("Asha's chief of staff") && prompt.contains("You act for Asha") && prompt.contains("Scope notes, in Asha's words:\nSlack is slack-work."));
+        assert!(!prompt.contains("{owner}"));
     }
 
     #[test]

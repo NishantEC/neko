@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# mac-care — free disk space on this Mac by clearing only what rebuilds itself.
+#
+#   mac-care            report what each step would free (changes nothing)
+#   mac-care --apply    do it, then report free space before and after
+#
+# Only regenerable data: package-manager caches (npm, pnpm unreferenced
+# packages, uv unused entries, yarn berry global cache, CocoaPods, Homebrew
+# old versions), Xcode DerivedData untouched for 7+ days, SwiftPM's cache,
+# unavailable simulators, Rust incremental build dirs untouched for 7+ days,
+# and logs older than 30 days. Never the Trash, Downloads, Documents, agent
+# transcripts, app data, or anything a running build is using: those are the
+# owner's call, and `mac-care` only lists the biggest of them at the end.
+# Shipped inside Neko (written to <Neko data>/bin/mac-care at start) and run by its
+# daily "Mac care" routine; machine-ok is used when present (~/.agents/bin).
+set -uo pipefail
+APPLY=0; [ "${1:-}" = "--apply" ] && APPLY=1
+H="$HOME"
+free_gb() { df -g /System/Volumes/Data | awk 'NR==2{print $4}'; }
+size() { du -sh "$@" 2>/dev/null | awk '{print $1}' | tail -1; }
+step() { printf '%-28s %8s  %s\n' "$1" "${2:-0}" "$3"; }
+
+if [ "$APPLY" = 1 ]; then
+  verdict="$("$H/.agents/bin/machine-ok" 2>/dev/null | head -1)"
+  case "$verdict" in WAIT*) echo "mac-care: machine says WAIT, not cleaning now ($verdict)"; exit 1;; esac
+fi
+before=$(free_gb)
+run() { [ "$APPLY" = 1 ] && "$@" >/dev/null 2>&1; true; }
+
+if command -v brew >/dev/null; then step "Homebrew old versions" "$(size "$H/Library/Caches/Homebrew")" "brew cleanup -s --prune=30"; run brew cleanup -s --prune=30; fi
+if command -v npm  >/dev/null; then step "npm cache" "$(size "$H/.npm/_cacache")" "npm cache clean --force"; run npm cache clean --force; fi
+if command -v pnpm >/dev/null; then step "pnpm unreferenced packages" "$(size "$H/Library/pnpm/store")" "pnpm store prune (only packages no project links)"; run pnpm store prune; fi
+if command -v uv   >/dev/null; then step "uv unused cache" "$(size "$H/.cache/uv")" "uv cache prune"; run uv cache prune; fi
+if [ -d "$H/.yarn/berry/cache" ]; then step "yarn berry global cache" "$(size "$H/.yarn/berry/cache")" "rm ~/.yarn/berry/cache"; run rm -rf "$H/.yarn/berry/cache"; fi
+if command -v pod >/dev/null; then step "CocoaPods cache" "$(size "$H/Library/Caches/CocoaPods")" "pod cache clean --all"; run pod cache clean --all; fi
+if [ -d "$H/Library/Caches/org.swift.swiftpm" ]; then step "SwiftPM cache" "$(size "$H/Library/Caches/org.swift.swiftpm")" "rm ~/Library/Caches/org.swift.swiftpm"; run rm -rf "$H/Library/Caches/org.swift.swiftpm"; fi
+DD="$H/Library/Developer/Xcode/DerivedData"
+if [ -d "$DD" ]; then
+  old=$(find "$DD" -mindepth 1 -maxdepth 1 -type d -mtime +7 2>/dev/null)
+  step "Xcode DerivedData (7+ days)" "$( [ -n "$old" ] && echo "$old" | tr '\n' '\0' | xargs -0 du -sch 2>/dev/null | tail -1 | awk '{print $1}')" "projects not built for a week"
+  [ "$APPLY" = 1 ] && [ -n "$old" ] && echo "$old" | while read -r d; do rm -rf -- "$d"; done
+fi
+if command -v xcrun >/dev/null; then step "Unavailable simulators" "-" "xcrun simctl delete unavailable"; run xcrun simctl delete unavailable; fi
+inc=$(find "$H/Documents" -maxdepth 4 -type d -name incremental -path '*/target/*' 2>/dev/null)
+if [ -n "$inc" ]; then
+  stale=$(echo "$inc" | while read -r d; do find "$d" -mindepth 1 -maxdepth 1 -mtime +7 2>/dev/null; done)
+  step "Rust incremental (7+ days)" "$( [ -n "$stale" ] && echo "$stale" | tr '\n' '\0' | xargs -0 du -sch 2>/dev/null | tail -1 | awk '{print $1}')" "target/*/incremental entries unused for a week"
+  [ "$APPLY" = 1 ] && [ -n "$stale" ] && echo "$stale" | while read -r d; do rm -rf -- "$d"; done
+fi
+step "Logs older than 30 days" "-" "~/Library/Logs"; [ "$APPLY" = 1 ] && find "$H/Library/Logs" -type f -mtime +30 -delete 2>/dev/null
+
+after=$(free_gb)
+echo
+if [ "$APPLY" = 1 ]; then echo "mac-care: free space ${before} GB -> ${after} GB (freed $((after - before)) GB)"; else echo "mac-care: report only (free ${before} GB); run with --apply to clean"; fi
+echo
+echo "Yours to decide (not touched):"
+for p in "$H/.Trash" "$H/Downloads" "$H/.claude/projects" "$H/.codex/sessions" "$H/Library/Developer/CoreSimulator/Devices"; do
+  [ -e "$p" ] && printf '  %8s  %s\n' "$(size "$p")" "${p/#$H/~}"
+done
