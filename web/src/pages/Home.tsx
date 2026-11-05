@@ -1,6 +1,7 @@
 // Home: the conversation with Neko. Conversation (use-stick-to-bottom), the
 // turns drawn with T3 Code's timeline rows, and the composer in T3's chrome with
-// the decision and the queue docked on its top edge.
+// the decision and the queue docked on its top edge. Beside it, the canvas: an
+// artifact a reply made opens in the inspector and stays until it is closed.
 import { useEffect, useMemo, useRef } from "react";
 import { accept, command } from "@/api";
 import { useWorkbench } from "@/useStore";
@@ -8,7 +9,10 @@ import { useSelectedWorkspace } from "@/shell/workspace";
 import { CaretDown, ChatCircle, Stop } from "@/ui/icons";
 import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from "@/chat/conversation";
 import { Suggestion, Suggestions } from "@/chat/suggestion";
-import { NekoComposer } from "@/chat/ChatInputComposer";
+import { NekoComposer, type ComposerHandle } from "@/chat/ChatInputComposer";
+import { Inspector } from "@/shell/inspector";
+import { ArtifactPanel } from "@/canvas/ArtifactPanel";
+import { closeCanvas, onArtifactSaved, openCanvas, referenceText, useArtifact, useCanvas } from "@/canvas/artifacts";
 import { Decisions, decisionsFromParts } from "@/chat/decisions";
 import { NekoTurn, UserTurn } from "@/chat/turns";
 import { chatSignature, useNekoChat } from "@/chat/sdk/chats";
@@ -22,7 +26,9 @@ const SUGGESTIONS = [
 
 export default function Home() {
   const { snapshot, connected, error } = useWorkbench();
-  const draft = useRef<{ set(text: string): void; focus(): void } | null>(null);
+  const draft = useRef<ComposerHandle | null>(null);
+  const canvas = useCanvas();
+  const { artifact: shown } = useArtifact(canvas?.id ?? null);
   // The conversation is the SDK's: `useChat` over the daemon's chat endpoints.
   // The snapshot only says when the log should be read again.
   const { chat, messages: all, loaded } = useNekoChat("neko", chatSignature(snapshot?.conversation));
@@ -32,6 +38,10 @@ export default function Home() {
   const decisions = useMemo(() => decisionsFromParts(all, snapshot?.tasks ?? []), [all, snapshot?.tasks]);
   // The sidebar's workspace switcher: the chat runs in that workspace, or none for all.
   const workspaceId: string | null = useSelectedWorkspace().id || null;
+
+  // A reply that saves an artifact opens it beside the conversation; a new
+  // version of the one on screen replaces it.
+  useEffect(() => onArtifactSaved((change) => { if (change.message_id) openCanvas(change.id, change.version); }), []);
 
   // Actions the ⌘K palette offers while Home is open.
   useEffect(
@@ -54,6 +64,24 @@ export default function Home() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <Inspector
+        open={!!canvas}
+        onClose={closeCanvas}
+        title={shown?.title ?? "Canvas"}
+        subtitle="Canvas"
+        fill
+      >
+        {canvas ? (
+          <ArtifactPanel
+            target={canvas}
+            onVersion={(n) => openCanvas(canvas.id, n)}
+            onComment={(artifact, n, pick) => {
+              const what = pick.text ? `“${pick.text.slice(0, 40)}${pick.text.length > 40 ? "…" : ""}”` : pick.selector;
+              draft.current?.reference(`${artifact.title} v${n} · ${what}`, referenceText(artifact.id, n, pick.selector, pick.text));
+            }}
+          />
+        ) : null}
+      </Inspector>
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-(--chat-content-max-width) gap-0 px-6 pt-0 pb-6">
           {!snapshot && <p className="mt-24 text-center text-muted-foreground">{error ?? "Connecting to Neko…"}</p>}

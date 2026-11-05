@@ -29,6 +29,8 @@ export type NekoData = {
   "neko-sources": { sources?: string[] };
   "neko-memory": { items?: string[] };
   "neko-status": { text?: string };
+  /** An artifact the agent saved during this reply (web/src/canvas). */
+  "neko-artifact": { id?: string; title?: string; kind?: string; version?: number };
 };
 
 export type NekoUIMessage = UIMessage<NekoMeta, NekoData>;

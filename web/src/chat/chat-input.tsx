@@ -36,6 +36,8 @@ export interface ChatAttachment {
   isImage?: boolean;
   status?: "uploading" | "ready" | "error";
   error?: string;
+  /** What the chip says it is when ready, instead of "File" (a canvas comment's reference). */
+  label?: string;
 }
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -176,7 +178,7 @@ export function ChatInput({
   const removeAttachment = (a: ChatAttachment) =>
     onRemoveAttachment ? onRemoveAttachment(a.id) : setAttachments(attachments.filter((x) => x.id !== a.id));
   const attachmentStatus = (a: ChatAttachment) =>
-    a.status === "uploading" ? "Uploading…" : a.status === "error" ? (a.error ?? "Could not attach") : a.isImage ? "Image" : "File";
+    a.status === "uploading" ? "Uploading…" : a.status === "error" ? (a.error ?? "Could not attach") : a.label ?? (a.isImage ? "Image" : "File");
 
   // T3 Code's composer chrome (ChatView + ChatComposer): ComposerSurface.Shell /
   // Host / Main, the banner dock for what sits on the composer's top edge, the

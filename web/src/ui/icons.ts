@@ -206,6 +206,8 @@ export {
   ArrowElbowDownRight,
   CircleDashed,
   Command,
+  CursorClick,
+  FrameCorners,
   GitPullRequest,
   PuzzlePiece,
   Plugs,

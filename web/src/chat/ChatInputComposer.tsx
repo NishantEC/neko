@@ -21,7 +21,7 @@ import { ComposerMenu, type ComposerMenuItem } from "@/chat/ChatInputMenu";
 import { RuntimePicker } from "@/chat/ChatInputRuntime";
 import { QueueTray } from "@/chat/queue-tray";
 import {
-  attachFile, completeSubmission, getDraft, removeDraftAttachment, setDraftMode, setDraftText, submission, useDraft,
+  addDraftAttachment, attachFile, completeSubmission, getDraft, removeDraftAttachment, setDraftMode, setDraftText, submission, useDraft,
   type ComposerMode,
 } from "@/chat/ChatInputDrafts";
 import {
@@ -39,6 +39,14 @@ import { messageText } from "@/chat/sdk/parts";
 import type { NekoUIMessage } from "@/chat/sdk/types";
 
 interface FoundFile { path: string; name: string; location: string }
+
+/** What a page can do to Home's composer: fill it, focus it, or add a reference chip. */
+export interface ComposerHandle {
+  set(text: string): void;
+  focus(): void;
+  /** `name` is what the chip shows; `reference` is the text the message carries. */
+  reference(name: string, reference: string): void;
+}
 
 /** The profile Home speaks to for a workspace (TodayView.scope). */
 export function profileFor(snapshot: Json | null, workspaceId: string | null): string {
@@ -84,7 +92,7 @@ export function NekoComposer({
   queued: NekoUIMessage[];
   decisionPending: boolean;
   workspaceId: string | null;
-  draftRef: React.RefObject<{ set(text: string): void; focus(): void } | null>;
+  draftRef: React.RefObject<ComposerHandle | null>;
   tray?: React.ReactNode;
 }) {
   const { snapshot } = useWorkbench();
@@ -103,7 +111,16 @@ export function NekoComposer({
   const planOnly = draft.mode === "plan";
 
   useEffect(() => {
-    draftRef.current = { set: (value) => setDraftText(scope, value), focus: () => area.current?.focus() };
+    draftRef.current = {
+      set: (value) => setDraftText(scope, value),
+      focus: () => area.current?.focus(),
+      // A chip whose text goes into the message (`submission` appends it), so
+      // the person types the comment and the agent reads what it is about.
+      reference: (name, reference) => {
+        addDraftAttachment(scope, { id: crypto.randomUUID(), name, type: "text/plain", isImage: false, status: "ready", reference, label: "Canvas" });
+        area.current?.focus();
+      },
+    };
     const forget = setReplyActions({
       send: (reply) => void deliver.current(reply, false),
       draft: (reply) => { setDraftText(scope, reply); area.current?.focus(); },

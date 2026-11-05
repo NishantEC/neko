@@ -16,6 +16,7 @@ import ChatMarkdown from "@/chat/t3/ChatMarkdown";
 import { ReplyAnswered, ReplyData } from "@/chat/reply-views";
 import { ACTION_TOOL, isToolPart, type NekoPart, type NekoUIMessage, type ToolPart } from "@/chat/sdk/types";
 import { messageText, replyText, splitTurn } from "@/chat/sdk/parts";
+import { ArtifactCard, artifactCards } from "@/canvas/ArtifactCard";
 
 /**
  * While a reply streams, only finished blocks are drawn: text up to the last
@@ -76,6 +77,8 @@ function Block({ part, last, streaming }: { part: NekoPart; last: boolean; strea
     const items = part.data.items ?? [];
     return items.length ? <p className="mt-2 text-xs text-muted-foreground/70">Remembered: {items.join(" · ")}</p> : null;
   }
+  // Artifact cards are drawn once per reply, below it (NekoTurn).
+  if (part.type === "data-neko-artifact") return null;
   if (part.type.startsWith("data-neko-")) return <ReplyData kind={part.type.slice("data-".length)} data={(part as { data: unknown }).data} />;
   return null;
 }
@@ -87,6 +90,9 @@ export function NekoTurn({ message, answered = false }: { message: NekoUIMessage
   const { work, reply } = splitTurn(message.parts);
   const text = replyText(reply);
   const actions = message.parts.filter((p): p is ToolPart => isToolPart(p) && p.toolName === ACTION_TOOL);
+  // An artifact is saved by a tool call, so its part sits among the work; its
+  // card belongs with the reply.
+  const artifacts = artifactCards(message.parts);
   const lastIndex = reply.length - 1;
   return (
     <div data-slot="neko-turn" data-pending={pending} className="pt-4">
@@ -99,6 +105,7 @@ export function NekoTurn({ message, answered = false }: { message: NekoUIMessage
         blocks={
           <ReplyAnswered value={answered}>
             {reply.map((part, index) => <Fragment key={index}><Block part={part} last={index === lastIndex} streaming={pending} /></Fragment>)}
+            {artifacts.map((card) => <ArtifactCard key={card.id} card={card} />)}
           </ReplyAnswered>
         }
       >

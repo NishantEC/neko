@@ -15,6 +15,8 @@ export interface DraftAttachment {
   reference?: string;
   status: "uploading" | "ready" | "error";
   error?: string;
+  /** Shown instead of "File" (a canvas comment's reference to an element). */
+  label?: string;
 }
 
 export type ComposerMode = "ask" | "plan";

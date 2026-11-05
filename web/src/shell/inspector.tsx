@@ -35,6 +35,8 @@ interface Meta {
   title?: ReactNode;
   subtitle?: ReactNode;
   onClose?: () => void;
+  /** The content fills the panel and scrolls itself (a canvas, a frame) instead of the panel scrolling. */
+  fill?: boolean;
 }
 interface State { owner: string; meta: Meta; node?: ReactNode }
 
@@ -77,14 +79,14 @@ export function useInspector() {
 }
 
 /** Declarative inspector: renders `children` into the panel while `open`. */
-export function Inspector({ open, onClose, title, subtitle, children }: { open: boolean; onClose?: () => void } & Meta & { children?: ReactNode }) {
+export function Inspector({ open, onClose, title, subtitle, fill, children }: { open: boolean; onClose?: () => void } & Meta & { children?: ReactNode }) {
   const api = useApi();
   const owner = useId();
   const { show, hide } = api;
   useEffect(() => {
     if (!open) return;
-    show(owner, { title, subtitle, onClose });
-  }, [open, owner, title, subtitle, onClose, show]);
+    show(owner, { title, subtitle, onClose, fill });
+  }, [open, owner, title, subtitle, onClose, fill, show]);
   useEffect(() => () => hide(owner), [owner, hide]);
   useEffect(() => {
     if (!open) hide(owner);
@@ -100,7 +102,7 @@ export function InspectorHost({ children }: { children: ReactNode }) {
     (owner: string, meta: Meta, node?: ReactNode) => {
       onCloseRef.current = meta.onClose;
       setState((s) => {
-        const same = s && s.owner === owner && !node && !s.node && s.meta.title === meta.title && s.meta.subtitle === meta.subtitle;
+        const same = s && s.owner === owner && !node && !s.node && s.meta.title === meta.title && s.meta.subtitle === meta.subtitle && s.meta.fill === meta.fill;
         // Same panel, same words: keep the state so a page that re-renders with a fresh inline
         // callback does not re-render the host (the callback itself lives in a ref).
         return same ? s : { owner, meta, node };
@@ -153,8 +155,8 @@ export function InspectorHost({ children }: { children: ReactNode }) {
                     <X />
                   </Button>
                 </header>
-                <div data-slot="inspector-body" className="min-h-0 flex-1 overflow-y-auto">
-                  <div ref={setSlot} />
+                <div data-slot="inspector-body" className={state.meta.fill ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto"}>
+                  <div ref={setSlot} className={state.meta.fill ? "h-full" : undefined} />
                   {state.node}
                 </div>
               </aside>
