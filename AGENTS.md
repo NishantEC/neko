@@ -124,9 +124,33 @@ snapshot from SQLite and serializes it to hash, and the allocator keeps the
 freed multi-megabyte buffers. The timed reload went from 2 s to 15 s
 (`IDLE_SNAPSHOT_RELOAD`), but that only took CPU from 13% to 11%: something
 bumps `data_revision` every few seconds, so the wait wakes and reloads
-anyway. Next step: find that writer, or keep the loaded snapshot in memory
-keyed by `data_revision`. Measure with `ps -o time=` over two minutes and
+anyway. Measure with `ps -o time=` over two minutes and
 `footprint`/`heap`, not RSS alone.
+**Idle CPU, measured again (2026-11-06).** 8.6% of a core (`ps -o time=`,
+10.3 s over 120 s). The `data_revision` theory was wrong for the current
+build: watching `PRAGMA data_version` from a read-only connection for two
+minutes found 9 commits, every one a real change (watch receipts in bursts
+every 3 min, watch schedules, sources), and in `sample` the held
+`WorkbenchIfChanged` threads were ~0.2% (one reload per 15 s). The cost was
+`workbench::load` itself: the scheduler tick (2 s), the watch tick,
+discovery, naming and parking each re-read and parsed the 6.5 MB of rows
+every few seconds (~48 ms each in a debug build), and the tick then saved
+the unchanged snapshot back, encoding every row only to find nothing to
+write. Fix: `Db` keeps the last snapshot `load` assembled with a
+`ContentStamp` (a per-connection counter every stored change bumps,
+including quiet writes, queued/dropped deferred values and rollbacks, plus
+SQLite's `data_version` for other connections); a load at the same stamp is
+a copy (~1 ms), only `heartbeat_ms` and `machine` are filled fresh.
+`load` was ~30% of the on-CPU samples, so expect ~8.6% to ~5-6%, not zero;
+re-measure after install before claiming more. Ruled out: skipping `persist` when handed back exactly the remembered
+snapshot (~0.4% more) broke the legacy-layout moves, which a save of an
+unchanged snapshot performs. A test that saves `heartbeat_ms = now_ms()`
+races every full-snapshot equality test through the global heartbeat; leave
+it at 0. Also, queueing the deferred value already waiting no longer bumps
+`data_revision`. Anything `load` reads must be written through `Db`'s
+methods: a raw SQL write on the daemon's own connection would be served
+stale (other connections' commits are seen through `data_version`). Left: the
+self-update tick runs `git` every 10 s (~1.5% here, mostly waiting).
 **Web-only changes ship without a reinstall** (2026-10-27): commit `web/`,
 then `bash scripts/ship-web.sh` (~1 min; `--rollback` undoes). It swaps
 `<data>/web-live`, which the running daemon serves per request; anything

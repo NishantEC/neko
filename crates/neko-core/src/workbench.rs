@@ -257,7 +257,32 @@ pub fn load_workspaces(db: &Db) -> Result<(Vec<neko_protocol::workbench::Workspa
     Ok((part.workspaces, part.workspace_folders))
 }
 
+/// The stored workbench, assembled. Unless something stored has changed
+/// since the last call (`Db::content_stamp`), it is the last one assembled,
+/// copied: the scheduler tick, the watch tick, discovery, naming, parking
+/// and every held `WorkbenchIfChanged` each call this every few seconds, and
+/// reading and parsing the 6.5 MB of rows each time was most of the idle
+/// daemon's CPU (2026-11-06). Only the heartbeat and the machine's health
+/// are not stored; they are filled in fresh on every call.
 pub fn load(db: &Db) -> Result<Snapshot, String> {
+    let stamp = db.content_stamp().map_err(|e| e.to_string())?;
+    let mut snapshot = match db.remembered_snapshot(stamp) {
+        Some(snapshot) => snapshot,
+        None => {
+            let snapshot = load_stored(db)?;
+            // A migration saves while loading; keep only what one stamp read.
+            if db.content_stamp().map_err(|e| e.to_string())? == stamp {
+                db.remember_snapshot(stamp, &snapshot);
+            }
+            snapshot
+        }
+    };
+    snapshot.heartbeat_ms = snapshot.heartbeat_ms.max(HEARTBEAT_MS.load(std::sync::atomic::Ordering::Acquire));
+    snapshot.machine = crate::machine::latest();
+    Ok(snapshot)
+}
+
+fn load_stored(db: &Db) -> Result<Snapshot, String> {
     let mut snapshot = if let Some(json) = db.get_setting(SETTING).map_err(|e| e.to_string())? {
         if json.len() > MAX_SNAPSHOT_BYTES {
             return Err("Workbench storage exceeds its size limit".into());
@@ -326,12 +351,10 @@ pub fn load(db: &Db) -> Result<Snapshot, String> {
         }
         save(db, &snapshot)?;
     }
-    snapshot.heartbeat_ms = snapshot.heartbeat_ms.max(HEARTBEAT_MS.load(std::sync::atomic::Ordering::Acquire));
     // Attached for readers only; save() never writes it into this setting.
     snapshot.conversation = crate::neko_chat::load(db)?;
     snapshot.memory = crate::neko_memory::load(db)?;
     snapshot.rulebook_default = crate::rulebook::default_text();
-    snapshot.machine = crate::machine::latest();
     snapshot.memory_options = crate::neko_memory::options(db)?;
     snapshot.memory_proposals = crate::memory_learning::proposals(db, &snapshot)?;
     snapshot.skills = crate::skills::load(db)?;
@@ -2083,6 +2106,66 @@ mod tests {
         db.flush_deferred().unwrap();
         assert_eq!(db.setting_writes(), before + 1, "one small row, written once");
         assert!(!db.get_setting(SETTING).unwrap().unwrap().contains("watch:1"));
+    }
+
+    /// Idle, five daemon threads each loaded the workbench every few
+    /// seconds; a load now reads storage only when something stored changed.
+    #[test]
+    fn load_reuses_the_last_snapshot_until_something_stored_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("neko.db");
+        let db = Db::open(&path).unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let _ = task(&db, &ws);
+        let first = load(&db).unwrap();
+        let stamp = db.content_stamp().unwrap();
+        assert_eq!(load(&db).unwrap(), first, "nothing stored changed: the same snapshot");
+        assert_eq!(db.content_stamp().unwrap(), stamp, "and reading changed nothing");
+
+        let mut mine = first.clone();
+        mine.tasks[0].title = "Renamed here".into();
+        save(&db, &mine).unwrap();
+        assert_eq!(load(&db).unwrap().tasks[0].title, "Renamed here", "a save on this connection is seen at once");
+
+        let other = Db::open(&path).unwrap();
+        let mut theirs = load(&other).unwrap();
+        theirs.tasks[0].title = "Renamed elsewhere".into();
+        save(&other, &theirs).unwrap();
+        assert_eq!(load(&db).unwrap().tasks[0].title, "Renamed elsewhere", "so is a commit by another connection");
+
+        let rolled_back = db.atomic(|| {
+            let mut state = load(&db)?;
+            state.tasks[0].title = "Rolled back".into();
+            save(&db, &state)?;
+            assert_eq!(load(&db)?.tasks[0].title, "Rolled back");
+            Err::<(), String>("refused".into())
+        });
+        assert!(rolled_back.is_err());
+        assert_eq!(load(&db).unwrap().tasks[0].title, "Renamed elsewhere", "a rolled-back save does not linger");
+
+    }
+
+    /// The scheduler tick saves what it loaded every 2 s; when nothing
+    /// changed that save must neither write nor queue anything, or every
+    /// tick would move the stamp and `load` would never reuse a snapshot.
+    #[test]
+    fn saving_back_what_load_returned_writes_nothing() {
+        let db = Db::open_in_memory().unwrap();
+        let repo = repository();
+        let ws = workspace(&db, repo.path());
+        let _ = task(&db, &ws);
+        db.flush_deferred().unwrap();
+        let mut state = load(&db).unwrap();
+        let (writes, stamp) = (db.setting_writes(), db.content_stamp().unwrap());
+        save(&db, &state).unwrap();
+        save_deferred(&db, &state).unwrap();
+        assert_eq!(db.setting_writes(), writes, "nothing written");
+        assert_eq!(db.content_stamp().unwrap(), stamp, "nothing queued");
+        state.tasks[0].title = "Changed".into();
+        save(&db, &state).unwrap();
+        assert!(db.setting_writes() > writes, "a real change still writes");
+        assert_eq!(load(&db).unwrap().tasks[0].title, "Changed");
     }
 
     /// `NEKO_DB_COPY=<path>`: migrate a copy of a real database and check

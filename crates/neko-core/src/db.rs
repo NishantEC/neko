@@ -20,6 +20,24 @@ pub struct Db {
     pending: std::cell::RefCell<std::collections::HashMap<String, (String, std::time::Instant)>>,
     in_transaction: std::cell::Cell<bool>,
     setting_writes: std::cell::Cell<u64>,
+    /// Bumped by every change this connection makes to what the settings
+    /// and task tables read as (a write, a value queued or dropped, a
+    /// rollback), quiet or not. With SQLite's `data_version` (commits by
+    /// other connections) it stamps what `workbench::load` last assembled.
+    content_revision: std::cell::Cell<u64>,
+    /// The last snapshot `workbench::load` assembled and the stamp it was
+    /// read at. Measured 2026-11-06: five daemon threads each re-read and
+    /// parsed the 6.5 MB workbench every few seconds while idle, ~5% of a
+    /// core between them; nothing had changed.
+    loaded: std::cell::RefCell<Option<(ContentStamp, neko_protocol::workbench::Snapshot)>>,
+}
+
+/// What the settings and task tables held when a value was read from them:
+/// equal stamps from one `Db` mean nothing stored has changed in between.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ContentStamp {
+    revision: u64,
+    data_version: i64,
 }
 
 /// Keys that `set_setting`/`set_setting_deferred` route to the task tables
@@ -74,6 +92,7 @@ impl Db {
             // Rolled back: what was remembered as written may not be on disk.
             self.written.borrow_mut().clear();
             *self.pending.borrow_mut() = deferred;
+            self.content_changed();
         }
         result
     }
@@ -86,7 +105,28 @@ impl Db {
             pending: Default::default(),
             in_transaction: std::cell::Cell::new(false),
             setting_writes: std::cell::Cell::new(0),
+            content_revision: std::cell::Cell::new(0),
+            loaded: Default::default(),
         }
+    }
+
+    fn content_changed(&self) {
+        self.content_revision.set(self.content_revision.get() + 1);
+    }
+
+    /// Stamps what the stored rows read as now; see `ContentStamp`.
+    pub fn content_stamp(&self) -> rusqlite::Result<ContentStamp> {
+        let data_version = self.conn.query_row("PRAGMA data_version", [], |row| row.get(0))?;
+        Ok(ContentStamp { revision: self.content_revision.get(), data_version })
+    }
+
+    /// The snapshot `remember_snapshot` kept, if it was read at `stamp`.
+    pub(crate) fn remembered_snapshot(&self, stamp: ContentStamp) -> Option<neko_protocol::workbench::Snapshot> {
+        self.loaded.borrow().as_ref().filter(|(at, _)| *at == stamp).map(|(_, snapshot)| snapshot.clone())
+    }
+
+    pub(crate) fn remember_snapshot(&self, stamp: ContentStamp, snapshot: &neko_protocol::workbench::Snapshot) {
+        *self.loaded.borrow_mut() = Some((stamp, snapshot.clone()));
     }
 
     /// Settings rows actually written to SQLite (identical and coalesced
@@ -104,8 +144,15 @@ impl Db {
             return self.set_setting(key, value);
         }
         if self.written.borrow().get(key).is_some_and(|v| v == value) {
-            self.pending.borrow_mut().remove(key);
+            if self.pending.borrow_mut().remove(key).is_some() {
+                self.content_changed();
+                data_changed();
+            }
             return Ok(());
+        }
+        // Already waiting with this value: nothing new for readers to see.
+        if self.pending.borrow().get(key).is_some_and(|(v, _)| v == value) {
+            return self.flush_due(DEFERRED_WRITE_DELAY);
         }
         let since = self
             .pending
@@ -115,6 +162,7 @@ impl Db {
         self.pending
             .borrow_mut()
             .insert(key.to_owned(), (value.to_owned(), since));
+        self.content_changed();
         data_changed();
         self.flush_due(DEFERRED_WRITE_DELAY)
     }
@@ -275,6 +323,7 @@ impl Db {
     pub fn delete_setting(&self, key: &str) -> rusqlite::Result<()> {
         self.pending.borrow_mut().remove(key);
         self.written.borrow_mut().remove(key);
+        self.content_changed();
         self.conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
         data_changed();
         Ok(())
@@ -286,6 +335,7 @@ impl Db {
             self.pending.borrow_mut().remove(&key);
             self.written.borrow_mut().remove(&key);
         }
+        self.content_changed();
         self.conn.execute("DELETE FROM workbench_task_events WHERE task_id = ?1", [task_id])?;
         self.conn.execute("DELETE FROM workbench_tasks WHERE id = ?1", [task_id])?;
         data_changed();
@@ -380,8 +430,11 @@ impl Db {
         }
         let superseded = self.pending.borrow_mut().remove(key);
         if self.written.borrow().get(key).is_some_and(|v| v == value) {
+            if superseded.is_some() { self.content_changed(); }
             return Ok(());
         }
+        // Counted before the write: a failed one may have changed some rows.
+        self.content_changed();
         if let Err(error) = self.write_row(key, value) {
             if let Some(pending) = superseded {
                 self.pending.borrow_mut().insert(key.to_owned(), pending);
@@ -544,6 +597,54 @@ mod tests {
             .record_clipboard_entry("new", "text", None, 5, 200)
             .unwrap();
         assert_eq!(provider.search("new", 6).len(), 1);
+    }
+
+    /// `workbench::load` trusts this stamp to know nothing stored changed.
+    #[test]
+    fn the_content_stamp_moves_with_every_stored_change_and_only_then() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("neko.db");
+        let db = Db::open(&path).unwrap();
+        let mut stamp = db.content_stamp().unwrap();
+        let mut moved = || {
+            let now = db.content_stamp().unwrap();
+            std::mem::replace(&mut stamp, now) != now
+        };
+        db.set_setting("a", "1").unwrap();
+        assert!(moved(), "a write");
+        db.set_setting("a", "1").unwrap();
+        let _ = db.get_setting("a").unwrap();
+        assert!(!moved(), "an identical write, a read");
+        db.set_setting_quiet("b", "1").unwrap();
+        assert!(moved(), "a quiet write still changes what is stored");
+        db.set_setting_deferred("a", "2").unwrap();
+        assert!(moved(), "a value queued for disk is what readers see");
+        db.set_setting_deferred("a", "2").unwrap();
+        assert!(!moved(), "the value already waiting");
+        db.set_setting_deferred("a", "1").unwrap();
+        assert!(moved(), "back to the written value: the queued one is dropped");
+        db.delete_setting("b").unwrap();
+        assert!(moved(), "a delete");
+        assert!(db.atomic(|| { db.set_setting("a", "3").map_err(|e| e.to_string())?; Err::<(), String>("no".into()) }).is_err());
+        assert!(moved(), "a rollback");
+        assert_eq!(db.get_setting("a").unwrap().as_deref(), Some("1"));
+        Db::open(&path).unwrap().set_setting("c", "1").unwrap();
+        assert!(moved(), "a commit by another connection");
+    }
+
+    /// A save that queues the progress already waiting must not wake every
+    /// held `WorkbenchIfChanged` to reload the snapshot.
+    #[test]
+    fn queueing_the_value_already_waiting_is_not_a_change() {
+        let db = Db::open_in_memory().unwrap();
+        db.set_setting_deferred("blob", "progress").unwrap();
+        let (writes, stamp) = (db.setting_writes(), db.content_stamp().unwrap());
+        for _ in 0..3 { db.set_setting_deferred("blob", "progress").unwrap(); }
+        assert_eq!(db.content_stamp().unwrap(), stamp);
+        assert_eq!(db.setting_writes(), writes);
+        assert_eq!(db.get_setting("blob").unwrap().as_deref(), Some("progress"));
+        db.flush_deferred().unwrap();
+        assert_eq!(db.setting_writes(), writes + 1, "and it still reaches disk");
     }
 
     #[test]
