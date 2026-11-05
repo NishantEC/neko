@@ -627,6 +627,10 @@ pub enum Request {
     RoutineNotifications {
         after: u64,
     },
+    /// Home chat's full-power mode: read it, or set it with `on`.
+    SuperAgent {
+        on: Option<bool>,
+    },
 }
 
 /// One valid user theme file (see `neko_core::appearance::validate_theme`).
@@ -723,6 +727,9 @@ pub enum Response {
     RoutineNotifications {
         items: Vec<routines::RoutineNotice>,
         latest: u64,
+    },
+    SuperAgent {
+        on: bool,
     },
     Error {
         message: String,

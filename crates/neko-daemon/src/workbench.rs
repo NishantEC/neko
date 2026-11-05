@@ -1644,10 +1644,15 @@ fn converse(
     })();
     if let Err(error) = recorded { return finish(&error, vec![], true); }
     snapshot.agent_runtime = selection.runtime;
-    // A chosen workspace runs in its repository. Otherwise the turn gets an
-    // empty scratch directory, never Neko's own data directory.
+    // Full power (the owner's default) acts like his own Claude Code session.
+    let super_on = neko_chat::super_agent(&db.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).filter(|h| h.is_dir());
+    // A chosen workspace runs in its repository. Otherwise a full-power turn
+    // starts in the home folder and a read-only one gets an empty scratch
+    // directory, never Neko's own data directory.
     let scratch = match chosen {
         Some(_) => None,
+        None if super_on && home.is_some() => None,
         None => {
             let dir = std::env::temp_dir().join(format!("neko-chat-{}", store::new_id()));
             if let Err(error) = std::fs::create_dir(&dir) {
@@ -1670,7 +1675,13 @@ fn converse(
                 .repository,
         ),
         (None, Some(dir)) => dir.clone(),
-        (None, None) => unreachable!(),
+        (None, None) => home.clone().unwrap_or_else(std::env::temp_dir),
+    };
+    let instruction = if super_on {
+        let neko = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "neko-daemon".into());
+        neko_chat::super_instruction(&neko)
+    } else {
+        neko_chat::INSTRUCTION.to_string()
     };
     // The newest two entries are this message and its pending reply.
     let history = &snapshot.conversation[..snapshot.conversation.len().saturating_sub(2)];
@@ -1686,14 +1697,15 @@ fn converse(
         directory,
         prompt: format!(
             "{}\n{}\n{}",
-            neko_chat::prompt(&snapshot, chosen, history, message),
+            neko_chat::prompt_with(&snapshot, chosen, history, message, &instruction),
             chosen.map(|workspace| decision_context::context_about(&snapshot, workspace, None, message)).unwrap_or_default(),
             skill_instructions
         ),
-        writable: false,
+        writable: super_on,
         // Long enough for the user to answer a tool approval or a macOS
-        // privacy prompt; Stop and double Escape end it sooner.
-        timeout: Duration::from_secs(900),
+        // privacy prompt, or for a full-power turn to do the work; Stop and
+        // double Escape end it sooner.
+        timeout: Duration::from_secs(if super_on { 1800 } else { 900 }),
         runtime: snapshot.agent_runtime.clone(),
     };
     // What the agent does arrives as AI SDK chunks: they build the reply in

@@ -339,6 +339,32 @@ function WorkStylePanel({ snapshot }: { snapshot: Json }) {
   );
 }
 
+/** Home chat's full-power mode (`SuperAgent`): on by default. */
+function SuperAgentPanel() {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    request({ SuperAgent: { on: null } }).then((r) => setOn(!!r?.SuperAgent?.on)).catch((e) => setError(String(e?.message ?? e)));
+  }, []);
+  const change = async (next: boolean) => {
+    setError(null);
+    try {
+      const r = await request({ SuperAgent: { on: next } });
+      setOn(!!r?.SuperAgent?.on);
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
+  };
+  return (
+    <Panel>
+      <SettingRow id="super-agent" title="Full power" description="Home chat works like your own Claude Code session in bypass mode: it edits files, runs commands, uses your tools and browser, and manages Neko itself, without asking per step. Off makes it read-only, with an approval for each action.">
+        {on === null ? <Skeleton className="h-5 w-9" /> : <Toggle checked={on} onChange={(v) => void change(v)} label="Full power for Home chat" />}
+      </SettingRow>
+      <ErrorNote error={error} onDismiss={() => setError(null)} />
+    </Panel>
+  );
+}
+
 export function AiSection() {
   const { snapshot } = useWorkbench();
   const catalog = useCatalog();
@@ -347,6 +373,9 @@ export function AiSection() {
     <div className="flex flex-col gap-8">
       <Section eyebrow="Runtime" title={<>Agent runtime.</>} intro="Choose the runtime and model for new work.">
         <RuntimePanel snapshot={snapshot} catalog={catalog} />
+      </Section>
+      <Section eyebrow="Home chat" title="What Home chat may do">
+        <SuperAgentPanel />
       </Section>
       <Section eyebrow="Home chat" title="Model pins" intro="Each pin is independent; anything left on Auto is chosen by Neko at the next run.">
         <PinsPanel snapshot={snapshot} catalog={catalog} />

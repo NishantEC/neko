@@ -168,12 +168,24 @@ hold. Only genuine unavailable access or user-owned decisions need a question.
 Chat tool cards persist the exact arguments and workspace. A tool whose server
 declares `readOnlyHint=true` can run without another prompt; the declaration participates
 in the schema hash. Unknown/action
-tools need an inline approval for each exact call. Denial never dispatches.
+tools need an inline approval for each exact call, except in full-power mode
+(below). Denial never dispatches.
 Approvals expire after 120 seconds; upstream execution remains bounded to 20
 seconds. Stop, runner timeout, lease drop, or daemon restart fail closed.
 Successful and failed dispatched calls have inline receipts. These guarantees
 depend on the explicitly trusted server's effect declaration; Neko cannot prove
 that arbitrary remote code is read-only, or undo an action already dispatched.
+
+**Full power (2026-11-06, the default).** The owner wants Home chat to have
+"the same power as a Claude Code session in bypass mode". With the
+`neko_super_agent_v1` setting on (`Request::SuperAgent`, Settings → AI &
+agents → Full power), a chat turn runs writable (Claude Code
+`bypassPermissions`, Codex without sandbox or approvals), in the chosen
+workspace's folder or the home folder when none is chosen, for up to 30
+minutes, and its bridge tools run without per-call approval. It manages Neko
+itself through `neko-daemon --request '<json>'`, which sends one `Request`
+over the socket and prints the `Response`. Turning it off restores the
+read-only, approve-each-action behaviour above.
 
 The daemon-owned `neko-core::mcp_host` hosts user-added and source-linked stdio
 and Streamable HTTP servers through pinned rmcp 3.4.1. A linked connection

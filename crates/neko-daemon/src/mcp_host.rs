@@ -222,6 +222,8 @@ impl Host {
         serde_json::from_str::<serde_json::Value>(arguments_json)
             .map_err(|_| "Invalid tool arguments")?;
         let id = store::new_id();
+        // In full-power mode the owner's standing rule applies: no per-call approval.
+        let auto = tool.read_only || neko_core::neko_chat::super_agent(&*self.db.lock().map_err(|_| "Chat storage unavailable")?);
         neko_core::neko_chat::record_call(
             &*self.db.lock().map_err(|_| "Chat storage unavailable")?,
             turn_id,
@@ -231,7 +233,7 @@ impl Host {
                 connection_id: connection_id.into(),
                 tool_name: tool.name.clone(),
                 arguments_json: arguments_json.into(),
-                status: if tool.read_only {
+                status: if auto {
                     ChatToolStatus::Running
                 } else {
                     ChatToolStatus::AwaitingApproval
@@ -249,7 +251,7 @@ impl Host {
             }
             let db = self.db.lock().map_err(|_| "Chat storage unavailable")?;
             match neko_core::neko_chat::call_status(&db, turn_id, &id)? {
-                ChatToolStatus::Running if tool.read_only => return Ok(Some(id)),
+                ChatToolStatus::Running if auto => return Ok(Some(id)),
                 ChatToolStatus::Approved => {
                     neko_core::neko_chat::set_call_status(
                         &db,

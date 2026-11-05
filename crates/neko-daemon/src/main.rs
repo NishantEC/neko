@@ -11,6 +11,49 @@ use std::sync::Arc;
 use neko_core::Db;
 use server::AppState;
 
+/// `neko-daemon --request '<json>'`: sends one `Request` to the running
+/// daemon and prints its `Response` as JSON (exit 1 for an error). This is
+/// how agents, Neko's own chat included, manage Neko from a shell.
+fn request_if_asked() -> Option<i32> {
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() != Some("--request") {
+        return None;
+    }
+    let Some(text) = args.next() else {
+        eprintln!("usage: neko-daemon --request '<json Request>'");
+        return Some(2);
+    };
+    let request: neko_protocol::Request = match serde_json::from_str(&text) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("not a Neko request: {error}");
+            return Some(2);
+        }
+    };
+    let run = || -> std::io::Result<neko_protocol::Response> {
+        let stream = std::os::unix::net::UnixStream::connect(neko_protocol::socket_path())?;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(120)))?;
+        neko_protocol::write_frame(&stream, &neko_protocol::Frame::Request { id: 1, request })?;
+        loop {
+            match neko_protocol::read_frame(&stream)? {
+                Some(neko_protocol::Frame::Response { id: 1, response }) => return Ok(response),
+                Some(_) => continue,
+                None => return Err(std::io::Error::other("the daemon closed the connection")),
+            }
+        }
+    };
+    match run() {
+        Ok(response) => {
+            println!("{}", serde_json::to_string(&response).unwrap_or_default());
+            Some(if matches!(response, neko_protocol::Response::Error { .. }) { 1 } else { 0 })
+        }
+        Err(error) => {
+            eprintln!("could not reach the Neko daemon: {error}");
+            Some(1)
+        }
+    }
+}
+
 fn main() {
     if neko_core::mcp_host::bridge::run_if_requested() {
         return;
@@ -19,6 +62,9 @@ fn main() {
         return;
     }
     if let Some(code) = neko_core::machine::check_if_requested() {
+        std::process::exit(code);
+    }
+    if let Some(code) = request_if_asked() {
         std::process::exit(code);
     }
     let socket_path = neko_protocol::socket_path();

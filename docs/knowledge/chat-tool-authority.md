@@ -1,5 +1,11 @@
 ## Chat tool authority
 
+**Full power is the default since 2026-11-06** (`neko_chat::super_agent`,
+setting `neko_super_agent_v1`): the turn is writable, starts in the home folder
+when unscoped, its bridge tools need no per-call approval, and it manages Neko
+through `neko-daemon --request`. Everything below describes the read-only
+mode, which is what Settings → AI & agents → Full power off gives.
+
 Chat MCP tools use the selected workspace's lease and current connection catalog;
 unscoped chat has no bridge. Server `readOnlyHint` participates in schema identity
 and is supplied by the server, not a security guarantee. Unknown/action tools require

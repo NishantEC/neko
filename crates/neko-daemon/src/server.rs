@@ -751,6 +751,13 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         Request::WorkbenchIfChanged { digest, wait_ms } => wait_for_change(state, digest, wait_ms, false),
         Request::MachineHealth => Response::MachineHealth(neko_core::machine::latest()),
         Request::Ping => Response::Pong,
+        Request::SuperAgent { on } => {
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match on.map(|on| neko_core::neko_chat::set_super_agent(&db, on)).transpose() {
+                Ok(_) => Response::SuperAgent { on: neko_core::neko_chat::super_agent(&db) },
+                Err(message) => Response::Error { message },
+            }
+        }
         request @ (Request::Routines
         | Request::SaveRoutine { .. }
         | Request::RunRoutineNow { .. }

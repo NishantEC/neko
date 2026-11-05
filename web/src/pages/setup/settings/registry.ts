@@ -31,6 +31,7 @@ export const SETTINGS: SettingDef[] = [
   { id: "effort", section: "ai", title: "Reasoning effort", keywords: ["thinking", "reasoning", "low", "high"] },
   { id: "speed", section: "ai", title: "Speed", keywords: ["fast", "tier", "priority", "service"] },
   { id: "custom-model", section: "ai", title: "Exact model ID", keywords: ["id", "custom", "manual"] },
+  { id: "super-agent", section: "ai", title: "Full power", keywords: ["super agent", "bypass", "permissions", "approval", "read-only", "edit files", "run commands", "chat power"] },
   { id: "pins", section: "ai", title: "Home chat model pins", keywords: ["pin", "neko decides", "automatic", "paid speed", "model", "effort"] },
   { id: "budget", section: "ai", title: "Task budget", keywords: ["cost", "money", "limit", "spend", "dollars", "price"] },
   { id: "tickets-at-once", section: "ai", title: "Tasks at once", keywords: ["concurrency", "parallel", "one at a time", "queue", "limit", "workers"] },

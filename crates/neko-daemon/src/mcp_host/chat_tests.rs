@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 fn fixture(read_only: bool) -> (Arc<Host>, String, Lease, String) {
     let db = Db::open_in_memory().unwrap();
+    // These tests cover the read-only mode: approval per action call.
+    neko_chat::set_super_agent(&db, false).unwrap();
     let mut state = Snapshot::default();
     for id in ["a", "b"] {
         state.workspaces.push(Workspace {
@@ -66,6 +68,8 @@ fn fixture(read_only: bool) -> (Arc<Host>, String, Lease, String) {
 #[test]
 fn new_trusted_connection_is_discovered_by_background_tick() {
     let db = Db::open_in_memory().unwrap();
+    // These tests cover the read-only mode: approval per action call.
+    neko_chat::set_super_agent(&db, false).unwrap();
     let mut state = Snapshot::default();
     state.workspaces.push(Workspace {
         id: "a".into(), name: "A".into(), repository: "/tmp".into(),
@@ -112,6 +116,8 @@ fn call(host: &Host, lease: &Lease, connection: &str) -> Result<String, String> 
 #[test]
 fn all_workspaces_chat_uses_only_an_unambiguous_workspace_authority() {
     let db = Db::open_in_memory().unwrap();
+    // These tests cover the read-only mode: approval per action call.
+    neko_chat::set_super_agent(&db, false).unwrap();
     let mut state = Snapshot::default();
     state.workspaces.push(Workspace {
         id: "home".into(), name: "Home".into(), repository: "/tmp".into(),
@@ -173,6 +179,8 @@ fn linked_workspace_stdio_server_dispatches_only_after_its_tool_grant() {
     );
     std::fs::write(repository.join(".mcp.json"), serde_json::json!({"mcpServers":{"fixture":{"command":executable,"args":[script,"readonly"]}}}).to_string()).unwrap();
     let db = Db::open_in_memory().unwrap();
+    // These tests cover the read-only mode: approval per action call.
+    neko_chat::set_super_agent(&db, false).unwrap();
     let mut state = Snapshot::default();
     state.workspaces.push(Workspace {
         id: "linked".into(),
@@ -305,6 +313,13 @@ fn action_waits_without_dispatch_until_approved_once() {
         }
         assert!(run.join().unwrap().unwrap().contains("receipt_id"));
     });
+}
+
+#[test]
+fn full_power_runs_an_action_tool_without_an_approval_card() {
+    let (host, _turn, lease, connection) = fixture(false);
+    neko_chat::set_super_agent(&host.db.lock().unwrap(), true).unwrap();
+    assert!(call(&host, &lease, &connection).unwrap().contains("receipt_id"));
 }
 
 #[test]
