@@ -1,5 +1,8 @@
 # Neko design principles
 
+The web app and workspace-level rules (tabs, status glyphs, crew, links, copy) are in `DESIGN.md` at the repository root, which agents read first.
+
+
 The native client (`native/NekoKit`) follows these rules. They decide what a
 new screen looks like before anyone draws it, and the tests in
 `Tests/NekoNativeTests/DesignSystemGuardTests.swift` keep the mechanical ones
