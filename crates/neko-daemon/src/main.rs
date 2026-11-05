@@ -29,8 +29,13 @@ fn request_if_asked() -> Option<i32> {
         Some("--protocol") => {
             // The request shapes, from the sources this build was made from,
             // so an agent on any Mac can read them without a checkout.
+            use std::io::Write;
+            // A reader that stops early (`| head`) is fine; never panic on it.
+            let mut out = std::io::stdout().lock();
             for (name, text) in PROTOCOL {
-                println!("===== {name} =====\n{text}");
+                if writeln!(out, "===== {name} =====\n{text}").is_err() {
+                    break;
+                }
             }
             return Some(0);
         }
