@@ -12,6 +12,7 @@
 // a page you write is never a weaker kind of page.
 //
 //   React, request, onEvent          the app's own copies (no bundler needed)
+//   ReactDOM, jsxRuntime             for pre-bundled React libraries (Excalidraw…)
 //   registerPage(spec)               component | load | wrap, see PageSpec
 //   registerCommands([…])            ⌘K entries, while the page is loaded
 //   inspector                        the resizable panel on the right
@@ -21,6 +22,8 @@
 //   navigation                       navigate(route), hrefFor(route), useRoute()
 //   addSection / addTab              add to Settings / to the task sheet
 import * as React from "react";
+import * as ReactDOM from "react-dom";
+import * as jsxRuntime from "react/jsx-runtime";
 import { createContext, lazy, useContext, type ComponentType } from "react";
 import { request, onEvent } from "@/api";
 import { registerCommands, type PaletteCommand } from "@/shell/commands";
@@ -55,6 +58,10 @@ export interface Host {
   id: string;
   source: "builtin" | "user";
   React: typeof React;
+  /** The app's own react-dom (createPortal, flushSync…): a library that renders through React must use this copy, never its own. */
+  ReactDOM: typeof ReactDOM;
+  /** React's JSX runtime, for pre-bundled libraries compiled with the automatic runtime. */
+  jsxRuntime: typeof jsxRuntime;
   request: typeof request;
   onEvent: typeof onEvent;
   registerPage(spec: PageSpec): void;
@@ -83,6 +90,8 @@ function shared(id: string, source: Host["source"], storage: PageStorage) {
     id,
     source,
     React,
+    ReactDOM,
+    jsxRuntime,
     request,
     onEvent,
     inspector,

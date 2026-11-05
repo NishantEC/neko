@@ -691,6 +691,10 @@ fn mime(path: &Path) -> &'static str {
         "webmanifest" => "application/manifest+json",
         "woff2" => "font/woff2",
         "woff" => "font/woff",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
+        // instantiateStreaming refuses WebAssembly served as anything else.
+        "wasm" => "application/wasm",
         "txt" | "md" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }

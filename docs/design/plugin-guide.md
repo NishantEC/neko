@@ -33,6 +33,8 @@ export default function register(host) {
 ```
 
 React, Neko's components and icons come from the host: never import them.
+`host.ReactDOM` and `host.jsxRuntime` are the app's own react-dom and JSX
+runtime, for libraries that render through React (see section 3).
 
 ## 2. What the host gives you
 
@@ -71,6 +73,17 @@ mkdir -p vendor && curl -fsSL https://unpkg.com/three@0.170.0/build/three.module
 ```js
 import * as THREE from "./vendor/three.module.js";
 ```
+
+A React library (Excalidraw, React Flow…) must use the app's React, never a
+copy of its own: pre-bundle it once in a scratch folder with esbuild
+(`--bundle --format=esm --splitting --minify`), resolving `react`,
+`react-dom` and `react/jsx-runtime` to a small shim that re-exports
+`globalThis.__nekoPlugin_<name>` (set from `host.React`, `host.ReactDOM` and
+`host.jsxRuntime` in `register` before the page module loads, e.g. with
+`registerPage({ load: () => import("./page.js") })`). Point the library's
+asset path (fonts, workers, `.wasm`) at the plugin folder, since anything from
+another site is refused. `.woff2`, `.ttf`, `.otf` and `.wasm` are served with
+their proper types.
 
 Pin an exact version, keep the library's licence file next to it
 (`vendor/LICENSE-three`), and prefer a single-file ESM build. WebGL, `<canvas>`,
