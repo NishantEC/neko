@@ -394,6 +394,15 @@ fn resolve_items(db: &neko_core::Db, workspace_id: &str, titles: &[String]) -> R
     Ok(())
 }
 
+fn failure_title(routine: &Routine) -> String {
+    format!("{} failed", routine.name)
+}
+
+/// Whether this routine's failure alert is already waiting on the owner.
+fn alert_open(db: &neko_core::Db, routine: &Routine) -> Result<bool, String> {
+    Ok(open_titles(db, &routine.workspace_id)?.contains(&title_key(&failure_title(routine))))
+}
+
 fn title_key(title: &str) -> String {
     title.trim().to_lowercase()
 }
@@ -445,9 +454,9 @@ fn run_one(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>) ->
         routine_state.last_run_ms = Some(now);
         routine_state.next_due_ms = Some(retry_or_next(&routine.cadence, &routine_state, now));
         routine_state.note = Some(format!("Last run could not be saved: {error}"));
-        if core::failure_alerts(&routine.cadence, routine_state.failures) {
+        if core::failure_alerts(&routine.cadence, routine_state.failures) && !alert_open(&db, routine).unwrap_or(false) {
             if let Ok(seq) = core::reserve_seq(&db, 1) {
-                let alert = NeedsYou { seq, title: format!("{} failed", routine.name), detail: format!("Neko could not save this run: {error}"), link: None, done: false };
+                let alert = NeedsYou { seq, title: failure_title(routine), detail: format!("Neko could not save this run: {error}"), link: None, done: false };
                 let run = RoutineRun { id: neko_core::workbench::new_id(), routine_id: routine.id.clone(), started_ms: now, finished_ms: Some(now), ok: false, quiet: false, did: Vec::new(), needs_you: vec![alert], error: Some(error.clone()), text: String::new() };
                 let _ = core::push_run(&db, &routine.id, run);
             }
@@ -509,7 +518,10 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
     let mut next_due = None;
     let run = match outcome {
         Ok(parsed) => {
-            resolve_items(&db, &routine.workspace_id, &parsed.resolved)?;
+            // A good run closes this routine's own failure alert.
+            let mut resolved = parsed.resolved.clone();
+            resolved.push(failure_title(&current));
+            resolve_items(&db, &routine.workspace_id, &resolved)?;
             let mut needs_you = parsed.needs_you;
             // Another routine in this scope may already have raised it.
             let open = open_titles(&db, &routine.workspace_id)?;
@@ -539,10 +551,10 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             }
             routine_state.failures = routine_state.failures.saturating_add(1);
             let mut needs_you = Vec::new();
-            if core::failure_alerts(&current.cadence, routine_state.failures) {
+            if core::failure_alerts(&current.cadence, routine_state.failures) && !alert_open(&db, &current)? {
                 needs_you.push(NeedsYou {
                     seq: core::reserve_seq(&db, 1)?,
-                    title: format!("{} failed", current.name),
+                    title: failure_title(&current),
                     detail: format!("{error} Neko will try again{}.", if matches!(current.cadence, Cadence::Daily { .. }) { " in 30 minutes" } else { " on schedule" }),
                     link: None,
                     done: false,
@@ -796,6 +808,20 @@ mod tests {
         assert_eq!(open_items(&db, "w").unwrap(), vec!["gmail api NOT enabled", "Sam"]);
         resolve_items(&db, "w", &["Gmail API not enabled".into()]).unwrap();
         assert_eq!(open_items(&db, "w").unwrap(), vec!["Sam"]);
+    }
+
+    #[test]
+    fn a_failure_alert_is_not_raised_twice() {
+        let db = neko_core::Db::open_in_memory().unwrap();
+        let sweep = Routine { name: "PR sweep".into(), ..routine("a", true) };
+        core::save_definitions(&db, &Store { routines: vec![sweep.clone()], ..Default::default() }).unwrap();
+        assert!(!alert_open(&db, &sweep).unwrap());
+        let alert = neko_protocol::routines::NeedsYou { seq: 1, title: failure_title(&sweep), detail: String::new(), link: None, done: false };
+        let run = RoutineRun { id: "x".into(), routine_id: "a".into(), started_ms: 0, finished_ms: None, ok: false, quiet: false, did: vec![], needs_you: vec![alert], error: None, text: String::new() };
+        core::push_run(&db, "a", run).unwrap();
+        assert!(alert_open(&db, &sweep).unwrap());
+        resolve_items(&db, "w", &[failure_title(&sweep)]).unwrap();
+        assert!(!alert_open(&db, &sweep).unwrap());
     }
 
     #[test]
