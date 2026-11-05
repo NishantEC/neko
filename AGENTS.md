@@ -219,6 +219,7 @@ finished.
 - [Chat is the AI SDK's (2026-10-22)](docs/knowledge/chat-is-the-ai-sdk-s.md) — Owner decision: Neko's chat protocol is the Vercel AI SDK's (ai, @ai-sdk/react).
 - [Neko runs the day (2026-10-29)](docs/knowledge/neko-runs-the-day.md) — Scopes from MCP config on disk, routines that act and report, the Inbox, notifications.
 - [Neko updates itself (2026-10-22)](docs/knowledge/neko-updates-itself.md) — Owner: Neko "should be able to write itself over".
+- [The canvas beside the chat (2026-11-06)](docs/knowledge/the-canvas-beside-the-chat.md) — Artifacts (`SaveArtifact`), `/artifact/<id>/<n>` under its own sandboxed CSP, comment mode, the Canvas page.
 - [Current scope: the spine, clipboard history, the first-run onboarding ](docs/knowledge/current-scope-the-spine-clipboard-history-the-first-run-onbo.md) — Slice 1 was a single-crate proof that GPUI works at all.
 - [Crate layout](docs/knowledge/crate-layout.md) — crates/…
 - [The daemon/client split, and why the hotkey is registered where it is](docs/knowledge/the-daemon-client-split-and-why-the-hotkey-is-registered-whe.md) — The daemon is resident, owns SQLite as the single writer…

@@ -187,6 +187,23 @@ itself through `neko-daemon --request '<json>'`, which sends one `Request`
 over the socket and prints the `Response`. Turning it off restores the
 read-only, approve-each-action behaviour above.
 
+**The canvas (2026-11-06).** Anything visual a full-power turn makes is an
+artifact: the agent writes one self-contained file and sends `SaveArtifact`;
+the daemon copies it into `<data dir>/artifacts/<id>/v<n>.<ext>`
+(`neko_core::artifacts`: 5 MB, html/svg/png/pdf/json/md with matching
+contents, contained paths), links it to the Home reply running then (a
+`data-neko-artifact` part) and broadcasts `ArtifactsChanged`. The web bridge
+serves `/artifact/<id>/<n>` behind the same gates as every route but under its
+own Content-Security-Policy (`web::ARTIFACT_CSP`: inline scripts allowed,
+`connect-src 'none'`, `form-action 'none'`, `sandbox allow-scripts`) in place
+of the app's (`default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; …;
+connect-src 'self'`); the app frames it in `<iframe sandbox="allow-scripts">`.
+Either way the artifact runs in an opaque origin and cannot reach the token,
+storage or API. html gets a small comment bridge that talks to its parent by
+`postMessage`. Home shows it in the inspector beside the chat; `#/canvas`
+lays every artifact out as frames. Details:
+`docs/knowledge/the-canvas-beside-the-chat.md`.
+
 The daemon-owned `neko-core::mcp_host` hosts user-added and source-linked stdio
 and Streamable HTTP servers through pinned rmcp 3.4.1. A linked connection
 stores its source identity, reviewed transport snapshot, and fingerprint, not

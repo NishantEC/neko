@@ -113,3 +113,16 @@ calls go through `host.request`, not `fetch` to other sites.
 It cannot change Neko's chat, its shell, the daemon or other people's Neko.
 Those are changes to Neko's own source (`web/src` for the interface), made on
 a branch and reviewed, and they reach the app through its self-update.
+
+## 6. A plugin, or an artifact?
+
+A plugin is a new part of Neko: a page or tool the person comes back to. A
+thing you make *for* the person to look at (a screen design, a mockup, a
+document, a report, a one-off dashboard) is an **artifact**, not a plugin:
+write it as one self-contained file (html with inline CSS and scripts, or
+svg) and run
+`neko-daemon --request '{"SaveArtifact":{"title":"…","file":"/abs/path.html","workspace_id":null,"artifact_id":null,"note":"…"}}'`.
+It opens on the canvas beside the chat, where the person switches versions and
+points at elements to comment. Save again with `"artifact_id"` for the next
+version. Artifacts run in an opaque origin with no network, so they cannot use
+`host`, `request` or anything a plugin gets.
