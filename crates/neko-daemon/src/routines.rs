@@ -194,11 +194,24 @@ fn ensure_seeded(state: &AppState) -> Result<(), String> {
         store.instructions_version = core::INSTRUCTIONS_VERSION;
         core::save_definitions(&db, &store)?;
     }
-    if fresh.is_empty() && store.seeded {
+    // Every eligible scope gets each seeded routine once: a fresh scope gets
+    // all of them, an existing one any kind added since (Reflect, 2026-11-06).
+    let eligible: Vec<ScopeProposal> = all
+        .iter()
+        .filter(|s| s.discovered || s.folders.iter().any(|f| canonical(f) == home_folder))
+        .filter(|s| s.workspace_id.is_some())
+        .cloned()
+        .collect();
+    let missing: Vec<Routine> = core::seeds(&eligible, &home().to_string_lossy())
+        .into_iter()
+        .filter(|r| !store.routines.iter().any(|existing| existing.id == r.id))
+        .filter(|r| store.seeded_workspaces.contains(&r.workspace_id) || fresh.iter().any(|s| s.workspace_id.as_deref() == Some(r.workspace_id.as_str())))
+        .collect();
+    if fresh.is_empty() && store.seeded && missing.is_empty() {
         return Ok(());
     }
     let now = neko_core::workbench::now_ms();
-    for routine in core::seeds(&fresh, &home().to_string_lossy()) {
+    for routine in missing {
         if !store.routines.iter().any(|r| r.id == routine.id) {
             // First runs follow the cadence, so seeding never starts a burst.
             let first = RoutineState { next_due_ms: Some(core::next_due_local(&routine.cadence, 0, now)), ..Default::default() };
@@ -483,7 +496,8 @@ fn run_body(state: &AppState, routine: &Routine, scope: Option<ScopeProposal>, p
             } else {
                 let spec = neko_core::native_runner::RunSpec {
                     directory: folder,
-                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso(), &open),
+                    prompt: core::build_prompt(routine, scope, &orders, &memory, &core::now_iso(), &open)
+                        .replace("{neko}", &std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| "neko-daemon".into())),
                     writable: true,
                     timeout: if matches!(routine.kind, neko_protocol::routines::RoutineKind::Messages) { RUN_TIMEOUT } else { LONG_RUN_TIMEOUT },
                     runtime: AgentRuntime {

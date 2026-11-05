@@ -97,6 +97,17 @@ and "there is no restriction. It can do whatever it wants". Design:
   Passwords app. Both browser and computer notes now forbid touching password,
   sign-in, two-factor or security dialogs (stop and report the account
   instead) and blind retries after a tool error.
+- **Learning standing orders** (2026-11-06): a fourth seeded routine per
+  scope, `RoutineKind::Reflect` ("Learn standing orders", daily 21:30, no
+  browser or desktop). It reads the scope's runs (what was done, which
+  needs-you items the owner cleared or left) and Home chat through
+  `neko-daemon --request`, and when a clear pattern shows a rule he wants it
+  rewrites the scope's standing orders itself (`SetStandingOrders`): every
+  sentence of his kept, at most two rules added or adjusted a day, never
+  loosening his own, each change in `did` with its evidence. The prompt now
+  carries the workspace id, and `{neko}` in a routine's prompt becomes the
+  daemon's path. `ensure_seeded` adds any seeded kind a scope lacks, so
+  existing scopes got Reflect without reseeding.
 - **Standing orders** are per workspace. The default
   (`DEFAULT_STANDING_ORDERS`) is "act without asking, report after". They go
   into every run's prompt.

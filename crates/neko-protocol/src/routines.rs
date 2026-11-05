@@ -9,6 +9,8 @@ pub enum RoutineKind {
     Messages,
     Digest,
     PrSweep,
+    /// Learns standing orders from what the owner did with the scope's work.
+    Reflect,
     Custom,
 }
 

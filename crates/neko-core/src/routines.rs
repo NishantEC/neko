@@ -249,7 +249,7 @@ pub fn build_prompt(routine: &Routine, scope: &ScopeProposal, orders: &str, memo
     let memory = if memory.is_null() { "{}".to_string() } else { memory.to_string() };
     format!(
         "You are Neko, Asha's chief of staff, running the \"{name}\" routine for the {scope_name} scope.\n\
-Working folder: {folder}. Your MCP servers are exactly this scope's: {servers}. Nothing from other scopes is loaded; if a source this routine needs is missing or not signed in, say so in needs_you.\n\
+Working folder: {folder}. Workspace id: {workspace_id}. Your MCP servers are exactly this scope's: {servers}. Nothing from other scopes is loaded; if a source this routine needs is missing or not signed in, say so in needs_you.\n\
 Now (UTC): {now_iso}\n\n\
 {instruction}\n\n\
 Standing orders from Asha:\n{orders}\n\n\
@@ -263,6 +263,7 @@ quiet is true only when nothing new happened and you did nothing; then did and n
         scope_name = scope.name,
         folder = scope.folders.first().map(String::as_str).unwrap_or("~"),
         instruction = routine.instruction.trim(),
+        workspace_id = routine.workspace_id,
         browser = if routine.browser { BROWSER_NOTE } else { "" },
         computer = if routine.computer { COMPUTER_NOTE } else { "" },
     )
@@ -376,6 +377,11 @@ Act on what you can first: answer review comments, fix or re-run failing CI, reb
             "Pull request and branch sweep. {hint} Go through Asha's open pull requests and his remote branches: rebase stale ones on their base, fix failing CI when the fix is clear, address review comments, nudge reviewers on PRs waiting more than two days, and close PRs and delete branches that are merged elsewhere, superseded or dead.\n\
 Do the work, do not just list it. Work in a temporary git worktree (`git worktree add` under /tmp, removed when done) so Asha's checkouts are never touched. Resolve conflicts yourself when the right result is clear from both sides, run the tests that cover the changed files, and push. When a PR has no reviewer, request one from CODEOWNERS or whoever reviewed that repository's recent PRs. Only a conflict whose right resolution needs a product decision goes in needs_you, with what the choice is. Report each action in did."
         ),
+        RoutineKind::Reflect => format!(
+            "Learn Asha's standing orders for this scope from what he actually does. Neko's own command line is `'{{neko}}' --request '<json>'` (it prints the JSON reply). \
+Read this scope's routines and their recent runs with `'{{neko}}' --request '\"Routines\"'` (only routines whose workspace_id is this scope's): what Neko did, which needs_you items he marked done, which he left open for days, and the current standing_orders for this workspace. Read Home chat with `'{{neko}}' --request '{{\"Workbench\":\"Snapshot\"}}'` (the conversation) for corrections or preferences he stated about this scope's work, and the memory entries for this workspace.\n\
+When a clear pattern shows a rule he wants (he corrected how a routine acted, he always handles a kind of item himself, he keeps ignoring a kind of item, he asked for something to be done differently), update this scope's standing orders with `'{{neko}}' --request '{{\"SetStandingOrders\":{{\"workspace_id\":\"<this workspace id>\",\"text\":\"<full new text>\"}}}}'`: keep every existing sentence of his, add or adjust at most two short rules per day, and write them in his voice as plain instructions. Never loosen a rule he wrote. Put each change in did with the evidence (which runs or messages). If nothing is clear, change nothing and be quiet. {hint}"
+        ),
         RoutineKind::Custom => String::new(),
     }
 }
@@ -393,6 +399,7 @@ pub fn seeds(scopes: &[ScopeProposal], home: &str) -> Vec<Routine> {
             (RoutineKind::Messages, "Messages", Cadence::Every { minutes: if busy { 20 } else { 60 }, from_hour: 8, to_hour: 23 }),
             (RoutineKind::Digest, "Morning brief", Cadence::Daily { hour: 10, minute: 30 }),
             (RoutineKind::PrSweep, "PR sweep", Cadence::Daily { hour: 11, minute: 0 }),
+            (RoutineKind::Reflect, "Learn standing orders", Cadence::Daily { hour: 21, minute: 30 }),
         ];
         for (kind, name, cadence) in specs {
             let paseo = match (kind, scope.name.as_str()) {
@@ -411,8 +418,8 @@ pub fn seeds(scopes: &[ScopeProposal], home: &str) -> Vec<Routine> {
                 enabled: true,
                 model: "sonnet".into(),
                 paseo_schedule: paseo.map(str::to_string),
-                browser: true,
-                computer: true,
+                browser: kind != RoutineKind::Reflect,
+                computer: kind != RoutineKind::Reflect,
             });
         }
     }
@@ -488,14 +495,18 @@ mod tests {
         let mut asha = scope("Asha", Some("w2"));
         asha.folders = vec!["/Users/n".into()];
         let routines = seeds(&[scope("Client A", Some("w1")), asha, scope("Loose", None)], "/Users/n/");
-        assert_eq!(routines.len(), 6);
+        assert_eq!(routines.len(), 8);
         assert_eq!(routines[0].paseo_schedule.as_deref(), Some("message-watch-adaptive"));
         assert_eq!(routines[0].cadence, Cadence::Every { minutes: 20, from_hour: 8, to_hour: 23 });
         assert!(routines[0].instruction.contains("slack-client-a"));
-        assert_eq!(routines[4].paseo_schedule.as_deref(), Some("daily-work-digest"));
-        assert_eq!(routines[5].paseo_schedule.as_deref(), Some("weekly-pr-sweep"));
+        assert_eq!(routines[5].paseo_schedule.as_deref(), Some("daily-work-digest"));
+        assert_eq!(routines[6].paseo_schedule.as_deref(), Some("weekly-pr-sweep"));
+        let reflect = &routines[3];
+        assert_eq!(reflect.kind, RoutineKind::Reflect);
+        assert!(reflect.instruction.contains("'{neko}' --request") && reflect.instruction.contains("SetStandingOrders"));
+        assert!(!reflect.browser && !reflect.computer);
         assert!(routines.iter().all(|r| r.id.starts_with(&r.workspace_id)));
-        assert!(routines[3].instruction.contains("Gmail"));
+        assert!(routines[4].instruction.contains("Gmail"));
         // A scope that is neither known nor home gets no personal routines.
         let other = seeds(&[scope("Side project", Some("w3"))], "/Users/n");
         assert!(other.iter().all(|r| r.paseo_schedule.is_none() && !r.instruction.contains("Gmail")));
