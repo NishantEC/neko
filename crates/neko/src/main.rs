@@ -720,6 +720,8 @@ fn main() {
                         }
                         // For open web pages; the panel serves no web UI.
                         Event::WebUpdated { .. } => {}
+                        // The canvas lives in the web UI.
+                        Event::ArtifactsChanged { .. } => {}
                         // The web UI's light/dark choice; the native app keeps its own
                         // single theme for now (see docs/design/themes.md).
                         Event::AppearanceChanged { .. } => {}

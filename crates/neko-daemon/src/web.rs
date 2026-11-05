@@ -120,6 +120,8 @@ pub struct Config {
     /// `<data dir>/attachments`: where files attached in the web composer are
     /// kept, the same folder the native composer writes to.
     pub attachments_dir: PathBuf,
+    /// `<data dir>/artifacts` (`neko_core::artifacts`), served at `/artifact/<id>/<n>`.
+    pub artifacts_dir: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +368,10 @@ fn write_head(stream: &mut TcpStream, status: u16, reason: &str, content_type: &
     }
     // Pages and plugins change under the user's feet by design; never cache.
     head.push_str("Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Frame-Options: SAMEORIGIN\r\n");
-    head.push_str("Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'\r\n");
+    // A reply that brings its own policy (an artifact) gets only that one.
+    if !extra.iter().any(|(name, _)| name.eq_ignore_ascii_case("Content-Security-Policy")) {
+        head.push_str("Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'\r\n");
+    }
     for (name, value) in extra {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
@@ -501,6 +506,8 @@ fn route(mut stream: TcpStream, req: Req, config: &Config, backend: &dyn Backend
         if req.method != "POST" { Reply::text(405, "Method Not Allowed") } else { store_attachment(&config.attachments_dir, req.header("x-neko-filename"), &req.body) }
     } else if let Some(rest) = path.strip_prefix("/plugins/") {
         if !get { Reply::text(405, "Method Not Allowed") } else { serve_plugin_file(&config.plugins_dir, rest) }
+    } else if let Some(rest) = path.strip_prefix("/artifact/") {
+        if !get { Reply::text(405, "Method Not Allowed") } else { serve_artifact(&config.artifacts_dir, rest, query_param(&req.query, "download").is_some()) }
     } else if let Some(rest) = path.strip_prefix("/api/chat/") {
         return chat_route(stream, &req, rest, backend);
     } else if path.starts_with("/api/") {
@@ -687,6 +694,7 @@ fn mime(path: &Path) -> &'static str {
         "svg" => "image/svg+xml",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
+        "pdf" => "application/pdf",
         "ico" => "image/x-icon",
         "webmanifest" => "application/manifest+json",
         "woff2" => "font/woff2",
@@ -760,6 +768,76 @@ fn serve_plugin_file(plugins: &Path, rest: &str) -> Reply {
         Some(file) => file_reply(&file),
         None => Reply::text(404, "Not Found"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Artifacts: what an agent made, shown on the canvas beside the chat
+// ---------------------------------------------------------------------------
+
+/// An artifact runs its own scripts, so it gets its own policy: it may use
+/// inline code and what is inside it, and reach nothing (`connect-src 'none'`,
+/// no form posts). `sandbox allow-scripts` gives it an opaque origin even when
+/// opened on its own in a tab, so it can never read Neko's cookie, storage or
+/// API, the same as inside the canvas's `<iframe sandbox="allow-scripts">`.
+pub const ARTIFACT_CSP: &str = "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts";
+
+/// Appended to an html artifact (before `</body>`): the comment bridge. When
+/// the canvas posts `{type:"neko-comment-mode", on}`, the hovered element is
+/// outlined and a click posts back `{type:"neko-pick", selector, text, rect}`
+/// instead of doing what the design does. It answers only its parent.
+pub const COMMENT_BRIDGE: &str = r##"<script data-neko-bridge>(function(){
+var on=false,box=null;
+function selector(el){var parts=[];while(el&&el.nodeType===1&&parts.length<6){var name=el.tagName.toLowerCase();if(el.id){parts.unshift("#"+CSS.escape(el.id));break;}if(name==="body"||name==="html"){parts.unshift(name);break;}var p=el.parentElement;if(p){var same=Array.prototype.filter.call(p.children,function(c){return c.tagName===el.tagName;});if(same.length>1)name+=":nth-of-type("+(same.indexOf(el)+1)+")";}parts.unshift(name);el=p;}return parts.join(" > ");}
+function show(el){if(!box){box=document.createElement("div");box.setAttribute("data-neko-bridge","");box.style.cssText="position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #2f6feb;background:rgba(47,111,235,.12);border-radius:3px;display:none";document.documentElement.appendChild(box);}var r=el.getBoundingClientRect();box.style.left=r.left+"px";box.style.top=r.top+"px";box.style.width=r.width+"px";box.style.height=r.height+"px";box.style.display="block";}
+function hide(){if(box)box.style.display="none";}
+addEventListener("message",function(e){if(e.source!==parent)return;var d=e.data;if(d&&d.type==="neko-comment-mode"){on=!!d.on;document.documentElement.style.cursor=on?"crosshair":"";if(!on)hide();}});
+addEventListener("mouseover",function(e){if(on&&e.target&&e.target.nodeType===1)show(e.target);},true);
+addEventListener("mouseleave",function(){hide();});
+["mousedown","mouseup","pointerdown","pointerup","dblclick","submit"].forEach(function(t){addEventListener(t,function(e){if(on){e.preventDefault();e.stopPropagation();}},true);});
+addEventListener("click",function(e){if(!on)return;e.preventDefault();e.stopPropagation();var el=e.target;if(!el||el.nodeType!==1)return;var r=el.getBoundingClientRect();var text=(el.innerText||el.textContent||"").replace(/\s+/g," ").trim().slice(0,120);parent.postMessage({type:"neko-pick",selector:selector(el),text:text,rect:{x:r.left,y:r.top,width:r.width,height:r.height}},"*");},true);
+addEventListener("keydown",function(e){if(on&&e.key==="Escape")parent.postMessage({type:"neko-comment-cancel"},"*");},true);
+})();</script>"##;
+
+/// The html with the bridge before its last `</body>`, or at the end when it has none.
+pub fn with_comment_bridge(html: &str) -> String {
+    let at = html.to_ascii_lowercase().rfind("</body>").unwrap_or(html.len());
+    let mut out = String::with_capacity(html.len() + COMMENT_BRIDGE.len());
+    out.push_str(&html[..at]);
+    out.push_str(COMMENT_BRIDGE);
+    out.push_str(&html[at..]);
+    out
+}
+
+/// A file name for a download: the title's letters and digits, then the version.
+fn download_name(title: &str, n: u32, kind: &str) -> String {
+    let mut slug: String = title.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    while slug.contains("--") { slug = slug.replace("--", "-"); }
+    let slug = slug.trim_matches('-');
+    let slug = if slug.is_empty() { "artifact" } else { &slug[..slug.len().min(60)] };
+    format!("{slug}-v{n}.{kind}")
+}
+
+/// `GET /artifact/<id>/<n>`: version `n` of an artifact (`latest` for the
+/// newest) under [`ARTIFACT_CSP`], html with the comment bridge; with
+/// `?download=1`, the file as it was saved, as an attachment.
+fn serve_artifact(root: &Path, rest: &str, download: bool) -> Reply {
+    let Some((id, n)) = rest.split_once('/') else { return Reply::text(404, "Not Found") };
+    let n = match n { "latest" => Some(0), n => n.parse::<u32>().ok().filter(|n| *n > 0) };
+    let (Some(n), true) = (n, neko_core::artifacts::valid_id(id)) else { return Reply::text(404, "Not Found") };
+    let Some((file, kind)) = neko_core::artifacts::version_file(root, id, n) else { return Reply::text(404, "Not Found") };
+    let Ok(bytes) = fs::read(&file) else { return Reply::text(404, "Not Found") };
+    let mut reply = if download || kind != "html" {
+        Reply::new(200, "OK", mime(&file), bytes)
+    } else {
+        Reply::new(200, "OK", mime(&file), with_comment_bridge(&String::from_utf8_lossy(&bytes)))
+    };
+    reply.extra.push(("Content-Security-Policy", ARTIFACT_CSP.into()));
+    if download {
+        let title = neko_core::artifacts::get(root, id).map(|a| a.title).unwrap_or_default();
+        let number = file.file_stem().and_then(|s| s.to_str()).and_then(|s| s.strip_prefix('v')).and_then(|s| s.parse().ok()).unwrap_or(n);
+        reply.extra.push(("Content-Disposition", format!("attachment; filename=\"{}\"", download_name(&title, number, &kind))));
+    }
+    reply
 }
 
 #[derive(serde::Serialize)]

@@ -643,6 +643,63 @@ pub enum Request {
     PluginStatus {
         id: Option<String>,
     },
+    /// Keeps a file the agent made as an artifact (`<data dir>/artifacts`):
+    /// copied in (5 MB at most; html, svg, png, pdf, json or md), recorded as
+    /// a new artifact or, with `artifact_id`, as its next version, and linked
+    /// to the Home reply running at that moment. `file` is an absolute path.
+    SaveArtifact {
+        /// Required for a new artifact; empty keeps the title when adding a version.
+        #[serde(default)]
+        title: String,
+        file: String,
+        #[serde(default)]
+        workspace_id: Option<String>,
+        #[serde(default)]
+        artifact_id: Option<String>,
+        /// What changed in this version, in a few words.
+        #[serde(default)]
+        note: String,
+    },
+    /// Every artifact, newest first; only one workspace's with `workspace_id`.
+    Artifacts {
+        #[serde(default)]
+        workspace_id: Option<String>,
+    },
+    /// One artifact's record.
+    Artifact {
+        id: String,
+    },
+}
+
+/// A file Neko keeps for the person: a design, a document, a dashboard
+/// (`neko_core::artifacts`). Its versions live beside `meta.json` as
+/// `v<n>.<ext>` and are served at `/artifact/<id>/<n>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Artifact {
+    pub id: String,
+    pub title: String,
+    /// The latest version's file type: `html`, `svg`, `png`, `pdf`, `json` or `md`.
+    pub kind: String,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    /// The Home reply that made it, when one was running.
+    #[serde(default)]
+    pub message_id: Option<String>,
+    pub versions: Vec<ArtifactVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactVersion {
+    /// 1, 2, 3…
+    pub n: u32,
+    /// The file's name inside the artifact's folder (`v2.html`).
+    pub file: String,
+    pub at_ms: i64,
+    #[serde(default)]
+    pub note: String,
+    /// The Home reply this version was made in, when one was running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
 }
 
 /// What the web app last reported about loading one plugin.
@@ -757,6 +814,17 @@ pub enum Response {
     PluginStatus {
         plugins: Vec<PluginHealth>,
     },
+    /// `version` is the one just kept.
+    ArtifactSaved {
+        artifact: Artifact,
+        version: u32,
+    },
+    Artifacts {
+        artifacts: Vec<Artifact>,
+    },
+    Artifact {
+        artifact: Artifact,
+    },
     Error {
         message: String,
     },
@@ -857,6 +925,13 @@ pub enum Event {
     /// (`<data dir>/web-live`). Open pages reload when the person is idle.
     WebUpdated {
         commit: String,
+    },
+    /// An artifact was kept or got a new version. `message_id` is the Home
+    /// reply it was linked to, so the chat can open it beside the conversation.
+    ArtifactsChanged {
+        id: String,
+        version: u32,
+        message_id: Option<String>,
     },
 }
 

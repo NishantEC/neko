@@ -75,6 +75,8 @@ pub struct AppState {
     web_events: Mutex<Vec<std::sync::mpsc::Sender<Event>>>,
     attention: Mutex<AttentionCounts>,
     native_attention: AtomicUsize,
+    /// `<data dir>/artifacts` (`neko_core::artifacts`); tests point it elsewhere.
+    pub artifacts: std::path::PathBuf,
 }
 
 impl AppState {
@@ -259,6 +261,7 @@ impl AppState {
             web_events: Mutex::new(Vec::new()),
             attention: Mutex::new(AttentionCounts::default()),
             native_attention: AtomicUsize::new(0),
+            artifacts: neko_core::artifacts::root(),
         }
     }
 }
@@ -745,6 +748,29 @@ fn plugin_health() -> &'static std::sync::Mutex<std::collections::BTreeMap<Strin
     HEALTH.get_or_init(Default::default)
 }
 
+/// `SaveArtifact`: keeps the file, links it to the Home reply running now
+/// (its card appears on that reply, and the reply's workspace is the
+/// artifact's when the agent named none), and tells every open page.
+fn save_artifact(state: &AppState, mut save: neko_core::artifacts::Save) -> Response {
+    let pending = {
+        let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        neko_core::neko_chat::pending_turn(&db)
+    };
+    if let Some((turn, workspace)) = pending {
+        save.message_id = Some(turn);
+        if save.workspace_id.as_deref().unwrap_or("").is_empty() { save.workspace_id = workspace; }
+    }
+    let message_id = save.message_id.clone();
+    match neko_core::artifacts::save(&state.artifacts, save) {
+        Ok((artifact, version)) => {
+            if let Some(turn) = &message_id { neko_core::neko_chat::show_artifact(turn, &artifact, version); }
+            broadcast(state, &Event::ArtifactsChanged { id: artifact.id.clone(), version, message_id });
+            Response::ArtifactSaved { artifact, version }
+        }
+        Err(message) => Response::Error { message },
+    }
+}
+
 fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> Response {
     match request {
         Request::McpBridge(request) => match state.workbench.mcp.bridge(request) {
@@ -767,6 +793,19 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
             let all = plugin_health().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             Response::PluginStatus { plugins: all.values().filter(|h| id.as_ref().is_none_or(|id| &h.id == id)).cloned().collect() }
         }
+        Request::SaveArtifact { title, file, workspace_id, artifact_id, note } => save_artifact(state, neko_core::artifacts::Save {
+            title,
+            file: std::path::PathBuf::from(file),
+            workspace_id,
+            artifact_id,
+            note,
+            message_id: None,
+        }),
+        Request::Artifacts { workspace_id } => Response::Artifacts { artifacts: neko_core::artifacts::list(&state.artifacts, workspace_id.as_deref()) },
+        Request::Artifact { id } => match neko_core::artifacts::get(&state.artifacts, &id) {
+            Some(artifact) => Response::Artifact { artifact },
+            None => Response::Error { message: format!("There is no artifact {id}.") },
+        },
         Request::SuperAgent { on } => {
             let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             match on.map(|on| neko_core::neko_chat::set_super_agent(&db, on)).transpose() {
@@ -1223,6 +1262,7 @@ pub fn spawn_web_bridge(state: Arc<AppState>) {
         plugin_data_dir: dir.join("plugin-data"),
         custom_css: dir.join("custom.css"),
         attachments_dir: dir.join("attachments"),
+        artifacts_dir: state.artifacts.clone(),
     };
     eprintln!("neko-daemon: web UI on http://127.0.0.1:{port}/ (token in {})", dir.join("web-token").display());
     std::thread::spawn(move || crate::web::serve(listener, config, Arc::new(WebBackend(state))));
@@ -1747,7 +1787,7 @@ mod tests {
     /// `AppState::with_test_providers`'s doc comment for why every test in
     /// this module goes through this rather than the real constructor.
     fn test_state(db: Db, apps: Vec<AppEntry>) -> AppState {
-        AppState::with_test_providers(
+        let mut state = AppState::with_test_providers(
             db,
             apps,
             Some(neko_core::files::FileProvider::empty()),
@@ -1755,7 +1795,51 @@ mod tests {
             // Never reaches the daemon: whether Paseo happens to be running
             // must not decide whether this suite passes.
             neko_core::permissions::PermissionsProvider::disabled(),
-        )
+        );
+        // Never the person's own artifacts folder.
+        state.artifacts = std::env::temp_dir().join(format!("neko-test-artifacts-{}", std::process::id()));
+        state
+    }
+
+    #[test]
+    fn an_artifact_saved_during_a_home_reply_is_linked_to_it_and_announced() {
+        use crate::web::Backend;
+        let tmp = tempfile::tempdir().unwrap();
+        let mut state = test_state(Db::open_in_memory().unwrap(), Vec::new());
+        state.artifacts = tmp.path().join("artifacts");
+        let state = Arc::new(state);
+        let events = WebBackend(state.clone()).subscribe();
+        let page = tmp.path().join("design.html");
+        std::fs::write(&page, "<html><body><h1>Hi</h1></body></html>").unwrap();
+        let save = |artifact_id: Option<String>| Request::SaveArtifact { title: "Onboarding".into(), file: page.to_string_lossy().into(), workspace_id: None, artifact_id, note: String::new() };
+
+        // Outside a reply it is kept, linked to nothing.
+        let Response::ArtifactSaved { artifact: loose, version: 1 } = handle_request_for_test(&state, save(None)) else { panic!("not saved") };
+        assert!(loose.message_id.is_none() && loose.workspace_id.is_none());
+        assert!(matches!(events.try_recv(), Ok(Event::ArtifactsChanged { message_id: None, version: 1, .. })));
+
+        // During one, it takes the reply's id and workspace, and its card appears on the reply.
+        let turn = neko_core::neko_chat::begin_scoped_turn(&state.db.lock().unwrap(), "design it", Some("ws-1")).unwrap();
+        let Response::ArtifactSaved { artifact, version: 1 } = handle_request_for_test(&state, save(None)) else { panic!("not saved") };
+        assert_eq!((artifact.message_id.as_deref(), artifact.workspace_id.as_deref()), (Some(turn.as_str()), Some("ws-1")));
+        let Ok(Event::ArtifactsChanged { id, version: 1, message_id }) = events.try_recv() else { panic!("no event") };
+        assert_eq!((id.as_str(), message_id.as_deref()), (artifact.id.as_str(), Some(turn.as_str())));
+        let Response::ArtifactSaved { version: 2, .. } = handle_request_for_test(&state, save(Some(artifact.id.clone()))) else { panic!("no second version") };
+        let cards: Vec<_> = neko_core::ui_message::live_parts(&turn).unwrap().into_iter().filter(|p| p["type"] == "data-neko-artifact").collect();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0]["data"]["version"], 2);
+
+        let Response::Artifacts { artifacts } = handle_request_for_test(&state, Request::Artifacts { workspace_id: Some("ws-1".into()) }) else { panic!() };
+        assert_eq!(artifacts.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), vec![artifact.id.as_str()]);
+        let Response::Artifact { artifact: one } = handle_request_for_test(&state, Request::Artifact { id: artifact.id.clone() }) else { panic!() };
+        assert_eq!(one.versions.len(), 2);
+        assert!(matches!(handle_request_for_test(&state, Request::Artifact { id: "../x".into() }), Response::Error { .. }));
+        // A refused file is an error, and announces nothing.
+        while events.try_recv().is_ok() {}
+        let refused = Request::SaveArtifact { title: "X".into(), file: "/etc/hosts".into(), workspace_id: None, artifact_id: None, note: String::new() };
+        assert!(matches!(handle_request_for_test(&state, refused), Response::Error { .. }));
+        assert!(events.try_recv().is_err());
+        neko_core::ui_message::finish(&turn, "done", 0);
     }
 
     #[test]

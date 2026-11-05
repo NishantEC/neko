@@ -60,7 +60,7 @@ fn start() -> Harness {
     let listener = bind(0).unwrap();
     let port = listener.local_addr().unwrap().port();
     let backend = Arc::new(Fake { seen: Mutex::new(Vec::new()), events: Mutex::new(Vec::new()), chat: Mutex::new(Vec::new()), feed: Mutex::new(None) });
-    let config = Config { token: TOKEN.into(), web_root: dir.path().join("web"), live_web: None, plugins_dir: dir.path().join("plugins"), plugin_data_dir: dir.path().join("plugin-data"), custom_css: dir.path().join("custom.css"), attachments_dir: dir.path().join("attachments") };
+    let config = Config { token: TOKEN.into(), web_root: dir.path().join("web"), live_web: None, plugins_dir: dir.path().join("plugins"), plugin_data_dir: dir.path().join("plugin-data"), custom_css: dir.path().join("custom.css"), attachments_dir: dir.path().join("attachments"), artifacts_dir: dir.path().join("artifacts") };
     let served = backend.clone();
     std::thread::spawn(move || serve(listener, config, served));
     Harness { port, backend, dir }
@@ -792,7 +792,7 @@ fn a_live_web_ui_is_preferred_and_old_chunks_stay_reachable() {
     fs::write(bundle.join("index.html"), "<html>bundle</html>").unwrap();
     fs::write(bundle.join("assets/old.js"), "old").unwrap();
     let data = dir.path().join("data");
-    let config = Config { token: TOKEN.into(), web_root: bundle.clone(), live_web: Some(data.clone()), plugins_dir: dir.path().join("plugins"), plugin_data_dir: dir.path().join("plugin-data"), custom_css: dir.path().join("custom.css"), attachments_dir: dir.path().join("attachments") };
+    let config = Config { token: TOKEN.into(), web_root: bundle.clone(), live_web: Some(data.clone()), plugins_dir: dir.path().join("plugins"), plugin_data_dir: dir.path().join("plugin-data"), custom_css: dir.path().join("custom.css"), attachments_dir: dir.path().join("attachments"), artifacts_dir: dir.path().join("artifacts") };
     let page = |path: &str| String::from_utf8(serve_static(&web_roots(&config), path).body).unwrap();
     assert_eq!(page("/"), "<html>bundle</html>", "no live UI: the bundle's");
     // A rebuilt UI is swapped in.
@@ -961,4 +961,75 @@ fn the_conversation_names_are_checked() {
     for bad in ["", "Neko", "task:", "task:a b", "task:a/b", "task:..", "tasks:a", &format!("task:{}", "a".repeat(65))] {
         assert!(!valid_conversation(bad), "{bad:?}");
     }
+}
+
+/// Keeps a file in the harness's artifact store, as `SaveArtifact` would.
+fn keep(h: &Harness, name: &str, body: &[u8], artifact_id: Option<String>) -> neko_core::artifacts::Artifact {
+    let file = h.dir.path().join(name);
+    fs::write(&file, body).unwrap();
+    let save = neko_core::artifacts::Save { title: "Onboarding screen".into(), file, artifact_id, ..Default::default() };
+    neko_core::artifacts::save(&h.dir.path().join("artifacts"), save).unwrap().0
+}
+
+#[test]
+fn an_artifact_is_served_under_its_own_policy_with_the_comment_bridge() {
+    let h = start();
+    let artifact = keep(&h, "design.html", b"<html><body><h1>One</h1></body></html>", None);
+    let page = get(h.port, &format!("/artifact/{}/1", artifact.id), &[]);
+    assert_eq!(page.status, 200);
+    assert!(page.head.contains("Content-Type: text/html; charset=utf-8"), "{}", page.head);
+    // Its own policy, and only that one: no network, an opaque origin even in a tab of its own.
+    assert_eq!(page.head.matches("Content-Security-Policy:").count(), 1, "{}", page.head);
+    assert!(page.head.contains(&format!("Content-Security-Policy: {ARTIFACT_CSP}")));
+    assert!(ARTIFACT_CSP.contains("connect-src 'none'") && ARTIFACT_CSP.contains("sandbox allow-scripts") && !ARTIFACT_CSP.contains("allow-same-origin"));
+    assert!(ARTIFACT_CSP.contains("frame-ancestors 'self'"));
+    assert!(page.head.contains("X-Content-Type-Options: nosniff") && page.head.contains("Cache-Control: no-store"));
+    // The bridge sits before </body>, the design is untouched around it.
+    assert!(page.body.starts_with("<html><body><h1>One</h1><script data-neko-bridge>"), "{}", page.body);
+    assert!(page.body.ends_with("</script></body></html>"));
+    assert!(page.body.contains("neko-comment-mode") && page.body.contains("neko-pick") && page.body.contains("e.source!==parent"));
+    // A download is the file as saved, without the bridge, named for its title.
+    let download = get(h.port, &format!("/artifact/{}/1?download=1", artifact.id), &[]);
+    assert_eq!(download.body, "<html><body><h1>One</h1></body></html>");
+    assert!(download.head.contains("Content-Disposition: attachment; filename=\"onboarding-screen-v1.html\""), "{}", download.head);
+    // `latest` follows new versions; an svg gets its mime and the same policy, and no bridge.
+    keep(&h, "design.svg", b"<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>", Some(artifact.id.clone()));
+    let latest = get(h.port, &format!("/artifact/{}/latest", artifact.id), &[]);
+    assert!(latest.head.contains("Content-Type: image/svg+xml") && latest.head.contains(ARTIFACT_CSP), "{}", latest.head);
+    assert!(!latest.body.contains("neko-bridge"));
+    // The app's own pages keep the app's policy.
+    assert!(get(h.port, "/", &[]).head.contains("connect-src 'self'"));
+}
+
+#[test]
+fn the_artifact_route_needs_the_same_gates_and_stays_in_its_store() {
+    let h = start();
+    let artifact = keep(&h, "design.html", b"<p>kept</p>", None);
+    let target = format!("/artifact/{}/1", artifact.id);
+    let host = format!("Host: 127.0.0.1:{}", h.port);
+    assert_eq!(http(h.port, "GET", &target, &[&host], "").status, 401, "no token");
+    assert_eq!(http(h.port, "GET", &target, &["Host: evil.example", &format!("Authorization: Bearer {TOKEN}")], "").status, 403, "DNS rebinding");
+    assert_eq!(get(h.port, &target, &["Origin: https://evil.example"]).status, 403);
+    assert_eq!(get(h.port, &target, &["Sec-Fetch-Site: cross-site"]).status, 403);
+    assert_eq!(http(h.port, "POST", &target, &good(h.port).iter().map(String::as_str).collect::<Vec<_>>(), "x").status, 405);
+    fs::write(h.dir.path().join("artifacts/stray.html"), "stray").unwrap();
+    for evil in [
+        "/artifact/".to_string(), format!("/artifact/{}", artifact.id), format!("/artifact/{}/0", artifact.id), format!("/artifact/{}/2", artifact.id),
+        format!("/artifact/{}/x", artifact.id), format!("/artifact/{}/1/extra", artifact.id), "/artifact/../secret.txt/1".into(),
+        "/artifact/%2e%2e/1".into(), "/artifact/stray.html/1".into(), format!("/artifact/{}/-1", artifact.id),
+    ] {
+        let answer = get(h.port, &evil, &[]);
+        assert!(answer.status == 400 || answer.status == 404, "{evil} -> {}", answer.status);
+        assert!(!answer.body.contains("outside the web root") && !answer.body.contains("stray"), "{evil}");
+    }
+    assert!(h.backend.seen.lock().unwrap().is_empty(), "serving an artifact never asks the daemon");
+}
+
+#[test]
+fn the_comment_bridge_goes_before_the_last_body_close_or_at_the_end() {
+    assert!(with_comment_bridge("<p>no body</p>").starts_with("<p>no body</p><script data-neko-bridge>"));
+    let html = with_comment_bridge("<BODY>a</BODY>\n");
+    assert!(html.starts_with("<BODY>a<script data-neko-bridge>") && html.ends_with("</script></BODY>\n"));
+    assert_eq!(download_name("  Café / Plan!! ", 3, "svg"), "caf-plan-v3.svg");
+    assert_eq!(download_name("", 1, "html"), "artifact-v1.html");
 }
