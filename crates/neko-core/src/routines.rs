@@ -379,6 +379,10 @@ pub fn parse_reply(text: &str) -> Result<Parsed, String> {
 
 /// How every seeded instruction finds the owner's accounts without knowing
 /// them: nothing about any one person or company is written into Neko.
+/// Every code change a routine or the full-power chat makes is checked by
+/// someone who did not write it, the way Neko's own tasks are.
+pub const REVIEW_BEFORE_PUSH: &str = "Before you push or report a non-trivial code change as done, have it reviewed by a fresh subagent that did not write it (the Agent tool; give it the diff, what the change is for, and how to verify), fix what it finds that is real, and say in did that it was reviewed. A clean rebase, a merge with no conflicts or a one-line obvious fix needs no review.";
+
 const FIND_ACCOUNTS: &str = "Find {owner}'s GitHub login with `gh api user --jq .login` and the organisation each repository belongs to with `git remote -v`; the scope notes and this scope's MCP servers say which chat, mail, calendar and issue tools to use.";
 
 /// The instruction a seeded routine of this kind gets.
@@ -387,7 +391,7 @@ pub fn seed_instruction(kind: RoutineKind, personal: bool) -> String {
 }
 
 /// Bumped when seeded instructions change; older ones are rewritten once.
-pub const INSTRUCTIONS_VERSION: u32 = 4;
+pub const INSTRUCTIONS_VERSION: u32 = 5;
 
 fn instruction(kind: RoutineKind, personal: bool) -> String {
     let own = if personal {
@@ -398,16 +402,16 @@ fn instruction(kind: RoutineKind, personal: bool) -> String {
     match kind {
         RoutineKind::Messages => format!(
             "Check everything that came in for {{owner}} in this scope since memory.last_check (if missing, the last 24 hours): direct messages and mentions, email, issue-tracker comments and mentions, and review comments on {{owner}}'s pull requests. {FIND_ACCOUNTS}{own}\n\
-Handle each one yourself: reply, answer, acknowledge, look things up in code or data to answer properly, fix small things, or start the work. Keep memory.last_check (UTC ISO time) and memory.expecting_reply_from (people you are waiting on) current. If a source fails because a sign-in is missing, put that in needs_you once, then remember you reported it."
+Handle each one yourself: reply, answer, acknowledge, look things up in code or data to answer properly, fix small things, or start the work. {REVIEW_BEFORE_PUSH} Keep memory.last_check (UTC ISO time) and memory.expecting_reply_from (people you are waiting on) current. If a source fails because a sign-in is missing, put that in needs_you once, then remember you reported it."
         ),
         RoutineKind::Digest => format!(
             "Morning brief for this scope. {FIND_ACCOUNTS}{own} Look at: {{owner}}'s open pull requests (CI, review state, unresolved comments), pull requests waiting on {{owner}}'s review, issues assigned to {{owner}} that changed in the last 24 hours, today's calendar, and anything urgent from monitoring.{machine}\n\
-Act on what you can first: answer review comments, fix or re-run failing CI, rebase, review the PRs waiting on {{owner}} when the change is clear. Then report: did = what you handled; needs_you = only the few things {{owner}} must do today, each with a link.",
+Act on what you can first: answer review comments, fix or re-run failing CI, rebase, review the PRs waiting on {{owner}} when the change is clear. {REVIEW_BEFORE_PUSH} Then report: did = what you handled; needs_you = only the few things {{owner}} must do today, each with a link.",
             machine = if personal { " Also one line on the machine: free disk (df -h /System/Volumes/Data) and load (uptime)." } else { "" }
         ),
         RoutineKind::PrSweep => format!(
             "Pull request and branch sweep. {FIND_ACCOUNTS}{own} Go through {{owner}}'s open pull requests and remote branches: rebase stale ones on their base, fix failing CI when the fix is clear, address review comments, nudge reviewers on PRs waiting more than two days, and close PRs and delete branches that are merged elsewhere, superseded or dead.\n\
-Do the work, do not just list it. Work in a temporary git worktree (`git worktree add` under /tmp, removed when done) so {{owner}}'s checkouts are never touched. Resolve conflicts yourself when the right result is clear from both sides, run the tests that cover the changed files, and push. When a PR has no reviewer, request one from CODEOWNERS or whoever reviewed that repository's recent PRs. Only a conflict whose right resolution needs a product decision goes in needs_you, with what the choice is. Report each action in did."
+Do the work, do not just list it. Work in a temporary git worktree (`git worktree add` under /tmp, removed when done) so {{owner}}'s checkouts are never touched. Resolve conflicts yourself when the right result is clear from both sides, run the tests that cover the changed files, and push. {REVIEW_BEFORE_PUSH} When a PR has no reviewer, request one from CODEOWNERS or whoever reviewed that repository's recent PRs. Only a conflict whose right resolution needs a product decision goes in needs_you, with what the choice is. Report each action in did."
         ),
         RoutineKind::Reflect => "Learn {owner}'s standing orders for this scope from what {owner} actually does. Neko's own command line is `'{neko}' --request '<json>'` (it prints the JSON reply; `'{neko}' --protocol` prints every request it accepts). \
 Read this scope's routines and their recent runs with `'{neko}' --request '\"Routines\"'` (only routines whose workspace_id is this scope's): what Neko did, which needs_you items {owner} marked done, which were left open for days, and the current standing_orders for this workspace. Read Home chat with `'{neko}' --request '{\"Workbench\":\"Snapshot\"}'` (the conversation) for corrections or preferences {owner} stated about this scope's work, and the memory entries for this workspace.\n\
@@ -532,6 +536,9 @@ mod tests {
         assert_eq!(routines.iter().filter(|r| r.kind == RoutineKind::MacCare).map(|r| r.workspace_id.as_str()).collect::<Vec<_>>(), vec!["w2"]);
         assert!(routines.iter().all(|r| r.paseo_schedule.is_none() && r.id.starts_with(&r.workspace_id)));
         assert!(routines[4].instruction.contains("personal scope"));
+        for kind in [RoutineKind::Messages, RoutineKind::Digest, RoutineKind::PrSweep] {
+            assert!(routines.iter().find(|r| r.kind == kind).unwrap().instruction.contains("fresh subagent that did not write it"), "{kind:?}");
+        }
         let reflect = routines.iter().find(|r| r.kind == RoutineKind::Reflect).unwrap();
         assert!(reflect.instruction.contains("'{neko}' --request") && !reflect.browser && !reflect.computer);
         for r in &routines {

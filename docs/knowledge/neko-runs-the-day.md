@@ -128,6 +128,11 @@ and "there is no restriction. It can do whatever it wants". Design:
   is no longer seeded. `mac-care` ships in the app (`scripts/mac-care`,
   written to `<data>/bin/mac-care`), and `neko-daemon --protocol` prints the
   request shapes, so the full-power chat needs no source checkout.
+- **Review before push** (2026-11-06): Messages, Morning brief, PR sweep and
+  the full-power chat are told (`REVIEW_BEFORE_PUSH`) that a non-trivial code
+  change gets a fresh reviewer subagent (the Agent tool) before it is pushed
+  or reported done, as Neko's own tasks get an independent reviewer; clean
+  rebases, conflict-free merges and one-line fixes are exempt.
 - **Standing orders** are per workspace. The default
   (`DEFAULT_STANDING_ORDERS`) is "act without asking, report after". They go
   into every run's prompt.
