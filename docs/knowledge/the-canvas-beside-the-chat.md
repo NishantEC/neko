@@ -65,10 +65,13 @@ authority for what is in and out of v1).
   the reply. Home opens the canvas in the shell's inspector (new `fill` option:
   the body does not scroll, the slot is full height) when an
   `ArtifactsChanged` carries a `message_id`, and keeps it until closed.
-  `#/canvas` (`pages/Canvas.tsx`, main group, `FrameCorners`) lays artifacts
-  out as frames (a live iframe laid out at 1280x800 and scaled into a 16:10
-  tile, `loading="lazy"`), filtered by the sidebar's workspace; opening one
-  sets the canvas target and goes to Home.
+  An artifact also opens in a tab of its own (`#/artifact?id=<id>&v=<n>`,
+  `canvas/ArtifactTab.tsx`, keyed `artifact:<id>` by `shell/tabs.ts`) from the
+  card's "Open in a tab", a link in a reply, or the right-click menu (shared by
+  the card and the panel: open in a tab, beside the chat, download, open in
+  browser, copy link). **No gallery page (2026-11-06, owner):** the `#/canvas`
+  page that laid every artifact out as frames was removed with its
+  `Artifacts` list hook; the daemon's `Artifacts` request stays for agents.
 - **Instruction.** `super_instruction` says anything visual is an artifact
   (one self-contained file, `SaveArtifact`, mention id and version in a line,
   save with `artifact_id` to add a version, how to read a reference) and the

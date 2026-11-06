@@ -200,9 +200,22 @@ of the app's (`default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; …;
 connect-src 'self'`); the app frames it in `<iframe sandbox="allow-scripts">`.
 Either way the artifact runs in an opaque origin and cannot reach the token,
 storage or API. html gets a small comment bridge that talks to its parent by
-`postMessage`. Home shows it in the inspector beside the chat; `#/canvas`
-lays every artifact out as frames. Details:
-`docs/knowledge/the-canvas-beside-the-chat.md`.
+`postMessage`. Home shows it in the inspector beside the chat, and an artifact
+can open in a tab of its own (`#/artifact?id=<id>`); there is no gallery page.
+Details: `docs/knowledge/the-canvas-beside-the-chat.md`.
+
+The web app (`web/`, served by the daemon and shown in the native window's web
+view) is one window of tabs (`DESIGN.md` §1). The address is still a hash route
+(`router.ts`); `shell/tabs.ts` watches it and keeps a tab strip in step: every
+page from the one registry, and detail places with keys of their own (a task
+`#/tasks?task=<id>&view=full`, a workspace `#/workspaces?workspace=<id>`, an
+artifact). A link opens or focuses its tab, so `host.navigation.navigate`,
+plain `<a href>` and plugins need nothing new; back and forward are the
+browser's history. The sidebar is a launcher, collapsed to its icon rail by
+default. One right-click menu (`shell/context-menu.tsx`) replaces the
+browser's: each surface registers its items, text fields keep the native menu.
+Statuses use one glyph set (`ui/status-glyph.tsx`). Details:
+`docs/knowledge/one-window-of-tabs.md`.
 
 The daemon-owned `neko-core::mcp_host` hosts user-added and source-linked stdio
 and Streamable HTTP servers through pinned rmcp 3.4.1. A linked connection
