@@ -47,16 +47,17 @@ export default async function ({ page, shot, a11y, check, PORT, DATA }) {
   const frame = page.frames().find((f) => f.url().includes(`/artifact/${id}/`));
   if (frame) {
     const probe = await frame.evaluate(async () => {
-      const out = { ran: document.body.dataset.ran, cookie: "", storage: "", api: "" };
+      const out = { ran: document.body.dataset.ran, cookie: "", storage: "" };
       try { out.cookie = document.cookie; } catch { out.cookie = "blocked"; }
       try { localStorage.setItem("x", "1"); out.storage = "open"; } catch { out.storage = "blocked"; }
-      try { await fetch("/api/request", { method: "POST", body: "\"Ping\"" }); out.api = "reached"; } catch { out.api = "blocked"; }
       return out;
     });
     check(probe.ran === "yes", "the design's own script runs");
     check(probe.cookie === "blocked" || probe.cookie === "", "the design cannot read Neko's cookie");
     check(probe.storage === "blocked", "the design cannot use Neko's storage");
-    check(probe.api === "blocked", "the design cannot reach Neko's API");
+    // Not probed from inside (a blocked fetch is a console error): the header says it.
+    const policy = await page.evaluate(async (url) => (await fetch(url)).headers.get("content-security-policy") ?? "", `/artifact/${id}/1`);
+    check(policy.includes("connect-src 'none'") && policy.includes("sandbox allow-scripts"), "the design cannot reach Neko's API (connect-src 'none', sandboxed)");
   } else {
     check(false, "found the artifact's frame");
   }
