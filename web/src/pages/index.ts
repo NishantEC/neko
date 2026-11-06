@@ -18,7 +18,7 @@
 // (conversation pieces). See docs/design/one-registry.md.
 import type { ComponentType } from "react";
 import { Brain, Gauge } from "@phosphor-icons/react";
-import { Clock, Eye, FrameCorners, Gear, GitPullRequest, House, ListChecks, Palette, SlidersHorizontal, Stack, TreeStructure, Tray, Users, Wrench, type Icon } from "@/ui/icons";
+import { Clock, Eye, Gear, GitPullRequest, House, ListChecks, Palette, SlidersHorizontal, Stack, TreeStructure, Tray, Users, Wrench, type Icon } from "@/ui/icons";
 import { HOME } from "@/router";
 import { builtinHost } from "@/host";
 import type { PageGroup } from "@/registry";
@@ -41,7 +41,6 @@ const page = (spec: PageSpec) => builtinHost.registerPage(spec);
 builtinHost.registerPage({ id: HOME, title: "Home", icon: House, keywords: ["chat", "ask", "conversation"], group: "main", component: Home });
 page({ id: "inbox", title: "Inbox", icon: Tray, keywords: ["needs you", "messages", "routines", "digest", "brief", "slack", "email", "today"], group: "main", load: () => import("@/pages/Inbox") });
 page({ id: "calendar", title: "Calendar", icon: CalendarIcon, keywords: ["calendar", "meetings", "schedule", "events", "agenda", "week"], group: "main", load: () => import("@/pages/Calendar") });
-page({ id: "canvas", title: "Canvas", icon: FrameCorners, keywords: ["artifacts", "designs", "mockups", "documents", "dashboards", "frames", "board"], group: "main", load: () => import("@/pages/Canvas") });
 page({ id: "tasks", title: "Tasks", icon: ListChecks, keywords: ["board", "list", "agents", "tickets", "work"], group: "work", load: () => import("@/pages/work/Tasks") });
 page({ id: "prs", title: "Pull requests", icon: GitPullRequest, keywords: ["merge", "github", "review", "checks"], group: "work", load: () => import("@/pages/work/PullRequests") });
 page({ id: "tree", title: "Agent tree", icon: TreeStructure, keywords: ["who started whom", "runs", "watches", "agents"], group: "work", load: () => import("@/pages/work/Tree") });
