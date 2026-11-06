@@ -1,7 +1,7 @@
 // #/tasks: every task as a list, a board or a tree, with the open task beside it
 // (TicketsView.swift, TicketPeek.swift) in ui-kit' response details sheet
-// (work/TaskSheet). A task is a link: #/tasks?task=<id>, and `&view=full` shows it
-// as a page. j / k move between tasks, Enter opens one, / searches; in the sheet
+// (work/TaskSheet). A task is a link: #/tasks?task=<id> opens it beside the list
+// in this tab, and `&view=full` shows it as a page in a tab of its own. j / k move between tasks, Enter opens one, / searches; in the sheet
 // ← → (or j / k) move to the previous / next task and Esc closes it.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useWorkbench } from "@/useStore";
@@ -34,6 +34,7 @@ import { useLocal } from "@/work/useLocal";
 import { useSelectedWorkspace } from "@/shell/workspace";
 import { buildTree, taskCount, taskTitle, type Stage } from "@/work/model";
 import { navigate } from "@/router";
+import { closeActiveTab } from "@/shell/tabs";
 
 type Layout = "list" | "board" | "tree";
 const isLayout = (v: string): v is Layout => v === "list" || v === "board" || v === "tree";
@@ -245,13 +246,14 @@ export default function Tasks() {
   ) : layout === "tree" && tree ? (
     <TreeView tree={tree} onOpenTask={open} onOpenHome={() => navigate("home")} onOpenWatching={() => navigate("watching")} />
   ) : (
-    <TaskList {...viewProps} />
+    <TaskList {...viewProps} showEmpty={stage === "all" && !search} />
   );
 
   if (taskId && full) {
     return (
       <div ref={page} data-slot="tasks-page" data-layout={layout} className="flex min-h-0 flex-1 flex-col">
-        <TaskDetail key={taskId} id={taskId} ui={ui} onClose={close} onToggleFull={toggleFull} onOpenTask={open} />
+        {/* A task as a full page is its own tab (shell/tabs.ts): closing it closes the tab. */}
+        <TaskDetail key={taskId} id={taskId} ui={ui} onClose={closeActiveTab} onToggleFull={toggleFull} onOpenTask={open} />
         {dialogs}
       </div>
     );

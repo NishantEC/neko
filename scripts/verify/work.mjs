@@ -241,13 +241,13 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   check(true, "← moves back to the previous task");
 
   // detail tabs
-  await page.getByRole("tab", { name: "Changes" }).click();
+  await page.getByRole("tab", { name: "Changes", exact: true }).click();
   await page.locator("[data-slot='changes'], [data-slot='changes-empty']").first().waitFor({ timeout: 5000 });
   check(true, "the Changes tab opens (a task with no working copy says so)");
-  await page.getByRole("tab", { name: "Details" }).click();
+  await page.getByRole("tab", { name: "Details", exact: true }).click();
   await page.locator("[data-slot='log']").waitFor({ timeout: 5000 });
   check(true, "the Details tab shows the activity log");
-  await page.getByRole("tab", { name: "Conversation" }).click();
+  await page.getByRole("tab", { name: "Conversation", exact: true }).click();
 
   // rename: a real RenameTask round trip against the test daemon
   const renamed = `Renamed by web verify ${Date.now() % 100000}`;
@@ -333,7 +333,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
     await a11y("board notice");
     await notice.getByRole("button", { name: "Dismiss" }).click();
     await card.click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Open" }).waitFor({ timeout: 3000 });
+    await page.getByRole("menuitem", { name: "Open", exact: true }).waitFor({ timeout: 3000 });
     check((await page.getByRole("menuitem", { name: /^Move to Running/ }).count()) === 1, "a card's context menu offers the moves the daemon allows");
     await page.keyboard.press("Escape");
     // Esc cancels a drag and the card stays where it was
@@ -662,7 +662,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
 
   // a ticket ready for review: result, independent review, delivery, then changes
   await page.goto(`${base}/#/tasks?task=${ids.ready}&view=full`);
-  await page.getByRole("tab", { name: "Result" }).click(); // the result is its own pane
+  await page.getByRole("tab", { name: "Result", exact: true }).click(); // the result is its own pane
   await page.locator("[data-slot='result']").waitFor({ timeout: 8000 });
   check((await page.getByRole("tab").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).filter((n) => ["Chat", "Result", "Changes", "Plan", "Details"].includes(n)).length >= 5, "the full page is a dock: Chat, Changes, Plan and Details are tabs");
   check((await page.locator("[data-slot='review']").count()) === 1, "the result shows the independent review verdict");
@@ -676,7 +676,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
   check((await page.getByRole("menuitem", { name: "Rename…" }).count()) === 1 && (await page.getByRole("menuitem", { name: "Cancel task" }).count()) === 1, "the ⋯ menu offers Rename and Cancel task");
   await page.keyboard.press("Escape");
   await both("work-rich-task-ready");
-  await page.getByRole("tab", { name: "Changes" }).click();
+  await page.getByRole("tab", { name: "Changes", exact: true }).click();
   await page.locator("[data-slot='changed-file']").first().waitFor({ timeout: 5000 });
   check((await page.locator("[data-slot='changed-file']").count()) === 3, "Changes lists the three changed files");
   check((await page.locator("[data-slot='diff'] tr[data-kind='add']").count()) > 5 && (await page.locator("[data-slot='diff'] tr[data-kind='del']").count()) > 1, "the diff colours added and removed lines");
@@ -691,7 +691,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT }) {
 
   // a task with a split: parallel work in Details
   await page.goto(`${base}/#/tasks?task=${ids.parent}&view=full`);
-  await page.getByRole("tab", { name: "Details" }).click();
+  await page.getByRole("tab", { name: "Details", exact: true }).click();
   await page.locator("[data-slot='split']").waitFor({ timeout: 5000 });
   check((await page.getByRole("button", { name: "Open subtask" }).count()) === 2, "a split lists its subtasks with Open subtask");
   await shot("work-rich-task-split");

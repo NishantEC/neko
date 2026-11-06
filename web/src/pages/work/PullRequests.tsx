@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useWorkbench } from "@/useStore";
 import { useSelectedWorkspace } from "@/shell/workspace";
+import { taskHref } from "@/shell/status";
 import { registerCommands } from "@/shell/commands";
 import { ArrowDown, ArrowSquareOut, ArrowsClockwise, GitBranch, CheckCircle, Clock, DotsThree, GitPullRequest, Hammer, XCircle, type Icon } from "@/ui/icons";
 import { GitMerge, HandPalm } from "@/work/icons";
@@ -68,7 +69,7 @@ function Row({ row, ui }: { row: PullRequestRow; ui: Ui }) {
       <div className="min-w-0 flex-1">
         {/* The title opens the task; the actions stay sibling buttons, never nested inside it. */}
         <a
-          href={`#/tasks?task=${row.id}`}
+          href={taskHref(row.id)}
           title={`Open the task for ${row.number || "this pull request"}`}
           className="line-clamp-2 rounded-sm font-medium leading-[1.35] text-strong outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -102,7 +103,7 @@ function Row({ row, ui }: { row: PullRequestRow; ui: Ui }) {
           <Button size="sm" variant="outline" aria-label={`Cancel merging ${row.number}`} onClick={() => void send("SetMergeWhenReady", row, `Won't merge ${row.number}.`, { enabled: false })}>Cancel merge</Button>
         ) : null}
         {["needsYou", "working", "unchecked", "merged", "closed"].includes(row.verdict) ? (
-          <Button size="sm" variant="outline" aria-label={`Open task for ${row.number}`} asChild><a href={`#/tasks?task=${row.id}`}>Open task</a></Button>
+          <Button size="sm" variant="outline" aria-label={`Open task for ${row.number}`} asChild><a href={taskHref(row.id)}>Open task</a></Button>
         ) : null}
         <Button size="icon-sm" variant="ghost" aria-label={`Open ${row.number} on GitHub`} title={`Open ${row.number} on GitHub`} asChild>
           <a href={row.url} target="_blank" rel="noreferrer"><ArrowSquareOut /></a>

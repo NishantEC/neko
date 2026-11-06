@@ -1,10 +1,12 @@
 // An artifact's card on the reply that made it (`data-neko-artifact` parts,
 // added by the daemon when the agent saves one). Open shows it on the canvas
-// beside the conversation.
+// beside the conversation; Open in a tab gives it a tab of its own. Its
+// right-click menu (artifactMenu) is shared with the canvas panel.
 import { Button } from "@/ui/button";
-import { FrameCorners } from "@/ui/icons";
+import { ArrowSquareOut, DownloadSimple, FrameCorners, Link, SidebarSimple } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
-import { openCanvas, useCanvas, type ArtifactCardData } from "@/canvas/artifacts";
+import { artifactHref, artifactUrl, downloadUrl, openCanvas, useCanvas, type ArtifactCardData } from "@/canvas/artifacts";
+import { copyText, useContextMenu, type MenuEntry } from "@/shell/context-menu";
 import type { NekoPart } from "@/chat/sdk/types";
 
 /** The artifact parts of a message, one per artifact (the daemon keys them by id). */
@@ -18,13 +20,43 @@ export function artifactCards(parts: NekoPart[]): ArtifactCardData[] {
   return [...byId.values()];
 }
 
+/** Opens the artifact's own tab (shell/tabs.ts). */
+export const openArtifactTab = (id: string, n?: number | null) => {
+  location.hash = artifactHref(id, n).slice(1);
+};
+
+/** The same actions as the card's and the panel's buttons, for the right-click menu. `version` null is the newest. */
+export function artifactMenu(id: string, version: number | null, { beside = true }: { beside?: boolean } = {}): MenuEntry[] {
+  const n = version ?? ("latest" as unknown as number);
+  return [
+    { label: "Open in a tab", icon: ArrowSquareOut, run: () => openArtifactTab(id, version) },
+    beside ? { label: "Open beside the chat", icon: SidebarSimple, run: () => openCanvas(id, version) } : null,
+    "separator",
+    {
+      label: "Download",
+      icon: DownloadSimple,
+      run: () => {
+        const a = document.createElement("a");
+        a.href = downloadUrl(id, n);
+        a.download = "";
+        a.click();
+      },
+    },
+    { label: "Open in browser", icon: ArrowSquareOut, run: () => void window.open(artifactUrl(id, n), "_blank", "noreferrer") },
+    { label: "Copy link", icon: Link, run: () => void copyText(`${location.origin}${location.pathname}${artifactHref(id, version)}`, "Link copied") },
+  ];
+}
+
 export function ArtifactCard({ card }: { card: ArtifactCardData }) {
   const canvas = useCanvas();
   const id = card.id ?? "";
   const open = canvas?.id === id;
   const title = card.title || "Artifact";
+  const version = card.version ?? null;
+  const menu = useContextMenu(() => artifactMenu(id, version));
   return (
     <div
+      {...menu}
       data-slot="artifact-card"
       data-artifact={id}
       data-open={open || undefined}
@@ -42,7 +74,10 @@ export function ArtifactCard({ card }: { card: ArtifactCardData }) {
           v{card.version ?? 1} · {(card.kind ?? "file").toUpperCase()}
         </p>
       </div>
-      <Button variant="outline" size="sm" aria-label={`Open ${title} on the canvas`} onClick={() => openCanvas(id, card.version ?? null)}>
+      <Button variant="ghost" size="icon-sm" aria-label={`Open ${title} in a tab`} title="Open in a tab" onClick={() => openArtifactTab(id, version)}>
+        <ArrowSquareOut />
+      </Button>
+      <Button variant="outline" size="sm" aria-label={`Open ${title} on the canvas`} onClick={() => openCanvas(id, version)}>
         {open ? "Showing" : "Open"}
       </Button>
     </div>

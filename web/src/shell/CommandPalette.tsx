@@ -13,7 +13,7 @@ import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, Comma
 import { Kbd } from "@/ui/kbd";
 import { Keyboard } from "@phosphor-icons/react";
 import {
-  ArrowRight, ArrowsClockwise, CheckCircle, CircleHalf, Copy, Moon, Palette, Plus, Rocket, Sun, Stop,
+  ArrowRight, ArrowsClockwise, CheckCircle, CircleHalf, Copy, Moon, Palette, Plus, Rocket, Sun, Stop, X,
 } from "@/ui/icons";
 import "@/pages";
 import { usePages } from "@/registry";
@@ -23,6 +23,7 @@ import { setMode, setSlot, useThemes } from "@/theme";
 import { useCommands, type PaletteCommand } from "@/shell/commands";
 import { approveFirstDecision, copyText, newTask, stopAllWork } from "@/shell/actions";
 import { openShortcuts } from "@/shell/shortcuts";
+import { closeActiveTab, newTab } from "@/shell/tabs";
 import { STAGE_TITLES, stageOf, taskHref, taskTitle, useShellStatus } from "@/shell/status";
 import { openOnboarding } from "@/onboarding/open";
 import { cn } from "@/ui/lib/utils";
@@ -37,7 +38,13 @@ const STAGE_DOT: Record<string, string> = {
 };
 
 export function CommandPalette() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenRaw] = useState(false);
+  const [search, setSearch] = useState("");
+  const setOpen = (value: boolean | ((v: boolean) => boolean)) => setOpenRaw((was) => {
+    const next = typeof value === "function" ? value(was) : value;
+    if (!next) setSearch("");
+    return next;
+  });
   const pages = usePages();
   const registered = useCommands();
   const { snapshot } = useWorkbench();
@@ -51,9 +58,18 @@ export function CommandPalette() {
         setOpen((value) => !value);
       }
     };
+    // "Search for …" from the right-click menu on selected text.
+    const onSearch = (e: Event) => {
+      setSearch(String((e as CustomEvent<string>).detail ?? ""));
+      setOpenRaw(true);
+    };
     addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  }, []);
+    addEventListener("neko:palette-search", onSearch);
+    return () => {
+      removeEventListener("keydown", onKey);
+      removeEventListener("neko:palette-search", onSearch);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = (fn: () => void) => () => {
     setOpen(false);
@@ -68,6 +84,8 @@ export function CommandPalette() {
       ...(status.approvals > 0
         ? [{ id: "shell.approve", title: "Approve what is waiting", hint: `${status.approvals} waiting`, keywords: ["yes", "allow", "decision", "pending"], icon: CheckCircle, shortcut: "⌘↵", run: () => void approveFirstDecision() }]
         : []),
+      { id: "shell.new-tab", title: "New tab", keywords: ["open", "launcher", "pages"], icon: Plus, shortcut: "⌘T", run: newTab },
+      { id: "shell.close-tab", title: "Close this tab", keywords: ["tab", "close"], icon: X, shortcut: "⌘W", run: closeActiveTab },
       { id: "shell.shortcuts", title: "Keyboard shortcuts", keywords: ["keys", "help", "hotkeys"], icon: Keyboard, shortcut: "?", run: openShortcuts },
       { id: "shell.setup", title: "Show the first-run tour", keywords: ["onboarding", "welcome", "setup", "permissions"], icon: Rocket, run: () => openOnboarding("welcome") },
     ],
@@ -111,7 +129,7 @@ export function CommandPalette() {
   return (
     <CommandDialog open={open} onOpenChange={setOpen} title="Command palette" description="Go to a page or run an action.">
       <Command onKeyDown={onKeyDown}>
-        <CommandInput placeholder="Go to a page, find a task or run an action…" aria-label="Command palette" />
+        <CommandInput value={search} onValueChange={setSearch} placeholder="Go to a page, find a task or run an action…" aria-label="Command palette" />
         <CommandList className="max-h-[min(440px,60vh)]">
           <CommandEmpty>Nothing matches. Try a page name or a task title.</CommandEmpty>
           <CommandGroup heading="Actions">
@@ -200,6 +218,11 @@ export function CommandPalette() {
       </Command>
     </CommandDialog>
   );
+}
+
+/** Opens the palette with `text` already searched (the right-click menu on selected text). */
+export function searchPalette(text: string) {
+  dispatchEvent(new CustomEvent("neko:palette-search", { detail: text.slice(0, 200) }));
 }
 
 /** Opens the palette from anywhere (the sidebar's search button). */

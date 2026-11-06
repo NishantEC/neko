@@ -3,7 +3,7 @@
 // link renderers. Dropped: file-link chips, thread / PR / citation links, math,
 // mermaid, images from the workspace, skills, find-in-thread, the incremental
 // streaming parser — none of which Neko's daemon produces.)
-import { memo, Suspense, type ReactNode } from "react";
+import { memo, Suspense, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "./remark-breaks";
@@ -11,6 +11,7 @@ import remarkBreaks from "./remark-breaks";
 import { cn } from "@/ui/lib/utils";
 import { MarkdownCodeBlock, ShikiCodeBlock, extractFenceLanguage } from "./MarkdownCodeBlock";
 import { MarkdownTable } from "./MarkdownTable";
+import { remarkReferences, useTaskIndex } from "@/chat/references";
 
 export interface ChatMarkdownProps {
   text: string;
@@ -37,9 +38,18 @@ function extractCodeBlock(children: ReactNode): { className: string | undefined;
 
 function components(isStreaming: boolean): Components {
   return {
-    a: function MarkdownLink({ node: _node, href, ...props }) {
+    a: function MarkdownLink({ node: _node, href, className, ...props }) {
       const external = typeof href === "string" && /^https?:/i.test(href);
-      return <a {...props} href={href} {...(external ? { target: "_blank", rel: "noreferrer" } : {})} />;
+      // A task id or an artifact named in the reply (chat/references.ts): an Iris link to its tab.
+      const reference = (props as Record<string, unknown>)["data-reference"];
+      return (
+        <a
+          {...props}
+          href={href}
+          className={cn(className, reference ? "font-medium text-primary no-underline underline-offset-2 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring" : undefined)}
+          {...(external ? { target: "_blank", rel: "noreferrer" } : {})}
+        />
+      );
     },
     table: function MarkdownTableRenderer({ node: _node, ...props }) {
       return <MarkdownTable {...props} />;
@@ -62,11 +72,11 @@ function components(isStreaming: boolean): Components {
 
 const STREAMING = components(true);
 const SETTLED = components(false);
-const PLUGINS = [remarkGfm];
-const PLUGINS_WITH_BREAKS = [remarkGfm, remarkBreaks];
 
 function ChatMarkdown({ text, className, inline = false, lineBreaks = false, isStreaming = false }: ChatMarkdownProps) {
   const Root = inline ? "span" : "div";
+  const tasks = useTaskIndex();
+  const plugins = useMemo(() => (lineBreaks ? [remarkGfm, remarkBreaks, remarkReferences(tasks)] : [remarkGfm, remarkReferences(tasks)]), [lineBreaks, tasks]);
   return (
     <Root
       className={cn(
@@ -77,7 +87,7 @@ function ChatMarkdown({ text, className, inline = false, lineBreaks = false, isS
       data-streaming={isStreaming ? "" : undefined}
     >
       <ReactMarkdown
-        remarkPlugins={lineBreaks ? PLUGINS_WITH_BREAKS : PLUGINS}
+        remarkPlugins={plugins}
         components={isStreaming ? STREAMING : SETTLED}
         {...(inline ? { allowedElements: ["p", "strong", "em", "code", "a", "del"], unwrapDisallowed: true } : {})}
       >

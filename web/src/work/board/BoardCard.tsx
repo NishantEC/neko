@@ -5,22 +5,21 @@
 // actions the task page runs; Done cards have no notch. The focusable element is a
 // full-size button under the content: it carries the drag listeners, the context menu
 // and the hooks the checks use (data-slot="task-row", data-card, data-task-id).
-import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { cloneElement, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { useDraggable } from "@dnd-kit/core";
-import { ArrowBendUpLeft, ArrowCounterClockwise, Check } from "@/ui/icons";
+import { ArrowBendUpLeft, ArrowCounterClockwise, ArrowSquareOut, Check, Copy, Link as LinkIcon, SidebarSimple } from "@/ui/icons";
 import { cn } from "@/ui/lib/utils";
-import {
-  ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
-} from "@/ui/context-menu";
+import { copyText, useContextMenu, type MenuEntry } from "@/shell/context-menu";
+import { taskHref } from "@/shell/status";
 import {
   COLUMNS, friendlyStatus, moveCommand, pullRequestNumber, repositoryOf, sourceOf, stageOf, STAGE_TITLE, stopReason, taskTitle, waitingReason,
   type Snapshot, type Task,
 } from "@/work/model";
-import { run } from "@/work/actions";
-import { moveTask, taskActions, type Ui } from "@/work/taskActions";
+import { moveTask, taskActions, type TaskAction, type Ui } from "@/work/taskActions";
 import { runtimeOf, shortId } from "@/work/board/moves";
 import { clock, NotchCard, shortAge, type NotchAction, type NotchCardProps } from "@/work/board/NotchCard";
 import type { Tone } from "@/work/tone";
+import { IdLabel, StatusGlyph as SharedGlyph, statusOf } from "@/ui/status-glyph";
 
 /** The agent runtime that works on the task, as a small round avatar (the task list uses it). */
 export function RuntimeAvatar({ snapshot, task, className }: { snapshot: Snapshot; task: Task; className?: string }) {
@@ -120,7 +119,14 @@ export function CardFace({ task, snapshot, selected, ghost, overlay, index = 0, 
     state: c.done ? null : { label: c.label, age: c.age, detail: c.action || c.pr ? undefined : c.repo ?? undefined },
     live: c.live ? { step: friendlyStatus(task.status), clock: clock(seconds) } : null,
     reason: c.reason,
-    meta: c.meta,
+    // Done cards end on their meta line: the status glyph and the id lead it.
+    meta: c.done ? (
+      <>
+        <SharedGlyph status={statusOf(task.status)} label="" size={12} className="me-1 inline align-[-2px]" />
+        <IdLabel className="text-[12px]">{shortId(task)}</IdLabel>{c.meta ? ` · ${c.meta}` : null}
+      </>
+    ) : c.meta,
+    notchLead: <SharedGlyph status={statusOf(task.status)} label="" size={12} />,
     pr: c.pr,
     action: overlay ? null : c.action,
   };
@@ -146,26 +152,45 @@ export function cardLabel(task: Task, snapshot: Snapshot): string {
   return [taskTitle(task), state, c.reason, c.repo, c.source, c.pr ? `pull request ${c.pr}` : null, shortId(task)].filter(Boolean).join(", ");
 }
 
-/** The context menu every task shares: open, run next, and the moves the daemon allows. */
-export function CardMenu({ task, onOpen, ui, children }: { task: Task; onOpen: (id: string) => void; ui: Ui; children: React.ReactElement }) {
+/**
+ * The context menu every task shares (shell/context-menu.tsx): open beside the
+ * list or in a tab, the actions taskActions() allows (the same list the task page
+ * and ⌘K use), the board moves the daemon allows, then rename, copy and delete.
+ */
+export function taskMenuItems(task: Task, snapshot: Snapshot, onOpen: ((id: string) => void) | null, ui: Ui): MenuEntry[] {
   const moves = COLUMNS.filter((c) => !c.statuses.includes(task.status) && moveCommand(task.status, c.id).command);
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onClick={() => onOpen(task.id)}>Open</ContextMenuItem>
-        {task.status === "Queued" ? (
-          <ContextMenuItem onClick={() => void run("PrioritizeTask", { task_id: task.id }, "Moved to the front of the queue.")}>Run next</ContextMenuItem>
-        ) : null}
-        {moves.length ? <ContextMenuSeparator /> : null}
-        {moves.map((c) => (
-          <ContextMenuItem key={c.id} onClick={() => moveTask(task, c.id, ui)}>
-            {c.id === "done" && moveCommand(task.status, c.id).command === "CancelTask" ? "Cancel task" : `Move to ${STAGE_TITLE[c.id]}`}
-          </ContextMenuItem>
-        ))}
-      </ContextMenuContent>
-    </ContextMenu>
-  );
+  const actions = taskActions(task, snapshot);
+  const act = (a: TaskAction): MenuEntry => ({
+    label: a.label,
+    destructive: a.kind === "destructive",
+    run: () => (a.href ? void window.open(a.href, "_blank", "noreferrer") : a.run?.(ui)),
+  });
+  const named = (id: string) => actions.find((a) => a.id === id);
+  const rename = named("rename");
+  const remove = named("delete");
+  return [
+    onOpen ? { label: "Open", icon: SidebarSimple, run: () => onOpen(task.id) } : null,
+    { label: "Open in a tab", icon: ArrowSquareOut, run: () => { location.hash = taskHref(task.id).slice(1); } },
+    "separator",
+    ...actions.filter((a) => a.id !== "rename" && a.id !== "delete").map(act),
+    "separator",
+    ...moves.map((c): MenuEntry => ({
+      label: c.id === "done" && moveCommand(task.status, c.id).command === "CancelTask" ? "Cancel task" : `Move to ${STAGE_TITLE[c.id]}`,
+      run: () => moveTask(task, c.id, ui),
+    })),
+    "separator",
+    rename ? act(rename) : null,
+    { label: `Copy id (${shortId(task)})`, icon: Copy, run: () => void copyText(shortId(task), `Copied ${shortId(task)}`) },
+    { label: "Copy link", icon: LinkIcon, run: () => void copyText(`${location.origin}${location.pathname}${taskHref(task.id)}`, "Copied the link") },
+    remove ? "separator" : null,
+    remove ? act(remove) : null,
+  ];
+}
+
+/** Gives `children` (a row or a card's button) the task's context menu. */
+export function CardMenu({ task, snapshot, onOpen, ui, children }: { task: Task; snapshot: Snapshot; onOpen: (id: string) => void; ui: Ui; children: React.ReactElement }) {
+  const menu = useContextMenu(() => taskMenuItems(task, snapshot, onOpen, ui));
+  return cloneElement(children, menu as Record<string, unknown>);
 }
 
 /** A card you can pick up with the pointer, or with Space and the arrow keys. Click and Enter still open the task. */
@@ -174,7 +199,7 @@ export function DraggableCard({ task, snapshot, selected, onOpen, ui, index }: C
   // The element is already a button; dnd-kit's role/aria-pressed would only restate (or contradict) that.
   const { role: _role, "aria-pressed": _pressed, ...aria } = attributes as Record<string, any>;
   const handle = (
-    <CardMenu task={task} onOpen={onOpen} ui={ui}>
+    <CardMenu task={task} snapshot={snapshot} onOpen={onOpen} ui={ui}>
       <HandleButton
         ref={setNodeRef}
         {...aria}

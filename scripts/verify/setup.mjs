@@ -254,7 +254,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await shot("setup-tools-registry");
   await a11y("Tools registry");
   await page.keyboard.press("Escape");
-  await page.getByRole("tab", { name: "Skills" }).click();
+  await page.getByRole("tab", { name: "Skills", exact: true }).click();
   await sleep(500);
   await shot("setup-tools-skills");
   await a11y("Tools skills tab");
@@ -281,7 +281,7 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await sleep(500);
   await shot("setup-memory-forget");
   await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
-  await page.getByRole("tab", { name: "Working style" }).click();
+  await page.getByRole("tab", { name: "Working style", exact: true }).click();
   await sleep(400);
   await shot("setup-memory-style");
   await a11y("Memory working style");
@@ -290,9 +290,11 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA }) {
   await open("profiles", "[data-slot='profile']");
   check((await page.locator("[data-slot='profile']").count()) === 2, "Profiles lists Neko and Reviewer");
   await both("profiles", "[data-slot='profile']", "Profiles");
-  await page.getByRole("button", { name: "Edit" }).nth(1).click();
+  // Scoped to the profiles: a tab's close button ("Close PR board (edited)") also matches "Edit".
+  await page.locator("[data-slot='profile']").nth(1).getByRole("button", { name: "Edit", exact: true }).click();
   await dialog().waitFor();
-  check((await dialog().getByLabel("Name").inputValue()) === "Reviewer", "the profile editor opens on the chosen profile");
+  const profileName = await dialog().getByLabel("Name").inputValue();
+  check(profileName === "Reviewer", `the profile editor opens on the chosen profile (“${profileName}”)`);
   await cancel();
 
   // ---- Settings -----------------------------------------------------------------

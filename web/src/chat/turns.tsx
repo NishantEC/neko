@@ -17,6 +17,8 @@ import { ReplyAnswered, ReplyData } from "@/chat/reply-views";
 import { ACTION_TOOL, isToolPart, type NekoPart, type NekoUIMessage, type ToolPart } from "@/chat/sdk/types";
 import { messageText, replyText, splitTurn } from "@/chat/sdk/parts";
 import { ArtifactCard, artifactCards } from "@/canvas/ArtifactCard";
+import { TurnHandoffs } from "@/chat/crew";
+import { useMessageMenu } from "@/chat/message-menu";
 
 /**
  * While a reply streams, only finished blocks are drawn: text up to the last
@@ -65,7 +67,13 @@ export function SettledActions({ parts }: { parts: ToolPart[] }) {
 }
 
 export function UserTurn({ message }: { message: NekoUIMessage }) {
-  return <UserTimelineRow text={messageText(message)} createdAt={message.metadata?.atMs ?? 0} failed={message.metadata?.state === "failed"} className="pt-4 first:pt-6" />;
+  const text = messageText(message);
+  const menu = useMessageMenu(message, text, { own: true });
+  return (
+    <div {...menu} data-slot="user-turn" className="pt-4 first:pt-6">
+      <UserTimelineRow text={text} createdAt={message.metadata?.atMs ?? 0} failed={message.metadata?.state === "failed"} />
+    </div>
+  );
 }
 
 function Block({ part, last, streaming }: { part: NekoPart; last: boolean; streaming: boolean }) {
@@ -94,8 +102,9 @@ export function NekoTurn({ message, answered = false }: { message: NekoUIMessage
   // card belongs with the reply.
   const artifacts = artifactCards(message.parts);
   const lastIndex = reply.length - 1;
+  const menu = useMessageMenu(message, text);
   return (
-    <div data-slot="neko-turn" data-pending={pending} className="pt-4">
+    <div {...menu} data-slot="neko-turn" data-pending={pending} className="pt-4">
       {work.length || pending ? <WorkLog message={message} work={work} /> : null}
       <AssistantTimelineRow
         text={text}
@@ -111,6 +120,7 @@ export function NekoTurn({ message, answered = false }: { message: NekoUIMessage
       >
         {meta.state === "failed" ? <p className="text-xs text-warning-foreground">This reply did not finish. Try sending it again.</p> : null}
         {actions.length ? <SettledActions parts={actions} /> : null}
+        <TurnHandoffs message={message} />
       </AssistantTimelineRow>
     </div>
   );

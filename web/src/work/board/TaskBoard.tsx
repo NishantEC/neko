@@ -1,5 +1,5 @@
 // The Tasks board: calm columns (the gallery's option A, chosen 2026-10-28). No panels, just
-// 12px of space between columns, each under a header with its dot, name and count (⋯ on hover).
+// 12px of space between columns, each under a header with its status glyph, name and count (⋯ on hover).
 // An empty column shrinks to a slim note; Done shows its latest five and "Show all N". Cards
 // you carry between them. Dragging is @dnd-kit (pointer and keyboard), and a
 // drop is only ever one of three things: nothing (same column), the daemon's own command
@@ -18,7 +18,8 @@ import { cn } from "@/ui/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { COLUMNS, STAGE_EMPTY, STAGE_TITLE, taskTitle, type Snapshot, type Stage, type Task } from "@/work/model";
 import { moveTask, type Ui } from "@/work/taskActions";
-import { STAGE_TONE, TONE_DOT } from "@/work/tone";
+import { STAGE_GLYPH } from "@/work/tone";
+import { StatusGlyph as SharedGlyph } from "@/ui/status-glyph";
 import { CardFace, DraggableCard } from "@/work/board/BoardCard";
 import { decide, setBoardDragging, shortId } from "@/work/board/moves";
 
@@ -71,7 +72,7 @@ const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(pre
 export function ColumnHeader({ stage, count, children }: { stage: Stage; count: number; children?: React.ReactNode }) {
   return (
     <div data-slot="group-header" data-stage={stage} className="flex h-8 shrink-0 items-center gap-1.5 px-0.5">
-      <span aria-hidden className={cn("size-2 shrink-0 rounded-full", TONE_DOT[STAGE_TONE[stage]])} />
+      <SharedGlyph status={STAGE_GLYPH[stage]} label="" size={13} />
       <h3 className="truncate text-[13.5px] font-semibold text-strong">{STAGE_TITLE[stage]}</h3>
       <span data-slot="column-count" className="text-[12.5px] tabular-nums text-muted-foreground">{count}</span>
       <span className="flex-1" />

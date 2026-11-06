@@ -12,7 +12,12 @@ import { Input } from "@/ui/input";
 import { Textarea } from "@/ui/textarea";
 import { Badge } from "@/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
-import { ArrowRight, ArrowsClockwise, Eye, FolderSimple, Note, PencilSimple, Plugs, Plus, Stack, Tray, Warning, Wrench, X } from "@/ui/icons";
+import { ArrowRight, ArrowSquareOut, ArrowsClockwise, Copy, Eye, FolderSimple, Link as LinkIcon, Note, PencilSimple, Plugs, Plus, Stack, Tray, Warning, Wrench, X } from "@/ui/icons";
+import { ProgressRing, StatusGlyph, type StatusKind } from "@/ui/status-glyph";
+import { itemProgress, routineStatus } from "@/setup/routine-status";
+import { copyText, useContextMenu } from "@/shell/context-menu";
+import { workspaceHref } from "@/shell/workspace";
+import { useHashParams } from "@/work/location";
 import { hrefFor, navigate } from "@/router";
 import { ErrorNote, FormField, Gate, EmptyBlock, PanelFooter, Row, SetupPage, Status, registerCommands } from "@/setup/kit";
 import { Panel } from "@/setup/kit";
@@ -185,7 +190,17 @@ function routineSummary(data: RoutinesData, workspaceId: string, now: number) {
   if (running) parts.push(`${str(running.routine.name)} is running now`);
   else if (latest) parts.push(`last: ${latest.name} ${!latest.run.ok ? "failed" : latest.run.quiet ? "was quiet" : "acted"} ${relativeTime(at(latest.run), now)}`);
   else if (views.length) parts.push("none has run yet");
-  return { count: views.length, needsYou, failing, text: parts.join(" · ") };
+  return { count: views.length, needsYou, failing, views, text: parts.join(" · ") };
+}
+
+/** A status in words with its glyph (DESIGN.md §3); colour only on the glyph. */
+function Said({ status, children }: { status: StatusKind; children: ReactNode }) {
+  return (
+    <span data-slot="said" data-status={status} className="inline-flex items-center gap-1.5 text-[13px] text-foreground/80">
+      <StatusGlyph status={status} label="" />
+      {children}
+    </span>
+  );
 }
 
 /** One group of MCP servers: the whole scope's, or one repository's own. */
@@ -280,8 +295,17 @@ function WorkspacePanel({ snapshot, workspace, onEdit, routines, now }: { snapsh
       return last;
     });
 
+  const menu = useContextMenu(() => [
+    { label: "Open in a tab", icon: ArrowSquareOut, run: () => { location.hash = workspaceHref(workspace.id).slice(1); } },
+    { label: "Edit…", icon: PencilSimple, run: onEdit },
+    { label: "Sync now", icon: ArrowsClockwise, disabled: active === 0 || busy, run: () => void syncNow() },
+    "separator",
+    { label: "Copy name", icon: Copy, run: () => void copyText(workspace.name, "Copied the name") },
+    { label: "Copy link", icon: LinkIcon, run: () => void copyText(`${location.origin}${location.pathname}${workspaceHref(workspace.id)}`, "Copied the link") },
+  ]);
+
   return (
-    <Panel data-slot="workspace" data-workspace={workspace.name} role="region" aria-labelledby={`ws-title-${workspace.id}`}>
+    <Panel data-slot="workspace" data-workspace={workspace.name} role="region" aria-labelledby={`ws-title-${workspace.id}`} {...menu}>
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
         <div className="flex min-w-0 items-center gap-3">
           <span aria-hidden className={`size-2 shrink-0 rounded-full ${attention ? "bg-warning" : "bg-success"}`} />
@@ -302,13 +326,29 @@ function WorkspacePanel({ snapshot, workspace, onEdit, routines, now }: { snapsh
           description={summary ? summary.text : routines.error ? "Couldn’t load routines right now." : "Loading routines…"}
           trailing={summary ? (
             <>
-              {summary.needsYou > 0 ? <Status tone="warning">{summary.needsYou} need{summary.needsYou === 1 ? "s" : ""} you</Status>
-                : summary.failing.length ? <Status tone="error">{summary.failing.length === 1 ? `${summary.failing[0]} failed` : `${summary.failing.length} failed`}</Status>
-                : summary.count ? <Status tone="success">Nothing needs you</Status> : null}
+              {summary.needsYou > 0 ? <Said status="inProgress">{summary.needsYou} need{summary.needsYou === 1 ? "s" : ""} you</Said>
+                : summary.failing.length ? <Said status="failed">{summary.failing.length === 1 ? `${summary.failing[0]} failed` : `${summary.failing.length} failed`}</Said>
+                : summary.count ? <Said status="done">Nothing needs you</Said> : null}
               {summary.count ? <Button variant="ghost" size="sm" aria-label={`Open the Inbox for ${workspace.name}`} render={<a href={hrefFor("inbox")} />}>Inbox <ArrowRight /></Button> : null}
             </>
           ) : null}
-        />
+        >
+          {summary && summary.views.length ? (
+            <ul data-slot="routine-summary" aria-label={`Routines in ${workspace.name}`} className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {summary.views.map((v) => {
+                const [kind, word] = routineStatus(v);
+                const parts = itemProgress(v);
+                return (
+                  <li key={str(v.routine.id)} data-status={kind} className="inline-flex items-center gap-1.5 text-[13px] text-foreground/80">
+                    <StatusGlyph status={kind} label={word} />
+                    <span>{str(v.routine.name)}</span>
+                    {parts.total ? <ProgressRing done={parts.done} total={parts.total} /> : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </Row>
         {problems.length ? (
           <Row
             title="Setup notes"
@@ -412,6 +452,9 @@ function WorkspaceList({ snapshot, dialog, setDialog }: { snapshot: Json; dialog
   const editing = useMemo(() => workspaces.find((w) => w.id === dialog.id) ?? null, [workspaces, dialog.id]);
   const routines = useRoutines();
   const now = useNow();
+  // `#/workspaces?workspace=<id>`: that workspace's own tab (shell/workspace.ts workspaceHref).
+  const wanted = useHashParams().get("workspace");
+  const only: Workspace | null | undefined = wanted ? workspaces.find((w) => w.id === wanted) ?? undefined : null;
   return (
     <>
       {routines.error ? (
@@ -424,6 +467,15 @@ function WorkspaceList({ snapshot, dialog, setDialog }: { snapshot: Json; dialog
         <EmptyBlock icon={Stack} title="No workspaces yet" description="A workspace is a name plus the folders where the work lives. Add one to start tasks, watches and schedules.">
           <Button onClick={() => setDialog({ open: true, id: null })}><Plus /> Add workspace</Button>
         </EmptyBlock>
+      ) : wanted ? (
+        <div data-slot="workspace-detail" className="flex flex-col gap-4">
+          <a href="#/workspaces" className="self-start rounded text-[13px] text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring">All workspaces</a>
+          {only ? (
+            <WorkspacePanel snapshot={snapshot} workspace={only} onEdit={() => setDialog({ open: true, id: only.id })} routines={routines} now={now} />
+          ) : (
+            <p className="text-[13px] text-muted-foreground">That workspace is not here any more. It may have been removed.</p>
+          )}
+        </div>
       ) : (
         <div className="flex flex-col gap-5">
           {workspaces.map((w) => (

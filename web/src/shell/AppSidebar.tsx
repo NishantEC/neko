@@ -11,6 +11,10 @@
 // are a rail on its own page); a footer that is one status line and a gear. No task list:
 // New task is ⌘N, ⌘K and the Tasks page. The only badge is the Tasks count of
 // what waits on you; the status line says the rest.
+//
+// Since the tab strip (2026-11-06, DESIGN.md §1) the sidebar is a launcher: a
+// row opens or focuses its page's tab, its right-click menu can open another
+// tab, and it starts collapsed to the icon rail (AppShell remembers the choice).
 import { useEffect, useState, type ComponentProps, type MouseEvent } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -33,6 +37,9 @@ import { SidebarStatus } from "@/shell/StatusBar";
 import { useShellStatus } from "@/shell/status";
 import { useSelectedWorkspace } from "@/shell/workspace";
 import { CollapseWhenNarrow, EASE_OUT, NavItem, shellAlreadyPainted } from "@/shell/AppSidebar.parts";
+import { WithContextMenu } from "@/shell/context-menu";
+import { openInNewTab } from "@/shell/tabs";
+import { ArrowSquareOut } from "@/ui/icons";
 
 export function Mark({ className }: { className?: string }) {
   return (
@@ -196,13 +203,20 @@ export function AppSidebar({ route }: { route: string }) {
   };
   const row = (p: PageDef, small = false) => (
     <motion.div key={p.id} {...cascade()} className="flex flex-col">
-      <NavItem
-        item={{ label: p.title, icon: p.icon, href: hrefFor(p.id) }}
-        active={route === p.id}
-        reduce={reduce}
-        small={small}
-        trailing={p.id === "tasks" ? <NeedsYouCount /> : undefined}
-      />
+      <WithContextMenu
+        items={() => [
+          { label: "Open", run: () => navigate(p.id) },
+          { label: "Open in a new tab", icon: ArrowSquareOut, run: () => openInNewTab(hrefFor(p.id)) },
+        ]}
+      >
+        <NavItem
+          item={{ label: p.title, icon: p.icon, href: hrefFor(p.id) }}
+          active={route === p.id}
+          reduce={reduce}
+          small={small}
+          trailing={p.id === "tasks" ? <NeedsYouCount /> : undefined}
+        />
+      </WithContextMenu>
     </motion.div>
   );
 

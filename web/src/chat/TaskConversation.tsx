@@ -28,6 +28,7 @@ import { conversationState, stopReason, waitingReason, workingLine, type Receipt
 import { chatFor, sendText, taskSignature, useNekoChat } from "@/chat/sdk/chats";
 import { isToolPart, type NekoUIMessage } from "@/chat/sdk/types";
 import { messageText, receiptOfPart } from "@/chat/sdk/parts";
+import { HandoffRow, useHideCrew } from "@/chat/crew";
 
 const RECENT = 3;
 
@@ -82,9 +83,11 @@ function speakerOf(message: NekoUIMessage): string {
 }
 
 /** A task's conversation as the SDK's messages (the daemon's projection of its events). */
-export function TaskTimeline({ messages, status }: { messages: NekoUIMessage[]; status: string }) {
+export function TaskTimeline({ messages, status, task }: { messages: NekoUIMessage[]; status: string; task?: Task }) {
   const working = workingLine(status);
+  const [hideCrew] = useHideCrew();
   let previous = "";
+  let previousAgent = "";
   return (
     <div data-slot="thread" className="flex flex-col">
       {messages.map((message, index) => {
@@ -117,8 +120,14 @@ export function TaskTimeline({ messages, status }: { messages: NekoUIMessage[]; 
           }
         });
         flush("end", index === messages.length - 1);
+        // One agent handing the task to the next (Scout → Builder) is a crew line (chat/crew.tsx).
+        const handoff = previousAgent && previousAgent !== author && !hideCrew
+          ? { key: message.id, from: previousAgent, to: author, task: task ?? null }
+          : null;
+        previousAgent = author;
         return (
           <div key={message.id} data-slot="agent-turn" className={showsSpeaker ? "pt-6" : "pt-2"}>
+            {handoff ? <HandoffRow handoff={handoff} className="pb-1" /> : null}
             {showsSpeaker ? <Author name={author} /> : null}
             {blocks}
           </div>
@@ -147,11 +156,11 @@ export function TaskConversation({ task, className, showResult = true }: { task:
   return (
     <Conversation className={cn("min-h-0 flex-1", className)}>
       <ConversationContent className="mx-auto w-full max-w-(--chat-content-max-width) gap-0 px-5 pt-1 pb-6">
-        <TaskTimeline messages={before} status={task.status} />
+        <TaskTimeline messages={before} status={task.status} task={task} />
         {hasPlanBlock ? <PlanBlock title={state.showsPlan ? state.planTitle : "Plan"} text={task.plan} /> : null}
         {showResult && String(task.result ?? "") !== "" ? <ResultBlock task={task} outcome={state.outcome} reviewIsCurrent={state.reviewIsCurrent} /> : null}
         {showResult ? <DeliveryCard task={task} /> : null}
-        {after.length ? <TaskTimeline messages={after} status={task.status} /> : null}
+        {after.length ? <TaskTimeline messages={after} status={task.status} task={task} /> : null}
         {messages.length === 0 && !hasPlanBlock && !task.result ? (
           <p className="mt-10 text-center text-[13px] text-muted-foreground">Nothing has happened on this task yet.</p>
         ) : null}

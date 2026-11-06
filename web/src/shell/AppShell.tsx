@@ -1,8 +1,11 @@
-// The app shell: ui-kit' sidebar (shell/AppSidebar.tsx) beside the open
-// page and the inspector, the status bar, ⌘K, the shortcut overlay, toasts,
+// The app shell: one window of tabs (DESIGN.md §1). The tab strip
+// (shell/TabStrip.tsx, store in shell/tabs.ts) sits on top of the open page
+// and the inspector; ui-kit' sidebar (shell/AppSidebar.tsx) is a launcher
+// beside them, collapsed to its icon rail by default. Around it: Neko's own
+// right-click menu (shell/context-menu.tsx), ⌘K, the shortcut overlay, toasts,
 // confirmations and the first-run tour. Pages only ever render their own
 // content (pages/index.ts), each inside ui-kit' PageContainer column.
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { SidebarInset, SidebarProvider } from "@/ui/sidebar";
 import { Skeleton } from "@/ui/skeleton";
 import { Toaster } from "@/ui/sonner";
@@ -20,7 +23,13 @@ import { CommandPalette, openPalette } from "@/shell/CommandPalette";
 import { InspectorHost } from "@/shell/inspector";
 import { ShortcutsOverlay } from "@/shell/shortcuts";
 import { ConfirmHost } from "@/shell/confirm";
-import { newTask, stopAllWork } from "@/shell/actions";
+import { askNeko, newTask, stopAllWork } from "@/shell/actions";
+import { ContextMenuHost, setShellMenuActions } from "@/shell/context-menu";
+import { canGoBack, canGoForward, goBack, goForward, newTab, startTabs, useTabs } from "@/shell/tabs";
+import { TAB_PANEL_ID, TabStrip, tabElementId } from "@/shell/TabStrip";
+import { Launcher } from "@/shell/Launcher";
+import { ArtifactTab } from "@/canvas/ArtifactTab";
+import { searchPalette } from "@/shell/CommandPalette";
 import { useAttention } from "@/shell/attention";
 import { AppSidebar, MobileTopBar } from "@/shell/AppSidebar";
 import { PageContainer } from "@/shell/PageContainer";
@@ -75,6 +84,9 @@ function CustomisedStrip({ id, title, plugin }: { id: string; title: string; plu
 function Outlet({ route }: { route: string }) {
   const { problems } = usePlugins();
   const page = usePages().find((p) => p.id === route);
+  // The shell's own places: not pages, so they are not in the sidebar or ⌘K's "Go to".
+  if (route === "new") return <Launcher />;
+  if (route === "artifact") return <ArtifactTab />;
   if (page) {
     const body = (
       <HostProvider value={page.host}>
@@ -125,18 +137,54 @@ function useGlobalShortcuts() {
   }, []);
 }
 
+setShellMenuActions({
+  back: goBack,
+  forward: goForward,
+  canGoBack,
+  canGoForward,
+  newTab,
+  openPalette,
+  askNeko,
+  search: searchPalette,
+});
+
+const SIDEBAR_KEY = "neko.sidebar.open";
+
+/** The sidebar is a launcher now that tabs hold the places: collapsed to its rail unless you open it (remembered). */
+function useSidebarOpen(): [boolean, (open: boolean) => void] {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_KEY) === "true"; } catch { return false; }
+  });
+  return [open, (next: boolean) => {
+    setOpen(next);
+    try { localStorage.setItem(SIDEBAR_KEY, String(next)); } catch { /* private mode */ }
+  }];
+}
+
 export function AppShell() {
+  useState(startTabs);
   const route = useRoute();
+  const { active } = useTabs();
+  const [sidebarOpen, setSidebarOpen] = useSidebarOpen();
   useAttention();
   useGlobalShortcuts();
   return (
     <TooltipProvider>
-      <SidebarProvider defaultOpen className="sky relative isolate h-svh min-h-0 has-data-[variant=inset]:bg-background">
+      <ContextMenuHost>
+      <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen} className="sky relative isolate h-svh min-h-0 has-data-[variant=inset]:bg-background">
         <AppSidebar route={route} />
         <SidebarInset className="relative flex h-svh min-h-0 min-w-0 flex-col overflow-hidden md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-0">
           <MobileTopBar />
+          <TabStrip />
           <InspectorHost>
-            <div data-slot="page" data-route={route} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div
+              data-slot="page"
+              data-route={route}
+              role="tabpanel"
+              id={TAB_PANEL_ID}
+              aria-labelledby={tabElementId(active)}
+              className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
               <Outlet route={route} />
             </div>
           </InspectorHost>
@@ -147,6 +195,7 @@ export function AppShell() {
         <OnboardingHost />
         <Toaster />
       </SidebarProvider>
+      </ContextMenuHost>
     </TooltipProvider>
   );
 }

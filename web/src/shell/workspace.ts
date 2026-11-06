@@ -23,3 +23,6 @@ export function useSelectedWorkspace(): {
   const current = workspaces.find((w) => w.id === raw) ?? null;
   return { id: current?.id ?? "", current, workspaces, select };
 }
+
+/** A workspace's own tab: the Workspaces page showing just that one (shell/tabs.ts keys it `workspace:<id>`). */
+export const workspaceHref = (id: string) => `#/workspaces?workspace=${encodeURIComponent(id)}`;

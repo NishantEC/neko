@@ -124,6 +124,9 @@ export default async function ({ page, shot, a11y, check, sleep, PORT, DATA, OUT
     };
   };
   await page.goto(`${base}/#/`);
+  // The sidebar starts collapsed to its launcher rail since the tab strip (tabs.mjs checks that);
+  // these checks read its rows, so open it the way a person would, remembered across the reload.
+  await page.evaluate(() => localStorage.setItem("neko.sidebar.open", "true"));
   await page.reload();
   await page.waitForSelector("[data-slot='composer'] textarea", { timeout: 15000 });
   await page.waitForSelector("[data-slot='workspace-switcher']", { timeout: 10000 });

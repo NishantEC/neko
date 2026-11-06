@@ -20,6 +20,9 @@ export interface ReplyActions {
   draft(text: string): void;
 }
 let actions: ReplyActions = { send: () => undefined, draft: () => undefined };
+/** Fills Home's composer (and focuses it) while it is mounted: what "Quote in reply" uses. */
+export const draftReply = (text: string) => actions.draft(text);
+
 export function setReplyActions(next: ReplyActions): () => void {
   actions = next;
   return () => { if (actions === next) actions = { send: () => undefined, draft: () => undefined }; };

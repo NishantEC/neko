@@ -12,8 +12,11 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/ui/collap
 import { SegmentedControl, SegmentedControlItem } from "@/ui/segmented-control";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { toast } from "@/ui/sonner";
-import { ArrowSquareOut, CaretDown, Check, PencilSimple, Play, Tray } from "@/ui/icons";
-import { EmptyBlock, ErrorNote, FormField, LoadingRows, Panel, Section, SetupPage, Status, Toggle } from "@/setup/kit";
+import { ArrowSquareOut, CaretDown, Check, Copy, Link as LinkIcon, Pause, PencilSimple, Play, Tray } from "@/ui/icons";
+import { ProgressRing, StatusGlyph } from "@/ui/status-glyph";
+import { itemProgress, routineStatus } from "@/setup/routine-status";
+import { copyText, useContextMenu } from "@/shell/context-menu";
+import { EmptyBlock, ErrorNote, FormField, LoadingRows, Panel, Section, SetupPage, Toggle } from "@/setup/kit";
 import { relativeTime, useNow } from "@/setup/lib";
 
 const POLL_MS = 10_000;
@@ -221,28 +224,40 @@ function RoutineRow({ view, now, send, onEdit }: { view: Json; now: number; send
   const { routine, state, runs } = view;
   const last: Json | undefined = runs?.[0];
   const queued = !!state.run_requested && !state.running;
-  const status = state.running ? <Status tone="warning">Running</Status>
-    : queued ? <Status tone="warning">Queued</Status>
-    : !routine.enabled ? <Status>Paused</Status>
-    : !last ? <Status>Not run yet</Status>
-    : !last.ok ? <Status tone="error">Failed</Status>
-    : last.quiet ? <Status>Quiet</Status>
-    : <Status tone="success">Acted</Status>;
+  const [kind, word] = routineStatus(view);
+  const status = (
+    <span data-slot="routine-status" data-status={kind} className={`inline-flex items-center gap-1.5 text-[13px] ${kind === "failed" ? "text-destructive-foreground" : "text-foreground/80"}`}>
+      <StatusGlyph status={kind} label="" />
+      {word}
+    </span>
+  );
+  // The latest run's items for you, as parts: done of all.
+  const parts = itemProgress(view);
+  const runNow = () => void send({ RunRoutineNow: { id: routine.id } }, `${routine.name} will start within 30 seconds`);
+  const setEnabled = (on: boolean) => void send({ SetRoutineEnabled: { id: routine.id, enabled: on } });
+  const menu = useContextMenu(() => [
+    { label: "Run now", icon: Play, disabled: !!state.running || queued, run: runNow },
+    { label: routine.enabled ? "Pause" : "Resume", icon: routine.enabled ? Pause : Play, run: () => setEnabled(!routine.enabled) },
+    { label: "Edit…", icon: PencilSimple, run: onEdit },
+    "separator",
+    { label: "Copy name", icon: Copy, run: () => void copyText(String(routine.name ?? ""), "Copied the name") },
+  ]);
   const due = state.next_due_ms;
   const next = state.running || queued || !routine.enabled ? null
     : !due || due <= now ? "due now"
     : `next ${relativeTime(due, now)}`;
   const facts = [cadenceText(routine.cadence), next, last ? `last ${relativeTime(last.finished_ms ?? last.started_ms, now)}` : null].filter(Boolean).join(" · ");
   return (
-    <div className="flex flex-col gap-2 px-6 py-4">
+    <div data-slot="routine-row" {...menu} className="flex flex-col gap-2 px-6 py-4">
       <div className="flex flex-wrap items-center gap-3">
         <span className="font-medium text-foreground">{routine.name}</span>
         {status}
+        {parts.total ? <ProgressRing done={parts.done} total={parts.total} /> : null}
         <span className="text-[13px] text-muted-foreground">{facts}</span>
         <span className="ms-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={state.running || queued} onClick={() => void send({ RunRoutineNow: { id: routine.id } }, `${routine.name} will start within 30 seconds`)}><Play /> Run now</Button>
+          <Button variant="outline" size="sm" disabled={state.running || queued} onClick={runNow}><Play /> Run now</Button>
           <Button variant="ghost" size="icon-sm" aria-label={`Edit ${routine.name}`} onClick={onEdit}><PencilSimple /></Button>
-          <Toggle checked={routine.enabled} label={`${routine.enabled ? "Pause" : "Resume"} ${routine.name}`} onChange={(on) => void send({ SetRoutineEnabled: { id: routine.id, enabled: on } })} />
+          <Toggle checked={routine.enabled} label={`${routine.enabled ? "Pause" : "Resume"} ${routine.name}`} onChange={setEnabled} />
         </span>
       </div>
       {last && !last.ok ? (
@@ -259,6 +274,31 @@ function RoutineRow({ view, now, send, onEdit }: { view: Json; now: number; send
         </div>
       ) : null}
       {state.note ? <p className="text-[13px] text-muted-foreground">{state.note}</p> : null}
+    </div>
+  );
+}
+
+/** One thing only you can do: what, where it came from, its link and Done (also on right-click). */
+function NeedsYouItem({ item, where, onDone }: { item: Json; where: string; onDone: () => void }) {
+  const link = safeLink(item.link);
+  const text = [item.title, item.detail].filter(Boolean).join("\n\n");
+  const menu = useContextMenu(() => [
+    { label: "Mark done", icon: Check, run: onDone },
+    link ? { label: "Open link", icon: ArrowSquareOut, run: () => void window.open(link, "_blank", "noreferrer") } : null,
+    "separator",
+    { label: "Copy", icon: Copy, run: () => void copyText(text) },
+    link ? { label: "Copy link", icon: LinkIcon, run: () => void copyText(link, "Copied the link") } : null,
+  ]);
+  return (
+    <div data-slot="needs-you-item" {...menu} className="flex items-start gap-3 px-6 py-4">
+      <StatusGlyph status="inProgress" label="Needs you" className="mt-1" />
+      <div className="min-w-0 flex-1">
+        <p className="text-[12.5px] text-muted-foreground">{where}</p>
+        <p className="font-medium text-foreground">{item.title}</p>
+        {item.detail ? <p className="mt-0.5 max-w-[70ch] whitespace-pre-wrap text-[13px] text-muted-foreground">{item.detail}</p> : null}
+      </div>
+      {link ? <Button variant="outline" size="sm" aria-label={`Open ${item.title}`} render={<a href={link} target="_blank" rel="noreferrer" />}><ArrowSquareOut /> Open</Button> : null}
+      <Button variant="outline" size="sm" aria-label={`Mark “${item.title}” done`} onClick={onDone}><Check /> Done</Button>
     </div>
   );
 }
@@ -312,20 +352,14 @@ function InboxBody() {
             <ShortList
               items={open}
               noun="items"
-              render={({ item, run, routine }) => {
-                const link = safeLink(item.link);
-                return (
-                  <div key={item.seq} className="flex items-start gap-3 px-6 py-4">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[12.5px] text-muted-foreground">{scopeName[routine.workspace_id] ?? "Scope"} · {routine.name} · {relativeTime(run.finished_ms ?? run.started_ms, now)}</p>
-                      <p className="font-medium text-foreground">{item.title}</p>
-                      {item.detail ? <p className="mt-0.5 max-w-[70ch] whitespace-pre-wrap text-[13px] text-muted-foreground">{item.detail}</p> : null}
-                    </div>
-                    {link ? <Button variant="outline" size="sm" aria-label={`Open ${item.title}`} render={<a href={link} target="_blank" rel="noreferrer" />}><ArrowSquareOut /> Open</Button> : null}
-                    <Button variant="outline" size="sm" aria-label={`Mark “${item.title}” done`} onClick={() => void done(routine.id, run.id, item.seq)}><Check /> Done</Button>
-                  </div>
-                );
-              }}
+              render={({ item, run, routine }) => (
+                <NeedsYouItem
+                  key={item.seq}
+                  item={item}
+                  where={`${scopeName[routine.workspace_id] ?? "Scope"} · ${routine.name} · ${relativeTime(run.finished_ms ?? run.started_ms, now)}`}
+                  onDone={() => void done(routine.id, run.id, item.seq)}
+                />
+              )}
             />
           </div></Panel>
         )}

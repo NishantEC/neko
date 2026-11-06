@@ -2,14 +2,15 @@
 // the daemon (`neko_core::artifacts`) and drawn on the canvas beside the chat.
 // See docs/knowledge/the-canvas-beside-the-chat.md.
 //
-//   request({ Artifacts: { workspace_id } })   the list, newest first
 //   request({ Artifact: { id } })              one record
 //   /artifact/<id>/<n>                         version n, under its own CSP
 //   ArtifactsChanged { id, version, message_id }   pushed on every save
 //
-// Which artifact the canvas shows is kept here, outside any page, so the Canvas
-// page can open one and Home shows it beside the conversation.
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+// Which artifact the canvas shows is kept here, outside any page, so a card,
+// a menu or an artifact's own tab can open one and Home shows it beside the
+// conversation. There is no gallery page (removed 2026-11-06, owner's call):
+// an artifact lives beside the reply that made it, or in a tab of its own.
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { onEvent, request, type Json } from "@/api";
 
 export interface ArtifactVersion {
@@ -45,11 +46,12 @@ export const isLive = (kind: string) => LIVE_KINDS.includes(kind);
 /** Only html carries the comment bridge. */
 export const canComment = (kind: string) => kind === "html";
 
+/** An artifact's own tab in the app (shell/tabs.ts keys it `artifact:<id>`); `artifactUrl` is the file itself. */
+export const artifactHref = (id: string, n?: number | null) => `#/artifact?id=${encodeURIComponent(id)}${n ? `&v=${n}` : ""}`;
 export const artifactUrl = (id: string, n: number) => `/artifact/${encodeURIComponent(id)}/${n}`;
 export const downloadUrl = (id: string, n: number) => `${artifactUrl(id, n)}?download=1`;
 
 export const latestVersion = (artifact: Artifact) => artifact.versions.reduce((max, v) => Math.max(max, v.n), 0);
-export const updatedMs = (artifact: Artifact) => artifact.versions.reduce((max, v) => Math.max(max, v.at_ms), 0);
 /** The kind of one version, from its file name (versions may differ). */
 export const versionKind = (artifact: Artifact, n: number) => artifact.versions.find((v) => v.n === n)?.file.split(".").pop()?.toLowerCase() ?? artifact.kind;
 
@@ -68,26 +70,6 @@ export function onArtifactSaved(fn: (change: { id: string; version: number; mess
     if (isChange(event)) fn(event.ArtifactsChanged);
   });
   return () => { stop(); };
-}
-
-/** Every artifact (one workspace's with `workspaceId`), kept current by the daemon's events. */
-export function useArtifacts(workspaceId: string | null) {
-  const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    try {
-      const reply = await request({ Artifacts: { workspace_id: workspaceId } });
-      setArtifacts((reply?.Artifacts?.artifacts ?? []) as Artifact[]);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [workspaceId]);
-  useEffect(() => {
-    void load();
-    return onArtifactSaved(() => void load());
-  }, [load]);
-  return { artifacts, error, reload: load };
 }
 
 /** One artifact's record, read again whenever it gets a new version. */

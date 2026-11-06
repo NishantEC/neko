@@ -134,5 +134,9 @@ export function elapsed(ms: number): string {
   return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 }
 
-/** Where a task opens. The Tasks page reads `?task=<id>` from the hash. */
-export const taskHref = (id: string) => `#/tasks?task=${encodeURIComponent(id)}`;
+/**
+ * Where a task opens: its own tab (shell/tabs.ts keys `#/tasks?task=<id>&view=full`
+ * as `task:<id>`). Inside the Tasks page a row still opens the sheet beside the
+ * list (`#/tasks?task=<id>`), which stays in the Tasks tab.
+ */
+export const taskHref = (id: string) => `#/tasks?task=${encodeURIComponent(id)}&view=full`;

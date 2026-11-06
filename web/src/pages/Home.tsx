@@ -17,6 +17,8 @@ import { Decisions, decisionsFromParts } from "@/chat/decisions";
 import { NekoTurn, UserTurn } from "@/chat/turns";
 import { chatSignature, useNekoChat } from "@/chat/sdk/chats";
 import { registerCommands } from "@/shell/commands";
+import { takeComposeRequest } from "@/shell/actions";
+import { CrewHeader } from "@/chat/crew";
 
 const SUGGESTIONS = [
   "What needs my attention right now?",
@@ -42,6 +44,29 @@ export default function Home() {
   // A reply that saves an artifact opens it beside the conversation; a new
   // version of the one on screen replaces it.
   useEffect(() => onArtifactSaved((change) => { if (change.message_id) openCanvas(change.id, change.version); }), []);
+
+  // "Ask Neko about this" (the context menu on selected text, shell/actions.ts): the quote
+  // lands in the composer, whether Home was open already or opened for it.
+  useEffect(() => {
+    let timer = 0;
+    const take = () => {
+      const text = takeComposeRequest();
+      if (!text) return;
+      const fill = (tries: number) => {
+        if (draft.current) {
+          draft.current.set(text);
+          draft.current.focus();
+        } else if (tries > 0) timer = window.setTimeout(() => fill(tries - 1), 50);
+      };
+      fill(20);
+    };
+    take();
+    addEventListener("neko:compose", take);
+    return () => {
+      removeEventListener("neko:compose", take);
+      clearTimeout(timer);
+    };
+  }, []);
 
   // Actions the ⌘K palette offers while Home is open.
   useEffect(
@@ -82,6 +107,9 @@ export default function Home() {
           />
         ) : null}
       </Inspector>
+      <div className="mx-auto w-full max-w-(--chat-content-max-width) shrink-0 px-6 pt-2">
+        <CrewHeader replying={!!pendingTurn} />
+      </div>
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-(--chat-content-max-width) gap-0 px-6 pt-0 pb-6">
           {!snapshot && <p className="mt-24 text-center text-muted-foreground">{error ?? "Connecting to Neko…"}</p>}

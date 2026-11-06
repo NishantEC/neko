@@ -1,8 +1,9 @@
 // The canvas beside the chat: an artifact saved while a Home reply runs gets a
 // card on that reply and opens on the canvas; the frame is sandboxed (no
 // cookie, no storage, no API); comment mode turns a click into a reference
-// chip in the composer; a second version replaces the first; the Canvas page
-// lists it as a frame and opening it returns to Home with it on the canvas.
+// chip in the composer; a second version replaces the first; the card's
+// "Open in a tab" gives the artifact a tab of its own. There is no Canvas
+// gallery page any more (#/canvas is a missing route).
 //
 //   NEKO_WEB_ONLY=canvas node scripts/web-verify.mjs
 import { writeFileSync } from "node:fs";
@@ -84,14 +85,15 @@ export default async function ({ page, shot, a11y, check, PORT, DATA }) {
   check((await page.locator("[data-slot='artifact-card']").count()) === 1, "one card per artifact on the reply");
   await shot("canvas-v2");
 
-  // The Canvas page: a frame per artifact; opening one returns to Home with it open.
+  // The card opens the artifact in a tab of its own, beside Home's tab.
+  await page.locator("[data-slot='artifact-card'] button[title='Open in a tab']").first().click();
+  await page.waitForSelector(`[data-slot='artifact-tab'] [data-slot='artifact-panel'][data-artifact='${id}']`, { timeout: 10000 }).then(() => check(true, "Open in a tab shows the artifact in its own tab"), () => check(false, "Open in a tab shows the artifact in its own tab"));
+  check((await page.locator("[role=tablist][aria-label='Open tabs'] [role=tab][aria-selected=true]").innerText().catch(() => "")).includes("Onboarding"), "the artifact's tab is selected and named after it");
+  await shot("canvas-tab");
+  await a11y("artifact tab");
+  // The gallery page is gone.
   await page.goto(`http://127.0.0.1:${PORT}/#/canvas`);
-  await page.waitForSelector(`[data-slot='artifact-frame-tile'][data-artifact='${id}']`, { timeout: 10000 });
-  check(true, "the Canvas page lists the artifact as a frame");
-  await shot("canvas-page");
-  await a11y("canvas page");
-  await page.locator(`[data-slot='artifact-frame-tile'][data-artifact='${id}'] button`).click();
-  await page.waitForSelector(`[data-slot='artifact-panel'][data-artifact='${id}']`, { timeout: 10000 }).then(() => check(true, "opening a frame returns to Home with it on the canvas"), () => check(false, "opening a frame returns to Home with it on the canvas"));
-  await a11y("canvas panel");
+  await page.waitForSelector("[data-slot='missing']", { timeout: 10000 }).then(() => check(true, "#/canvas is no longer a page"), () => check(false, "#/canvas is no longer a page"));
+  await page.goto(`http://127.0.0.1:${PORT}/#/`);
   await page.locator("button[aria-label='Close the inspector']").click();
 }

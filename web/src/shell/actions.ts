@@ -24,6 +24,25 @@ export function focusComposer() {
   setTimeout(attempt, 30);
 }
 
+// "Ask Neko about this" (the context menu on selected text): Home's composer,
+// prefilled with the quote. Home takes the request when it mounts and on the
+// `neko:compose` event, so it works whether Home is open or not.
+let composeRequest: string | null = null;
+
+export function askNeko(text: string) {
+  const quote = text.trim().split("\n").map((line) => `> ${line}`).join("\n");
+  composeRequest = `${quote}\n\n`;
+  navigate(HOME);
+  dispatchEvent(new CustomEvent("neko:compose"));
+}
+
+/** The pending "Ask Neko about this" text, once. */
+export function takeComposeRequest(): string | null {
+  const text = composeRequest;
+  composeRequest = null;
+  return text;
+}
+
 /** CancelAllWork, after asking: it stops every unfinished task and Neko's reply (StopAllWork.swift). */
 export async function stopAllWork(): Promise<boolean> {
   const snapshot = getStore().snapshot;

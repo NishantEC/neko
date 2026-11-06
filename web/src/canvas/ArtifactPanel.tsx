@@ -20,6 +20,8 @@ import {
   artifactUrl, canComment, downloadUrl, latestVersion, useArtifact, versionKind,
   type Artifact, type CanvasTarget,
 } from "@/canvas/artifacts";
+import { artifactMenu } from "@/canvas/ArtifactCard";
+import { useContextMenu } from "@/shell/context-menu";
 
 /** What a click in comment mode pointed at. */
 export interface ElementPick {
@@ -117,6 +119,9 @@ export function ArtifactPanel({
   const now = useNow();
   // Escape inside the frame ends comment mode; so does a new artifact.
   useEffect(() => setCommenting(false), [target.id]);
+  // The right-click menu: the toolbar's actions plus its own tab (the frame itself is another document).
+  const shownVersion = artifact && target.version && artifact.versions.some((v) => v.n === target.version) ? target.version : artifact ? latestVersion(artifact) : null;
+  const menu = useContextMenu(() => artifactMenu(target.id, shownVersion, { beside: false }));
 
   if (error) return <p role="alert" className="p-4 text-sm text-destructive">{error}</p>;
   if (!artifact) return <p className="p-4 text-sm text-muted-foreground" aria-busy="true">Opening…</p>;
@@ -132,7 +137,7 @@ export function ArtifactPanel({
   }));
 
   return (
-    <div data-slot="artifact-panel" data-artifact={artifact.id} data-version={n} className="flex h-full min-h-0 flex-col">
+    <div {...menu} data-slot="artifact-panel" data-artifact={artifact.id} data-version={n} className="flex h-full min-h-0 flex-col">
       <div role="toolbar" aria-label="Canvas" className="flex flex-wrap items-center gap-1.5 border-b border-border/70 px-3 py-2">
         {artifact.versions.length > 1 ? (
           <Pick label="Version" value={String(n)} onChange={(value) => onVersion?.(Number(value))} options={options} className="min-w-28" />
