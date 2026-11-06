@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 pub mod agent_profiles;
+pub mod calendar;
 pub mod agent_models;
 pub mod decision_context;
 pub mod mcp_host;
@@ -627,6 +628,23 @@ pub enum Request {
     RoutineNotifications {
         after: u64,
     },
+    /// The installed app's copy of macOS Calendar: every event from 7 days
+    /// ago to 35 days ahead, replacing what was there. With `access` other
+    /// than `Granted` the stored events are dropped. Answered with
+    /// `CalendarStatus`.
+    SetCalendarEvents {
+        events: Vec<calendar::CalendarEvent>,
+        source: String,
+        #[serde(default = "calendar::granted")]
+        access: calendar::CalendarAccess,
+    },
+    /// Stored events overlapping `[from_ms, to_ms)`, Neko's dated work in
+    /// that range, and the sync status.
+    CalendarEvents {
+        from_ms: i64,
+        to_ms: i64,
+    },
+    CalendarStatus,
     /// Home chat's full-power mode: read it, or set it with `on`.
     SuperAgent {
         on: Option<bool>,
@@ -808,6 +826,12 @@ pub enum Response {
         items: Vec<routines::RoutineNotice>,
         latest: u64,
     },
+    CalendarEvents {
+        events: Vec<calendar::CalendarEvent>,
+        neko: Vec<calendar::NekoCalendarItem>,
+        status: calendar::CalendarStatus,
+    },
+    CalendarStatus(calendar::CalendarStatus),
     SuperAgent {
         on: bool,
     },

@@ -820,6 +820,18 @@ fn handle_request(state: &AppState, request: Request, ctx: &RequestContext) -> R
         | Request::ClearNeedsYou { .. }
         | Request::SetStandingOrders { .. }
         | Request::RoutineNotifications { .. }) => crate::routines::handle(state, request),
+        Request::SetCalendarEvents { events, source, access } => {
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match neko_core::calendar::store(&db, events, &source, access, neko_core::workbench::now_ms()) {
+                Ok(status) => Response::CalendarStatus(status),
+                Err(message) => Response::Error { message },
+            }
+        }
+        Request::CalendarEvents { from_ms, to_ms } => calendar_events(state, from_ms, to_ms).unwrap_or_else(|message| Response::Error { message }),
+        Request::CalendarStatus => {
+            let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            neko_core::calendar::status(&db).map_or_else(|message| Response::Error { message }, Response::CalendarStatus)
+        }
         Request::AgentModels { refresh } => {
             Response::AgentModels(neko_core::agent_catalog::catalog(refresh))
         }
@@ -1164,6 +1176,17 @@ pub fn broadcast_event(state: &AppState, event: &Event) {
 
 pub fn notify_icons_updated(state: &AppState) {
     broadcast(state, &Event::IconsUpdated);
+}
+
+/// Stored calendar events and Neko's dated work in one range. Recurrences
+/// are expanded after the database lock is released.
+fn calendar_events(state: &AppState, from_ms: i64, to_ms: i64) -> Result<Response, String> {
+    let (events, status, sources) = {
+        let db = state.db.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        (neko_core::calendar::events_in(&db, from_ms, to_ms)?, neko_core::calendar::status(&db)?, neko_core::calendar::read_sources(&db)?)
+    };
+    let neko = neko_core::calendar::neko_items_local(&sources, from_ms, to_ms, neko_core::workbench::now_ms());
+    Ok(Response::CalendarEvents { events, neko, status })
 }
 
 /// The web bridge's door into the daemon (`web.rs`). It calls the very same
@@ -1799,6 +1822,28 @@ mod tests {
         // Never the person's own artifacts folder.
         state.artifacts = std::env::temp_dir().join(format!("neko-test-artifacts-{}", std::process::id()));
         state
+    }
+
+    #[test]
+    fn calendar_events_round_trip_through_the_protocol() {
+        use neko_protocol::calendar::{CalendarAccess, CalendarEvent};
+        let state = test_state(Db::open_in_memory().unwrap(), Vec::new());
+        let Response::CalendarStatus(before) = handle_request_for_test(&state, Request::CalendarStatus) else { panic!() };
+        assert_eq!(before.access, CalendarAccess::NotAsked);
+        // What the app sends, as JSON: `access` may be left out (granted).
+        let sent: Request = serde_json::from_value(serde_json::json!({"SetCalendarEvents": {"source": "macOS Calendar", "events": [
+            {"id": "e1", "calendar": "Work", "color": "#336699", "title": "Standup", "start_ms": 1_000, "end_ms": 2_000, "all_day": false, "url": "https://meet.example.com/x"},
+            {"id": "e2", "calendar": "Home", "color": "", "title": "Holiday", "start_ms": 50_000, "end_ms": 60_000, "all_day": true}
+        ]}})).unwrap();
+        let Response::CalendarStatus(status) = handle_request_for_test(&state, sent) else { panic!() };
+        assert_eq!((status.access, status.events), (CalendarAccess::Granted, 2));
+        let Response::CalendarEvents { events, status, .. } = handle_request_for_test(&state, Request::CalendarEvents { from_ms: 0, to_ms: 10_000 }) else { panic!() };
+        assert_eq!(events.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["e1"]);
+        assert_eq!(status.events, 2);
+        let Response::Error { .. } = handle_request_for_test(&state, Request::CalendarEvents { from_ms: 10, to_ms: 0 }) else { panic!() };
+        let denied = Request::SetCalendarEvents { events: vec![CalendarEvent { id: "e3".into(), ..Default::default() }], source: String::new(), access: CalendarAccess::Denied };
+        let Response::CalendarStatus(status) = handle_request_for_test(&state, denied) else { panic!() };
+        assert_eq!((status.access, status.events), (CalendarAccess::Denied, 0));
     }
 
     #[test]

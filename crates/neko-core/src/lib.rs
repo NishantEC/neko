@@ -19,6 +19,7 @@ pub mod artifacts;
 pub mod appearance;
 pub mod apps;
 pub mod ask;
+pub mod calendar;
 pub mod cancel;
 pub mod clipboard;
 pub mod codex;
